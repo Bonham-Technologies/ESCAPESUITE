@@ -23,8 +23,8 @@ export default defineConfig({
 
   webServer: [
     {
-      command: 'npm run dev',
-      cwd: '../ESCAPEPLAN',
+      command: 'pnpm run dev',
+      cwd: '../plan',
       port: 5173,
       reuseExistingServer: true,
       timeout: 120000,
@@ -33,8 +33,8 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm run dev',
-      cwd: '../ESCAPECRAFT',
+      command: 'pnpm run dev',
+      cwd: '../craft',
       port: 5174,
       reuseExistingServer: true,
       timeout: 120000,
@@ -43,8 +43,8 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm run dev',
-      cwd: '../ESCAPEARTIST',
+      command: 'pnpm run dev',
+      cwd: '../artist',
       port: 5175,
       reuseExistingServer: true,
       timeout: 120000,
