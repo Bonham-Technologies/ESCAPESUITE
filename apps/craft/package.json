@@ -2,6 +2,9 @@
   "name": "@escapesuite/craft",
   "private": true,
   "version": "1.0.0",
+  "description": "Client-side video recorder",
+  "author": "Bonham Technologies, LLC",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "type": "module",
   "scripts": {
     "dev": "vite",

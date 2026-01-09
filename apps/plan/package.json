@@ -2,6 +2,9 @@
   "name": "@escapesuite/plan",
   "private": true,
   "version": "1.0.0",
+  "description": "ESCAPE Suite hub, authentication & subscriptions",
+  "author": "Bonham Technologies, LLC",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "type": "module",
   "homepage": "https://www.escapesuite.io",
   "scripts": {

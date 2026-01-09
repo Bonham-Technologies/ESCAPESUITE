@@ -31,7 +31,7 @@ The ESCAPE Suite is a collection of privacy-first, client-side media creation to
 - User authentication via Clerk
 - Subscription management (trial, pro monthly/annual, founding member)
 - Dashboard with tool launchers
-- Analytics (Plausible) and error tracking (Sentry)
+- Analytics (Vercel Analytics) and error tracking (Sentry)
 
 **Test Coverage:** 21 unit tests (subscription API, analytics)
 
@@ -401,7 +401,7 @@ The standalone build produces a single HTML file that:
 
 All ESCAPE Suite repositories are protected under a **Proprietary Software License**:
 
-- All rights reserved by ESCAPE Suite
+- All rights reserved by Bonham Technologies, LLC
 - Source code is confidential and proprietary
 - No redistribution, modification, or reverse engineering permitted
 - Authorized use only under valid license agreement

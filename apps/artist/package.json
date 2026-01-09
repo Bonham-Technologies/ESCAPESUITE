@@ -20,8 +20,8 @@
     "editor",
     "webcodecs"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "Bonham Technologies, LLC",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "dependencies": {
     "@clerk/clerk-react": "^5.25.3",
     "@sentry/react": "^10.32.1",

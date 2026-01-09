@@ -1,12 +1,13 @@
 # ESCAPEARTIST
 
 [![CI](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
 
 A powerful, client-side video editor built entirely for the browser. No server required, no uploads needed - edit videos directly in your browser using modern web technologies.
 
 **Part of the [ESCAPESUITE monorepo](../../README.md)**
+
+**Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.**
 
 <!--
 ## Demo
@@ -253,7 +254,8 @@ Typical storage quota: 50GB+ (Chrome), 10GB+ (Firefox)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This software is proprietary. See the root [LICENSE](../../LICENSE) for details.
+Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.
 
 ## Acknowledgments
 

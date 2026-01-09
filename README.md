@@ -1,9 +1,10 @@
 # ESCAPE Suite
 
 [![CI](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Privacy-first, client-side media creation tools that run entirely in the browser. All video processing happens locally - no cloud uploads required.
+
+**Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.**
 
 ## Apps
 
@@ -175,8 +176,13 @@ VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This software is proprietary. See [LICENSE](LICENSE) for details.
+
+- **SaaS**: Use via [escapesuite.io](https://escapesuite.io) with subscription
+- **Standalone**: Purchase license from Bonham Technologies, LLC
 
 ---
 
 **ESCAPE Suite** - Professional media creation in your browser.
+
+Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.

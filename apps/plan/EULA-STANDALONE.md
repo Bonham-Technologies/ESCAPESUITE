@@ -10,7 +10,7 @@
 
 This End User License Agreement ("Agreement") is a legal agreement between you
 (either an individual or a single entity, referred to herein as "Licensee" or
-"you") and ESCAPE Suite ("Licensor," "we," "us," or "our") for the use of
+"you") and Bonham Technologies, LLC ("Licensor," "we," "us," or "our") for the use of
 ESCAPE Suite standalone software products, including ESCAPECRAFT, ESCAPEARTIST,
 or the complete ESCAPE Suite bundle (collectively, the "Software").
 
