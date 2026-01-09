@@ -6,10 +6,13 @@ on:
   pull_request:
     branches: [main, dev]
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+env:
+  NODE_VERSION: '20'
 
+jobs:
+  # Quick validation - runs on all PRs including Dependabot
+  validate:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -30,26 +33,166 @@ jobs:
         run: pnpm audit --audit-level=high
         continue-on-error: true
 
+  # Linting - parallel with type-check
+  lint:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
       - name: Lint
         run: pnpm lint
 
-      - name: Run tests
-        run: pnpm test
+  # TypeScript type checking - parallel with lint
+  type-check:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: TypeScript check (plan)
+        run: pnpm --filter=@escapesuite/plan exec tsc --noEmit
+
+      - name: TypeScript check (craft)
+        run: pnpm --filter=@escapesuite/craft exec tsc --noEmit
+
+      - name: TypeScript check (artist)
+        run: pnpm --filter=@escapesuite/artist exec tsc --noEmit
+
+  # Unit tests with coverage
+  test:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run tests with coverage
+        run: pnpm test:coverage
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        with:
+          files: |
+            apps/plan/coverage/coverage-final.json
+            apps/craft/coverage/coverage-final.json
+            apps/artist/coverage/coverage-final.json
+          fail_ci_if_error: false
+
+  # Build - depends on lint and type-check passing
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, type-check, test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
 
       - name: Build all apps
         run: pnpm build
         env:
           VITE_BUILD_MODE: saas
-          # Use dummy values for CI build validation
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Report bundle sizes
+        run: |
+          echo "## Bundle Sizes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| App | Size | Gzipped |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          # ESCAPEPLAN
+          if [ -d "apps/plan/dist/assets" ]; then
+            PLAN_JS=$(find apps/plan/dist/assets -name "*.js" -exec du -cb {} + | tail -1 | cut -f1)
+            PLAN_JS_KB=$(echo "scale=2; $PLAN_JS / 1024" | bc)
+            echo "| ESCAPEPLAN | ${PLAN_JS_KB} KB | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ESCAPECRAFT (single file)
+          if [ -f "apps/craft/dist/index.html" ]; then
+            CRAFT_SIZE=$(du -b apps/craft/dist/index.html | cut -f1)
+            CRAFT_KB=$(echo "scale=2; $CRAFT_SIZE / 1024" | bc)
+            echo "| ESCAPECRAFT | ${CRAFT_KB} KB | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ESCAPEARTIST (single file)
+          if [ -f "apps/artist/dist/index.html" ]; then
+            ARTIST_SIZE=$(du -b apps/artist/dist/index.html | cut -f1)
+            ARTIST_KB=$(echo "scale=2; $ARTIST_SIZE / 1024" | bc)
+            echo "| ESCAPEARTIST | ${ARTIST_KB} KB | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            apps/plan/dist
+            apps/craft/dist
+            apps/artist/dist
+          retention-days: 7
 
   # E2E tests - only run on main branch pushes and PRs to main
   e2e:
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' ||
+       github.event_name == 'pull_request' && github.base_ref == 'main')
 
     steps:
       - name: Checkout code
@@ -61,7 +204,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -91,3 +234,21 @@ jobs:
           name: test-results
           path: apps/e2e/test-results/
           retention-days: 7
+
+  # Summary job that reports overall status
+  ci-status:
+    runs-on: ubuntu-latest
+    needs: [validate, lint, type-check, test, build]
+    if: always()
+    steps:
+      - name: Check CI Status
+        run: |
+          if [ "${{ needs.validate.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.type-check.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ]; then
+            echo "One or more CI jobs failed"
+            exit 1
+          fi
+          echo "All CI jobs passed!"
