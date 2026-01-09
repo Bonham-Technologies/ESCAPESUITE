@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm run build:deploy",
+  "installCommand": "pnpm install",
+  "outputDirectory": "dist",
+  "framework": null,
+  "rewrites": [
+    {
+      "source": "/craft",
+      "destination": "/craft/index.html"
+    },
+    {
+      "source": "/craft/(.*)",
+      "destination": "/craft/index.html"
+    },
+    {
+      "source": "/artist",
+      "destination": "/artist/index.html"
+    },
+    {
+      "source": "/artist/(.*)",
+      "destination": "/artist/index.html"
+    },
+    {
+      "source": "/((?!craft|artist|assets|favicon).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

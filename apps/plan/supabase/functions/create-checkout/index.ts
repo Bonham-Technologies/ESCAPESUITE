@@ -1,0 +1,90 @@
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
+      apiVersion: '2023-10-16',
+    })
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
+
+    const { clerkUserId, priceId, successUrl, cancelUrl } = await req.json()
+
+    if (!clerkUserId || !priceId) {
+      return new Response(
+        JSON.stringify({ error: 'Missing required fields' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Check if user already has a subscription record
+    const { data: existingSub } = await supabase
+      .from('subscriptions')
+      .select('stripe_customer_id')
+      .eq('clerk_user_id', clerkUserId)
+      .single()
+
+    let customerId = existingSub?.stripe_customer_id
+
+    // Create Stripe customer if doesn't exist
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        metadata: { clerk_user_id: clerkUserId },
+      })
+      customerId = customer.id
+
+      // Create subscription record
+      await supabase.from('subscriptions').upsert({
+        clerk_user_id: clerkUserId,
+        stripe_customer_id: customerId,
+        status: 'trialing',
+        plan: 'trial',
+      })
+    }
+
+    // Determine if this is a one-time payment (Founding Member) or subscription
+    const price = await stripe.prices.retrieve(priceId)
+    const isOneTime = price.type === 'one_time'
+
+    // Create checkout session
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      mode: isOneTime ? 'payment' : 'subscription',
+      success_url: successUrl || `${req.headers.get('origin')}/dashboard?success=true`,
+      cancel_url: cancelUrl || `${req.headers.get('origin')}/?canceled=true`,
+      metadata: {
+        clerk_user_id: clerkUserId,
+        price_id: priceId,
+      },
+      // For subscriptions, allow promotion codes
+      ...(isOneTime ? {} : { allow_promotion_codes: true }),
+    })
+
+    return new Response(
+      JSON.stringify({ url: session.url }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  } catch (error) {
+    console.error('Checkout error:', error)
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+})

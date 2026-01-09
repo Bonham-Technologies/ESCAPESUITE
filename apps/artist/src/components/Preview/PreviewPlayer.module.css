@@ -1,0 +1,145 @@
+/* PreviewPlayer styles */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  max-width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+.videoWrapper {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 120px;
+  max-height: 100%;
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  text-align: center;
+}
+
+.placeholder svg {
+  opacity: 0.5;
+}
+
+.placeholder p {
+  font-size: 14px;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.timecode {
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.clipInfo {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* Playback Controls */
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.controlButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.controlButton:hover:not(:disabled) {
+  background: var(--border-color);
+  color: var(--text-primary);
+}
+
+.controlButton:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.playButton {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  color: white;
+}
+
+.playButton:hover:not(:disabled) {
+  background: #3a8eef;
+  color: white;
+}

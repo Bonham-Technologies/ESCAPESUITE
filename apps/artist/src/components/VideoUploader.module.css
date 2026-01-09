@@ -1,0 +1,424 @@
+/* VideoUploader styles */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.dropZone {
+  border: 2px dashed var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.dropZone:hover,
+.dragOver {
+  border-color: var(--accent-primary);
+  background: rgba(74, 158, 255, 0.1);
+}
+
+.dropZoneIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.dropZoneIcon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.dropZoneText {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.dropZoneHint {
+  color: var(--text-muted);
+  font-size: 10px;
+  display: none;
+}
+
+.fileInput {
+  display: none;
+}
+
+.uploadList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.uploadItem {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.uploadInfo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
+
+.uploadName {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uploadStatus {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.progressBar {
+  height: 3px;
+  background: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent-primary);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Video Library styles */
+
+.emptyLibrary {
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.library {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.videoItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.videoItem:hover {
+  background: var(--bg-hover);
+}
+
+.thumbnail {
+  width: 64px;
+  height: 36px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumbnailPlaceholder {
+  color: var(--text-muted);
+}
+
+.videoInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.videoName {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.videoMeta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.videoActions {
+  display: flex;
+  gap: var(--spacing-xs);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.videoItem:hover .videoActions {
+  opacity: 1;
+}
+
+.addButton,
+.removeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.addButton {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.addButton:hover {
+  background: #3a8eef;
+}
+
+.removeButton {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.removeButton:hover {
+  background: var(--accent-danger);
+  color: white;
+}
+
+/* Storage bar styles - integrated */
+
+.storageBar {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.storageWarning {
+  background: rgba(255, 152, 0, 0.15);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.storageMain {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.storageInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.storageWarning .storageInfo {
+  color: #ff9800;
+}
+
+.storageProgress {
+  flex: 1;
+  height: 3px;
+  background: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+  min-width: 40px;
+}
+
+.storageProgressFill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width var(--transition-normal);
+}
+
+.storageWarning .storageProgressFill {
+  background: #ff9800;
+}
+
+.storageActions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.storageClearButton {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.storageClearButton:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: rgba(66, 133, 244, 0.1);
+}
+
+.storageClearButton.clearUnused:hover {
+  border-color: #ff9800;
+  color: #ff9800;
+  background: rgba(255, 152, 0, 0.1);
+}
+
+.storageClearButton.clearAll:hover {
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+  background: rgba(244, 67, 54, 0.1);
+}
+
+/* Library container and header */
+
+.libraryContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.libraryHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 var(--spacing-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.clearAllButton {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.clearAllButton:hover {
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+}
+
+.headerButtons {
+  display: flex;
+  gap: var(--spacing-xs);
+  align-items: center;
+}
+
+.clearUnusedButton {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.clearUnusedButton:hover {
+  border-color: #ff9800;
+  color: #ff9800;
+  background: rgba(255, 152, 0, 0.1);
+}
+
+.clearCacheButton {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.clearCacheButton:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: rgba(66, 133, 244, 0.1);
+}
+
+/* Upload error state */
+
+.uploadError {
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+.uploadError .uploadStatus {
+  color: #f44336;
+}
+
+.dismissButton {
+  background: transparent;
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #f44336;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-top: var(--spacing-xs);
+}
+
+.dismissButton:hover {
+  background: rgba(244, 67, 54, 0.2);
+}
+
+/* Media type badges */
+
+.thumbnail {
+  position: relative;
+}
+
+.mediaTypeBadge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+  letter-spacing: 0.5px;
+}
+
+.audioBadge {
+  background: rgba(74, 158, 255, 0.9);
+}

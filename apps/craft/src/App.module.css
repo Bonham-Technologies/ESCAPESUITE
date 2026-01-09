@@ -1,0 +1,686 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: var(--bg-primary);
+}
+
+/* Header - matches ESCAPEARTIST layout */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  height: 48px;
+  flex-shrink: 0;
+}
+
+.headerLeft,
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.headerCenter {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.dashboardLink {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.dashboardLink:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.logo {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.headerButton {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.headerButton:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.headerButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.editorButton {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.editorButton:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* Recording status indicators */
+.recordingIndicator {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  color: var(--error);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.recordingDot {
+  width: 8px;
+  height: 8px;
+  background-color: var(--error);
+  border-radius: 50%;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.pausedIndicator {
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 280px;
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebarSection {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebarTitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  overflow: hidden;
+}
+
+.previewContainer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+}
+
+.preview {
+  width: 100%;
+  height: 100%;
+  max-width: 1280px;
+  max-height: 720px;
+  background-color: #000;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.previewPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text-secondary);
+}
+
+.previewIcon {
+  width: 64px;
+  height: 64px;
+  opacity: 0.5;
+}
+
+.controlsBar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1rem;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.recordButton {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: var(--accent);
+  border: 4px solid var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recordButton:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+  transform: scale(1.05);
+}
+
+.recordButton.recording {
+  background-color: var(--error);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.recordButtonInner {
+  width: 24px;
+  height: 24px;
+  background-color: var(--text-primary);
+  border-radius: 4px;
+  transition: border-radius 0.2s ease;
+}
+
+.recordButton:not(.recording) .recordButtonInner {
+  border-radius: 50%;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
+  }
+}
+
+.timer {
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 1.5rem;
+  color: var(--text-primary);
+  min-width: 100px;
+  text-align: center;
+}
+
+.timer.recording {
+  color: var(--error);
+}
+
+.controlButton {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.controlButton svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Recordings list in sidebar */
+.recordingsList {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem;
+}
+
+.recordingItem {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background-color: var(--bg-tertiary);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.recordingItem:hover {
+  background-color: var(--bg-primary);
+}
+
+.recordingThumbnail {
+  width: 64px;
+  height: 36px;
+  background-color: #000;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.recordingInfo {
+  flex: 1;
+  min-width: 80px;
+}
+
+.recordingName {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recordingMeta {
+  font-size: 0.625rem;
+  color: var(--text-secondary);
+}
+
+.recordingActions {
+  display: flex;
+  gap: 0.125rem;
+  flex-shrink: 0;
+}
+
+.iconButton {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iconButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Empty state */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.emptyIcon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.5;
+  margin-bottom: 1rem;
+}
+
+/* Capability indicators */
+.capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.capability {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.capabilityIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.capabilityIcon.available {
+  color: var(--success);
+}
+
+.capabilityIcon.unavailable {
+  color: var(--error);
+}
+
+/* Source toggles */
+.sourceToggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sourceToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+}
+
+.sourceLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.sourceIcon {
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+}
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background-color: var(--bg-tertiary);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border: none;
+  padding: 0;
+}
+
+.toggle.active {
+  background-color: var(--accent);
+}
+
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background-color: var(--text-primary);
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.toggle.active .toggleKnob {
+  transform: translateX(20px);
+}
+
+/* Audio meters */
+.audioMeters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.audioMeter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.meterLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  width: 50px;
+}
+
+.meterBar {
+  flex: 1;
+  height: 6px;
+  background-color: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--success) 0%, var(--warning) 70%, var(--error) 100%);
+  border-radius: 3px;
+  transition: width 0.1s ease;
+}
+
+/* Countdown overlay */
+.countdown {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 100;
+}
+
+.countdownNumber {
+  font-size: 8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  animation: countdownPulse 1s ease-in-out;
+}
+
+@keyframes countdownPulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* Webcam overlay controls */
+.webcamControls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.positionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.positionButton {
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.positionButton.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sizeSlider {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.slider {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 6px;
+  background-color: var(--bg-tertiary);
+  border-radius: 3px;
+  outline: none;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background-color: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.shapeToggle {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.shapeButton {
+  flex: 1;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.shapeButton.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Keyboard shortcuts hint */
+.shortcutsHint {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.shortcut {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.shortcutKey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 0.5rem;
+  background-color: var(--bg-tertiary);
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 0.75rem;
+}
+
+/* Playback Modal */
+.playbackModal {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+
+.playbackContent {
+  display: flex;
+  flex-direction: column;
+  max-width: 90vw;
+  max-height: 90vh;
+  background-color: var(--bg-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.playbackHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+}
+
+.playbackTitle {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+.playbackClose {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.playbackClose svg {
+  width: 18px;
+  height: 18px;
+}
+
+.playbackVideo {
+  width: auto;
+  height: auto;
+  max-width: 80vw;
+  max-height: calc(90vh - 60px);
+  background-color: #000;
+}

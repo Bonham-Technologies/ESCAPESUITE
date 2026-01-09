@@ -1,0 +1,22 @@
+.authPage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 160px);
+  padding: 2rem;
+  width: 100%;
+}
+
+/* Clerk component styling */
+.clerkRoot {
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.clerkCard {
+  background-color: #12121a !important;
+  border: 1px solid #2a2a3e !important;
+  border-radius: 16px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+}

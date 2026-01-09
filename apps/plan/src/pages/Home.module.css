@@ -1,0 +1,377 @@
+.home {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Hero Section */
+.hero {
+  padding: 6rem 2rem;
+  text-align: center;
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+}
+
+.heroContent {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.heroTitle {
+  font-size: 3.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.03em;
+}
+
+.gradient {
+  background: linear-gradient(135deg, var(--accent) 0%, #a855f7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.heroSubtitle {
+  font-size: 1.25rem;
+  color: var(--text-secondary);
+  margin-bottom: 2rem;
+  line-height: 1.6;
+}
+
+.heroCta {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.heroCta button {
+  font-size: 1.1rem;
+  padding: 1rem 2rem;
+}
+
+/* Section Styles */
+.sectionTitle {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+/* Tools Section */
+.tools {
+  padding: 6rem 2rem;
+  background-color: var(--bg-primary);
+}
+
+.toolsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 2rem;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.toolCard {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.toolCard:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+}
+
+.toolIcon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 1rem;
+  color: var(--accent);
+}
+
+.toolIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.toolCard h3 {
+  margin-bottom: 0.75rem;
+}
+
+.toolCard p {
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.featureList {
+  list-style: none;
+  padding: 0;
+}
+
+.featureList li {
+  color: var(--text-secondary);
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+.featureList li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: var(--success);
+}
+
+/* Features Section */
+.features {
+  padding: 6rem 2rem;
+  background-color: var(--bg-secondary);
+}
+
+.featuresGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.feature {
+  text-align: center;
+  padding: 2rem;
+}
+
+.featureIcon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1.5rem;
+  color: var(--accent);
+  background-color: var(--bg-tertiary);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.featureIcon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.feature h3 {
+  margin-bottom: 0.75rem;
+}
+
+.feature p {
+  line-height: 1.6;
+}
+
+/* Pricing Section */
+.pricing {
+  padding: 6rem 2rem;
+  background-color: var(--bg-primary);
+}
+
+.pricingGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.pricingCard {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  text-align: center;
+  position: relative;
+}
+
+.pricingCard.featured {
+  border-color: var(--accent);
+  transform: scale(1.05);
+}
+
+.badge {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--accent);
+  color: white;
+  padding: 0.25rem 1rem;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.pricingCard h3 {
+  margin-bottom: 1rem;
+}
+
+.price {
+  margin-bottom: 1rem;
+}
+
+.amount {
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.period {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-left: 0.25rem;
+}
+
+.savings {
+  color: var(--success);
+  font-size: 0.875rem;
+  margin-bottom: 1.5rem;
+}
+
+.pricingFeatures {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 2rem;
+  text-align: left;
+}
+
+.pricingFeatures li {
+  color: var(--text-secondary);
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+.pricingFeatures li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: var(--success);
+}
+
+.pricingCard button {
+  width: 100%;
+}
+
+/* Founding Member Card */
+.foundingMember {
+  max-width: 800px;
+  margin: 3rem auto 0;
+  background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+  border: 2px solid var(--accent);
+  border-radius: 20px;
+  padding: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.foundingContent {
+  flex: 1;
+}
+
+.foundingBadge {
+  display: inline-block;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+
+.foundingMember h3 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.foundingMember p {
+  margin-bottom: 1rem;
+  max-width: 400px;
+}
+
+.foundingPrice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.foundingPrice .amount {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.foundingPrice .period {
+  font-size: 1rem;
+  color: var(--text-secondary);
+}
+
+.foundingMember button {
+  white-space: nowrap;
+  padding: 1rem 2rem;
+  font-size: 1rem;
+}
+
+@media (max-width: 768px) {
+  .foundingMember {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .foundingMember p {
+    max-width: none;
+  }
+
+  .foundingPrice {
+    justify-content: center;
+  }
+
+  .foundingMember button {
+    width: 100%;
+  }
+}
+
+/* CTA Section */
+.cta {
+  padding: 6rem 2rem;
+  text-align: center;
+  background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+}
+
+.cta h2 {
+  margin-bottom: 1rem;
+}
+
+.cta p {
+  margin-bottom: 2rem;
+  font-size: 1.125rem;
+}
+
+.cta button {
+  font-size: 1.1rem;
+  padding: 1rem 2.5rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .heroTitle {
+    font-size: 2.5rem;
+  }
+
+  .heroCta {
+    flex-direction: column;
+  }
+
+  .pricingCard.featured {
+    transform: none;
+  }
+}

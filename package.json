@@ -1,0 +1,26 @@
+{
+  "name": "escapesuite",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:plan": "turbo dev --filter=@escapesuite/plan",
+    "dev:craft": "turbo dev --filter=@escapesuite/craft",
+    "dev:artist": "turbo dev --filter=@escapesuite/artist",
+    "build": "turbo build",
+    "build:plan": "turbo build --filter=@escapesuite/plan",
+    "build:craft": "turbo build --filter=@escapesuite/craft",
+    "build:artist": "turbo build --filter=@escapesuite/artist",
+    "build:deploy": "node scripts/build-all.mjs",
+    "lint": "turbo lint",
+    "test": "turbo test:run",
+    "test:watch": "turbo test",
+    "test:coverage": "turbo test:coverage",
+    "test:e2e": "turbo test --filter=@escapesuite/e2e",
+    "clean": "turbo clean && rm -rf node_modules && rm -rf dist"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.4"
+  }
+}

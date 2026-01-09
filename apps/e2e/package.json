@@ -1,0 +1,21 @@
+{
+  "name": "@escapesuite/e2e",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:escapeplan": "playwright test tests/escapeplan",
+    "test:escapecraft": "playwright test tests/escapecraft",
+    "test:escapeartist": "playwright test tests/escapeartist",
+    "test:integration": "playwright test tests/integration",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^25.0.3",
+    "wait-on": "^9.0.3"
+  }
+}

@@ -1,0 +1,18 @@
+.diamonds {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  pointer-events: none;
+}
+
+.diamond {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: #f5a623;
+  border: 1px solid #ffd700;
+  transform: translateX(-50%) rotate(45deg);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
+}

@@ -1,0 +1,105 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 4px var(--spacing-md);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.toolGroup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.groupLabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 4px;
+}
+
+.buttonGroup {
+  display: flex;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.toolButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toolButton:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.toolButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolButton.active {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.toggleButton {
+  width: auto;
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.toggleButton.active {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-color);
+  margin: 0 4px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.helpButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.helpButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}

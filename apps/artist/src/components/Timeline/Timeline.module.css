@@ -1,0 +1,638 @@
+/* Timeline component styles - Multi-track */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  background: var(--timeline-bg);
+  border-top: 1px solid var(--border-color);
+  height: 320px;
+  min-height: 180px;
+}
+
+/* Ruler row */
+.rulerRow {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.trackHeaderSpacer {
+  width: 160px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+
+.ruler {
+  flex: 1;
+  position: relative;
+  height: 28px;
+  background: var(--bg-secondary);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  cursor: pointer;
+}
+
+.ruler::-webkit-scrollbar {
+  display: none;
+}
+
+.rulerContent {
+  position: relative;
+  height: 100%;
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.tickMinor {
+  background: var(--border-color);
+  height: 8px;
+  top: auto;
+}
+
+.tickMajor {
+  background: var(--border-light);
+  height: 14px;
+  top: auto;
+}
+
+.tickLabel {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Tracks area */
+.tracksArea {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Track headers column (contains scrollable headers + add button) */
+.trackHeadersColumn {
+  width: 160px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+
+/* Track headers (scrollable area) */
+.trackHeaders {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.trackHeaders::-webkit-scrollbar {
+  display: none;
+}
+
+.trackHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  padding: 0;
+  border-bottom: 1px solid var(--border-color);
+  gap: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+/* Volume section on the left - contains vertical slider and mute button */
+.trackVolumeSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  gap: 4px;
+  background: var(--bg-tertiary);
+  border-right: 1px solid var(--border-color);
+  min-width: 32px;
+}
+
+/* Track info section on the right - contains name and controls */
+.trackInfoSection {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  gap: 4px;
+  min-width: 0;
+}
+
+.trackHeaderTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.trackName {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+  cursor: text;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.trackName:hover {
+  background: var(--bg-tertiary);
+}
+
+.trackReorderBtns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trackMoveBtn {
+  width: 18px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.trackMoveBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  transform: scale(1.1);
+}
+
+.trackMoveBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.trackControls {
+  display: flex;
+  gap: 4px;
+}
+
+.trackControlBtn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.trackControlBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+
+.trackControlBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.trackControlBtn.active {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.trackDeleteBtn:hover:not(:disabled) {
+  background: var(--accent-danger, #e53935);
+  color: white;
+}
+
+/* Vertical volume slider */
+.trackVolumeSlider {
+  width: 20px;
+  height: 100%;
+  min-height: 30px;
+  max-height: 50px;
+  cursor: pointer;
+  accent-color: var(--accent-primary);
+  -webkit-appearance: none;
+  appearance: none;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  background: transparent;
+  border-radius: 2px;
+}
+
+.trackVolumeSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent-primary);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.trackVolumeSlider::-webkit-slider-runnable-track {
+  width: 4px;
+  background: linear-gradient(to top, var(--bg-primary), var(--bg-hover));
+  border-radius: 2px;
+}
+
+.trackVolumeSlider::-moz-range-thumb {
+  width: 12px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent-primary);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.trackVolumeSlider::-moz-range-track {
+  width: 4px;
+  background: linear-gradient(to top, var(--bg-primary), var(--bg-hover));
+  border-radius: 2px;
+}
+
+/* Mute button below volume slider */
+.trackMuteBtn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.trackMuteBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.trackMuteBtn.active {
+  background: var(--accent-danger, #e53935);
+  color: white;
+}
+
+/* Track name input for inline editing */
+.trackNameInput {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  outline: none;
+}
+
+/* Track container (scrollable area) */
+.trackContainer {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: auto;
+  position: relative;
+}
+
+.tracksContent {
+  position: relative;
+  min-height: 100%;
+}
+
+.track {
+  position: relative;
+  background: var(--timeline-track-bg);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.track:last-child {
+  border-bottom: none;
+}
+
+/* Ensure track header last child also has no border to match */
+.trackHeader:last-of-type {
+  border-bottom: none;
+}
+
+.trackHidden {
+  opacity: 0.5;
+}
+
+.trackLocked {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--timeline-track-bg),
+    var(--timeline-track-bg) 10px,
+    rgba(255, 255, 255, 0.02) 10px,
+    rgba(255, 255, 255, 0.02) 20px
+  );
+}
+
+/* Clips */
+.clip {
+  position: absolute;
+  top: 4px;
+  height: calc(100% - 8px);
+  min-height: 40px;
+  background: var(--timeline-clip-bg);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow var(--transition-fast);
+  overflow: hidden;
+}
+
+.clip:hover {
+  background: #4a6a9a;
+}
+
+.clipSelected {
+  background: var(--timeline-clip-selected);
+  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-md);
+}
+
+.clipDragging {
+  opacity: 0.8;
+  cursor: grabbing;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+}
+
+.clipPreview {
+  background: rgba(74, 144, 226, 0.3);
+  border: 2px dashed var(--accent-primary);
+  pointer-events: none;
+}
+
+.clipContent {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  height: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  overflow: hidden;
+  gap: 2px;
+}
+
+.clipName {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: white;
+}
+
+.clipDuration {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.7);
+  width: 100%;
+}
+
+/* Audio clip styling */
+.clipAudio {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+}
+
+.clipAudio:hover {
+  background: linear-gradient(135deg, #7c7efa 0%, #6366f1 100%);
+}
+
+.clipAudio.clipSelected {
+  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
+}
+
+/* Image clip styling */
+.clipImage {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.clipImage:hover {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+}
+
+.clipImage.clipSelected {
+  background: linear-gradient(135deg, #6ee7b7 0%, #10b981 100%);
+}
+
+/* Text overlay clip styling */
+.clipText {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.clipText:hover {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+}
+
+.clipText.clipSelected {
+  background: linear-gradient(135deg, #fcd34d 0%, #f59e0b 100%);
+}
+
+/* Shape overlay clip styling */
+.clipShape {
+  background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+}
+
+.clipShape:hover {
+  background: linear-gradient(135deg, #f472b6 0%, #ec4899 100%);
+}
+
+.clipShape.clipSelected {
+  background: linear-gradient(135deg, #f9a8d4 0%, #ec4899 100%);
+}
+
+/* Clip icon */
+.clipIcon {
+  flex-shrink: 0;
+  margin-right: 4px;
+  opacity: 0.8;
+}
+
+/* Trimming state */
+.clipTrimming {
+  box-shadow: 0 0 0 2px var(--accent-warning, #f5a623);
+}
+
+/* Snap line */
+.snapLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent-warning, #f5a623);
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 0 4px var(--accent-warning, #f5a623);
+}
+
+/* Playhead */
+.playhead {
+  position: absolute;
+  top: 0;
+  z-index: var(--z-playhead);
+  cursor: ew-resize;
+  transform: translateX(-50%);
+}
+
+.playheadHead {
+  width: 14px;
+  height: 14px;
+  background: var(--timeline-playhead);
+  border-radius: 2px;
+  transform: translateX(-50%) rotate(45deg);
+  margin-left: 50%;
+  margin-top: -4px;
+}
+
+.playheadLine {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 2px;
+  bottom: 0;
+  background: var(--timeline-playhead);
+  transform: translateX(-50%);
+}
+
+/* Trim handles */
+.trimHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 5;
+  transition: background var(--transition-fast);
+}
+
+.trimHandle:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.clip:hover .trimHandle,
+.clipSelected .trimHandle {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.clip:hover .trimHandle:hover,
+.clipSelected .trimHandle:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.clipTrimming {
+  box-shadow: 0 0 0 2px var(--accent-warning, #f5a623), var(--shadow-md);
+}
+
+/* Info bar */
+.info {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Marker flag in ruler */
+.markerFlag {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+  cursor: pointer;
+  z-index: 10;
+}
+
+.markerFlagHead {
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 10px solid var(--marker-color, #f5a623);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.markerFlag:hover .markerFlagHead {
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.5)) brightness(1.1);
+}
+
+/* Marker line in track area */
+.markerLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--marker-color, #f5a623);
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Tool cursors */
+.razorCursor {
+  cursor: crosshair;
+}
+
+.razorCursor .clip {
+  cursor: crosshair;
+}
+
+.rippleCursor {
+  cursor: ew-resize;
+}
+
+.rippleCursor .clip {
+  cursor: ew-resize;
+}

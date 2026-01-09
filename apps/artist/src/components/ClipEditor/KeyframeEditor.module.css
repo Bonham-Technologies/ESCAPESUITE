@@ -1,0 +1,257 @@
+/* KeyframeEditor styles */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.time {
+  font-size: 10px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  color: var(--accent-primary);
+}
+
+.properties {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.property {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.propertyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.propertyHeader:hover {
+  background: var(--bg-hover);
+}
+
+.propertyHeader.active {
+  border-left: 2px solid var(--accent-primary);
+}
+
+.propertyName {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.propertyActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.customBadge {
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  background: var(--accent-primary);
+  color: white;
+  border-radius: 2px;
+}
+
+.keyframeCount {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.addButton {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.addButton:hover {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+/* Keyframe track */
+.track {
+  position: relative;
+  height: 20px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  margin: 2px 0;
+}
+
+.trackLine {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: var(--border-color);
+  transform: translateY(-50%);
+}
+
+.playhead {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--accent-primary);
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.keyframe {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+  z-index: 1;
+}
+
+.keyframe.preset {
+  background: var(--text-muted);
+  border-color: var(--text-muted);
+}
+
+.keyframe.custom {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.keyframe.selected {
+  border-color: white;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+.keyframe:hover {
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.2);
+}
+
+/* Keyframe editor panel */
+.keyframeEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.keyframeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keyframeRow label {
+  flex-shrink: 0;
+  width: 50px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.keyframeRow span {
+  font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  color: var(--text-secondary);
+}
+
+.keyframeRow input[type="number"] {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.keyframeRow input[type="number"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.keyframeRow select {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.keyframeRow select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.removeButton {
+  padding: 4px 8px;
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid var(--accent-danger, #e53935);
+  border-radius: var(--radius-sm);
+  color: var(--accent-danger, #e53935);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.removeButton:hover {
+  background: var(--accent-danger, #e53935);
+  color: white;
+}
+
+.presetNote {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+}

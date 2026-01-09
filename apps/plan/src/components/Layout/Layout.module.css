@@ -1,0 +1,75 @@
+.layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.logoIcon {
+  width: 32px;
+  height: 32px;
+  color: var(--accent);
+}
+
+.logoText {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.logoSuite {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-left: 0.25rem;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.nav a {
+  color: var(--text-secondary);
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.nav a:hover {
+  color: var(--text-primary);
+}
+
+.main {
+  flex: 1;
+}
+
+.footer {
+  padding: 2rem;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  background-color: var(--bg-secondary);
+}
+
+.footer p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}

@@ -1,0 +1,768 @@
+/* ClipEditor styles */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-lg);
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.empty p {
+  margin: 0;
+}
+
+/* Add overlay section */
+.addOverlaySection {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-sm);
+  padding: 0 var(--spacing-md);
+}
+
+.addOverlayButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.addOverlayButton:hover {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+.deleteButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.deleteButton:hover {
+  background: var(--accent-danger);
+  color: white;
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.infoRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.label {
+  color: var(--text-muted);
+}
+
+.value {
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+/* Collapsible section styles */
+.collapsible {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.collapsibleHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  width: 100%;
+  padding: 0 var(--spacing-sm) 0 0;
+  background: transparent;
+}
+
+.collapsibleHeader:hover {
+  background: var(--bg-hover);
+}
+
+.collapsibleToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: 1;
+  padding: var(--spacing-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.collapseIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.collapseIcon.open {
+  transform: rotate(90deg);
+}
+
+.collapsibleContent {
+  padding: 0 var(--spacing-sm) var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.headerRightContent {
+  margin-left: auto;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.trimControls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.trimInput {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.trimInput label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.inputGroup {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 12px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.setButton {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.setButton:hover:not(:disabled) {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.setButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trimSlider {
+  margin-top: var(--spacing-sm);
+}
+
+.sliderTrack {
+  position: relative;
+  height: 24px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.sliderRange {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-primary);
+  opacity: 0.3;
+}
+
+.rangeInput {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sliderLabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--spacing-xs);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.actionButton {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 13px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.actionButton:hover:not(:disabled) {
+  background: var(--border-color);
+  color: var(--text-primary);
+}
+
+.actionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.playheadInfo {
+  padding: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Section header with title and reset button */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.resetButton {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.resetButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Transform controls */
+.transformControls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.transformRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.transformRow label {
+  flex-shrink: 0;
+  width: 70px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.transformRow input[type="range"] {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  appearance: none;
+  cursor: pointer;
+}
+
+.transformRow input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--accent-primary);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.transformRow input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.transformRow span {
+  flex-shrink: 0;
+  width: 40px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+/* Blend mode select */
+.select {
+  width: 100%;
+  padding: var(--spacing-sm);
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* Scale lock controls */
+.scaleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-xs) 0;
+  border-top: 1px solid var(--border-color);
+  margin-top: var(--spacing-xs);
+}
+
+.scaleLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.lockButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.lockButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.lockButton.locked {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+/* Transition controls */
+.transitionControls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.transitionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.transitionRow label {
+  flex-shrink: 0;
+  width: 60px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.transitionRow .select {
+  flex: 1;
+}
+
+.hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin: 0;
+  margin-top: -4px;
+}
+
+/* Header with clip type */
+.headerInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.clipType {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-primary);
+}
+
+/* Text overlay styles */
+.textarea {
+  width: 100%;
+  padding: var(--spacing-sm);
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  resize: vertical;
+  min-height: 40px;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.row {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.numberInput {
+  width: 50px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 12px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.numberInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.styleButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+  font-weight: bold;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.styleButton:hover {
+  background: var(--bg-hover);
+}
+
+.styleButton.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.colorInput {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: 1;
+}
+
+.colorInput span {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.colorInput input[type="color"] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.colorInput input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.colorInput input[type="color"]::-webkit-color-swatch {
+  border-radius: 2px;
+  border: none;
+}
+
+.colorInput input[type="color"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* No fill button */
+.noFillButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: 2px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  transition: all var(--transition-fast);
+}
+
+.noFillButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.noFillButton.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+/* Animation section styles */
+.animationGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.animationLabel {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.animationRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.animationRow .select {
+  flex: 1;
+}
+
+.animationBadge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  background: var(--accent-primary);
+  color: white;
+  border-radius: var(--radius-sm);
+}
+
+/* Keyframe Editor Button */
+.keyframeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-top: var(--spacing-sm);
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.keyframeButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.keyframeButton.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.keyframeButton svg {
+  flex-shrink: 0;
+}
+
+.keyframeBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--accent-primary);
+  color: white;
+  border-radius: 9px;
+  margin-left: auto;
+}
+
+/* Smaller select for inline use */
+.selectSmall {
+  flex: 1;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 11px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+
+.selectSmall:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.selectSmall option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}

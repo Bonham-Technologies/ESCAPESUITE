@@ -1,0 +1,235 @@
+/* ExportDialog styles */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.dialog {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 400px;
+  max-width: 90vw;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.closeButton:hover {
+  color: var(--text-primary);
+}
+
+.body {
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.radioGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.radio {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.radio:hover:not(.radioDisabled) {
+  background: var(--bg-hover);
+}
+
+.radio input {
+  margin-right: var(--spacing-sm);
+}
+
+.radio span:first-of-type {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.radioHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 20px;
+  margin-top: 2px;
+}
+
+.radioDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.select {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid var(--accent-danger);
+  border-radius: var(--radius-sm);
+  color: var(--accent-danger);
+  font-size: 13px;
+}
+
+.summary {
+  padding: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.progressSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg) 0;
+}
+
+.progressInfo {
+  text-align: center;
+}
+
+.progressPhase {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-primary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.progressMessage {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.progressBar {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width var(--transition-normal);
+}
+
+.progressPercent {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--border-color);
+}
+
+.cancelButton,
+.exportButton {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cancelButton {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.cancelButton:hover {
+  background: var(--bg-hover);
+}
+
+.exportButton {
+  background: var(--accent-primary);
+  border: none;
+  color: white;
+}
+
+.exportButton:hover:not(:disabled) {
+  background: #3a8eef;
+}
+
+.exportButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

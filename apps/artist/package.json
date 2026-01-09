@@ -1,0 +1,50 @@
+{
+  "name": "@escapesuite/artist",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Client-side web video editor",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:standalone": "cross-env VITE_BUILD_MODE=standalone tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
+  },
+  "keywords": [
+    "video",
+    "editor",
+    "webcodecs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@clerk/clerk-react": "^5.25.3",
+    "@sentry/react": "^10.32.1",
+    "idb": "^8.0.3",
+    "mediabunny": "^1.27.3",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.9"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "@vitest/coverage-v8": "^4.0.16",
+    "cross-env": "^10.1.0",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^27.4.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vite-plugin-singlefile": "^2.3.0",
+    "vitest": "^4.0.16"
+  }
+}
