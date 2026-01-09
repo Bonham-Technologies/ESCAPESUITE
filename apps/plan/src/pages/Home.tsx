@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react'
 import { useSubscription } from '../hooks/useSubscription'
 import { analytics } from '../lib/analytics'
+import { functionsUrl, supabaseAnonKey } from '../lib/supabase'
 import styles from './Home.module.css'
 
 const PRICE_IDS = {
@@ -64,17 +65,28 @@ export default function Home() {
       // Track the inquiry
       analytics.enterpriseInquiry(enterpriseForm.company)
 
-      // Send to backend (using mailto as fallback for now)
-      const mailtoLink = `mailto:enterprise@escapesuite.io?subject=${encodeURIComponent(
-        `Enterprise Inquiry - ${enterpriseForm.company}`
-      )}&body=${encodeURIComponent(
-        `Name: ${enterpriseForm.name}\n` +
-        `Email: ${enterpriseForm.email}\n` +
-        `Company: ${enterpriseForm.company}\n\n` +
-        `Message:\n${enterpriseForm.message}`
-      )}`
+      // Submit to Edge Function
+      const response = await fetch(`${functionsUrl}/enterprise-inquiry`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          name: enterpriseForm.name,
+          email: enterpriseForm.email,
+          company: enterpriseForm.company,
+          message: enterpriseForm.message,
+        }),
+      })
 
-      window.location.href = mailtoLink
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to submit inquiry')
+      }
+
       setEnterpriseSubmitted(true)
     } catch (error) {
       console.error('Enterprise form error:', error)
@@ -425,7 +437,7 @@ export default function Home() {
                   <polyline points="22 4 12 14.01 9 11.01" />
                 </svg>
                 <h3>Thank You!</h3>
-                <p>Your email client should open with your inquiry. If not, please email us directly at enterprise@escapesuite.io</p>
+                <p>Your inquiry has been submitted. We'll be in touch within 1-2 business days.</p>
               </div>
             ) : (
               <>

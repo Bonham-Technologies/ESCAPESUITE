@@ -18,7 +18,7 @@ export default function Layout() {
         <Outlet />
       </main>
       <footer className={styles.footer}>
-        <p>&copy; {new Date().getFullYear()} ESCAPE Suite. All rights reserved.</p>
+        <p>&copy; {new Date().getFullYear()} Bonham Technologies, LLC. All rights reserved.</p>
       </footer>
     </div>
   )
