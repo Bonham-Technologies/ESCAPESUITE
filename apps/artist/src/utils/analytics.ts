@@ -1,25 +1,16 @@
-// Plausible Analytics event tracking
-// https://plausible.io/docs/custom-event-goals
+// Vercel Analytics event tracking
+// https://vercel.com/docs/analytics/custom-events
 
-declare global {
-  interface Window {
-    plausible?: (
-      event: string,
-      options?: { props?: Record<string, string | number | boolean> }
-    ) => void
-  }
-}
+import { track } from '@vercel/analytics'
 
 /**
- * Track a custom event in Plausible
+ * Track a custom event in Vercel Analytics
  */
 export function trackEvent(
   event: string,
   props?: Record<string, string | number | boolean>
 ): void {
-  if (typeof window !== 'undefined' && window.plausible) {
-    window.plausible(event, props ? { props } : undefined)
-  }
+  track(event, props)
 }
 
 // ESCAPEARTIST Events

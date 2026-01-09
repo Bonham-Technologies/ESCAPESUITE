@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Analytics } from '@vercel/analytics/react';
 import App from './App';
 import './styles/index.css';
 import { isSaaSMode, StandaloneAuthGate } from './auth';
@@ -33,6 +34,7 @@ async function renderApp() {
         <ClerkProvider publishableKey={CLERK_KEY}>
           <SaaSApp />
         </ClerkProvider>
+        <Analytics />
       </StrictMode>
     );
   } else {
@@ -42,6 +44,7 @@ async function renderApp() {
         <StandaloneAuthGate>
           <App />
         </StandaloneAuthGate>
+        <Analytics />
       </StrictMode>
     );
   }
