@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react'
 import { useSubscription } from '../hooks/useSubscription'
@@ -11,10 +11,25 @@ const PRICE_IDS = {
   founding: import.meta.env.VITE_STRIPE_PRICE_FOUNDING,
 }
 
+interface EnterpriseFormData {
+  name: string
+  email: string
+  company: string
+  message: string
+}
+
 export default function Home() {
   const { isSignedIn } = useUser()
   const { subscription, checkout } = useSubscription()
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
+  const [enterpriseForm, setEnterpriseForm] = useState<EnterpriseFormData>({
+    name: '',
+    email: '',
+    company: '',
+    message: '',
+  })
+  const [enterpriseSubmitting, setEnterpriseSubmitting] = useState(false)
+  const [enterpriseSubmitted, setEnterpriseSubmitted] = useState(false)
 
   const handleCheckout = async (priceId: string, planName: string) => {
     if (!isSignedIn) {
@@ -39,6 +54,35 @@ export default function Home() {
   // Track when pricing section comes into view
   const pricingRef = useRef<HTMLElement>(null)
   const pricingTracked = useRef(false)
+  const enterpriseRef = useRef<HTMLElement>(null)
+
+  const handleEnterpriseSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setEnterpriseSubmitting(true)
+
+    try {
+      // Track the inquiry
+      analytics.enterpriseInquiry(enterpriseForm.company)
+
+      // Send to backend (using mailto as fallback for now)
+      const mailtoLink = `mailto:enterprise@escapesuite.io?subject=${encodeURIComponent(
+        `Enterprise Inquiry - ${enterpriseForm.company}`
+      )}&body=${encodeURIComponent(
+        `Name: ${enterpriseForm.name}\n` +
+        `Email: ${enterpriseForm.email}\n` +
+        `Company: ${enterpriseForm.company}\n\n` +
+        `Message:\n${enterpriseForm.message}`
+      )}`
+
+      window.location.href = mailtoLink
+      setEnterpriseSubmitted(true)
+    } catch (error) {
+      console.error('Enterprise form error:', error)
+      alert('Failed to submit inquiry. Please try again or email enterprise@escapesuite.io directly.')
+    } finally {
+      setEnterpriseSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     const pricingSection = pricingRef.current
@@ -313,6 +357,119 @@ export default function Home() {
               </button>
             )}
           </SignedIn>
+        </div>
+      </section>
+
+      {/* Enterprise Standalone Section */}
+      <section className={styles.enterprise} ref={enterpriseRef}>
+        <div className={styles.enterpriseContent}>
+          <div className={styles.enterpriseInfo}>
+            <div className={styles.enterpriseBadge}>Enterprise</div>
+            <h2>Standalone Deployment</h2>
+            <p className={styles.enterpriseSubtitle}>
+              Deploy ESCAPE Suite on your own infrastructure with no internet required.
+              Perfect for air-gapped environments, restricted networks, and organizations
+              with strict data sovereignty requirements.
+            </p>
+            <div className={styles.enterpriseFeatures}>
+              <div className={styles.enterpriseFeature}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                <div>
+                  <h4>Air-Gapped Ready</h4>
+                  <p>Single HTML file deployment with no external dependencies</p>
+                </div>
+              </div>
+              <div className={styles.enterpriseFeature}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                <div>
+                  <h4>Unlimited Users</h4>
+                  <p>One license covers your entire organization</p>
+                </div>
+              </div>
+              <div className={styles.enterpriseFeature}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                <div>
+                  <h4>Dedicated Support</h4>
+                  <p>Priority support with training and onboarding</p>
+                </div>
+              </div>
+              <div className={styles.enterpriseFeature}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                <div>
+                  <h4>Complete Privacy</h4>
+                  <p>No telemetry, no cloud, complete data control</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.enterpriseForm}>
+            {enterpriseSubmitted ? (
+              <div className={styles.enterpriseSuccess}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                <h3>Thank You!</h3>
+                <p>Your email client should open with your inquiry. If not, please email us directly at enterprise@escapesuite.io</p>
+              </div>
+            ) : (
+              <>
+                <h3>Request a Quote</h3>
+                <form onSubmit={handleEnterpriseSubmit}>
+                  <div className={styles.formRow}>
+                    <input
+                      type="text"
+                      placeholder="Your Name"
+                      value={enterpriseForm.name}
+                      onChange={(e) => setEnterpriseForm({ ...enterpriseForm, name: e.target.value })}
+                      required
+                    />
+                    <input
+                      type="email"
+                      placeholder="Work Email"
+                      value={enterpriseForm.email}
+                      onChange={(e) => setEnterpriseForm({ ...enterpriseForm, email: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <input
+                      type="text"
+                      placeholder="Company Name"
+                      value={enterpriseForm.company}
+                      onChange={(e) => setEnterpriseForm({ ...enterpriseForm, company: e.target.value })}
+                      required
+                    />
+                  <textarea
+                    placeholder="Tell us about your use case and requirements..."
+                    value={enterpriseForm.message}
+                    onChange={(e) => setEnterpriseForm({ ...enterpriseForm, message: e.target.value })}
+                    rows={4}
+                  />
+                  <button type="submit" className="primary" disabled={enterpriseSubmitting}>
+                    {enterpriseSubmitting ? 'Sending...' : 'Get Custom Quote'}
+                  </button>
+                </form>
+                <p className={styles.enterpriseNote}>
+                  $4,999/year includes unlimited users within your organization.
+                </p>
+              </>
+            )}
+          </div>
         </div>
       </section>
 
