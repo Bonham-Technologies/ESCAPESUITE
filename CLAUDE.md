@@ -165,6 +165,31 @@ Test counts:
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
 - Edge Functions use Deno runtime (not Node.js)
 
+## CI/CD Pipeline
+
+GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
+
+| Job | Purpose | Runs On |
+|-----|---------|---------|
+| `validate` | Install deps, security audit | All PRs |
+| `lint` | ESLint all apps (parallel) | All PRs |
+| `type-check` | TypeScript `--noEmit` (parallel) | All PRs |
+| `test` | Unit tests with coverage | All PRs |
+| `build` | Production builds, bundle size report | All PRs |
+| `e2e` | Playwright E2E tests | Main branch only |
+| `ci-status` | Summary/gate job | All PRs |
+
+**Dependabot** (`.github/dependabot.yml`):
+- Weekly updates for all apps
+- Grouped PRs: React, Clerk, testing, linting
+- GitHub Actions version updates
+
+## Vercel Analytics
+
+All apps use `@vercel/analytics` for pageview and custom event tracking:
+- `<Analytics />` component in each app's `main.tsx`
+- Custom events via `track()` in `*/analytics.ts` files
+
 ## Per-App Documentation
 
 Each app has its own CLAUDE.md with detailed architecture:

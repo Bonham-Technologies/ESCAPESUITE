@@ -2,6 +2,8 @@
 
 Client-side video recorder for the ESCAPE Suite. Records screen, webcam, and audio directly in the browser with no server required.
 
+**Part of the [ESCAPESUITE monorepo](../../README.md)**
+
 ## Features
 
 - **Screen Capture**: Record your entire screen, a window, or a browser tab
@@ -21,33 +23,45 @@ Client-side video recorder for the ESCAPE Suite. Records screen, webcam, and aud
 | S | Stop recording |
 | Esc | Cancel |
 
-## Tech Stack
-
-- React 19 + TypeScript
-- Vite with single-file build
-- Zustand for state management
-- MediaRecorder API for recording
-- Shared IndexedDB with ESCAPEARTIST
-
 ## Development
 
 ```bash
-npm install
-npm run dev
+# From monorepo root (recommended)
+pnpm dev:craft           # Start on localhost:5174
+
+# Or from this directory
+pnpm dev
 ```
 
 ## Build
 
 ```bash
-npm run build
+# From monorepo root
+pnpm build:craft
+
+# Standard build (with auth)
+pnpm build
+
+# Standalone build (single HTML, no auth)
+pnpm build:standalone
 ```
 
-Outputs a single `index.html` file in `dist/` that can be deployed anywhere.
+The standalone build outputs a single `index.html` file that can be used offline.
+
+## Tech Stack
+
+- React 19 + TypeScript + Vite
+- Zustand for state management
+- MediaRecorder API for recording
+- Shared IndexedDB with ESCAPEARTIST
+- Vercel Analytics
 
 ## ESCAPE Suite
 
-ESCAPECRAFT is part of the ESCAPE Suite:
-- **ESCAPECRAFT** - Video recorder (this project)
-- **ESCAPEARTIST** - Video editor
+| App | Port | Description |
+|-----|------|-------------|
+| ESCAPEPLAN | 5173 | Hub & auth |
+| ESCAPECRAFT | 5174 | This app - recorder |
+| ESCAPEARTIST | 5175 | Video editor |
 
-Both apps share the same IndexedDB storage, allowing seamless transfer of recordings to the editor.
+Both ESCAPECRAFT and ESCAPEARTIST share the same IndexedDB storage, allowing seamless transfer of recordings to the editor.

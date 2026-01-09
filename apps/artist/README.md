@@ -1,10 +1,12 @@
 # ESCAPEARTIST
 
-[![CI](https://github.com/mrbonha/ESCAPEARTIST/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbonha/ESCAPEARTIST/actions/workflows/ci.yml)
+[![CI](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
 
 A powerful, client-side video editor built entirely for the browser. No server required, no uploads needed - edit videos directly in your browser using modern web technologies.
+
+**Part of the [ESCAPESUITE monorepo](../../README.md)**
 
 <!--
 ## Demo
@@ -73,35 +75,42 @@ TODO: Add screenshot or demo GIF showing the editor interface
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+
-- npm or yarn
+- Node.js 20+
+- pnpm 9+
 - Chrome/Edge (for MP4 export)
 
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/mrbonha/ESCAPEARTIST.git
-cd ESCAPEARTIST
+# Clone the monorepo
+git clone https://github.com/mrbonha/ESCAPESUITE.git
+cd ESCAPESUITE
 
 # Install dependencies
-npm install
+pnpm install
 
 # Start development server
-npm run dev
+pnpm dev:artist          # localhost:5175
+```
+
+Or from this directory:
+
+```bash
+pnpm dev
 ```
 
 ### Build
 
 ```bash
-# Production build (single HTML file)
-npm run build
+# From monorepo root
+pnpm build:artist
 
-# Preview production build
-npm run preview
+# Or from this directory
+pnpm build               # Standard build (with auth)
+pnpm build:standalone    # Single HTML file (no auth, offline-ready)
 ```
 
-The build outputs a single `index.html` file in the `dist/` directory containing all code, styles, and assets inlined.
+The standalone build outputs a single `index.html` file containing all code, styles, and assets inlined.
 
 ## Usage
 

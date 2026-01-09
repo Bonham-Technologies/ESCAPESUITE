@@ -6,13 +6,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ESCAPECRAFT is a client-side video recorder built with React 19, TypeScript, and Vite. It records screen, webcam, and audio directly in the browser with no server required. Part of the ESCAPE Suite alongside ESCAPEARTIST (video editor).
 
+**Monorepo Location**: `apps/craft` in the ESCAPESUITE monorepo.
+
 ## Build Commands
 
+Run from monorepo root using pnpm:
+
 ```bash
-npm run dev      # Start development server
-npm run build    # TypeScript check + Vite production build
-npm run preview  # Preview production build
-npm run lint     # Run ESLint
+pnpm dev:craft           # Start development server (localhost:5174)
+pnpm build:craft         # Production build
+pnpm test --filter=@escapesuite/craft    # Run tests
+pnpm lint                # Lint all apps including craft
+```
+
+Or from this directory:
+
+```bash
+pnpm dev                 # Start development server
+pnpm build               # TypeScript check + Vite build
+pnpm build:standalone    # Single HTML file, no auth
+pnpm test:run            # Run tests
+pnpm lint                # Run ESLint
 ```
 
 ## Architecture
@@ -28,6 +42,7 @@ npm run lint     # Run ESLint
 - `permissions.ts`: Environment capability detection and stream acquisition
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction
+- `watermark.ts`: Watermark rendering for trial/free users
 
 ### Recording Modes
 - **Screen Only**: Display capture without audio
@@ -41,17 +56,27 @@ npm run lint     # Run ESLint
 - Both apps share `video-editor-db` IndexedDB database
 - Recordings stored with `source: 'recording'` and `recordedAt` timestamp
 - "Send to Editor" opens ESCAPEARTIST with `?loadVideo=<id>` parameter
-- Same-origin deployment enables seamless data sharing
+- Same-origin deployment (Vercel) enables seamless data sharing
 
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
 - Target: ESNext, no code splitting
+- `build:standalone` creates an auth-free version for offline use
 
 ### WebM Handling
 - MediaRecorder produces WebM without proper seek metadata
 - `fix-webm-duration` library patches duration/cues after recording
 - Thumbnails captured from live preview (more reliable than from blob)
 - Metadata extraction has fallbacks for problematic WebM files
+
+### Analytics
+- Vercel Analytics via `@vercel/analytics`
+- Custom events in `src/utils/analytics.ts`:
+  - `Recording Started`
+  - `Recording Completed` (with duration)
+  - `Recording Sent to Editor`
+  - `Recording Downloaded`
+  - `Recording Deleted`
 
 ## Key Constraints
 
