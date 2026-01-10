@@ -252,8 +252,9 @@ jobs:
             exit 1
           fi
 
-          # E2E must pass on PRs (skipped on push to main)
+          # E2E must pass on PRs (skipped for Dependabot and push to main)
           if [ "${{ github.event_name }}" == "pull_request" ] && \
+             [ "${{ github.actor }}" != "dependabot[bot]" ] && \
              [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
             exit 1

@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Root dependencies (Turbo)
+  # All npm dependencies (pnpm monorepo - single lockfile at root)
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
@@ -8,102 +8,37 @@ updates:
       day: "monday"
     open-pull-requests-limit: 10
     groups:
-      turbo:
+      # Group related packages to reduce PR noise
+      react:
         patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+      clerk:
+        patterns:
+          - "@clerk/*"
+      testing:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "@testing-library/*"
+          - "fake-indexeddb"
+          - "jsdom"
+      linting:
+        patterns:
+          - "eslint*"
+          - "typescript-eslint"
+          - "@eslint/*"
+      build-tools:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
           - "turbo"
-
-  # ESCAPEPLAN dependencies
-  - package-ecosystem: "npm"
-    directory: "/apps/plan"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
-    groups:
-      react:
+      types:
         patterns:
-          - "react"
-          - "react-dom"
-          - "@types/react*"
-      clerk:
-        patterns:
-          - "@clerk/*"
-      testing:
-        patterns:
-          - "vitest"
-          - "@vitest/*"
-          - "@testing-library/*"
-      linting:
-        patterns:
-          - "eslint*"
-          - "typescript-eslint"
-          - "@eslint/*"
-
-  # ESCAPECRAFT dependencies
-  - package-ecosystem: "npm"
-    directory: "/apps/craft"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
-    groups:
-      react:
-        patterns:
-          - "react"
-          - "react-dom"
-          - "@types/react*"
-      clerk:
-        patterns:
-          - "@clerk/*"
-      testing:
-        patterns:
-          - "vitest"
-          - "@vitest/*"
-          - "@testing-library/*"
-      linting:
-        patterns:
-          - "eslint*"
-          - "typescript-eslint"
-          - "@eslint/*"
-
-  # ESCAPEARTIST dependencies
-  - package-ecosystem: "npm"
-    directory: "/apps/artist"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
-    groups:
-      react:
-        patterns:
-          - "react"
-          - "react-dom"
-          - "@types/react*"
-      clerk:
-        patterns:
-          - "@clerk/*"
-      testing:
-        patterns:
-          - "vitest"
-          - "@vitest/*"
-          - "@testing-library/*"
-      linting:
-        patterns:
-          - "eslint*"
-          - "typescript-eslint"
-          - "@eslint/*"
-
-  # E2E test dependencies
-  - package-ecosystem: "npm"
-    directory: "/apps/e2e"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    groups:
-      playwright:
-        patterns:
-          - "@playwright/*"
+          - "@types/*"
+        exclude-patterns:
+          - "@types/react*"  # Already in react group
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
