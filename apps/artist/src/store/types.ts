@@ -1,35 +1,15 @@
 // Core data types for the video editor
 
-// Media types
-export type MediaType = 'video' | 'image' | 'audio';
+// Shared types - imported from shared package
+import type {
+  MediaType,
+  MediaSource,
+  WaveformPeak,
+  SourceVideo,
+} from '@escapesuite/shared/types'
 
-// Waveform data for audio visualization
-export interface WaveformPeak {
-  min: number;  // -1 to 1
-  max: number;  // -1 to 1
-}
-
-// Media source - how the media was added
-export type MediaSource = 'upload' | 'recording';
-
-export interface SourceVideo {
-  id: string;
-  name: string;
-  duration: number;
-  width: number;
-  height: number;
-  frameRate: number;
-  mimeType: string;
-  size: number;
-  thumbnailUrl?: string;
-  mediaType?: MediaType; // 'video' | 'image' | 'audio', defaults to 'video' for backwards compatibility
-  // Integration with ESCAPECRAFT recorder
-  source?: MediaSource; // 'upload' | 'recording', defaults to 'upload'
-  recordedAt?: number; // Timestamp when recorded (for recordings from ESCAPECRAFT)
-  // Audio waveform data for timeline visualization
-  waveformData?: WaveformPeak[];  // Peak envelope for audio visualization (~100 samples/sec)
-  hasAudio?: boolean;  // Whether this media file contains audio tracks
-}
+// Re-export shared types
+export type { MediaType, MediaSource, WaveformPeak, SourceVideo }
 
 // Default duration for images when added to timeline (seconds)
 export const DEFAULT_IMAGE_DURATION = 5;
