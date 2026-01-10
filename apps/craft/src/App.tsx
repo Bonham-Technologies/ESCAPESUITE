@@ -17,7 +17,8 @@ import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, r
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
 import { useAuth } from './auth';
 import { analytics } from './utils/analytics';
-import { initTheme, cleanupTheme } from './utils/theme';
+import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
+import { themeStorage } from './utils/themeStorage';
 
 function App() {
   const {
@@ -89,7 +90,7 @@ function App() {
 
   // Initialize theme on mount
   useEffect(() => {
-    initTheme();
+    initTheme(themeStorage);
     return () => cleanupTheme();
   }, []);
 

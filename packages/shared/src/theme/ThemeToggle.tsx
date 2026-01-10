@@ -6,7 +6,7 @@ import {
   subscribe,
   type ThemePreference,
   type ResolvedTheme,
-} from '../utils/theme';
+} from './theme';
 import styles from './ThemeToggle.module.css';
 
 interface ThemeToggleProps {

@@ -13,7 +13,8 @@ import { initIntegration, parseUrlParams, loadVideoFromUrl, sendMessage } from '
 import { processVideoFile } from './core/videoProcessor';
 import { saveSessionState, getSessionState, clearSessionState, getVideo, getThumbnail, type SessionState } from './core/storage';
 import { analytics } from './utils/analytics';
-import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from './utils/theme';
+import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
+import { themeStorage } from './utils/themeStorage';
 import styles from './App.module.css';
 
 // Auto-save debounce delay (milliseconds)
@@ -145,7 +146,7 @@ function App() {
 
   // Initialize theme on mount
   useEffect(() => {
-    initTheme();
+    initTheme(themeStorage);
     return () => cleanupTheme();
   }, []);
 
