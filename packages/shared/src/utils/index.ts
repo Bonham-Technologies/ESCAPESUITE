@@ -1,4 +1,5 @@
-// Time utilities - re-export from shared
+// Shared utility functions
+
 export {
   formatTimecode,
   formatTime,
@@ -9,4 +10,4 @@ export {
   pixelsToTime,
   timeToPixels,
   formatFileSize,
-} from '@escapesuite/shared/utils'
+} from './time'
