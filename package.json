@@ -21,9 +21,14 @@
     "test:watch": "turbo test",
     "test:coverage": "turbo test:coverage",
     "test:e2e": "turbo test --filter=@escapesuite/e2e",
-    "clean": "turbo clean && rm -rf node_modules && rm -rf dist"
+    "clean": "turbo clean && rm -rf node_modules && rm -rf dist",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset tag",
+    "release": "changeset version && changeset tag"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.8",
     "turbo": "^2.3.4"
   }
 }
