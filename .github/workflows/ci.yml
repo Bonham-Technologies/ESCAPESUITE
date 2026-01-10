@@ -234,6 +234,119 @@ jobs:
           path: apps/e2e/test-results/
           retention-days: 7
 
+  # Standalone build - builds auth-free single-file versions
+  build-standalone:
+    runs-on: ubuntu-latest
+    needs: [lint, type-check, test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build standalone versions
+        run: pnpm build:standalone
+        env:
+          VITE_BUILD_MODE: standalone
+
+      - name: Report standalone bundle sizes
+        run: |
+          echo "## Standalone Bundle Sizes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| App | Size | Gzipped |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          # ESCAPECRAFT standalone
+          if [ -f "apps/craft/dist/index.html" ]; then
+            CRAFT_SIZE=$(du -b apps/craft/dist/index.html | cut -f1)
+            CRAFT_KB=$(echo "scale=2; $CRAFT_SIZE / 1024" | bc)
+            CRAFT_GZ=$(gzip -c apps/craft/dist/index.html | wc -c)
+            CRAFT_GZ_KB=$(echo "scale=2; $CRAFT_GZ / 1024" | bc)
+            echo "| ESCAPECRAFT | ${CRAFT_KB} KB | ${CRAFT_GZ_KB} KB |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ESCAPEARTIST standalone
+          if [ -f "apps/artist/dist/index.html" ]; then
+            ARTIST_SIZE=$(du -b apps/artist/dist/index.html | cut -f1)
+            ARTIST_KB=$(echo "scale=2; $ARTIST_SIZE / 1024" | bc)
+            ARTIST_GZ=$(gzip -c apps/artist/dist/index.html | wc -c)
+            ARTIST_GZ_KB=$(echo "scale=2; $ARTIST_GZ / 1024" | bc)
+            echo "| ESCAPEARTIST | ${ARTIST_KB} KB | ${ARTIST_GZ_KB} KB |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload standalone artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: standalone-builds
+          path: |
+            apps/craft/dist/index.html
+            apps/artist/dist/index.html
+          retention-days: 30
+
+  # Standalone E2E tests - verify auth-free builds work correctly
+  test-standalone:
+    runs-on: ubuntu-latest
+    needs: build-standalone
+    if: |
+      github.event_name == 'pull_request' &&
+      github.actor != 'dependabot[bot]'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Download standalone builds
+        uses: actions/download-artifact@v4
+        with:
+          name: standalone-builds
+          path: apps/
+
+      - name: Install Playwright Browsers
+        run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
+
+      - name: Run standalone E2E tests
+        run: pnpm test:e2e:standalone
+        env:
+          CI: true
+
+      - name: Upload Standalone Test Report
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: playwright-report-standalone
+          path: apps/e2e/playwright-report-standalone/
+          retention-days: 30
+
+      - name: Upload Standalone Test Results
+        uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: test-results-standalone
+          path: apps/e2e/test-results/
+          retention-days: 7
+
   # Deploy to Vercel - only after CI passes
   # Requires disabling Vercel's Git integration in the Vercel dashboard
   deploy:
@@ -334,7 +447,7 @@ jobs:
   # Summary job that reports overall status
   ci-status:
     runs-on: ubuntu-latest
-    needs: [validate, lint, type-check, test, build, e2e, deploy]
+    needs: [validate, lint, type-check, test, build, build-standalone, e2e, test-standalone, deploy]
     if: always()
     steps:
       - name: Check CI Status
@@ -349,11 +462,25 @@ jobs:
             exit 1
           fi
 
+          # Standalone build must pass
+          if [ "${{ needs.build-standalone.result }}" != "success" ]; then
+            echo "Standalone build failed"
+            exit 1
+          fi
+
           # E2E must pass on PRs (skipped for Dependabot and push to main)
           if [ "${{ github.event_name }}" == "pull_request" ] && \
              [ "${{ github.actor }}" != "dependabot[bot]" ] && \
              [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
+            exit 1
+          fi
+
+          # Standalone E2E must pass on PRs (skipped for Dependabot and push to main)
+          if [ "${{ github.event_name }}" == "pull_request" ] && \
+             [ "${{ github.actor }}" != "dependabot[bot]" ] && \
+             [ "${{ needs.test-standalone.result }}" != "success" ]; then
+            echo "Standalone E2E tests failed"
             exit 1
           fi
 

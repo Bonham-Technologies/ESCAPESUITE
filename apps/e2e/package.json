@@ -11,11 +11,15 @@
     "test:escapecraft": "playwright test tests/escapecraft",
     "test:escapeartist": "playwright test tests/escapeartist",
     "test:integration": "playwright test tests/integration",
-    "report": "playwright show-report"
+    "test:standalone": "playwright test --config=playwright.standalone.config.ts",
+    "test:standalone:headed": "playwright test --config=playwright.standalone.config.ts --headed",
+    "report": "playwright show-report",
+    "report:standalone": "playwright show-report playwright-report-standalone"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
     "@types/node": "^25.0.4",
+    "serve": "^14.2.4",
     "wait-on": "^9.0.3"
   }
 }
