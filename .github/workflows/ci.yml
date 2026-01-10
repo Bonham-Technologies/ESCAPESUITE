@@ -289,8 +289,8 @@ jobs:
         with:
           name: standalone-builds
           path: |
-            apps/craft/dist/index.html
-            apps/artist/dist/index.html
+            apps/craft/dist
+            apps/artist/dist
           retention-days: 30
 
   # Standalone E2E tests - verify auth-free builds work correctly
@@ -318,10 +318,31 @@ jobs:
         run: pnpm install
 
       - name: Download standalone builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: standalone-builds
-          path: .
+
+      - name: Verify standalone builds
+        run: |
+          echo "Checking downloaded artifacts..."
+          echo "Current directory: $(pwd)"
+          echo "Top level contents:"
+          ls -la
+          echo ""
+          echo "Looking for index.html files:"
+          find . -name "index.html" -type f 2>/dev/null | head -20
+          echo ""
+          echo "Checking expected locations..."
+          if [ -f "apps/craft/dist/index.html" ]; then
+            echo "ESCAPECRAFT standalone found: $(du -h apps/craft/dist/index.html)"
+          else
+            echo "ERROR: ESCAPECRAFT standalone not found at apps/craft/dist/index.html"
+          fi
+          if [ -f "apps/artist/dist/index.html" ]; then
+            echo "ESCAPEARTIST standalone found: $(du -h apps/artist/dist/index.html)"
+          else
+            echo "ERROR: ESCAPEARTIST standalone not found at apps/artist/dist/index.html"
+          fi
 
       - name: Install Playwright Browsers
         run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
