@@ -44,7 +44,14 @@
       "Bash(pnpm install:*)",
       "Bash(pnpm build:*)",
       "Bash(pnpm test:*)",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run dev:*)",
+      "Bash(pnpm changeset:*)",
+      "Bash(grep:*)"
     ]
   }
 }
