@@ -1,24 +1,9 @@
-// Types shared with ESCAPEARTIST for integration compatibility
-
-export type MediaType = 'video' | 'image' | 'audio';
-export type MediaSource = 'upload' | 'recording';
-
-// Compatible with ESCAPEARTIST SourceVideo type
-export interface SourceVideo {
-  id: string;
-  name: string;
-  duration: number;
-  width: number;
-  height: number;
-  frameRate: number;
-  mimeType: string;
-  size: number;
-  thumbnailUrl?: string;
-  mediaType?: MediaType;
-  // New fields for recording integration
-  source?: MediaSource;
-  recordedAt?: number;
-}
+// Types shared with ESCAPEARTIST - imported from shared package
+export type {
+  MediaType,
+  MediaSource,
+  SourceVideo,
+} from '@escapesuite/shared/types'
 
 // Recording-specific types
 
