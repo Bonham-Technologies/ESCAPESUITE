@@ -234,10 +234,99 @@ jobs:
           path: apps/e2e/test-results/
           retention-days: 7
 
+  # Deploy to Vercel - only after CI passes
+  # Requires disabling Vercel's Git integration in the Vercel dashboard
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [lint, type-check, test, build, e2e]
+    # Deploy on: push to main, or PR (after e2e passes)
+    # Skip for Dependabot PRs
+    if: |
+      always() &&
+      needs.build.result == 'success' &&
+      needs.lint.result == 'success' &&
+      needs.type-check.result == 'success' &&
+      needs.test.result == 'success' &&
+      (github.event_name == 'push' || needs.e2e.result == 'success') &&
+      github.actor != 'dependabot[bot]'
+
+    environment:
+      name: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel Environment
+        run: vercel pull --yes --environment=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || 'preview' }} --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build with Vercel
+        run: vercel build ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--prod' || '' }} --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VITE_BUILD_MODE: saas
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Deploy to Vercel
+        id: deploy
+        run: |
+          if [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          else
+            URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          fi
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Deployed to: $URL"
+
+      - name: Comment PR with deployment URL
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.deploy.outputs.url }}';
+            const body = `## 🚀 Deployment Preview\n\nThis PR has been deployed to Vercel:\n\n**Preview URL:** ${url}\n\n_Deployed after CI passed_`;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Deployment Preview')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
+
   # Summary job that reports overall status
   ci-status:
     runs-on: ubuntu-latest
-    needs: [validate, lint, type-check, test, build, e2e]
+    needs: [validate, lint, type-check, test, build, e2e, deploy]
     if: always()
     steps:
       - name: Check CI Status
@@ -258,6 +347,12 @@ jobs:
              [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
             exit 1
+          fi
+
+          # Deploy should succeed (but don't fail CI if it doesn't - just warn)
+          if [ "${{ needs.deploy.result }}" != "success" ] && \
+             [ "${{ needs.deploy.result }}" != "skipped" ]; then
+            echo "::warning::Deployment failed or was skipped"
           fi
 
           echo "All CI jobs passed!"
