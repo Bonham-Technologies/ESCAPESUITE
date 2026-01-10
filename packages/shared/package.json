@@ -9,7 +9,8 @@
     "./analytics": "./src/analytics/index.ts",
     "./sentry": "./src/sentry/index.ts",
     "./auth": "./src/auth/index.ts",
-    "./types": "./src/types/index.ts"
+    "./types": "./src/types/index.ts",
+    "./storage": "./src/storage/index.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@sentry/react": "^10.32.1",
     "@vercel/analytics": "^1.6.1",
+    "idb": "^8.0.3",
     "react": "^19.2.3"
   },
   "peerDependencies": {
