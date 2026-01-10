@@ -225,34 +225,46 @@ Each app has a `.github/workflows/test.yml` that runs on push/PR to main:
 
 ---
 
-## Air-Gapped / Standalone Deployment
+## Enterprise Standalone Deployment
 
-ESCAPECRAFT and ESCAPEARTIST support standalone builds that work without internet connectivity.
+ESCAPECRAFT and ESCAPEARTIST support standalone builds that work without internet connectivity. This is offered as an **Enterprise-only** option for organizations with strict data sovereignty, air-gapped environments, or restricted network requirements.
+
+### Enterprise Offering
+
+**Standalone licensing is available exclusively for enterprise customers.** To request a quote:
+
+1. Visit [escapesuite.io](https://www.escapesuite.io) and scroll to the Enterprise section
+2. Fill out the quote request form with your organization details
+3. Our team will provide a custom quote based on your requirements
+
+**$4,999/year** includes unlimited users within your organization.
+
+### Enterprise Features
+
+| Feature | SaaS Mode | Enterprise Standalone |
+|---------|-----------|----------------------|
+| Authentication | Clerk (cloud) | License key |
+| Subscription check | Supabase API | License validation |
+| Error tracking | Sentry | Disabled |
+| Analytics | Vercel Analytics | Disabled |
+| Bundle size | Standard | Optimized (smaller) |
+| Internet required | Yes | No |
+| Deployment | Cloud (Vercel) | Self-hosted / Local |
+| Support | Standard | Dedicated + Training |
 
 ### Building Standalone Versions
 
 ```bash
-# ESCAPECRAFT standalone
-cd ESCAPECRAFT
-npm run build:standalone
+# ESCAPECRAFT standalone (from monorepo root)
+cd apps/craft
+VITE_BUILD_MODE=standalone VITE_LICENSE_KEY="<license>" pnpm build
 # Output: dist/index.html (single file, ~2MB)
 
 # ESCAPEARTIST standalone
-cd ESCAPEARTIST
-npm run build:standalone
+cd apps/artist
+VITE_BUILD_MODE=standalone VITE_LICENSE_KEY="<license>" pnpm build
 # Output: dist/index.html (single file, ~3MB)
 ```
-
-### Standalone Features
-
-| Feature | SaaS Mode | Standalone Mode |
-|---------|-----------|-----------------|
-| Authentication | Clerk (cloud) | License key |
-| Subscription check | Supabase API | License validation |
-| Error tracking | Sentry | Disabled |
-| Analytics | Plausible | Disabled |
-| Bundle size | Larger | Smaller |
-| Internet required | Yes | No |
 
 ### License Key Format
 
@@ -273,13 +285,13 @@ License payload structure:
 }
 ```
 
-### Generating Licenses
+### Generating Licenses (Internal)
 
 Use the license generation script:
 
 ```bash
-cd ESCAPEPLAN
-node scripts/generate-license.js
+cd apps/plan
+node scripts/generate-license.js "Customer Name" suite "2027-01-01"
 ```
 
 ### Distributing Standalone Builds
@@ -289,7 +301,8 @@ The standalone build produces a single HTML file that:
 - Requires no external dependencies
 - Can be opened directly from filesystem
 - Can be hosted on any static server
-- Works in restricted/corporate environments
+- Works in air-gapped/restricted environments
+- Includes embedded license for offline validation
 
 ---
 
@@ -409,14 +422,13 @@ All ESCAPE Suite repositories are protected under a **Proprietary Software Licen
 
 ### License Tiers (Standalone/EULA)
 
-For standalone deployments, the following license tiers are available:
+Standalone deployment is available exclusively for enterprise customers:
 
-| Tier | Devices | Support | Price |
-|------|---------|---------|-------|
-| **Individual** | 1 device | Community/email | $99/year |
-| **Team** | Up to 5 devices | Priority email | $399/year |
-| **Enterprise** | Up to 25 devices | Dedicated + phone | $1,499/year |
-| **Site** | Unlimited (single org) | Premium + training | $4,999/year |
+| Tier | Users | Support | Price |
+|------|-------|---------|-------|
+| **Enterprise** | Unlimited (single org) | Dedicated + training | $4,999/year |
+
+Custom pricing is available for multi-site deployments and extended support. Contact enterprise@escapesuite.io for a quote.
 
 ### License Files
 
@@ -425,16 +437,18 @@ For standalone deployments, the following license tiers are available:
 | `LICENSE` | Proprietary license terms (all repos) |
 | `EULA-STANDALONE.md` | End User License Agreement for standalone customers |
 
-### SaaS vs Standalone
+### SaaS vs Enterprise Standalone
 
-| Aspect | SaaS Mode | Standalone Mode |
-|--------|-----------|-----------------|
+| Aspect | SaaS Mode | Enterprise Standalone |
+|--------|-----------|----------------------|
+| Target | Individual/Teams | Organizations (25+ users) |
 | Authentication | Clerk (cloud) | License key validation |
-| Subscription | Stripe billing | One-time/annual license |
-| Updates | Automatic | Manual download |
-| Support | Included with tier | Per license tier |
+| Subscription | Stripe billing (monthly/annual) | Annual enterprise license |
+| Updates | Automatic | Manual delivery |
+| Support | Standard (included) | Dedicated + training |
 | Data | Client-side (private) | Client-side (private) |
+| Internet | Required for auth | Not required |
 
 ---
 
-*Documentation updated: January 6, 2026*
+*Documentation updated: January 9, 2026*

@@ -22,6 +22,10 @@ export const analytics = {
   trialActivated: () => trackEvent('Trial Activated'),
   subscriptionActivated: (plan: string) => trackEvent('Subscription Activated', { plan }),
 
+  // Enterprise events
+  enterpriseInquiry: (company: string) =>
+    trackEvent('Enterprise Inquiry', { company }),
+
   // Engagement events
   toolLaunched: (tool: 'craft' | 'artist') => trackEvent('Tool Launched', { tool }),
 }
