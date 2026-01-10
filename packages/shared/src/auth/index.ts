@@ -24,3 +24,13 @@ export {
   isTrialUser,
   type Subscription,
 } from './subscription'
+
+// Auth UI components
+export { ErrorScreen } from './ErrorScreen'
+export { LoadingScreen } from './LoadingScreen'
+export {
+  StandaloneAuthGate,
+  SaaSAuthGate,
+  type StandaloneAuthGateProps,
+  type SaaSAuthGateProps,
+} from './AuthGate'
