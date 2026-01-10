@@ -1,17 +1,8 @@
-// Vercel Analytics event tracking
-// https://vercel.com/docs/analytics/custom-events
+// ESCAPEPLAN Analytics
+// Re-export shared trackEvent for backwards compatibility
+export { trackEvent } from '@escapesuite/shared/analytics'
 
-import { track } from '@vercel/analytics'
-
-/**
- * Track a custom event in Vercel Analytics
- */
-export function trackEvent(
-  event: string,
-  props?: Record<string, string | number | boolean>
-): void {
-  track(event, props)
-}
+import { trackEvent } from '@escapesuite/shared/analytics'
 
 // ESCAPEPLAN Events
 export const analytics = {

@@ -311,6 +311,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@vercel/analytics':
+        specifier: ^1.6.1
+        version: 1.6.1(react@19.2.3)
       react:
         specifier: ^19.2.3
         version: 19.2.3

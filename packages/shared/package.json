@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./theme": "./src/theme/index.ts"
+    "./theme": "./src/theme/index.ts",
+    "./analytics": "./src/analytics/index.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -14,6 +15,7 @@
     "lint": "echo 'No lint configured'"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.6.1",
     "react": "^19.2.3"
   },
   "peerDependencies": {
