@@ -12,7 +12,7 @@ async function renderApp() {
   if (isSaaSMode()) {
     // Initialize Sentry in SaaS mode only (excludes from standalone bundle)
     const { initSentry } = await import('./lib/sentry');
-    initSentry();
+    initSentry({ product: 'artist' });
 
     // Dynamically import Clerk to avoid bundling it in standalone builds
     const { ClerkProvider, useUser } = await import('@clerk/clerk-react');
