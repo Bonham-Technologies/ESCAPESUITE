@@ -10,7 +10,9 @@
     "./sentry": "./src/sentry/index.ts",
     "./auth": "./src/auth/index.ts",
     "./types": "./src/types/index.ts",
-    "./storage": "./src/storage/index.ts"
+    "./storage": "./src/storage/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./watermark": "./src/watermark/index.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
