@@ -6,11 +6,76 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const SALES_EMAIL = 'sales@escapesuite.io'
+
 interface EnterpriseInquiry {
   name: string
   email: string
   company: string
   message: string
+}
+
+async function sendNotificationEmail(inquiry: EnterpriseInquiry): Promise<void> {
+  const resendApiKey = Deno.env.get('RESEND_API_KEY')
+  if (!resendApiKey) {
+    console.warn('RESEND_API_KEY not configured, skipping email notification')
+    return
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: 'ESCAPE Suite <noreply@escapesuite.io>',
+      to: [SALES_EMAIL],
+      reply_to: inquiry.email,
+      subject: `New Enterprise Inquiry - ${inquiry.company}`,
+      html: `
+        <h2>New Enterprise Inquiry</h2>
+        <p>A new enterprise inquiry has been submitted:</p>
+        <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Name</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(inquiry.name)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Email</td>
+            <td style="padding: 8px; border: 1px solid #ddd;"><a href="mailto:${escapeHtml(inquiry.email)}">${escapeHtml(inquiry.email)}</a></td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Company</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(inquiry.company)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Message</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${inquiry.message ? escapeHtml(inquiry.message) : '<em>No message provided</em>'}</td>
+          </tr>
+        </table>
+        <p style="margin-top: 20px; color: #666;">
+          Reply directly to this email to respond to the customer.
+        </p>
+      `,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    console.error('Failed to send notification email:', error)
+  } else {
+    console.log('Notification email sent to', SALES_EMAIL)
+  }
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
 
 serve(async (req) => {
@@ -65,9 +130,8 @@ serve(async (req) => {
       )
     }
 
-    // Optionally send notification email (can be added later with Resend/SendGrid)
-    // For now, just log it
-    console.log('Enterprise inquiry received:', { name, email, company })
+    // Send notification email to sales
+    await sendNotificationEmail({ name, email, company, message })
 
     return new Response(
       JSON.stringify({
