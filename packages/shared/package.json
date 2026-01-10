@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./theme": "./src/theme/index.ts",
     "./analytics": "./src/analytics/index.ts",
-    "./sentry": "./src/sentry/index.ts"
+    "./sentry": "./src/sentry/index.ts",
+    "./auth": "./src/auth/index.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
