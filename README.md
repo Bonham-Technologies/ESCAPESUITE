@@ -166,13 +166,45 @@ VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 | Firefox 100+ | Full | Full | Full | Not supported |
 | Safari 16+ | Limited | Limited | Limited | Not supported |
 
+## Releases
+
+This monorepo uses [Changesets](https://github.com/changesets/changesets) for version management.
+
+### Creating a Changeset
+
+When making changes that should be released:
+
+```bash
+pnpm changeset
+```
+
+This will prompt you to:
+1. Select which packages changed
+2. Choose the bump type (major/minor/patch)
+3. Write a summary of changes
+
+A changeset file is created in `.changeset/` - commit this with your PR.
+
+### Release Process
+
+1. Changesets accumulate on `main` as PRs are merged
+2. The Release workflow automatically creates a "Version Packages" PR
+3. Merging that PR bumps versions, updates CHANGELOGs, and creates git tags
+4. GitHub Releases are automatically created for each package
+
+### Versioning
+
+- All main apps (`plan`, `craft`, `artist`) are **linked** - they version together
+- E2E tests are excluded from versioning
+
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make changes and test (`pnpm test && pnpm lint`)
-4. Commit using [conventional commits](https://www.conventionalcommits.org/)
-5. Push and open a Pull Request
+4. **Add a changeset** if your changes should be released (`pnpm changeset`)
+5. Commit and push
+6. Open a Pull Request
 
 ## License
 
