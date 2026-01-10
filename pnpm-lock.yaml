@@ -311,6 +311,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@clerk/clerk-react':
+        specifier: ^5.59.2
+        version: 5.59.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@sentry/react':
         specifier: ^10.32.1
         version: 10.32.1(react@19.2.3)
@@ -323,10 +326,16 @@ importers:
       react:
         specifier: ^19.2.3
         version: 19.2.3
+      react-dom:
+        specifier: ^19.2.3
+        version: 19.2.3(react@19.2.3)
     devDependencies:
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.7
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.7)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3

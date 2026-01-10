@@ -12,7 +12,8 @@
     "./types": "./src/types/index.ts",
     "./storage": "./src/storage/index.ts",
     "./utils": "./src/utils/index.ts",
-    "./watermark": "./src/watermark/index.ts"
+    "./watermark": "./src/watermark/index.ts",
+    "./bootstrap": "./src/bootstrap/index.tsx"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -21,16 +22,20 @@
     "lint": "echo 'No lint configured'"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.59.2",
     "@sentry/react": "^10.32.1",
     "@vercel/analytics": "^1.6.1",
     "idb": "^8.0.3",
-    "react": "^19.2.3"
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
     "typescript": "~5.9.3"
   }
 }
