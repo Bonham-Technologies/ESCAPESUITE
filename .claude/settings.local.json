@@ -51,7 +51,8 @@
       "Bash(npx tsc:*)",
       "Bash(npm run dev:*)",
       "Bash(pnpm changeset:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(pnpm test:run:*)"
     ]
   }
 }
