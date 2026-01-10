@@ -1,13 +1,14 @@
 import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import Header from './Header'
-import { initTheme, cleanupTheme } from '../../utils/theme'
+import { initTheme, cleanupTheme } from '@escapesuite/shared/theme'
+import { themeStorage } from '../../utils/themeStorage'
 import styles from './Layout.module.css'
 
 export default function Layout() {
   // Initialize theme on mount
   useEffect(() => {
-    initTheme()
+    initTheme(themeStorage)
     return () => cleanupTheme()
   }, [])
 

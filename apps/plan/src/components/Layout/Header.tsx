@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
-import { ThemeToggle } from '../ThemeToggle'
+import { ThemeToggle } from '@escapesuite/shared/theme'
 import styles from './Layout.module.css'
 
 export default function Header() {

@@ -1,18 +1,22 @@
 // Theme management utility for ESCAPE Suite
 // Supports light/dark/system themes with persistence and external API
-
-import { getSetting, setSetting } from '../core/storage';
+// Storage-agnostic: apps provide their own storage implementation
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
 
-const THEME_STORAGE_KEY = 'theme-preference';
+export interface ThemeStorage {
+  load: () => Promise<ThemePreference | null>;
+  save: (preference: ThemePreference) => Promise<void>;
+}
+
 const DEFAULT_THEME: ThemePreference = 'dark';
 
 // Internal state
 let currentPreference: ThemePreference = DEFAULT_THEME;
 let currentResolved: ResolvedTheme = 'dark';
 let systemMediaQuery: MediaQueryList | null = null;
+let storage: ThemeStorage | null = null;
 const subscribers: Set<(theme: ResolvedTheme) => void> = new Set();
 
 /**
@@ -63,13 +67,15 @@ export function applyTheme(theme: ResolvedTheme): void {
  * Load theme preference from storage
  */
 export async function loadThemePreference(): Promise<ThemePreference> {
-  try {
-    const stored = await getSetting<ThemePreference>(THEME_STORAGE_KEY);
-    if (stored && ['light', 'dark', 'system'].includes(stored)) {
-      return stored;
+  if (storage) {
+    try {
+      const stored = await storage.load();
+      if (stored && ['light', 'dark', 'system'].includes(stored)) {
+        return stored;
+      }
+    } catch (e) {
+      console.warn('Failed to load theme preference:', e);
     }
-  } catch (e) {
-    console.warn('Failed to load theme preference:', e);
   }
   return DEFAULT_THEME;
 }
@@ -78,10 +84,12 @@ export async function loadThemePreference(): Promise<ThemePreference> {
  * Save theme preference to storage
  */
 export async function saveThemePreference(preference: ThemePreference): Promise<void> {
-  try {
-    await setSetting(THEME_STORAGE_KEY, preference);
-  } catch (e) {
-    console.error('Failed to save theme preference:', e);
+  if (storage) {
+    try {
+      await storage.save(preference);
+    } catch (e) {
+      console.error('Failed to save theme preference:', e);
+    }
   }
 }
 
@@ -160,7 +168,12 @@ export function parseThemeFromUrl(): ThemePreference | null {
  * - Sets up system preference listener
  * - Exposes window.ESCAPE_THEME API
  */
-export async function initTheme(): Promise<void> {
+export async function initTheme(themeStorage?: ThemeStorage): Promise<void> {
+  // Set storage implementation
+  if (themeStorage) {
+    storage = themeStorage;
+  }
+
   // Check for URL override first (doesn't persist)
   const urlTheme = parseThemeFromUrl();
 
@@ -193,6 +206,7 @@ export function cleanupTheme(): void {
     systemMediaQuery = null;
   }
   subscribers.clear();
+  storage = null;
 }
 
 /**
