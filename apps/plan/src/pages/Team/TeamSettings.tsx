@@ -199,6 +199,9 @@ export default function TeamSettings() {
               </label>
               <p className="form-help">
                 Track all member actions and security events.
+                {auditLogging && (
+                  <> <Link to={`/team/${slug}/audit-logs`} className="view-logs-link">View Logs →</Link></>
+                )}
               </p>
             </div>
             <input

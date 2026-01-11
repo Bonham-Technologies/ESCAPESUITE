@@ -10,6 +10,7 @@ import {
   TeamMembers,
   TeamSettings,
   AcceptInvite,
+  AuditLogs,
 } from './pages/Team'
 import { Downloads } from './pages/Portal'
 import { Pricing } from './pages/Pricing'
@@ -62,6 +63,14 @@ function App() {
           element={
             <ProtectedRoute>
               <TeamSettings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="team/:slug/audit-logs"
+          element={
+            <ProtectedRoute>
+              <AuditLogs />
             </ProtectedRoute>
           }
         />

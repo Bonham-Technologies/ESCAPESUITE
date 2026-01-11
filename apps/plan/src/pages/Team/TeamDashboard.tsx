@@ -154,6 +154,13 @@ export default function TeamDashboard() {
               <span className="action-desc">Add team members</span>
             </Link>
           )}
+          {canManageSettings(currentUserRole || '') && organization.settings?.audit_logging && (
+            <Link to={`/team/${slug}/audit-logs`} className="action-card">
+              <span className="action-icon">📋</span>
+              <span className="action-title">Audit Logs</span>
+              <span className="action-desc">View activity history</span>
+            </Link>
+          )}
         </div>
       </section>
 
