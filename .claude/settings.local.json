@@ -52,7 +52,8 @@
       "Bash(npm run dev:*)",
       "Bash(pnpm changeset:*)",
       "Bash(grep:*)",
-      "Bash(pnpm test:run:*)"
+      "Bash(pnpm test:run:*)",
+      "Bash(pnpm build:standalone:*)"
     ]
   }
 }
