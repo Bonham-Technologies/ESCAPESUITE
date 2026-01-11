@@ -34,16 +34,71 @@ serve(async (req) => {
         const session = event.data.object as Stripe.Checkout.Session
         const clerkUserId = session.metadata?.clerk_user_id
         const priceId = session.metadata?.price_id
-        const checkoutType = session.metadata?.type // 'organization' or undefined (individual)
+        const checkoutType = session.metadata?.type // 'organization', 'license', or undefined (individual)
         const organizationId = session.metadata?.organization_id
 
-        if (!clerkUserId) {
-          console.error('No clerk_user_id in session metadata')
+        // Handle license purchase (standalone)
+        if (checkoutType === 'license') {
+          const product = session.metadata?.product as 'craft' | 'artist' | 'suite'
+          const tier = session.metadata?.tier as 'standard' | 'pro' | 'lifetime'
+          const seats = parseInt(session.metadata?.seats || '1', 10)
+          const customerEmail = session.customer_details?.email || ''
+          const customerName = session.customer_details?.name || undefined
+          const customerId = session.customer as string
+
+          console.log(`License purchase: ${product} ${tier} x${seats} for ${customerEmail}`)
+
+          // Generate license via the generate-license function
+          const licenseResponse = await fetch(
+            `${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-license`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+              },
+              body: JSON.stringify({
+                customerId: clerkUserId || customerId,
+                customerEmail,
+                customerName,
+                product,
+                tier,
+                seats,
+                stripePaymentId: session.payment_intent as string,
+              }),
+            }
+          )
+
+          if (!licenseResponse.ok) {
+            const errorText = await licenseResponse.text()
+            console.error('Failed to generate license:', errorText)
+            throw new Error(`Failed to generate license: ${errorText}`)
+          }
+
+          const licenseData = await licenseResponse.json()
+          console.log(`License generated: ${licenseData.licenseId}`)
+
+          // Track the download for analytics
+          await supabase.from('license_downloads').insert({
+            user_id: clerkUserId || null,
+            product,
+            version: 'purchase',
+            ip_address: null,
+            user_agent: null,
+          })
+
+          // TODO: Send license key via email
+          // This would integrate with an email service like Resend, SendGrid, etc.
+
           break
         }
 
         // Handle organization checkout
         if (checkoutType === 'organization' && organizationId) {
+          if (!clerkUserId) {
+            console.error('No clerk_user_id in session metadata for organization checkout')
+            break
+          }
           const orgPlan = session.metadata?.plan || 'team'
           const seatCount = parseInt(session.metadata?.seat_count || '5', 10)
 
@@ -93,6 +148,11 @@ serve(async (req) => {
         }
 
         // Handle individual checkout (existing logic)
+        if (!clerkUserId) {
+          console.error('No clerk_user_id in session metadata for individual checkout')
+          break
+        }
+
         let plan = 'pro_monthly'
         let status = 'active'
 

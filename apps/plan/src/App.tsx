@@ -12,6 +12,7 @@ import {
   AcceptInvite,
 } from './pages/Team'
 import { Downloads } from './pages/Portal'
+import { Pricing } from './pages/Pricing'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -29,6 +30,7 @@ function App() {
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Home />} />
+        <Route path="pricing" element={<Pricing />} />
         <Route path="sign-in/*" element={<SignInPage />} />
         <Route path="sign-up/*" element={<SignUpPage />} />
         <Route

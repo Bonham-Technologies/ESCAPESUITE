@@ -33,9 +33,22 @@
 | generate-license | Done | `apps/plan/supabase/functions/generate-license/` |
 | validate-license | Done | `apps/plan/supabase/functions/validate-license/` |
 | get-license-key | Done | `apps/plan/supabase/functions/get-license-key/` |
+| create-license-checkout | Done | `apps/plan/supabase/functions/create-license-checkout/` |
 | License validation (client) | Done | `packages/shared/src/auth/license.ts` |
 | Downloads portal page | Done | `apps/plan/src/pages/Portal/Downloads.tsx` |
 | Unit tests | Done | `packages/shared/src/auth/license.test.ts` |
+
+### Track C: Distribution & Updates (COMPLETE)
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Release workflow | Done | `.github/workflows/release.yml` |
+| get-version API | Done | `apps/plan/supabase/functions/get-version/` |
+| Pricing page | Done | `apps/plan/src/pages/Pricing/Pricing.tsx` |
+
+**Note:** Track C requires:
+- `SUPABASE_SERVICE_ROLE_KEY` - For uploading builds to Supabase Storage
+- Supabase Storage bucket named `downloads` (public access for downloads)
 
 **Note:** Track B requires the following environment variables to be set:
 - `LICENSE_PRIVATE_KEY` - Ed25519 private key (hex-encoded) for signing licenses
