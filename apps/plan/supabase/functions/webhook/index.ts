@@ -34,13 +34,65 @@ serve(async (req) => {
         const session = event.data.object as Stripe.Checkout.Session
         const clerkUserId = session.metadata?.clerk_user_id
         const priceId = session.metadata?.price_id
+        const checkoutType = session.metadata?.type // 'organization' or undefined (individual)
+        const organizationId = session.metadata?.organization_id
 
         if (!clerkUserId) {
           console.error('No clerk_user_id in session metadata')
           break
         }
 
-        // Determine plan type from price ID
+        // Handle organization checkout
+        if (checkoutType === 'organization' && organizationId) {
+          const orgPlan = session.metadata?.plan || 'team'
+          const seatCount = parseInt(session.metadata?.seat_count || '5', 10)
+
+          // Activate the organization owner's membership
+          await supabase
+            .from('organization_members')
+            .update({ joined_at: new Date().toISOString() })
+            .eq('organization_id', organizationId)
+            .eq('user_id', clerkUserId)
+            .eq('role', 'owner')
+
+          // Create subscription record linked to organization
+          await supabase.from('subscriptions').upsert({
+            clerk_user_id: clerkUserId,
+            stripe_customer_id: session.customer as string,
+            stripe_subscription_id: session.subscription as string || null,
+            status: 'active',
+            plan: orgPlan,
+            organization_id: organizationId,
+            seat_count: seatCount,
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          }, {
+            onConflict: 'clerk_user_id',
+          })
+
+          // Log the action (if audit logging enabled)
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('settings')
+            .eq('id', organizationId)
+            .single()
+
+          if (org?.settings?.audit_logging) {
+            await supabase.from('audit_logs').insert({
+              organization_id: organizationId,
+              user_id: clerkUserId,
+              action: 'subscription.created',
+              resource_type: 'subscription',
+              resource_id: session.subscription as string,
+              metadata: { plan: orgPlan, seatCount },
+            })
+          }
+
+          console.log(`Organization subscription created for ${organizationId}: ${orgPlan} with ${seatCount} seats`)
+          break
+        }
+
+        // Handle individual checkout (existing logic)
         let plan = 'pro_monthly'
         let status = 'active'
 
