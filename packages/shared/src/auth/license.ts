@@ -72,6 +72,13 @@ function parseNewFormat(licenseKey: string): SignedLicensePayload | null {
   }
 }
 
+// Helper to ensure we have a proper ArrayBuffer (not SharedArrayBuffer)
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.length)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
+}
+
 // Verify Ed25519 signature using Web Crypto API
 async function verifySignatureAsync(payload: SignedLicensePayload): Promise<boolean> {
   if (!PUBLIC_KEY_HEX) {
@@ -85,7 +92,7 @@ async function verifySignatureAsync(payload: SignedLicensePayload): Promise<bool
     // Import the public key
     const publicKey = await crypto.subtle.importKey(
       'raw',
-      publicKeyBytes,
+      toArrayBuffer(publicKeyBytes),
       { name: 'Ed25519' },
       false,
       ['verify']
@@ -103,7 +110,7 @@ async function verifySignatureAsync(payload: SignedLicensePayload): Promise<bool
     return await crypto.subtle.verify(
       'Ed25519',
       publicKey,
-      signatureBytes,
+      toArrayBuffer(signatureBytes),
       messageBytes
     )
   } catch (error) {

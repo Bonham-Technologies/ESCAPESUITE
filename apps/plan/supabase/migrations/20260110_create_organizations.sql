@@ -117,10 +117,7 @@ CREATE TABLE IF NOT EXISTS organization_invites (
   accepted_at TIMESTAMPTZ,
 
   -- Timestamps
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-  -- Constraints: only one pending invite per email per org
-  UNIQUE(organization_id, email) WHERE accepted_at IS NULL
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Indexes for organization_invites
@@ -128,6 +125,11 @@ CREATE INDEX idx_organization_invites_org_id ON organization_invites(organizatio
 CREATE INDEX idx_organization_invites_email ON organization_invites(email);
 CREATE INDEX idx_organization_invites_token ON organization_invites(token);
 CREATE INDEX idx_organization_invites_expires_at ON organization_invites(expires_at);
+
+-- Partial unique index: only one pending invite per email per org
+CREATE UNIQUE INDEX idx_organization_invites_pending_unique
+  ON organization_invites(organization_id, email)
+  WHERE accepted_at IS NULL;
 
 -- ============================================================================
 -- AUDIT LOGS TABLE
