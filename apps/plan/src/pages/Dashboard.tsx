@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { useSubscription } from '../hooks/useSubscription'
+import { useOrganization } from '../hooks/useOrganization'
 import { getPlanDisplayName } from '../lib/subscription'
 import { analytics } from '../lib/analytics'
 import styles from './Dashboard.module.css'
@@ -13,7 +15,15 @@ const PRICE_IDS = {
 export default function Dashboard() {
   const { user } = useUser()
   const { subscription, isLoading, checkout, openPortal } = useSubscription()
+  const { organizations, fetchOrganizations, loading: orgsLoading } = useOrganization()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+
+  // Fetch user's organizations on mount
+  useEffect(() => {
+    if (user?.id) {
+      fetchOrganizations()
+    }
+  }, [user?.id, fetchOrganizations])
 
   const handleUpgrade = async () => {
     try {
@@ -148,6 +158,7 @@ export default function Dashboard() {
 
         {/* Subscription Status */}
         <section className={styles.subscriptionSection}>
+          <h2>Subscription</h2>
           <div className={styles.subscriptionCard}>
             <div className={styles.subscriptionInfo}>
               <h3>{isLoading ? 'Loading...' : getPlanDisplayName(subscription?.plan || 'trial')}</h3>
@@ -184,6 +195,66 @@ export default function Dashboard() {
                 {actionLoading === 'manage' ? 'Loading...' : 'Manage Subscription'}
               </button>
             )}
+          </div>
+        </section>
+
+        {/* Teams Section */}
+        <section className={styles.teamsSection}>
+          <div className={styles.teamsSectionHeader}>
+            <h2>Your Teams</h2>
+            <Link to="/pricing?tab=team">
+              <button>Create Team</button>
+            </Link>
+          </div>
+          {orgsLoading ? (
+            <p className={styles.teamsLoading}>Loading teams...</p>
+          ) : organizations.length > 0 ? (
+            <div className={styles.teamsGrid}>
+              {organizations.map((org) => (
+                <Link key={org.id} to={`/team/${org.slug}`} className={styles.teamCard}>
+                  <div className={styles.teamInfo}>
+                    <h3>{org.name}</h3>
+                    <span className={styles.teamPlan}>
+                      {org.plan === 'enterprise' ? 'Enterprise' : 'Team'} Plan
+                    </span>
+                  </div>
+                  <div className={styles.teamArrow}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className={styles.teamsEmpty}>
+              <p>You're not part of any teams yet.</p>
+              <p className={styles.teamsEmptyHint}>
+                Create a team for centralized billing and member management, or wait for an invite.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Quick Links */}
+        <section className={styles.quickLinks}>
+          <h2>Quick Links</h2>
+          <div className={styles.linksGrid}>
+            <Link to="/pricing" className={styles.linkCard}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="12" y1="1" x2="12" y2="23" />
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
+              <span>View Pricing</span>
+            </Link>
+            <Link to="/portal/downloads" className={styles.linkCard}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Downloads & Licenses</span>
+            </Link>
           </div>
         </section>
       </div>
