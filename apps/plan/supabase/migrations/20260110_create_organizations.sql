@@ -311,11 +311,17 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION generate_invite_token()
 RETURNS TEXT AS $$
 BEGIN
-  RETURN encode(gen_random_bytes(32), 'base64')
-    -- Make URL-safe
-    REPLACE('+', '-')
-    REPLACE('/', '_')
-    REPLACE('=', '');
+  -- Generate base64 and make URL-safe by replacing characters
+  RETURN REPLACE(
+    REPLACE(
+      REPLACE(
+        encode(gen_random_bytes(32), 'base64'),
+        '+', '-'
+      ),
+      '/', '_'
+    ),
+    '=', ''
+  );
 END;
 $$ LANGUAGE plpgsql;
 
