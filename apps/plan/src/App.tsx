@@ -5,6 +5,14 @@ import Home from './pages/Home'
 import Dashboard from './pages/Dashboard'
 import SignInPage from './pages/SignIn'
 import SignUpPage from './pages/SignUp'
+import {
+  TeamDashboard,
+  TeamMembers,
+  TeamSettings,
+  AcceptInvite,
+} from './pages/Team'
+import { Downloads } from './pages/Portal'
+import { Pricing } from './pages/Pricing'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -22,6 +30,7 @@ function App() {
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Home />} />
+        <Route path="pricing" element={<Pricing />} />
         <Route path="sign-in/*" element={<SignInPage />} />
         <Route path="sign-up/*" element={<SignUpPage />} />
         <Route
@@ -29,6 +38,39 @@ function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="team/:slug"
+          element={
+            <ProtectedRoute>
+              <TeamDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="team/:slug/members"
+          element={
+            <ProtectedRoute>
+              <TeamMembers />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="team/:slug/settings"
+          element={
+            <ProtectedRoute>
+              <TeamSettings />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="invite/:token" element={<AcceptInvite />} />
+        <Route
+          path="portal/downloads"
+          element={
+            <ProtectedRoute>
+              <Downloads />
             </ProtectedRoute>
           }
         />

@@ -13,9 +13,16 @@ export { AuthContext, useAuth, type AuthState } from './context'
 
 export {
   validateLicense,
+  validateLicenseAsync,
   getLicenseInfo,
+  hasFeature,
+  getLicenseStorageKey,
+  saveLicense,
+  loadLicense,
+  clearLicense,
   type License,
   type ProductType,
+  type LicenseTier,
 } from './license'
 
 export {

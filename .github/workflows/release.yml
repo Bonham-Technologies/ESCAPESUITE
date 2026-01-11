@@ -15,6 +15,9 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+      publishedPackages: ${{ steps.changesets.outputs.publishedPackages }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -65,5 +68,193 @@ jobs:
                 console.log(`Created release for ${tagName}`);
               } catch (error) {
                 console.log(`Release ${tagName} may already exist: ${error.message}`);
+              }
+            }
+
+  # Upload standalone builds to Supabase Storage when craft or artist is released
+  upload-standalone:
+    name: Upload Standalone Builds
+    runs-on: ubuntu-latest
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    steps:
+      - name: Check if craft or artist was released
+        id: check-apps
+        run: |
+          PACKAGES='${{ needs.release.outputs.publishedPackages }}'
+          echo "Published packages: $PACKAGES"
+
+          # Check for craft
+          if echo "$PACKAGES" | grep -q '"name":"@escapesuite/craft"'; then
+            CRAFT_VERSION=$(echo "$PACKAGES" | jq -r '.[] | select(.name == "@escapesuite/craft") | .version')
+            echo "craft_released=true" >> $GITHUB_OUTPUT
+            echo "craft_version=$CRAFT_VERSION" >> $GITHUB_OUTPUT
+            echo "ESCAPECRAFT version: $CRAFT_VERSION"
+          else
+            echo "craft_released=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check for artist
+          if echo "$PACKAGES" | grep -q '"name":"@escapesuite/artist"'; then
+            ARTIST_VERSION=$(echo "$PACKAGES" | jq -r '.[] | select(.name == "@escapesuite/artist") | .version')
+            echo "artist_released=true" >> $GITHUB_OUTPUT
+            echo "artist_version=$ARTIST_VERSION" >> $GITHUB_OUTPUT
+            echo "ESCAPEARTIST version: $ARTIST_VERSION"
+          else
+            echo "artist_released=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build standalone versions
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        run: pnpm build:standalone
+        env:
+          VITE_BUILD_MODE: standalone
+          VITE_LICENSE_PUBLIC_KEY: ${{ secrets.LICENSE_PUBLIC_KEY }}
+
+      - name: Prepare versioned builds
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        run: |
+          mkdir -p uploads
+
+          # ESCAPECRAFT
+          if [ "${{ steps.check-apps.outputs.craft_released }}" == "true" ]; then
+            VERSION="${{ steps.check-apps.outputs.craft_version }}"
+            cp apps/craft/dist/index.html "uploads/ESCAPECRAFT-${VERSION}.html"
+            cp apps/craft/dist/index.html "uploads/ESCAPECRAFT-latest.html"
+            echo "Created ESCAPECRAFT builds for version $VERSION"
+            ls -la uploads/ESCAPECRAFT*
+          fi
+
+          # ESCAPEARTIST
+          if [ "${{ steps.check-apps.outputs.artist_released }}" == "true" ]; then
+            VERSION="${{ steps.check-apps.outputs.artist_version }}"
+            cp apps/artist/dist/index.html "uploads/ESCAPEARTIST-${VERSION}.html"
+            cp apps/artist/dist/index.html "uploads/ESCAPEARTIST-latest.html"
+            echo "Created ESCAPEARTIST builds for version $VERSION"
+            ls -la uploads/ESCAPEARTIST*
+          fi
+
+      - name: Create version manifest
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        run: |
+          # Build version.json with current versions
+          cat > uploads/version.json << EOF
+          {
+            "generated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "products": {
+              "craft": {
+                "version": "${{ steps.check-apps.outputs.craft_version || 'null' }}",
+                "file": "ESCAPECRAFT-${{ steps.check-apps.outputs.craft_version || 'latest' }}.html",
+                "latestFile": "ESCAPECRAFT-latest.html"
+              },
+              "artist": {
+                "version": "${{ steps.check-apps.outputs.artist_version || 'null' }}",
+                "file": "ESCAPEARTIST-${{ steps.check-apps.outputs.artist_version || 'latest' }}.html",
+                "latestFile": "ESCAPEARTIST-latest.html"
+              }
+            }
+          }
+          EOF
+
+          echo "Version manifest:"
+          cat uploads/version.json
+
+      - name: Upload to Supabase Storage
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # Upload each file to Supabase Storage
+          for file in uploads/*; do
+            FILENAME=$(basename "$file")
+            echo "Uploading $FILENAME..."
+
+            curl -X POST \
+              "${SUPABASE_URL}/storage/v1/object/downloads/${FILENAME}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+              -H "Content-Type: text/html" \
+              -H "x-upsert: true" \
+              --data-binary @"$file" \
+              --fail --silent --show-error
+
+            echo "Uploaded $FILENAME"
+          done
+
+          echo "All files uploaded to Supabase Storage"
+
+      - name: Attach builds to GitHub Release
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Get releases created by the release job
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 10
+            });
+
+            // Upload craft build if released
+            if ('${{ steps.check-apps.outputs.craft_released }}' === 'true') {
+              const version = '${{ steps.check-apps.outputs.craft_version }}';
+              const tagName = `@escapesuite/craft@${version}`;
+              const release = releases.find(r => r.tag_name === tagName);
+
+              if (release) {
+                const filePath = `uploads/ESCAPECRAFT-${version}.html`;
+                const content = fs.readFileSync(filePath);
+
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  name: `ESCAPECRAFT-${version}.html`,
+                  data: content
+                });
+                console.log(`Attached ESCAPECRAFT-${version}.html to release`);
+              }
+            }
+
+            // Upload artist build if released
+            if ('${{ steps.check-apps.outputs.artist_released }}' === 'true') {
+              const version = '${{ steps.check-apps.outputs.artist_version }}';
+              const tagName = `@escapesuite/artist@${version}`;
+              const release = releases.find(r => r.tag_name === tagName);
+
+              if (release) {
+                const filePath = `uploads/ESCAPEARTIST-${version}.html`;
+                const content = fs.readFileSync(filePath);
+
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  name: `ESCAPEARTIST-${version}.html`,
+                  data: content
+                });
+                console.log(`Attached ESCAPEARTIST-${version}.html to release`);
               }
             }

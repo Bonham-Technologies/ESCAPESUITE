@@ -34,13 +34,125 @@ serve(async (req) => {
         const session = event.data.object as Stripe.Checkout.Session
         const clerkUserId = session.metadata?.clerk_user_id
         const priceId = session.metadata?.price_id
+        const checkoutType = session.metadata?.type // 'organization', 'license', or undefined (individual)
+        const organizationId = session.metadata?.organization_id
 
-        if (!clerkUserId) {
-          console.error('No clerk_user_id in session metadata')
+        // Handle license purchase (standalone)
+        if (checkoutType === 'license') {
+          const product = session.metadata?.product as 'craft' | 'artist' | 'suite'
+          const tier = session.metadata?.tier as 'standard' | 'pro' | 'lifetime'
+          const seats = parseInt(session.metadata?.seats || '1', 10)
+          const customerEmail = session.customer_details?.email || ''
+          const customerName = session.customer_details?.name || undefined
+          const customerId = session.customer as string
+
+          console.log(`License purchase: ${product} ${tier} x${seats} for ${customerEmail}`)
+
+          // Generate license via the generate-license function
+          const licenseResponse = await fetch(
+            `${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-license`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+              },
+              body: JSON.stringify({
+                customerId: clerkUserId || customerId,
+                customerEmail,
+                customerName,
+                product,
+                tier,
+                seats,
+                stripePaymentId: session.payment_intent as string,
+              }),
+            }
+          )
+
+          if (!licenseResponse.ok) {
+            const errorText = await licenseResponse.text()
+            console.error('Failed to generate license:', errorText)
+            throw new Error(`Failed to generate license: ${errorText}`)
+          }
+
+          const licenseData = await licenseResponse.json()
+          console.log(`License generated: ${licenseData.licenseId}`)
+
+          // Track the download for analytics
+          await supabase.from('license_downloads').insert({
+            user_id: clerkUserId || null,
+            product,
+            version: 'purchase',
+            ip_address: null,
+            user_agent: null,
+          })
+
+          // TODO: Send license key via email
+          // This would integrate with an email service like Resend, SendGrid, etc.
+
           break
         }
 
-        // Determine plan type from price ID
+        // Handle organization checkout
+        if (checkoutType === 'organization' && organizationId) {
+          if (!clerkUserId) {
+            console.error('No clerk_user_id in session metadata for organization checkout')
+            break
+          }
+          const orgPlan = session.metadata?.plan || 'team'
+          const seatCount = parseInt(session.metadata?.seat_count || '5', 10)
+
+          // Activate the organization owner's membership
+          await supabase
+            .from('organization_members')
+            .update({ joined_at: new Date().toISOString() })
+            .eq('organization_id', organizationId)
+            .eq('user_id', clerkUserId)
+            .eq('role', 'owner')
+
+          // Create subscription record linked to organization
+          await supabase.from('subscriptions').upsert({
+            clerk_user_id: clerkUserId,
+            stripe_customer_id: session.customer as string,
+            stripe_subscription_id: session.subscription as string || null,
+            status: 'active',
+            plan: orgPlan,
+            organization_id: organizationId,
+            seat_count: seatCount,
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          }, {
+            onConflict: 'clerk_user_id',
+          })
+
+          // Log the action (if audit logging enabled)
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('settings')
+            .eq('id', organizationId)
+            .single()
+
+          if (org?.settings?.audit_logging) {
+            await supabase.from('audit_logs').insert({
+              organization_id: organizationId,
+              user_id: clerkUserId,
+              action: 'subscription.created',
+              resource_type: 'subscription',
+              resource_id: session.subscription as string,
+              metadata: { plan: orgPlan, seatCount },
+            })
+          }
+
+          console.log(`Organization subscription created for ${organizationId}: ${orgPlan} with ${seatCount} seats`)
+          break
+        }
+
+        // Handle individual checkout (existing logic)
+        if (!clerkUserId) {
+          console.error('No clerk_user_id in session metadata for individual checkout')
+          break
+        }
+
         let plan = 'pro_monthly'
         let status = 'active'
 
