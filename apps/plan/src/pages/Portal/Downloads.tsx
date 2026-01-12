@@ -297,6 +297,7 @@ export default function Downloads() {
           max-width: 1000px;
           margin: 0 auto;
           padding: 2rem;
+          color: var(--text-primary);
         }
 
         .portal-downloads.loading,
@@ -318,7 +319,7 @@ export default function Downloads() {
           align-items: center;
           gap: 0.5rem;
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin-bottom: 0.5rem;
         }
 
@@ -329,11 +330,12 @@ export default function Downloads() {
 
         .page-header h1 {
           margin: 0;
+          color: var(--text-primary);
         }
 
         .error-banner {
-          background: #fef2f2;
-          color: #dc2626;
+          background: var(--error-bg, #fef2f2);
+          color: var(--error-text, #dc2626);
           padding: 1rem;
           border-radius: 8px;
           margin-bottom: 2rem;
@@ -345,8 +347,14 @@ export default function Downloads() {
           margin-bottom: 3rem;
         }
 
+        .licenses-section h2,
+        .downloads-section h2,
+        .help-section h2 {
+          color: var(--text-primary);
+        }
+
         .section-description {
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin-bottom: 1.5rem;
         }
 
@@ -354,8 +362,9 @@ export default function Downloads() {
         .empty-state {
           padding: 2rem;
           text-align: center;
-          background: var(--color-surface, #f9fafb);
+          background: var(--bg-secondary);
           border-radius: 12px;
+          color: var(--text-secondary);
         }
 
         .licenses-grid {
@@ -365,8 +374,8 @@ export default function Downloads() {
         }
 
         .license-card {
-          background: white;
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
           border-radius: 12px;
           padding: 1.5rem;
         }
@@ -381,6 +390,7 @@ export default function Downloads() {
         .license-header h3 {
           margin: 0;
           font-size: 1.125rem;
+          color: var(--text-primary);
         }
 
         .tier-badge {
@@ -392,18 +402,18 @@ export default function Downloads() {
         }
 
         .tier-lifetime {
-          background: #fef3c7;
-          color: #92400e;
+          background: var(--badge-gold-bg, #fef3c7);
+          color: var(--badge-gold-text, #92400e);
         }
 
         .tier-pro {
-          background: #dbeafe;
-          color: #1e40af;
+          background: var(--badge-blue-bg, #dbeafe);
+          color: var(--badge-blue-text, #1e40af);
         }
 
         .tier-standard {
-          background: #f3f4f6;
-          color: #374151;
+          background: var(--bg-tertiary);
+          color: var(--text-secondary);
         }
 
         .license-details {
@@ -414,7 +424,7 @@ export default function Downloads() {
           display: flex;
           justify-content: space-between;
           padding: 0.5rem 0;
-          border-bottom: 1px solid var(--color-border, #e5e7eb);
+          border-bottom: 1px solid var(--border-color);
         }
 
         .detail-row:last-child {
@@ -422,7 +432,11 @@ export default function Downloads() {
         }
 
         .label {
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
+        }
+
+        .value {
+          color: var(--text-primary);
         }
 
         .downloads-grid {
@@ -436,8 +450,8 @@ export default function Downloads() {
           align-items: center;
           gap: 1rem;
           padding: 1.5rem;
-          background: white;
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
           border-radius: 12px;
         }
 
@@ -455,11 +469,12 @@ export default function Downloads() {
 
         .download-info h3 {
           margin: 0 0 0.25rem;
+          color: var(--text-primary);
         }
 
         .download-meta {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin: 0;
         }
 
@@ -490,11 +505,12 @@ export default function Downloads() {
         .step-content h3 {
           margin: 0 0 0.25rem;
           font-size: 1rem;
+          color: var(--text-primary);
         }
 
         .step-content p {
           margin: 0;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           font-size: 0.875rem;
         }
 
@@ -521,19 +537,19 @@ export default function Downloads() {
         }
 
         .btn-secondary {
-          background: transparent;
-          color: var(--color-text, #1f2937);
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
+          border: 1px solid var(--border-color);
         }
 
         .btn-secondary:hover {
-          background: var(--color-surface, #f9fafb);
+          background: var(--bg-secondary);
         }
 
         .spinner {
           width: 40px;
           height: 40px;
-          border: 3px solid var(--color-border, #e5e7eb);
+          border: 3px solid var(--border-color);
           border-top-color: var(--color-primary, #6366f1);
           border-radius: 50%;
           animation: spin 1s linear infinite;
