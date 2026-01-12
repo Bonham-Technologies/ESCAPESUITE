@@ -307,6 +307,7 @@ export default function TeamMembers() {
           max-width: 1000px;
           margin: 0 auto;
           padding: 2rem;
+          color: var(--text-primary);
         }
 
         .team-members.loading,
@@ -327,7 +328,7 @@ export default function TeamMembers() {
           align-items: center;
           gap: 0.5rem;
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin-bottom: 0.5rem;
         }
 
@@ -338,15 +339,17 @@ export default function TeamMembers() {
 
         .page-header h1 {
           margin: 0;
+          color: var(--text-primary);
         }
 
         .seats-info {
           margin-bottom: 1.5rem;
+          color: var(--text-secondary);
         }
 
         .seats-bar {
           height: 8px;
-          background: var(--color-border, #e5e7eb);
+          background: var(--border-color);
           border-radius: 4px;
           overflow: hidden;
           margin-bottom: 0.5rem;
@@ -359,7 +362,7 @@ export default function TeamMembers() {
         }
 
         .seats-available {
-          color: var(--color-success, #10b981);
+          color: var(--success);
           margin-left: 0.5rem;
         }
 
@@ -373,6 +376,13 @@ export default function TeamMembers() {
 
         .members-section h2 {
           margin-bottom: 1rem;
+          color: var(--text-primary);
+        }
+
+        .members-table {
+          background: var(--bg-secondary);
+          border-radius: 12px;
+          overflow: hidden;
         }
 
         .members-table table {
@@ -384,13 +394,18 @@ export default function TeamMembers() {
         .members-table td {
           padding: 1rem;
           text-align: left;
-          border-bottom: 1px solid var(--color-border, #e5e7eb);
+          border-bottom: 1px solid var(--border-color);
         }
 
         .members-table th {
           font-weight: 600;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           font-size: 0.875rem;
+          background: var(--bg-tertiary);
+        }
+
+        .members-table td {
+          color: var(--text-primary);
         }
 
         .member-cell {
@@ -413,8 +428,8 @@ export default function TeamMembers() {
         }
 
         .you-badge {
-          background: var(--color-surface, #f3f4f6);
-          color: var(--color-text-secondary, #6b7280);
+          background: var(--bg-tertiary);
+          color: var(--text-secondary);
           padding: 0.125rem 0.5rem;
           border-radius: 4px;
           font-size: 0.75rem;
@@ -423,9 +438,10 @@ export default function TeamMembers() {
 
         .role-select {
           padding: 0.375rem 0.75rem;
-          border: 1px solid var(--color-border, #e5e7eb);
+          border: 1px solid var(--border-color);
           border-radius: 6px;
-          background: white;
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
           cursor: pointer;
         }
 
@@ -437,18 +453,18 @@ export default function TeamMembers() {
         }
 
         .role-owner {
-          background: #fef3c7;
-          color: #92400e;
+          background: var(--badge-gold-bg);
+          color: var(--badge-gold-text);
         }
 
         .role-admin {
-          background: #dbeafe;
-          color: #1e40af;
+          background: var(--badge-blue-bg);
+          color: var(--badge-blue-text);
         }
 
         .role-member {
-          background: #f3f4f6;
-          color: #374151;
+          background: var(--bg-tertiary);
+          color: var(--text-secondary);
         }
 
         .invites-list {
@@ -462,8 +478,8 @@ export default function TeamMembers() {
           justify-content: space-between;
           align-items: center;
           padding: 1rem;
-          background: var(--color-surface, #f9fafb);
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
           border-radius: 8px;
         }
 
@@ -474,22 +490,23 @@ export default function TeamMembers() {
 
         .invite-email {
           font-weight: 500;
+          color: var(--text-primary);
         }
 
         .invite-role {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
         }
 
         .invite-meta {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
         }
 
         .modal-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0, 0, 0, 0.5);
+          background: rgba(0, 0, 0, 0.7);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -497,15 +514,17 @@ export default function TeamMembers() {
         }
 
         .modal {
-          background: white;
+          background: var(--bg-secondary);
           padding: 2rem;
           border-radius: 12px;
           width: 100%;
           max-width: 400px;
+          border: 1px solid var(--border-color);
         }
 
         .modal h2 {
           margin: 0 0 1.5rem;
+          color: var(--text-primary);
         }
 
         .form-group {
@@ -516,28 +535,31 @@ export default function TeamMembers() {
           display: block;
           font-weight: 500;
           margin-bottom: 0.5rem;
+          color: var(--text-primary);
         }
 
         .form-group input,
         .form-group select {
           width: 100%;
           padding: 0.75rem;
-          border: 1px solid var(--color-border, #e5e7eb);
+          border: 1px solid var(--border-color);
           border-radius: 8px;
           font-size: 1rem;
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
         }
 
         .error-message {
-          background: #fef2f2;
-          color: #dc2626;
+          background: var(--error-bg);
+          color: var(--error-text);
           padding: 0.75rem;
           border-radius: 8px;
           margin-bottom: 1rem;
         }
 
         .success-message {
-          background: #f0fdf4;
-          color: #16a34a;
+          background: var(--success-bg);
+          color: var(--success-text);
           padding: 0.75rem;
           border-radius: 8px;
           margin-bottom: 1rem;
@@ -563,15 +585,28 @@ export default function TeamMembers() {
           border: none;
         }
 
+        .btn-primary:hover:not(:disabled) {
+          background: var(--color-primary-dark, #4f46e5);
+        }
+
         .btn-secondary {
-          background: transparent;
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
+          border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+          border-color: var(--color-primary);
         }
 
         .btn-danger {
-          background: #fee2e2;
-          color: #dc2626;
+          background: var(--error-bg);
+          color: var(--error-text);
           border: none;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+          opacity: 0.9;
         }
 
         .btn-sm {
@@ -582,7 +617,7 @@ export default function TeamMembers() {
         .spinner {
           width: 40px;
           height: 40px;
-          border: 3px solid var(--color-border, #e5e7eb);
+          border: 3px solid var(--border-color);
           border-top-color: var(--color-primary, #6366f1);
           border-radius: 50%;
           animation: spin 1s linear infinite;
