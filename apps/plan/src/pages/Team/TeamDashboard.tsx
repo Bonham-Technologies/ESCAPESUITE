@@ -154,6 +154,13 @@ export default function TeamDashboard() {
               <span className="action-desc">Add team members</span>
             </Link>
           )}
+          {canManageSettings(currentUserRole || '') && organization.settings?.audit_logging && (
+            <Link to={`/team/${slug}/audit-logs`} className="action-card">
+              <span className="action-icon">📋</span>
+              <span className="action-title">Audit Logs</span>
+              <span className="action-desc">View activity history</span>
+            </Link>
+          )}
         </div>
       </section>
 
@@ -162,6 +169,7 @@ export default function TeamDashboard() {
           max-width: 1200px;
           margin: 0 auto;
           padding: 2rem;
+          color: var(--text-primary);
         }
 
         .team-dashboard.loading,
@@ -176,7 +184,7 @@ export default function TeamDashboard() {
         }
 
         .success-banner {
-          background: var(--color-success, #10b981);
+          background: var(--success);
           color: white;
           padding: 1rem;
           border-radius: 8px;
@@ -199,6 +207,7 @@ export default function TeamDashboard() {
 
         .team-info h1 {
           margin: 0;
+          color: var(--text-primary);
         }
 
         .plan-badge {
@@ -218,16 +227,16 @@ export default function TeamDashboard() {
         }
 
         .stat-card {
-          background: var(--color-surface, #f9fafb);
+          background: var(--bg-secondary);
           padding: 1.5rem;
           border-radius: 12px;
-          border: 1px solid var(--color-border, #e5e7eb);
+          border: 1px solid var(--border-color);
         }
 
         .stat-card h3 {
           margin: 0 0 0.5rem;
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           font-weight: 500;
         }
 
@@ -235,11 +244,12 @@ export default function TeamDashboard() {
           font-size: 2rem;
           font-weight: 700;
           margin-bottom: 0.25rem;
+          color: var(--text-primary);
         }
 
         .stat-label {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin: 0;
         }
 
@@ -256,6 +266,7 @@ export default function TeamDashboard() {
 
         .section-header h2 {
           margin: 0;
+          color: var(--text-primary);
         }
 
         .member-list {
@@ -269,9 +280,9 @@ export default function TeamDashboard() {
           align-items: center;
           gap: 1rem;
           padding: 1rem;
-          background: var(--color-surface, #f9fafb);
+          background: var(--bg-secondary);
           border-radius: 8px;
-          border: 1px solid var(--color-border, #e5e7eb);
+          border: 1px solid var(--border-color);
         }
 
         .member-avatar {
@@ -293,11 +304,12 @@ export default function TeamDashboard() {
 
         .member-email {
           font-weight: 500;
+          color: var(--text-primary);
         }
 
         .member-role {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
         }
 
         .view-all {
@@ -318,11 +330,11 @@ export default function TeamDashboard() {
           flex-direction: column;
           align-items: center;
           padding: 1.5rem;
-          background: var(--color-surface, #f9fafb);
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
           border-radius: 12px;
           text-decoration: none;
-          color: inherit;
+          color: var(--text-primary);
           transition: border-color 0.2s, box-shadow 0.2s;
         }
 
@@ -339,11 +351,12 @@ export default function TeamDashboard() {
         .action-title {
           font-weight: 600;
           margin-bottom: 0.25rem;
+          color: var(--text-primary);
         }
 
         .action-desc {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
         }
 
         .btn {
@@ -368,19 +381,19 @@ export default function TeamDashboard() {
         }
 
         .btn-secondary {
-          background: transparent;
-          color: var(--color-text, #1f2937);
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
+          border: 1px solid var(--border-color);
         }
 
         .btn-secondary:hover {
-          background: var(--color-surface, #f9fafb);
+          border-color: var(--color-primary);
         }
 
         .spinner {
           width: 40px;
           height: 40px;
-          border: 3px solid var(--color-border, #e5e7eb);
+          border: 3px solid var(--border-color);
           border-top-color: var(--color-primary, #6366f1);
           border-radius: 50%;
           animation: spin 1s linear infinite;

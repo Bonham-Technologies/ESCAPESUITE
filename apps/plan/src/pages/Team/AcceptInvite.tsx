@@ -187,34 +187,36 @@ export default function AcceptInvite() {
           align-items: center;
           justify-content: center;
           padding: 2rem;
-          background: var(--color-background, #f9fafb);
+          background: var(--bg-primary);
         }
 
         .accept-invite.loading,
         .accept-invite.error {
           flex-direction: column;
           text-align: center;
+          color: var(--text-primary);
         }
 
         .accept-invite.error h1 {
-          color: #dc2626;
+          color: var(--error);
         }
 
         .invite-card {
-          background: white;
+          background: var(--bg-secondary);
           border-radius: 16px;
           padding: 2.5rem;
           max-width: 420px;
           width: 100%;
           text-align: center;
-          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+          border: 1px solid var(--border-color);
         }
 
         .invite-icon {
           width: 80px;
           height: 80px;
           border-radius: 50%;
-          background: var(--color-surface, #f3f4f6);
+          background: var(--bg-tertiary);
           color: var(--color-primary, #6366f1);
           display: flex;
           align-items: center;
@@ -223,33 +225,34 @@ export default function AcceptInvite() {
         }
 
         .invite-icon.success {
-          background: #dcfce7;
-          color: #16a34a;
+          background: var(--success-bg);
+          color: var(--success);
         }
 
         .invite-card h1 {
           font-size: 1.5rem;
           margin: 0 0 0.75rem;
+          color: var(--text-primary);
         }
 
         .invite-card p {
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin: 0 0 1rem;
         }
 
         .sign-in-prompt {
           font-weight: 500;
-          color: var(--color-text, #1f2937) !important;
+          color: var(--text-primary) !important;
         }
 
         .redirect-notice {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280) !important;
+          color: var(--text-secondary) !important;
         }
 
         .error-message {
-          background: #fef2f2;
-          color: #dc2626;
+          background: var(--error-bg);
+          color: var(--error-text);
           padding: 1rem;
           border-radius: 8px;
           margin-bottom: 1.5rem;
@@ -270,6 +273,7 @@ export default function AcceptInvite() {
         .help-text {
           font-size: 0.875rem;
           margin-top: 1.5rem !important;
+          color: var(--text-secondary);
         }
 
         .help-text a {
@@ -317,7 +321,7 @@ export default function AcceptInvite() {
         .spinner {
           width: 40px;
           height: 40px;
-          border: 3px solid var(--color-border, #e5e7eb);
+          border: 3px solid var(--border-color);
           border-top-color: var(--color-primary, #6366f1);
           border-radius: 50%;
           animation: spin 1s linear infinite;

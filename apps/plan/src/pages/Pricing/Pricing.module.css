@@ -15,7 +15,7 @@
 }
 
 .header p {
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
   font-size: 1.125rem;
 }
 
@@ -26,7 +26,7 @@
   gap: 0.5rem;
   margin-bottom: 3rem;
   padding: 0.25rem;
-  background: var(--color-surface, #f3f4f6);
+  background: var(--bg-tertiary);
   border-radius: 12px;
   max-width: 500px;
   margin-left: auto;
@@ -41,17 +41,19 @@
   border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
+  color: var(--text-secondary);
   transition: all 0.2s;
 }
 
 .tab:hover {
   background: rgba(99, 102, 241, 0.1);
+  color: var(--text-primary);
 }
 
 .tab.active {
-  background: white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  color: var(--color-primary, #6366f1);
+  background: var(--bg-secondary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  color: var(--accent);
 }
 
 /* Individual Pricing */
@@ -67,8 +69,8 @@
 }
 
 .pricingCard {
-  background: white;
-  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 2rem;
   text-align: center;
@@ -76,7 +78,7 @@
 }
 
 .pricingCard.featured {
-  border-color: var(--color-primary, #6366f1);
+  border-color: var(--accent);
   box-shadow: 0 4px 20px rgba(99, 102, 241, 0.15);
 }
 
@@ -85,7 +87,7 @@
   top: -12px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--color-primary, #6366f1);
+  background: var(--accent);
   color: white;
   padding: 0.25rem 1rem;
   border-radius: 999px;
@@ -96,6 +98,7 @@
 .pricingCard h3 {
   margin: 0 0 1rem;
   font-size: 1.25rem;
+  color: var(--text-primary);
 }
 
 .price {
@@ -105,16 +108,17 @@
 .amount {
   font-size: 2.5rem;
   font-weight: 700;
+  color: var(--text-primary);
 }
 
 .period {
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
   font-size: 0.875rem;
   margin-left: 0.25rem;
 }
 
 .savings {
-  color: var(--color-success, #10b981);
+  color: var(--success);
   font-size: 0.875rem;
   margin-bottom: 1.5rem;
 }
@@ -130,6 +134,7 @@
   padding: 0.5rem 0;
   padding-left: 1.5rem;
   position: relative;
+  color: var(--text-secondary);
 }
 
 .features li::before {
@@ -140,14 +145,15 @@
   transform: translateY(-50%);
   width: 16px;
   height: 16px;
-  background: var(--color-success, #10b981);
+  background: var(--success);
   border-radius: 50%;
   mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center/10px no-repeat;
   -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center/10px no-repeat;
 }
 
 .foundingMember {
-  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.15), rgba(253, 230, 138, 0.1));
+  border: 1px solid rgba(251, 191, 36, 0.3);
   border-radius: 16px;
   padding: 2rem;
   display: flex;
@@ -170,12 +176,12 @@
 
 .foundingMember h3 {
   margin: 0;
-  color: #78350f;
+  color: var(--text-primary);
 }
 
 .foundingMember p {
   margin: 0.5rem 0 0;
-  color: #92400e;
+  color: var(--text-secondary);
 }
 
 /* Team Pricing */
@@ -192,8 +198,8 @@
 }
 
 .teamCalculator {
-  background: white;
-  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 2rem;
 }
@@ -206,6 +212,7 @@
   margin: 0 0 1rem;
   font-size: 1rem;
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .planSelector {
@@ -215,8 +222,8 @@
 }
 
 .planOption {
-  background: var(--color-surface, #f9fafb);
-  border: 2px solid var(--color-border, #e5e7eb);
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border);
   border-radius: 12px;
   padding: 1.5rem 1rem;
   cursor: pointer;
@@ -226,28 +233,29 @@
 }
 
 .planOption:hover {
-  border-color: var(--color-primary, #6366f1);
+  border-color: var(--accent);
 }
 
 .planOption.active {
-  border-color: var(--color-primary, #6366f1);
-  background: rgba(99, 102, 241, 0.05);
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .planName {
   font-weight: 600;
   font-size: 1.125rem;
   margin-bottom: 0.25rem;
+  color: var(--text-primary);
 }
 
 .planPrice {
-  color: var(--color-primary, #6366f1);
+  color: var(--accent);
   font-weight: 600;
 }
 
 .planMin {
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
   margin-top: 0.25rem;
 }
 
@@ -255,7 +263,7 @@
   position: absolute;
   top: -10px;
   right: -10px;
-  background: var(--color-primary, #6366f1);
+  background: var(--accent);
   color: white;
   padding: 0.25rem 0.5rem;
   border-radius: 6px;
@@ -273,7 +281,7 @@
   flex: 1;
   height: 6px;
   appearance: none;
-  background: var(--color-border, #e5e7eb);
+  background: var(--border);
   border-radius: 3px;
 }
 
@@ -281,7 +289,7 @@
   appearance: none;
   width: 20px;
   height: 20px;
-  background: var(--color-primary, #6366f1);
+  background: var(--accent);
   border-radius: 50%;
   cursor: pointer;
 }
@@ -290,19 +298,22 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  color: var(--text-secondary);
 }
 
 .seatValue input[type="number"] {
   width: 60px;
   padding: 0.5rem;
-  border: 1px solid var(--color-border, #e5e7eb);
+  border: 1px solid var(--border);
   border-radius: 8px;
   text-align: center;
   font-weight: 600;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 .calculatorTotal {
-  background: var(--color-surface, #f9fafb);
+  background: var(--bg-tertiary);
   border-radius: 12px;
   padding: 1.5rem;
   text-align: center;
@@ -313,28 +324,31 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.5rem;
+  color: var(--text-secondary);
 }
 
 .totalAmount {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--color-primary, #6366f1);
+  color: var(--accent);
 }
 
 .annualNote {
   font-size: 0.875rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
   margin-bottom: 1rem;
 }
 
 .teamFeatures {
-  background: var(--color-surface, #f9fafb);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 2rem;
 }
 
 .teamFeatures h3 {
   margin: 0 0 1.5rem;
+  color: var(--text-primary);
 }
 
 .featureGrid {
@@ -353,12 +367,13 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  color: var(--text-secondary);
 }
 
 .featureItem svg {
   width: 20px;
   height: 20px;
-  color: var(--color-success, #10b981);
+  color: var(--success);
   flex-shrink: 0;
 }
 
@@ -377,15 +392,16 @@
 
 .standaloneInfo h3 {
   margin: 0 0 0.5rem;
+  color: var(--text-primary);
 }
 
 .standaloneInfo p {
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
 }
 
 .standaloneCalculator {
-  background: white;
-  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 2rem;
   display: grid;
@@ -396,6 +412,7 @@
 .tierSelector h4 {
   margin: 0 0 1rem;
   font-size: 1rem;
+  color: var(--text-primary);
 }
 
 .productOptions {
@@ -411,8 +428,8 @@
 }
 
 .productOption {
-  background: var(--color-surface, #f9fafb);
-  border: 2px solid var(--color-border, #e5e7eb);
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border);
   border-radius: 12px;
   padding: 1.5rem 1rem;
   cursor: pointer;
@@ -425,12 +442,12 @@
 }
 
 .productOption:hover {
-  border-color: var(--color-primary, #6366f1);
+  border-color: var(--accent);
 }
 
 .productOption.active {
-  border-color: var(--color-primary, #6366f1);
-  background: rgba(99, 102, 241, 0.05);
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .productIcon {
@@ -439,7 +456,7 @@
   justify-content: center;
   width: 40px;
   height: 40px;
-  background: var(--color-primary, #6366f1);
+  background: var(--accent);
   color: white;
   border-radius: 8px;
   font-size: 0.625rem;
@@ -448,11 +465,12 @@
 
 .productName {
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .productDesc {
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
 }
 
 .tierOptions {
@@ -468,8 +486,8 @@
 }
 
 .tierOption {
-  background: var(--color-surface, #f9fafb);
-  border: 2px solid var(--color-border, #e5e7eb);
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border);
   border-radius: 12px;
   padding: 1.5rem 1rem;
   cursor: pointer;
@@ -483,18 +501,18 @@
 }
 
 .tierOption:hover {
-  border-color: var(--color-primary, #6366f1);
+  border-color: var(--accent);
 }
 
 .tierOption.active {
-  border-color: var(--color-primary, #6366f1);
-  background: rgba(99, 102, 241, 0.05);
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .tierBadge {
   position: absolute;
   top: -10px;
-  background: var(--color-success, #10b981);
+  background: var(--success);
   color: white;
   padding: 0.25rem 0.5rem;
   border-radius: 6px;
@@ -504,21 +522,22 @@
 
 .tierName {
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .tierPrice {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--color-primary, #6366f1);
+  color: var(--accent);
 }
 
 .tierDesc {
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
 }
 
 .standaloneTotal {
-  background: var(--color-surface, #f9fafb);
+  background: var(--bg-tertiary);
   border-radius: 12px;
   padding: 1.5rem;
   text-align: center;
@@ -533,28 +552,30 @@
 
 .selectedProduct {
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .selectedPrice {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--color-primary, #6366f1);
+  color: var(--accent);
 }
 
 .oneTimeNote {
   font-size: 0.875rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
   margin-bottom: 1rem;
 }
 
 .downloadNote {
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
   margin-top: 1rem;
 }
 
 .standaloneFeatures {
-  background: var(--color-surface, #f9fafb);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 2rem;
 }
@@ -562,18 +583,20 @@
 .standaloneFeatures h4 {
   margin: 0 0 1rem;
   text-align: center;
+  color: var(--text-primary);
 }
 
 /* FAQ */
 .faq {
   margin-top: 4rem;
   padding-top: 2rem;
-  border-top: 1px solid var(--color-border, #e5e7eb);
+  border-top: 1px solid var(--border);
 }
 
 .faq h2 {
   text-align: center;
   margin-bottom: 2rem;
+  color: var(--text-primary);
 }
 
 .faqGrid {
@@ -583,7 +606,8 @@
 }
 
 .faqItem {
-  background: var(--color-surface, #f9fafb);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 1.5rem;
 }
@@ -591,54 +615,24 @@
 .faqItem h4 {
   margin: 0 0 0.5rem;
   font-size: 1rem;
+  color: var(--text-primary);
 }
 
 .faqItem p {
   margin: 0;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--text-secondary);
   font-size: 0.875rem;
   line-height: 1.6;
 }
 
-/* Buttons */
+/* Buttons - use global button styles, just add width */
 .pricingCard button,
 .foundingMember button,
 .calculatorTotal button,
 .standaloneTotal button {
   width: 100%;
-  padding: 0.75rem 1.5rem;
-  border: 1px solid var(--color-border, #e5e7eb);
-  background: white;
-  border-radius: 8px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
-.pricingCard button:hover,
-.foundingMember button:hover,
-.calculatorTotal button:hover,
-.standaloneTotal button:hover {
-  background: var(--color-surface, #f9fafb);
-}
-
-.pricingCard button.primary,
-.foundingMember button.primary,
-.calculatorTotal button.primary,
-.standaloneTotal button.primary {
-  background: var(--color-primary, #6366f1);
-  color: white;
-  border-color: var(--color-primary, #6366f1);
-}
-
-.pricingCard button.primary:hover,
-.foundingMember button.primary:hover,
-.calculatorTotal button.primary:hover,
-.standaloneTotal button.primary:hover {
-  background: var(--color-primary-dark, #4f46e5);
-}
-
-.pricingCard button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.foundingMember button {
+  width: auto;
 }

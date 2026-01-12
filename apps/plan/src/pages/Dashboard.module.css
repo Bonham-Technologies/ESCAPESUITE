@@ -142,7 +142,11 @@
 
 /* Subscription Section */
 .subscriptionSection {
-  margin-bottom: 2rem;
+  margin-bottom: 3rem;
+}
+
+.subscriptionSection h2 {
+  margin-bottom: 1.5rem;
 }
 
 .subscriptionCard {
@@ -162,6 +166,137 @@
 .subscriptionInfo p {
   margin: 0;
   font-size: 0.875rem;
+}
+
+/* Teams Section */
+.teamsSection {
+  margin-bottom: 3rem;
+}
+
+.teamsSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.teamsSectionHeader h2 {
+  margin: 0;
+}
+
+.teamsLoading {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.teamsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.teamCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s ease;
+}
+
+.teamCard:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.teamInfo h3 {
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+}
+
+.teamPlan {
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.teamArrow {
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.teamCard:hover .teamArrow {
+  transform: translateX(4px);
+  color: var(--accent);
+}
+
+.teamsEmpty {
+  padding: 2rem;
+  background-color: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.teamsEmpty p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.teamsEmptyHint {
+  margin-top: 0.5rem !important;
+  font-size: 0.875rem;
+}
+
+/* Quick Links */
+.quickLinks {
+  margin-bottom: 2rem;
+}
+
+.quickLinks h2 {
+  margin-bottom: 1.5rem;
+}
+
+.linksGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.linkCard {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s ease;
+}
+
+.linkCard:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.linkCard svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.linkCard span {
+  font-weight: 500;
 }
 
 /* Responsive */

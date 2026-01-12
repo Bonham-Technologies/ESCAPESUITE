@@ -199,6 +199,9 @@ export default function TeamSettings() {
               </label>
               <p className="form-help">
                 Track all member actions and security events.
+                {auditLogging && (
+                  <> <Link to={`/team/${slug}/audit-logs`} className="view-logs-link">View Logs →</Link></>
+                )}
               </p>
             </div>
             <input
@@ -281,6 +284,7 @@ export default function TeamSettings() {
           max-width: 800px;
           margin: 0 auto;
           padding: 2rem;
+          color: var(--text-primary);
         }
 
         .team-settings.loading,
@@ -301,7 +305,7 @@ export default function TeamSettings() {
           align-items: center;
           gap: 0.5rem;
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin-bottom: 0.5rem;
         }
 
@@ -312,11 +316,12 @@ export default function TeamSettings() {
 
         .page-header h1 {
           margin: 0;
+          color: var(--text-primary);
         }
 
         .settings-section {
-          background: var(--color-surface, #f9fafb);
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
           border-radius: 12px;
           padding: 1.5rem;
           margin-bottom: 1.5rem;
@@ -325,6 +330,7 @@ export default function TeamSettings() {
         .settings-section h2 {
           margin: 0 0 1.5rem;
           font-size: 1.125rem;
+          color: var(--text-primary);
         }
 
         .form-group {
@@ -339,27 +345,38 @@ export default function TeamSettings() {
           display: block;
           font-weight: 500;
           margin-bottom: 0.5rem;
+          color: var(--text-primary);
         }
 
         .form-group input[type="text"] {
           width: 100%;
           padding: 0.75rem;
-          border: 1px solid var(--color-border, #e5e7eb);
+          border: 1px solid var(--border-color);
           border-radius: 8px;
           font-size: 1rem;
-          background: white;
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
         }
 
         .form-group input:disabled {
-          background: var(--color-surface, #f3f4f6);
-          color: var(--color-text-secondary, #6b7280);
+          background: var(--bg-tertiary);
+          color: var(--text-secondary);
           cursor: not-allowed;
         }
 
         .form-help {
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
           margin: 0.5rem 0 0;
+        }
+
+        .view-logs-link {
+          color: var(--color-primary, #6366f1);
+          text-decoration: none;
+        }
+
+        .view-logs-link:hover {
+          text-decoration: underline;
         }
 
         .toggle-group {
@@ -367,8 +384,8 @@ export default function TeamSettings() {
           justify-content: space-between;
           align-items: flex-start;
           padding: 1rem;
-          background: white;
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-color);
           border-radius: 8px;
         }
 
@@ -380,13 +397,14 @@ export default function TeamSettings() {
           display: flex;
           align-items: center;
           gap: 0.5rem;
+          color: var(--text-primary);
         }
 
         .toggle {
           width: 48px;
           height: 24px;
           appearance: none;
-          background: var(--color-border, #e5e7eb);
+          background: var(--border-color);
           border-radius: 12px;
           position: relative;
           cursor: pointer;
@@ -443,7 +461,7 @@ export default function TeamSettings() {
         }
 
         .seat-count {
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
         }
 
         .form-actions {
@@ -454,25 +472,25 @@ export default function TeamSettings() {
         }
 
         .error-message {
-          background: #fef2f2;
-          color: #dc2626;
+          background: var(--error-bg);
+          color: var(--error-text);
           padding: 0.75rem;
           border-radius: 8px;
         }
 
         .success-message {
-          background: #f0fdf4;
-          color: #16a34a;
+          background: var(--success-bg);
+          color: var(--success-text);
           padding: 0.75rem;
           border-radius: 8px;
         }
 
         .danger-zone {
-          border-color: #fecaca;
+          border-color: var(--error);
         }
 
         .danger-zone h2 {
-          color: #dc2626;
+          color: var(--error);
         }
 
         .danger-action {
@@ -480,20 +498,21 @@ export default function TeamSettings() {
           justify-content: space-between;
           align-items: center;
           padding: 1rem;
-          background: white;
-          border: 1px solid var(--color-border, #e5e7eb);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-color);
           border-radius: 8px;
         }
 
         .danger-info h3 {
           margin: 0 0 0.25rem;
           font-size: 1rem;
+          color: var(--text-primary);
         }
 
         .danger-info p {
           margin: 0;
           font-size: 0.875rem;
-          color: var(--color-text-secondary, #6b7280);
+          color: var(--text-secondary);
         }
 
         .btn {
@@ -520,13 +539,13 @@ export default function TeamSettings() {
         }
 
         .btn-danger {
-          background: #fee2e2;
-          color: #dc2626;
+          background: var(--error-bg);
+          color: var(--error-text);
           border: none;
         }
 
         .btn-danger:hover:not(:disabled) {
-          background: #fecaca;
+          opacity: 0.9;
         }
 
         .btn-danger:disabled {
@@ -537,7 +556,7 @@ export default function TeamSettings() {
         .spinner {
           width: 40px;
           height: 40px;
-          border: 3px solid var(--color-border, #e5e7eb);
+          border: 3px solid var(--border-color);
           border-top-color: var(--color-primary, #6366f1);
           border-radius: 50%;
           animation: spin 1s linear infinite;

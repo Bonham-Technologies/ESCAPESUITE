@@ -20,6 +20,7 @@ export default function Header() {
       </Link>
 
       <nav className={styles.nav}>
+        <Link to="/pricing">Pricing</Link>
         <ThemeToggle />
         <SignedOut>
           <Link to="/sign-in">Sign In</Link>

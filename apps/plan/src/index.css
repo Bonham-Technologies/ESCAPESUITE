@@ -12,6 +12,25 @@
   --error: #ef4444;
   --border: #2a2a3e;
 
+  /* Aliases for component compatibility */
+  --border-color: var(--border);
+  --color-primary: var(--accent);
+  --color-primary-dark: var(--accent-hover);
+
+  /* Badge colors - dark mode */
+  --badge-gold-bg: #78350f;
+  --badge-gold-text: #fef3c7;
+  --badge-blue-bg: #1e3a5f;
+  --badge-blue-text: #bfdbfe;
+
+  /* Error banner colors - dark mode */
+  --error-bg: #450a0a;
+  --error-text: #fca5a5;
+
+  /* Success banner colors - dark mode */
+  --success-bg: #052e16;
+  --success-text: #86efac;
+
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -40,6 +59,25 @@
   --warning: #f59e0b;
   --error: #dc2626;
   --border: #d1d5db;
+
+  /* Aliases for component compatibility */
+  --border-color: var(--border);
+  --color-primary: var(--accent);
+  --color-primary-dark: var(--accent-hover);
+
+  /* Badge colors - light mode */
+  --badge-gold-bg: #fef3c7;
+  --badge-gold-text: #92400e;
+  --badge-blue-bg: #dbeafe;
+  --badge-blue-text: #1e40af;
+
+  /* Error banner colors - light mode */
+  --error-bg: #fef2f2;
+  --error-text: #dc2626;
+
+  /* Success banner colors - light mode */
+  --success-bg: #f0fdf4;
+  --success-text: #16a34a;
 
   color-scheme: light;
 }
