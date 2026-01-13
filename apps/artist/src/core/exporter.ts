@@ -16,7 +16,7 @@ import type { Clip, SourceVideo, Track, ExportOptions, ExportProgress, BlendMode
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
-import { getAnimatedValues, getAnimatedValuesCached, clearAnimationCache } from '../utils/animation';
+import { getAnimatedValuesCached, clearAnimationCache } from '../utils/animation';
 import { drawWatermark, type WatermarkConfig } from '../utils/watermark';
 import { getWorkerSupport } from '../utils/workerSupport';
 import type { WorkerRequest, WorkerResponse, AudioClipMeta } from '../workers/exportWorker';
@@ -500,14 +500,13 @@ const lastSeekPositions = new Map<string, number>();
 /**
  * Optimized seek that skips if we're already at the target time
  * Uses frame-level tolerance (1 frame at 30fps = ~0.033s)
- * Returns true if seek was successful (or skipped because already there)
  */
 async function seekVideoOptimized(
   video: HTMLVideoElement,
   time: number,
   videoId: string,
   frameRate: number = 30
-): Promise<boolean> {
+): Promise<void> {
   const frameTolerance = 1 / frameRate;
   const lastPosition = lastSeekPositions.get(videoId);
 
@@ -516,18 +515,17 @@ async function seekVideoOptimized(
   if (lastPosition !== undefined && Math.abs(lastPosition - time) < frameTolerance) {
     // Still update to exact time for tracking
     lastSeekPositions.set(videoId, time);
-    return video.readyState >= 2;
+    return;
   }
 
   // Also check actual video position
   if (Math.abs(video.currentTime - time) < frameTolerance) {
     lastSeekPositions.set(videoId, time);
-    return video.readyState >= 2;
+    return;
   }
 
-  const success = await seekVideo(video, time);
+  await seekVideo(video, time);
   lastSeekPositions.set(videoId, time);
-  return success;
 }
 
 /**
@@ -567,7 +565,10 @@ function drawClipToCanvas(
   transitionModifiers?: TransitionModifiers
 ) {
   // Get animated values - this applies presets and custom keyframes
-  const animated = getAnimatedValues(
+  // Use cached version for export performance
+  const cacheKey = `${clip.id}:${clipTime.toFixed(3)}`;
+  const animated = getAnimatedValuesCached(
+    cacheKey,
     clipTime,
     clip.duration,
     clip.animation,
@@ -691,7 +692,10 @@ function drawImageToCanvasWithModifiers(
   transitionModifiers?: TransitionModifiers
 ) {
   // Get animated values - this applies presets and custom keyframes
-  const animated = getAnimatedValues(
+  // Use cached version for export performance
+  const cacheKey = `${clip.id}:${clipTime.toFixed(3)}`;
+  const animated = getAnimatedValuesCached(
+    cacheKey,
     clipTime,
     clip.duration,
     clip.animation,
@@ -1447,7 +1451,10 @@ export async function exportToWebM(
         };
       }
 
-      const animated = getAnimatedValues(
+      // Use cached version for export performance
+      const cacheKey = `${clip.id}:${overlayClipTime.toFixed(3)}`;
+      const animated = getAnimatedValuesCached(
+        cacheKey,
         overlayClipTime,
         clip.duration,
         clip.animation,
@@ -1878,7 +1885,10 @@ export async function exportToMP4(
         };
       }
 
-      const animated = getAnimatedValues(
+      // Use cached version for export performance
+      const cacheKey = `${clip.id}:${overlayClipTime.toFixed(3)}`;
+      const animated = getAnimatedValuesCached(
+        cacheKey,
         overlayClipTime,
         clip.duration,
         clip.animation,
