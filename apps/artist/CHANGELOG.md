@@ -13,7 +13,7 @@
 ### Changed
 
 - **Waveform Visibility**: AudioWaveform component now uses white color when clip is selected for better contrast against blue selection background
-- **Seek Timeout**: Increased video seek timeout from 500ms to 1000ms for more reliable seeking on high-resolution video
+- **Seek Timing**: Balanced seek timeout (500ms) and retry logic to prevent export pausing while maintaining reliability
 
 ### Fixed
 

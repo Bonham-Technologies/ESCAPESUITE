@@ -320,35 +320,36 @@ describe('exporter - seek optimization', () => {
 describe('exporter - black flash prevention', () => {
   describe('seek timeout configuration', () => {
     it('uses reasonable timeout values', () => {
-      const seekTimeout = 1000 // Current value in code
-      const frameReadyTimeout = 200 // Verification timeout
+      const seekTimeout = 500 // Current value in code
+      const frameReadyCheck = 16 // Quick frame ready check
 
-      // Timeout should be at least 500ms for reliable seeking
-      expect(seekTimeout).toBeGreaterThanOrEqual(500)
+      // Timeout should be reasonable for reliable seeking
+      expect(seekTimeout).toBeGreaterThanOrEqual(250)
+      expect(seekTimeout).toBeLessThanOrEqual(1000)
       // Frame ready check should be quick
-      expect(frameReadyTimeout).toBeLessThan(500)
+      expect(frameReadyCheck).toBeLessThan(100)
     })
   })
 
   describe('retry logic', () => {
-    it('allows multiple retry attempts', () => {
-      const maxRetries = 2 // Current value in code
+    it('allows retry attempts', () => {
+      const maxRetries = 1 // Current value in code
 
       expect(maxRetries).toBeGreaterThanOrEqual(1)
-      expect(maxRetries).toBeLessThanOrEqual(5) // Don't retry too many times
+      expect(maxRetries).toBeLessThanOrEqual(3) // Don't retry too many times
     })
 
     it('calculates total maximum wait time', () => {
-      const seekTimeout = 1000
-      const maxRetries = 2
-      const retryDelay = 50
-      const frameReadyTimeout = 200
+      const seekTimeout = 500
+      const maxRetries = 1
+      const retryDelay = 16
+      const frameReadyCheck = 16
 
       // Worst case: all retries fail
-      const maxWaitTime = (maxRetries + 1) * (seekTimeout + frameReadyTimeout) + maxRetries * retryDelay
+      const maxWaitTime = (maxRetries + 1) * (seekTimeout + frameReadyCheck) + maxRetries * retryDelay
 
-      // Should complete within reasonable time (under 5 seconds)
-      expect(maxWaitTime).toBeLessThan(5000)
+      // Should complete within reasonable time (under 2 seconds per video)
+      expect(maxWaitTime).toBeLessThan(2000)
     })
   })
 })

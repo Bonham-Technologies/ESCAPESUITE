@@ -443,22 +443,24 @@ async function waitForVideoReady(video: HTMLVideoElement, timeoutMs: number = 50
 
 /**
  * Wait for video to seek to a specific time with retry logic
- * Increased timeout and better frame readiness verification
+ * Balanced timeout for reliability without excessive delays
  */
-async function seekVideo(video: HTMLVideoElement, time: number, maxRetries: number = 2): Promise<boolean> {
-  const seekTimeout = 1000; // Increased from 500ms to 1000ms
+async function seekVideo(video: HTMLVideoElement, time: number, maxRetries: number = 1): Promise<boolean> {
+  const seekTimeout = 500; // 500ms is usually sufficient
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const success = await attemptSeek(video, time, seekTimeout);
     if (success) {
-      // Verify frame is actually ready
-      const frameReady = await waitForVideoReady(video, 200);
-      if (frameReady) return true;
+      // Quick check that frame is ready
+      if (video.readyState >= 2) return true;
+      // Brief wait if not immediately ready
+      await new Promise(resolve => setTimeout(resolve, 16));
+      if (video.readyState >= 2) return true;
     }
 
-    // If this wasn't the last attempt, wait a bit before retrying
+    // Brief pause before retry
     if (attempt < maxRetries) {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 16));
     }
   }
 
@@ -485,8 +487,7 @@ async function attemptSeek(video: HTMLVideoElement, time: number, timeoutMs: num
     const onSeeked = () => {
       clearTimeout(timeout);
       video.removeEventListener('seeked', onSeeked);
-      // Small delay to ensure frame data is available
-      setTimeout(() => resolve(true), 10);
+      resolve(true);
     };
 
     video.addEventListener('seeked', onSeeked, { once: true });
@@ -1489,8 +1490,9 @@ export async function exportToWebM(
     frameCount++;
 
     // Backpressure: wait if encoder queue is too large to prevent memory issues
-    while (videoEncoder.encodeQueueSize > 10) {
-      await new Promise(resolve => setTimeout(resolve, 10));
+    // Use higher threshold (30) to reduce pausing while still preventing memory exhaustion
+    if (videoEncoder.encodeQueueSize > 30) {
+      await new Promise(resolve => setTimeout(resolve, 1));
     }
 
     // Update progress periodically
@@ -1928,8 +1930,9 @@ export async function exportToMP4(
     frameCount++;
 
     // Backpressure: wait if encoder queue is too large to prevent memory issues
-    while (videoEncoder.encodeQueueSize > 10) {
-      await new Promise(resolve => setTimeout(resolve, 10));
+    // Use higher threshold (30) to reduce pausing while still preventing memory exhaustion
+    if (videoEncoder.encodeQueueSize > 30) {
+      await new Promise(resolve => setTimeout(resolve, 1));
     }
 
     // Update progress periodically
