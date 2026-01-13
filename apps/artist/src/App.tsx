@@ -30,6 +30,7 @@ function App() {
   const [notification, setNotification] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   const project = useEditorStore((state) => state.project);
@@ -650,12 +651,37 @@ function App() {
         </section>
 
         {/* Right sidebar - Clip Inspector */}
-        <aside className={styles.propertiesSidebar}>
+        <aside className={`${styles.propertiesSidebar} ${inspectorCollapsed ? styles.inspectorCollapsed : ''}`}>
           <div className={styles.sidebarHeader}>
             <span>Inspector</span>
+            <button
+              className={styles.collapseButton}
+              onClick={() => setInspectorCollapsed(!inspectorCollapsed)}
+              title={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                {inspectorCollapsed ? (
+                  <polyline points="15 18 9 12 15 6" />
+                ) : (
+                  <polyline points="9 18 15 12 9 6" />
+                )}
+              </svg>
+            </button>
           </div>
-          <ClipEditor />
+          {!inspectorCollapsed && <ClipEditor />}
         </aside>
+
+        {/* Mobile inspector toggle button */}
+        <button
+          className={styles.mobileInspectorToggle}
+          onClick={() => setInspectorCollapsed(!inspectorCollapsed)}
+          title="Toggle inspector"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <line x1="15" y1="3" x2="15" y2="21" />
+          </svg>
+        </button>
       </main>
 
       {/* Timeline */}

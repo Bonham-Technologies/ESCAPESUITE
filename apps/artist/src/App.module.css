@@ -545,3 +545,143 @@
   border-bottom-color: var(--accent-primary);
   background: transparent;
 }
+
+/* Inspector collapsed state */
+.inspectorCollapsed {
+  width: 40px;
+}
+
+.inspectorCollapsed .sidebarHeader {
+  justify-content: center;
+  padding: var(--spacing-xs);
+}
+
+.inspectorCollapsed .sidebarHeader span {
+  display: none;
+}
+
+/* Mobile inspector toggle button - hidden by default */
+.mobileInspectorToggle {
+  display: none;
+  position: fixed;
+  bottom: 260px;
+  right: var(--spacing-sm);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: none;
+  color: white;
+  cursor: pointer;
+  z-index: var(--z-modal);
+  box-shadow: var(--shadow-lg);
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.mobileInspectorToggle:hover {
+  background: #3a8eef;
+  transform: scale(1.05);
+}
+
+/* Responsive styles */
+@media (max-width: 1200px) {
+  .propertiesSidebar {
+    width: 280px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 200px;
+  }
+
+  .propertiesSidebar {
+    width: 260px;
+  }
+}
+
+@media (max-width: 900px) {
+  /* Collapse left sidebar automatically */
+  .sidebar {
+    width: 40px;
+  }
+
+  .sidebar .sidebarHeader span,
+  .sidebar .uploaderContainer,
+  .sidebar .libraryContainer {
+    display: none;
+  }
+
+  .sidebar .sidebarHeader {
+    justify-content: center;
+    padding: var(--spacing-xs);
+  }
+
+  /* Make inspector a slide-out panel */
+  .propertiesSidebar {
+    position: fixed;
+    right: 0;
+    top: 48px;
+    bottom: 0;
+    width: 300px;
+    z-index: calc(var(--z-modal) - 1);
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .propertiesSidebar.inspectorCollapsed {
+    transform: translateX(100%);
+    width: 300px;
+  }
+
+  .inspectorCollapsed .sidebarHeader span {
+    display: inline;
+  }
+
+  /* Show mobile toggle button */
+  .mobileInspectorToggle {
+    display: flex;
+  }
+}
+
+@media (max-width: 640px) {
+  .header {
+    padding: var(--spacing-xs);
+  }
+
+  .headerLeft,
+  .headerRight {
+    gap: var(--spacing-xs);
+  }
+
+  .headerButton {
+    padding: var(--spacing-xs);
+  }
+
+  .headerButton span {
+    display: none;
+  }
+
+  .projectName {
+    min-width: 120px;
+    font-size: 12px;
+  }
+
+  .propertiesSidebar {
+    width: 100%;
+    max-width: 320px;
+  }
+
+  .timelineControls {
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs);
+  }
+
+  .addTrackButton span {
+    display: none;
+  }
+}
