@@ -5,7 +5,7 @@
 ### Added
 
 - **Responsive Inspector Panel**: Inspector panel now adapts to different screen sizes with collapsible toggle, media queries at 1200px/1024px/900px/640px breakpoints, slide-out panel on mobile, and floating action button for mobile access
-- **Animation Caching**: Added `getAnimatedValuesCached()` function with LRU cache (50,000 entries max) to prevent redundant keyframe interpolation during exports
+- **Animation Caching**: Added `getAnimatedValuesCached()` function with cache (10,000 entries max) to prevent redundant keyframe interpolation during exports
 - **Seek Position Tracking**: Added `seekVideoOptimized()` that skips redundant video seeks within frame tolerance (1/frameRate)
 - **Video Frame Readiness**: Added `waitForVideoReady()` function to ensure frame data is available before drawing
 

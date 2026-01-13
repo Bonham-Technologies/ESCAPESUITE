@@ -76,7 +76,7 @@ Clips support animated properties via keyframes:
 - `getAnimatedValuesCached(cacheKey, ...)`: Cached version for export performance (keyed by clipId:time)
 - `clearAnimationCache()`: Clears animation cache (called at export start)
 - Keyframes are stored relative to clip start time (0 = clip start)
-- **Animation cache**: LRU cache (50,000 entries max) prevents redundant keyframe interpolation during exports
+- **Animation cache**: Cache (10,000 entries max) prevents redundant keyframe interpolation during exports
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline

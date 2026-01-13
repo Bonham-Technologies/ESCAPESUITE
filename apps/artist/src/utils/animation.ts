@@ -32,7 +32,7 @@ export interface AnimatedValues {
 
 // Cache for animation values during export - keyed by clipId:time
 const animationCache = new Map<string, AnimatedValues>();
-const CACHE_MAX_SIZE = 50000; // Limit cache size to prevent memory issues
+const CACHE_MAX_SIZE = 10000; // Limit cache size to prevent memory issues
 
 /**
  * Clear the animation cache (call at start/end of export)
@@ -62,13 +62,10 @@ export function getAnimatedValuesCached(
   // Compute values
   const result = getAnimatedValues(clipTime, clipDuration, animation, baseTransform, baseEffects);
 
-  // Cache result (with size limit)
+  // Cache result (with size limit) - clear entire cache when full to avoid
+  // expensive partial eviction
   if (animationCache.size >= CACHE_MAX_SIZE) {
-    // Remove oldest entries (first 1000)
-    const keysToDelete = Array.from(animationCache.keys()).slice(0, 1000);
-    for (const key of keysToDelete) {
-      animationCache.delete(key);
-    }
+    animationCache.clear();
   }
   animationCache.set(cacheKey, result);
 
