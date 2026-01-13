@@ -26,6 +26,8 @@ interface AudioWaveformProps {
   color?: string;
   /** Whether this is an audio-only clip (affects color) */
   isAudioClip?: boolean;
+  /** Whether the clip is selected (affects color for visibility) */
+  isSelected?: boolean;
 }
 
 export function AudioWaveform({
@@ -37,6 +39,7 @@ export function AudioWaveform({
   height,
   color,
   isAudioClip = false,
+  isSelected = false,
 }: AudioWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -76,8 +79,10 @@ export function AudioWaveform({
     // Clear canvas
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-    // Waveform color - purple for audio, blue tint for video with audio
-    const waveformColor = color || (isAudioClip ? 'rgba(138, 43, 226, 0.6)' : 'rgba(74, 158, 255, 0.5)');
+    // Waveform color - use high contrast white when selected, otherwise purple for audio, blue tint for video
+    const defaultColor = isAudioClip ? 'rgba(138, 43, 226, 0.6)' : 'rgba(74, 158, 255, 0.5)';
+    const selectedColor = 'rgba(255, 255, 255, 0.85)';
+    const waveformColor = color || (isSelected ? selectedColor : defaultColor);
     ctx.fillStyle = waveformColor;
 
     const centerY = canvasHeight / 2;
@@ -99,7 +104,7 @@ export function AudioWaveform({
       const barHeight = Math.max(1, maxY - minY);
       ctx.fillRect(x, minY, 1, barHeight);
     }
-  }, [displayPeaks, width, height, color, isAudioClip]);
+  }, [displayPeaks, width, height, color, isAudioClip, isSelected]);
 
   if (!peaks || peaks.length === 0 || width <= 0 || height <= 0) {
     return null;
