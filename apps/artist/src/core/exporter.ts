@@ -417,29 +417,79 @@ function drawShapeOverlayToCanvasAnimated(
 }
 
 /**
- * Wait for video to seek to a specific time with retry
+ * Wait for video to be ready to render (readyState >= 2)
  */
-async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
+async function waitForVideoReady(video: HTMLVideoElement, timeoutMs: number = 500): Promise<boolean> {
+  if (video.readyState >= 2) return true;
+
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
+      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('loadeddata', onCanPlay);
+      resolve(video.readyState >= 2);
+    }, timeoutMs);
+
+    const onCanPlay = () => {
+      clearTimeout(timeout);
+      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('loadeddata', onCanPlay);
+      resolve(true);
+    };
+
+    video.addEventListener('canplay', onCanPlay, { once: true });
+    video.addEventListener('loadeddata', onCanPlay, { once: true });
+  });
+}
+
+/**
+ * Wait for video to seek to a specific time with retry logic
+ * Increased timeout and better frame readiness verification
+ */
+async function seekVideo(video: HTMLVideoElement, time: number, maxRetries: number = 2): Promise<boolean> {
+  const seekTimeout = 1000; // Increased from 500ms to 1000ms
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const success = await attemptSeek(video, time, seekTimeout);
+    if (success) {
+      // Verify frame is actually ready
+      const frameReady = await waitForVideoReady(video, 200);
+      if (frameReady) return true;
+    }
+
+    // If this wasn't the last attempt, wait a bit before retrying
+    if (attempt < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+
+  // Return whether video is at least partially ready
+  return video.readyState >= 2;
+}
+
+/**
+ * Single seek attempt with timeout
+ */
+async function attemptSeek(video: HTMLVideoElement, time: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    // If already at correct time, no need to seek
+    if (Math.abs(video.currentTime - time) < 0.02) {
+      resolve(true);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
       video.removeEventListener('seeked', onSeeked);
-      resolve(); // Resolve anyway to prevent blocking
-    }, 500);
+      resolve(false); // Seek timed out
+    }, timeoutMs);
 
     const onSeeked = () => {
       clearTimeout(timeout);
       video.removeEventListener('seeked', onSeeked);
-      // Small delay to ensure frame is ready
-      setTimeout(resolve, 10);
+      // Small delay to ensure frame data is available
+      setTimeout(() => resolve(true), 10);
     };
 
-    if (Math.abs(video.currentTime - time) < 0.02) {
-      clearTimeout(timeout);
-      resolve();
-      return;
-    }
-
-    video.addEventListener('seeked', onSeeked);
+    video.addEventListener('seeked', onSeeked, { once: true });
     video.currentTime = Math.max(0, Math.min(time, video.duration || time));
   });
 }
@@ -450,13 +500,14 @@ const lastSeekPositions = new Map<string, number>();
 /**
  * Optimized seek that skips if we're already at the target time
  * Uses frame-level tolerance (1 frame at 30fps = ~0.033s)
+ * Returns true if seek was successful (or skipped because already there)
  */
 async function seekVideoOptimized(
   video: HTMLVideoElement,
   time: number,
   videoId: string,
   frameRate: number = 30
-): Promise<void> {
+): Promise<boolean> {
   const frameTolerance = 1 / frameRate;
   const lastPosition = lastSeekPositions.get(videoId);
 
@@ -465,17 +516,18 @@ async function seekVideoOptimized(
   if (lastPosition !== undefined && Math.abs(lastPosition - time) < frameTolerance) {
     // Still update to exact time for tracking
     lastSeekPositions.set(videoId, time);
-    return;
+    return video.readyState >= 2;
   }
 
   // Also check actual video position
   if (Math.abs(video.currentTime - time) < frameTolerance) {
     lastSeekPositions.set(videoId, time);
-    return;
+    return video.readyState >= 2;
   }
 
-  await seekVideo(video, time);
+  const success = await seekVideo(video, time);
   lastSeekPositions.set(videoId, time);
+  return success;
 }
 
 /**
@@ -721,7 +773,7 @@ function drawTransition(
   currentTime: number, // Current timeline time (for calculating clip times)
   canvasWidth: number,
   canvasHeight: number
-) {
+): boolean {
   const { outgoingClip, incomingClip, progress, type } = transition;
 
   // Calculate clip times for animations
@@ -733,17 +785,27 @@ function drawTransition(
   const hasIncoming = videoElements.has(incomingClip.sourceVideoId) || imageElements.has(incomingClip.sourceVideoId);
 
   if (!hasOutgoing && !hasIncoming) {
-    return;
+    return false;
+  }
+
+  // Check video readyState before attempting to draw
+  const outgoingVideo = videoElements.get(outgoingClip.sourceVideoId);
+  const incomingVideo = videoElements.get(incomingClip.sourceVideoId);
+
+  // Warn if videos exist but aren't ready (potential black flash cause)
+  if (outgoingVideo && outgoingVideo.readyState < 2) {
+    console.warn(`Transition: outgoing video not ready (readyState=${outgoingVideo.readyState}) at time ${currentTime}`);
+  }
+  if (incomingVideo && incomingVideo.readyState < 2) {
+    console.warn(`Transition: incoming video not ready (readyState=${incomingVideo.readyState}) at time ${currentTime}`);
   }
 
   // If only one clip has media, draw it normally
   if (!hasOutgoing) {
-    drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, canvasWidth, canvasHeight, { opacity: progress });
-    return;
+    return drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, canvasWidth, canvasHeight, { opacity: progress });
   }
   if (!hasIncoming) {
-    drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, canvasWidth, canvasHeight, { opacity: 1 - progress });
-    return;
+    return drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, canvasWidth, canvasHeight, { opacity: 1 - progress });
   }
 
   const w = canvasWidth;
@@ -829,6 +891,8 @@ function drawTransition(
       drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h);
       drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h);
   }
+
+  return true;
 }
 
 /**
