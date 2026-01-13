@@ -16,7 +16,7 @@ import type { Clip, SourceVideo, Track, ExportOptions, ExportProgress, BlendMode
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
-import { getAnimatedValues } from '../utils/animation';
+import { getAnimatedValues, getAnimatedValuesCached, clearAnimationCache } from '../utils/animation';
 import { drawWatermark, type WatermarkConfig } from '../utils/watermark';
 import { getWorkerSupport } from '../utils/workerSupport';
 import type { WorkerRequest, WorkerResponse, AudioClipMeta } from '../workers/exportWorker';
@@ -442,6 +442,47 @@ async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
     video.addEventListener('seeked', onSeeked);
     video.currentTime = Math.max(0, Math.min(time, video.duration || time));
   });
+}
+
+// Track last seek position per video to avoid redundant seeks
+const lastSeekPositions = new Map<string, number>();
+
+/**
+ * Optimized seek that skips if we're already at the target time
+ * Uses frame-level tolerance (1 frame at 30fps = ~0.033s)
+ */
+async function seekVideoOptimized(
+  video: HTMLVideoElement,
+  time: number,
+  videoId: string,
+  frameRate: number = 30
+): Promise<void> {
+  const frameTolerance = 1 / frameRate;
+  const lastPosition = lastSeekPositions.get(videoId);
+
+  // Skip seek if we're already within one frame of the target
+  // This is the most common case during sequential playback
+  if (lastPosition !== undefined && Math.abs(lastPosition - time) < frameTolerance) {
+    // Still update to exact time for tracking
+    lastSeekPositions.set(videoId, time);
+    return;
+  }
+
+  // Also check actual video position
+  if (Math.abs(video.currentTime - time) < frameTolerance) {
+    lastSeekPositions.set(videoId, time);
+    return;
+  }
+
+  await seekVideo(video, time);
+  lastSeekPositions.set(videoId, time);
+}
+
+/**
+ * Clear seek position tracking (call at start of export)
+ */
+function clearSeekPositions(): void {
+  lastSeekPositions.clear();
 }
 
 // Transition modifiers for drawing clips during transitions
@@ -1065,6 +1106,10 @@ export async function exportToWebM(
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
 
+  // Clear optimization caches at start of export
+  clearSeekPositions();
+  clearAnimationCache();
+
   onProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
   // Use the bottom-most track's source dimensions as the base
@@ -1240,14 +1285,14 @@ export async function exportToWebM(
       }
     }
 
-    // Seek all active videos to correct positions first
+    // Seek all active videos to correct positions first (using optimized seek)
     const seekPromises: Promise<void>[] = [];
     for (const { clip, clipTime } of mediaClips) {
       const video = videoElements.get(clip.sourceVideoId);
       if (!video) continue;
 
       const sourceTime = clip.startTime + clipTime;
-      seekPromises.push(seekVideo(video, sourceTime));
+      seekPromises.push(seekVideoOptimized(video, sourceTime, clip.sourceVideoId, frameRate));
     }
 
     // Also seek transition clips if in a transition
@@ -1258,9 +1303,9 @@ export async function exportToWebM(
         const incomingClipTime = currentTime - clipEnd;
         if (incomingClipTime >= 0) {
           const sourceTime = activeTransition.incomingClip.startTime + incomingClipTime;
-          seekPromises.push(seekVideo(incomingVideo, sourceTime));
+          seekPromises.push(seekVideoOptimized(incomingVideo, sourceTime, activeTransition.incomingClip.sourceVideoId, frameRate));
         } else {
-          seekPromises.push(seekVideo(incomingVideo, activeTransition.incomingClip.startTime));
+          seekPromises.push(seekVideoOptimized(incomingVideo, activeTransition.incomingClip.startTime, activeTransition.incomingClip.sourceVideoId, frameRate));
         }
       }
     }
@@ -1470,6 +1515,10 @@ export async function exportToMP4(
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
 
+  // Clear optimization caches at start of export
+  clearSeekPositions();
+  clearAnimationCache();
+
   onProgress({ phase: 'preparing', progress: 0, message: 'Preparing MP4 export...' });
 
   // Use the bottom-most track's source dimensions as the base
@@ -1667,14 +1716,14 @@ export async function exportToMP4(
       }
     }
 
-    // Seek all active videos first
+    // Seek all active videos first (using optimized seek)
     const seekPromises: Promise<void>[] = [];
     for (const { clip, clipTime } of mediaClips) {
       const video = videoElements.get(clip.sourceVideoId);
       if (!video) continue;
 
       const sourceTime = clip.startTime + clipTime;
-      seekPromises.push(seekVideo(video, sourceTime));
+      seekPromises.push(seekVideoOptimized(video, sourceTime, clip.sourceVideoId, frameRate));
     }
 
     // Also seek transition clips if in a transition
@@ -1685,9 +1734,9 @@ export async function exportToMP4(
         const incomingClipTime = currentTime - clipEnd;
         if (incomingClipTime >= 0) {
           const sourceTime = activeTransition.incomingClip.startTime + incomingClipTime;
-          seekPromises.push(seekVideo(incomingVideo, sourceTime));
+          seekPromises.push(seekVideoOptimized(incomingVideo, sourceTime, activeTransition.incomingClip.sourceVideoId, frameRate));
         } else {
-          seekPromises.push(seekVideo(incomingVideo, activeTransition.incomingClip.startTime));
+          seekPromises.push(seekVideoOptimized(incomingVideo, activeTransition.incomingClip.startTime, activeTransition.incomingClip.sourceVideoId, frameRate));
         }
       }
     }
