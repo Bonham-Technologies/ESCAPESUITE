@@ -108,6 +108,7 @@ The export pipeline includes several optimizations to improve performance:
 - **Frame tolerance**: Uses 1/frameRate (e.g., 0.033s at 30fps) to determine if seek is needed
 - **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
 - **Cache lifecycle**: `clearSeekPositions()` and `clearAnimationCache()` called at export start
+- **Encoder backpressure**: Waits if `videoEncoder.encodeQueueSize > 10` to prevent memory exhaustion
 
 ### Black Flash Prevention (`src/core/exporter.ts`)
 To prevent black frames during export:

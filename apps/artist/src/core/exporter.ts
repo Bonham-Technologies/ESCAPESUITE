@@ -1488,6 +1488,11 @@ export async function exportToWebM(
 
     frameCount++;
 
+    // Backpressure: wait if encoder queue is too large to prevent memory issues
+    while (videoEncoder.encodeQueueSize > 10) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
     // Update progress periodically
     if (frameCount % 5 === 0 || frameCount === totalFrames) {
       const progress = 18 + (frameCount / totalFrames) * 70;
@@ -1921,6 +1926,11 @@ export async function exportToMP4(
     frame.close();
 
     frameCount++;
+
+    // Backpressure: wait if encoder queue is too large to prevent memory issues
+    while (videoEncoder.encodeQueueSize > 10) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
 
     // Update progress periodically
     if (frameCount % 5 === 0 || frameCount === totalFrames) {

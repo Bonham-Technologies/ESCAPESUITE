@@ -8,6 +8,7 @@
 - **Animation Caching**: Added `getAnimatedValuesCached()` function with cache (10,000 entries max) to prevent redundant keyframe interpolation during exports
 - **Seek Position Tracking**: Added `seekVideoOptimized()` that skips redundant video seeks within frame tolerance (1/frameRate)
 - **Video Frame Readiness**: Added `waitForVideoReady()` function to ensure frame data is available before drawing
+- **Encoder Backpressure**: Added queue size monitoring to prevent memory exhaustion during exports
 
 ### Changed
 
