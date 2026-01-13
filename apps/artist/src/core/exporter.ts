@@ -532,9 +532,17 @@ async function seekVideoOptimized(
 
 /**
  * Clear seek position tracking (call at start of export)
+ * Exported for testing
  */
-function clearSeekPositions(): void {
+export function clearSeekPositions(): void {
   lastSeekPositions.clear();
+}
+
+/**
+ * Get the current seek positions map size (for testing)
+ */
+export function getSeekPositionsCount(): number {
+  return lastSeekPositions.size;
 }
 
 // Transition modifiers for drawing clips during transitions

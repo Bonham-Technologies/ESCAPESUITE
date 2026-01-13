@@ -73,7 +73,10 @@ Clips support animated properties via keyframes:
 - **Preset animations**: Clips can have in/out presets (`fade`, `slide-*`, `scale-*`, `pop`, `blur`)
 - **Custom keyframes**: Per-property keyframe arrays override presets when present
 - `getAnimatedValues(time, clipDuration, animation, transform, effects)`: Returns interpolated values for a given time
+- `getAnimatedValuesCached(cacheKey, ...)`: Cached version for export performance (keyed by clipId:time)
+- `clearAnimationCache()`: Clears animation cache (called at export start)
 - Keyframes are stored relative to clip start time (0 = clip start)
+- **Animation cache**: LRU cache (50,000 entries max) prevents redundant keyframe interpolation during exports
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
@@ -98,6 +101,35 @@ Interactive overlay manipulation in the preview canvas:
   - `Overlay Added` (with type: text/shape/blur)
   - `Export Started` (with format)
   - `Export Completed` (with format and duration)
+
+### Export Performance Optimizations (`src/core/exporter.ts`)
+The export pipeline includes several optimizations to improve performance:
+- **Seek position tracking**: `seekVideoOptimized()` skips redundant video seeks if already within one frame of target position
+- **Frame tolerance**: Uses 1/frameRate (e.g., 0.033s at 30fps) to determine if seek is needed
+- **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
+- **Cache lifecycle**: `clearSeekPositions()` and `clearAnimationCache()` called at export start
+
+### Black Flash Prevention (`src/core/exporter.ts`)
+To prevent black frames during export:
+- **Increased seek timeout**: 1000ms (up from 500ms) for reliable seeking on high-res video
+- **Retry logic**: Up to 3 attempts per seek with 50ms delay between retries
+- **Frame readiness verification**: `waitForVideoReady()` ensures video.readyState >= 2 before drawing
+- **readyState logging**: Warnings logged when videos aren't ready during transitions
+- **Transition safety**: `drawTransition()` returns success status for debugging
+
+### Responsive Inspector (`src/App.tsx`, `src/App.module.css`)
+The inspector panel (ClipEditor) adapts to different screen sizes:
+- **Collapsible**: Toggle button to collapse/expand inspector on any screen size
+- **Media queries**: Responsive breakpoints at 1200px, 1024px, 900px, and 640px
+- **Slide-out panel**: On screens < 900px, inspector becomes a fixed slide-out panel
+- **Mobile toggle**: Floating action button for mobile inspector access
+- **Auto-collapse**: Left sidebar collapses automatically on small screens
+
+### Audio Waveform Visibility (`src/components/Timeline/AudioWaveform.tsx`)
+Waveform visualization adapts to clip selection state:
+- **Default colors**: Purple (`rgba(138, 43, 226, 0.6)`) for audio, blue tint for video with audio
+- **Selected state**: White (`rgba(255, 255, 255, 0.85)`) for high contrast against blue selection background
+- **Custom color**: `color` prop overrides default/selected colors when provided
 
 ## Key Constraints
 

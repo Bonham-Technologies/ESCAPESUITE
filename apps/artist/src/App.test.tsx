@@ -244,4 +244,85 @@ describe('App', () => {
       expect(store.project.name).toBeDefined()
     })
   })
+
+  describe('inspector panel', () => {
+    it('renders inspector header', () => {
+      render(<App />)
+
+      expect(screen.getByText('Inspector')).toBeInTheDocument()
+    })
+
+    it('renders collapse button in inspector', () => {
+      render(<App />)
+
+      const collapseButton = screen.getByTitle('Hide inspector')
+      expect(collapseButton).toBeInTheDocument()
+    })
+
+    it('toggles inspector collapsed state when button clicked', () => {
+      render(<App />)
+
+      // Find the collapse button by title
+      const collapseButton = screen.getByTitle(/Hide inspector/i)
+      expect(collapseButton).toBeInTheDocument()
+
+      // Click to collapse
+      fireEvent.click(collapseButton)
+
+      // Button title should change to "Show inspector"
+      expect(screen.getByTitle(/Show inspector/i)).toBeInTheDocument()
+    })
+
+    it('hides ClipEditor when inspector is collapsed', () => {
+      render(<App />)
+
+      // Initially ClipEditor should be visible (shows empty state message)
+      expect(screen.getByText(/Select a clip/i)).toBeInTheDocument()
+
+      // Click collapse button
+      const collapseButton = screen.getByTitle(/Hide inspector/i)
+      fireEvent.click(collapseButton)
+
+      // ClipEditor content should not be visible when collapsed
+      expect(screen.queryByText(/Select a clip/i)).not.toBeInTheDocument()
+    })
+
+    it('shows ClipEditor when inspector is expanded', () => {
+      render(<App />)
+
+      // Collapse first
+      const collapseButton = screen.getByTitle(/Hide inspector/i)
+      fireEvent.click(collapseButton)
+
+      // Then expand
+      const expandButton = screen.getByTitle(/Show inspector/i)
+      fireEvent.click(expandButton)
+
+      // ClipEditor should be visible again
+      expect(screen.getByText(/Select a clip/i)).toBeInTheDocument()
+    })
+  })
+
+  describe('mobile inspector toggle', () => {
+    it('renders mobile toggle button', () => {
+      render(<App />)
+
+      const mobileToggle = screen.getByTitle('Toggle inspector')
+      expect(mobileToggle).toBeInTheDocument()
+    })
+
+    it('toggles inspector when mobile button clicked', () => {
+      render(<App />)
+
+      // Initially inspector should show content
+      expect(screen.getByText(/Select a clip/i)).toBeInTheDocument()
+
+      // Click mobile toggle
+      const mobileToggle = screen.getByTitle('Toggle inspector')
+      fireEvent.click(mobileToggle)
+
+      // Inspector content should be hidden
+      expect(screen.queryByText(/Select a clip/i)).not.toBeInTheDocument()
+    })
+  })
 })

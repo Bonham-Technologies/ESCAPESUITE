@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
   interpolateKeyframes,
   ensureKeyframesSorted,
   getAnimatedValues,
+  getAnimatedValuesCached,
+  clearAnimationCache,
   hasAnimation,
   getAllKeyframesForProperty,
   createDefaultAnimation,
@@ -507,5 +509,90 @@ describe('getAnimatedValues with overlay transforms', () => {
     expect(atMiddle.scaleY).toBe(1)
     expect(atMiddle.rotation).toBe(90)
     expect(atMiddle.opacity).toBeCloseTo(0.6)
+  })
+})
+
+describe('getAnimatedValuesCached', () => {
+  beforeEach(() => {
+    // Clear cache before each test
+    clearAnimationCache()
+  })
+
+  it('returns same result as getAnimatedValues', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+    }
+
+    const cached = getAnimatedValuesCached('test-clip-1:0.25', 0.25, 1, animation, baseTransform, baseEffects)
+    const direct = getAnimatedValues(0.25, 1, animation, baseTransform, baseEffects)
+
+    expect(cached.x).toBe(direct.x)
+    expect(cached.y).toBe(direct.y)
+    expect(cached.scaleX).toBe(direct.scaleX)
+    expect(cached.scaleY).toBe(direct.scaleY)
+    expect(cached.rotation).toBe(direct.rotation)
+    expect(cached.opacity).toBe(direct.opacity)
+    expect(cached.blur).toBe(direct.blur)
+  })
+
+  it('returns cached value on second call with same key', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+    }
+
+    const first = getAnimatedValuesCached('test-clip-2:0.5', 0.5, 1, animation, baseTransform, baseEffects)
+    const second = getAnimatedValuesCached('test-clip-2:0.5', 0.5, 1, animation, baseTransform, baseEffects)
+
+    // Should be exact same object reference (cached)
+    expect(first).toBe(second)
+  })
+
+  it('returns different values for different cache keys', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+    }
+
+    const atStart = getAnimatedValuesCached('test-clip-3:0', 0, 1, animation, baseTransform, baseEffects)
+    const atEnd = getAnimatedValuesCached('test-clip-3:1', 1, 1, animation, baseTransform, baseEffects)
+
+    // Should have different opacity values (fade-in animation)
+    expect(atStart.opacity).not.toBe(atEnd.opacity)
+  })
+
+  it('handles undefined animation', () => {
+    const result = getAnimatedValuesCached('test-clip-4:0', 0, 1, undefined, baseTransform, baseEffects)
+
+    expect(result.x).toBe(baseTransform.x)
+    expect(result.y).toBe(baseTransform.y)
+    expect(result.opacity).toBe(baseTransform.opacity)
+  })
+})
+
+describe('clearAnimationCache', () => {
+  it('clears cached values', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+    }
+
+    // Cache a value
+    const first = getAnimatedValuesCached('clear-test:0.5', 0.5, 1, animation, baseTransform, baseEffects)
+
+    // Clear cache
+    clearAnimationCache()
+
+    // Get value again - should be a new object (not same reference)
+    const second = getAnimatedValuesCached('clear-test:0.5', 0.5, 1, animation, baseTransform, baseEffects)
+
+    // Values should be equal but not same reference
+    expect(first).not.toBe(second)
+    expect(first.opacity).toBe(second.opacity)
   })
 })
