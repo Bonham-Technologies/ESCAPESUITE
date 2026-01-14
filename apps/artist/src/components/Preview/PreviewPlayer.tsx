@@ -2535,6 +2535,30 @@ export function PreviewPlayer() {
             audio.play().catch(console.error);
           }
         }
+      } else {
+        // Clips haven't changed, but we still need to update volumes for keyframe animation
+        // This ensures volume keyframes are applied continuously during playback
+        for (const { clip, clipTime, track } of currentActiveClips) {
+          const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
+          if (!sourceMedia) continue;
+
+          const trackVolume = track?.volume ?? 1;
+          const clipVolume = getAnimatedVolume(clipTime, clip.animation, 1);
+          const combinedVolume = trackVolume * clipVolume;
+
+          if (sourceMedia.mediaType === 'audio') {
+            const audio = audioElementsRef.current.get(clip.sourceVideoId);
+            if (audio && !track.muted) {
+              audio.volume = combinedVolume;
+            }
+          } else if (sourceMedia.mediaType !== 'image') {
+            // Video clips
+            const video = videoElementsRef.current.get(clip.sourceVideoId);
+            if (video && !track?.muted) {
+              video.volume = combinedVolume;
+            }
+          }
+        }
       }
 
       // Update display time (local state, fast)
