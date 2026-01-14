@@ -82,6 +82,7 @@ export function KeyframeGraph({
   // Get default value for property
   const defaultValue = useMemo(() => {
     if (property === 'blur') return effects?.blur ?? 0;
+    if (property === 'volume') return 1; // Volume default is 1 (100%)
     return transform?.[property as keyof ClipTransform] ?? 0;
   }, [property, transform, effects]);
 
@@ -177,7 +178,7 @@ export function KeyframeGraph({
   function formatValue(value: number, prop: AnimatableProperty): string {
     if (prop === 'rotation') return `${value.toFixed(0)}°`;
     if (prop === 'blur') return `${value.toFixed(0)}px`;
-    if (prop === 'opacity') return `${(value * 100).toFixed(0)}%`;
+    if (prop === 'opacity' || prop === 'volume') return `${(value * 100).toFixed(0)}%`;
     if (prop === 'x' || prop === 'y') return `${(value * 100).toFixed(0)}%`;
     return value.toFixed(2);
   }

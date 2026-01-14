@@ -139,6 +139,8 @@ export function KeyframePanel() {
 
       if (property === 'blur') {
         keyframeValue = effects?.blur ?? 0;
+      } else if (property === 'volume') {
+        keyframeValue = 1; // Volume default is 1 (100%)
       } else {
         keyframeValue = transform?.[property as keyof typeof transform] ?? 0;
       }
