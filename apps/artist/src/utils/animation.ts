@@ -24,6 +24,7 @@ export interface AnimatedValues {
   rotation: number;
   opacity: number;
   blur: number;
+  volume: number;  // Audio volume (0-1)
 }
 
 // ============================================
@@ -469,6 +470,7 @@ export function getAnimatedValues(
     rotation: baseTransform.rotation,
     opacity: baseTransform.opacity,
     blur: baseEffects.blur,
+    volume: 1,  // Default volume is 1 (100%), can be overridden by keyframes
   };
 
   // If no animation config, return base values
@@ -495,7 +497,7 @@ export function getAnimatedValues(
   );
 
   // For each animatable property, merge presets with custom keyframes and interpolate
-  const properties: AnimatableProperty[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur'];
+  const properties: AnimatableProperty[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur', 'volume'];
 
   for (const prop of properties) {
     // Merge: in preset + out preset + custom keyframes (custom takes precedence)
@@ -530,7 +532,7 @@ export function hasAnimation(animation: ClipAnimation | undefined): boolean {
   if (animation.out.type !== 'none' && animation.out.duration > 0) return true;
 
   // Check custom keyframes
-  const properties: AnimatableProperty[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur'];
+  const properties: AnimatableProperty[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur', 'volume'];
   for (const prop of properties) {
     const kfs = animation.keyframes[prop];
     if (kfs && kfs.length > 0) return true;
@@ -586,4 +588,39 @@ export function getAllKeyframesForProperty(
  */
 export function createDefaultAnimation(): ClipAnimation {
   return structuredClone(DEFAULT_ANIMATION);
+}
+
+/**
+ * Get the animated volume value at a specific clip time
+ * This is a convenience function for audio processing
+ *
+ * @param clipTime - Time relative to clip start (seconds)
+ * @param animation - The clip's animation configuration
+ * @param baseVolume - Base volume (default 1.0)
+ * @returns Volume value between 0-1
+ */
+export function getAnimatedVolume(
+  clipTime: number,
+  animation: ClipAnimation | undefined,
+  baseVolume: number = 1
+): number {
+  if (!animation) {
+    return baseVolume;
+  }
+
+  const volumeKeyframes = animation.keyframes.volume;
+  if (!volumeKeyframes || volumeKeyframes.length === 0) {
+    return baseVolume;
+  }
+
+  return interpolateKeyframes(volumeKeyframes, clipTime, baseVolume);
+}
+
+/**
+ * Check if a clip has volume keyframes
+ */
+export function hasVolumeKeyframes(animation: ClipAnimation | undefined): boolean {
+  if (!animation) return false;
+  const volumeKeyframes = animation.keyframes.volume;
+  return volumeKeyframes !== undefined && volumeKeyframes.length > 0;
 }

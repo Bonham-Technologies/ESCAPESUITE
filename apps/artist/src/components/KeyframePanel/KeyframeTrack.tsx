@@ -29,6 +29,7 @@ const PROPERTY_LABELS: Record<AnimatableProperty, string> = {
   rotation: 'Rotation',
   opacity: 'Opacity',
   blur: 'Blur',
+  volume: 'Volume',
 };
 
 export function KeyframeTrack({

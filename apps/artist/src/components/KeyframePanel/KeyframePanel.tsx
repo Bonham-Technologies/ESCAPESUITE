@@ -8,7 +8,8 @@ import { KeyframeGraph } from './KeyframeGraph';
 import { ClipPreview } from './ClipPreview';
 import styles from './KeyframePanel.module.css';
 
-const ANIMATABLE_PROPERTIES: { property: AnimatableProperty; label: string }[] = [
+// Visual properties - transforms and effects
+const VISUAL_PROPERTIES: { property: AnimatableProperty; label: string }[] = [
   { property: 'x', label: 'Position X' },
   { property: 'y', label: 'Position Y' },
   { property: 'scaleX', label: 'Scale X' },
@@ -17,6 +18,14 @@ const ANIMATABLE_PROPERTIES: { property: AnimatableProperty; label: string }[] =
   { property: 'opacity', label: 'Opacity' },
   { property: 'blur', label: 'Blur' },
 ];
+
+// Audio properties
+const AUDIO_PROPERTIES: { property: AnimatableProperty; label: string }[] = [
+  { property: 'volume', label: 'Volume' },
+];
+
+// Combined for lookups
+const ALL_PROPERTIES = [...VISUAL_PROPERTIES, ...AUDIO_PROPERTIES];
 
 export function KeyframePanel() {
   const {
@@ -27,6 +36,7 @@ export function KeyframePanel() {
     setKeyframePanelSelectedProperty,
     selectedClipId,
     project,
+    sourceVideos,
     currentTime,
     moveClipKeyframe,
     setClipKeyframe,
@@ -44,6 +54,15 @@ export function KeyframePanel() {
     if (!selectedClipId) return null;
     return project.timeline.clips.find((c: Clip) => c.id === selectedClipId) || null;
   }, [selectedClipId, project.timeline.clips]);
+
+  // Check if selected clip has audio (video with audio, or audio-only clip)
+  const clipHasAudio = useMemo(() => {
+    if (!selectedClip) return false;
+    const sourceMedia = sourceVideos.find(s => s.id === selectedClip.sourceVideoId);
+    if (!sourceMedia) return false;
+    // Audio clips or video clips with audio
+    return sourceMedia.mediaType === 'audio' || sourceMedia.hasAudio === true;
+  }, [selectedClip, sourceVideos]);
 
   // Calculate time relative to clip
   const clipRelativeTime = useMemo(() => {
@@ -204,7 +223,7 @@ export function KeyframePanel() {
               <div className={styles.graphContainer}>
                 <div className={styles.graphHeader}>
                   <span className={styles.graphTitle}>
-                    {ANIMATABLE_PROPERTIES.find(p => p.property === selectedProperty)?.label}
+                    {ALL_PROPERTIES.find(p => p.property === selectedProperty)?.label}
                   </span>
                   <button
                     className={styles.graphClose}
@@ -228,9 +247,9 @@ export function KeyframePanel() {
               </div>
             )}
 
-            {/* Property tracks */}
+            {/* Visual property tracks */}
             <div className={styles.tracks}>
-              {ANIMATABLE_PROPERTIES.map(({ property, label }) => (
+              {VISUAL_PROPERTIES.map(({ property, label }) => (
                 <KeyframeTrack
                   key={property}
                   property={property}
@@ -249,6 +268,33 @@ export function KeyframePanel() {
                 />
               ))}
             </div>
+
+            {/* Audio property tracks - only show if clip has audio */}
+            {clipHasAudio && (
+              <>
+                <div className={styles.sectionHeader}>Audio</div>
+                <div className={styles.tracks}>
+                  {AUDIO_PROPERTIES.map(({ property, label }) => (
+                    <KeyframeTrack
+                      key={property}
+                      property={property}
+                      label={label}
+                      clipId={selectedClip.id}
+                      clipDuration={selectedClip.duration}
+                      animation={selectedClip.animation}
+                      transform={selectedClip.transform}
+                      effects={selectedClip.effects}
+                      currentTime={clipRelativeTime}
+                      playheadTime={playheadTime}
+                      isSelected={selectedProperty === property}
+                      onSelect={() => handlePropertySelect(property)}
+                      onKeyframeMoved={handleKeyframeMoved}
+                      onAddKeyframe={handleAddKeyframe}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
 
             {/* Help text */}
             <div className={styles.helpText}>

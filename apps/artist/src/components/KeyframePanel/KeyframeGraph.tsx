@@ -26,6 +26,7 @@ const PROPERTY_RANGES: Record<AnimatableProperty, { min: number; max: number; st
   rotation: { min: -360, max: 360, step: 90 },
   opacity: { min: 0, max: 1, step: 0.25 },
   blur: { min: 0, max: 50, step: 10 },
+  volume: { min: 0, max: 1, step: 0.25 },
 };
 
 const GRAPH_PADDING = { top: 20, right: 20, bottom: 30, left: 50 };
