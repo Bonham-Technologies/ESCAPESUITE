@@ -20,6 +20,14 @@ import styles from './App.module.css';
 // Auto-save debounce delay (milliseconds)
 const AUTO_SAVE_DELAY = 2000;
 
+// Timeline height constraints
+const MIN_TIMELINE_HEIGHT = 120;
+const MAX_TIMELINE_HEIGHT = 600;
+const DEFAULT_TIMELINE_HEIGHT = 320;
+
+// LocalStorage key for timeline height
+const TIMELINE_HEIGHT_KEY = 'escapeartist-timeline-height';
+
 function App() {
   const [showExport, setShowExport] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -32,6 +40,11 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [timelineHeight, setTimelineHeight] = useState(() => {
+    const saved = localStorage.getItem(TIMELINE_HEIGHT_KEY);
+    return saved ? Math.min(MAX_TIMELINE_HEIGHT, Math.max(MIN_TIMELINE_HEIGHT, parseInt(saved, 10))) : DEFAULT_TIMELINE_HEIGHT;
+  });
+  const [isResizing, setIsResizing] = useState(false);
 
   const project = useEditorStore((state) => state.project);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
@@ -392,6 +405,49 @@ function App() {
     goToNextMarker, goToPreviousMarker, showShortcuts, splitClip
   ]);
 
+  // Timeline resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const handleResizeDoubleClick = useCallback(() => {
+    setTimelineHeight(DEFAULT_TIMELINE_HEIGHT);
+    localStorage.setItem(TIMELINE_HEIGHT_KEY, DEFAULT_TIMELINE_HEIGHT.toString());
+    showNotification('Timeline height reset', 'info');
+  }, [showNotification]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleResizeMove = (e: MouseEvent) => {
+      // Calculate new height based on mouse position from bottom of window
+      const newHeight = window.innerHeight - e.clientY;
+      const clampedHeight = Math.min(MAX_TIMELINE_HEIGHT, Math.max(MIN_TIMELINE_HEIGHT, newHeight));
+      setTimelineHeight(clampedHeight);
+    };
+
+    const handleResizeEnd = () => {
+      setIsResizing(false);
+      // Save to localStorage
+      localStorage.setItem(TIMELINE_HEIGHT_KEY, timelineHeight.toString());
+    };
+
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+
+    // Add resize cursor to body while dragging
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, timelineHeight]);
+
   // Initialize integration API
   useEffect(() => {
     const cleanup = initIntegration(async (message) => {
@@ -684,8 +740,18 @@ function App() {
         </button>
       </main>
 
+      {/* Resize handle */}
+      <div
+        className={`${styles.resizeHandle} ${isResizing ? styles.resizeHandleActive : ''}`}
+        onMouseDown={handleResizeStart}
+        onDoubleClick={handleResizeDoubleClick}
+        title="Drag to resize timeline (double-click to reset)"
+      >
+        <div className={styles.resizeHandleGrip} />
+      </div>
+
       {/* Timeline */}
-      <footer className={styles.footer}>
+      <footer className={styles.footer} style={{ height: timelineHeight }}>
         <div className={styles.timelineControls}>
           <button className={styles.addTrackButton} onClick={() => addTrack()} title="Add new track">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
