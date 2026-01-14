@@ -417,31 +417,6 @@ function drawShapeOverlayToCanvasAnimated(
 }
 
 /**
- * Wait for video to be ready to render (readyState >= 2)
- */
-async function waitForVideoReady(video: HTMLVideoElement, timeoutMs: number = 500): Promise<boolean> {
-  if (video.readyState >= 2) return true;
-
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      video.removeEventListener('canplay', onCanPlay);
-      video.removeEventListener('loadeddata', onCanPlay);
-      resolve(video.readyState >= 2);
-    }, timeoutMs);
-
-    const onCanPlay = () => {
-      clearTimeout(timeout);
-      video.removeEventListener('canplay', onCanPlay);
-      video.removeEventListener('loadeddata', onCanPlay);
-      resolve(true);
-    };
-
-    video.addEventListener('canplay', onCanPlay, { once: true });
-    video.addEventListener('loadeddata', onCanPlay, { once: true });
-  });
-}
-
-/**
  * Wait for video to seek to a specific time with retry logic
  * Balanced timeout for reliability without excessive delays
  */

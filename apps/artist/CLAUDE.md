@@ -113,10 +113,9 @@ The export pipeline includes several optimizations to improve performance:
 ### Black Flash Prevention (`src/core/exporter.ts`)
 To prevent black frames during export:
 - **Seek timeout**: 500ms per attempt for reliable seeking
-- **Retry logic**: Up to 2 attempts per seek with quick frame readiness checks
-- **Frame readiness verification**: `waitForVideoReady()` ensures video.readyState >= 2 before drawing
-- **readyState logging**: Warnings logged when videos aren't ready during transitions
-- **Transition safety**: `drawTransition()` returns success status for debugging
+- **Retry logic**: Up to 2 attempts per seek with quick frame readiness checks (16ms)
+- **readyState checks**: Inline checks ensure video.readyState >= 2 before drawing
+- **Transition safety**: `drawTransition()` includes readyState verification
 
 ### Responsive Inspector (`src/App.tsx`, `src/App.module.css`)
 The inspector panel (ClipEditor) adapts to different screen sizes:
