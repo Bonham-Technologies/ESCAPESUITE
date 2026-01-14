@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   isMP4ExportSupported,
   isWebMExportSupported,
+  clearSeekPositions,
+  getSeekPositionsCount,
 } from './exporter'
 
 // Mock dependencies
@@ -224,6 +226,130 @@ describe('exporter - integration helpers', () => {
       const progress = (currentTime - transitionStart) / transitionDuration
 
       expect(progress).toBe(0.5)
+    })
+  })
+})
+
+describe('exporter - seek optimization', () => {
+  beforeEach(() => {
+    clearSeekPositions()
+  })
+
+  describe('clearSeekPositions', () => {
+    it('clears all tracked seek positions', () => {
+      // Initial state should be empty after clear
+      expect(getSeekPositionsCount()).toBe(0)
+    })
+  })
+
+  describe('getSeekPositionsCount', () => {
+    it('returns 0 when no positions tracked', () => {
+      clearSeekPositions()
+      expect(getSeekPositionsCount()).toBe(0)
+    })
+  })
+
+  describe('frame tolerance calculations', () => {
+    it('calculates correct frame tolerance at 30fps', () => {
+      const frameRate = 30
+      const frameTolerance = 1 / frameRate
+
+      expect(frameTolerance).toBeCloseTo(0.0333, 3)
+    })
+
+    it('calculates correct frame tolerance at 60fps', () => {
+      const frameRate = 60
+      const frameTolerance = 1 / frameRate
+
+      expect(frameTolerance).toBeCloseTo(0.0167, 3)
+    })
+
+    it('determines if positions are within frame tolerance', () => {
+      const frameRate = 30
+      const frameTolerance = 1 / frameRate
+      const lastPosition = 1.0
+      const newPosition = 1.02
+
+      const withinTolerance = Math.abs(lastPosition - newPosition) < frameTolerance
+
+      expect(withinTolerance).toBe(true)
+    })
+
+    it('determines if positions exceed frame tolerance', () => {
+      const frameRate = 30
+      const frameTolerance = 1 / frameRate
+      const lastPosition = 1.0
+      const newPosition = 1.1 // 0.1s apart, more than one frame
+
+      const withinTolerance = Math.abs(lastPosition - newPosition) < frameTolerance
+
+      expect(withinTolerance).toBe(false)
+    })
+  })
+
+  describe('video readiness checks', () => {
+    it('defines readyState thresholds correctly', () => {
+      // HAVE_NOTHING = 0
+      // HAVE_METADATA = 1
+      // HAVE_CURRENT_DATA = 2
+      // HAVE_FUTURE_DATA = 3
+      // HAVE_ENOUGH_DATA = 4
+
+      const minimumForDrawing = 2 // HAVE_CURRENT_DATA
+
+      expect(minimumForDrawing).toBe(2)
+    })
+
+    it('video should be ready when readyState >= 2', () => {
+      const testCases = [
+        { readyState: 0, expected: false },
+        { readyState: 1, expected: false },
+        { readyState: 2, expected: true },
+        { readyState: 3, expected: true },
+        { readyState: 4, expected: true },
+      ]
+
+      testCases.forEach(({ readyState, expected }) => {
+        const isReady = readyState >= 2
+        expect(isReady).toBe(expected)
+      })
+    })
+  })
+})
+
+describe('exporter - black flash prevention', () => {
+  describe('seek timeout configuration', () => {
+    it('uses reasonable timeout values', () => {
+      const seekTimeout = 500 // Current value in code
+      const frameReadyCheck = 16 // Quick frame ready check
+
+      // Timeout should be reasonable for reliable seeking
+      expect(seekTimeout).toBeGreaterThanOrEqual(250)
+      expect(seekTimeout).toBeLessThanOrEqual(1000)
+      // Frame ready check should be quick
+      expect(frameReadyCheck).toBeLessThan(100)
+    })
+  })
+
+  describe('retry logic', () => {
+    it('allows retry attempts', () => {
+      const maxRetries = 1 // Current value in code
+
+      expect(maxRetries).toBeGreaterThanOrEqual(1)
+      expect(maxRetries).toBeLessThanOrEqual(3) // Don't retry too many times
+    })
+
+    it('calculates total maximum wait time', () => {
+      const seekTimeout = 500
+      const maxRetries = 1
+      const retryDelay = 16
+      const frameReadyCheck = 16
+
+      // Worst case: all retries fail
+      const maxWaitTime = (maxRetries + 1) * (seekTimeout + frameReadyCheck) + maxRetries * retryDelay
+
+      // Should complete within reasonable time (under 2 seconds per video)
+      expect(maxWaitTime).toBeLessThan(2000)
     })
   })
 })

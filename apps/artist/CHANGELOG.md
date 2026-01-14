@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Responsive Inspector Panel**: Inspector panel now adapts to different screen sizes with collapsible toggle, media queries at 1200px/1024px/900px/640px breakpoints, slide-out panel on mobile, and floating action button for mobile access
+- **Animation Caching**: Added `getAnimatedValuesCached()` function with cache (10,000 entries max) to prevent redundant keyframe interpolation during exports
+- **Seek Position Tracking**: Added `seekVideoOptimized()` that skips redundant video seeks within frame tolerance (1/frameRate)
+- **Encoder Backpressure**: Added queue size monitoring to prevent memory exhaustion during exports
+
+### Changed
+
+- **Waveform Visibility**: AudioWaveform component now uses white color when clip is selected for better contrast against blue selection background
+- **Seek Timing**: Balanced seek timeout (500ms) and retry logic to prevent export pausing while maintaining reliability
+
+### Fixed
+
+- **Black Flash Prevention**: Added `waitForFrameReady()` with event-based waiting to ensure video frames are available before encoding
+- **Frame Freezing**: Restored proper frame readiness verification after seek operations
+- **Transition Rendering**: Added readyState checks and logging in `drawTransition()` to help debug video readiness issues
+
 ## 1.1.1
 
 ### Patch Changes

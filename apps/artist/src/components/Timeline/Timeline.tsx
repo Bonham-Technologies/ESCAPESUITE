@@ -873,6 +873,7 @@ export function Timeline() {
                           width={clipWidth}
                           height={track.height - 4}
                           isAudioClip={isAudioClip}
+                          isSelected={isSelected}
                         />
                       )}
                       {/* Left trim handle */}
