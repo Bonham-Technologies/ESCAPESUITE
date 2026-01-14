@@ -59,14 +59,20 @@ export function KeyframeGraph({
   // Selected keyframe for deletion
   const [selectedKeyframeTime, setSelectedKeyframeTime] = useState<number | null>(null);
 
-  // Get all keyframes for this property
+  // Get all keyframes for this property (filter out any with invalid values)
   const keyframes = useMemo(() => {
-    return getAllKeyframesForProperty(
+    const allKeyframes = getAllKeyframesForProperty(
       property,
       clipDuration,
       animation,
       transform || DEFAULT_TRANSFORM,
       effects || DEFAULT_EFFECTS
+    );
+    // Filter out keyframes with undefined or NaN values
+    return allKeyframes.filter(kf =>
+      kf.value !== undefined &&
+      kf.value !== null &&
+      Number.isFinite(kf.value)
     );
   }, [property, clipDuration, animation, transform, effects]);
 

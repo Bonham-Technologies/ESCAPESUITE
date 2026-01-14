@@ -139,14 +139,19 @@ export function interpolateKeyframes(
     return defaultValue;
   }
 
+  // Helper to safely get a keyframe value, falling back to defaultValue if invalid
+  const safeValue = (value: number | undefined): number => {
+    return value !== undefined && Number.isFinite(value) ? value : defaultValue;
+  };
+
   // Before first keyframe - return first value
   if (time <= keyframes[0].time) {
-    return keyframes[0].value;
+    return safeValue(keyframes[0].value);
   }
 
   // After last keyframe - return last value
   if (time >= keyframes[keyframes.length - 1].time) {
-    return keyframes[keyframes.length - 1].value;
+    return safeValue(keyframes[keyframes.length - 1].value);
   }
 
   // Binary search to find the keyframe at or before this time
@@ -159,6 +164,10 @@ export function interpolateKeyframes(
   const kf1 = keyframes[index];
   const kf2 = keyframes[index + 1];
 
+  // Safely get values, falling back to defaultValue if undefined/NaN
+  const value1 = safeValue(kf1.value);
+  const value2 = safeValue(kf2.value);
+
   // Calculate progress between keyframes
   const duration = kf2.time - kf1.time;
   const elapsed = time - kf1.time;
@@ -168,7 +177,7 @@ export function interpolateKeyframes(
   const easedT = applyEasing(t, kf1.easing);
 
   // Linear interpolation with eased t
-  return kf1.value + (kf2.value - kf1.value) * easedT;
+  return value1 + (value2 - value1) * easedT;
 }
 
 /**
@@ -613,7 +622,13 @@ export function getAnimatedVolume(
     return baseVolume;
   }
 
-  return interpolateKeyframes(volumeKeyframes, clipTime, baseVolume);
+  const result = interpolateKeyframes(volumeKeyframes, clipTime, baseVolume);
+
+  // Ensure we always return a valid finite number clamped to 0-1
+  if (!Number.isFinite(result)) {
+    return baseVolume;
+  }
+  return Math.max(0, Math.min(1, result));
 }
 
 /**

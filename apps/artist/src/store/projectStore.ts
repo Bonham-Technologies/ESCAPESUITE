@@ -659,6 +659,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         let baseValue: number;
         if (property === 'blur') {
           baseValue = clip.effects?.blur ?? 0;
+        } else if (property === 'volume') {
+          // Volume default is 1 (100%)
+          baseValue = 1;
         } else if (clip.textData && (property === 'x' || property === 'y' || property === 'rotation')) {
           // Text overlay - get from textData
           if (property === 'rotation') {
