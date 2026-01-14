@@ -416,105 +416,8 @@ function drawShapeOverlayToCanvasAnimated(
   ctx.restore();
 }
 
-/**
- * Wait for video frame to be ready for drawing
- * Returns true when readyState >= 2 (HAVE_CURRENT_DATA)
- */
-async function waitForFrameReady(video: HTMLVideoElement, timeoutMs: number = 100): Promise<boolean> {
-  if (video.readyState >= 2) return true;
-
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      video.removeEventListener('canplay', onReady);
-      video.removeEventListener('loadeddata', onReady);
-      resolve(video.readyState >= 2);
-    }, timeoutMs);
-
-    const onReady = () => {
-      clearTimeout(timeout);
-      video.removeEventListener('canplay', onReady);
-      video.removeEventListener('loadeddata', onReady);
-      resolve(true);
-    };
-
-    video.addEventListener('canplay', onReady, { once: true });
-    video.addEventListener('loadeddata', onReady, { once: true });
-  });
-}
-
-/**
- * Wait for video to seek to a specific time
- * Ensures frame data is available after seeking
- */
-async function seekVideo(video: HTMLVideoElement, time: number): Promise<boolean> {
-  const seekTimeout = 500;
-
-  // If already at correct time, just verify frame is ready
-  if (Math.abs(video.currentTime - time) < 0.02) {
-    return waitForFrameReady(video, 50);
-  }
-
-  const seekSuccess = await new Promise<boolean>((resolve) => {
-    const timeout = setTimeout(() => {
-      video.removeEventListener('seeked', onSeeked);
-      resolve(false);
-    }, seekTimeout);
-
-    const onSeeked = () => {
-      clearTimeout(timeout);
-      video.removeEventListener('seeked', onSeeked);
-      resolve(true);
-    };
-
-    video.addEventListener('seeked', onSeeked, { once: true });
-    video.currentTime = Math.max(0, Math.min(time, video.duration || time));
-  });
-
-  if (!seekSuccess) {
-    // Seek timed out, but check if we're close enough
-    if (Math.abs(video.currentTime - time) < 0.1) {
-      return waitForFrameReady(video, 50);
-    }
-    return false;
-  }
-
-  // Wait for frame data to be available after seek
-  return waitForFrameReady(video, 100);
-}
-
-// Track last seek position per video to avoid redundant seeks
+// Track last seek position per video (used by playback sync functions)
 const lastSeekPositions = new Map<string, number>();
-
-/**
- * Optimized seek that skips if we're already at the target time
- * Uses frame-level tolerance (1 frame at 30fps = ~0.033s)
- */
-async function seekVideoOptimized(
-  video: HTMLVideoElement,
-  time: number,
-  videoId: string,
-  frameRate: number = 30
-): Promise<void> {
-  const frameTolerance = 1 / frameRate;
-  const lastPosition = lastSeekPositions.get(videoId);
-
-  // Skip seek if we're already within one frame of the target
-  // This is the most common case during sequential playback
-  if (lastPosition !== undefined && Math.abs(lastPosition - time) < frameTolerance) {
-    // Still update to exact time for tracking
-    lastSeekPositions.set(videoId, time);
-    return;
-  }
-
-  // Also check actual video position
-  if (Math.abs(video.currentTime - time) < frameTolerance) {
-    lastSeekPositions.set(videoId, time);
-    return;
-  }
-
-  await seekVideo(video, time);
-  lastSeekPositions.set(videoId, time);
-}
 
 /**
  * Clear seek position tracking (call at start of export)
@@ -653,7 +556,7 @@ function drawMediaWithModifiers(
   modifiers?: TransitionModifiers
 ) {
   const video = videoElements.get(clip.sourceVideoId);
-  if (video && video.readyState >= 2) {
+  if (video && video.readyState >= 1) {
     drawClipToCanvas(ctx, video, clip, clipTime, canvasWidth, canvasHeight, modifiers);
     return true;
   }
@@ -793,10 +696,11 @@ function drawTransition(
   const incomingVideo = videoElements.get(incomingClip.sourceVideoId);
 
   // Warn if videos exist but aren't ready (potential black flash cause)
-  if (outgoingVideo && outgoingVideo.readyState < 2) {
+  // Using readyState >= 1 like preview player for forgiving rendering
+  if (outgoingVideo && outgoingVideo.readyState < 1) {
     console.warn(`Transition: outgoing video not ready (readyState=${outgoingVideo.readyState}) at time ${currentTime}`);
   }
-  if (incomingVideo && incomingVideo.readyState < 2) {
+  if (incomingVideo && incomingVideo.readyState < 1) {
     console.warn(`Transition: incoming video not ready (readyState=${incomingVideo.readyState}) at time ${currentTime}`);
   }
 
@@ -1322,11 +1226,61 @@ export async function exportToWebM(
 
   onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
 
-  // Process frame by frame
+  // Use real-time playback approach for reliable frame capture
+  // This plays videos at normal speed and captures frames, avoiding seek issues
   const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+  const frameDurationMs = 1000 / frameRate;
   let frameCount = 0;
 
-  for (let currentTime = 0; currentTime < totalDuration; currentTime += 1 / frameRate) {
+  // Track which videos are currently playing and their state
+  const videoPlaybackState = new Map<string, { playing: boolean; targetTime: number }>();
+
+  // Initialize all videos as paused
+  for (const [sourceId, video] of videoElements) {
+    video.pause();
+    video.currentTime = 0;
+    videoPlaybackState.set(sourceId, { playing: false, targetTime: 0 });
+  }
+
+  // Helper to sync a video to target time - uses playback for small forward movements
+  const syncVideoToTime = async (video: HTMLVideoElement, sourceId: string, targetTime: number): Promise<void> => {
+    const state = videoPlaybackState.get(sourceId)!;
+    const currentPos = video.currentTime;
+    const diff = targetTime - currentPos;
+
+    // If we need to go backwards or jump more than 0.5s forward, seek
+    if (diff < -0.05 || diff > 0.5) {
+      video.pause();
+      video.currentTime = targetTime;
+      state.playing = false;
+      // Wait for seek to complete
+      await new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        video.addEventListener('seeked', onSeeked, { once: true });
+        // Timeout fallback
+        setTimeout(resolve, 200);
+      });
+    } else if (diff > 0.05) {
+      // Small forward movement - let video play to catch up
+      if (!state.playing) {
+        video.play().catch(() => {});
+        state.playing = true;
+      }
+    }
+    // If diff is very small (-0.05 to 0.05), we're close enough - do nothing
+
+    state.targetTime = targetTime;
+  };
+
+  // Process frames using requestAnimationFrame for smooth timing
+  const exportStartTime = performance.now();
+
+  for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+    const currentTime = frameIndex / frameRate;
+
     // Check for active transition
     const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
 
@@ -1349,32 +1303,52 @@ export async function exportToWebM(
       }
     }
 
-    // Seek all active videos to correct positions first (using optimized seek)
-    const seekPromises: Promise<void>[] = [];
+    // Sync all active videos to their target times
+    const syncPromises: Promise<void>[] = [];
+    const activeVideoIds = new Set<string>();
+
     for (const { clip, clipTime } of mediaClips) {
       const video = videoElements.get(clip.sourceVideoId);
       if (!video) continue;
 
       const sourceTime = clip.startTime + clipTime;
-      seekPromises.push(seekVideoOptimized(video, sourceTime, clip.sourceVideoId, frameRate));
+      activeVideoIds.add(clip.sourceVideoId);
+      syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
     }
 
-    // Also seek transition clips if in a transition
+    // Also sync transition clips
     if (activeTransition) {
       const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
       if (incomingVideo) {
         const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
         const incomingClipTime = currentTime - clipEnd;
-        if (incomingClipTime >= 0) {
-          const sourceTime = activeTransition.incomingClip.startTime + incomingClipTime;
-          seekPromises.push(seekVideoOptimized(incomingVideo, sourceTime, activeTransition.incomingClip.sourceVideoId, frameRate));
-        } else {
-          seekPromises.push(seekVideoOptimized(incomingVideo, activeTransition.incomingClip.startTime, activeTransition.incomingClip.sourceVideoId, frameRate));
+        const sourceTime = incomingClipTime >= 0
+          ? activeTransition.incomingClip.startTime + incomingClipTime
+          : activeTransition.incomingClip.startTime;
+        activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
+        syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
+      }
+    }
+
+    // Pause videos that are no longer active
+    for (const [sourceId, video] of videoElements) {
+      if (!activeVideoIds.has(sourceId)) {
+        const state = videoPlaybackState.get(sourceId)!;
+        if (state.playing) {
+          video.pause();
+          state.playing = false;
         }
       }
     }
 
-    await Promise.all(seekPromises);
+    await Promise.all(syncPromises);
+
+    // Wait for the real-time frame interval to maintain proper pacing
+    const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
+    const now = performance.now();
+    if (now < targetRealTime) {
+      await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
+    }
 
     // Helper to calculate clip time
     const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
@@ -1389,9 +1363,9 @@ export async function exportToWebM(
 
       const clipTime = getClipTime(clip);
 
-      // Try video first, then image
+      // Try video first, then image - use readyState >= 1 (like preview player)
       const video = videoElements.get(clip.sourceVideoId);
-      if (video && video.readyState >= 2) {
+      if (video && video.readyState >= 1) {
         drawClipToCanvas(ctx, video, clip, clipTime, width, height);
         continue;
       }
@@ -1760,20 +1734,70 @@ export async function exportToMP4(
     await audioEncoder.configure(aacConfig);
   }
 
+  // Use real-time playback approach for reliable frame capture (same as WebM)
+  // This plays videos at normal speed and captures frames, avoiding seek issues
   const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+  const frameDurationMs = 1000 / frameRate;
   let frameCount = 0;
+
+  // Track which videos are currently playing and their state
+  const videoPlaybackState = new Map<string, { playing: boolean; targetTime: number }>();
+
+  // Initialize all videos as paused
+  for (const [sourceId, video] of videoElements) {
+    video.pause();
+    video.currentTime = 0;
+    videoPlaybackState.set(sourceId, { playing: false, targetTime: 0 });
+  }
+
+  // Helper to sync a video to target time - uses playback for small forward movements
+  const syncVideoToTime = async (video: HTMLVideoElement, sourceId: string, targetTime: number): Promise<void> => {
+    const state = videoPlaybackState.get(sourceId)!;
+    const currentPos = video.currentTime;
+    const diff = targetTime - currentPos;
+
+    // If we need to go backwards or jump more than 0.5s forward, seek
+    if (diff < -0.05 || diff > 0.5) {
+      video.pause();
+      video.currentTime = targetTime;
+      state.playing = false;
+      // Wait for seek to complete
+      await new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        video.addEventListener('seeked', onSeeked, { once: true });
+        // Timeout fallback
+        setTimeout(resolve, 200);
+      });
+    } else if (diff > 0.05) {
+      // Small forward movement - let video play to catch up
+      if (!state.playing) {
+        video.play().catch(() => {});
+        state.playing = true;
+      }
+    }
+    // If diff is very small (-0.05 to 0.05), we're close enough - do nothing
+
+    state.targetTime = targetTime;
+  };
+
+  // Process frames using requestAnimationFrame for smooth timing
+  const exportStartTime = performance.now();
 
   onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
 
-  // Process frame by frame
-  for (let currentTime = 0; currentTime < totalDuration; currentTime += 1 / frameRate) {
+  for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+    const currentTime = frameIndex / frameRate;
+
     // Check for active transition
     const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
 
     // Get all clips at current time
     const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
 
-    // Clear canvas
+    // Clear canvas to black
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, width, height);
 
@@ -1789,32 +1813,52 @@ export async function exportToMP4(
       }
     }
 
-    // Seek all active videos first (using optimized seek)
-    const seekPromises: Promise<void>[] = [];
+    // Sync all active videos to their target times
+    const syncPromises: Promise<void>[] = [];
+    const activeVideoIds = new Set<string>();
+
     for (const { clip, clipTime } of mediaClips) {
       const video = videoElements.get(clip.sourceVideoId);
       if (!video) continue;
 
       const sourceTime = clip.startTime + clipTime;
-      seekPromises.push(seekVideoOptimized(video, sourceTime, clip.sourceVideoId, frameRate));
+      activeVideoIds.add(clip.sourceVideoId);
+      syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
     }
 
-    // Also seek transition clips if in a transition
+    // Also sync transition clips
     if (activeTransition) {
       const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
       if (incomingVideo) {
         const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
         const incomingClipTime = currentTime - clipEnd;
-        if (incomingClipTime >= 0) {
-          const sourceTime = activeTransition.incomingClip.startTime + incomingClipTime;
-          seekPromises.push(seekVideoOptimized(incomingVideo, sourceTime, activeTransition.incomingClip.sourceVideoId, frameRate));
-        } else {
-          seekPromises.push(seekVideoOptimized(incomingVideo, activeTransition.incomingClip.startTime, activeTransition.incomingClip.sourceVideoId, frameRate));
+        const sourceTime = incomingClipTime >= 0
+          ? activeTransition.incomingClip.startTime + incomingClipTime
+          : activeTransition.incomingClip.startTime;
+        activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
+        syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
+      }
+    }
+
+    // Pause videos that are no longer active
+    for (const [sourceId, video] of videoElements) {
+      if (!activeVideoIds.has(sourceId)) {
+        const state = videoPlaybackState.get(sourceId)!;
+        if (state.playing) {
+          video.pause();
+          state.playing = false;
         }
       }
     }
 
-    await Promise.all(seekPromises);
+    await Promise.all(syncPromises);
+
+    // Wait for the real-time frame interval to maintain proper pacing
+    const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
+    const now = performance.now();
+    if (now < targetRealTime) {
+      await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
+    }
 
     // Helper to calculate clip time
     const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
@@ -1829,9 +1873,9 @@ export async function exportToMP4(
 
       const clipTime = getClipTime(clip);
 
-      // Try video first, then image
+      // Try video first, then image - use readyState >= 1 (like preview player)
       const video = videoElements.get(clip.sourceVideoId);
-      if (video && video.readyState >= 2) {
+      if (video && video.readyState >= 1) {
         drawClipToCanvas(ctx, video, clip, clipTime, width, height);
         continue;
       }
