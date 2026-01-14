@@ -16,7 +16,8 @@
 
 ### Fixed
 
-- **Black Flash Prevention**: Added retry logic (up to 3 attempts) for video seeking with frame readiness verification to prevent black frames in exports
+- **Black Flash Prevention**: Added `waitForFrameReady()` with event-based waiting to ensure video frames are available before encoding
+- **Frame Freezing**: Restored proper frame readiness verification after seek operations
 - **Transition Rendering**: Added readyState checks and logging in `drawTransition()` to help debug video readiness issues
 
 ## 1.1.1

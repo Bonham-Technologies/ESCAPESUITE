@@ -108,13 +108,13 @@ The export pipeline includes several optimizations to improve performance:
 - **Frame tolerance**: Uses 1/frameRate (e.g., 0.033s at 30fps) to determine if seek is needed
 - **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
 - **Cache lifecycle**: `clearSeekPositions()` and `clearAnimationCache()` called at export start
-- **Encoder backpressure**: Waits if `videoEncoder.encodeQueueSize > 10` to prevent memory exhaustion
+- **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
 
 ### Black Flash Prevention (`src/core/exporter.ts`)
 To prevent black frames during export:
-- **Seek timeout**: 500ms per attempt for reliable seeking
-- **Retry logic**: Up to 2 attempts per seek with quick frame readiness checks (16ms)
-- **readyState checks**: Inline checks ensure video.readyState >= 2 before drawing
+- **Seek timeout**: 500ms for reliable seeking
+- **Frame readiness**: `waitForFrameReady()` ensures video.readyState >= 2 with event-based waiting
+- **Post-seek verification**: Always waits for frame data after successful seek
 - **Transition safety**: `drawTransition()` includes readyState verification
 
 ### Responsive Inspector (`src/App.tsx`, `src/App.module.css`)
