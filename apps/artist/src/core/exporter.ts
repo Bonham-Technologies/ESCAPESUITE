@@ -16,7 +16,7 @@ import type { Clip, SourceVideo, Track, ExportOptions, ExportProgress, BlendMode
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
-import { getAnimatedValuesCached, clearAnimationCache } from '../utils/animation';
+import { getAnimatedValuesCached, clearAnimationCache, getAnimatedVolume } from '../utils/animation';
 import { drawWatermark, type WatermarkConfig } from '../utils/watermark';
 import { getWorkerSupport } from '../utils/workerSupport';
 import type { WorkerRequest, WorkerResponse, AudioClipMeta } from '../workers/exportWorker';
@@ -868,6 +868,9 @@ async function extractAndMixAudio(
       const sourceStartSample = Math.floor(clipSourceStart * sampleRate);
       const durationSamples = Math.floor(clipDuration * sampleRate);
 
+      // Check if clip has volume keyframes (optimization: compute once per clip)
+      const hasVolumeKeyframes = clip.animation?.keyframes?.volume && clip.animation.keyframes.volume.length > 0;
+
       // Get audio data from source
       for (let ch = 0; ch < Math.min(channels, audioBuffer.numberOfChannels); ch++) {
         const sourceData = audioBuffer.getChannelData(ch);
@@ -877,8 +880,17 @@ async function extractAndMixAudio(
           const outputIdx = (outputStartSample + s) * channels + ch;
 
           if (sourceIdx >= 0 && sourceIdx < sourceData.length && outputIdx >= 0 && outputIdx < outputBuffer.length) {
-            // Mix (add) audio with track volume - could cause clipping, but simple for now
-            outputBuffer[outputIdx] += sourceData[sourceIdx] * trackVolume;
+            // Calculate clip-relative time for this sample
+            const sampleClipTime = s / sampleRate;
+
+            // Get animated volume (only compute if clip has keyframes)
+            const clipVolume = hasVolumeKeyframes
+              ? getAnimatedVolume(sampleClipTime, clip.animation, 1)
+              : 1;
+
+            // Mix audio with combined track and clip volume
+            const combinedVolume = trackVolume * clipVolume;
+            outputBuffer[outputIdx] += sourceData[sourceIdx] * combinedVolume;
           }
         }
       }
@@ -891,7 +903,17 @@ async function extractAndMixAudio(
           const outputIdx = (outputStartSample + s) * channels + 1;
 
           if (sourceIdx >= 0 && sourceIdx < sourceData.length && outputIdx >= 0 && outputIdx < outputBuffer.length) {
-            outputBuffer[outputIdx] += sourceData[sourceIdx] * trackVolume;
+            // Calculate clip-relative time for this sample
+            const sampleClipTime = s / sampleRate;
+
+            // Get animated volume (only compute if clip has keyframes)
+            const clipVolume = hasVolumeKeyframes
+              ? getAnimatedVolume(sampleClipTime, clip.animation, 1)
+              : 1;
+
+            // Mix audio with combined track and clip volume
+            const combinedVolume = trackVolume * clipVolume;
+            outputBuffer[outputIdx] += sourceData[sourceIdx] * combinedVolume;
           }
         }
       }

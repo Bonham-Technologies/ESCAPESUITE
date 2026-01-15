@@ -3,7 +3,7 @@ import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getVideoBlob } from '../../core/storage';
 import { getFrameCache } from '../../core/frameCache';
 import { formatTimecode } from '../../utils/timeUtils';
-import { getAnimatedValues } from '../../utils/animation';
+import { getAnimatedValues, getAnimatedVolume } from '../../utils/animation';
 import { useThrottledDragUpdate } from '../../hooks';
 import type { BlendMode, Clip, Track, TransitionType, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
@@ -2367,8 +2367,11 @@ export function PreviewPlayer() {
       video.currentTime = sourceTime;
 
       // Set audio for ALL video clips (browser will mix them)
+      // Apply both track volume and animated clip volume
       video.muted = track?.muted ?? false;
-      video.volume = track?.volume ?? 1;
+      const trackVolume = track?.volume ?? 1;
+      const clipVolume = getAnimatedVolume(clipTime, clip.animation, 1);
+      video.volume = trackVolume * clipVolume;
 
       video.play().catch(console.error);
     }
@@ -2383,7 +2386,10 @@ export function PreviewPlayer() {
 
       const sourceTime = clipData.clip.startTime + clipData.clipTime;
       audio.currentTime = sourceTime;
-      audio.volume = clipData.track?.volume ?? 1;
+      // Apply both track volume and animated clip volume
+      const trackVolume = clipData.track?.volume ?? 1;
+      const clipVolume = getAnimatedVolume(clipData.clipTime, clipData.clip.animation, 1);
+      audio.volume = trackVolume * clipVolume;
       audio.play().catch(console.error);
     }
 
@@ -2491,8 +2497,11 @@ export function PreviewPlayer() {
           }
 
           // Set audio for ALL video clips (browser will mix them)
+          // Apply both track volume and animated clip volume
           video.muted = track?.muted ?? false;
-          video.volume = track?.volume ?? 1;
+          const trackVolume = track?.volume ?? 1;
+          const clipVolume = getAnimatedVolume(clipTime, clip.animation, 1);
+          video.volume = trackVolume * clipVolume;
 
           // Make sure video is playing
           if (video.paused) {
@@ -2516,11 +2525,38 @@ export function PreviewPlayer() {
             audio.currentTime = sourceTime;
           }
 
-          audio.volume = clipData.track?.volume ?? 1;
+          // Apply both track volume and animated clip volume
+          const trackVolume = clipData.track?.volume ?? 1;
+          const clipVolume = getAnimatedVolume(clipData.clipTime, clipData.clip.animation, 1);
+          audio.volume = trackVolume * clipVolume;
 
           // Make sure audio is playing
           if (audio.paused) {
             audio.play().catch(console.error);
+          }
+        }
+      } else {
+        // Clips haven't changed, but we still need to update volumes for keyframe animation
+        // This ensures volume keyframes are applied continuously during playback
+        for (const { clip, clipTime, track } of currentActiveClips) {
+          const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
+          if (!sourceMedia) continue;
+
+          const trackVolume = track?.volume ?? 1;
+          const clipVolume = getAnimatedVolume(clipTime, clip.animation, 1);
+          const combinedVolume = trackVolume * clipVolume;
+
+          if (sourceMedia.mediaType === 'audio') {
+            const audio = audioElementsRef.current.get(clip.sourceVideoId);
+            if (audio && !track.muted) {
+              audio.volume = combinedVolume;
+            }
+          } else if (sourceMedia.mediaType !== 'image') {
+            // Video clips
+            const video = videoElementsRef.current.get(clip.sourceVideoId);
+            if (video && !track?.muted) {
+              video.volume = combinedVolume;
+            }
           }
         }
       }

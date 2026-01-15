@@ -29,6 +29,7 @@ const PROPERTY_LABELS: Record<AnimatableProperty, string> = {
   rotation: 'Rotation',
   opacity: 'Opacity',
   blur: 'Blur',
+  volume: 'Volume',
 };
 
 export function KeyframeTrack({
@@ -64,9 +65,14 @@ export function KeyframeTrack({
 
   // Get current interpolated value
   const currentValue = useMemo(() => {
-    const defaultValue = property === 'blur'
-      ? (effects?.blur ?? 0)
-      : (transform?.[property as keyof ClipTransform] ?? 0);
+    let defaultValue: number;
+    if (property === 'blur') {
+      defaultValue = effects?.blur ?? 0;
+    } else if (property === 'volume') {
+      defaultValue = 1; // Volume default is 1 (100%)
+    } else {
+      defaultValue = transform?.[property as keyof ClipTransform] ?? 0;
+    }
     return interpolateKeyframes(keyframes, currentTime, defaultValue);
   }, [keyframes, currentTime, property, transform, effects]);
 
@@ -108,7 +114,7 @@ export function KeyframeTrack({
   const formatValue = (value: number): string => {
     if (property === 'rotation') return `${value.toFixed(0)}°`;
     if (property === 'blur') return `${value.toFixed(1)}px`;
-    if (property === 'opacity') return `${(value * 100).toFixed(0)}%`;
+    if (property === 'opacity' || property === 'volume') return `${(value * 100).toFixed(0)}%`;
     if (property === 'x' || property === 'y') return `${(value * 100).toFixed(1)}%`;
     return value.toFixed(2);
   };

@@ -26,6 +26,7 @@ const PROPERTY_RANGES: Record<AnimatableProperty, { min: number; max: number; st
   rotation: { min: -360, max: 360, step: 90 },
   opacity: { min: 0, max: 1, step: 0.25 },
   blur: { min: 0, max: 50, step: 10 },
+  volume: { min: 0, max: 1, step: 0.25 },
 };
 
 const GRAPH_PADDING = { top: 20, right: 20, bottom: 30, left: 50 };
@@ -58,14 +59,20 @@ export function KeyframeGraph({
   // Selected keyframe for deletion
   const [selectedKeyframeTime, setSelectedKeyframeTime] = useState<number | null>(null);
 
-  // Get all keyframes for this property
+  // Get all keyframes for this property (filter out any with invalid values)
   const keyframes = useMemo(() => {
-    return getAllKeyframesForProperty(
+    const allKeyframes = getAllKeyframesForProperty(
       property,
       clipDuration,
       animation,
       transform || DEFAULT_TRANSFORM,
       effects || DEFAULT_EFFECTS
+    );
+    // Filter out keyframes with undefined or NaN values
+    return allKeyframes.filter(kf =>
+      kf.value !== undefined &&
+      kf.value !== null &&
+      Number.isFinite(kf.value)
     );
   }, [property, clipDuration, animation, transform, effects]);
 
@@ -81,6 +88,7 @@ export function KeyframeGraph({
   // Get default value for property
   const defaultValue = useMemo(() => {
     if (property === 'blur') return effects?.blur ?? 0;
+    if (property === 'volume') return 1; // Volume default is 1 (100%)
     return transform?.[property as keyof ClipTransform] ?? 0;
   }, [property, transform, effects]);
 
@@ -176,7 +184,7 @@ export function KeyframeGraph({
   function formatValue(value: number, prop: AnimatableProperty): string {
     if (prop === 'rotation') return `${value.toFixed(0)}°`;
     if (prop === 'blur') return `${value.toFixed(0)}px`;
-    if (prop === 'opacity') return `${(value * 100).toFixed(0)}%`;
+    if (prop === 'opacity' || prop === 'volume') return `${(value * 100).toFixed(0)}%`;
     if (prop === 'x' || prop === 'y') return `${(value * 100).toFixed(0)}%`;
     return value.toFixed(2);
   }

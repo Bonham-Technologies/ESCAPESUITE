@@ -8,6 +8,8 @@ import {
   hasAnimation,
   getAllKeyframesForProperty,
   createDefaultAnimation,
+  getAnimatedVolume,
+  hasVolumeKeyframes,
 } from './animation'
 import type { Keyframe, ClipAnimation, ClipTransform, ClipEffects } from '../store/types'
 
@@ -594,5 +596,185 @@ describe('clearAnimationCache', () => {
     // Values should be equal but not same reference
     expect(first).not.toBe(second)
     expect(first.opacity).toBe(second.opacity)
+  })
+})
+
+describe('volume keyframes', () => {
+  describe('getAnimatedVolume', () => {
+    it('returns base volume when no animation', () => {
+      expect(getAnimatedVolume(0.5, undefined, 1)).toBe(1)
+      expect(getAnimatedVolume(0.5, undefined, 0.5)).toBe(0.5)
+    })
+
+    it('returns base volume when no volume keyframes', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+      }
+      expect(getAnimatedVolume(0.5, animation, 1)).toBe(1)
+    })
+
+    it('interpolates volume keyframes linearly', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+          volume: [
+            { time: 0, value: 0, easing: 'linear' },
+            { time: 1, value: 1, easing: 'linear' },
+          ],
+        },
+      }
+
+      expect(getAnimatedVolume(0, animation, 1)).toBe(0)
+      expect(getAnimatedVolume(0.5, animation, 1)).toBe(0.5)
+      expect(getAnimatedVolume(1, animation, 1)).toBe(1)
+    })
+
+    it('supports ease-in easing for fade in effect', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+          volume: [
+            { time: 0, value: 0, easing: 'ease-in' },
+            { time: 1, value: 1, easing: 'linear' },
+          ],
+        },
+      }
+
+      // With ease-in, volume should be less than linear at midpoint
+      const midVolume = getAnimatedVolume(0.5, animation, 1)
+      expect(midVolume).toBeLessThan(0.5)
+      expect(midVolume).toBeGreaterThan(0)
+    })
+
+    it('supports ease-out easing for fade out effect', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+          volume: [
+            { time: 0, value: 1, easing: 'ease-out' },
+            { time: 1, value: 0, easing: 'linear' },
+          ],
+        },
+      }
+
+      // With ease-out going from 1 to 0, volume drops fast initially then slows
+      // At midpoint (t=0.5), ease-out gives t' = 0.75, so value = 1 + (0-1)*0.75 = 0.25
+      const midVolume = getAnimatedVolume(0.5, animation, 1)
+      expect(midVolume).toBeLessThan(0.5) // Faster drop means lower value at midpoint
+      expect(midVolume).toBeGreaterThan(0)
+    })
+
+    it('handles multiple volume keyframes for complex envelopes', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+          volume: [
+            { time: 0, value: 0, easing: 'linear' },     // Start silent
+            { time: 0.5, value: 1, easing: 'linear' },   // Fade in to full
+            { time: 1.5, value: 1, easing: 'linear' },   // Stay at full
+            { time: 2, value: 0, easing: 'linear' },     // Fade out
+          ],
+        },
+      }
+
+      expect(getAnimatedVolume(0, animation, 1)).toBe(0)
+      expect(getAnimatedVolume(0.25, animation, 1)).toBe(0.5)
+      expect(getAnimatedVolume(0.5, animation, 1)).toBe(1)
+      expect(getAnimatedVolume(1, animation, 1)).toBe(1)
+      expect(getAnimatedVolume(1.75, animation, 1)).toBe(0.5)
+      expect(getAnimatedVolume(2, animation, 1)).toBe(0)
+    })
+  })
+
+  describe('hasVolumeKeyframes', () => {
+    it('returns false when no animation', () => {
+      expect(hasVolumeKeyframes(undefined)).toBe(false)
+    })
+
+    it('returns false when no volume keyframes', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+      }
+      expect(hasVolumeKeyframes(animation)).toBe(false)
+    })
+
+    it('returns true when volume keyframes exist', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+          volume: [
+            { time: 0, value: 1, easing: 'linear' },
+            { time: 1, value: 0.5, easing: 'linear' },
+          ],
+        },
+      }
+      expect(hasVolumeKeyframes(animation)).toBe(true)
+    })
+  })
+
+  describe('getAnimatedValues includes volume', () => {
+    it('returns default volume of 1 when no keyframes', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+      }
+      const result = getAnimatedValues(0.5, 1, animation, baseTransform, baseEffects)
+      expect(result.volume).toBe(1)
+    })
+
+    it('interpolates volume keyframes', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+          volume: [
+            { time: 0, value: 0, easing: 'linear' },
+            { time: 1, value: 1, easing: 'linear' },
+          ],
+        },
+      }
+
+      const atStart = getAnimatedValues(0, 1, animation, baseTransform, baseEffects)
+      expect(atStart.volume).toBe(0)
+
+      const atMid = getAnimatedValues(0.5, 1, animation, baseTransform, baseEffects)
+      expect(atMid.volume).toBe(0.5)
+
+      const atEnd = getAnimatedValues(1, 1, animation, baseTransform, baseEffects)
+      expect(atEnd.volume).toBe(1)
+    })
+  })
+
+  describe('hasAnimation includes volume keyframes', () => {
+    it('returns true when only volume keyframes exist', () => {
+      const animation: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+          volume: [
+            { time: 0, value: 1, easing: 'linear' },
+            { time: 1, value: 0, easing: 'linear' },
+          ],
+        },
+      }
+      expect(hasAnimation(animation)).toBe(true)
+    })
   })
 })

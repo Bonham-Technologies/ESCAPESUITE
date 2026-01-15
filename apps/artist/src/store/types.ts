@@ -87,7 +87,8 @@ export type AnimatableProperty =
   | 'scaleY'
   | 'rotation'
   | 'opacity'
-  | 'blur';
+  | 'blur'
+  | 'volume';  // Audio volume (0-1)
 
 // Animation preset types for quick setup
 export type AnimationPresetType =
