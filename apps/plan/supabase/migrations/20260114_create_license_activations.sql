@@ -45,33 +45,23 @@ CREATE POLICY "Service role access for activations" ON license_activations
 -- ============================================================================
 -- LICENSE DOWNLOADS TABLE
 -- ============================================================================
--- Track when licenses are downloaded (for analytics and audit)
+-- Note: license_downloads table may already exist with different schema
+-- We only add the license_id column if it doesn't exist
 
-CREATE TABLE IF NOT EXISTS license_downloads (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+DO $$
+BEGIN
+  -- Add license_id column if it doesn't exist
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'license_downloads' AND column_name = 'license_id'
+  ) THEN
+    ALTER TABLE license_downloads ADD COLUMN license_id TEXT;
+  END IF;
+END $$;
 
-  -- Reference to the license
-  license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
-
-  -- Download metadata
-  downloaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ip_address INET,
-  user_agent TEXT,
-
-  -- Additional metadata
-  metadata JSONB DEFAULT '{}'::jsonb
-);
-
--- Index for lookups
-CREATE INDEX idx_license_downloads_license_id ON license_downloads(license_id);
-CREATE INDEX idx_license_downloads_downloaded_at ON license_downloads(downloaded_at);
-
--- Enable Row Level Security
-ALTER TABLE license_downloads ENABLE ROW LEVEL SECURITY;
-
--- Policy: service role only
-CREATE POLICY "Service role access for downloads" ON license_downloads
-  FOR ALL USING (auth.role() = 'service_role');
+-- Create index only if it doesn't exist
+CREATE INDEX IF NOT EXISTS idx_license_downloads_license_id ON license_downloads(license_id);
+CREATE INDEX IF NOT EXISTS idx_license_downloads_downloaded_at ON license_downloads(downloaded_at);
 
 -- ============================================================================
 -- COMMENTS FOR DOCUMENTATION
@@ -84,6 +74,4 @@ COMMENT ON COLUMN license_activations.app_version IS 'Version of the app at time
 COMMENT ON COLUMN license_activations.first_seen_at IS 'When this machine first activated the license';
 COMMENT ON COLUMN license_activations.last_seen_at IS 'Most recent activity from this machine';
 
-COMMENT ON TABLE license_downloads IS 'Audit log of license key downloads from the portal';
-COMMENT ON COLUMN license_downloads.license_id IS 'Reference to the license being downloaded';
-COMMENT ON COLUMN license_downloads.ip_address IS 'IP address of the download request';
+-- Note: license_downloads table comments skipped as table may have different schema
