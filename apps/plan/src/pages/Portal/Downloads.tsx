@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { supabase } from '../../lib/supabase'
 
+// Get Supabase URL from environment
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || ''
+
 interface LicenseRecord {
   id: string
   product: 'craft' | 'artist' | 'suite'
@@ -24,30 +27,61 @@ interface DownloadInfo {
   downloadUrl: string
 }
 
+interface VersionInfo {
+  craft: { version: string; fileSize: string }
+  artist: { version: string; fileSize: string }
+}
+
+// Build Supabase Storage public URL
+function getStorageUrl(fileName: string): string {
+  return `${SUPABASE_URL}/storage/v1/object/public/downloads/${fileName}`
+}
+
 export default function Downloads() {
   const { user, isLoaded } = useUser()
   const [licenses, setLicenses] = useState<LicenseRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [versionInfo, setVersionInfo] = useState<VersionInfo>({
+    craft: { version: '1.1.1', fileSize: '~800 KB' },
+    artist: { version: '1.1.1', fileSize: '~1.1 MB' },
+  })
 
-  // Available downloads (this would come from a version API in production)
+  // Fetch version info from storage (version.json)
+  useEffect(() => {
+    async function fetchVersionInfo() {
+      try {
+        const response = await fetch(getStorageUrl('version.json'))
+        if (response.ok) {
+          const data = await response.json()
+          setVersionInfo(data)
+        }
+      } catch {
+        // Use defaults if version.json isn't available
+        console.debug('version.json not available, using defaults')
+      }
+    }
+    fetchVersionInfo()
+  }, [])
+
+  // Build downloads list from version info
   const downloads: DownloadInfo[] = [
     {
       product: 'craft',
-      version: '1.0.0',
-      platform: 'Windows',
-      fileName: 'ESCAPECRAFT-standalone.html',
-      fileSize: '2.5 MB',
-      downloadUrl: '/downloads/craft/ESCAPECRAFT-standalone.html',
+      version: versionInfo.craft.version,
+      platform: 'All Platforms',
+      fileName: 'ESCAPECRAFT-latest.html',
+      fileSize: versionInfo.craft.fileSize,
+      downloadUrl: getStorageUrl('ESCAPECRAFT-latest.html'),
     },
     {
       product: 'artist',
-      version: '1.0.0',
-      platform: 'Windows',
-      fileName: 'ESCAPEARTIST-standalone.html',
-      fileSize: '3.2 MB',
-      downloadUrl: '/downloads/artist/ESCAPEARTIST-standalone.html',
+      version: versionInfo.artist.version,
+      platform: 'All Platforms',
+      fileName: 'ESCAPEARTIST-latest.html',
+      fileSize: versionInfo.artist.fileSize,
+      downloadUrl: getStorageUrl('ESCAPEARTIST-latest.html'),
     },
   ]
 
