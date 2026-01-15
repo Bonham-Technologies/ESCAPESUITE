@@ -164,13 +164,11 @@ serve(async (req) => {
       }
     }
 
-    // Track license download
+    // Track license download (ignore errors if table doesn't exist)
     await supabase.from('license_downloads').insert({
       license_id: licenseId,
       user_id: clerkUserId,
       downloaded_at: new Date().toISOString(),
-    }).catch(() => {
-      // Ignore if table doesn't exist yet
     })
 
     return new Response(
@@ -187,8 +185,9 @@ serve(async (req) => {
     )
   } catch (error) {
     console.error('Error retrieving license key:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error)
     return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
+      JSON.stringify({ error: errorMessage, stack: error instanceof Error ? error.stack : undefined }),
       {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
