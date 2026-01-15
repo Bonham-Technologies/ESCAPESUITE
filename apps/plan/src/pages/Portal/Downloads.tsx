@@ -95,16 +95,14 @@ export default function Downloads() {
       setError(null)
 
       try {
-        const { data, error: fetchError } = await supabase
-          .from('licenses')
-          .select('id, product, tier, seat_count, issued_at, expires_at, metadata')
-          .eq('customer_id', user.id)
-          .is('revoked_at', null)
-          .order('issued_at', { ascending: false })
+        // Use Edge Function to fetch licenses (bypasses RLS)
+        const response = await supabase.functions.invoke('get-user-licenses', {
+          body: { clerkUserId: user.id },
+        })
 
-        if (fetchError) throw fetchError
+        if (response.error) throw response.error
 
-        setLicenses(data || [])
+        setLicenses(response.data?.licenses || [])
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load licenses')
       } finally {
