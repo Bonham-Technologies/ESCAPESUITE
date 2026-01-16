@@ -3,6 +3,7 @@ import { AuthContext, type AuthState } from './context'
 import { ErrorScreen } from './ErrorScreen'
 import { LoadingScreen } from './LoadingScreen'
 import { LicenseInputModal } from './LicenseInputModal'
+import { ExpirationBanner } from './ExpirationBanner'
 import { LICENSE_KEY } from './config'
 import { validateLicense, getLicenseInfo, loadLicense, type License } from './license'
 import { getSubscription, isTrialUser, isPaidUser } from './subscription'
@@ -23,6 +24,7 @@ interface AuthGateProps {
 function initializeLicenseState(product: AppProduct): {
   authState: AuthState
   licenseKey: string | null
+  license: License | null
 } {
   // First, try to load license from localStorage
   const storedLicense = loadLicense(product)
@@ -39,6 +41,7 @@ function initializeLicenseState(product: AppProduct): {
           customerName: license.customer,
         },
         licenseKey: storedLicense,
+        license,
       }
     }
     // Stored license is invalid - continue to check embedded key
@@ -59,6 +62,7 @@ function initializeLicenseState(product: AppProduct): {
           customerName: license.customer,
         },
         licenseKey: LICENSE_KEY,
+        license,
       }
     }
     // Embedded license is invalid
@@ -70,6 +74,7 @@ function initializeLicenseState(product: AppProduct): {
         error: 'Invalid or expired license key',
       },
       licenseKey: null,
+      license: null,
     }
   }
 
@@ -82,6 +87,7 @@ function initializeLicenseState(product: AppProduct): {
       error: null, // No error - show license input modal
     },
     licenseKey: null,
+    license: null,
   }
 }
 
@@ -94,9 +100,9 @@ interface StandaloneAuthGateProps {
 
 // Standalone mode auth gate - license-based with runtime license input
 export function StandaloneAuthGate({ children, appName, logo, product }: StandaloneAuthGateProps) {
-  const [{ authState, licenseKey }, setState] = useState(() => {
+  const [{ authState, licenseKey, license }, setState] = useState(() => {
     const result = initializeLicenseState(product)
-    return { authState: result.authState, licenseKey: result.licenseKey }
+    return { authState: result.authState, licenseKey: result.licenseKey, license: result.license }
   })
 
   // Track activation in background (don't block UI)
@@ -109,16 +115,17 @@ export function StandaloneAuthGate({ children, appName, logo, product }: Standal
     }
   }, [authState.isAuthorized, licenseKey, product])
 
-  const handleLicenseSuccess = useCallback((license: License) => {
+  const handleLicenseSuccess = useCallback((newLicense: License) => {
     setState({
       authState: {
         isAuthorized: true,
         isTrial: false,
         isLoading: false,
         error: null,
-        customerName: license.customer,
+        customerName: newLicense.customer,
       },
       licenseKey: loadLicense(product) || '',
+      license: newLicense,
     })
   }, [product])
 
@@ -145,6 +152,7 @@ export function StandaloneAuthGate({ children, appName, logo, product }: Standal
 
   return (
     <AuthContext.Provider value={authState}>
+      <ExpirationBanner license={license} />
       {children}
     </AuthContext.Provider>
   )
