@@ -93,9 +93,10 @@ describe('Dashboard - subscription states', () => {
     vi.mocked(useSubscription).mockReturnValue({
       subscription: null,
       isLoading: true,
+      error: null,
       checkout: vi.fn(),
       openPortal: vi.fn(),
-      refresh: vi.fn(),
+      refetch: vi.fn(),
     })
 
     render(
@@ -113,9 +114,10 @@ describe('Dashboard - subscription states', () => {
     vi.mocked(useSubscription).mockReturnValue({
       subscription: null,
       isLoading: false,
+      error: null,
       checkout: vi.fn(),
       openPortal: vi.fn(),
-      refresh: vi.fn(),
+      refetch: vi.fn(),
     })
 
     render(
