@@ -9,7 +9,7 @@ vi.mock('@clerk/clerk-react', () => ({
     user: null,
     isSignedIn: false,
   })),
-  SignedIn: ({ children }: { children: React.ReactNode }) => null,
+  SignedIn: ({ children: _children }: { children: React.ReactNode }) => null,
   SignedOut: ({ children }: { children: React.ReactNode }) => children,
 }))
 
