@@ -73,3 +73,26 @@
   font-size: 0.875rem;
   color: var(--text-secondary);
 }
+
+.footerLinks {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.footerLinks a {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.footerLinks a:hover {
+  color: var(--text-primary);
+}
+
+.footerDivider {
+  color: var(--border);
+}
