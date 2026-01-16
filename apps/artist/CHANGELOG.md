@@ -1,24 +1,52 @@
 # Changelog
 
-## [Unreleased]
+## 1.2.0
 
-### Added
+### Minor Changes
 
-- **Responsive Inspector Panel**: Inspector panel now adapts to different screen sizes with collapsible toggle, media queries at 1200px/1024px/900px/640px breakpoints, slide-out panel on mobile, and floating action button for mobile access
-- **Animation Caching**: Added `getAnimatedValuesCached()` function with cache (10,000 entries max) to prevent redundant keyframe interpolation during exports
-- **Seek Position Tracking**: Added `seekVideoOptimized()` that skips redundant video seeks within frame tolerance (1/frameRate)
-- **Encoder Backpressure**: Added queue size monitoring to prevent memory exhaustion during exports
+- Add resizable timeline, export performance improvements, and responsive inspector
 
-### Changed
+  - **Resizable Timeline Panel**: Drag handle to adjust timeline height (120-600px), double-click to reset, persisted to localStorage
+  - **Export Performance**: Real-time playback instead of frame-by-frame seeking, encoder backpressure to prevent memory exhaustion
+  - **Responsive Inspector**: Collapsible panel with slide-out on mobile, floating toggle button
+  - **Animation Caching**: Memoized keyframe interpolation (10,000 entry cache)
+  - **Seek Optimization**: Skip redundant video seeks within frame tolerance
+  - **Waveform Visibility**: White color when clip selected for better contrast
+  - **Black Flash Prevention**: Event-based frame readiness waiting before encoding
 
-- **Waveform Visibility**: AudioWaveform component now uses white color when clip is selected for better contrast against blue selection background
-- **Seek Timing**: Balanced seek timeout (500ms) and retry logic to prevent export pausing while maintaining reliability
+- Add audio volume keyframe animation support
 
-### Fixed
+  - Volume property now animatable with keyframes like other properties
+  - Keyframes applied continuously during playback and export
+  - Supports all easing functions (linear, ease-in, ease-out, etc.)
+  - Volume range 0-200% (0 = mute, 100% = original, 200% = 2x gain)
 
-- **Black Flash Prevention**: Added `waitForFrameReady()` with event-based waiting to ensure video frames are available before encoding
-- **Frame Freezing**: Restored proper frame readiness verification after seek operations
-- **Transition Rendering**: Added readyState checks and logging in `drawTransition()` to help debug video readiness issues
+- Add standalone licensing system with pre-licensed downloads
+
+  ### ESCAPEPLAN
+
+  - **Pre-Licensed Downloads**: Server-side license injection - users download HTML with license already embedded
+  - **Downloads Page**: "Download (Pre-Licensed)" button for instant-use downloads, "Generic" for manual key entry
+  - **Edge Functions**: `get-licensed-download` for personalized builds, `get-user-licenses` for portal, `send-license-email` for purchase emails
+  - **Database Migrations**: `license_activations` table, `downloads` storage bucket
+
+  ### ESCAPECRAFT & ESCAPEARTIST
+
+  - **License Input Modal**: Runtime license key entry UI for standalone builds
+  - **Machine Hash**: Browser fingerprinting for activation tracking
+  - **Dashboard Link**: Hidden in standalone mode (no dashboard exists)
+  - **Analytics**: Removed from standalone builds (runs offline)
+
+  ### Shared Package
+
+  - **LicenseInputModal**: Reusable license entry component
+  - **machineHash**: Cross-browser machine identification
+  - **Bootstrap**: Analytics excluded from standalone mode
+
+### Patch Changes
+
+- Updated dependencies
+  - @escapesuite/shared@1.2.0
 
 ## 1.1.1
 
@@ -215,47 +243,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - replace CodeQL with npm audit for security scanning ([8222f1d](https://github.com/mrbonha/ESCAPEARTIST/commit/8222f1d54f1ecf4f8630ce5ab80ba6ac247fc795))
 - replace CodeQL with npm audit for security scanning ([c551f60](https://github.com/mrbonha/ESCAPEARTIST/commit/c551f60be023853619b13fac7d5f8423e0829746))
 
-## [Unreleased]
-
-### Added
-
-- **Keyframe Animation System**
-
-  - Full keyframe interpolation engine with 10 easing functions
-  - Animation presets for clip entrances (fade, slide, scale, pop, blur)
-  - Animation presets for clip exits with matching effects
-  - Custom keyframe editor UI for fine-grained control
-  - Animatable properties: position (x, y), scale (x, y), rotation, opacity, blur
-  - Per-keyframe easing selection
-
-- **Keyframe Editor UI**
-  - Visual keyframe track per animated property
-  - Playhead indicator showing current position within clip
-  - Add/remove custom keyframes at any point
-  - Edit keyframe values and easing curves
-  - Visual distinction between preset and custom keyframes
-
-### Changed
-
-- **Export Resolution Logic**
-  - Resolution now based on bottom-most track (base layer) instead of top-most
-  - Better handling of overlay-heavy compositions where main video is on bottom track
-
-### Fixed
-
-- **Preview Black Screen Issues**
-
-  - Fixed black flashes during slow timeline scrubbing
-  - Fixed black screen when undoing operations
-  - Improved canvas state management between clip draws
-  - Added explicit filter reset to prevent blur bleeding between clips
-  - Lowered video readyState requirement to allow drawing during seeks
-
-- **Transform Isolation**
-  - Fixed transforms on one clip affecting other clips on same track
-  - Added full canvas state reset at start of each frame draw
-
 ---
+
+## Pre-Monorepo History
+
+The following versions were released before ESCAPEARTIST joined the ESCAPESUITE monorepo.
 
 ## [0.4.2] - 2024-12-11
 
@@ -454,9 +446,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 | Version | Date   | Highlights                                                              |
 | ------- | ------ | ----------------------------------------------------------------------- |
-| 1.1.0   | Jan 1  | Track volume control, auto-track creation, blur overlay, no-fill option |
-| 1.0.0   | Jan 1  | First stable release                                                    |
-| 0.4.2   | Dec 11 | Animation UI, bug fixes                                                 |
+| 1.2.0   | Jan 16 | Resizable timeline, volume keyframes, standalone licensing, export perf |
+| 1.1.1   | Jan 10 | Shared package extraction, code deduplication                           |
+| 1.1.0   | Jan 8  | Changesets, dependency sync                                             |
+| 1.0.0   | Jan 1  | First monorepo stable release                                           |
+| 0.4.2   | Dec 11 | Animation UI, bug fixes (pre-monorepo)                                  |
 | 0.4.1   | Dec 10 | Shape blur, track management                                            |
 | 0.4.0   | Dec 9  | Multi-track, transitions, blend modes                                   |
 | 0.3.0   | Dec 8  | MP4 export, overlays                                                    |

@@ -26,17 +26,22 @@ pnpm test:escapeartist   # Test only ESCAPEARTIST
 
 ```
 tests/
-├── escapeplan/          # ESCAPEPLAN tests
-│   ├── smoke.spec.ts    # Basic loading and navigation
-│   └── auth.spec.ts     # Authentication flows
-├── escapecraft/         # ESCAPECRAFT tests
-│   ├── smoke.spec.ts    # Basic loading
-│   └── recording.spec.ts # Recording features
-└── escapeartist/        # ESCAPEARTIST tests
-    ├── smoke.spec.ts    # Basic loading
-    ├── timeline.spec.ts # Timeline operations
-    └── export.spec.ts   # Export functionality
+├── escapeplan/              # ESCAPEPLAN tests
+│   ├── landing.spec.ts      # Landing page and navigation
+│   └── dashboard.spec.ts    # Dashboard functionality
+├── escapecraft/             # ESCAPECRAFT tests
+│   └── recording-flow.spec.ts # Recording features
+├── escapeartist/            # ESCAPEARTIST tests
+│   ├── video-import.spec.ts # Video import functionality
+│   └── timeline-editing.spec.ts # Timeline operations
+├── integration/             # Cross-app integration tests
+│   └── craft-to-artist.spec.ts # CRAFT → ARTIST workflow
+└── standalone/              # Standalone build tests
+    ├── craft.spec.ts        # ESCAPECRAFT standalone
+    └── artist.spec.ts       # ESCAPEARTIST standalone
 ```
+
+See also: [Standalone Test Battery](../../docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists.
 
 ## CI Behavior
 

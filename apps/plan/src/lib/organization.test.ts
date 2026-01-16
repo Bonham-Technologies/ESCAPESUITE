@@ -159,3 +159,53 @@ describe('organization', () => {
     })
   })
 })
+
+// Import and test the additional helper functions
+import { getActionDisplayName, getResourceTypeDisplayName } from './organization'
+
+describe('organization - audit log helpers', () => {
+  describe('getActionDisplayName', () => {
+    it('returns correct display names for member actions', () => {
+      expect(getActionDisplayName('member.invited')).toBe('Member Invited')
+      expect(getActionDisplayName('member.joined')).toBe('Member Joined')
+      expect(getActionDisplayName('member.removed')).toBe('Member Removed')
+      expect(getActionDisplayName('member.left')).toBe('Member Left')
+      expect(getActionDisplayName('member.role_changed')).toBe('Role Changed')
+    })
+
+    it('returns correct display names for organization actions', () => {
+      expect(getActionDisplayName('organization.created')).toBe('Organization Created')
+      expect(getActionDisplayName('organization.updated')).toBe('Settings Updated')
+    })
+
+    it('returns correct display names for subscription actions', () => {
+      expect(getActionDisplayName('subscription.created')).toBe('Subscription Created')
+      expect(getActionDisplayName('subscription.updated')).toBe('Subscription Updated')
+      expect(getActionDisplayName('subscription.cancelled')).toBe('Subscription Cancelled')
+    })
+
+    it('formats unknown actions with title case', () => {
+      expect(getActionDisplayName('custom_action.test')).toBe('Custom Action Test')
+      expect(getActionDisplayName('some.other_action')).toBe('Some Other Action')
+    })
+  })
+
+  describe('getResourceTypeDisplayName', () => {
+    it('returns correct display names for known types', () => {
+      expect(getResourceTypeDisplayName('member')).toBe('Member')
+      expect(getResourceTypeDisplayName('settings')).toBe('Settings')
+      expect(getResourceTypeDisplayName('subscription')).toBe('Subscription')
+      expect(getResourceTypeDisplayName('organization')).toBe('Organization')
+      expect(getResourceTypeDisplayName('invite')).toBe('Invite')
+    })
+
+    it('returns N/A for null', () => {
+      expect(getResourceTypeDisplayName(null)).toBe('N/A')
+    })
+
+    it('capitalizes unknown types', () => {
+      expect(getResourceTypeDisplayName('custom')).toBe('Custom')
+      expect(getResourceTypeDisplayName('something')).toBe('Something')
+    })
+  })
+})

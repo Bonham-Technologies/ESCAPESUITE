@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.2.0
+
+### Minor Changes
+
+- Add standalone licensing system with pre-licensed downloads
+
+  ### ESCAPEPLAN
+
+  - **Pre-Licensed Downloads**: Server-side license injection - users download HTML with license already embedded
+  - **Downloads Page**: "Download (Pre-Licensed)" button for instant-use downloads, "Generic" for manual key entry
+  - **Edge Functions**: `get-licensed-download` for personalized builds, `get-user-licenses` for portal, `send-license-email` for purchase emails
+  - **Database Migrations**: `license_activations` table, `downloads` storage bucket
+
+  ### ESCAPECRAFT & ESCAPEARTIST
+
+  - **License Input Modal**: Runtime license key entry UI for standalone builds
+  - **Machine Hash**: Browser fingerprinting for activation tracking
+  - **Dashboard Link**: Hidden in standalone mode (no dashboard exists)
+  - **Analytics**: Removed from standalone builds (runs offline)
+
+  ### Shared Package
+
+  - **LicenseInputModal**: Reusable license entry component
+  - **machineHash**: Cross-browser machine identification
+  - **Bootstrap**: Analytics excluded from standalone mode
+
+### Patch Changes
+
+- Updated dependencies
+  - @escapesuite/shared@1.2.0
+
 ## 1.1.1
 
 ### Patch Changes
