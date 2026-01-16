@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { supabase } from '../../lib/supabase'
@@ -17,6 +17,11 @@ interface LicenseRecord {
     features?: string[]
   }
 }
+
+type DownloadingState = {
+  licenseId: string
+  product: 'craft' | 'artist'
+} | null
 
 interface DownloadInfo {
   product: 'craft' | 'artist'
@@ -43,6 +48,7 @@ export default function Downloads() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState<DownloadingState>(null)
   const [versionInfo, setVersionInfo] = useState<VersionInfo>({
     craft: { version: '1.1.1', fileSize: '~800 KB' },
     artist: { version: '1.1.1', fileSize: '~1.1 MB' },
@@ -114,7 +120,6 @@ export default function Downloads() {
   }, [user, isLoaded])
 
   const copyLicenseKey = async (licenseId: string) => {
-    // In production, this would fetch the actual license key from a secure endpoint
     try {
       const response = await supabase.functions.invoke('get-license-key', {
         body: { licenseId, clerkUserId: user?.id },
@@ -129,6 +134,38 @@ export default function Downloads() {
       alert(err instanceof Error ? err.message : 'Failed to copy license key')
     }
   }
+
+  const downloadPreLicensed = useCallback(async (licenseId: string, product: 'craft' | 'artist') => {
+    if (!user) return
+
+    setDownloading({ licenseId, product })
+    setError(null)
+
+    try {
+      const response = await supabase.functions.invoke('get-licensed-download', {
+        body: { licenseId, clerkUserId: user.id, product },
+      })
+
+      if (response.error) throw response.error
+
+      // The response data is the HTML content
+      // We need to trigger a download
+      const blob = new Blob([response.data], { type: 'text/html' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const productName = product === 'craft' ? 'ESCAPECRAFT' : 'ESCAPEARTIST'
+      a.download = `${productName}-licensed.html`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download pre-licensed file')
+    } finally {
+      setDownloading(null)
+    }
+  }, [user])
 
   const getProductDisplayName = (product: string) => {
     switch (product) {
@@ -160,6 +197,16 @@ export default function Downloads() {
         l.product === product ||
         l.product === 'suite'
     )
+  }
+
+  const getLicenseForProduct = (product: 'craft' | 'artist'): LicenseRecord | undefined => {
+    // Prefer exact product match, then suite
+    return licenses.find((l) => l.product === product) ||
+           licenses.find((l) => l.product === 'suite')
+  }
+
+  const isDownloading = (product: 'craft' | 'artist') => {
+    return downloading?.product === product
   }
 
   if (!isLoaded) {
@@ -262,6 +309,8 @@ export default function Downloads() {
         <div className="downloads-grid">
           {downloads.map((download) => {
             const hasLicense = canDownload(download.product)
+            const license = getLicenseForProduct(download.product)
+            const currentlyDownloading = isDownloading(download.product)
             return (
               <div
                 key={`${download.product}-${download.platform}`}
@@ -278,14 +327,24 @@ export default function Downloads() {
                     v{download.version} | {download.platform} | {download.fileSize}
                   </p>
                 </div>
-                {hasLicense ? (
-                  <a
-                    href={download.downloadUrl}
-                    className="btn btn-primary"
-                    download={download.fileName}
-                  >
-                    Download
-                  </a>
+                {hasLicense && license ? (
+                  <div className="download-actions">
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => downloadPreLicensed(license.id, download.product)}
+                      disabled={currentlyDownloading}
+                    >
+                      {currentlyDownloading ? 'Preparing...' : 'Download (Pre-Licensed)'}
+                    </button>
+                    <a
+                      href={download.downloadUrl}
+                      className="btn btn-secondary btn-small"
+                      download={download.fileName}
+                      title="Download generic version (requires license key entry)"
+                    >
+                      Generic
+                    </a>
+                  </div>
                 ) : (
                   <Link to="/pricing" className="btn btn-secondary">
                     Purchase License
@@ -299,26 +358,50 @@ export default function Downloads() {
 
       <section className="help-section">
         <h2>Getting Started</h2>
-        <div className="help-steps">
-          <div className="step">
-            <div className="step-number">1</div>
-            <div className="step-content">
-              <h3>Download</h3>
-              <p>Download the standalone HTML file for your product.</p>
+        <div className="help-options">
+          <div className="help-option recommended">
+            <h3>Option A: Pre-Licensed Download (Recommended)</h3>
+            <div className="help-steps">
+              <div className="step">
+                <div className="step-number">1</div>
+                <div className="step-content">
+                  <h4>Download Pre-Licensed</h4>
+                  <p>Click "Download (Pre-Licensed)" - your license is embedded automatically.</p>
+                </div>
+              </div>
+              <div className="step">
+                <div className="step-number">2</div>
+                <div className="step-content">
+                  <h4>Open & Use</h4>
+                  <p>Open the HTML file and start using the app immediately.</p>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="step">
-            <div className="step-number">2</div>
-            <div className="step-content">
-              <h3>Copy License Key</h3>
-              <p>Click "Copy License Key" on your license card above.</p>
-            </div>
-          </div>
-          <div className="step">
-            <div className="step-number">3</div>
-            <div className="step-content">
-              <h3>Activate</h3>
-              <p>Open the HTML file and paste your license key when prompted.</p>
+          <div className="help-option">
+            <h3>Option B: Generic Download</h3>
+            <div className="help-steps">
+              <div className="step">
+                <div className="step-number">1</div>
+                <div className="step-content">
+                  <h4>Download Generic</h4>
+                  <p>Click "Generic" to download the unlicensed version.</p>
+                </div>
+              </div>
+              <div className="step">
+                <div className="step-number">2</div>
+                <div className="step-content">
+                  <h4>Copy License Key</h4>
+                  <p>Click "Copy License Key" on your license card above.</p>
+                </div>
+              </div>
+              <div className="step">
+                <div className="step-number">3</div>
+                <div className="step-content">
+                  <h4>Activate</h4>
+                  <p>Open the HTML file and paste your license key when prompted.</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -508,6 +591,52 @@ export default function Downloads() {
           font-size: 0.875rem;
           color: var(--text-secondary);
           margin: 0;
+        }
+
+        .download-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .btn-small {
+          padding: 0.375rem 0.75rem;
+          font-size: 0.75rem;
+        }
+
+        .help-options {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 1.5rem;
+        }
+
+        .help-option {
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
+          border-radius: 12px;
+          padding: 1.5rem;
+        }
+
+        .help-option.recommended {
+          border-color: var(--color-primary, #6366f1);
+          background: color-mix(in srgb, var(--color-primary, #6366f1) 5%, var(--bg-secondary));
+        }
+
+        .help-option h3 {
+          margin: 0 0 1rem;
+          font-size: 1rem;
+          color: var(--text-primary);
+        }
+
+        .help-option .help-steps {
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .help-option .step-content h4 {
+          margin: 0 0 0.25rem;
+          font-size: 0.875rem;
+          color: var(--text-primary);
         }
 
         .help-steps {

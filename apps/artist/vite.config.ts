@@ -24,7 +24,11 @@ export default defineConfig({
     // Build mode: 'saas' (default) or 'standalone'
     'import.meta.env.VITE_BUILD_MODE': JSON.stringify(process.env.VITE_BUILD_MODE || 'saas'),
     // License key for standalone builds
-    'import.meta.env.VITE_LICENSE_KEY': JSON.stringify(process.env.VITE_LICENSE_KEY || ''),
+    // If no key provided in standalone mode, use placeholder for server-side injection
+    'import.meta.env.VITE_LICENSE_KEY': JSON.stringify(
+      process.env.VITE_LICENSE_KEY ||
+      (process.env.VITE_BUILD_MODE === 'standalone' ? '__ESCAPE_LICENSE_PLACEHOLDER__' : '')
+    ),
   },
   test: {
     globals: true,
