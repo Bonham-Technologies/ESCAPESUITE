@@ -179,14 +179,16 @@ jobs:
             const artistSize = '${{ needs.build-standalone.outputs.artist_size }}';
             const devUrl = process.env.SUPABASE_URL_DEV;
 
-            const body = `## 🚀 Standalone Preview Builds Ready
-
-            | App | Version | Size | Preview |
-            |-----|---------|------|---------|
-            | ESCAPECRAFT | \`${version}\` | ${craftSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |
-            | ESCAPEARTIST | \`${version}\` | ${artistSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |
-
-            > These are dev preview builds. They will be promoted to production when the PR is merged.`;
+            const body = [
+              '## 🚀 Standalone Preview Builds Ready',
+              '',
+              '| App | Version | Size | Preview |',
+              '|-----|---------|------|---------|',
+              `| ESCAPECRAFT | \`${version}\` | ${craftSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |`,
+              `| ESCAPEARTIST | \`${version}\` | ${artistSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |`,
+              '',
+              '> These are dev preview builds. They will be promoted to production when the PR is merged.'
+            ].join('\n');
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -266,25 +268,30 @@ jobs:
               sha: context.sha
             });
 
+            // Create release body
+            const releaseBody = [
+              '## Standalone Downloads',
+              '',
+              '| App | Size | Download |',
+              '|-----|------|----------|',
+              `| ESCAPECRAFT | ${craftSize} | [ESCAPECRAFT-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |`,
+              `| ESCAPEARTIST | ${artistSize} | [ESCAPEARTIST-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |`,
+              '',
+              '### Latest (always up-to-date)',
+              `- [ESCAPECRAFT-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-latest.html)`,
+              `- [ESCAPEARTIST-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-latest.html)`,
+              '',
+              '### Changelog',
+              'See commit history for changes in this release.'
+            ].join('\n');
+
             // Create release
             await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: `v${version}`,
               name: `ESCAPE Suite v${version}`,
-              body: `## Standalone Downloads
-
-| App | Size | Download |
-|-----|------|----------|
-| ESCAPECRAFT | ${craftSize} | [ESCAPECRAFT-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |
-| ESCAPEARTIST | ${artistSize} | [ESCAPEARTIST-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |
-
-### Latest (always up-to-date)
-- [ESCAPECRAFT-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-latest.html)
-- [ESCAPEARTIST-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-latest.html)
-
-### Changelog
-See commit history for changes in this release.`,
+              body: releaseBody,
               draft: false,
               prerelease: false
             });

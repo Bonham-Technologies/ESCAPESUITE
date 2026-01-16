@@ -14,6 +14,7 @@ import {
 } from './pages/Team'
 import { Downloads } from './pages/Portal'
 import { Pricing } from './pages/Pricing'
+import { Privacy, Terms } from './pages/Legal'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -32,6 +33,8 @@ function App() {
       <Route path="/" element={<Layout />}>
         <Route index element={<Home />} />
         <Route path="pricing" element={<Pricing />} />
+        <Route path="privacy" element={<Privacy />} />
+        <Route path="terms" element={<Terms />} />
         <Route path="sign-in/*" element={<SignInPage />} />
         <Route path="sign-up/*" element={<SignUpPage />} />
         <Route
