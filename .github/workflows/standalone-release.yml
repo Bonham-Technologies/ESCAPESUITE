@@ -133,6 +133,8 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     environment: development
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Download artifacts
