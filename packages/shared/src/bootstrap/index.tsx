@@ -83,12 +83,12 @@ export async function bootstrapApp(config: BootstrapConfig): Promise<void> {
     )
   } else {
     // Standalone mode - license-based auth only
+    // No Analytics in standalone (runs offline, no network requests)
     root.render(
       <StrictMode>
         <StandaloneAuthGate>
           <App />
         </StandaloneAuthGate>
-        <Analytics />
       </StrictMode>
     )
   }

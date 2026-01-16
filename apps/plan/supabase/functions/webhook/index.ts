@@ -20,7 +20,8 @@ serve(async (req) => {
   let event: Stripe.Event
 
   try {
-    event = stripe.webhooks.constructEvent(body, signature!, endpointSecret)
+    // Use async version for Deno compatibility with SubtleCrypto
+    event = await stripe.webhooks.constructEventAsync(body, signature!, endpointSecret)
   } catch (err) {
     console.error('Webhook signature verification failed:', err.message)
     return new Response(`Webhook Error: ${err.message}`, { status: 400 })
@@ -78,17 +79,44 @@ serve(async (req) => {
           const licenseData = await licenseResponse.json()
           console.log(`License generated: ${licenseData.licenseId}`)
 
-          // Track the download for analytics
+          // Track the license for analytics
           await supabase.from('license_downloads').insert({
-            user_id: clerkUserId || null,
-            product,
-            version: 'purchase',
-            ip_address: null,
-            user_agent: null,
+            license_id: licenseData.licenseId,
+            downloaded_at: new Date().toISOString(),
+            metadata: { source: 'purchase', product, tier },
           })
 
-          // TODO: Send license key via email
-          // This would integrate with an email service like Resend, SendGrid, etc.
+          // Send license key via email
+          try {
+            const emailResponse = await fetch(
+              `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-license-email`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                },
+                body: JSON.stringify({
+                  licenseKey: licenseData.licenseKey,
+                  customerEmail,
+                  customerName,
+                  product,
+                  tier,
+                }),
+              }
+            )
+
+            if (!emailResponse.ok) {
+              const errorText = await emailResponse.text()
+              console.error('Failed to send license email:', errorText)
+              // Don't throw - license was generated successfully, email is best-effort
+            } else {
+              console.log(`License email sent to ${customerEmail}`)
+            }
+          } catch (emailError) {
+            console.error('Error sending license email:', emailError)
+            // Don't throw - license was generated successfully
+          }
 
           break
         }

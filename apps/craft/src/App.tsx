@@ -15,7 +15,7 @@ import { Compositor } from './core/compositor';
 import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
-import { useAuth } from './auth';
+import { useAuth, isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
@@ -584,9 +584,11 @@ function App() {
       {/* Header */}
       <header className={styles.header}>
         <div className={styles.headerLeft}>
-          <a href="/dashboard" className={styles.dashboardLink} title="Back to Dashboard">
-            ← Dashboard
-          </a>
+          {!isStandaloneMode() && (
+            <a href="/dashboard" className={styles.dashboardLink} title="Back to Dashboard">
+              ← Dashboard
+            </a>
+          )}
           <h1 className={styles.logo}>ESCAPECRAFT</h1>
         </div>
 

@@ -1,10 +1,12 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { AuthContext, type AuthState } from './context'
 import { ErrorScreen } from './ErrorScreen'
 import { LoadingScreen } from './LoadingScreen'
+import { LicenseInputModal } from './LicenseInputModal'
 import { LICENSE_KEY } from './config'
-import { validateLicense, getLicenseInfo } from './license'
+import { validateLicense, getLicenseInfo, loadLicense, type License } from './license'
 import { getSubscription, isTrialUser, isPaidUser } from './subscription'
+import { getMachineHash } from './machineHash'
 
 // Product types that can be validated (excludes 'suite' which is license-only)
 type AppProduct = 'craft' | 'artist'
@@ -17,25 +19,69 @@ interface AuthGateProps {
 }
 
 // Initialize license state synchronously to avoid effect-based setState
-function initializeLicenseState(product: AppProduct): AuthState {
-  const license = validateLicense(LICENSE_KEY, product)
-  if (license) {
-    console.log('License validated:', getLicenseInfo(license))
+// First checks localStorage, then falls back to embedded LICENSE_KEY
+function initializeLicenseState(product: AppProduct): {
+  authState: AuthState
+  licenseKey: string | null
+} {
+  // First, try to load license from localStorage
+  const storedLicense = loadLicense(product)
+  if (storedLicense) {
+    const license = validateLicense(storedLicense, product)
+    if (license) {
+      console.log('License validated (stored):', getLicenseInfo(license))
+      return {
+        authState: {
+          isAuthorized: true,
+          isTrial: false,
+          isLoading: false,
+          error: null,
+          customerName: license.customer,
+        },
+        licenseKey: storedLicense,
+      }
+    }
+    // Stored license is invalid - continue to check embedded key
+    console.warn('Stored license is invalid or expired')
+  }
+
+  // Fall back to embedded LICENSE_KEY
+  if (LICENSE_KEY) {
+    const license = validateLicense(LICENSE_KEY, product)
+    if (license) {
+      console.log('License validated (embedded):', getLicenseInfo(license))
+      return {
+        authState: {
+          isAuthorized: true,
+          isTrial: false,
+          isLoading: false,
+          error: null,
+          customerName: license.customer,
+        },
+        licenseKey: LICENSE_KEY,
+      }
+    }
+    // Embedded license is invalid
     return {
-      isAuthorized: true,
-      isTrial: false,
-      isLoading: false,
-      error: null,
-      customerName: license.customer,
+      authState: {
+        isAuthorized: false,
+        isTrial: false,
+        isLoading: false,
+        error: 'Invalid or expired license key',
+      },
+      licenseKey: null,
     }
   }
+
+  // No license found - will show input modal
   return {
-    isAuthorized: false,
-    isTrial: false,
-    isLoading: false,
-    error: LICENSE_KEY
-      ? 'Invalid or expired license key'
-      : 'No license key found. This application requires a valid license.',
+    authState: {
+      isAuthorized: false,
+      isTrial: false,
+      isLoading: false,
+      error: null, // No error - show license input modal
+    },
+    licenseKey: null,
   }
 }
 
@@ -46,12 +92,51 @@ interface StandaloneAuthGateProps {
   product: AppProduct
 }
 
-// Standalone mode auth gate - license-based
+// Standalone mode auth gate - license-based with runtime license input
 export function StandaloneAuthGate({ children, appName, logo, product }: StandaloneAuthGateProps) {
-  const [authState] = useState<AuthState>(() => initializeLicenseState(product))
+  const [{ authState, licenseKey }, setState] = useState(() => {
+    const result = initializeLicenseState(product)
+    return { authState: result.authState, licenseKey: result.licenseKey }
+  })
+
+  // Track activation in background (don't block UI)
+  useEffect(() => {
+    if (authState.isAuthorized && licenseKey) {
+      // Fire and forget - activation tracking is best-effort
+      trackActivation(licenseKey, product).catch((err) => {
+        console.warn('Activation tracking failed:', err)
+      })
+    }
+  }, [authState.isAuthorized, licenseKey, product])
+
+  const handleLicenseSuccess = useCallback((license: License) => {
+    setState({
+      authState: {
+        isAuthorized: true,
+        isTrial: false,
+        isLoading: false,
+        error: null,
+        customerName: license.customer,
+      },
+      licenseKey: loadLicense(product) || '',
+    })
+  }, [product])
 
   if (authState.isLoading) {
     return <LoadingScreen appName={appName} logo={logo} />
+  }
+
+  // Show license input modal if no valid license and no error
+  // (error means embedded license was invalid, which is a different case)
+  if (!authState.isAuthorized && !authState.error) {
+    return (
+      <LicenseInputModal
+        isOpen={true}
+        onSuccess={handleLicenseSuccess}
+        product={product}
+        appName={appName}
+      />
+    )
   }
 
   if (!authState.isAuthorized) {
@@ -63,6 +148,46 @@ export function StandaloneAuthGate({ children, appName, logo, product }: Standal
       {children}
     </AuthContext.Provider>
   )
+}
+
+// Track license activation for seat limiting (best-effort, non-blocking)
+async function trackActivation(licenseKey: string, product: AppProduct): Promise<void> {
+  try {
+    const machineHash = await getMachineHash()
+    const appVersion = import.meta.env.VITE_APP_VERSION || '1.0.0'
+
+    // Get Supabase URL from environment
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    if (!supabaseUrl) {
+      console.warn('SUPABASE_URL not configured - skipping activation tracking')
+      return
+    }
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/validate-license`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        licenseKey,
+        product,
+        machineHash,
+        appVersion,
+      }),
+    })
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      if (data.error === 'Maximum activations reached') {
+        console.warn(`License seat limit reached: ${data.currentActivations}/${data.maxActivations}`)
+        // Note: We don't block the user here - local validation passed
+        // The server-side check is for tracking/analytics
+      }
+    }
+  } catch (error) {
+    // Network error - offline mode is fine
+    console.debug('Activation tracking failed (offline?):', error)
+  }
 }
 
 interface SaaSAuthGateProps {

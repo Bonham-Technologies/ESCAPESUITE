@@ -60,10 +60,21 @@ function hexToBytes(hex: string): Uint8Array {
 async function signLicense(payload: LicensePayload): Promise<string> {
   const privateKeyBytes = hexToBytes(PRIVATE_KEY_HEX)
 
-  // Import the private key
+  // Ed25519 PKCS8 prefix for 32-byte private key
+  const pkcs8Prefix = new Uint8Array([
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+    0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20
+  ])
+
+  // Combine prefix with private key bytes
+  const pkcs8Key = new Uint8Array(pkcs8Prefix.length + privateKeyBytes.length)
+  pkcs8Key.set(pkcs8Prefix)
+  pkcs8Key.set(privateKeyBytes, pkcs8Prefix.length)
+
+  // Import the private key in PKCS8 format
   const privateKey = await crypto.subtle.importKey(
-    'raw',
-    privateKeyBytes,
+    'pkcs8',
+    pkcs8Key,
     {
       name: 'Ed25519',
     },

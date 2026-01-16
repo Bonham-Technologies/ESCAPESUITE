@@ -1,0 +1,299 @@
+name: Standalone Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/craft/**'
+      - 'apps/artist/**'
+      - 'packages/shared/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/craft/**'
+      - 'apps/artist/**'
+      - 'packages/shared/**'
+
+env:
+  # Supabase project URLs
+  SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_URL_DEV: ${{ secrets.SUPABASE_URL_DEV }}
+  SUPABASE_SERVICE_KEY_PROD: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+  SUPABASE_SERVICE_KEY_DEV: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
+
+jobs:
+  build-standalone:
+    name: Build Standalone Apps
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      craft_size: ${{ steps.sizes.outputs.craft }}
+      artist_size: ${{ steps.sizes.outputs.artist }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Determine version
+        id: version
+        run: |
+          # Use package.json version + short SHA for unique versioning
+          CRAFT_VERSION=$(node -p "require('./apps/craft/package.json').version")
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            VERSION="${CRAFT_VERSION}-pr${{ github.event.pull_request.number }}"
+          else
+            VERSION="${CRAFT_VERSION}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Build ESCAPECRAFT Standalone
+        run: pnpm build:standalone
+        working-directory: apps/craft
+        env:
+          VITE_APP_VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Build ESCAPEARTIST Standalone
+        run: pnpm build:standalone
+        working-directory: apps/artist
+        env:
+          VITE_APP_VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Get file sizes
+        id: sizes
+        run: |
+          CRAFT_SIZE=$(du -h apps/craft/dist/index.html | cut -f1)
+          ARTIST_SIZE=$(du -h apps/artist/dist/index.html | cut -f1)
+          echo "craft=~${CRAFT_SIZE}" >> $GITHUB_OUTPUT
+          echo "artist=~${ARTIST_SIZE}" >> $GITHUB_OUTPUT
+
+      - name: Rename build artifacts
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Copy to versioned names
+          cp apps/craft/dist/index.html "apps/craft/dist/ESCAPECRAFT-${VERSION}.html"
+          cp apps/artist/dist/index.html "apps/artist/dist/ESCAPEARTIST-${VERSION}.html"
+
+          # Copy to latest names
+          cp apps/craft/dist/index.html "apps/craft/dist/ESCAPECRAFT-latest.html"
+          cp apps/artist/dist/index.html "apps/artist/dist/ESCAPEARTIST-latest.html"
+
+      - name: Generate version.json
+        run: |
+          cat > version.json << EOF
+          {
+            "craft": {
+              "version": "${{ steps.version.outputs.version }}",
+              "fileSize": "${{ steps.sizes.outputs.craft }}",
+              "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "commit": "${{ github.sha }}"
+            },
+            "artist": {
+              "version": "${{ steps.version.outputs.version }}",
+              "fileSize": "${{ steps.sizes.outputs.artist }}",
+              "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "commit": "${{ github.sha }}"
+            }
+          }
+          EOF
+          cat version.json
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-builds
+          path: |
+            apps/craft/dist/ESCAPECRAFT-*.html
+            apps/artist/dist/ESCAPEARTIST-*.html
+            version.json
+          retention-days: 30
+
+  deploy-dev:
+    name: Deploy to Dev Storage
+    needs: build-standalone
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: standalone-builds
+          path: ./dist
+
+      - name: Upload to Supabase Storage (Dev)
+        run: |
+          VERSION="${{ needs.build-standalone.outputs.version }}"
+
+          # Upload versioned files
+          for file in dist/apps/craft/dist/ESCAPECRAFT-*.html dist/apps/artist/dist/ESCAPEARTIST-*.html; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              echo "Uploading $filename to dev storage..."
+              curl -X POST \
+                "${SUPABASE_URL_DEV}/storage/v1/object/downloads/${filename}" \
+                -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_DEV}" \
+                -H "Content-Type: text/html" \
+                -H "x-upsert: true" \
+                --data-binary "@$file"
+            fi
+          done
+
+          # Upload version.json
+          echo "Uploading version.json..."
+          curl -X POST \
+            "${SUPABASE_URL_DEV}/storage/v1/object/downloads/version.json" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_DEV}" \
+            -H "Content-Type: application/json" \
+            -H "x-upsert: true" \
+            --data-binary "@dist/version.json"
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ needs.build-standalone.outputs.version }}';
+            const craftSize = '${{ needs.build-standalone.outputs.craft_size }}';
+            const artistSize = '${{ needs.build-standalone.outputs.artist_size }}';
+            const devUrl = process.env.SUPABASE_URL_DEV;
+
+            const body = `## 🚀 Standalone Preview Builds Ready
+
+            | App | Version | Size | Preview |
+            |-----|---------|------|---------|
+            | ESCAPECRAFT | \`${version}\` | ${craftSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |
+            | ESCAPEARTIST | \`${version}\` | ${artistSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |
+
+            > These are dev preview builds. They will be promoted to production when the PR is merged.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  deploy-prod:
+    name: Deploy to Production Storage
+    needs: build-standalone
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: standalone-builds
+          path: ./dist
+
+      - name: Upload to Supabase Storage (Production)
+        run: |
+          VERSION="${{ needs.build-standalone.outputs.version }}"
+
+          # Upload versioned files (for release history)
+          for file in dist/apps/craft/dist/ESCAPECRAFT-*.html dist/apps/artist/dist/ESCAPEARTIST-*.html; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              echo "Uploading $filename to production storage..."
+              curl -X POST \
+                "${SUPABASE_URL_PROD}/storage/v1/object/downloads/${filename}" \
+                -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_PROD}" \
+                -H "Content-Type: text/html" \
+                -H "x-upsert: true" \
+                --data-binary "@$file"
+            fi
+          done
+
+          # Upload version.json
+          echo "Uploading version.json..."
+          curl -X POST \
+            "${SUPABASE_URL_PROD}/storage/v1/object/downloads/version.json" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_PROD}" \
+            -H "Content-Type: application/json" \
+            -H "x-upsert: true" \
+            --data-binary "@dist/version.json"
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ needs.build-standalone.outputs.version }}';
+            const craftSize = '${{ needs.build-standalone.outputs.craft_size }}';
+            const artistSize = '${{ needs.build-standalone.outputs.artist_size }}';
+            const prodUrl = process.env.SUPABASE_URL_PROD;
+
+            // Check if release already exists
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: `v${version}`
+              });
+              console.log(`Release v${version} already exists, skipping...`);
+              return;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
+
+            // Create tag
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/v${version}`,
+              sha: context.sha
+            });
+
+            // Create release
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${version}`,
+              name: `ESCAPE Suite v${version}`,
+              body: `## Standalone Downloads
+
+| App | Size | Download |
+|-----|------|----------|
+| ESCAPECRAFT | ${craftSize} | [ESCAPECRAFT-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |
+| ESCAPEARTIST | ${artistSize} | [ESCAPEARTIST-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |
+
+### Latest (always up-to-date)
+- [ESCAPECRAFT-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-latest.html)
+- [ESCAPEARTIST-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-latest.html)
+
+### Changelog
+See commit history for changes in this release.`,
+              draft: false,
+              prerelease: false
+            });
+
+  cleanup-old-releases:
+    name: Cleanup Old Dev Builds
+    needs: deploy-dev
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: List and cleanup old PR builds
+        run: |
+          # This is a placeholder - implement based on your retention policy
+          # You could use Supabase Storage API to list and delete old PR builds
+          echo "Cleanup job - implement retention policy as needed"
+          # Example: Delete builds older than 30 days or from closed PRs

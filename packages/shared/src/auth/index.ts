@@ -35,9 +35,13 @@ export {
 // Auth UI components
 export { ErrorScreen } from './ErrorScreen'
 export { LoadingScreen } from './LoadingScreen'
+export { LicenseInputModal } from './LicenseInputModal'
 export {
   StandaloneAuthGate,
   SaaSAuthGate,
   type StandaloneAuthGateProps,
   type SaaSAuthGateProps,
 } from './AuthGate'
+
+// Machine identification for activation tracking
+export { getMachineHash, clearMachineHash, getCachedMachineHash } from './machineHash'

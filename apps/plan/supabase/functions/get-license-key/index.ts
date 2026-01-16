@@ -27,9 +27,21 @@ function hexToBytes(hex: string): Uint8Array {
 async function signPayload(payload: Record<string, unknown>): Promise<string> {
   const privateKeyBytes = hexToBytes(PRIVATE_KEY_HEX)
 
+  // Ed25519 PKCS8 prefix for 32-byte private key
+  const pkcs8Prefix = new Uint8Array([
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+    0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20
+  ])
+
+  // Combine prefix with private key bytes
+  const pkcs8Key = new Uint8Array(pkcs8Prefix.length + privateKeyBytes.length)
+  pkcs8Key.set(pkcs8Prefix)
+  pkcs8Key.set(privateKeyBytes, pkcs8Prefix.length)
+
+  // Import the private key in PKCS8 format
   const privateKey = await crypto.subtle.importKey(
-    'raw',
-    privateKeyBytes,
+    'pkcs8',
+    pkcs8Key,
     { name: 'Ed25519' },
     false,
     ['sign']
@@ -47,22 +59,21 @@ async function signPayload(payload: Record<string, unknown>): Promise<string> {
   return base64Encode(new Uint8Array(signature))
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
-      },
-    })
+    return new Response('ok', { headers: corsHeaders })
   }
 
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
 
@@ -73,7 +84,7 @@ serve(async (req) => {
     if (!licenseId || !clerkUserId) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -87,7 +98,7 @@ serve(async (req) => {
     if (licenseError || !license) {
       return new Response(
         JSON.stringify({ error: 'License not found' }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } }
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -95,7 +106,7 @@ serve(async (req) => {
     if (license.customer_id !== clerkUserId) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -103,7 +114,7 @@ serve(async (req) => {
     if (license.revoked_at) {
       return new Response(
         JSON.stringify({ error: 'License has been revoked' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -153,13 +164,11 @@ serve(async (req) => {
       }
     }
 
-    // Track license download
+    // Track license download (ignore errors if table doesn't exist)
     await supabase.from('license_downloads').insert({
       license_id: licenseId,
       user_id: clerkUserId,
       downloaded_at: new Date().toISOString(),
-    }).catch(() => {
-      // Ignore if table doesn't exist yet
     })
 
     return new Response(
@@ -171,22 +180,17 @@ serve(async (req) => {
       }),
       {
         status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     )
   } catch (error) {
     console.error('Error retrieving license key:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error)
     return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
+      JSON.stringify({ error: errorMessage, stack: error instanceof Error ? error.stack : undefined }),
       {
         status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     )
   }
