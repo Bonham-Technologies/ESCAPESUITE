@@ -3,6 +3,22 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Dashboard from './Dashboard'
 
+// Mock Supabase client (before other imports that depend on it)
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    functions: {
+      invoke: vi.fn(),
+    },
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          single: vi.fn(() => Promise.resolve({ data: null, error: null })),
+        })),
+      })),
+    })),
+  },
+}))
+
 // Mock hooks and dependencies
 vi.mock('@clerk/clerk-react', () => ({
   useUser: vi.fn(() => ({
