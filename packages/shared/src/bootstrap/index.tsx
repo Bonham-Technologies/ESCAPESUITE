@@ -7,8 +7,6 @@ import { Analytics } from '@vercel/analytics/react'
 export interface BootstrapConfig {
   /** The root element ID (default: 'root') */
   rootId?: string
-  /** Product name for Sentry tagging */
-  product: 'craft' | 'artist'
   /** The main App component */
   App: ComponentType
   /** Function to check if SaaS mode is enabled */
@@ -21,8 +19,6 @@ export interface BootstrapConfig {
   }>
   /** Dynamic import for Clerk key */
   importClerkKey: () => Promise<{ CLERK_KEY: string }>
-  /** Dynamic import for Sentry init */
-  importSentry: () => Promise<{ initSentry: (options: { product: string }) => void }>
 }
 
 /**
@@ -30,20 +26,18 @@ export interface BootstrapConfig {
  *
  * This handles:
  * - SaaS vs Standalone mode detection
- * - Dynamic loading of Clerk and Sentry (excludes from standalone bundle)
+ * - Dynamic loading of Clerk (excludes from standalone bundle)
  * - Proper auth gate wrapping
  * - Analytics integration
  */
 export async function bootstrapApp(config: BootstrapConfig): Promise<void> {
   const {
     rootId = 'root',
-    product,
     App,
     isSaaSMode,
     StandaloneAuthGate,
     importSaaSAuthGate,
     importClerkKey,
-    importSentry,
   } = config
 
   const rootElement = document.getElementById(rootId)
@@ -54,10 +48,6 @@ export async function bootstrapApp(config: BootstrapConfig): Promise<void> {
   const root = createRoot(rootElement)
 
   if (isSaaSMode()) {
-    // Initialize Sentry in SaaS mode only (excludes from standalone bundle)
-    const { initSentry } = await importSentry()
-    initSentry({ product })
-
     // Dynamically import Clerk to avoid bundling it in standalone builds
     const { ClerkProvider, useUser } = await import('@clerk/clerk-react')
     const { SaaSAuthGate } = await importSaaSAuthGate()

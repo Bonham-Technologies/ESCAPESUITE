@@ -57,8 +57,7 @@ src/
 │   ├── supabase.ts       # Supabase client
 │   ├── subscription.ts   # Subscription API helpers
 │   ├── organization.ts   # Organization/team API helpers
-│   ├── analytics.ts      # Vercel Analytics tracking
-│   └── sentry.ts         # Error monitoring integration
+│   └── analytics.ts      # Vercel Analytics tracking
 └── pages/
     ├── Home.tsx          # Landing page with pricing overview
     ├── Dashboard.tsx     # Protected dashboard with tool launchers & teams
