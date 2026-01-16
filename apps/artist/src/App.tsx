@@ -15,6 +15,7 @@ import { saveSessionState, getSessionState, clearSessionState, getVideo, getThum
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
+import { isStandaloneMode } from './auth';
 import styles from './App.module.css';
 
 // Auto-save debounce delay (milliseconds)
@@ -562,9 +563,11 @@ function App() {
       {/* Header */}
       <header className={styles.header}>
         <div className={styles.headerLeft}>
-          <a href="/dashboard" className={styles.dashboardLink} title="Back to Dashboard">
-            ← Dashboard
-          </a>
+          {!isStandaloneMode() && (
+            <a href="/dashboard" className={styles.dashboardLink} title="Back to Dashboard">
+              ← Dashboard
+            </a>
+          )}
           <h1 className={styles.logo}>ESCAPEARTIST</h1>
         </div>
 
