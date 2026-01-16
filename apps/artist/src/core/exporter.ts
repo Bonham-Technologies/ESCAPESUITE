@@ -88,6 +88,25 @@ function getActiveTransition(clips: Clip[], tracks: Track[], time: number): Tran
 
 type ProgressCallback = (progress: ExportProgress) => void;
 
+/**
+ * Error thrown when export is cancelled by user
+ */
+export class ExportAbortedError extends Error {
+  constructor() {
+    super('Export was cancelled');
+    this.name = 'ExportAbortedError';
+  }
+}
+
+/**
+ * Check if abort was requested and throw if so
+ */
+function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new ExportAbortedError();
+  }
+}
+
 // Map blend modes to canvas globalCompositeOperation
 const blendModeToCanvas: Record<BlendMode, GlobalCompositeOperation> = {
   normal: 'source-over',
@@ -1084,7 +1103,8 @@ export async function exportToWebM(
   options: ExportOptions,
   onProgress: ProgressCallback,
   tracks?: Track[],
-  watermark?: WatermarkConfig | null
+  watermark?: WatermarkConfig | null,
+  signal?: AbortSignal
 ): Promise<Blob> {
   if (!isWebMExportSupported()) {
     throw new Error('WebM export requires WebCodecs API (Chrome/Edge)');
@@ -1093,6 +1113,9 @@ export async function exportToWebM(
   if (clips.length === 0) {
     throw new Error('No clips to export');
   }
+
+  // Check for early abort
+  checkAborted(signal);
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
 
@@ -1300,80 +1323,95 @@ export async function exportToWebM(
   // Process frames using requestAnimationFrame for smooth timing
   const exportStartTime = performance.now();
 
-  for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-    const currentTime = frameIndex / frameRate;
+  // Helper to clean up resources on abort or completion
+  const cleanup = () => {
+    videoElements.forEach((v) => {
+      v.pause();
+      URL.revokeObjectURL(v.src);
+    });
+    imageElements.forEach((img) => {
+      URL.revokeObjectURL(img.src);
+    });
+  };
 
-    // Check for active transition
-    const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
+  try {
+    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+      // Check for abort at start of each frame
+      checkAborted(signal);
 
-    // Get all clips at current time
-    const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
+      const currentTime = frameIndex / frameRate;
 
-    // Clear canvas to black
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, width, height);
+      // Check for active transition
+      const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
 
-    // Separate media clips from overlay clips
-    const mediaClips: typeof activeClips = [];
-    const overlayClips: typeof activeClips = [];
+      // Get all clips at current time
+      const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
 
-    for (const clipData of activeClips) {
-      if (clipData.clip.overlayType) {
-        overlayClips.push(clipData);
-      } else {
-        mediaClips.push(clipData);
-      }
-    }
+      // Clear canvas to black
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
 
-    // Sync all active videos to their target times
-    const syncPromises: Promise<void>[] = [];
-    const activeVideoIds = new Set<string>();
+      // Separate media clips from overlay clips
+      const mediaClips: typeof activeClips = [];
+      const overlayClips: typeof activeClips = [];
 
-    for (const { clip, clipTime } of mediaClips) {
-      const video = videoElements.get(clip.sourceVideoId);
-      if (!video) continue;
-
-      const sourceTime = clip.startTime + clipTime;
-      activeVideoIds.add(clip.sourceVideoId);
-      syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
-    }
-
-    // Also sync transition clips
-    if (activeTransition) {
-      const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
-      if (incomingVideo) {
-        const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
-        const incomingClipTime = currentTime - clipEnd;
-        const sourceTime = incomingClipTime >= 0
-          ? activeTransition.incomingClip.startTime + incomingClipTime
-          : activeTransition.incomingClip.startTime;
-        activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
-        syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
-      }
-    }
-
-    // Pause videos that are no longer active
-    for (const [sourceId, video] of videoElements) {
-      if (!activeVideoIds.has(sourceId)) {
-        const state = videoPlaybackState.get(sourceId)!;
-        if (state.playing) {
-          video.pause();
-          state.playing = false;
+      for (const clipData of activeClips) {
+        if (clipData.clip.overlayType) {
+          overlayClips.push(clipData);
+        } else {
+          mediaClips.push(clipData);
         }
       }
-    }
 
-    await Promise.all(syncPromises);
+      // Sync all active videos to their target times
+      const syncPromises: Promise<void>[] = [];
+      const activeVideoIds = new Set<string>();
 
-    // Wait for the real-time frame interval to maintain proper pacing
-    const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
-    const now = performance.now();
-    if (now < targetRealTime) {
-      await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
-    }
+      for (const { clip, clipTime } of mediaClips) {
+        const video = videoElements.get(clip.sourceVideoId);
+        if (!video) continue;
 
-    // Helper to calculate clip time
-    const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
+        const sourceTime = clip.startTime + clipTime;
+        activeVideoIds.add(clip.sourceVideoId);
+        syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
+      }
+
+      // Also sync transition clips
+      if (activeTransition) {
+        const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
+        if (incomingVideo) {
+          const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
+          const incomingClipTime = currentTime - clipEnd;
+          const sourceTime = incomingClipTime >= 0
+            ? activeTransition.incomingClip.startTime + incomingClipTime
+            : activeTransition.incomingClip.startTime;
+          activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
+          syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
+        }
+      }
+
+      // Pause videos that are no longer active
+      for (const [sourceId, video] of videoElements) {
+        if (!activeVideoIds.has(sourceId)) {
+          const state = videoPlaybackState.get(sourceId)!;
+          if (state.playing) {
+            video.pause();
+            state.playing = false;
+          }
+        }
+      }
+
+      await Promise.all(syncPromises);
+
+      // Wait for the real-time frame interval to maintain proper pacing
+      const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
+      const now = performance.now();
+      if (now < targetRealTime) {
+        await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
+      }
+
+      // Helper to calculate clip time
+      const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
 
     // Draw each media clip (bottom to top by track index)
     for (const { clip } of mediaClips) {
@@ -1490,76 +1528,94 @@ export async function exportToWebM(
       // Yield to prevent UI blocking
       await new Promise(resolve => setTimeout(resolve, 0));
     }
-  }
-
-  // Encode audio in chunks if available
-  if (audioEncoder && audioData) {
-    onProgress({ phase: 'encoding', progress: 89, message: 'Encoding audio...' });
-
-    const samplesPerChunk = sampleRate; // 1 second chunks
-    const totalSamples = audioData.length / 2; // audioData is interleaved stereo
-    const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
-
-    for (let i = 0; i < totalChunks; i++) {
-      const startSample = i * samplesPerChunk;
-      const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
-      const chunkSamples = endSample - startSample;
-
-      // Create planar audio data (left channel first, then right channel)
-      const chunkData = new Float32Array(chunkSamples * 2);
-
-      // Left channel (first half)
-      for (let s = 0; s < chunkSamples; s++) {
-        chunkData[s] = audioData[(startSample + s) * 2]; // Left from interleaved
-      }
-      // Right channel (second half)
-      for (let s = 0; s < chunkSamples; s++) {
-        chunkData[chunkSamples + s] = audioData[(startSample + s) * 2 + 1]; // Right from interleaved
-      }
-
-      const audioDataObj = new AudioData({
-        format: 'f32-planar',
-        sampleRate,
-        numberOfFrames: chunkSamples,
-        numberOfChannels: 2,
-        timestamp: Math.round((startSample / sampleRate) * 1_000_000),
-        data: chunkData,
-      });
-
-      audioEncoder.encode(audioDataObj);
-      audioDataObj.close();
     }
+
+    // Encode audio in chunks if available
+    if (audioEncoder && audioData) {
+      onProgress({ phase: 'encoding', progress: 89, message: 'Encoding audio...' });
+
+      const samplesPerChunk = sampleRate; // 1 second chunks
+      const totalSamples = audioData.length / 2; // audioData is interleaved stereo
+      const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
+
+      for (let i = 0; i < totalChunks; i++) {
+        // Check for abort during audio encoding
+        checkAborted(signal);
+
+        const startSample = i * samplesPerChunk;
+        const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
+        const chunkSamples = endSample - startSample;
+
+        // Create planar audio data (left channel first, then right channel)
+        const chunkData = new Float32Array(chunkSamples * 2);
+
+        // Left channel (first half)
+        for (let s = 0; s < chunkSamples; s++) {
+          chunkData[s] = audioData[(startSample + s) * 2]; // Left from interleaved
+        }
+        // Right channel (second half)
+        for (let s = 0; s < chunkSamples; s++) {
+          chunkData[chunkSamples + s] = audioData[(startSample + s) * 2 + 1]; // Right from interleaved
+        }
+
+        const audioDataObj = new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: chunkSamples,
+          numberOfChannels: 2,
+          timestamp: Math.round((startSample / sampleRate) * 1_000_000),
+          data: chunkData,
+        });
+
+        audioEncoder.encode(audioDataObj);
+        audioDataObj.close();
+      }
+    }
+
+    // Flush and finalize
+    onProgress({ phase: 'muxing', progress: 92, message: 'Finalizing WebM...' });
+
+    await videoEncoder.flush();
+    videoEncoder.close();
+
+    if (audioEncoder) {
+      await audioEncoder.flush();
+      audioEncoder.close();
+    }
+
+    await output.finalize();
+
+    // Clean up media elements
+    cleanup();
+
+    onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
+
+    // Get the final buffer
+    const buffer = target.buffer;
+    if (!buffer) {
+      throw new Error('Export failed: no data was written to buffer');
+    }
+    return new Blob([buffer], { type: 'video/webm' });
+  } catch (error) {
+    // Clean up resources on error
+    cleanup();
+
+    // Close encoders if they exist
+    try {
+      if (videoEncoder.state !== 'closed') {
+        videoEncoder.close();
+      }
+    } catch { /* ignore */ }
+
+    try {
+      if (audioEncoder && audioEncoder.state !== 'closed') {
+        audioEncoder.close();
+      }
+    } catch { /* ignore */ }
+
+    // Re-throw the error (including ExportAbortedError)
+    throw error;
   }
-
-  // Flush and finalize
-  onProgress({ phase: 'muxing', progress: 92, message: 'Finalizing WebM...' });
-
-  await videoEncoder.flush();
-  videoEncoder.close();
-
-  if (audioEncoder) {
-    await audioEncoder.flush();
-    audioEncoder.close();
-  }
-
-  await output.finalize();
-
-  // Clean up media elements
-  videoElements.forEach((v) => {
-    URL.revokeObjectURL(v.src);
-  });
-  imageElements.forEach((img) => {
-    URL.revokeObjectURL(img.src);
-  });
-
-  onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
-
-  // Get the final buffer
-  const buffer = target.buffer;
-  if (!buffer) {
-    throw new Error('Export failed: no data was written to buffer');
-  }
-  return new Blob([buffer], { type: 'video/webm' });
 }
 
 /**
@@ -1572,7 +1628,8 @@ export async function exportToMP4(
   options: ExportOptions,
   onProgress: ProgressCallback,
   tracks?: Track[],
-  watermark?: WatermarkConfig | null
+  watermark?: WatermarkConfig | null,
+  signal?: AbortSignal
 ): Promise<Blob> {
   if (!isMP4ExportSupported()) {
     throw new Error('MP4 export requires WebCodecs API (Chrome/Edge)');
@@ -1581,6 +1638,9 @@ export async function exportToMP4(
   if (clips.length === 0) {
     throw new Error('No clips to export');
   }
+
+  // Check for early abort
+  checkAborted(signal);
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
 
@@ -1808,35 +1868,50 @@ export async function exportToMP4(
   // Process frames using requestAnimationFrame for smooth timing
   const exportStartTime = performance.now();
 
+  // Helper to clean up resources on abort or completion
+  const cleanup = () => {
+    videoElements.forEach((v) => {
+      v.pause();
+      URL.revokeObjectURL(v.src);
+    });
+    imageElements.forEach((img) => {
+      URL.revokeObjectURL(img.src);
+    });
+  };
+
   onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
 
-  for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-    const currentTime = frameIndex / frameRate;
+  try {
+    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+      // Check for abort at start of each frame
+      checkAborted(signal);
 
-    // Check for active transition
-    const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
+      const currentTime = frameIndex / frameRate;
 
-    // Get all clips at current time
-    const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
+      // Check for active transition
+      const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
 
-    // Clear canvas to black
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, width, height);
+      // Get all clips at current time
+      const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
 
-    // Separate media clips from overlay clips
-    const mediaClips: typeof activeClips = [];
-    const overlayClips: typeof activeClips = [];
+      // Clear canvas to black
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
 
-    for (const clipData of activeClips) {
-      if (clipData.clip.overlayType) {
-        overlayClips.push(clipData);
-      } else {
-        mediaClips.push(clipData);
+      // Separate media clips from overlay clips
+      const mediaClips: typeof activeClips = [];
+      const overlayClips: typeof activeClips = [];
+
+      for (const clipData of activeClips) {
+        if (clipData.clip.overlayType) {
+          overlayClips.push(clipData);
+        } else {
+          mediaClips.push(clipData);
+        }
       }
-    }
 
-    // Sync all active videos to their target times
-    const syncPromises: Promise<void>[] = [];
+      // Sync all active videos to their target times
+      const syncPromises: Promise<void>[] = [];
     const activeVideoIds = new Set<string>();
 
     for (const { clip, clipTime } of mediaClips) {
@@ -2000,74 +2075,92 @@ export async function exportToMP4(
       // Yield to prevent UI blocking
       await new Promise(resolve => setTimeout(resolve, 0));
     }
-  }
-
-  // Encode audio in chunks if available
-  if (audioEncoder && audioData) {
-    onProgress({ phase: 'encoding', progress: 89, message: 'Encoding audio...' });
-
-    const samplesPerChunk = sampleRate; // 1 second chunks
-    const totalSamples = audioData.length / 2; // audioData is interleaved stereo
-    const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
-
-    for (let i = 0; i < totalChunks; i++) {
-      const startSample = i * samplesPerChunk;
-      const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
-      const chunkSamples = endSample - startSample;
-
-      // Create planar audio data (left channel first, then right channel)
-      const chunkData = new Float32Array(chunkSamples * 2);
-
-      // Left channel (first half)
-      for (let s = 0; s < chunkSamples; s++) {
-        chunkData[s] = audioData[(startSample + s) * 2]; // Left from interleaved
-      }
-      // Right channel (second half)
-      for (let s = 0; s < chunkSamples; s++) {
-        chunkData[chunkSamples + s] = audioData[(startSample + s) * 2 + 1]; // Right from interleaved
-      }
-
-      const audioDataObj = new AudioData({
-        format: 'f32-planar',
-        sampleRate,
-        numberOfFrames: chunkSamples,
-        numberOfChannels: 2,
-        timestamp: Math.round((startSample / sampleRate) * 1_000_000),
-        data: chunkData,
-      });
-
-      audioEncoder.encode(audioDataObj);
-      audioDataObj.close();
     }
+
+    // Encode audio in chunks if available
+    if (audioEncoder && audioData) {
+      onProgress({ phase: 'encoding', progress: 89, message: 'Encoding audio...' });
+
+      const samplesPerChunk = sampleRate; // 1 second chunks
+      const totalSamples = audioData.length / 2; // audioData is interleaved stereo
+      const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
+
+      for (let i = 0; i < totalChunks; i++) {
+        // Check for abort during audio encoding
+        checkAborted(signal);
+
+        const startSample = i * samplesPerChunk;
+        const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
+        const chunkSamples = endSample - startSample;
+
+        // Create planar audio data (left channel first, then right channel)
+        const chunkData = new Float32Array(chunkSamples * 2);
+
+        // Left channel (first half)
+        for (let s = 0; s < chunkSamples; s++) {
+          chunkData[s] = audioData[(startSample + s) * 2]; // Left from interleaved
+        }
+        // Right channel (second half)
+        for (let s = 0; s < chunkSamples; s++) {
+          chunkData[chunkSamples + s] = audioData[(startSample + s) * 2 + 1]; // Right from interleaved
+        }
+
+        const audioDataObj = new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: chunkSamples,
+          numberOfChannels: 2,
+          timestamp: Math.round((startSample / sampleRate) * 1_000_000),
+          data: chunkData,
+        });
+
+        audioEncoder.encode(audioDataObj);
+        audioDataObj.close();
+      }
+    }
+
+    // Flush and finalize
+    onProgress({ phase: 'muxing', progress: 92, message: 'Finalizing MP4...' });
+
+    await videoEncoder.flush();
+    videoEncoder.close();
+
+    if (audioEncoder) {
+      await audioEncoder.flush();
+      audioEncoder.close();
+    }
+
+    await output.finalize();
+
+    // Clean up media elements
+    cleanup();
+
+    onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
+
+    // Get the final buffer
+    const buffer = target.buffer;
+    if (!buffer) {
+      throw new Error('Export failed: no data was written to buffer');
+    }
+    return new Blob([buffer], { type: 'video/mp4' });
+  } catch (error) {
+    // Clean up resources on error
+    cleanup();
+
+    // Close encoders if they exist
+    try {
+      if (videoEncoder.state !== 'closed') {
+        videoEncoder.close();
+      }
+    } catch { /* ignore */ }
+
+    try {
+      if (audioEncoder && audioEncoder.state !== 'closed') {
+        audioEncoder.close();
+      }
+    } catch { /* ignore */ }
+
+    // Re-throw the error (including ExportAbortedError)
+    throw error;
   }
-
-  // Flush and finalize
-  onProgress({ phase: 'muxing', progress: 92, message: 'Finalizing MP4...' });
-
-  await videoEncoder.flush();
-  videoEncoder.close();
-
-  if (audioEncoder) {
-    await audioEncoder.flush();
-    audioEncoder.close();
-  }
-
-  await output.finalize();
-
-  // Clean up media elements
-  videoElements.forEach((v) => {
-    URL.revokeObjectURL(v.src);
-  });
-  imageElements.forEach((img) => {
-    URL.revokeObjectURL(img.src);
-  });
-
-  onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
-
-  // Get the final buffer
-  const buffer = target.buffer;
-  if (!buffer) {
-    throw new Error('Export failed: no data was written to buffer');
-  }
-  return new Blob([buffer], { type: 'video/mp4' });
 }
