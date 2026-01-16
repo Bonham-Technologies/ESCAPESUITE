@@ -44,8 +44,8 @@ const { mockExportToWebM, mockExportToMP4, MockExportAbortedError } = vi.hoisted
 })
 
 vi.mock('../../core/exporter', () => ({
-  exportToWebM: (...args: unknown[]) => mockExportToWebM(...args),
-  exportToMP4: (...args: unknown[]) => mockExportToMP4(...args),
+  exportToWebM: mockExportToWebM,
+  exportToMP4: mockExportToMP4,
   isMP4ExportSupported: vi.fn(() => true),
   ExportAbortedError: MockExportAbortedError,
 }))

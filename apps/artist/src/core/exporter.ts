@@ -20,6 +20,8 @@ import { getAnimatedValuesCached, clearAnimationCache, getAnimatedVolume } from 
 import { drawWatermark, type WatermarkConfig } from '../utils/watermark';
 import { getWorkerSupport } from '../utils/workerSupport';
 import type { WorkerRequest, WorkerResponse, AudioClipMeta } from '../workers/exportWorker';
+// Import worker using Vite's ?worker syntax to avoid MIME type issues with .ts extension
+import ExportWorker from '../workers/exportWorker?worker';
 
 // Helper to get transition info between clips
 interface TransitionInfo {
@@ -982,9 +984,8 @@ async function extractAndMixAudioWithWorker(
   }
 
   try {
-    // Create worker from bundled code
-    const workerUrl = new URL('../workers/exportWorker.ts', import.meta.url);
-    const worker = new Worker(workerUrl, { type: 'module' });
+    // Create worker using Vite's bundled worker
+    const worker = new ExportWorker();
 
     // Collect audio blobs and metadata
     const audioBlobs: ArrayBuffer[] = [];
