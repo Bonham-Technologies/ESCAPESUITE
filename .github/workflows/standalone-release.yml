@@ -1,22 +1,12 @@
 name: Standalone Release
 
+# This workflow runs AFTER CI passes to deploy standalone builds
+# It downloads artifacts from the CI workflow instead of rebuilding
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/craft/**'
-      - 'apps/artist/**'
-      - 'packages/shared/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'apps/craft/**'
-      - 'apps/artist/**'
-      - 'packages/shared/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main, dev]
 
 env:
   # Supabase project URLs
@@ -26,129 +16,145 @@ env:
   SUPABASE_SERVICE_KEY_DEV: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
 
 jobs:
-  build-standalone:
-    name: Build Standalone Apps
+  # Prepare artifacts from CI workflow
+  prepare:
+    name: Prepare Standalone Artifacts
     runs-on: ubuntu-latest
+    # Only run if CI workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     outputs:
       version: ${{ steps.version.outputs.version }}
       craft_size: ${{ steps.sizes.outputs.craft }}
       artist_size: ${{ steps.sizes.outputs.artist }}
+      is_pr: ${{ steps.check.outputs.is_pr }}
+      pr_number: ${{ steps.check.outputs.pr_number }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Check if PR or push
+        id: check
+        run: |
+          if [ "${{ github.event.workflow_run.event }}" = "pull_request" ]; then
+            echo "is_pr=true" >> $GITHUB_OUTPUT
+            # Extract PR number from the workflow run
+            echo "pr_number=${{ github.event.workflow_run.pull_requests[0].number }}" >> $GITHUB_OUTPUT
+          else
+            echo "is_pr=false" >> $GITHUB_OUTPUT
+            echo "pr_number=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download standalone artifacts from CI
+        uses: actions/download-artifact@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          name: standalone-builds
+          path: ./artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine version
         id: version
         run: |
-          # Use package.json version + short SHA for unique versioning
           CRAFT_VERSION=$(node -p "require('./apps/craft/package.json').version")
-          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            VERSION="${CRAFT_VERSION}-pr${{ github.event.pull_request.number }}"
+          if [ "${{ steps.check.outputs.is_pr }}" = "true" ]; then
+            VERSION="${CRAFT_VERSION}-pr${{ steps.check.outputs.pr_number }}"
           else
             VERSION="${CRAFT_VERSION}"
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Building version: ${VERSION}"
+          echo "Version: ${VERSION}"
 
-      - name: Build ESCAPECRAFT Standalone
-        run: pnpm build:standalone
-        working-directory: apps/craft
-        env:
-          VITE_APP_VERSION: ${{ steps.version.outputs.version }}
-
-      - name: Build ESCAPEARTIST Standalone
-        run: pnpm build:standalone
-        working-directory: apps/artist
-        env:
-          VITE_APP_VERSION: ${{ steps.version.outputs.version }}
-
-      - name: Get file sizes
+      - name: Get file sizes and prepare release artifacts
         id: sizes
         run: |
-          CRAFT_SIZE=$(du -h apps/craft/dist/index.html | cut -f1)
-          ARTIST_SIZE=$(du -h apps/artist/dist/index.html | cut -f1)
-          echo "craft=~${CRAFT_SIZE}" >> $GITHUB_OUTPUT
-          echo "artist=~${ARTIST_SIZE}" >> $GITHUB_OUTPUT
+          # Move artifacts to expected structure
+          mkdir -p dist/craft dist/artist
 
-      - name: Rename build artifacts
-        run: |
+          # Find the standalone HTML files from CI artifacts
+          CRAFT_HTML=$(find ./artifacts -name "index.html" -path "*/craft/*" | head -1)
+          ARTIST_HTML=$(find ./artifacts -name "index.html" -path "*/artist/*" | head -1)
+
+          if [ -z "$CRAFT_HTML" ]; then
+            echo "Error: Could not find ESCAPECRAFT standalone build"
+            exit 1
+          fi
+          if [ -z "$ARTIST_HTML" ]; then
+            echo "Error: Could not find ESCAPEARTIST standalone build"
+            exit 1
+          fi
+
           VERSION="${{ steps.version.outputs.version }}"
 
           # Copy to versioned names
-          cp apps/craft/dist/index.html "apps/craft/dist/ESCAPECRAFT-${VERSION}.html"
-          cp apps/artist/dist/index.html "apps/artist/dist/ESCAPEARTIST-${VERSION}.html"
+          cp "$CRAFT_HTML" "dist/craft/ESCAPECRAFT-${VERSION}.html"
+          cp "$ARTIST_HTML" "dist/artist/ESCAPEARTIST-${VERSION}.html"
 
           # Copy to latest names
-          cp apps/craft/dist/index.html "apps/craft/dist/ESCAPECRAFT-latest.html"
-          cp apps/artist/dist/index.html "apps/artist/dist/ESCAPEARTIST-latest.html"
+          cp "$CRAFT_HTML" "dist/craft/ESCAPECRAFT-latest.html"
+          cp "$ARTIST_HTML" "dist/artist/ESCAPEARTIST-latest.html"
+
+          # Get sizes
+          CRAFT_SIZE=$(du -h "dist/craft/ESCAPECRAFT-${VERSION}.html" | cut -f1)
+          ARTIST_SIZE=$(du -h "dist/artist/ESCAPEARTIST-${VERSION}.html" | cut -f1)
+          echo "craft=~${CRAFT_SIZE}" >> $GITHUB_OUTPUT
+          echo "artist=~${ARTIST_SIZE}" >> $GITHUB_OUTPUT
+
+          echo "ESCAPECRAFT size: ${CRAFT_SIZE}"
+          echo "ESCAPEARTIST size: ${ARTIST_SIZE}"
 
       - name: Generate version.json
         run: |
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          cat > version.json <<EOF
+          cat > dist/version.json <<EOF
           {
             "craft": {
               "version": "${{ steps.version.outputs.version }}",
               "fileSize": "${{ steps.sizes.outputs.craft }}",
               "buildDate": "${BUILD_DATE}",
-              "commit": "${{ github.sha }}"
+              "commit": "${{ github.event.workflow_run.head_sha }}"
             },
             "artist": {
               "version": "${{ steps.version.outputs.version }}",
               "fileSize": "${{ steps.sizes.outputs.artist }}",
               "buildDate": "${BUILD_DATE}",
-              "commit": "${{ github.sha }}"
+              "commit": "${{ github.event.workflow_run.head_sha }}"
             }
           }
           EOF
-          cat version.json
+          cat dist/version.json
 
-      - name: Upload build artifacts
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: standalone-builds
-          path: |
-            apps/craft/dist/ESCAPECRAFT-*.html
-            apps/artist/dist/ESCAPEARTIST-*.html
-            version.json
+          name: standalone-release
+          path: dist/
           retention-days: 30
 
   deploy-dev:
     name: Deploy to Dev Storage
-    needs: build-standalone
-    if: github.event_name == 'pull_request'
+    needs: prepare
+    if: needs.prepare.outputs.is_pr == 'true'
     runs-on: ubuntu-latest
     environment: development
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: standalone-builds
+          name: standalone-release
           path: ./dist
 
       - name: Upload to Supabase Storage (Dev)
         run: |
-          VERSION="${{ needs.build-standalone.outputs.version }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
 
           # Upload versioned files
-          for file in dist/apps/craft/dist/ESCAPECRAFT-*.html dist/apps/artist/dist/ESCAPEARTIST-*.html; do
+          for file in dist/craft/ESCAPECRAFT-*.html dist/artist/ESCAPEARTIST-*.html; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
               echo "Uploading $filename to dev storage..."
@@ -174,9 +180,10 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const version = '${{ needs.build-standalone.outputs.version }}';
-            const craftSize = '${{ needs.build-standalone.outputs.craft_size }}';
-            const artistSize = '${{ needs.build-standalone.outputs.artist_size }}';
+            const version = '${{ needs.prepare.outputs.version }}';
+            const craftSize = '${{ needs.prepare.outputs.craft_size }}';
+            const artistSize = '${{ needs.prepare.outputs.artist_size }}';
+            const prNumber = '${{ needs.prepare.outputs.pr_number }}';
             const devUrl = process.env.SUPABASE_URL_DEV;
 
             const body = [
@@ -187,11 +194,13 @@ jobs:
               `| ESCAPECRAFT | \`${version}\` | ${craftSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |`,
               `| ESCAPEARTIST | \`${version}\` | ${artistSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |`,
               '',
-              '> These are dev preview builds. They will be promoted to production when the PR is merged.'
+              '> These are dev preview builds. They will be promoted to production when the PR is merged.',
+              '',
+              '_✅ Deployed after CI passed_'
             ].join('\n');
 
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: parseInt(prNumber),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: body
@@ -199,24 +208,27 @@ jobs:
 
   deploy-prod:
     name: Deploy to Production Storage
-    needs: build-standalone
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: prepare
+    # Deploy to prod when CI passes for a push to main (not a PR)
+    if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: write
 
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: standalone-builds
+          name: standalone-release
           path: ./dist
 
       - name: Upload to Supabase Storage (Production)
         run: |
-          VERSION="${{ needs.build-standalone.outputs.version }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
 
           # Upload versioned files (for release history)
-          for file in dist/apps/craft/dist/ESCAPECRAFT-*.html dist/apps/artist/dist/ESCAPEARTIST-*.html; do
+          for file in dist/craft/ESCAPECRAFT-*.html dist/artist/ESCAPEARTIST-*.html; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
               echo "Uploading $filename to production storage..."
@@ -242,9 +254,10 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const version = '${{ needs.build-standalone.outputs.version }}';
-            const craftSize = '${{ needs.build-standalone.outputs.craft_size }}';
-            const artistSize = '${{ needs.build-standalone.outputs.artist_size }}';
+            const version = '${{ needs.prepare.outputs.version }}';
+            const craftSize = '${{ needs.prepare.outputs.craft_size }}';
+            const artistSize = '${{ needs.prepare.outputs.artist_size }}';
+            const headSha = '${{ github.event.workflow_run.head_sha }}';
             const prodUrl = process.env.SUPABASE_URL_PROD;
 
             // Check if release already exists
@@ -265,7 +278,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: `refs/tags/v${version}`,
-              sha: context.sha
+              sha: headSha
             });
 
             // Create release body
@@ -282,7 +295,9 @@ jobs:
               `- [ESCAPEARTIST-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-latest.html)`,
               '',
               '### Changelog',
-              'See commit history for changes in this release.'
+              'See commit history for changes in this release.',
+              '',
+              '_✅ Released after CI passed_'
             ].join('\n');
 
             // Create release
@@ -298,8 +313,8 @@ jobs:
 
   cleanup-old-releases:
     name: Cleanup Old Dev Builds
-    needs: deploy-dev
-    if: github.event_name == 'pull_request'
+    needs: [prepare, deploy-dev]
+    if: needs.prepare.outputs.is_pr == 'true'
     runs-on: ubuntu-latest
 
     steps:

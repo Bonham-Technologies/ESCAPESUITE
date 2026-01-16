@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useEditorStore } from '../../store/projectStore';
-import { exportToWebM, exportToMP4, isMP4ExportSupported } from '../../core/exporter';
+import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError } from '../../core/exporter';
 import { analytics } from '../../utils/analytics';
 import { useAuth } from '../../auth';
 import { defaultWatermarkConfig } from '../../utils/watermark';
@@ -27,6 +27,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // AbortController for cancelling exports
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const mp4Supported = isMP4ExportSupported();
 
   const handleExport = useCallback(async () => {
@@ -37,6 +40,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
     setError(null);
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
+
+    // Create new AbortController for this export
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     const format = options.format === 'mp4' && mp4Supported ? 'mp4' : 'webm';
     analytics.exportStarted(format);
@@ -51,10 +58,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       const watermark = isTrial ? defaultWatermarkConfig : null;
 
       if (options.format === 'mp4' && mp4Supported) {
-        blob = await exportToMP4(clips, sourceVideos, options, onProgress, tracks, watermark);
+        blob = await exportToMP4(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal);
         extension = 'mp4';
       } else {
-        blob = await exportToWebM(clips, sourceVideos, options, onProgress, tracks, watermark);
+        blob = await exportToWebM(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal);
         extension = 'webm';
       }
 
@@ -83,14 +90,27 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         setProgress(null);
       }, 2000);
     } catch (err) {
+      // Don't show error for user-initiated cancellation
+      if (err instanceof ExportAbortedError) {
+        setProgress(null);
+        return;
+      }
+
       console.error('Export failed:', err);
       setError(err instanceof Error ? err.message : 'Export failed');
       setProgress(null);
+    } finally {
+      // Clear the abort controller reference
+      abortControllerRef.current = null;
     }
   }, [clips, tracks, sourceVideos, options, projectName, mp4Supported, onClose, isTrial]);
 
   const handleCancel = useCallback(() => {
-    // TODO: Implement export cancellation
+    // Abort any in-progress export
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setProgress(null);
     onClose();
   }, [onClose]);

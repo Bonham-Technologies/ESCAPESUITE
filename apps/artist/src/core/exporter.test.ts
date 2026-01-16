@@ -6,6 +6,7 @@ import {
   getSeekPositionsCount,
   exportToWebM,
   exportToMP4,
+  ExportAbortedError,
 } from './exporter'
 import type { Clip, SourceVideo, ExportOptions, Track } from '../store/types'
 
@@ -718,6 +719,120 @@ describe('exporter - audio mixing', () => {
     // Should be unchanged
     for (let i = 0; i < samples.length; i++) {
       expect(samples[i]).toBe(original[i])
+    }
+  })
+})
+
+describe('ExportAbortedError', () => {
+  it('has correct name property', () => {
+    const error = new ExportAbortedError()
+    expect(error.name).toBe('ExportAbortedError')
+  })
+
+  it('has correct message', () => {
+    const error = new ExportAbortedError()
+    expect(error.message).toBe('Export was cancelled')
+  })
+
+  it('is an instance of Error', () => {
+    const error = new ExportAbortedError()
+    expect(error).toBeInstanceOf(Error)
+  })
+
+  it('can be caught and identified', () => {
+    try {
+      throw new ExportAbortedError()
+    } catch (e) {
+      expect(e).toBeInstanceOf(ExportAbortedError)
+      expect((e as ExportAbortedError).name).toBe('ExportAbortedError')
+    }
+  })
+})
+
+describe('exporter - abort signal handling', () => {
+  const createTestClip = (): Clip => ({
+    id: 'clip1',
+    sourceVideoId: 'video1',
+    name: 'Clip 1',
+    trackId: 'track1',
+    startTime: 0,
+    endTime: 5,
+    duration: 5,
+    timelinePosition: 0,
+    blendMode: 'normal',
+    transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+    effects: { blur: 0 },
+    transition: { type: 'none', duration: 0 },
+  })
+
+  const createTestSourceVideo = (): SourceVideo => ({
+    id: 'video1',
+    name: 'test.mp4',
+    duration: 10,
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    mimeType: 'video/mp4',
+    size: 1000000,
+  })
+
+  const createTestOptions = (format: 'webm' | 'mp4'): ExportOptions => ({
+    format,
+    quality: 'medium',
+    resolution: 'original',
+  })
+
+  beforeEach(() => {
+    // Setup WebCodecs mocks
+    globalThis.VideoEncoder = vi.fn() as unknown as typeof VideoEncoder
+    globalThis.VideoDecoder = vi.fn() as unknown as typeof VideoDecoder
+    globalThis.VideoFrame = vi.fn() as unknown as typeof VideoFrame
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('exportToWebM throws ExportAbortedError when signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort() // Abort immediately
+
+    const clips = [createTestClip()]
+    const sourceVideos = [createTestSourceVideo()]
+    const options = createTestOptions('webm')
+
+    await expect(
+      exportToWebM(clips, sourceVideos, options, vi.fn(), undefined, undefined, controller.signal)
+    ).rejects.toThrow(ExportAbortedError)
+  })
+
+  it('exportToMP4 throws ExportAbortedError when signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort() // Abort immediately
+
+    const clips = [createTestClip()]
+    const sourceVideos = [createTestSourceVideo()]
+    const options = createTestOptions('mp4')
+
+    await expect(
+      exportToMP4(clips, sourceVideos, options, vi.fn(), undefined, undefined, controller.signal)
+    ).rejects.toThrow(ExportAbortedError)
+  })
+
+  it('ExportAbortedError message indicates cancellation', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    const clips = [createTestClip()]
+    const sourceVideos = [createTestSourceVideo()]
+    const options = createTestOptions('webm')
+
+    try {
+      await exportToWebM(clips, sourceVideos, options, vi.fn(), undefined, undefined, controller.signal)
+      expect.fail('Should have thrown')
+    } catch (e) {
+      expect(e).toBeInstanceOf(ExportAbortedError)
+      expect((e as Error).message).toBe('Export was cancelled')
     }
   })
 })

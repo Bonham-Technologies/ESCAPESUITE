@@ -27,11 +27,27 @@ vi.mock('../../store/projectStore', () => ({
   }),
 }))
 
-// Mock the exporter
+// Mock the exporter - use vi.hoisted for variables referenced in vi.mock
+const { mockExportToWebM, mockExportToMP4, MockExportAbortedError } = vi.hoisted(() => {
+  // Define mock class inside hoisted block
+  class MockExportAbortedError extends Error {
+    constructor() {
+      super('Export was cancelled')
+      this.name = 'ExportAbortedError'
+    }
+  }
+  return {
+    mockExportToWebM: vi.fn(() => Promise.resolve(new Blob())),
+    mockExportToMP4: vi.fn(() => Promise.resolve(new Blob())),
+    MockExportAbortedError,
+  }
+})
+
 vi.mock('../../core/exporter', () => ({
-  exportToWebM: vi.fn(() => Promise.resolve(new Blob())),
-  exportToMP4: vi.fn(() => Promise.resolve(new Blob())),
+  exportToWebM: mockExportToWebM,
+  exportToMP4: mockExportToMP4,
   isMP4ExportSupported: vi.fn(() => true),
+  ExportAbortedError: MockExportAbortedError,
 }))
 
 // Mock CSS modules
@@ -181,5 +197,70 @@ describe('ExportDialog', () => {
 
     const exportButton = screen.getByRole('button', { name: /export/i })
     expect(exportButton).not.toBeDisabled()
+  })
+
+  it('passes AbortSignal to export function when exporting', async () => {
+    // Create a long-running export that we can inspect
+    let capturedSignal: AbortSignal | undefined
+    mockExportToWebM.mockImplementation((...args: unknown[]) => {
+      // The signal is the 7th argument (index 6)
+      capturedSignal = args[6] as AbortSignal | undefined
+      return Promise.resolve(new Blob())
+    })
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    const exportButton = screen.getByRole('button', { name: /export/i })
+    fireEvent.click(exportButton)
+
+    // Wait for the export to be called
+    await vi.waitFor(() => {
+      expect(mockExportToWebM).toHaveBeenCalled()
+    })
+
+    // Verify AbortSignal was passed
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('does not show error message when export is cancelled by user', async () => {
+    // Simulate export being cancelled
+    mockExportToWebM.mockImplementation(() => {
+      return Promise.reject(new MockExportAbortedError())
+    })
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    const exportButton = screen.getByRole('button', { name: /export/i })
+    fireEvent.click(exportButton)
+
+    // Wait for the export to be called and rejected
+    await vi.waitFor(() => {
+      expect(mockExportToWebM).toHaveBeenCalled()
+    })
+
+    // Wait a tick for error handling
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    // Should NOT show error message for user-initiated cancellation
+    expect(screen.queryByText(/error/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument()
+  })
+
+  it('shows error message for non-cancellation errors', async () => {
+    // Simulate a real error (not cancellation)
+    mockExportToWebM.mockImplementation(() => {
+      return Promise.reject(new Error('Encoding failed'))
+    })
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    const exportButton = screen.getByRole('button', { name: /export/i })
+    fireEvent.click(exportButton)
+
+    // Wait for error to be displayed
+    await vi.waitFor(() => {
+      expect(screen.getByText(/encoding failed/i)).toBeInTheDocument()
+    })
   })
 })
