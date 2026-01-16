@@ -33,8 +33,8 @@ importers:
         specifier: ^8.0.3
         version: 8.0.3
       mediabunny:
-        specifier: ^1.27.3
-        version: 1.27.4
+        specifier: ^1.28.0
+        version: 1.28.0
       react:
         specifier: ^19.2.3
         version: 19.2.3
@@ -406,6 +406,10 @@ packages:
     resolution: {integrity: sha512-cjQ7ZlQ0Mv3b47hABuTevyTuYN4i+loJKGeV9flcCgIK37cCXRh+L1bd3iBHlynerhQ7BhCkn2BPbQUL+rGqFg==}
     engines: {node: '>=6.9.0'}
 
+  '@babel/code-frame@7.28.6':
+    resolution: {integrity: sha512-JYgintcMjRiCvS8mMECzaEn+m3PfoQiyqukOMCCVQtoJGYJw8j/8LBJEiqkHLkfwCcs74E3pbAUFNg7d9VNJ+Q==}
+    engines: {node: '>=6.9.0'}
+
   '@babel/compat-data@7.28.5':
     resolution: {integrity: sha512-6uFXyCayocRbqhZOB+6XcuZbkMNimwfVGFji8CTZnCzOHVGvDqzvitu1re2AU5LROliz7eQPhB8CpAMvnx9EjA==}
     engines: {node: '>=6.9.0'}
@@ -475,6 +479,10 @@ packages:
 
   '@babel/runtime@7.28.4':
     resolution: {integrity: sha512-Q/N6JNWvIvPnLDvjlE1OUBLPQHH6l3CltCEsHIujp45zQUSSh8K+gHnaEX45yAT1nyngnINhvWtzN+Nb9D8RAQ==}
+    engines: {node: '>=6.9.0'}
+
+  '@babel/runtime@7.28.6':
+    resolution: {integrity: sha512-05WQkdpL9COIMz4LjTxGpPNCdlpyimKppYNoJ5Di5EUObifl8t4tuLuUBBZEpoLYOmfvIWrsp9fCl0HoPRVTdA==}
     engines: {node: '>=6.9.0'}
 
   '@babel/template@7.27.2':
@@ -2094,8 +2102,8 @@ packages:
   mdn-data@2.12.2:
     resolution: {integrity: sha512-IEn+pegP1aManZuckezWCO+XZQDplx1366JoVhTpMpBB1sPey/SbveZQUosKiKiGYjg1wH4pMlNgXbCiYgihQA==}
 
-  mediabunny@1.27.4:
-    resolution: {integrity: sha512-j69K0yiXYMHyb5g4XyhYjbz1VpllRVyyDGF5lqYTsrdF0XoDRoGReoRvon9lnENv5yY5A5u+09dnqISwXvS86Q==}
+  mediabunny@1.28.0:
+    resolution: {integrity: sha512-D63nzvBRIBSUsRgaIfFugWCy2iOV5T/C6nHn2fW0aWqyRuSGzWsVMXzlNi3iCKieoA/WECYJg8oVGtUukpy3XQ==}
 
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
@@ -2848,6 +2856,12 @@ snapshots:
       js-tokens: 4.0.0
       picocolors: 1.1.1
 
+  '@babel/code-frame@7.28.6':
+    dependencies:
+      '@babel/helper-validator-identifier': 7.28.5
+      js-tokens: 4.0.0
+      picocolors: 1.1.1
+
   '@babel/compat-data@7.28.5': {}
 
   '@babel/core@7.28.5':
@@ -2932,6 +2946,8 @@ snapshots:
       '@babel/helper-plugin-utils': 7.27.1
 
   '@babel/runtime@7.28.4': {}
+
+  '@babel/runtime@7.28.6': {}
 
   '@babel/template@7.27.2':
     dependencies:
@@ -3518,8 +3534,8 @@ snapshots:
 
   '@testing-library/dom@10.4.1':
     dependencies:
-      '@babel/code-frame': 7.27.1
-      '@babel/runtime': 7.28.4
+      '@babel/code-frame': 7.28.6
+      '@babel/runtime': 7.28.6
       '@types/aria-query': 5.0.4
       aria-query: 5.3.0
       dom-accessibility-api: 0.5.16
@@ -4579,7 +4595,7 @@ snapshots:
 
   mdn-data@2.12.2: {}
 
-  mediabunny@1.27.4:
+  mediabunny@1.28.0:
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.11
       '@types/dom-webcodecs': 0.1.13
