@@ -171,7 +171,7 @@ jobs:
             --data-binary "@dist/version.json"
 
       - name: Comment on PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const version = '${{ needs.build-standalone.outputs.version }}';
@@ -237,7 +237,7 @@ jobs:
             --data-binary "@dist/version.json"
 
       - name: Create GitHub Release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const version = '${{ needs.build-standalone.outputs.version }}';

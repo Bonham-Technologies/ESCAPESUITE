@@ -318,7 +318,7 @@ jobs:
         run: pnpm install
 
       - name: Download standalone builds
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: standalone-builds
 
@@ -423,7 +423,7 @@ jobs:
 
       - name: Comment PR with deployment URL
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const url = '${{ steps.deploy.outputs.url }}';
