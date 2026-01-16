@@ -127,12 +127,15 @@ describe('exporter', () => {
       const clips: Clip[] = [{
         id: 'clip1',
         sourceVideoId: 'video1',
+        name: 'Clip 1',
         trackId: 'track1',
         startTime: 0,
         endTime: 5,
         duration: 5,
         timelinePosition: 0,
         blendMode: 'normal',
+        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+        effects: { blur: 0 },
         transition: { type: 'none', duration: 0 },
       }]
       const sourceVideos: SourceVideo[] = [{
@@ -141,6 +144,9 @@ describe('exporter', () => {
         duration: 10,
         width: 1920,
         height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
       }]
       const options: ExportOptions = {
         format: 'webm',
@@ -170,12 +176,15 @@ describe('exporter', () => {
       const clips: Clip[] = [{
         id: 'clip1',
         sourceVideoId: 'video1',
+        name: 'Clip 1',
         trackId: 'track1',
         startTime: 0,
         endTime: 5,
         duration: 5,
         timelinePosition: 0,
         blendMode: 'normal',
+        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+        effects: { blur: 0 },
         transition: { type: 'none', duration: 0 },
       }]
       const sourceVideos: SourceVideo[] = [{
@@ -184,6 +193,9 @@ describe('exporter', () => {
         duration: 10,
         width: 1920,
         height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
       }]
       const options: ExportOptions = {
         format: 'mp4',
@@ -370,7 +382,7 @@ describe('exporter - blend mode mapping', () => {
   }
 
   it('maps all blend modes to valid canvas operations', () => {
-    Object.entries(blendModeToCanvas).forEach(([mode, operation]) => {
+    Object.entries(blendModeToCanvas).forEach(([_mode, operation]) => {
       expect(typeof operation).toBe('string')
       expect(operation.length).toBeGreaterThan(0)
     })
@@ -434,12 +446,15 @@ describe('exporter - transition detection', () => {
   const createClip = (overrides: Partial<Clip> = {}): Clip => ({
     id: 'clip1',
     sourceVideoId: 'video1',
+    name: 'Clip 1',
     trackId: 'track1',
     startTime: 0,
     endTime: 5,
     duration: 5,
     timelinePosition: 0,
     blendMode: 'normal',
+    transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+    effects: { blur: 0 },
     transition: { type: 'none', duration: 0 },
     ...overrides,
   })

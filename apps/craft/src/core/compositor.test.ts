@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { CompositorConfig } from './compositor'
+import { describe, it, expect, vi } from 'vitest'
 
 // Skip tests that require DOM features not available in jsdom
 // These tests verify the compositor logic without instantiating the class
@@ -123,15 +122,10 @@ describe('Compositor - video aspect ratio cropping', () => {
     expect(videoAspect).toBeGreaterThan(1)
 
     // For circle, crop to square
-    let srcWidth = videoWidth
-    let srcHeight = videoHeight
-    let srcX = 0
-    let srcY = 0
-
-    if (videoAspect > 1) {
-      srcWidth = srcHeight
-      srcX = (videoWidth - srcWidth) / 2
-    }
+    const srcHeight = videoHeight
+    const srcWidth = srcHeight // Set to srcHeight since aspect > 1
+    const srcY = 0
+    const srcX = (videoWidth - srcWidth) / 2
 
     expect(srcWidth).toBe(1080)
     expect(srcX).toBe(420)
@@ -145,15 +139,10 @@ describe('Compositor - video aspect ratio cropping', () => {
 
     expect(videoAspect).toBeLessThan(1)
 
-    let srcWidth = videoWidth
-    let srcHeight = videoHeight
-    let srcX = 0
-    let srcY = 0
-
-    if (videoAspect <= 1) {
-      srcHeight = srcWidth
-      srcY = (videoHeight - srcHeight) / 2
-    }
+    const srcWidth = videoWidth
+    const srcHeight = srcWidth // Set to srcWidth since aspect <= 1
+    const srcX = 0
+    const srcY = (videoHeight - srcHeight) / 2
 
     expect(srcHeight).toBe(1080)
     expect(srcY).toBe(420)
