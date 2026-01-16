@@ -4,11 +4,9 @@ import { bootstrapApp } from '@escapesuite/shared/bootstrap'
 import { isSaaSMode, StandaloneAuthGate } from './auth'
 
 bootstrapApp({
-  product: 'artist',
   App,
   isSaaSMode,
   StandaloneAuthGate,
   importSaaSAuthGate: () => import('./auth'),
   importClerkKey: () => import('./auth/config'),
-  importSentry: () => import('./lib/sentry'),
 })

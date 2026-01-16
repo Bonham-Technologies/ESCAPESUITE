@@ -13,8 +13,7 @@
         "VITE_SUPABASE_ANON_KEY",
         "VITE_STRIPE_PRICE_PRO_MONTHLY",
         "VITE_STRIPE_PRICE_PRO_ANNUAL",
-        "VITE_STRIPE_PRICE_FOUNDING",
-        "VITE_SENTRY_DSN"
+        "VITE_STRIPE_PRICE_FOUNDING"
       ]
     },
     "dev": {

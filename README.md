@@ -154,7 +154,6 @@ VITE_STRIPE_PRICE_FOUNDING=price_xxx
 
 # Optional
 VITE_BUILD_MODE=saas
-VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 ```
 
 ## Browser Support

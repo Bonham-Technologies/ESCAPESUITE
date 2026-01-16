@@ -7,7 +7,6 @@
     ".": "./src/index.ts",
     "./theme": "./src/theme/index.ts",
     "./analytics": "./src/analytics/index.ts",
-    "./sentry": "./src/sentry/index.ts",
     "./auth": "./src/auth/index.ts",
     "./types": "./src/types/index.ts",
     "./storage": "./src/storage/index.ts",
@@ -26,7 +25,6 @@
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.59.2",
-    "@sentry/react": "^10.32.1",
     "@vercel/analytics": "^1.6.1",
     "idb": "^8.0.3",
     "react": "^19.2.3",
@@ -41,10 +39,10 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",
-    "@types/react": "^19.2.7",
+    "@types/react": "^19.2.8",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
-    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/coverage-v8": "^4.0.17",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
@@ -52,7 +50,7 @@
     "globals": "^17.0.0",
     "jsdom": "^27.4.0",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.46.4",
-    "vitest": "^4.0.16"
+    "typescript-eslint": "^8.53.0",
+    "vitest": "^4.0.17"
   }
 }

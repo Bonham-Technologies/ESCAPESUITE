@@ -464,7 +464,6 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxxxxxxxxxxxx
 # =============================================================================
 # OPTIONAL
 # =============================================================================
-# VITE_SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/xxx
 # VITE_BUILD_MODE=saas
 ```
 
@@ -567,7 +566,6 @@ LICENSE_PUBLIC_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - [ ] Monitor Stripe webhook logs
 - [ ] Monitor Supabase Edge Function logs
 - [ ] Monitor Vercel deployment logs
-- [ ] Set up error alerting (Sentry, etc.)
 
 ---
 

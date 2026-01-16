@@ -99,21 +99,6 @@ trackEvent('Video Exported', { format: 'mp4', duration: 120 })
 
 ---
 
-### Sentry (`@escapesuite/shared/sentry`)
-
-Sentry error monitoring initialization.
-
-```ts
-import { initSentry } from '@escapesuite/shared/sentry'
-
-initSentry({ product: 'craft' })
-```
-
-**Exports:**
-- `initSentry(options)` - Initialize Sentry with product tagging
-
----
-
 ### Storage (`@escapesuite/shared/storage`)
 
 IndexedDB utilities for video/thumbnail storage.
@@ -243,13 +228,11 @@ App initialization helper for consistent startup.
 import { bootstrapApp } from '@escapesuite/shared/bootstrap'
 
 bootstrapApp({
-  product: 'craft',
   App,
   isSaaSMode,
   StandaloneAuthGate,
   importSaaSAuthGate: () => import('./auth'),
   importClerkKey: () => import('./auth/config'),
-  importSentry: () => import('./lib/sentry'),
 })
 ```
 
