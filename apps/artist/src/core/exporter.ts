@@ -455,6 +455,18 @@ export function getSeekPositionsCount(): number {
   return lastSeekPositions.size;
 }
 
+/**
+ * Yield to allow other tasks to run without being throttled in background tabs.
+ * Uses MessageChannel which is not subject to the same throttling as setTimeout.
+ */
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => resolve();
+    channel.port2.postMessage(null);
+  });
+}
+
 // Transition modifiers for drawing clips during transitions
 interface TransitionModifiers {
   opacity?: number;
@@ -1526,8 +1538,8 @@ export async function exportToWebM(
         message: `Encoding frame ${frameCount}/${totalFrames}...`,
       });
 
-      // Yield to prevent UI blocking
-      await new Promise(resolve => setTimeout(resolve, 0));
+      // Yield to prevent UI blocking (uses MessageChannel to avoid background tab throttling)
+      await yieldToMain();
     }
     }
 
@@ -2073,8 +2085,8 @@ export async function exportToMP4(
         message: `Encoding frame ${frameCount}/${totalFrames}...`,
       });
 
-      // Yield to prevent UI blocking
-      await new Promise(resolve => setTimeout(resolve, 0));
+      // Yield to prevent UI blocking (uses MessageChannel to avoid background tab throttling)
+      await yieldToMain();
     }
     }
 
