@@ -102,6 +102,9 @@ supabase/
 │   ├── create-license-checkout/  # Stripe checkout for licenses
 │   ├── generate-license/         # Generate license key post-purchase
 │   ├── get-license-key/          # Retrieve user's license keys
+│   ├── get-user-licenses/        # List all licenses for current user
+│   ├── get-licensed-download/    # Server-side license injection for pre-licensed downloads
+│   ├── send-license-email/       # Email license key after purchase
 │   ├── validate-license/         # Validate license for desktop apps
 │   │
 │   │ # Enterprise
@@ -327,6 +330,8 @@ All components should use these variables instead of hardcoded colors.
 ### Standalone License Flow
 1. From Pricing page, scroll to "Standalone Licenses"
 2. Select product and tier → Stripe checkout
-3. Complete payment → License key generated and emailed
-4. Download desktop app from `/portal/downloads`
-5. Enter license key in desktop app → Validated via validate-license function
+3. Complete payment → License key generated and emailed via `send-license-email`
+4. Download desktop app from `/portal/downloads`:
+   - **Pre-Licensed Download** (recommended): Click "Download (Pre-Licensed)" → `get-licensed-download` injects license into HTML → App works immediately
+   - **Generic Download**: Click "Generic" → Download unlicensed HTML → Enter license key on first launch
+5. License validated offline via signed Ed25519 JWT (no internet required after activation)

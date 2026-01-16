@@ -39,3 +39,6 @@ pnpm-debug.log*
 
 # Vercel
 .vercel/
+
+# Claude Code
+tmpclaude-*

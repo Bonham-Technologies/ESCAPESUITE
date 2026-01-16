@@ -150,12 +150,13 @@ VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 - **Unit tests**: Vitest with Testing Library, fake-indexeddb for storage mocking
 - **E2E tests**: Playwright with Chromium
 - **CI behavior**: In CI (`process.env.CI=true`), only smoke tests run; auth-dependent tests are skipped
+- **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts:
-- ESCAPEPLAN: 70 tests
-- ESCAPECRAFT: 146 tests
-- ESCAPEARTIST: 447 tests
-- E2E: 69 tests (smoke tests run in CI)
+- ESCAPEPLAN: 47 tests
+- ESCAPECRAFT: 95 tests
+- ESCAPEARTIST: 453 tests
+- E2E: 62 tests (smoke tests run in CI)
 
 ## Key Constraints
 
@@ -178,6 +179,13 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 | `build` | Production builds, bundle size report | All PRs |
 | `e2e` | Playwright E2E tests | Main branch only |
 | `ci-status` | Summary/gate job | All PRs |
+
+**Standalone Release** (`.github/workflows/standalone-release.yml`):
+- Triggers on merge to `main` branch
+- Builds ESCAPECRAFT and ESCAPEARTIST in standalone mode (`VITE_BUILD_MODE=standalone`)
+- Uploads single-file HTML builds to Supabase Storage (`downloads` bucket)
+- Files available at: `escapecraft-standalone.html`, `escapeartist-standalone.html`
+- Pre-licensed downloads inject license keys at download time via `get-licensed-download` Edge Function
 
 **Dependabot** (`.github/dependabot.yml`):
 - Weekly updates for all apps

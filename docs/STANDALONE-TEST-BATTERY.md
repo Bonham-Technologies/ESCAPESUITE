@@ -155,11 +155,13 @@ Expected: 27 tests pass (as of current version)
 3. Verify error screen displays
 4. Error message should indicate license issue
 
-### Test: Missing License Shows Error
+### Test: Missing License Shows License Input Modal
 1. Build with `VITE_BUILD_MODE=standalone` but no `VITE_LICENSE_KEY`
 2. Open app
-3. Verify error screen displays
-4. Error message: "No license key found"
+3. Verify license input modal displays
+4. Modal should have field for entering license key
+5. Enter valid license → app loads successfully
+6. License is stored in localStorage for future sessions
 
 ### Test: Expired License Shows Error
 1. Generate license with past expiration date
@@ -181,6 +183,23 @@ Expected: 27 tests pass (as of current version)
 3. Both apps should load successfully
 
 ## File Distribution Tests
+
+### Test: Pre-Licensed Download from Portal
+1. Sign in to ESCAPEPLAN at `/portal/downloads`
+2. Verify user has a valid license in the database
+3. Click "Download (Pre-Licensed)" button
+4. Verify download starts with `escapecraft-standalone.html` or `escapeartist-standalone.html`
+5. Open downloaded file locally (file://)
+6. App should load immediately without prompting for license
+7. Console shows "License validated: Licensed to <customer>"
+
+### Test: Generic Download Requires License Entry
+1. Sign in to ESCAPEPLAN at `/portal/downloads`
+2. Click "Generic" download button
+3. Open downloaded file locally
+4. Verify license input modal appears
+5. Enter license key from email receipt
+6. App loads successfully
 
 ### Test: Single HTML File
 1. Build standalone version
@@ -216,10 +235,8 @@ No license public key configured - signature verification skipped
 
 ## Known Limitations
 
-1. **License embedded at build time**: Users cannot change their license key after the app is built
-2. **No runtime license input UI**: This is a known gap - the current system requires embedding at build time
-3. **Development licenses**: The CLI generator creates development-only licenses (signature verification skipped)
-4. **Production licenses**: Should be generated via the Supabase Edge Function with proper Ed25519 signatures
+1. **Development licenses**: The CLI generator creates development-only licenses (signature verification skipped)
+2. **Production licenses**: Should be generated via the Supabase Edge Function with proper Ed25519 signatures
 
 ## Cleanup
 
@@ -270,8 +287,5 @@ cd apps/artist && pnpm exec vite preview --port 5185
 
 ## Future Improvements Needed
 
-1. **License Input UI**: Allow users to paste license keys at runtime instead of build-time embedding
-2. **Download Portal**: Wire up the `/portal/downloads` page to actually serve standalone files
-3. **Stripe Integration**: Complete the checkout flow for standalone license purchases
-4. **Machine Activation**: Implement seat limiting with machine hash tracking
-5. **Update Checking**: Add in-app update notifications
+1. **Update Checking**: Add in-app update notifications for standalone versions
+2. **Offline-first Updates**: Allow checking for updates when connectivity is available
