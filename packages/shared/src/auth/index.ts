@@ -36,6 +36,7 @@ export {
 export { ErrorScreen } from './ErrorScreen'
 export { LoadingScreen } from './LoadingScreen'
 export { LicenseInputModal } from './LicenseInputModal'
+export { ExpirationBanner } from './ExpirationBanner'
 export {
   StandaloneAuthGate,
   SaaSAuthGate,
