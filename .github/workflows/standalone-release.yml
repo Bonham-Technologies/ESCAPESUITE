@@ -7,12 +7,16 @@ on:
       - 'apps/craft/**'
       - 'apps/artist/**'
       - 'packages/shared/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
   pull_request:
     branches: [main]
     paths:
       - 'apps/craft/**'
       - 'apps/artist/**'
       - 'packages/shared/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
 
 env:
   # Supabase project URLs
@@ -96,18 +100,19 @@ jobs:
 
       - name: Generate version.json
         run: |
-          cat > version.json << EOF
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          cat > version.json <<EOF
           {
             "craft": {
               "version": "${{ steps.version.outputs.version }}",
               "fileSize": "${{ steps.sizes.outputs.craft }}",
-              "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "buildDate": "${BUILD_DATE}",
               "commit": "${{ github.sha }}"
             },
             "artist": {
               "version": "${{ steps.version.outputs.version }}",
               "fileSize": "${{ steps.sizes.outputs.artist }}",
-              "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "buildDate": "${BUILD_DATE}",
               "commit": "${{ github.sha }}"
             }
           }
