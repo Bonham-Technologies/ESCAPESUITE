@@ -187,6 +187,7 @@
 .main {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -199,13 +200,18 @@
   flex-direction: column;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
+  /* Allow flex children to scroll by constraining sidebar height */
+  min-height: 0;
 }
 
 .propertiesSidebar {
   width: 300px;
+  height: 100%;
   border-right: none;
   border-left: 1px solid var(--border-color);
   overflow: hidden;
+  /* Constrain height so ClipEditor can scroll */
+  min-height: 0;
 }
 
 .sidebarHeader {
