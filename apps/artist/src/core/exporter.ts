@@ -22,6 +22,34 @@ import { getWorkerSupport } from '../utils/workerSupport';
 import type { WorkerRequest, WorkerResponse, AudioClipMeta } from '../workers/exportWorker';
 // Import worker using Vite's ?worker syntax to avoid MIME type issues with .ts extension
 import ExportWorker from '../workers/exportWorker?worker';
+// FrameSource imports for WebCodecs-based background export
+// TODO: Integrate with export functions in Phase 2b
+// import {
+//   FrameSourceFactory,
+//   type IFrameSource,
+//   isWebCodecsAvailable,
+// } from './frameSource';
+
+/**
+ * A drawable media source that can be used with canvas drawImage.
+ * Includes VideoFrame (from WebCodecs), HTMLVideoElement, and HTMLImageElement.
+ */
+type DrawableMediaSource = VideoFrame | HTMLVideoElement | HTMLImageElement;
+
+/**
+ * Get dimensions from a drawable source
+ */
+function getSourceDimensions(source: DrawableMediaSource): { width: number; height: number } {
+  if (source instanceof HTMLVideoElement) {
+    return { width: source.videoWidth || 1920, height: source.videoHeight || 1080 };
+  } else if (source instanceof HTMLImageElement) {
+    return { width: source.naturalWidth || 1920, height: source.naturalHeight || 1080 };
+  } else if ('displayWidth' in source) {
+    // VideoFrame
+    return { width: source.displayWidth, height: source.displayHeight };
+  }
+  return { width: 1920, height: 1080 };
+}
 
 // Helper to get transition info between clips
 interface TransitionInfo {
@@ -477,11 +505,11 @@ interface TransitionModifiers {
 
 /**
  * Draw a clip to canvas with transform and blend mode
- * Videos are scaled to fill the canvas by default (scale 1.0 = fill canvas)
+ * Media sources (videos, images, VideoFrames) are scaled to fill the canvas by default
  */
 function drawClipToCanvas(
   ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
+  source: DrawableMediaSource,
   clip: Clip,
   clipTime: number, // Time relative to clip start (for animations)
   canvasWidth: number,
@@ -527,9 +555,10 @@ function drawClipToCanvas(
     ctx.clip();
   }
 
-  // Get video dimensions
-  const videoWidth = video.videoWidth || canvasWidth;
-  const videoHeight = video.videoHeight || canvasHeight;
+  // Get source dimensions (works for VideoFrame, HTMLVideoElement, HTMLImageElement)
+  const { width: sourceWidth, height: sourceHeight } = getSourceDimensions(source);
+  const videoWidth = sourceWidth || canvasWidth;
+  const videoHeight = sourceHeight || canvasHeight;
 
   // Calculate scale to fill canvas (cover mode - fills canvas, may crop)
   const videoAspect = videoWidth / videoHeight;
@@ -568,8 +597,8 @@ function drawClipToCanvas(
   const x = centerX - (scaledWidth / 2);
   const y = centerY - (scaledHeight / 2);
 
-  // Draw the video frame
-  ctx.drawImage(video, x, y, scaledWidth, scaledHeight);
+  // Draw the media frame (VideoFrame, HTMLVideoElement, or HTMLImageElement)
+  ctx.drawImage(source, x, y, scaledWidth, scaledHeight);
 
   // Restore context state
   ctx.restore();
