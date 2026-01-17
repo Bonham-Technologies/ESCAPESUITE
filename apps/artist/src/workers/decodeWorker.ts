@@ -21,7 +21,8 @@ interface WorkerGlobalScopeExtended {
 }
 declare const self: WorkerGlobalScopeExtended;
 
-import MP4Box, {
+import {
+  createFile,
   type MP4File,
   type MP4Info,
   type MP4Sample,
@@ -172,7 +173,7 @@ async function initializeSource(
     postProgress(sourceId, 'demuxing', 0);
 
     // Create mp4box file instance
-    const mp4File = MP4Box.createFile();
+    const mp4File = createFile();
     const samples: IndexedSample[] = [];
 
     // Promise to wait for mp4box to be ready
