@@ -468,8 +468,8 @@ function yieldToMain(): Promise<void> {
 }
 
 /**
- * Seek video to target time using always-seek approach (no playback).
- * Uses MessageChannel-based polling to work in background tabs.
+ * Seek video to target time and ensure the frame is decoded.
+ * Briefly plays the video after seeking to force frame decode.
  *
  * @param video - The video element to seek
  * @param targetTime - The time to seek to in seconds
@@ -491,12 +491,9 @@ async function seekVideoToTime(
   // Set the target time
   video.currentTime = targetTime;
 
-  // Wait for seek to complete by polling currentTime and readyState
-  // This approach works reliably in background tabs where seeked events may be delayed
+  // Wait for seeked event
   await new Promise<void>((resolve) => {
     let resolved = false;
-    let attempts = 0;
-    const maxAttempts = 100; // ~1 second max wait
 
     const finish = () => {
       if (resolved) return;
@@ -505,39 +502,62 @@ async function seekVideoToTime(
       resolve();
     };
 
-    const checkSeekComplete = () => {
+    const onSeeked = () => {
+      finish();
+    };
+    video.addEventListener('seeked', onSeeked, { once: true });
+
+    // Timeout fallback using MessageChannel (not throttled in background)
+    let attempts = 0;
+    const checkTimeout = () => {
       if (resolved) return;
       attempts++;
-
-      // Check if seek completed: currentTime is close to target AND frame data is available
-      const seekedToTarget = Math.abs(video.currentTime - targetTime) < frameTolerance;
-      const hasFrameData = video.readyState >= 2;
-
-      if ((seekedToTarget && hasFrameData) || attempts >= maxAttempts) {
-        if (attempts >= maxAttempts && !seekedToTarget) {
-          console.warn(`Seek timeout for time ${targetTime} (current: ${video.currentTime})`);
-        }
+      if (attempts > 100) {
+        console.warn(`Seek timeout for time ${targetTime}`);
         finish();
       } else {
-        // Use MessageChannel for next poll (not throttled in background tabs)
         const channel = new MessageChannel();
-        channel.port1.onmessage = checkSeekComplete;
+        channel.port1.onmessage = checkTimeout;
         channel.port2.postMessage(null);
       }
     };
+    checkTimeout();
+  });
 
-    // Listen for seeked event as it may resolve faster
-    const onSeeked = () => {
-      // Verify frame data is available after seeked event
-      if (video.readyState >= 2) {
-        finish();
-      }
-      // If not ready, the polling will continue
+  // Briefly play and immediately pause to force frame decode
+  // This is necessary because seeking alone may not decode the frame
+  video.play().catch(() => {});
+
+  // Wait for frame to be presented using requestVideoFrameCallback
+  await new Promise<void>((resolve) => {
+    let resolved = false;
+
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      video.pause();
+      resolve();
     };
-    video.addEventListener('seeked', onSeeked);
 
-    // Start polling
-    checkSeekComplete();
+    if ('requestVideoFrameCallback' in video) {
+      (video as HTMLVideoElement & { requestVideoFrameCallback: (cb: () => void) => number })
+        .requestVideoFrameCallback(() => finish());
+    }
+
+    // Timeout fallback
+    let attempts = 0;
+    const checkTimeout = () => {
+      if (resolved) return;
+      attempts++;
+      if (attempts > 20) {
+        finish();
+      } else {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = checkTimeout;
+        channel.port2.postMessage(null);
+      }
+    };
+    checkTimeout();
   });
 }
 
