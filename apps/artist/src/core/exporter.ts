@@ -467,6 +467,68 @@ function yieldToMain(): Promise<void> {
   });
 }
 
+/**
+ * Seek video to target time using always-seek approach (no playback).
+ * Uses MessageChannel-based timeout to work in background tabs.
+ *
+ * @param video - The video element to seek
+ * @param targetTime - The time to seek to in seconds
+ * @param frameTolerance - Skip seek if already within this tolerance (default: 0.033s for 30fps)
+ */
+async function seekVideoToTime(
+  video: HTMLVideoElement,
+  targetTime: number,
+  frameTolerance: number = 0.033
+): Promise<void> {
+  const currentPos = video.currentTime;
+  const diff = Math.abs(targetTime - currentPos);
+
+  // Skip seek if already within tolerance of target
+  if (diff < frameTolerance) {
+    return;
+  }
+
+  // Always seek (never use playback - playback is throttled in background tabs)
+  video.currentTime = targetTime;
+
+  // Wait for seek with MessageChannel-based timeout (not throttled in background)
+  await new Promise<void>((resolve) => {
+    let resolved = false;
+
+    const onSeeked = () => {
+      if (resolved) return;
+      resolved = true;
+      video.removeEventListener('seeked', onSeeked);
+      resolve();
+    };
+
+    video.addEventListener('seeked', onSeeked, { once: true });
+
+    // Use MessageChannel for timeout polling (not throttled in background tabs)
+    const channel = new MessageChannel();
+    let timeoutCount = 0;
+    const maxTimeoutCount = 50; // ~500ms max wait
+
+    channel.port1.onmessage = () => {
+      if (resolved) return;
+      timeoutCount++;
+
+      // Check if video is ready (readyState >= 2 means current frame data is available)
+      if (video.readyState >= 2 || timeoutCount >= maxTimeoutCount) {
+        resolved = true;
+        video.removeEventListener('seeked', onSeeked);
+        resolve();
+      } else {
+        // Schedule another check
+        channel.port2.postMessage(null);
+      }
+    };
+
+    // Start timeout chain
+    channel.port2.postMessage(null);
+  });
+}
+
 // Transition modifiers for drawing clips during transitions
 interface TransitionModifiers {
   opacity?: number;
@@ -1284,57 +1346,18 @@ export async function exportToWebM(
 
   onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
 
-  // Use real-time playback approach for reliable frame capture
-  // This plays videos at normal speed and captures frames, avoiding seek issues
+  // Frame-by-frame encoding using always-seek approach
+  // This works correctly even when the browser tab is in the background
+  // (setTimeout and video.play() are throttled in background tabs, seeking is not)
   const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-  const frameDurationMs = 1000 / frameRate;
+  const frameTolerance = 1 / frameRate; // Skip seeks within one frame
   let frameCount = 0;
 
-  // Track which videos are currently playing and their state
-  const videoPlaybackState = new Map<string, { playing: boolean; targetTime: number }>();
-
   // Initialize all videos as paused
-  for (const [sourceId, video] of videoElements) {
+  for (const video of videoElements.values()) {
     video.pause();
     video.currentTime = 0;
-    videoPlaybackState.set(sourceId, { playing: false, targetTime: 0 });
   }
-
-  // Helper to sync a video to target time - uses playback for small forward movements
-  const syncVideoToTime = async (video: HTMLVideoElement, sourceId: string, targetTime: number): Promise<void> => {
-    const state = videoPlaybackState.get(sourceId)!;
-    const currentPos = video.currentTime;
-    const diff = targetTime - currentPos;
-
-    // If we need to go backwards or jump more than 0.5s forward, seek
-    if (diff < -0.05 || diff > 0.5) {
-      video.pause();
-      video.currentTime = targetTime;
-      state.playing = false;
-      // Wait for seek to complete
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked, { once: true });
-        // Timeout fallback
-        setTimeout(resolve, 200);
-      });
-    } else if (diff > 0.05) {
-      // Small forward movement - let video play to catch up
-      if (!state.playing) {
-        video.play().catch(() => {});
-        state.playing = true;
-      }
-    }
-    // If diff is very small (-0.05 to 0.05), we're close enough - do nothing
-
-    state.targetTime = targetTime;
-  };
-
-  // Process frames using requestAnimationFrame for smooth timing
-  const exportStartTime = performance.now();
 
   // Helper to clean up resources on abort or completion
   const cleanup = () => {
@@ -1376,20 +1399,18 @@ export async function exportToWebM(
         }
       }
 
-      // Sync all active videos to their target times
-      const syncPromises: Promise<void>[] = [];
-      const activeVideoIds = new Set<string>();
+      // Seek all active videos to their target times (no playback - works in background tabs)
+      const seekPromises: Promise<void>[] = [];
 
       for (const { clip, clipTime } of mediaClips) {
         const video = videoElements.get(clip.sourceVideoId);
         if (!video) continue;
 
         const sourceTime = clip.startTime + clipTime;
-        activeVideoIds.add(clip.sourceVideoId);
-        syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
+        seekPromises.push(seekVideoToTime(video, sourceTime, frameTolerance));
       }
 
-      // Also sync transition clips
+      // Also seek transition clips
       if (activeTransition) {
         const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
         if (incomingVideo) {
@@ -1398,30 +1419,11 @@ export async function exportToWebM(
           const sourceTime = incomingClipTime >= 0
             ? activeTransition.incomingClip.startTime + incomingClipTime
             : activeTransition.incomingClip.startTime;
-          activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
-          syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
+          seekPromises.push(seekVideoToTime(incomingVideo, sourceTime, frameTolerance));
         }
       }
 
-      // Pause videos that are no longer active
-      for (const [sourceId, video] of videoElements) {
-        if (!activeVideoIds.has(sourceId)) {
-          const state = videoPlaybackState.get(sourceId)!;
-          if (state.playing) {
-            video.pause();
-            state.playing = false;
-          }
-        }
-      }
-
-      await Promise.all(syncPromises);
-
-      // Wait for the real-time frame interval to maintain proper pacing
-      const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
-      const now = performance.now();
-      if (now < targetRealTime) {
-        await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
-      }
+      await Promise.all(seekPromises);
 
       // Helper to calculate clip time
       const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
@@ -1524,9 +1526,9 @@ export async function exportToWebM(
     frameCount++;
 
     // Backpressure: wait for encoder to catch up if queue is too large
-    // This prevents memory exhaustion while allowing smooth encoding
+    // Uses yieldToMain() instead of setTimeout to work in background tabs
     while (videoEncoder.encodeQueueSize > 20) {
-      await new Promise(resolve => setTimeout(resolve, 5));
+      await yieldToMain();
     }
 
     // Update progress periodically
@@ -1829,57 +1831,18 @@ export async function exportToMP4(
     await audioEncoder.configure(aacConfig);
   }
 
-  // Use real-time playback approach for reliable frame capture (same as WebM)
-  // This plays videos at normal speed and captures frames, avoiding seek issues
+  // Frame-by-frame encoding using always-seek approach (same as WebM)
+  // This works correctly even when the browser tab is in the background
+  // (setTimeout and video.play() are throttled in background tabs, seeking is not)
   const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-  const frameDurationMs = 1000 / frameRate;
+  const frameTolerance = 1 / frameRate; // Skip seeks within one frame
   let frameCount = 0;
 
-  // Track which videos are currently playing and their state
-  const videoPlaybackState = new Map<string, { playing: boolean; targetTime: number }>();
-
   // Initialize all videos as paused
-  for (const [sourceId, video] of videoElements) {
+  for (const video of videoElements.values()) {
     video.pause();
     video.currentTime = 0;
-    videoPlaybackState.set(sourceId, { playing: false, targetTime: 0 });
   }
-
-  // Helper to sync a video to target time - uses playback for small forward movements
-  const syncVideoToTime = async (video: HTMLVideoElement, sourceId: string, targetTime: number): Promise<void> => {
-    const state = videoPlaybackState.get(sourceId)!;
-    const currentPos = video.currentTime;
-    const diff = targetTime - currentPos;
-
-    // If we need to go backwards or jump more than 0.5s forward, seek
-    if (diff < -0.05 || diff > 0.5) {
-      video.pause();
-      video.currentTime = targetTime;
-      state.playing = false;
-      // Wait for seek to complete
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked, { once: true });
-        // Timeout fallback
-        setTimeout(resolve, 200);
-      });
-    } else if (diff > 0.05) {
-      // Small forward movement - let video play to catch up
-      if (!state.playing) {
-        video.play().catch(() => {});
-        state.playing = true;
-      }
-    }
-    // If diff is very small (-0.05 to 0.05), we're close enough - do nothing
-
-    state.targetTime = targetTime;
-  };
-
-  // Process frames using requestAnimationFrame for smooth timing
-  const exportStartTime = performance.now();
 
   // Helper to clean up resources on abort or completion
   const cleanup = () => {
@@ -1923,54 +1886,33 @@ export async function exportToMP4(
         }
       }
 
-      // Sync all active videos to their target times
-      const syncPromises: Promise<void>[] = [];
-    const activeVideoIds = new Set<string>();
+      // Seek all active videos to their target times (no playback - works in background tabs)
+      const seekPromises: Promise<void>[] = [];
 
-    for (const { clip, clipTime } of mediaClips) {
-      const video = videoElements.get(clip.sourceVideoId);
-      if (!video) continue;
+      for (const { clip, clipTime } of mediaClips) {
+        const video = videoElements.get(clip.sourceVideoId);
+        if (!video) continue;
 
-      const sourceTime = clip.startTime + clipTime;
-      activeVideoIds.add(clip.sourceVideoId);
-      syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
-    }
-
-    // Also sync transition clips
-    if (activeTransition) {
-      const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
-      if (incomingVideo) {
-        const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
-        const incomingClipTime = currentTime - clipEnd;
-        const sourceTime = incomingClipTime >= 0
-          ? activeTransition.incomingClip.startTime + incomingClipTime
-          : activeTransition.incomingClip.startTime;
-        activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
-        syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
+        const sourceTime = clip.startTime + clipTime;
+        seekPromises.push(seekVideoToTime(video, sourceTime, frameTolerance));
       }
-    }
 
-    // Pause videos that are no longer active
-    for (const [sourceId, video] of videoElements) {
-      if (!activeVideoIds.has(sourceId)) {
-        const state = videoPlaybackState.get(sourceId)!;
-        if (state.playing) {
-          video.pause();
-          state.playing = false;
+      // Also seek transition clips
+      if (activeTransition) {
+        const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
+        if (incomingVideo) {
+          const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
+          const incomingClipTime = currentTime - clipEnd;
+          const sourceTime = incomingClipTime >= 0
+            ? activeTransition.incomingClip.startTime + incomingClipTime
+            : activeTransition.incomingClip.startTime;
+          seekPromises.push(seekVideoToTime(incomingVideo, sourceTime, frameTolerance));
         }
       }
-    }
 
-    await Promise.all(syncPromises);
+      await Promise.all(seekPromises);
 
-    // Wait for the real-time frame interval to maintain proper pacing
-    const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
-    const now = performance.now();
-    if (now < targetRealTime) {
-      await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
-    }
-
-    // Helper to calculate clip time
+      // Helper to calculate clip time
     const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
 
     // Composite each media clip (bottom to top by track index)
@@ -2071,9 +2013,9 @@ export async function exportToMP4(
     frameCount++;
 
     // Backpressure: wait for encoder to catch up if queue is too large
-    // This prevents memory exhaustion while allowing smooth encoding
+    // Uses yieldToMain() instead of setTimeout to work in background tabs
     while (videoEncoder.encodeQueueSize > 20) {
-      await new Promise(resolve => setTimeout(resolve, 5));
+      await yieldToMain();
     }
 
     // Update progress periodically
