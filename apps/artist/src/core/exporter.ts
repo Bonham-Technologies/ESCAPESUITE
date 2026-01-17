@@ -469,7 +469,7 @@ function yieldToMain(): Promise<void> {
 
 /**
  * Seek video to target time using always-seek approach (no playback).
- * Uses MessageChannel-based timeout to work in background tabs.
+ * Uses MessageChannel-based polling to work in background tabs.
  *
  * @param video - The video element to seek
  * @param targetTime - The time to seek to in seconds
@@ -488,44 +488,56 @@ async function seekVideoToTime(
     return;
   }
 
-  // Always seek (never use playback - playback is throttled in background tabs)
+  // Set the target time
   video.currentTime = targetTime;
 
-  // Wait for seek with MessageChannel-based timeout (not throttled in background)
+  // Wait for seek to complete by polling currentTime and readyState
+  // This approach works reliably in background tabs where seeked events may be delayed
   await new Promise<void>((resolve) => {
     let resolved = false;
+    let attempts = 0;
+    const maxAttempts = 100; // ~1 second max wait
 
-    const onSeeked = () => {
+    const finish = () => {
       if (resolved) return;
       resolved = true;
       video.removeEventListener('seeked', onSeeked);
       resolve();
     };
 
-    video.addEventListener('seeked', onSeeked, { once: true });
-
-    // Use MessageChannel for timeout polling (not throttled in background tabs)
-    const channel = new MessageChannel();
-    let timeoutCount = 0;
-    const maxTimeoutCount = 50; // ~500ms max wait
-
-    channel.port1.onmessage = () => {
+    const checkSeekComplete = () => {
       if (resolved) return;
-      timeoutCount++;
+      attempts++;
 
-      // Check if video is ready (readyState >= 2 means current frame data is available)
-      if (video.readyState >= 2 || timeoutCount >= maxTimeoutCount) {
-        resolved = true;
-        video.removeEventListener('seeked', onSeeked);
-        resolve();
+      // Check if seek completed: currentTime is close to target AND frame data is available
+      const seekedToTarget = Math.abs(video.currentTime - targetTime) < frameTolerance;
+      const hasFrameData = video.readyState >= 2;
+
+      if ((seekedToTarget && hasFrameData) || attempts >= maxAttempts) {
+        if (attempts >= maxAttempts && !seekedToTarget) {
+          console.warn(`Seek timeout for time ${targetTime} (current: ${video.currentTime})`);
+        }
+        finish();
       } else {
-        // Schedule another check
+        // Use MessageChannel for next poll (not throttled in background tabs)
+        const channel = new MessageChannel();
+        channel.port1.onmessage = checkSeekComplete;
         channel.port2.postMessage(null);
       }
     };
 
-    // Start timeout chain
-    channel.port2.postMessage(null);
+    // Listen for seeked event as it may resolve faster
+    const onSeeked = () => {
+      // Verify frame data is available after seeked event
+      if (video.readyState >= 2) {
+        finish();
+      }
+      // If not ready, the polling will continue
+    };
+    video.addEventListener('seeked', onSeeked);
+
+    // Start polling
+    checkSeekComplete();
   });
 }
 
