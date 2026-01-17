@@ -61,6 +61,7 @@ export function canUseExportWorker(): boolean {
 
 /**
  * Async version of worker support check with actual verification
+ * Tests if OfflineAudioContext is available INSIDE the worker context
  */
 export async function canUseExportWorkerAsync(): Promise<boolean> {
   // Check for Web Worker support
@@ -68,14 +69,34 @@ export async function canUseExportWorkerAsync(): Promise<boolean> {
     return false;
   }
 
-  // Check for OfflineAudioContext
+  // Check for OfflineAudioContext in main thread first
   if (typeof OfflineAudioContext === 'undefined') {
     return false;
   }
 
-  // Try to create and communicate with a test worker
+  // Try to create a worker that tests OfflineAudioContext availability inside the worker
   try {
-    const testCode = 'self.onmessage = () => self.postMessage("ok")';
+    // Test code that checks if OfflineAudioContext exists inside the worker
+    const testCode = `
+      self.onmessage = () => {
+        try {
+          // Check if OfflineAudioContext is available in worker context
+          if (typeof OfflineAudioContext === 'undefined') {
+            self.postMessage('no-audio-context');
+            return;
+          }
+          // Try to create one to verify it actually works
+          const ctx = new OfflineAudioContext(2, 1000, 48000);
+          ctx.startRendering().then(() => {
+            self.postMessage('ok');
+          }).catch(() => {
+            self.postMessage('audio-context-error');
+          });
+        } catch (e) {
+          self.postMessage('error: ' + e.message);
+        }
+      }
+    `;
     const blob = new Blob([testCode], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
 
@@ -87,7 +108,7 @@ export async function canUseExportWorkerAsync(): Promise<boolean> {
           testWorker.terminate();
           URL.revokeObjectURL(url);
           resolve(false); // Timeout = probably blocked
-        }, 500);
+        }, 1000);
 
         testWorker.onmessage = (e) => {
           clearTimeout(timeout);
@@ -103,7 +124,7 @@ export async function canUseExportWorkerAsync(): Promise<boolean> {
           resolve(false);
         };
 
-        // Send message to trigger response
+        // Send message to trigger the test
         testWorker.postMessage('test');
       } catch {
         URL.revokeObjectURL(url);
