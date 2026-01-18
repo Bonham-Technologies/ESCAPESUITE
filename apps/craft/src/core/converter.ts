@@ -296,17 +296,25 @@ export async function convertToMP4(
     onProgress({ phase: 'encoding', progress: 90, message: 'Encoding audio...' });
 
     // Encode audio if we have it
+    // Note: audioData is interleaved [L, R, L, R, ...] but AudioData f32-planar
+    // expects planar format [L, L, L, ..., R, R, R, ...]
     if (audioEncoder && audioData) {
       const samplesPerChunk = 1024;
-      const totalAudioSamples = audioData.length / 2; // Stereo
+      const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
       let audioTimestamp = 0;
 
       for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
         const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
-        const chunkData = new Float32Array(chunkSize * 2);
 
-        for (let i = 0; i < chunkSize * 2; i++) {
-          chunkData[i] = audioData[offset * 2 + i] || 0;
+        // Create planar data: [all left samples][all right samples]
+        const planarData = new Float32Array(chunkSize * 2);
+
+        for (let i = 0; i < chunkSize; i++) {
+          const srcIndex = offset + i;
+          // Left channel goes first (indices 0 to chunkSize-1)
+          planarData[i] = audioData[srcIndex * 2] || 0;
+          // Right channel goes second (indices chunkSize to chunkSize*2-1)
+          planarData[chunkSize + i] = audioData[srcIndex * 2 + 1] || 0;
         }
 
         const audioFrame = new AudioData({
@@ -315,7 +323,7 @@ export async function convertToMP4(
           numberOfFrames: chunkSize,
           numberOfChannels: 2,
           timestamp: audioTimestamp,
-          data: chunkData,
+          data: planarData,
         });
 
         audioEncoder.encode(audioFrame);

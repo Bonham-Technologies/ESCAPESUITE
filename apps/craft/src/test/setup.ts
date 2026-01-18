@@ -43,6 +43,30 @@ vi.stubGlobal('ResizeObserver', class ResizeObserver {
   disconnect = vi.fn()
 })
 
+// Helper to create a mock MediaStreamTrack with all required methods
+function createMockAudioTrack() {
+  return {
+    id: 'mock-destination-audio-track',
+    kind: 'audio' as const,
+    label: 'Mock destination audio track',
+    enabled: true,
+    muted: false,
+    readyState: 'live' as const,
+    stop: vi.fn(),
+    clone: vi.fn(),
+    getCapabilities: vi.fn(() => ({})),
+    getConstraints: vi.fn(() => ({})),
+    getSettings: vi.fn(() => ({})),
+    applyConstraints: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(() => true),
+    onended: null,
+    onmute: null,
+    onunmute: null,
+  }
+}
+
 // Mock AudioContext for audio tests
 vi.stubGlobal('AudioContext', class AudioContext {
   state = 'running'
@@ -67,7 +91,7 @@ vi.stubGlobal('AudioContext', class AudioContext {
   }))
   createMediaStreamDestination = vi.fn(() => ({
     stream: {
-      getAudioTracks: vi.fn(() => [{ id: 'mock-audio-track' }]),
+      getAudioTracks: vi.fn(() => [createMockAudioTrack()]),
     },
   }))
   decodeAudioData = vi.fn()
