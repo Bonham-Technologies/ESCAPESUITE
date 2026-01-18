@@ -60,6 +60,7 @@ function App() {
   const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null); // recording ID or null
   const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [showHelpModal, setShowHelpModal] = useState(false);
 
   // Capture thumbnail from preview video element
   const capturePreviewThumbnail = useCallback((): Promise<Blob | null> => {
@@ -662,6 +663,18 @@ function App() {
 
         <div className={styles.headerRight}>
           <button
+            className={styles.headerButton}
+            onClick={() => setShowHelpModal(true)}
+            title="Recording Tips"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Help
+          </button>
+          <button
             className={`${styles.headerButton} ${styles.editorButton}`}
             onClick={() => window.open('/artist/', 'escapeartist')}
             title="Open Editor"
@@ -1040,6 +1053,93 @@ function App() {
               controls
               autoPlay
             />
+          </div>
+        </div>
+      )}
+
+      {/* Help Modal */}
+      {showHelpModal && (
+        <div className={styles.helpModal} onClick={() => setShowHelpModal(false)}>
+          <div className={styles.helpContent} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.helpHeader}>
+              <h2 className={styles.helpTitle}>Recording Tips</h2>
+              <button
+                className={styles.helpClose}
+                onClick={() => setShowHelpModal(false)}
+                title="Close"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className={styles.helpBody}>
+              <section className={styles.helpSection}>
+                <h3>Choosing What to Record</h3>
+                <p>When you start recording, your browser will ask what you want to capture:</p>
+                <ul>
+                  <li>
+                    <strong>Entire Screen</strong> (Recommended) - Captures everything on your monitor.
+                    Best for tutorials and demos where you switch between apps.
+                  </li>
+                  <li>
+                    <strong>Window</strong> - Captures a specific application window.
+                    Note: For browser windows, only the active tab is visible.
+                  </li>
+                  <li>
+                    <strong>Browser Tab</strong> - Captures a single browser tab.
+                    Good for recording web content without distractions.
+                  </li>
+                </ul>
+              </section>
+
+              <section className={styles.helpSection}>
+                <h3>Best Practices</h3>
+                <ul>
+                  <li>
+                    <strong>Use "Entire Screen" for multi-app recordings</strong> - This ensures
+                    everything you do is captured, regardless of which window is focused.
+                  </li>
+                  <li>
+                    <strong>Keep ESCAPECRAFT in a separate window</strong> - If using window capture,
+                    run ESCAPECRAFT in its own browser window so it doesn't appear in your recording.
+                  </li>
+                  <li>
+                    <strong>Check "Share system audio"</strong> - Enable this in the capture dialog
+                    to record sounds from videos, games, and other applications.
+                  </li>
+                  <li>
+                    <strong>Use keyboard shortcuts</strong> - Press <kbd>R</kbd> to start,
+                    <kbd>P</kbd> to pause, <kbd>S</kbd> to stop, and <kbd>Esc</kbd> to cancel.
+                  </li>
+                </ul>
+              </section>
+
+              <section className={styles.helpSection}>
+                <h3>Recording Modes</h3>
+                <ul>
+                  <li><strong>Screen Only</strong> - Just your screen, no audio</li>
+                  <li><strong>Screen + Mic</strong> - Screen with your voice narration</li>
+                  <li><strong>Screen + System Audio</strong> - Screen with app sounds</li>
+                  <li><strong>Screen + Both</strong> - Screen with mic and system audio</li>
+                  <li><strong>Webcam Only</strong> - Just your camera with microphone</li>
+                  <li><strong>Picture-in-Picture</strong> - Screen with webcam overlay</li>
+                </ul>
+              </section>
+
+              <section className={styles.helpSection}>
+                <h3>Download Formats</h3>
+                <ul>
+                  <li>
+                    <strong>WebM</strong> - Native browser format. Instant download, works great
+                    in Chrome, Firefox, and most video editors.
+                  </li>
+                  <li>
+                    <strong>MP4</strong> - Universal format. Takes a moment to convert but plays
+                    everywhere including Windows Media Player and QuickTime.
+                  </li>
+                </ul>
+              </section>
+            </div>
           </div>
         </div>
       )}
