@@ -45,21 +45,47 @@ export async function detectCapabilities(): Promise<EnvironmentCapabilities> {
 /**
  * Request screen capture with optional system audio.
  * Returns the MediaStream or throws an error.
+ *
+ * Note: Uses constraints to improve capture experience:
+ * - selfBrowserSurface: "exclude" prevents selecting the CRAFT tab
+ * - preferCurrentTab: false discourages selecting current tab
+ * - monitorTypeSurfaces: "include" enables monitor/screen selection
  */
 export async function requestScreenCapture(
   withSystemAudio: boolean
 ): Promise<MediaStream> {
-  const constraints: DisplayMediaStreamOptions = {
-    video: {
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-      frameRate: { ideal: 30 },
-    },
+  // Build video constraints with display surface preferences
+  // These help guide users to select appropriate capture sources
+  const videoConstraints: MediaTrackConstraints & {
+    displaySurface?: string;
+  } = {
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: 30 },
+  };
+
+  // Extended constraints for better capture source selection
+  // These are Chrome-specific but gracefully ignored by other browsers
+  const extendedConstraints: DisplayMediaStreamOptions & {
+    selfBrowserSurface?: string;
+    preferCurrentTab?: boolean;
+    monitorTypeSurfaces?: string;
+    surfaceSwitching?: string;
+  } = {
+    video: videoConstraints,
     audio: withSystemAudio,
+    // Exclude the current tab (CRAFT) from selection options
+    selfBrowserSurface: 'exclude',
+    // Don't prefer the current tab
+    preferCurrentTab: false,
+    // Include monitor/screen options in picker
+    monitorTypeSurfaces: 'include',
+    // Allow surface switching during capture (e.g., if user switches windows)
+    surfaceSwitching: 'include',
   };
 
   try {
-    return await navigator.mediaDevices.getDisplayMedia(constraints);
+    return await navigator.mediaDevices.getDisplayMedia(extendedConstraints);
   } catch (error) {
     if (error instanceof Error) {
       if (error.name === 'NotAllowedError') {
