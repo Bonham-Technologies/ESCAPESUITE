@@ -43,10 +43,20 @@ pnpm lint                # Run ESLint
 - `videoProcessor.ts`: Video metadata extraction and thumbnail generation using native `<video>` element and canvas
 - `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
-  - **MP4**: H.264 video + AAC audio, frame-by-frame encoding
+  - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
 - `projectManager.ts`: Project save/load to JSON files with embedded video references
 - `exportScheduler.ts`: Background export queue management
 - `frameCache.ts`: LRU cache for decoded video frames
+- `videoDecodeManager.ts`: Main thread API for WebCodecs video decoding via Web Worker
+- `frameSource.ts`: Abstraction layer for frame sources (WebCodecs or HTMLVideoElement fallback)
+
+### Video Decode Worker (`src/workers/decodeWorker.ts`)
+Web Worker for WebCodecs-based video decoding, enabling full-speed exports in background tabs:
+- Uses `mp4box.js` for MP4 container demuxing
+- Uses WebCodecs `VideoDecoder` for frame decoding
+- Builds keyframe index for efficient seeking
+- LRU frame cache with configurable size
+- Returns `VideoFrame` objects (transferable) for zero-copy performance
 
 ### Integration API (`src/utils/integration.ts`)
 The editor can be embedded in other applications via:
@@ -104,6 +114,10 @@ Interactive overlay manipulation in the preview canvas:
 
 ### Export Performance Optimizations (`src/core/exporter.ts`)
 The export pipeline includes several optimizations to improve performance:
+- **Background tab export (MP4)**: Uses WebCodecs `VideoDecoder` in a Web Worker for frame decoding, enabling full-speed exports even when the browser tab is in the background. Web Workers are not subject to browser throttling that affects `setTimeout` and `video.play()` on the main thread.
+- **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
+  - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for MP4 files (background-capable)
+  - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
 - **Seek position tracking**: `seekVideoOptimized()` skips redundant video seeks if already within one frame of target position
 - **Frame tolerance**: Uses 1/frameRate (e.g., 0.033s at 30fps) to determine if seek is needed
 - **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
@@ -135,4 +149,5 @@ Waveform visualization adapts to clip selection state:
 
 - WebCodecs API (exports) only works in Chrome/Edge
 - Video blobs stored in IndexedDB; large files may hit storage limits
-- All encoding/decoding happens on main thread via HTMLVideoElement; no Web Workers currently
+- MP4 decoding uses Web Worker with WebCodecs for background-capable export; WebM falls back to HTMLVideoElement on main thread
+- WebCodecs background export only works for MP4 source files; WebM sources use HTMLVideoElement seeking

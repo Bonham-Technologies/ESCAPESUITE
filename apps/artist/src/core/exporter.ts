@@ -22,6 +22,33 @@ import { getWorkerSupport } from '../utils/workerSupport';
 import type { WorkerRequest, WorkerResponse, AudioClipMeta } from '../workers/exportWorker';
 // Import worker using Vite's ?worker syntax to avoid MIME type issues with .ts extension
 import ExportWorker from '../workers/exportWorker?worker';
+// FrameSource imports for WebCodecs-based background export
+import {
+  FrameSourceFactory,
+  type IFrameSource,
+  isWebCodecsAvailable,
+} from './frameSource';
+
+/**
+ * A drawable media source that can be used with canvas drawImage.
+ * Includes VideoFrame (from WebCodecs), HTMLVideoElement, and HTMLImageElement.
+ */
+type DrawableMediaSource = VideoFrame | HTMLVideoElement | HTMLImageElement;
+
+/**
+ * Get dimensions from a drawable source
+ */
+function getSourceDimensions(source: DrawableMediaSource): { width: number; height: number } {
+  if (source instanceof HTMLVideoElement) {
+    return { width: source.videoWidth || 1920, height: source.videoHeight || 1080 };
+  } else if (source instanceof HTMLImageElement) {
+    return { width: source.naturalWidth || 1920, height: source.naturalHeight || 1080 };
+  } else if ('displayWidth' in source) {
+    // VideoFrame
+    return { width: source.displayWidth, height: source.displayHeight };
+  }
+  return { width: 1920, height: 1080 };
+}
 
 // Helper to get transition info between clips
 interface TransitionInfo {
@@ -227,6 +254,112 @@ async function loadImageElement(blob: Blob): Promise<HTMLImageElement> {
       reject(new Error('Failed to load image'));
     };
   });
+}
+
+/**
+ * Frame manager for WebCodecs-based export
+ * Handles frame fetching and cleanup
+ */
+interface FrameManager {
+  factory: FrameSourceFactory;
+  sources: Map<string, IFrameSource>;
+  currentFrames: Map<string, VideoFrame>;
+  useWebCodecs: boolean;
+}
+
+/**
+ * Create a frame manager for WebCodecs-based export
+ */
+async function createFrameManager(useWebCodecs: boolean): Promise<FrameManager> {
+  const factory = new FrameSourceFactory(useWebCodecs);
+  await factory.initialize();
+
+  return {
+    factory,
+    sources: new Map(),
+    currentFrames: new Map(),
+    useWebCodecs: factory.isWebCodecsEnabled(),
+  };
+}
+
+/**
+ * Load a video source into the frame manager
+ */
+async function loadFrameSource(
+  manager: FrameManager,
+  sourceId: string,
+  blob: Blob,
+  mimeType: string
+): Promise<IFrameSource> {
+  const source = await manager.factory.createSource(sourceId, blob, mimeType);
+  manager.sources.set(sourceId, source);
+  return source;
+}
+
+/**
+ * Get a frame from a source at the specified timestamp
+ * Returns the frame without auto-cleanup - caller must manage frame lifecycle
+ */
+async function getFrameAtTime(
+  manager: FrameManager,
+  sourceId: string,
+  timestamp: number
+): Promise<DrawableMediaSource | null> {
+  const source = manager.sources.get(sourceId);
+  if (!source) return null;
+
+  try {
+    const frame = await source.getFrame(timestamp);
+
+    // Track VideoFrame objects for cleanup at end of frame iteration
+    if (frame instanceof VideoFrame) {
+      manager.currentFrames.set(`${sourceId}:${timestamp}`, frame);
+    }
+
+    return frame;
+  } catch (error) {
+    console.warn(`Failed to get frame for ${sourceId} at ${timestamp}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Clean up all frames fetched during current iteration
+ * Call this after drawing and encoding each frame
+ */
+function cleanupIterationFrames(manager: FrameManager): void {
+  for (const frame of manager.currentFrames.values()) {
+    try {
+      frame.close();
+    } catch {
+      // Frame may already be closed
+    }
+  }
+  manager.currentFrames.clear();
+}
+
+/**
+ * Clean up all frames from the frame manager
+ */
+function cleanupCurrentFrames(manager: FrameManager): void {
+  for (const frame of manager.currentFrames.values()) {
+    frame.close();
+  }
+  manager.currentFrames.clear();
+}
+
+/**
+ * Dispose of all sources and clean up the frame manager
+ */
+async function disposeFrameManager(manager: FrameManager): Promise<void> {
+  cleanupCurrentFrames(manager);
+
+  for (const source of manager.sources.values()) {
+    await source.dispose();
+  }
+  manager.sources.clear();
+
+  manager.factory.dispose();
 }
 
 // Animated values type for overlays
@@ -477,11 +610,11 @@ interface TransitionModifiers {
 
 /**
  * Draw a clip to canvas with transform and blend mode
- * Videos are scaled to fill the canvas by default (scale 1.0 = fill canvas)
+ * Media sources (videos, images, VideoFrames) are scaled to fill the canvas by default
  */
 function drawClipToCanvas(
   ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
+  source: DrawableMediaSource,
   clip: Clip,
   clipTime: number, // Time relative to clip start (for animations)
   canvasWidth: number,
@@ -527,9 +660,10 @@ function drawClipToCanvas(
     ctx.clip();
   }
 
-  // Get video dimensions
-  const videoWidth = video.videoWidth || canvasWidth;
-  const videoHeight = video.videoHeight || canvasHeight;
+  // Get source dimensions (works for VideoFrame, HTMLVideoElement, HTMLImageElement)
+  const { width: sourceWidth, height: sourceHeight } = getSourceDimensions(source);
+  const videoWidth = sourceWidth || canvasWidth;
+  const videoHeight = sourceHeight || canvasHeight;
 
   // Calculate scale to fill canvas (cover mode - fills canvas, may crop)
   const videoAspect = videoWidth / videoHeight;
@@ -568,8 +702,8 @@ function drawClipToCanvas(
   const x = centerX - (scaledWidth / 2);
   const y = centerY - (scaledHeight / 2);
 
-  // Draw the video frame
-  ctx.drawImage(video, x, y, scaledWidth, scaledHeight);
+  // Draw the media frame (VideoFrame, HTMLVideoElement, or HTMLImageElement)
+  ctx.drawImage(source, x, y, scaledWidth, scaledHeight);
 
   // Restore context state
   ctx.restore();
@@ -601,6 +735,31 @@ function drawMediaWithModifiers(
   }
 
   return false;
+}
+
+/**
+ * Draw a clip using a pre-fetched frame with transition modifiers
+ * Used when frames have been fetched via FrameManager
+ */
+function drawMediaWithFrame(
+  ctx: CanvasRenderingContext2D,
+  frame: DrawableMediaSource | null,
+  clip: Clip,
+  clipTime: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  modifiers?: TransitionModifiers
+): boolean {
+  if (!frame) return false;
+
+  if (frame instanceof HTMLImageElement) {
+    drawImageToCanvasWithModifiers(ctx, frame, clip, clipTime, canvasWidth, canvasHeight, modifiers);
+    return true;
+  }
+
+  // VideoFrame or HTMLVideoElement
+  drawClipToCanvas(ctx, frame, clip, clipTime, canvasWidth, canvasHeight, modifiers);
+  return true;
 }
 
 /**
@@ -827,6 +986,138 @@ function drawTransition(
       // For 'none' or unknown types, just draw normally
       drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h);
       drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h);
+  }
+
+  return true;
+}
+
+/**
+ * Draw a transition between two clips using pre-fetched frames
+ * Used when frames have been fetched via FrameManager
+ */
+function drawTransitionWithFrames(
+  ctx: CanvasRenderingContext2D,
+  outgoingFrame: DrawableMediaSource | null,
+  incomingFrame: DrawableMediaSource | null,
+  transition: TransitionInfo,
+  currentTime: number,
+  canvasWidth: number,
+  canvasHeight: number
+): boolean {
+  const { outgoingClip, incomingClip, progress, type } = transition;
+
+  // Calculate clip times for animations
+  const outClipTime = currentTime - outgoingClip.timelinePosition;
+  const inClipTime = currentTime - incomingClip.timelinePosition;
+
+  const hasOutgoing = outgoingFrame !== null;
+  const hasIncoming = incomingFrame !== null;
+
+  if (!hasOutgoing && !hasIncoming) {
+    return false;
+  }
+
+  // If only one clip has media, draw it normally
+  if (!hasOutgoing) {
+    return drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, canvasWidth, canvasHeight, { opacity: progress });
+  }
+  if (!hasIncoming) {
+    return drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, canvasWidth, canvasHeight, { opacity: 1 - progress });
+  }
+
+  const w = canvasWidth;
+  const h = canvasHeight;
+
+  switch (type) {
+    case 'fade':
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { opacity: progress });
+      break;
+
+    case 'dissolve': {
+      const dissolveBlur = Math.sin(progress * Math.PI) * 3;
+      ctx.save();
+      if (dissolveBlur > 0) {
+        ctx.filter = `blur(${dissolveBlur}px)`;
+      }
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { opacity: progress });
+      ctx.restore();
+      break;
+    }
+
+    case 'wipe-left':
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
+        clipRegion: { x: 0, y: 0, width: w * (1 - progress), height: h }
+      });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
+        clipRegion: { x: w * (1 - progress), y: 0, width: w * progress, height: h }
+      });
+      break;
+
+    case 'wipe-right':
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
+        clipRegion: { x: w * progress, y: 0, width: w * (1 - progress), height: h }
+      });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
+        clipRegion: { x: 0, y: 0, width: w * progress, height: h }
+      });
+      break;
+
+    case 'wipe-up':
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
+        clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) }
+      });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
+        clipRegion: { x: 0, y: 0, width: w, height: h * progress }
+      });
+      break;
+
+    case 'wipe-down':
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
+        clipRegion: { x: 0, y: 0, width: w, height: h * (1 - progress) }
+      });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
+        clipRegion: { x: 0, y: h * (1 - progress), width: w, height: h * progress }
+      });
+      break;
+
+    case 'slide-left': {
+      const outX = -w * progress;
+      const inX = w * (1 - progress);
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetX: outX });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetX: inX });
+      break;
+    }
+
+    case 'slide-right': {
+      const outX = w * progress;
+      const inX = -w * (1 - progress);
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetX: outX });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetX: inX });
+      break;
+    }
+
+    case 'slide-up': {
+      const outY = -h * progress;
+      const inY = h * (1 - progress);
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetY: outY });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetY: inY });
+      break;
+    }
+
+    case 'slide-down': {
+      const outY = h * progress;
+      const inY = -h * (1 - progress);
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetY: outY });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetY: inY });
+      break;
+    }
+
+    default:
+      // Fallback: simple crossfade
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { opacity: progress });
   }
 
   return true;
@@ -1709,10 +2000,19 @@ export async function exportToMP4(
   const ctx = canvas.getContext('2d', { alpha: false })!;
 
   // Load all unique source media (videos and images)
+  // Use WebCodecs-based frame decoding when available for background-capable export
   onProgress({ phase: 'preparing', progress: 12, message: 'Loading media files...' });
 
-  const videoElements: Map<string, HTMLVideoElement> = new Map();
+  // Create frame manager - uses WebCodecs when available, falls back to HTMLVideoElement
+  const frameManager = await createFrameManager(isWebCodecsAvailable());
   const imageElements: Map<string, HTMLImageElement> = new Map();
+
+  // Log which mode we're using
+  if (frameManager.useWebCodecs) {
+    console.log('[MP4 Export] Using WebCodecs for video decoding (background-capable)');
+  } else {
+    console.log('[MP4 Export] Using HTMLVideoElement for video decoding (standard mode)');
+  }
 
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
   const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
@@ -1727,10 +2027,9 @@ export async function exportToMP4(
         const img = await loadImageElement(blob);
         imageElements.set(sourceId, img);
       } else if (source?.mediaType !== 'audio') {
-        // Load as video (skip audio-only files for visual rendering)
+        // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
         try {
-          const video = await loadVideoElement(blob);
-          videoElements.set(sourceId, video);
+          await loadFrameSource(frameManager, sourceId, blob, blob.type || 'video/mp4');
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback
@@ -1829,64 +2128,19 @@ export async function exportToMP4(
     await audioEncoder.configure(aacConfig);
   }
 
-  // Use real-time playback approach for reliable frame capture (same as WebM)
-  // This plays videos at normal speed and captures frames, avoiding seek issues
+  // WebCodecs-based frame fetching runs at full speed (no browser throttling)
   const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-  const frameDurationMs = 1000 / frameRate;
   let frameCount = 0;
 
-  // Track which videos are currently playing and their state
-  const videoPlaybackState = new Map<string, { playing: boolean; targetTime: number }>();
-
-  // Initialize all videos as paused
-  for (const [sourceId, video] of videoElements) {
-    video.pause();
-    video.currentTime = 0;
-    videoPlaybackState.set(sourceId, { playing: false, targetTime: 0 });
-  }
-
-  // Helper to sync a video to target time - uses playback for small forward movements
-  const syncVideoToTime = async (video: HTMLVideoElement, sourceId: string, targetTime: number): Promise<void> => {
-    const state = videoPlaybackState.get(sourceId)!;
-    const currentPos = video.currentTime;
-    const diff = targetTime - currentPos;
-
-    // If we need to go backwards or jump more than 0.5s forward, seek
-    if (diff < -0.05 || diff > 0.5) {
-      video.pause();
-      video.currentTime = targetTime;
-      state.playing = false;
-      // Wait for seek to complete
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked, { once: true });
-        // Timeout fallback
-        setTimeout(resolve, 200);
-      });
-    } else if (diff > 0.05) {
-      // Small forward movement - let video play to catch up
-      if (!state.playing) {
-        video.play().catch(() => {});
-        state.playing = true;
-      }
-    }
-    // If diff is very small (-0.05 to 0.05), we're close enough - do nothing
-
-    state.targetTime = targetTime;
-  };
-
-  // Process frames using requestAnimationFrame for smooth timing
-  const exportStartTime = performance.now();
-
   // Helper to clean up resources on abort or completion
-  const cleanup = () => {
-    videoElements.forEach((v) => {
-      v.pause();
-      URL.revokeObjectURL(v.src);
-    });
+  const cleanup = async () => {
+    // Clean up any remaining iteration frames
+    cleanupIterationFrames(frameManager);
+
+    // Dispose frame manager (closes VideoFrames and frame sources)
+    await disposeFrameManager(frameManager);
+
+    // Clean up image elements
     imageElements.forEach((img) => {
       URL.revokeObjectURL(img.src);
     });
@@ -1898,6 +2152,9 @@ export async function exportToMP4(
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       // Check for abort at start of each frame
       checkAborted(signal);
+
+      // Clean up frames from previous iteration before starting new one
+      cleanupIterationFrames(frameManager);
 
       const currentTime = frameIndex / frameRate;
 
@@ -1923,83 +2180,87 @@ export async function exportToMP4(
         }
       }
 
-      // Sync all active videos to their target times
-      const syncPromises: Promise<void>[] = [];
-    const activeVideoIds = new Set<string>();
+      // Helper to calculate clip time
+      const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
 
-    for (const { clip, clipTime } of mediaClips) {
-      const video = videoElements.get(clip.sourceVideoId);
-      if (!video) continue;
+      // Fetch frames for all active media clips (runs at full speed with WebCodecs)
+      const framePromises: Array<{ clip: Clip; clipTime: number; framePromise: Promise<DrawableMediaSource | null> }> = [];
 
-      const sourceTime = clip.startTime + clipTime;
-      activeVideoIds.add(clip.sourceVideoId);
-      syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
-    }
-
-    // Also sync transition clips
-    if (activeTransition) {
-      const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
-      if (incomingVideo) {
-        const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
-        const incomingClipTime = currentTime - clipEnd;
-        const sourceTime = incomingClipTime >= 0
-          ? activeTransition.incomingClip.startTime + incomingClipTime
-          : activeTransition.incomingClip.startTime;
-        activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
-        syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
-      }
-    }
-
-    // Pause videos that are no longer active
-    for (const [sourceId, video] of videoElements) {
-      if (!activeVideoIds.has(sourceId)) {
-        const state = videoPlaybackState.get(sourceId)!;
-        if (state.playing) {
-          video.pause();
-          state.playing = false;
+      for (const { clip, clipTime } of mediaClips) {
+        // Check if this is a video source (in frameManager.sources)
+        const sourceTime = clip.startTime + clipTime;
+        if (frameManager.sources.has(clip.sourceVideoId)) {
+          framePromises.push({
+            clip,
+            clipTime,
+            framePromise: getFrameAtTime(frameManager, clip.sourceVideoId, sourceTime),
+          });
+        } else if (imageElements.has(clip.sourceVideoId)) {
+          // Image - resolve immediately
+          const img = imageElements.get(clip.sourceVideoId)!;
+          framePromises.push({
+            clip,
+            clipTime,
+            framePromise: Promise.resolve(img),
+          });
         }
       }
-    }
 
-    await Promise.all(syncPromises);
+      // Also fetch frames for transition clips if active
+      let outgoingFrame: DrawableMediaSource | null = null;
+      let incomingFrame: DrawableMediaSource | null = null;
 
-    // Wait for the real-time frame interval to maintain proper pacing
-    const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
-    const now = performance.now();
-    if (now < targetRealTime) {
-      await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
-    }
+      if (activeTransition) {
+        const outClipTime = currentTime - activeTransition.outgoingClip.timelinePosition;
+        const outSourceTime = activeTransition.outgoingClip.startTime + outClipTime;
 
-    // Helper to calculate clip time
-    const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
+        const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
+        const inClipTime = currentTime - clipEnd;
+        const inSourceTime = inClipTime >= 0
+          ? activeTransition.incomingClip.startTime + inClipTime
+          : activeTransition.incomingClip.startTime;
 
-    // Composite each media clip (bottom to top by track index)
-    for (const { clip } of mediaClips) {
-      // Skip clips that are part of an active transition
-      if (activeTransition &&
-          (clip.id === activeTransition.outgoingClip.id || clip.id === activeTransition.incomingClip.id)) {
-        continue;
+        // Fetch outgoing frame
+        if (frameManager.sources.has(activeTransition.outgoingClip.sourceVideoId)) {
+          outgoingFrame = await getFrameAtTime(frameManager, activeTransition.outgoingClip.sourceVideoId, outSourceTime);
+        } else if (imageElements.has(activeTransition.outgoingClip.sourceVideoId)) {
+          outgoingFrame = imageElements.get(activeTransition.outgoingClip.sourceVideoId)!;
+        }
+
+        // Fetch incoming frame
+        if (frameManager.sources.has(activeTransition.incomingClip.sourceVideoId)) {
+          incomingFrame = await getFrameAtTime(frameManager, activeTransition.incomingClip.sourceVideoId, inSourceTime);
+        } else if (imageElements.has(activeTransition.incomingClip.sourceVideoId)) {
+          incomingFrame = imageElements.get(activeTransition.incomingClip.sourceVideoId)!;
+        }
       }
 
-      const clipTime = getClipTime(clip);
+      // Wait for all regular clip frames
+      const frames = await Promise.all(
+        framePromises.map(async ({ clip, clipTime, framePromise }) => ({
+          clip,
+          clipTime,
+          frame: await framePromise,
+        }))
+      );
 
-      // Try video first, then image - use readyState >= 1 (like preview player)
-      const video = videoElements.get(clip.sourceVideoId);
-      if (video && video.readyState >= 1) {
-        drawClipToCanvas(ctx, video, clip, clipTime, width, height);
-        continue;
+      // Composite each media clip (bottom to top by track index)
+      for (const { clip, clipTime, frame } of frames) {
+        // Skip clips that are part of an active transition
+        if (activeTransition &&
+            (clip.id === activeTransition.outgoingClip.id || clip.id === activeTransition.incomingClip.id)) {
+          continue;
+        }
+
+        if (frame) {
+          drawMediaWithFrame(ctx, frame, clip, clipTime, width, height);
+        }
       }
 
-      const image = imageElements.get(clip.sourceVideoId);
-      if (image) {
-        drawImageToCanvasWithModifiers(ctx, image, clip, clipTime, width, height);
+      // Draw transition if active
+      if (activeTransition) {
+        drawTransitionWithFrames(ctx, outgoingFrame, incomingFrame, activeTransition, currentTime, width, height);
       }
-    }
-
-    // Draw transition if active
-    if (activeTransition) {
-      drawTransition(ctx, videoElements, imageElements, activeTransition, currentTime, width, height);
-    }
 
     // Draw overlay clips in track order (lower index = rendered first = behind)
     // This ensures blur overlays on higher tracks can blur content on lower tracks
@@ -2146,7 +2407,7 @@ export async function exportToMP4(
     await output.finalize();
 
     // Clean up media elements
-    cleanup();
+    await cleanup();
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
@@ -2158,7 +2419,7 @@ export async function exportToMP4(
     return new Blob([buffer], { type: 'video/mp4' });
   } catch (error) {
     // Clean up resources on error
-    cleanup();
+    await cleanup();
 
     // Close encoders if they exist
     try {
