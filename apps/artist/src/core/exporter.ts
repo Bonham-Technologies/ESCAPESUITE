@@ -298,7 +298,7 @@ async function loadFrameSource(
 
 /**
  * Get a frame from a source at the specified timestamp
- * Handles cleanup of previous frames automatically
+ * Returns the frame without auto-cleanup - caller must manage frame lifecycle
  */
 async function getFrameAtTime(
   manager: FrameManager,
@@ -308,19 +308,12 @@ async function getFrameAtTime(
   const source = manager.sources.get(sourceId);
   if (!source) return null;
 
-  // Clean up previous frame for this source if it's a VideoFrame
-  const previousFrame = manager.currentFrames.get(sourceId);
-  if (previousFrame) {
-    previousFrame.close();
-    manager.currentFrames.delete(sourceId);
-  }
-
   try {
     const frame = await source.getFrame(timestamp);
 
-    // Track VideoFrame objects for cleanup
+    // Track VideoFrame objects for cleanup at end of frame iteration
     if (frame instanceof VideoFrame) {
-      manager.currentFrames.set(sourceId, frame);
+      manager.currentFrames.set(`${sourceId}:${timestamp}`, frame);
     }
 
     return frame;
@@ -328,6 +321,21 @@ async function getFrameAtTime(
     console.warn(`Failed to get frame for ${sourceId} at ${timestamp}:`, error);
     return null;
   }
+}
+
+/**
+ * Clean up all frames fetched during current iteration
+ * Call this after drawing and encoding each frame
+ */
+function cleanupIterationFrames(manager: FrameManager): void {
+  for (const frame of manager.currentFrames.values()) {
+    try {
+      frame.close();
+    } catch {
+      // Frame may already be closed
+    }
+  }
+  manager.currentFrames.clear();
 }
 
 /**
@@ -2126,6 +2134,9 @@ export async function exportToMP4(
 
   // Helper to clean up resources on abort or completion
   const cleanup = async () => {
+    // Clean up any remaining iteration frames
+    cleanupIterationFrames(frameManager);
+
     // Dispose frame manager (closes VideoFrames and frame sources)
     await disposeFrameManager(frameManager);
 
@@ -2141,6 +2152,9 @@ export async function exportToMP4(
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       // Check for abort at start of each frame
       checkAborted(signal);
+
+      // Clean up frames from previous iteration before starting new one
+      cleanupIterationFrames(frameManager);
 
       const currentTime = frameIndex / frameRate;
 
