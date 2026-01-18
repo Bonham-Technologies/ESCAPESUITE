@@ -106,11 +106,13 @@ dist/
 
 ### ESCAPEARTIST (apps/artist)
 - Zustand store in `src/store/projectStore.ts`
-- Core modules in `src/core/`: `storage.ts`, `videoProcessor.ts`, `exporter.ts`, `projectManager.ts`, `exportScheduler.ts`, `frameCache.ts`
+- Core modules in `src/core/`: `storage.ts`, `videoProcessor.ts`, `exporter.ts`, `projectManager.ts`, `exportScheduler.ts`, `frameCache.ts`, `videoDecodeManager.ts`, `frameSource.ts`
+- Video decode worker in `src/workers/decodeWorker.ts` for background-capable MP4 exports
 - Keyframe animation system in `src/utils/animation.ts`
 - Audio waveform visualization in `src/utils/waveform.ts`
-- WebCodecs API for encoding (Chrome/Edge only)
+- WebCodecs API for encoding/decoding (Chrome/Edge only)
 - Export formats: WebM (VP9+Opus) and MP4 (H.264+AAC)
+- Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
 
 ### Data Flow
 ```
@@ -154,7 +156,7 @@ VITE_BUILD_MODE=saas              # or 'standalone' for air-gapped builds
 Test counts:
 - ESCAPEPLAN: 47 tests
 - ESCAPECRAFT: 95 tests
-- ESCAPEARTIST: 453 tests
+- ESCAPEARTIST: 570 tests
 - E2E: 62 tests (smoke tests run in CI)
 
 ## Key Constraints
