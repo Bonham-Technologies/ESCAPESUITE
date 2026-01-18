@@ -15,7 +15,7 @@ import { Compositor } from './core/compositor';
 import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
-import { convertToMP4, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, type ConversionProgress } from './core/converter';
+import { convertToMP4, fixWebMMetadata, isMP4ConversionSupported, type ConversionProgress } from './core/converter';
 import { useAuth, isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -565,53 +565,26 @@ function App() {
   const handleDownloadWebM = async (id: string, name: string) => {
     setDownloadMenuOpen(null);
 
-    // Find the recording to get its duration
-    const recording = recordings.find(r => r.id === id);
-    if (!recording) return;
-
     const blob = await getVideoBlob(id);
     if (!blob) return;
 
-    // If WebM remuxing is supported, re-encode for proper playback in all players
-    if (isWebMRemuxSupported()) {
-      setConvertingId(id);
-      setConversionProgress({ phase: 'preparing', progress: 0, message: 'Preparing WebM...' });
+    try {
+      // Fix WebM metadata for proper seeking/playback (near-instant, no re-encoding)
+      const fixedBlob = await fixWebMMetadata(blob);
 
-      try {
-        const remuxedBlob = await remuxToWebM(blob, recording.duration, (progress) => {
-          setConversionProgress(progress);
-        });
-
-        // Download the remuxed WebM
-        analytics.recordingDownloaded();
-        const url = createBlobUrl(remuxedBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        a.download = `${safeName}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        revokeBlobUrl(url);
-      } catch (error) {
-        console.error('WebM remuxing failed:', error);
-        // Fall back to raw download
-        analytics.recordingDownloaded();
-        const url = createBlobUrl(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        a.download = `${safeName}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        revokeBlobUrl(url);
-      } finally {
-        setConvertingId(null);
-        setConversionProgress(null);
-      }
-    } else {
-      // Fall back to raw download if WebCodecs not available
+      analytics.recordingDownloaded();
+      const url = createBlobUrl(fixedBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      a.download = `${safeName}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      revokeBlobUrl(url);
+    } catch (error) {
+      console.error('WebM metadata fix failed:', error);
+      // Fall back to raw download
       analytics.recordingDownloaded();
       const url = createBlobUrl(blob);
       const a = document.createElement('a');

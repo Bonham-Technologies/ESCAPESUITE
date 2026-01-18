@@ -12,6 +12,7 @@ import {
   EncodedAudioPacketSource,
   EncodedPacket,
 } from 'mediabunny';
+import fixWebmDuration from 'webm-duration-fix';
 
 export interface ConversionProgress {
   phase: 'preparing' | 'encoding' | 'finalizing';
@@ -31,6 +32,19 @@ export function isMP4ConversionSupported(): boolean {
     typeof AudioEncoder !== 'undefined' &&
     typeof AudioContext !== 'undefined'
   );
+}
+
+/**
+ * Fix WebM metadata for proper seeking and playback.
+ * This is near-instant since it only rewrites container metadata
+ * (Duration, SeekHead, Cues) without re-encoding video/audio.
+ *
+ * Uses webm-duration-fix which properly adds seek cues that
+ * Windows Media Player and other players need for scrubbing.
+ */
+export async function fixWebMMetadata(webmBlob: Blob): Promise<Blob> {
+  const fixedBlob = await fixWebmDuration(webmBlob);
+  return fixedBlob;
 }
 
 /**

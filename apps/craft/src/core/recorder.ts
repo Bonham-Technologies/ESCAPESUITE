@@ -1,6 +1,6 @@
 // Core recording engine using MediaRecorder API
 
-import fixWebmDuration from 'fix-webm-duration';
+import fixWebmDuration from 'webm-duration-fix';
 import { getSupportedMimeType, stopStream } from './permissions';
 import type { RecordingConfig, AudioLevels } from '../store/types';
 
@@ -131,12 +131,12 @@ export class Recorder {
 
     this.mediaRecorder.onstop = async () => {
       const rawBlob = new Blob(this.chunks, { type: mimeType });
-      const duration = this.getDuration() * 1000; // Convert to milliseconds
 
-      // Fix WebM duration/seek metadata for proper scrubbing support
+      // Fix WebM metadata (duration, seek cues) for proper playback
+      // webm-duration-fix adds Duration, SeekHead, and Cues elements
       let fixedBlob: Blob;
       try {
-        fixedBlob = await fixWebmDuration(rawBlob, duration, { logger: false });
+        fixedBlob = await fixWebmDuration(rawBlob);
       } catch {
         // Fall back to raw blob if fixing fails
         fixedBlob = rawBlob;
