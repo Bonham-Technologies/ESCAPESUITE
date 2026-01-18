@@ -22,6 +22,7 @@
     "@vercel/analytics": "^1.6.1",
     "fix-webm-duration": "^1.0.6",
     "idb": "^8.0.3",
+    "mediabunny": "^1.27.6",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "uuid": "^13.0.0",

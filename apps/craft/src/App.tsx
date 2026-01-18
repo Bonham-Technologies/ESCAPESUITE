@@ -15,6 +15,7 @@ import { Compositor } from './core/compositor';
 import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
+import { convertToMP4, isMP4ConversionSupported, type ConversionProgress } from './core/converter';
 import { useAuth, isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -56,6 +57,9 @@ function App() {
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null); // recording ID or null
+  const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
+  const [convertingId, setConvertingId] = useState<string | null>(null);
 
   // Capture thumbnail from preview video element
   const capturePreviewThumbnail = useCallback((): Promise<Blob | null> => {
@@ -107,6 +111,21 @@ function App() {
       previewRef.current.play().catch(() => {});
     }
   }, [previewStream]);
+
+  // Close download menu when clicking outside
+  useEffect(() => {
+    if (!downloadMenuOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest(`.${styles.downloadDropdown}`)) {
+        setDownloadMenuOpen(null);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [downloadMenuOpen]);
 
   // Stop all streams helper
   const stopAllStreams = useCallback(() => {
@@ -541,8 +560,8 @@ function App() {
     setPlaybackName('');
   };
 
-  // Download a recording
-  const handleDownloadRecording = async (id: string, name: string) => {
+  // Download a recording as WebM
+  const handleDownloadWebM = async (id: string, name: string) => {
     const blob = await getVideoBlob(id);
     if (blob) {
       analytics.recordingDownloaded();
@@ -556,6 +575,43 @@ function App() {
       a.click();
       document.body.removeChild(a);
       revokeBlobUrl(url);
+    }
+    setDownloadMenuOpen(null);
+  };
+
+  // Download a recording as MP4 (convert from WebM)
+  const handleDownloadMP4 = async (id: string, name: string) => {
+    setDownloadMenuOpen(null);
+    setConvertingId(id);
+    setConversionProgress({ phase: 'preparing', progress: 0, message: 'Starting conversion...' });
+
+    try {
+      const blob = await getVideoBlob(id);
+      if (!blob) {
+        throw new Error('Recording not found');
+      }
+
+      const mp4Blob = await convertToMP4(blob, (progress) => {
+        setConversionProgress(progress);
+      });
+
+      // Download the MP4
+      analytics.recordingDownloaded();
+      const url = createBlobUrl(mp4Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      a.download = `${safeName}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      revokeBlobUrl(url);
+    } catch (error) {
+      console.error('MP4 conversion failed:', error);
+      alert('Failed to convert to MP4. Please try downloading as WebM instead.');
+    } finally {
+      setConvertingId(null);
+      setConversionProgress(null);
     }
   };
 
@@ -804,13 +860,38 @@ function App() {
                       >
                         <PlayIcon />
                       </button>
-                      <button
-                        className={styles.iconButton}
-                        onClick={() => handleDownloadRecording(recording.id, recording.name)}
-                        title="Download"
-                      >
-                        <DownloadIcon />
-                      </button>
+                      <div className={styles.downloadDropdown}>
+                        <button
+                          className={styles.iconButton}
+                          onClick={() => setDownloadMenuOpen(downloadMenuOpen === recording.id ? null : recording.id)}
+                          title="Download"
+                          disabled={convertingId === recording.id}
+                        >
+                          {convertingId === recording.id ? (
+                            <span className={styles.spinnerSmall} />
+                          ) : (
+                            <DownloadIcon />
+                          )}
+                        </button>
+                        {downloadMenuOpen === recording.id && (
+                          <div className={styles.downloadMenu}>
+                            <button
+                              className={styles.downloadMenuItem}
+                              onClick={() => handleDownloadWebM(recording.id, recording.name)}
+                            >
+                              Download WebM
+                            </button>
+                            {isMP4ConversionSupported() && (
+                              <button
+                                className={styles.downloadMenuItem}
+                                onClick={() => handleDownloadMP4(recording.id, recording.name)}
+                              >
+                                Download MP4
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <button
                         className={styles.iconButton}
                         onClick={() => handleSendToEditor(recording.id)}
@@ -826,6 +907,19 @@ function App() {
                         <TrashIcon />
                       </button>
                     </div>
+                    {convertingId === recording.id && conversionProgress && (
+                      <div className={styles.conversionProgress}>
+                        <div className={styles.conversionProgressBar}>
+                          <div
+                            className={styles.conversionProgressFill}
+                            style={{ width: `${conversionProgress.progress}%` }}
+                          />
+                        </div>
+                        <span className={styles.conversionProgressText}>
+                          {conversionProgress.message}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
