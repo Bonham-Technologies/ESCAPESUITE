@@ -567,6 +567,15 @@ jobs:
     steps:
       - name: Check CI Status
         run: |
+          # For pull_request_target from non-bot actors, skip validation
+          # (the regular pull_request workflow handles those PRs)
+          if [ "${{ github.event_name }}" == "pull_request_target" ] && \
+             [ "${{ github.actor }}" != "github-actions[bot]" ] && \
+             [ "${{ github.actor }}" != "dependabot[bot]" ]; then
+            echo "Skipping ci-status for pull_request_target from regular user (handled by pull_request workflow)"
+            exit 0
+          fi
+
           # Core jobs must pass
           if [ "${{ needs.validate.result }}" != "success" ] || \
              [ "${{ needs.lint-and-typecheck.result }}" != "success" ] || \

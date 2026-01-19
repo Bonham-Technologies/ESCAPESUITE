@@ -151,16 +151,15 @@ VITE_BUILD_MODE=saas              # or 'standalone' for air-gapped builds
 ## Testing
 
 - **Unit tests**: Vitest with Testing Library, fake-indexeddb for storage mocking
-- **E2E tests**: Playwright with Chromium
-- **Journey tests**: Comprehensive user flow tests covering trial, subscription, and license workflows
-- **CI behavior**: In CI (`process.env.CI=true`), only smoke tests run; auth-dependent tests are skipped
+- **E2E tests**: Playwright with Chromium (fast tests exclude journey tests)
+- **Journey tests**: 69 comprehensive user flow tests covering trial, subscription, team, and license workflows
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts:
 - ESCAPEPLAN: 47 tests
 - ESCAPECRAFT: 143 tests
 - ESCAPEARTIST: 570 tests
-- E2E: 62 structural tests + 69 journey tests (smoke tests run in CI)
+- E2E: 62 structural tests + 69 journey tests
 
 ## Key Constraints
 
@@ -177,12 +176,21 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 | Job | Purpose | Runs On |
 |-----|---------|---------|
 | `validate` | Install deps, security audit | All PRs |
-| `lint` | ESLint all apps (parallel) | All PRs |
-| `type-check` | TypeScript `--noEmit` (parallel) | All PRs |
+| `lint-and-typecheck` | ESLint + TypeScript (combined) | All PRs |
 | `test` | Unit tests with coverage | All PRs |
 | `build` | Production builds, bundle size report | All PRs |
-| `e2e` | Playwright E2E tests | Main branch only |
+| `build-standalone` | Standalone builds (no auth) | All PRs |
+| `e2e` | Fast E2E tests (excludes journeys) | PRs only |
+| `e2e-full` | Full E2E including journeys | Main branch or `run-full-e2e` label |
+| `test-standalone` | Standalone E2E tests | PRs only |
+| `deploy` | Vercel deployment | After E2E passes |
 | `ci-status` | Summary/gate job | All PRs |
+
+**CI Optimizations:**
+- Concurrency control cancels in-progress runs when new commits are pushed
+- Combined lint + type-check saves ~30s of runner setup overhead
+- Playwright browsers are cached across runs (~1min savings)
+- Journey tests excluded by default (add `run-full-e2e` label to include)
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Triggers on merge to `main` branch

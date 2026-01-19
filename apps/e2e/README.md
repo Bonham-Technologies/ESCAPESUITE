@@ -145,10 +145,31 @@ See also: [Standalone Test Battery](../../docs/STANDALONE-TEST-BATTERY.md) for m
 
 ## CI Behavior
 
-In CI (`process.env.CI=true`):
-- Only smoke tests run (tests tagged `@smoke`)
-- Auth-dependent tests are skipped
+The CI workflow is optimized to balance thoroughness with speed:
+
+### Default PR Behavior
+- **Fast E2E tests** run on every PR (excludes journey tests)
+- Journey tests are excluded using `--grep-invert "Journey"`
+- Playwright browsers are cached to speed up runs
+- Concurrent runs are cancelled when new commits are pushed
+
+### Full E2E (Including Journeys)
+To run the complete test suite including all 69 journey tests:
+1. Add the `run-full-e2e` label to your PR, OR
+2. Merge to `main` branch (full tests run automatically)
+
+### CI Optimizations
+| Optimization | Benefit |
+|--------------|---------|
+| Concurrency control | Cancels duplicate runs on new pushes |
+| Combined lint + type-check | Saves ~30s runner setup |
+| Playwright browser caching | Saves ~1min per E2E job |
+| Journey tests excluded by default | Saves ~3-5min per PR |
+
+### Test Configuration
 - Tests run against development servers started by Playwright
+- Mock Clerk key is used when `VITE_CLERK_PUBLISHABLE_KEY` is not set
+- Route mocking intercepts all external API calls (Clerk, Stripe, Supabase)
 
 ## Configuration
 
