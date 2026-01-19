@@ -367,7 +367,7 @@ export class WebCodecsRecorder {
   /**
    * Start frame capture using MediaStreamTrackProcessor (preferred method)
    */
-  private async startTrackProcessorCapture(frameDurationUs: number): Promise<void> {
+  private async startTrackProcessorCapture(_frameDurationUs: number): Promise<void> {
     if (!this.frameReader || !this.videoEncoder) return;
 
     const targetFrameInterval = 1000 / this.frameRate;
@@ -377,7 +377,8 @@ export class WebCodecsRecorder {
       while (this.frameReaderActive && this.isRecordingActive) {
         const { value: frame, done } = await this.frameReader.read();
 
-        if (done || !frame) break;
+        if (done) break;
+        if (!frame) continue;
 
         // Throttle to target frame rate
         const now = performance.now();
@@ -387,26 +388,28 @@ export class WebCodecsRecorder {
         }
         lastFrameTime = now;
 
-        if (!this.isPausedState && this.videoEncoder && this.videoEncoder.state !== 'closed') {
-          try {
-            // Create a new VideoFrame with our timestamp
-            const newFrame = new VideoFrame(frame, {
-              timestamp: this.frameCount * frameDurationUs,
-              duration: frameDurationUs,
-            });
-
-            // Encode frame (keyframe every 2 seconds)
-            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
-            this.videoEncoder.encode(newFrame, { keyFrame });
-            newFrame.close();
-
-            this.frameCount++;
-          } catch (e) {
-            console.error('Frame encoding error:', e);
-          }
+        if (this.isPausedState) {
+          // When paused, just close the frame and continue
+          frame.close();
+          continue;
         }
 
-        frame.close();
+        if (this.videoEncoder && this.videoEncoder.state !== 'closed') {
+          try {
+            // Encode frame directly - encoder takes ownership, so DON'T close it after
+            // The frame's original timestamp from the capture is used
+            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
+            this.videoEncoder.encode(frame, { keyFrame });
+            this.frameCount++;
+            // Note: Do NOT call frame.close() here - encoder now owns the frame
+          } catch (e) {
+            console.error('Frame encoding error:', e);
+            // Only close frame if encoding failed
+            frame.close();
+          }
+        } else {
+          frame.close();
+        }
       }
     } catch (e) {
       // Reader was cancelled or track ended
@@ -442,7 +445,7 @@ export class WebCodecsRecorder {
             // Encode frame (keyframe every 2 seconds)
             const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
             this.videoEncoder.encode(frame, { keyFrame });
-            frame.close();
+            // Note: encoder takes ownership of frame, don't close it
 
             this.frameCount++;
           } catch (e) {
@@ -481,7 +484,7 @@ export class WebCodecsRecorder {
             // Encode frame (keyframe every 2 seconds)
             const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
             this.videoEncoder.encode(frame, { keyFrame });
-            frame.close();
+            // Note: encoder takes ownership of frame, don't close it
 
             this.frameCount++;
           } catch (e) {
