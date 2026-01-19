@@ -563,7 +563,15 @@ jobs:
   ci-status:
     runs-on: ubuntu-latest
     needs: [validate, lint-and-typecheck, test, build, build-standalone, e2e, e2e-full, test-standalone, deploy]
-    if: always()
+    # Always run, but skip for pull_request_target from non-bot actors
+    # (those PRs are handled by the regular pull_request workflow)
+    if: |
+      always() && (
+        github.event_name != 'pull_request_target' ||
+        github.actor == 'github-actions[bot]' ||
+        github.actor == 'dependabot[bot]' ||
+        startsWith(github.head_ref, 'changeset-release/')
+      )
     steps:
       - name: Check CI Status
         run: |
