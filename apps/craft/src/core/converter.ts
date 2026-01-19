@@ -3,6 +3,27 @@
  * Converts recordings from WebM (VP8/VP9 + Opus) to MP4 (H.264 + AAC)
  */
 
+// TypeScript types for requestVideoFrameCallback (not in standard lib yet)
+interface VideoFrameCallbackMetadata {
+  presentationTime: number;
+  expectedDisplayTime: number;
+  width: number;
+  height: number;
+  mediaTime: number;
+  presentedFrames: number;
+  processingDuration?: number;
+  captureTime?: number;
+  receiveTime?: number;
+  rtpTimestamp?: number;
+}
+
+interface HTMLVideoElementWithRVFC extends HTMLVideoElement {
+  requestVideoFrameCallback(
+    callback: (now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => void
+  ): number;
+  cancelVideoFrameCallback(handle: number): void;
+}
+
 import {
   Output,
   BufferTarget,
@@ -146,6 +167,168 @@ async function waitForVideoReady(
       // Resolve anyway - use current state
       resolve();
     }, timeoutMs);
+  });
+}
+
+/**
+ * Capture frames by playing the video (much faster than seek-based approach).
+ * Uses requestVideoFrameCallback if available for precise frame capture.
+ */
+async function captureFramesViaPlayback(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  videoEncoder: VideoEncoder,
+  frameRate: number,
+  totalFrames: number,
+  keyFrameInterval: number,
+  signal?: AbortSignal,
+  onProgress?: (frameIndex: number, totalFrames: number) => void
+): Promise<void> {
+  const frameDuration = 1 / frameRate;
+  const frameDurationUs = Math.round(frameDuration * 1_000_000);
+
+  // Check if requestVideoFrameCallback is available
+  const hasRVFC = 'requestVideoFrameCallback' in video;
+
+  return new Promise((resolve, reject) => {
+    let frameIndex = 0;
+    let lastCaptureTime = -frameDuration; // Ensure we capture frame 0
+    let rvfcHandle: number | null = null;
+    let rafHandle: number | null = null;
+    let isFinished = false;
+
+    const cleanup = () => {
+      isFinished = true;
+      if (rvfcHandle !== null && hasRVFC) {
+        (video as HTMLVideoElementWithRVFC).cancelVideoFrameCallback(rvfcHandle);
+      }
+      if (rafHandle !== null) {
+        cancelAnimationFrame(rafHandle);
+      }
+      video.pause();
+    };
+
+    const onAbort = () => {
+      cleanup();
+      reject(new ConversionAbortedError());
+    };
+
+    signal?.addEventListener('abort', onAbort);
+
+    const captureCurrentFrame = () => {
+      if (frameIndex >= totalFrames || isFinished) return false;
+
+      // Draw current frame to canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Create and encode frame
+      const frame = new VideoFrame(canvas, {
+        timestamp: frameIndex * frameDurationUs,
+        duration: frameDurationUs,
+      });
+
+      const keyFrame = frameIndex % keyFrameInterval === 0;
+      videoEncoder.encode(frame, { keyFrame });
+      frame.close();
+
+      frameIndex++;
+      onProgress?.(frameIndex, totalFrames);
+
+      return frameIndex < totalFrames;
+    };
+
+    if (hasRVFC) {
+      // Use requestVideoFrameCallback for precise frame capture
+      const rvfcCallback = (_now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => {
+        if (signal?.aborted || isFinished) return;
+
+        const currentTime = metadata.mediaTime;
+
+        // Capture frames at target frame rate intervals
+        while (lastCaptureTime + frameDuration <= currentTime && frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+
+        // Continue if video is still playing and we need more frames
+        if (!video.ended && !video.paused && frameIndex < totalFrames) {
+          rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
+        }
+      };
+
+      video.addEventListener('ended', () => {
+        if (isFinished) return;
+        // Capture any remaining frames using the last displayed frame
+        while (frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      });
+
+      video.addEventListener('error', () => {
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        reject(new Error('Video playback error'));
+      });
+
+      rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
+      video.currentTime = 0;
+      video.play().catch(reject);
+    } else {
+      // Fallback: use requestAnimationFrame with time-based capture
+      const rafCallback = () => {
+        if (signal?.aborted || isFinished) return;
+
+        const currentTime = video.currentTime;
+
+        // Capture frames at target frame rate intervals
+        while (lastCaptureTime + frameDuration <= currentTime && frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+
+        // Continue if video is still playing and we need more frames
+        if (!video.ended && !video.paused && frameIndex < totalFrames) {
+          rafHandle = requestAnimationFrame(rafCallback);
+        } else if (video.ended || frameIndex >= totalFrames) {
+          // Capture any remaining frames
+          while (frameIndex < totalFrames) {
+            captureCurrentFrame();
+            lastCaptureTime += frameDuration;
+          }
+          cleanup();
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }
+      };
+
+      video.addEventListener('ended', () => {
+        if (isFinished) return;
+        // Capture any remaining frames
+        while (frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      });
+
+      video.addEventListener('error', () => {
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        reject(new Error('Video playback error'));
+      });
+
+      video.currentTime = 0;
+      video.play().then(() => {
+        rafHandle = requestAnimationFrame(rafCallback);
+      }).catch(reject);
+    }
   });
 }
 
@@ -372,7 +555,7 @@ export async function convertToMP4(
       });
     }
 
-    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames (playing video)...' });
 
     // Create canvas for frame capture
     const canvas = document.createElement('canvas');
@@ -380,53 +563,25 @@ export async function convertToMP4(
     canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false })!;
 
-    const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-
-    // Encode frames
-    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-      // Check for cancellation at the start of each frame
-      checkAborted(signal);
-
-      const currentTime = frameIndex / frameRate;
-
-      // Seek video to current time with timeout (WebM files from MediaRecorder may have seek issues)
-      await seekVideoWithTimeout(video, currentTime, 500, signal);
-
-      // Wait for frame to be ready with timeout
-      await waitForVideoReady(video, 500, signal);
-
-      // Draw frame to canvas
-      ctx.drawImage(video, 0, 0, width, height);
-
-      // Create VideoFrame from canvas
-      const frame = new VideoFrame(canvas, {
-        timestamp: frameIndex * frameDurationUs,
-        duration: frameDurationUs,
-      });
-
-      // Encode frame
-      const keyFrame = frameIndex % 30 === 0; // Keyframe every 30 frames
-      videoEncoder.encode(frame, { keyFrame });
-      frame.close();
-
-      // Wait for encoder queue to drain if needed (uses MessageChannel to avoid background tab throttling)
-      while (videoEncoder.encodeQueueSize > 20) {
-        await yieldToMain();
+    // Use play-based frame capture (much faster than seek-based)
+    await captureFramesViaPlayback(
+      video,
+      canvas,
+      ctx,
+      videoEncoder,
+      frameRate,
+      totalFrames,
+      30, // keyframe every 30 frames (1 second)
+      signal,
+      (frameIndex, total) => {
+        const progress = 18 + (frameIndex / total) * 70;
+        onProgress({
+          phase: 'encoding',
+          progress,
+          message: `Encoding frame ${frameIndex} of ${total}...`
+        });
       }
-
-      // Yield periodically to keep UI responsive and avoid background tab issues
-      if (frameIndex % 5 === 0) {
-        await yieldToMain();
-      }
-
-      // Update progress
-      const progress = 18 + (frameIndex / totalFrames) * 70;
-      onProgress({
-        phase: 'encoding',
-        progress,
-        message: `Encoding frame ${frameIndex + 1} of ${totalFrames}...`
-      });
-    }
+    );
 
     // Flush video encoder
     await videoEncoder.flush();
@@ -652,7 +807,7 @@ export async function remuxToWebM(
       });
     }
 
-    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames (playing video)...' });
 
     // Create canvas for frame capture
     const canvas = document.createElement('canvas');
@@ -660,53 +815,25 @@ export async function remuxToWebM(
     canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false })!;
 
-    const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-
-    // Encode frames
-    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-      // Check for cancellation at the start of each frame
-      checkAborted(signal);
-
-      const currentTime = frameIndex / frameRate;
-
-      // Seek video to current time with timeout (WebM files from MediaRecorder may have seek issues)
-      await seekVideoWithTimeout(video, currentTime, 500, signal);
-
-      // Wait for frame to be ready with timeout
-      await waitForVideoReady(video, 500, signal);
-
-      // Draw frame to canvas
-      ctx.drawImage(video, 0, 0, width, height);
-
-      // Create VideoFrame from canvas
-      const frame = new VideoFrame(canvas, {
-        timestamp: frameIndex * frameDurationUs,
-        duration: frameDurationUs,
-      });
-
-      // Encode frame (keyframe every 2 seconds for better seeking)
-      const keyFrame = frameIndex % (frameRate * 2) === 0;
-      videoEncoder.encode(frame, { keyFrame });
-      frame.close();
-
-      // Wait for encoder queue to drain if needed (uses MessageChannel to avoid background tab throttling)
-      while (videoEncoder.encodeQueueSize > 20) {
-        await yieldToMain();
+    // Use play-based frame capture (much faster than seek-based)
+    await captureFramesViaPlayback(
+      video,
+      canvas,
+      ctx,
+      videoEncoder,
+      frameRate,
+      totalFrames,
+      frameRate * 2, // keyframe every 2 seconds for better seeking
+      signal,
+      (frameIndex, total) => {
+        const progress = 18 + (frameIndex / total) * 70;
+        onProgress({
+          phase: 'encoding',
+          progress,
+          message: `Encoding frame ${frameIndex} of ${total}...`
+        });
       }
-
-      // Yield periodically to keep UI responsive and avoid background tab issues
-      if (frameIndex % 5 === 0) {
-        await yieldToMain();
-      }
-
-      // Update progress
-      const progress = 18 + (frameIndex / totalFrames) * 70;
-      onProgress({
-        phase: 'encoding',
-        progress,
-        message: `Encoding frame ${frameIndex + 1} of ${totalFrames}...`
-      });
-    }
+    );
 
     // Flush video encoder
     await videoEncoder.flush();
