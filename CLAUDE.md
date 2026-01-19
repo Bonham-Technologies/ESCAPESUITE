@@ -160,7 +160,7 @@ Test counts:
 - ESCAPEPLAN: 47 tests
 - ESCAPECRAFT: 143 tests
 - ESCAPEARTIST: 570 tests
-- E2E: 62 structural tests + 29 journey tests (smoke tests run in CI)
+- E2E: 62 structural tests + 69 journey tests (smoke tests run in CI)
 
 ## Key Constraints
 
