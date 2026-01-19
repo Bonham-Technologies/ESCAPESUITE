@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.4.0
+
+### Minor Changes
+
+- 2f796b1: Add flexible download format options and recording improvements
+
+  **New Features:**
+
+  - Three download format options: WebM (Instant), WebM (Compatible), and MP4 (Universal)
+  - Help modal with recording tips and best practices
+  - MP4 export using WebCodecs + Mediabunny (H.264 + AAC)
+
+  **Improvements:**
+
+  - Improved screen capture source selection (excludes self-capture)
+  - Fixed download dropdown positioning
+  - Added track ended event handlers for graceful recording stops
+  - Better WebM metadata using webm-duration-fix library
+
+  **Download Options:**
+
+  - WebM (Instant): Fast download, works in browsers and VLC
+  - WebM (Compatible): Re-encoded for Windows Media Player compatibility
+  - MP4 (Universal): H.264 + AAC for maximum compatibility everywhere
+
+- f37d020: Add WebCodecs-based recorder for proper WebM container output
+
+  - New `WebCodecsRecorder` class using WebCodecs API and Mediabunny for muxing
+  - Produces properly structured WebM files that work in Windows Media Player
+  - Falls back to MediaRecorder-based recorder when WebCodecs is not available
+  - Added `recorder-factory.ts` for automatic recorder selection based on browser support
+  - VP9 video encoding at 2.5 Mbps, Opus audio encoding at 128 kbps
+  - Preserves all existing recorder functionality (pause/resume, duration tracking, audio levels)
+
 ## 1.2.0
 
 ### Minor Changes
