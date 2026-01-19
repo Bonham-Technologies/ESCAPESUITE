@@ -3,6 +3,27 @@
  * Converts recordings from WebM (VP8/VP9 + Opus) to MP4 (H.264 + AAC)
  */
 
+// TypeScript types for requestVideoFrameCallback (not in standard lib yet)
+interface VideoFrameCallbackMetadata {
+  presentationTime: number;
+  expectedDisplayTime: number;
+  width: number;
+  height: number;
+  mediaTime: number;
+  presentedFrames: number;
+  processingDuration?: number;
+  captureTime?: number;
+  receiveTime?: number;
+  rtpTimestamp?: number;
+}
+
+interface HTMLVideoElementWithRVFC extends HTMLVideoElement {
+  requestVideoFrameCallback(
+    callback: (now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => void
+  ): number;
+  cancelVideoFrameCallback(handle: number): void;
+}
+
 import {
   Output,
   BufferTarget,
@@ -21,6 +42,200 @@ export interface ConversionProgress {
 }
 
 export type ProgressCallback = (progress: ConversionProgress) => void;
+
+/**
+ * Error thrown when conversion is cancelled by user
+ */
+export class ConversionAbortedError extends Error {
+  constructor() {
+    super('Conversion was cancelled');
+    this.name = 'ConversionAbortedError';
+  }
+}
+
+/**
+ * Check if abort was requested and throw if so
+ */
+function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new ConversionAbortedError();
+  }
+}
+
+/**
+ * Yield to main thread without being throttled in background tabs.
+ * Uses MessageChannel which is not subject to the same throttling as setTimeout.
+ */
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => resolve();
+    channel.port2.postMessage(null);
+  });
+}
+
+/**
+ * Capture frames by playing the video (much faster than seek-based approach).
+ * Uses requestVideoFrameCallback if available for precise frame capture.
+ */
+async function captureFramesViaPlayback(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  videoEncoder: VideoEncoder,
+  frameRate: number,
+  totalFrames: number,
+  keyFrameInterval: number,
+  signal?: AbortSignal,
+  onProgress?: (frameIndex: number, totalFrames: number) => void
+): Promise<void> {
+  const frameDuration = 1 / frameRate;
+  const frameDurationUs = Math.round(frameDuration * 1_000_000);
+
+  // Check if requestVideoFrameCallback is available
+  // Use a function check to avoid TypeScript type narrowing issues
+  const hasRVFC = typeof (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback === 'function';
+
+  return new Promise((resolve, reject) => {
+    let frameIndex = 0;
+    let lastCaptureTime = -frameDuration; // Ensure we capture frame 0
+    let rvfcHandle: number | null = null;
+    let rafHandle: number | null = null;
+    let isFinished = false;
+
+    const cleanup = () => {
+      isFinished = true;
+      if (rvfcHandle !== null && hasRVFC) {
+        (video as HTMLVideoElementWithRVFC).cancelVideoFrameCallback(rvfcHandle);
+      }
+      if (rafHandle !== null) {
+        cancelAnimationFrame(rafHandle);
+      }
+      video.pause();
+    };
+
+    const onAbort = () => {
+      cleanup();
+      reject(new ConversionAbortedError());
+    };
+
+    signal?.addEventListener('abort', onAbort);
+
+    const captureCurrentFrame = () => {
+      if (frameIndex >= totalFrames || isFinished) return false;
+
+      // Draw current frame to canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Create and encode frame
+      const frame = new VideoFrame(canvas, {
+        timestamp: frameIndex * frameDurationUs,
+        duration: frameDurationUs,
+      });
+
+      const keyFrame = frameIndex % keyFrameInterval === 0;
+      videoEncoder.encode(frame, { keyFrame });
+      frame.close();
+
+      frameIndex++;
+      onProgress?.(frameIndex, totalFrames);
+
+      return frameIndex < totalFrames;
+    };
+
+    if (hasRVFC) {
+      // Use requestVideoFrameCallback for precise frame capture
+      const rvfcCallback = (_now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => {
+        if (signal?.aborted || isFinished) return;
+
+        const currentTime = metadata.mediaTime;
+
+        // Capture frames at target frame rate intervals
+        while (lastCaptureTime + frameDuration <= currentTime && frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+
+        // Continue if video is still playing and we need more frames
+        if (!video.ended && !video.paused && frameIndex < totalFrames) {
+          rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
+        }
+      };
+
+      video.addEventListener('ended', () => {
+        if (isFinished) return;
+        // Capture any remaining frames using the last displayed frame
+        while (frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      });
+
+      video.addEventListener('error', () => {
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        reject(new Error('Video playback error'));
+      });
+
+      rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
+      video.currentTime = 0;
+      video.play().catch(reject);
+    } else {
+      // Fallback: use requestAnimationFrame with time-based capture
+      const rafCallback = () => {
+        if (signal?.aborted || isFinished) return;
+
+        const currentTime = video.currentTime;
+
+        // Capture frames at target frame rate intervals
+        while (lastCaptureTime + frameDuration <= currentTime && frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+
+        // Continue if video is still playing and we need more frames
+        if (!video.ended && !video.paused && frameIndex < totalFrames) {
+          rafHandle = requestAnimationFrame(rafCallback);
+        } else if (video.ended || frameIndex >= totalFrames) {
+          // Capture any remaining frames
+          while (frameIndex < totalFrames) {
+            captureCurrentFrame();
+            lastCaptureTime += frameDuration;
+          }
+          cleanup();
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }
+      };
+
+      video.addEventListener('ended', () => {
+        if (isFinished) return;
+        // Capture any remaining frames
+        while (frameIndex < totalFrames) {
+          captureCurrentFrame();
+          lastCaptureTime += frameDuration;
+        }
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      });
+
+      video.addEventListener('error', () => {
+        cleanup();
+        signal?.removeEventListener('abort', onAbort);
+        reject(new Error('Video playback error'));
+      });
+
+      video.currentTime = 0;
+      video.play().then(() => {
+        rafHandle = requestAnimationFrame(rafCallback);
+      }).catch(reject);
+    }
+  });
+}
 
 /**
  * Check if MP4 conversion is supported (requires WebCodecs)
@@ -102,10 +317,14 @@ function audioBufferToFloat32(audioBuffer: AudioBuffer): Float32Array {
 
 /**
  * Convert WebM blob to MP4
+ * @param webmBlob - The WebM blob to convert
+ * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal for cancellation
  */
 export async function convertToMP4(
   webmBlob: Blob,
-  onProgress: ProgressCallback
+  onProgress: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<Blob> {
   if (!isMP4ConversionSupported()) {
     throw new Error('MP4 conversion requires WebCodecs API (Chrome/Edge)');
@@ -241,7 +460,7 @@ export async function convertToMP4(
       });
     }
 
-    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames (playing video)...' });
 
     // Create canvas for frame capture
     const canvas = document.createElement('canvas');
@@ -249,60 +468,25 @@ export async function convertToMP4(
     canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false })!;
 
-    const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-
-    // Encode frames
-    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-      const currentTime = frameIndex / frameRate;
-
-      // Seek video to current time
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked);
-        video.currentTime = currentTime;
-      });
-
-      // Wait for frame to be ready
-      if (video.readyState < 2) {
-        await new Promise<void>((resolve) => {
-          const onCanPlay = () => {
-            video.removeEventListener('canplay', onCanPlay);
-            resolve();
-          };
-          video.addEventListener('canplay', onCanPlay);
+    // Use play-based frame capture (much faster than seek-based)
+    await captureFramesViaPlayback(
+      video,
+      canvas,
+      ctx,
+      videoEncoder,
+      frameRate,
+      totalFrames,
+      30, // keyframe every 30 frames (1 second)
+      signal,
+      (frameIndex, total) => {
+        const progress = 18 + (frameIndex / total) * 70;
+        onProgress({
+          phase: 'encoding',
+          progress,
+          message: `Encoding frame ${frameIndex} of ${total}...`
         });
       }
-
-      // Draw frame to canvas
-      ctx.drawImage(video, 0, 0, width, height);
-
-      // Create VideoFrame from canvas
-      const frame = new VideoFrame(canvas, {
-        timestamp: frameIndex * frameDurationUs,
-        duration: frameDurationUs,
-      });
-
-      // Encode frame
-      const keyFrame = frameIndex % 30 === 0; // Keyframe every 30 frames
-      videoEncoder.encode(frame, { keyFrame });
-      frame.close();
-
-      // Wait for encoder queue to drain if needed
-      while (videoEncoder.encodeQueueSize > 20) {
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      }
-
-      // Update progress
-      const progress = 18 + (frameIndex / totalFrames) * 70;
-      onProgress({
-        phase: 'encoding',
-        progress,
-        message: `Encoding frame ${frameIndex + 1} of ${totalFrames}...`
-      });
-    }
+    );
 
     // Flush video encoder
     await videoEncoder.flush();
@@ -314,11 +498,21 @@ export async function convertToMP4(
     // Note: audioData is interleaved [L, R, L, R, ...] but AudioData f32-planar
     // expects planar format [L, L, L, ..., R, R, R, ...]
     if (audioEncoder && audioData) {
+      // Check for cancellation before audio encoding
+      checkAborted(signal);
+
       const samplesPerChunk = 1024;
       const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
       let audioTimestamp = 0;
+      let chunkCount = 0;
 
       for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
+        // Check for cancellation periodically during audio encoding
+        if (chunkCount % 100 === 0) {
+          checkAborted(signal);
+        }
+        chunkCount++;
+
         const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
 
         // Create planar data: [all left samples][all right samples]
@@ -346,9 +540,9 @@ export async function convertToMP4(
 
         audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
 
-        // Wait for encoder queue to drain
+        // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
         while (audioEncoder.encodeQueueSize > 20) {
-          await new Promise((resolve) => setTimeout(resolve, 1));
+          await yieldToMain();
         }
       }
 
@@ -392,11 +586,16 @@ export function isWebMRemuxSupported(): boolean {
  * Remux WebM blob to create a proper container with seek metadata
  * This re-encodes the video using WebCodecs + Mediabunny to produce
  * a WebM file that plays correctly in all players (including Windows Media Player)
+ * @param webmBlob - The WebM blob to remux
+ * @param duration - Known duration of the video
+ * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal for cancellation
  */
 export async function remuxToWebM(
   webmBlob: Blob,
   duration: number,
-  onProgress: ProgressCallback
+  onProgress: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<Blob> {
   if (!isWebMRemuxSupported()) {
     throw new Error('WebM remuxing requires WebCodecs API (Chrome/Edge)');
@@ -513,7 +712,7 @@ export async function remuxToWebM(
       });
     }
 
-    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames (playing video)...' });
 
     // Create canvas for frame capture
     const canvas = document.createElement('canvas');
@@ -521,60 +720,25 @@ export async function remuxToWebM(
     canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false })!;
 
-    const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-
-    // Encode frames
-    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-      const currentTime = frameIndex / frameRate;
-
-      // Seek video to current time
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked);
-        video.currentTime = currentTime;
-      });
-
-      // Wait for frame to be ready
-      if (video.readyState < 2) {
-        await new Promise<void>((resolve) => {
-          const onCanPlay = () => {
-            video.removeEventListener('canplay', onCanPlay);
-            resolve();
-          };
-          video.addEventListener('canplay', onCanPlay);
+    // Use play-based frame capture (much faster than seek-based)
+    await captureFramesViaPlayback(
+      video,
+      canvas,
+      ctx,
+      videoEncoder,
+      frameRate,
+      totalFrames,
+      frameRate * 2, // keyframe every 2 seconds for better seeking
+      signal,
+      (frameIndex, total) => {
+        const progress = 18 + (frameIndex / total) * 70;
+        onProgress({
+          phase: 'encoding',
+          progress,
+          message: `Encoding frame ${frameIndex} of ${total}...`
         });
       }
-
-      // Draw frame to canvas
-      ctx.drawImage(video, 0, 0, width, height);
-
-      // Create VideoFrame from canvas
-      const frame = new VideoFrame(canvas, {
-        timestamp: frameIndex * frameDurationUs,
-        duration: frameDurationUs,
-      });
-
-      // Encode frame (keyframe every 2 seconds for better seeking)
-      const keyFrame = frameIndex % (frameRate * 2) === 0;
-      videoEncoder.encode(frame, { keyFrame });
-      frame.close();
-
-      // Wait for encoder queue to drain if needed
-      while (videoEncoder.encodeQueueSize > 20) {
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      }
-
-      // Update progress
-      const progress = 18 + (frameIndex / totalFrames) * 70;
-      onProgress({
-        phase: 'encoding',
-        progress,
-        message: `Encoding frame ${frameIndex + 1} of ${totalFrames}...`
-      });
-    }
+    );
 
     // Flush video encoder
     await videoEncoder.flush();
@@ -584,11 +748,20 @@ export async function remuxToWebM(
 
     // Encode audio if we have it
     if (audioEncoder && audioData) {
+      // Check for cancellation before audio encoding
+      checkAborted(signal);
       const samplesPerChunk = 1024;
       const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
       let audioTimestamp = 0;
+      let chunkCount = 0;
 
       for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
+        // Check for cancellation periodically during audio encoding
+        if (chunkCount % 100 === 0) {
+          checkAborted(signal);
+        }
+        chunkCount++;
+
         const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
 
         // Create planar data: [all left samples][all right samples]
@@ -616,9 +789,9 @@ export async function remuxToWebM(
 
         audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
 
-        // Wait for encoder queue to drain
+        // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
         while (audioEncoder.encodeQueueSize > 20) {
-          await new Promise((resolve) => setTimeout(resolve, 1));
+          await yieldToMain();
         }
       }
 

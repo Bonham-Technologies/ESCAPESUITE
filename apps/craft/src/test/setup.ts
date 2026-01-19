@@ -43,6 +43,22 @@ vi.stubGlobal('ResizeObserver', class ResizeObserver {
   disconnect = vi.fn()
 })
 
+// Mock HTMLCanvasElement.getContext for WebCodecs recorder tests
+const originalGetContext = HTMLCanvasElement.prototype.getContext
+HTMLCanvasElement.prototype.getContext = function(contextId: string, options?: CanvasRenderingContext2DSettings) {
+  if (contextId === '2d') {
+    return {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+      putImageData: vi.fn(),
+      clearRect: vi.fn(),
+      fillRect: vi.fn(),
+      canvas: this,
+    } as unknown as CanvasRenderingContext2D
+  }
+  return originalGetContext.call(this, contextId, options)
+}
+
 // Helper to create a mock MediaStreamTrack with all required methods
 function createMockAudioTrack() {
   return {
@@ -93,6 +109,11 @@ vi.stubGlobal('AudioContext', class AudioContext {
     stream: {
       getAudioTracks: vi.fn(() => [createMockAudioTrack()]),
     },
+  }))
+  createScriptProcessor = vi.fn(() => ({
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    onaudioprocess: null,
   }))
   decodeAudioData = vi.fn()
   close = vi.fn()

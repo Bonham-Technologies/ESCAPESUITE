@@ -354,16 +354,12 @@
 }
 
 .downloadMenu {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-bottom: 4px;
+  position: fixed;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 100;
+  z-index: 1000;
   min-width: 140px;
   overflow: hidden;
 }
@@ -432,12 +428,18 @@
   margin-top: 0.25rem;
 }
 
+.conversionProgressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
 .conversionProgressBar {
   height: 4px;
   background: var(--border);
   border-radius: 2px;
   overflow: hidden;
-  margin-bottom: 0.25rem;
 }
 
 .conversionProgressFill {
@@ -450,6 +452,23 @@
 .conversionProgressText {
   font-size: 0.625rem;
   color: var(--text-secondary);
+}
+
+.conversionCancelButton {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 0.125rem 0.25rem;
+  cursor: pointer;
+  border-radius: 2px;
+  line-height: 1;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.conversionCancelButton:hover {
+  background: var(--bg-primary);
+  color: var(--text);
 }
 
 /* Empty state */

@@ -10,13 +10,12 @@ import {
   requestMicrophone,
   stopStream,
 } from './core/permissions';
-import { Recorder } from './core/recorder';
+import { createRecorder, type AnyRecorder } from './core/recorder-factory';
 import { Compositor } from './core/compositor';
-import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
-import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, type ConversionProgress } from './core/converter';
-import { useAuth, isStandaloneMode } from './auth';
+import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, ConversionAbortedError, type ConversionProgress } from './core/converter';
+import { isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
@@ -44,20 +43,19 @@ function App() {
     loadRecordings,
   } = useRecorderStore();
 
-  const { isTrial } = useAuth();
-
-  const recorderRef = useRef<Recorder | null>(null);
+  const recorderRef = useRef<AnyRecorder | null>(null);
   const compositorRef = useRef<Compositor | null>(null);
-  const watermarkerRef = useRef<StreamWatermarker | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
+  const conversionAbortRef = useRef<AbortController | null>(null);
 
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
   const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null); // recording ID or null
+  const [downloadMenuPosition, setDownloadMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -121,6 +119,7 @@ function App() {
       const target = event.target as Element;
       if (!target.closest(`.${styles.downloadDropdown}`)) {
         setDownloadMenuOpen(null);
+        setDownloadMenuPosition(null);
       }
     };
 
@@ -138,11 +137,6 @@ function App() {
     if (compositorRef.current) {
       compositorRef.current.dispose();
       compositorRef.current = null;
-    }
-
-    if (watermarkerRef.current) {
-      watermarkerRef.current.dispose();
-      watermarkerRef.current = null;
     }
   }, [screenStream, webcamStream, setStreams]);
 
@@ -351,16 +345,12 @@ function App() {
       const { screen, webcam, mic } = await acquireStreams();
       setStreams(screen, webcam);
 
-      // Set up preview (with watermark for trial users)
-      const watermarkConfig = isTrial ? {
-        text: 'ESCAPE Suite Trial',
-        subtext: 'escapesuite.io',
-        opacity: 0.5,
-        fontSize: 24,
-      } : null;
+      // Set up preview
+      // Note: Watermarks are NOT applied during recording - they are added at export time
+      // This avoids canvas.captureStream() issues with hidden video elements
 
       if (config.screenEnabled && config.webcamEnabled && screen && webcam) {
-        // PiP mode - use compositor
+        // PiP mode - use compositor (no watermark during recording, applied at export)
         const videoTrack = screen.getVideoTracks()[0];
         const settings = videoTrack.getSettings();
         compositorRef.current = new Compositor(
@@ -370,45 +360,22 @@ function App() {
             webcamPosition: config.webcamPosition,
             webcamSize: config.webcamSize,
             webcamShape: config.webcamShape,
-            watermark: watermarkConfig,
+            // No watermark during recording - applied at export for trial users
           }
         );
         compositorRef.current.setScreenStream(screen);
         compositorRef.current.setWebcamStream(webcam);
         const composedStream = compositorRef.current.start();
         setPreviewStream(composedStream);
-      } else if (screen && isTrial) {
-        // Single source with watermark for trial users
-        const videoTrack = screen.getVideoTracks()[0];
-        const settings = videoTrack.getSettings();
-        watermarkerRef.current = new StreamWatermarker(
-          settings.width || 1920,
-          settings.height || 1080,
-          watermarkConfig || undefined
-        );
-        watermarkerRef.current.setStream(screen);
-        const watermarkedStream = watermarkerRef.current.start();
-        setPreviewStream(watermarkedStream);
-      } else if (webcam && isTrial) {
-        // Webcam only with watermark for trial users
-        const videoTrack = webcam.getVideoTracks()[0];
-        const settings = videoTrack.getSettings();
-        watermarkerRef.current = new StreamWatermarker(
-          settings.width || 1280,
-          settings.height || 720,
-          watermarkConfig || undefined
-        );
-        watermarkerRef.current.setStream(webcam);
-        const watermarkedStream = watermarkerRef.current.start();
-        setPreviewStream(watermarkedStream);
       } else if (screen) {
+        // Screen only - use raw stream (watermark applied at export for trial users)
         setPreviewStream(screen);
       } else if (webcam) {
         setPreviewStream(webcam);
       }
 
-      // Initialize recorder
-      recorderRef.current = new Recorder({
+      // Initialize recorder (uses WebCodecs if available for proper WebM containers)
+      recorderRef.current = createRecorder({
         onStart: () => {
           setState('recording');
           analytics.recordingStarted();
@@ -439,22 +406,20 @@ function App() {
         onAudioLevels: setAudioLevels,
       });
 
-      // Use composed/watermarked stream for recording
+      // Use raw streams for recording - watermarks are applied at export time
+      // This avoids canvas.captureStream() issues with hidden video elements
       let recordingScreen: MediaStream | null = screen;
 
       if (config.screenEnabled && config.webcamEnabled && compositorRef.current) {
-        // PiP mode - use compositor output
+        // PiP mode - use compositor output (required to combine screen + webcam)
+        // Note: PiP compositor is still needed but watermark will be added at export
         recordingScreen = new MediaStream([
           ...compositorRef.current.getCanvas().captureStream(30).getVideoTracks(),
           ...(screen?.getAudioTracks() || []),
         ]);
-      } else if (watermarkerRef.current) {
-        // Single source with watermark
-        recordingScreen = new MediaStream([
-          ...watermarkerRef.current.getCanvas().captureStream(30).getVideoTracks(),
-          ...(screen?.getAudioTracks() || webcam?.getAudioTracks() || []),
-        ]);
       }
+      // For single-source recordings (screen-only or webcam-only), use raw stream
+      // Watermark will be applied during export for trial users
 
       await recorderRef.current.initialize(recordingScreen, webcam, mic, config);
 
@@ -480,7 +445,6 @@ function App() {
     startRecording,
     stopAllStreams,
     saveRecording,
-    isTrial,
   ]);
 
   // Keyboard shortcuts
@@ -546,9 +510,20 @@ function App() {
 
     const blob = await getVideoBlob(id);
     if (blob) {
-      const url = createBlobUrl(blob);
-      setPlaybackUrl(url);
-      setPlaybackName(name);
+      // Fix WebM metadata for proper seeking/scrubbing
+      // MediaRecorder WebM files lack seek cues, making timeline scrubbing unreliable
+      try {
+        const fixedBlob = await fixWebMMetadata(blob);
+        const url = createBlobUrl(fixedBlob);
+        setPlaybackUrl(url);
+        setPlaybackName(name);
+      } catch (error) {
+        // Fall back to raw blob if metadata fix fails
+        console.warn('WebM metadata fix failed for playback:', error);
+        const url = createBlobUrl(blob);
+        setPlaybackUrl(url);
+        setPlaybackName(name);
+      }
     }
   };
 
@@ -564,6 +539,7 @@ function App() {
   // Download a recording as WebM
   const handleDownloadWebM = async (id: string, name: string) => {
     setDownloadMenuOpen(null);
+    setDownloadMenuPosition(null);
 
     const blob = await getVideoBlob(id);
     if (!blob) return;
@@ -601,8 +577,12 @@ function App() {
   // Download a recording as MP4 (convert from WebM)
   const handleDownloadMP4 = async (id: string, name: string) => {
     setDownloadMenuOpen(null);
+    setDownloadMenuPosition(null);
     setConvertingId(id);
     setConversionProgress({ phase: 'preparing', progress: 0, message: 'Starting conversion...' });
+
+    // Create AbortController for cancellation
+    conversionAbortRef.current = new AbortController();
 
     try {
       const blob = await getVideoBlob(id);
@@ -612,7 +592,7 @@ function App() {
 
       const mp4Blob = await convertToMP4(blob, (progress) => {
         setConversionProgress(progress);
-      });
+      }, conversionAbortRef.current.signal);
 
       // Download the MP4
       analytics.recordingDownloaded();
@@ -626,9 +606,14 @@ function App() {
       document.body.removeChild(a);
       revokeBlobUrl(url);
     } catch (error) {
-      console.error('MP4 conversion failed:', error);
-      alert('Failed to convert to MP4. Please try downloading as WebM instead.');
+      if (error instanceof ConversionAbortedError) {
+        console.log('MP4 conversion cancelled by user');
+      } else {
+        console.error('MP4 conversion failed:', error);
+        alert('Failed to convert to MP4. Please try downloading as WebM instead.');
+      }
     } finally {
+      conversionAbortRef.current = null;
       setConvertingId(null);
       setConversionProgress(null);
     }
@@ -637,6 +622,7 @@ function App() {
   // Download a recording as WebM with proper container (re-encoded for compatibility)
   const handleDownloadWebMCompatible = async (id: string, name: string) => {
     setDownloadMenuOpen(null);
+    setDownloadMenuPosition(null);
 
     // Find the recording to get its duration
     const recording = recordings.find(r => r.id === id);
@@ -644,6 +630,9 @@ function App() {
 
     setConvertingId(id);
     setConversionProgress({ phase: 'preparing', progress: 0, message: 'Preparing WebM...' });
+
+    // Create AbortController for cancellation
+    conversionAbortRef.current = new AbortController();
 
     try {
       const blob = await getVideoBlob(id);
@@ -653,7 +642,7 @@ function App() {
 
       const remuxedBlob = await remuxToWebM(blob, recording.duration, (progress) => {
         setConversionProgress(progress);
-      });
+      }, conversionAbortRef.current.signal);
 
       // Download the remuxed WebM
       analytics.recordingDownloaded();
@@ -667,11 +656,23 @@ function App() {
       document.body.removeChild(a);
       revokeBlobUrl(url);
     } catch (error) {
-      console.error('WebM remuxing failed:', error);
-      alert('Failed to create compatible WebM. Please try MP4 instead.');
+      if (error instanceof ConversionAbortedError) {
+        console.log('WebM conversion cancelled by user');
+      } else {
+        console.error('WebM remuxing failed:', error);
+        alert('Failed to create compatible WebM. Please try MP4 instead.');
+      }
     } finally {
+      conversionAbortRef.current = null;
       setConvertingId(null);
       setConversionProgress(null);
+    }
+  };
+
+  // Cancel ongoing conversion
+  const handleCancelConversion = () => {
+    if (conversionAbortRef.current) {
+      conversionAbortRef.current.abort();
     }
   };
 
@@ -935,7 +936,19 @@ function App() {
                       <div className={styles.downloadDropdown}>
                         <button
                           className={styles.iconButton}
-                          onClick={() => setDownloadMenuOpen(downloadMenuOpen === recording.id ? null : recording.id)}
+                          onClick={(e) => {
+                            if (downloadMenuOpen === recording.id) {
+                              setDownloadMenuOpen(null);
+                              setDownloadMenuPosition(null);
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setDownloadMenuPosition({
+                                top: rect.bottom + 4,
+                                left: rect.left + rect.width / 2 - 70, // Center the 140px menu
+                              });
+                              setDownloadMenuOpen(recording.id);
+                            }
+                          }}
                           title="Download"
                           disabled={convertingId === recording.id}
                         >
@@ -945,8 +958,11 @@ function App() {
                             <DownloadIcon />
                           )}
                         </button>
-                        {downloadMenuOpen === recording.id && (
-                          <div className={styles.downloadMenu}>
+                        {downloadMenuOpen === recording.id && downloadMenuPosition && (
+                          <div
+                            className={styles.downloadMenu}
+                            style={{ top: downloadMenuPosition.top, left: downloadMenuPosition.left }}
+                          >
                             <button
                               className={styles.downloadMenuItem}
                               onClick={() => handleDownloadWebM(recording.id, recording.name)}
@@ -995,15 +1011,24 @@ function App() {
                     </div>
                     {convertingId === recording.id && conversionProgress && (
                       <div className={styles.conversionProgress}>
+                        <div className={styles.conversionProgressHeader}>
+                          <span className={styles.conversionProgressText}>
+                            {conversionProgress.message}
+                          </span>
+                          <button
+                            className={styles.conversionCancelButton}
+                            onClick={handleCancelConversion}
+                            title="Cancel conversion"
+                          >
+                            ✕
+                          </button>
+                        </div>
                         <div className={styles.conversionProgressBar}>
                           <div
                             className={styles.conversionProgressFill}
                             style={{ width: `${conversionProgress.progress}%` }}
                           />
                         </div>
-                        <span className={styles.conversionProgressText}>
-                          {conversionProgress.message}
-                        </span>
                       </div>
                     )}
                   </div>
