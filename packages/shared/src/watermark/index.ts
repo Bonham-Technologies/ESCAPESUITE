@@ -76,11 +76,16 @@ export class StreamWatermarker {
   setStream(stream: MediaStream): void {
     if (this.video) {
       this.video.srcObject = null
+      this.video.remove()
     }
 
     this.video = document.createElement('video')
     this.video.srcObject = stream
     this.video.muted = true
+    // IMPORTANT: Attach to DOM to force browser to decode frames
+    // Browsers optimize away frame decoding for non-visible elements
+    this.video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;pointer-events:none;'
+    document.body.appendChild(this.video)
     this.video.play()
   }
 
@@ -104,6 +109,7 @@ export class StreamWatermarker {
 
     if (this.video) {
       this.video.srcObject = null
+      this.video.remove() // Remove from DOM
       this.video = null
     }
 

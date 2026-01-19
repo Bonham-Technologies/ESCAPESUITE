@@ -47,11 +47,16 @@ export class Compositor {
   setScreenStream(stream: MediaStream): void {
     if (this.screenVideo) {
       this.screenVideo.srcObject = null;
+      this.screenVideo.remove();
     }
 
     this.screenVideo = document.createElement('video');
     this.screenVideo.srcObject = stream;
     this.screenVideo.muted = true;
+    // IMPORTANT: Attach to DOM to force browser to decode frames
+    // Browsers optimize away frame decoding for non-visible elements
+    this.screenVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;pointer-events:none;';
+    document.body.appendChild(this.screenVideo);
     this.screenVideo.play();
   }
 
@@ -61,6 +66,7 @@ export class Compositor {
   setWebcamStream(stream: MediaStream | null): void {
     if (this.webcamVideo) {
       this.webcamVideo.srcObject = null;
+      this.webcamVideo.remove();
       this.webcamVideo = null;
     }
 
@@ -68,6 +74,9 @@ export class Compositor {
       this.webcamVideo = document.createElement('video');
       this.webcamVideo.srcObject = stream;
       this.webcamVideo.muted = true;
+      // IMPORTANT: Attach to DOM to force browser to decode frames
+      this.webcamVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;pointer-events:none;';
+      document.body.appendChild(this.webcamVideo);
       this.webcamVideo.play();
     }
   }
@@ -99,11 +108,13 @@ export class Compositor {
 
     if (this.screenVideo) {
       this.screenVideo.srcObject = null;
+      this.screenVideo.remove(); // Remove from DOM
       this.screenVideo = null;
     }
 
     if (this.webcamVideo) {
       this.webcamVideo.srcObject = null;
+      this.webcamVideo.remove(); // Remove from DOM
       this.webcamVideo = null;
     }
 

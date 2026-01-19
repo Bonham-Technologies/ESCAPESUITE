@@ -94,7 +94,9 @@
       "Bash(pnpm --filter @escapesuite/craft test:run)",
       "Bash(pnpm --filter @escapesuite/craft lint:*)",
       "Bash(pnpm --filter @escapesuite/craft build:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)"
     ]
   }
 }
