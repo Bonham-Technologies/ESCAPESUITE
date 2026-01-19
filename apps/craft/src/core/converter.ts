@@ -23,6 +23,37 @@ export interface ConversionProgress {
 export type ProgressCallback = (progress: ConversionProgress) => void;
 
 /**
+ * Error thrown when conversion is cancelled by user
+ */
+export class ConversionAbortedError extends Error {
+  constructor() {
+    super('Conversion was cancelled');
+    this.name = 'ConversionAbortedError';
+  }
+}
+
+/**
+ * Check if abort was requested and throw if so
+ */
+function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new ConversionAbortedError();
+  }
+}
+
+/**
+ * Yield to main thread without being throttled in background tabs.
+ * Uses MessageChannel which is not subject to the same throttling as setTimeout.
+ */
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => resolve();
+    channel.port2.postMessage(null);
+  });
+}
+
+/**
  * Check if MP4 conversion is supported (requires WebCodecs)
  */
 export function isMP4ConversionSupported(): boolean {
@@ -102,10 +133,14 @@ function audioBufferToFloat32(audioBuffer: AudioBuffer): Float32Array {
 
 /**
  * Convert WebM blob to MP4
+ * @param webmBlob - The WebM blob to convert
+ * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal for cancellation
  */
 export async function convertToMP4(
   webmBlob: Blob,
-  onProgress: ProgressCallback
+  onProgress: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<Blob> {
   if (!isMP4ConversionSupported()) {
     throw new Error('MP4 conversion requires WebCodecs API (Chrome/Edge)');
@@ -253,6 +288,9 @@ export async function convertToMP4(
 
     // Encode frames
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+      // Check for cancellation at the start of each frame
+      checkAborted(signal);
+
       const currentTime = frameIndex / frameRate;
 
       // Seek video to current time
@@ -290,9 +328,14 @@ export async function convertToMP4(
       videoEncoder.encode(frame, { keyFrame });
       frame.close();
 
-      // Wait for encoder queue to drain if needed
+      // Wait for encoder queue to drain if needed (uses MessageChannel to avoid background tab throttling)
       while (videoEncoder.encodeQueueSize > 20) {
-        await new Promise((resolve) => setTimeout(resolve, 1));
+        await yieldToMain();
+      }
+
+      // Yield periodically to keep UI responsive and avoid background tab issues
+      if (frameIndex % 5 === 0) {
+        await yieldToMain();
       }
 
       // Update progress
@@ -314,11 +357,21 @@ export async function convertToMP4(
     // Note: audioData is interleaved [L, R, L, R, ...] but AudioData f32-planar
     // expects planar format [L, L, L, ..., R, R, R, ...]
     if (audioEncoder && audioData) {
+      // Check for cancellation before audio encoding
+      checkAborted(signal);
+
       const samplesPerChunk = 1024;
       const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
       let audioTimestamp = 0;
+      let chunkCount = 0;
 
       for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
+        // Check for cancellation periodically during audio encoding
+        if (chunkCount % 100 === 0) {
+          checkAborted(signal);
+        }
+        chunkCount++;
+
         const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
 
         // Create planar data: [all left samples][all right samples]
@@ -346,9 +399,9 @@ export async function convertToMP4(
 
         audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
 
-        // Wait for encoder queue to drain
+        // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
         while (audioEncoder.encodeQueueSize > 20) {
-          await new Promise((resolve) => setTimeout(resolve, 1));
+          await yieldToMain();
         }
       }
 
@@ -392,11 +445,16 @@ export function isWebMRemuxSupported(): boolean {
  * Remux WebM blob to create a proper container with seek metadata
  * This re-encodes the video using WebCodecs + Mediabunny to produce
  * a WebM file that plays correctly in all players (including Windows Media Player)
+ * @param webmBlob - The WebM blob to remux
+ * @param duration - Known duration of the video
+ * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal for cancellation
  */
 export async function remuxToWebM(
   webmBlob: Blob,
   duration: number,
-  onProgress: ProgressCallback
+  onProgress: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<Blob> {
   if (!isWebMRemuxSupported()) {
     throw new Error('WebM remuxing requires WebCodecs API (Chrome/Edge)');
@@ -525,6 +583,9 @@ export async function remuxToWebM(
 
     // Encode frames
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+      // Check for cancellation at the start of each frame
+      checkAborted(signal);
+
       const currentTime = frameIndex / frameRate;
 
       // Seek video to current time
@@ -562,9 +623,14 @@ export async function remuxToWebM(
       videoEncoder.encode(frame, { keyFrame });
       frame.close();
 
-      // Wait for encoder queue to drain if needed
+      // Wait for encoder queue to drain if needed (uses MessageChannel to avoid background tab throttling)
       while (videoEncoder.encodeQueueSize > 20) {
-        await new Promise((resolve) => setTimeout(resolve, 1));
+        await yieldToMain();
+      }
+
+      // Yield periodically to keep UI responsive and avoid background tab issues
+      if (frameIndex % 5 === 0) {
+        await yieldToMain();
       }
 
       // Update progress
@@ -584,11 +650,20 @@ export async function remuxToWebM(
 
     // Encode audio if we have it
     if (audioEncoder && audioData) {
+      // Check for cancellation before audio encoding
+      checkAborted(signal);
       const samplesPerChunk = 1024;
       const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
       let audioTimestamp = 0;
+      let chunkCount = 0;
 
       for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
+        // Check for cancellation periodically during audio encoding
+        if (chunkCount % 100 === 0) {
+          checkAborted(signal);
+        }
+        chunkCount++;
+
         const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
 
         // Create planar data: [all left samples][all right samples]
@@ -616,9 +691,9 @@ export async function remuxToWebM(
 
         audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
 
-        // Wait for encoder queue to drain
+        // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
         while (audioEncoder.encodeQueueSize > 20) {
-          await new Promise((resolve) => setTimeout(resolve, 1));
+          await yieldToMain();
         }
       }
 

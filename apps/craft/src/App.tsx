@@ -14,7 +14,7 @@ import { createRecorder, type AnyRecorder } from './core/recorder-factory';
 import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
-import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, type ConversionProgress } from './core/converter';
+import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, ConversionAbortedError, type ConversionProgress } from './core/converter';
 import { isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -49,6 +49,7 @@ function App() {
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
+  const conversionAbortRef = useRef<AbortController | null>(null);
 
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
@@ -569,6 +570,9 @@ function App() {
     setConvertingId(id);
     setConversionProgress({ phase: 'preparing', progress: 0, message: 'Starting conversion...' });
 
+    // Create AbortController for cancellation
+    conversionAbortRef.current = new AbortController();
+
     try {
       const blob = await getVideoBlob(id);
       if (!blob) {
@@ -577,7 +581,7 @@ function App() {
 
       const mp4Blob = await convertToMP4(blob, (progress) => {
         setConversionProgress(progress);
-      });
+      }, conversionAbortRef.current.signal);
 
       // Download the MP4
       analytics.recordingDownloaded();
@@ -591,9 +595,14 @@ function App() {
       document.body.removeChild(a);
       revokeBlobUrl(url);
     } catch (error) {
-      console.error('MP4 conversion failed:', error);
-      alert('Failed to convert to MP4. Please try downloading as WebM instead.');
+      if (error instanceof ConversionAbortedError) {
+        console.log('MP4 conversion cancelled by user');
+      } else {
+        console.error('MP4 conversion failed:', error);
+        alert('Failed to convert to MP4. Please try downloading as WebM instead.');
+      }
     } finally {
+      conversionAbortRef.current = null;
       setConvertingId(null);
       setConversionProgress(null);
     }
@@ -611,6 +620,9 @@ function App() {
     setConvertingId(id);
     setConversionProgress({ phase: 'preparing', progress: 0, message: 'Preparing WebM...' });
 
+    // Create AbortController for cancellation
+    conversionAbortRef.current = new AbortController();
+
     try {
       const blob = await getVideoBlob(id);
       if (!blob) {
@@ -619,7 +631,7 @@ function App() {
 
       const remuxedBlob = await remuxToWebM(blob, recording.duration, (progress) => {
         setConversionProgress(progress);
-      });
+      }, conversionAbortRef.current.signal);
 
       // Download the remuxed WebM
       analytics.recordingDownloaded();
@@ -633,11 +645,23 @@ function App() {
       document.body.removeChild(a);
       revokeBlobUrl(url);
     } catch (error) {
-      console.error('WebM remuxing failed:', error);
-      alert('Failed to create compatible WebM. Please try MP4 instead.');
+      if (error instanceof ConversionAbortedError) {
+        console.log('WebM conversion cancelled by user');
+      } else {
+        console.error('WebM remuxing failed:', error);
+        alert('Failed to create compatible WebM. Please try MP4 instead.');
+      }
     } finally {
+      conversionAbortRef.current = null;
       setConvertingId(null);
       setConversionProgress(null);
+    }
+  };
+
+  // Cancel ongoing conversion
+  const handleCancelConversion = () => {
+    if (conversionAbortRef.current) {
+      conversionAbortRef.current.abort();
     }
   };
 
@@ -976,15 +1000,24 @@ function App() {
                     </div>
                     {convertingId === recording.id && conversionProgress && (
                       <div className={styles.conversionProgress}>
+                        <div className={styles.conversionProgressHeader}>
+                          <span className={styles.conversionProgressText}>
+                            {conversionProgress.message}
+                          </span>
+                          <button
+                            className={styles.conversionCancelButton}
+                            onClick={handleCancelConversion}
+                            title="Cancel conversion"
+                          >
+                            ✕
+                          </button>
+                        </div>
                         <div className={styles.conversionProgressBar}>
                           <div
                             className={styles.conversionProgressFill}
                             style={{ width: `${conversionProgress.progress}%` }}
                           />
                         </div>
-                        <span className={styles.conversionProgressText}>
-                          {conversionProgress.message}
-                        </span>
                       </div>
                     )}
                   </div>
