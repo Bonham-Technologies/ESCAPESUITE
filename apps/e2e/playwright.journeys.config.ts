@@ -47,7 +47,9 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 120000,
       env: {
-        VITE_CLERK_PUBLISHABLE_KEY: process.env.VITE_CLERK_PUBLISHABLE_KEY || '',
+        // Use test key if not provided - our route mocking intercepts all Clerk API calls
+        VITE_CLERK_PUBLISHABLE_KEY:
+          process.env.VITE_CLERK_PUBLISHABLE_KEY || 'pk_test_mock_key_for_e2e_testing',
       },
     },
     {
@@ -57,7 +59,8 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 120000,
       env: {
-        VITE_CLERK_PUBLISHABLE_KEY: process.env.VITE_CLERK_PUBLISHABLE_KEY || '',
+        VITE_CLERK_PUBLISHABLE_KEY:
+          process.env.VITE_CLERK_PUBLISHABLE_KEY || 'pk_test_mock_key_for_e2e_testing',
       },
     },
     {
@@ -67,7 +70,8 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 120000,
       env: {
-        VITE_CLERK_PUBLISHABLE_KEY: process.env.VITE_CLERK_PUBLISHABLE_KEY || '',
+        VITE_CLERK_PUBLISHABLE_KEY:
+          process.env.VITE_CLERK_PUBLISHABLE_KEY || 'pk_test_mock_key_for_e2e_testing',
       },
     },
   ],
