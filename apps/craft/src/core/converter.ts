@@ -54,6 +54,102 @@ function yieldToMain(): Promise<void> {
 }
 
 /**
+ * Seek video to a specific time with timeout and abort support.
+ * Returns true if seek succeeded, false if it timed out (video will be at closest position).
+ */
+async function seekVideoWithTimeout(
+  video: HTMLVideoElement,
+  time: number,
+  timeoutMs: number = 500,
+  signal?: AbortSignal
+): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    // Handle abort
+    if (signal?.aborted) {
+      reject(new ConversionAbortedError());
+      return;
+    }
+
+    const onAbort = () => {
+      cleanup();
+      reject(new ConversionAbortedError());
+    };
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      video.removeEventListener('seeked', onSeeked);
+      signal?.removeEventListener('abort', onAbort);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+
+    const onSeeked = () => {
+      cleanup();
+      resolve(true);
+    };
+
+    video.addEventListener('seeked', onSeeked);
+    signal?.addEventListener('abort', onAbort);
+
+    // Set timeout fallback - some seeks may never complete on poorly-formed WebM
+    timeoutId = setTimeout(() => {
+      cleanup();
+      // Resolve anyway - we'll use whatever frame is currently displayed
+      resolve(false);
+    }, timeoutMs);
+
+    video.currentTime = time;
+  });
+}
+
+/**
+ * Wait for video to be ready with timeout and abort support.
+ */
+async function waitForVideoReady(
+  video: HTMLVideoElement,
+  timeoutMs: number = 500,
+  signal?: AbortSignal
+): Promise<void> {
+  if (video.readyState >= 2) return;
+
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new ConversionAbortedError());
+      return;
+    }
+
+    const onAbort = () => {
+      cleanup();
+      reject(new ConversionAbortedError());
+    };
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('loadeddata', onCanPlay);
+      signal?.removeEventListener('abort', onAbort);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+
+    const onCanPlay = () => {
+      cleanup();
+      resolve();
+    };
+
+    video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('loadeddata', onCanPlay);
+    signal?.addEventListener('abort', onAbort);
+
+    timeoutId = setTimeout(() => {
+      cleanup();
+      // Resolve anyway - use current state
+      resolve();
+    }, timeoutMs);
+  });
+}
+
+/**
  * Check if MP4 conversion is supported (requires WebCodecs)
  */
 export function isMP4ConversionSupported(): boolean {
@@ -293,26 +389,11 @@ export async function convertToMP4(
 
       const currentTime = frameIndex / frameRate;
 
-      // Seek video to current time
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked);
-        video.currentTime = currentTime;
-      });
+      // Seek video to current time with timeout (WebM files from MediaRecorder may have seek issues)
+      await seekVideoWithTimeout(video, currentTime, 500, signal);
 
-      // Wait for frame to be ready
-      if (video.readyState < 2) {
-        await new Promise<void>((resolve) => {
-          const onCanPlay = () => {
-            video.removeEventListener('canplay', onCanPlay);
-            resolve();
-          };
-          video.addEventListener('canplay', onCanPlay);
-        });
-      }
+      // Wait for frame to be ready with timeout
+      await waitForVideoReady(video, 500, signal);
 
       // Draw frame to canvas
       ctx.drawImage(video, 0, 0, width, height);
@@ -588,26 +669,11 @@ export async function remuxToWebM(
 
       const currentTime = frameIndex / frameRate;
 
-      // Seek video to current time
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked);
-        video.currentTime = currentTime;
-      });
+      // Seek video to current time with timeout (WebM files from MediaRecorder may have seek issues)
+      await seekVideoWithTimeout(video, currentTime, 500, signal);
 
-      // Wait for frame to be ready
-      if (video.readyState < 2) {
-        await new Promise<void>((resolve) => {
-          const onCanPlay = () => {
-            video.removeEventListener('canplay', onCanPlay);
-            resolve();
-          };
-          video.addEventListener('canplay', onCanPlay);
-        });
-      }
+      // Wait for frame to be ready with timeout
+      await waitForVideoReady(video, 500, signal);
 
       // Draw frame to canvas
       ctx.drawImage(video, 0, 0, width, height);
