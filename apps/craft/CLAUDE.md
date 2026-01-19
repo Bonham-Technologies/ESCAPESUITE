@@ -43,6 +43,7 @@ pnpm lint                # Run ESLint
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction
 - `watermark.ts`: Watermark rendering for trial/free users
+- `converter.ts`: Video format conversion using WebCodecs + Mediabunny
 
 ### Recording Modes
 - **Screen Only**: Display capture without audio
@@ -63,11 +64,18 @@ pnpm lint                # Run ESLint
 - Target: ESNext, no code splitting
 - `build:standalone` creates an auth-free version for offline use
 
+### Download Formats
+Three download options with different speed/compatibility trade-offs:
+- **WebM (Instant)**: Fast metadata fix using `webm-duration-fix`, works in browsers/VLC
+- **WebM (Compatible)**: Re-encoded with WebCodecs + Mediabunny for Windows Media Player
+- **MP4 (Universal)**: H.264 + AAC conversion for maximum compatibility
+
 ### WebM Handling
 - MediaRecorder produces WebM without proper seek metadata
-- `fix-webm-duration` library patches duration/cues after recording
+- `webm-duration-fix` library adds Duration, SeekHead, and Cues elements
 - Thumbnails captured from live preview (more reliable than from blob)
 - Metadata extraction has fallbacks for problematic WebM files
+- Compatible WebM option re-encodes with VP9 + Opus via Mediabunny
 
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`
@@ -84,6 +92,7 @@ pnpm lint                # Run ESLint
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
 - AudioContext needs resume() call due to Chrome autoplay policy
 - WebM from MediaRecorder needs post-processing for proper scrubbing
+- WebCodecs API (MP4/Compatible WebM conversion) only works in Chrome/Edge
 
 ## Keyboard Shortcuts
 
