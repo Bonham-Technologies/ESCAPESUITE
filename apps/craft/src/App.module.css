@@ -369,7 +369,9 @@
 }
 
 .downloadMenuItem {
-  display: block;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   width: 100%;
   padding: 0.5rem 0.75rem;
   text-align: left;
@@ -379,6 +381,13 @@
   border: none;
   cursor: pointer;
   transition: background-color 0.15s;
+  gap: 1rem;
+}
+
+.downloadMenuHint {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .downloadMenuItem:hover {

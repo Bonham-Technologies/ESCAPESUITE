@@ -15,7 +15,7 @@ import { Compositor } from './core/compositor';
 import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
-import { convertToMP4, fixWebMMetadata, isMP4ConversionSupported, type ConversionProgress } from './core/converter';
+import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, type ConversionProgress } from './core/converter';
 import { useAuth, isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -634,6 +634,47 @@ function App() {
     }
   };
 
+  // Download a recording as WebM with proper container (re-encoded for compatibility)
+  const handleDownloadWebMCompatible = async (id: string, name: string) => {
+    setDownloadMenuOpen(null);
+
+    // Find the recording to get its duration
+    const recording = recordings.find(r => r.id === id);
+    if (!recording) return;
+
+    setConvertingId(id);
+    setConversionProgress({ phase: 'preparing', progress: 0, message: 'Preparing WebM...' });
+
+    try {
+      const blob = await getVideoBlob(id);
+      if (!blob) {
+        throw new Error('Recording not found');
+      }
+
+      const remuxedBlob = await remuxToWebM(blob, recording.duration, (progress) => {
+        setConversionProgress(progress);
+      });
+
+      // Download the remuxed WebM
+      analytics.recordingDownloaded();
+      const url = createBlobUrl(remuxedBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      a.download = `${safeName}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      revokeBlobUrl(url);
+    } catch (error) {
+      console.error('WebM remuxing failed:', error);
+      alert('Failed to create compatible WebM. Please try MP4 instead.');
+    } finally {
+      setConvertingId(null);
+      setConversionProgress(null);
+    }
+  };
+
   // Toggle source
   const toggleSource = (source: 'screen' | 'webcam' | 'microphone' | 'systemAudio') => {
     switch (source) {
@@ -909,15 +950,29 @@ function App() {
                             <button
                               className={styles.downloadMenuItem}
                               onClick={() => handleDownloadWebM(recording.id, recording.name)}
+                              title="Fast download, works in browsers and VLC"
                             >
-                              Download WebM
+                              <span>WebM</span>
+                              <span className={styles.downloadMenuHint}>Instant</span>
                             </button>
+                            {isWebMRemuxSupported() && (
+                              <button
+                                className={styles.downloadMenuItem}
+                                onClick={() => handleDownloadWebMCompatible(recording.id, recording.name)}
+                                title="Re-encoded for Windows Media Player compatibility"
+                              >
+                                <span>WebM</span>
+                                <span className={styles.downloadMenuHint}>Compatible</span>
+                              </button>
+                            )}
                             {isMP4ConversionSupported() && (
                               <button
                                 className={styles.downloadMenuItem}
                                 onClick={() => handleDownloadMP4(recording.id, recording.name)}
+                                title="Universal compatibility (H.264 + AAC)"
                               >
-                                Download MP4
+                                <span>MP4</span>
+                                <span className={styles.downloadMenuHint}>Universal</span>
                               </button>
                             )}
                           </div>
