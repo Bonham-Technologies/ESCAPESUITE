@@ -35,6 +35,15 @@ export function isWebCodecsRecordingSupported(): boolean {
   );
 }
 
+// Type for MediaStreamTrackProcessor (not yet in TypeScript lib)
+interface MediaStreamTrackProcessor {
+  readable: ReadableStream<VideoFrame>;
+}
+interface MediaStreamTrackProcessorConstructor {
+  new (options: { track: MediaStreamTrack }): MediaStreamTrackProcessor;
+}
+declare const MediaStreamTrackProcessor: MediaStreamTrackProcessorConstructor | undefined;
+
 export class WebCodecsRecorder {
   private callbacks: WebCodecsRecorderCallbacks = {};
   private videoTrack: MediaStreamTrack | null = null;
@@ -60,11 +69,16 @@ export class WebCodecsRecorder {
   private frameCount = 0;
   private audioTimestamp = 0;
 
-  // Frame capture
+  // Frame capture (for fallback method)
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private videoElement: HTMLVideoElement | null = null;
   private frameInterval: number | null = null;
+
+  // Frame capture (for MediaStreamTrackProcessor method)
+  private trackProcessor: MediaStreamTrackProcessor | null = null;
+  private frameReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
+  private frameReaderActive = false;
 
   // Audio capture
   private audioWorklet: ScriptProcessorNode | null = null;
@@ -112,21 +126,32 @@ export class WebCodecsRecorder {
     this.width = settings.width || 1920;
     this.height = settings.height || 1080;
 
-    // Set up video element to capture frames from the stream
-    // IMPORTANT: Video element must be attached to the DOM for browsers to decode frames
-    this.videoElement = document.createElement('video');
-    this.videoElement.srcObject = new MediaStream([this.videoTrack]);
-    this.videoElement.muted = true;
-    this.videoElement.playsInline = true;
-    this.videoElement.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
-    document.body.appendChild(this.videoElement);
-    await this.videoElement.play();
+    // Set up frame capture - prefer MediaStreamTrackProcessor if available
+    const hasTrackProcessor = typeof MediaStreamTrackProcessor !== 'undefined';
 
-    // Set up canvas for frame capture
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = this.width;
-    this.canvas.height = this.height;
-    this.ctx = this.canvas.getContext('2d', { alpha: false })!;
+    if (hasTrackProcessor) {
+      // Use MediaStreamTrackProcessor for direct frame access (most reliable)
+      console.log('Using MediaStreamTrackProcessor for frame capture');
+      this.trackProcessor = new MediaStreamTrackProcessor!({ track: this.videoTrack });
+      this.frameReader = this.trackProcessor.readable.getReader();
+    } else {
+      // Fallback: Use video element + canvas approach
+      console.log('Falling back to video element for frame capture');
+      this.videoElement = document.createElement('video');
+      this.videoElement.srcObject = new MediaStream([this.videoTrack]);
+      this.videoElement.muted = true;
+      this.videoElement.playsInline = true;
+      // Use visibility:hidden and actual dimensions to ensure proper decoding
+      this.videoElement.style.cssText = `position:fixed;top:0;left:0;width:${this.width}px;height:${this.height}px;visibility:hidden;pointer-events:none;z-index:-9999;`;
+      document.body.appendChild(this.videoElement);
+      await this.videoElement.play();
+
+      // Set up canvas for frame capture
+      this.canvas = document.createElement('canvas');
+      this.canvas.width = this.width;
+      this.canvas.height = this.height;
+      this.ctx = this.canvas.getContext('2d', { alpha: false })!;
+    }
 
     // Set up audio context for mixing and level monitoring
     this.audioContext = new AudioContext({ sampleRate: this.sampleRate });
@@ -310,7 +335,11 @@ export class WebCodecsRecorder {
    * Start recording.
    */
   start(): void {
-    if (!this.videoEncoder || !this.canvas || !this.ctx || !this.videoElement) {
+    // Check initialization based on which capture method we're using
+    const usingTrackProcessor = this.frameReader !== null;
+    const usingVideoElement = this.videoElement !== null && this.canvas !== null && this.ctx !== null;
+
+    if (!this.videoEncoder || (!usingTrackProcessor && !usingVideoElement)) {
       throw new Error('Recorder not initialized');
     }
 
@@ -323,10 +352,78 @@ export class WebCodecsRecorder {
 
     const frameDurationUs = Math.round((1 / this.frameRate) * 1_000_000);
 
+    if (usingTrackProcessor && this.frameReader) {
+      // Use MediaStreamTrackProcessor for direct frame access
+      this.frameReaderActive = true;
+      this.startTrackProcessorCapture(frameDurationUs);
+    } else if (usingVideoElement) {
+      // Fallback to video element + canvas approach
+      this.startVideoElementCapture(frameDurationUs);
+    }
+
+    this.callbacks.onStart?.();
+  }
+
+  /**
+   * Start frame capture using MediaStreamTrackProcessor (preferred method)
+   */
+  private async startTrackProcessorCapture(frameDurationUs: number): Promise<void> {
+    if (!this.frameReader || !this.videoEncoder) return;
+
+    const targetFrameInterval = 1000 / this.frameRate;
+    let lastFrameTime = 0;
+
+    try {
+      while (this.frameReaderActive && this.isRecordingActive) {
+        const { value: frame, done } = await this.frameReader.read();
+
+        if (done || !frame) break;
+
+        // Throttle to target frame rate
+        const now = performance.now();
+        if (now - lastFrameTime < targetFrameInterval * 0.8) {
+          frame.close();
+          continue;
+        }
+        lastFrameTime = now;
+
+        if (!this.isPausedState && this.videoEncoder && this.videoEncoder.state !== 'closed') {
+          try {
+            // Create a new VideoFrame with our timestamp
+            const newFrame = new VideoFrame(frame, {
+              timestamp: this.frameCount * frameDurationUs,
+              duration: frameDurationUs,
+            });
+
+            // Encode frame (keyframe every 2 seconds)
+            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
+            this.videoEncoder.encode(newFrame, { keyFrame });
+            newFrame.close();
+
+            this.frameCount++;
+          } catch (e) {
+            console.error('Frame encoding error:', e);
+          }
+        }
+
+        frame.close();
+      }
+    } catch (e) {
+      // Reader was cancelled or track ended
+      if (this.isRecordingActive) {
+        console.warn('Track processor read error:', e);
+      }
+    }
+  }
+
+  /**
+   * Start frame capture using video element + canvas (fallback method)
+   */
+  private startVideoElementCapture(frameDurationUs: number): void {
     // Check if requestVideoFrameCallback is available (more reliable for video frame capture)
     const hasRequestVideoFrameCallback = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
-    if (hasRequestVideoFrameCallback) {
+    if (hasRequestVideoFrameCallback && this.videoElement) {
       // Use requestVideoFrameCallback for more accurate frame capture
       const captureFrameRVFC = () => {
         if (!this.isRecordingActive) return;
@@ -397,8 +494,6 @@ export class WebCodecsRecorder {
 
       captureFrame();
     }
-
-    this.callbacks.onStart?.();
   }
 
   /**
@@ -430,11 +525,21 @@ export class WebCodecsRecorder {
     if (!this.isRecordingActive) return;
 
     this.isRecordingActive = false;
+    this.frameReaderActive = false;
 
-    // Stop frame capture
+    // Stop frame capture (setTimeout-based)
     if (this.frameInterval) {
       clearTimeout(this.frameInterval);
       this.frameInterval = null;
+    }
+
+    // Cancel frame reader (MediaStreamTrackProcessor-based)
+    if (this.frameReader) {
+      try {
+        await this.frameReader.cancel();
+      } catch {
+        // Ignore cancel errors
+      }
     }
 
     try {
@@ -540,6 +645,8 @@ export class WebCodecsRecorder {
    * Clean up resources.
    */
   private cleanup(): void {
+    this.frameReaderActive = false;
+
     if (this.frameInterval) {
       clearTimeout(this.frameInterval);
       this.frameInterval = null;
@@ -549,6 +656,17 @@ export class WebCodecsRecorder {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
+
+    // Clean up MediaStreamTrackProcessor resources
+    if (this.frameReader) {
+      try {
+        this.frameReader.cancel().catch(() => {});
+      } catch {
+        // Ignore errors
+      }
+      this.frameReader = null;
+    }
+    this.trackProcessor = null;
 
     if (this.audioWorklet) {
       this.audioWorklet.disconnect();
@@ -596,6 +714,7 @@ export class WebCodecsRecorder {
   dispose(): void {
     if (this.isRecordingActive) {
       this.isRecordingActive = false;
+      this.frameReaderActive = false;
       if (this.frameInterval) {
         clearTimeout(this.frameInterval);
       }
