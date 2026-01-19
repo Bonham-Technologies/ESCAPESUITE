@@ -54,6 +54,7 @@ function App() {
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
   const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null); // recording ID or null
+  const [downloadMenuPosition, setDownloadMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -117,6 +118,7 @@ function App() {
       const target = event.target as Element;
       if (!target.closest(`.${styles.downloadDropdown}`)) {
         setDownloadMenuOpen(null);
+        setDownloadMenuPosition(null);
       }
     };
 
@@ -525,6 +527,7 @@ function App() {
   // Download a recording as WebM
   const handleDownloadWebM = async (id: string, name: string) => {
     setDownloadMenuOpen(null);
+    setDownloadMenuPosition(null);
 
     const blob = await getVideoBlob(id);
     if (!blob) return;
@@ -562,6 +565,7 @@ function App() {
   // Download a recording as MP4 (convert from WebM)
   const handleDownloadMP4 = async (id: string, name: string) => {
     setDownloadMenuOpen(null);
+    setDownloadMenuPosition(null);
     setConvertingId(id);
     setConversionProgress({ phase: 'preparing', progress: 0, message: 'Starting conversion...' });
 
@@ -598,6 +602,7 @@ function App() {
   // Download a recording as WebM with proper container (re-encoded for compatibility)
   const handleDownloadWebMCompatible = async (id: string, name: string) => {
     setDownloadMenuOpen(null);
+    setDownloadMenuPosition(null);
 
     // Find the recording to get its duration
     const recording = recordings.find(r => r.id === id);
@@ -896,7 +901,19 @@ function App() {
                       <div className={styles.downloadDropdown}>
                         <button
                           className={styles.iconButton}
-                          onClick={() => setDownloadMenuOpen(downloadMenuOpen === recording.id ? null : recording.id)}
+                          onClick={(e) => {
+                            if (downloadMenuOpen === recording.id) {
+                              setDownloadMenuOpen(null);
+                              setDownloadMenuPosition(null);
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setDownloadMenuPosition({
+                                top: rect.bottom + 4,
+                                left: rect.left + rect.width / 2 - 70, // Center the 140px menu
+                              });
+                              setDownloadMenuOpen(recording.id);
+                            }
+                          }}
                           title="Download"
                           disabled={convertingId === recording.id}
                         >
@@ -906,8 +923,11 @@ function App() {
                             <DownloadIcon />
                           )}
                         </button>
-                        {downloadMenuOpen === recording.id && (
-                          <div className={styles.downloadMenu}>
+                        {downloadMenuOpen === recording.id && downloadMenuPosition && (
+                          <div
+                            className={styles.downloadMenu}
+                            style={{ top: downloadMenuPosition.top, left: downloadMenuPosition.left }}
+                          >
                             <button
                               className={styles.downloadMenuItem}
                               onClick={() => handleDownloadWebM(recording.id, recording.name)}
