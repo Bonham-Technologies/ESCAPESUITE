@@ -93,7 +93,8 @@ async function captureFramesViaPlayback(
   const frameDurationUs = Math.round(frameDuration * 1_000_000);
 
   // Check if requestVideoFrameCallback is available
-  const hasRVFC = 'requestVideoFrameCallback' in video;
+  // Use a function check to avoid TypeScript type narrowing issues
+  const hasRVFC = typeof (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback === 'function';
 
   return new Promise((resolve, reject) => {
     let frameIndex = 0;
