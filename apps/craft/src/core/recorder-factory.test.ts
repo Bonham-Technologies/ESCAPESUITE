@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRecorder, canUseWebCodecsRecorder, getRecorderType } from './recorder-factory'
 import { Recorder } from './recorder'
-import { WebCodecsRecorder } from './webcodecs-recorder'
+// WebCodecsRecorder import removed - WebCodecs recording is disabled due to browser limitations
 
 // Mock WebCodecs APIs
 const mockVideoEncoder = vi.fn().mockImplementation(() => ({
@@ -68,16 +68,20 @@ vi.mock('mediabunny', () => ({
 }))
 
 describe('recorder-factory', () => {
+  // NOTE: WebCodecs recording is disabled due to browser limitations with capturing
+  // frames from hidden video elements. canUseWebCodecsRecorder() always returns false.
+
   describe('canUseWebCodecsRecorder', () => {
-    it('should return true when WebCodecs is available', () => {
-      // In test environment, WebCodecs APIs are mocked
-      expect(canUseWebCodecsRecorder()).toBe(true)
+    it('should return false (WebCodecs recording is disabled)', () => {
+      // WebCodecs recording is disabled due to frame capture issues
+      // See: recorder-factory.ts comments for details
+      expect(canUseWebCodecsRecorder()).toBe(false)
     })
   })
 
   describe('getRecorderType', () => {
-    it('should return webcodecs when WebCodecs is available', () => {
-      expect(getRecorderType()).toBe('webcodecs')
+    it('should return mediarecorder (WebCodecs recording is disabled)', () => {
+      expect(getRecorderType()).toBe('mediarecorder')
     })
   })
 
@@ -92,9 +96,9 @@ describe('recorder-factory', () => {
       vi.clearAllMocks()
     })
 
-    it('should create WebCodecsRecorder when WebCodecs is available', () => {
+    it('should create Recorder (MediaRecorder-based) since WebCodecs is disabled', () => {
       const recorder = createRecorder(callbacks)
-      expect(recorder).toBeInstanceOf(WebCodecsRecorder)
+      expect(recorder).toBeInstanceOf(Recorder)
       recorder.dispose()
     })
 
