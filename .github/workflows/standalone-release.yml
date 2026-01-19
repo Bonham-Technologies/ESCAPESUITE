@@ -23,7 +23,8 @@ jobs:
     # Only run if CI workflow succeeded
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
-      actions: read  # Required to download artifacts from triggering workflow
+      contents: read  # Required to checkout repository
+      actions: read   # Required to download artifacts from triggering workflow
     outputs:
       version: ${{ steps.version.outputs.version }}
       craft_size: ${{ steps.sizes.outputs.craft }}
