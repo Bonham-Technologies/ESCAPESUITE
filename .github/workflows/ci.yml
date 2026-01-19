@@ -193,8 +193,8 @@ jobs:
             apps/artist/dist
           retention-days: 7
 
-  # E2E tests - smoke tests only (fast)
-  # Skip for docs-only changes and Dependabot
+  # E2E tests - fast tests (excludes journey tests)
+  # Skip for Dependabot
   e2e:
     runs-on: ubuntu-latest
     needs: build
@@ -236,8 +236,8 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium
 
-      - name: Run E2E tests (smoke only)
-        run: pnpm --filter=@escapesuite/e2e exec playwright test --grep @smoke
+      - name: Run E2E tests (excluding journeys)
+        run: pnpm --filter=@escapesuite/e2e exec playwright test --ignore-snapshots --grep-invert "Journey"
         env:
           CI: true
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
