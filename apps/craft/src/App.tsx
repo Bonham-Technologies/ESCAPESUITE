@@ -12,11 +12,10 @@ import {
 } from './core/permissions';
 import { createRecorder, type AnyRecorder } from './core/recorder-factory';
 import { Compositor } from './core/compositor';
-import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
 import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, type ConversionProgress } from './core/converter';
-import { useAuth, isStandaloneMode } from './auth';
+import { isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
@@ -44,11 +43,8 @@ function App() {
     loadRecordings,
   } = useRecorderStore();
 
-  const { isTrial } = useAuth();
-
   const recorderRef = useRef<AnyRecorder | null>(null);
   const compositorRef = useRef<Compositor | null>(null);
-  const watermarkerRef = useRef<StreamWatermarker | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
@@ -138,11 +134,6 @@ function App() {
     if (compositorRef.current) {
       compositorRef.current.dispose();
       compositorRef.current = null;
-    }
-
-    if (watermarkerRef.current) {
-      watermarkerRef.current.dispose();
-      watermarkerRef.current = null;
     }
   }, [screenStream, webcamStream, setStreams]);
 
@@ -351,16 +342,12 @@ function App() {
       const { screen, webcam, mic } = await acquireStreams();
       setStreams(screen, webcam);
 
-      // Set up preview (with watermark for trial users)
-      const watermarkConfig = isTrial ? {
-        text: 'ESCAPE Suite Trial',
-        subtext: 'escapesuite.io',
-        opacity: 0.5,
-        fontSize: 24,
-      } : null;
+      // Set up preview
+      // Note: Watermarks are NOT applied during recording - they are added at export time
+      // This avoids canvas.captureStream() issues with hidden video elements
 
       if (config.screenEnabled && config.webcamEnabled && screen && webcam) {
-        // PiP mode - use compositor
+        // PiP mode - use compositor (no watermark during recording, applied at export)
         const videoTrack = screen.getVideoTracks()[0];
         const settings = videoTrack.getSettings();
         compositorRef.current = new Compositor(
@@ -370,38 +357,15 @@ function App() {
             webcamPosition: config.webcamPosition,
             webcamSize: config.webcamSize,
             webcamShape: config.webcamShape,
-            watermark: watermarkConfig,
+            // No watermark during recording - applied at export for trial users
           }
         );
         compositorRef.current.setScreenStream(screen);
         compositorRef.current.setWebcamStream(webcam);
         const composedStream = compositorRef.current.start();
         setPreviewStream(composedStream);
-      } else if (screen && isTrial) {
-        // Single source with watermark for trial users
-        const videoTrack = screen.getVideoTracks()[0];
-        const settings = videoTrack.getSettings();
-        watermarkerRef.current = new StreamWatermarker(
-          settings.width || 1920,
-          settings.height || 1080,
-          watermarkConfig || undefined
-        );
-        watermarkerRef.current.setStream(screen);
-        const watermarkedStream = watermarkerRef.current.start();
-        setPreviewStream(watermarkedStream);
-      } else if (webcam && isTrial) {
-        // Webcam only with watermark for trial users
-        const videoTrack = webcam.getVideoTracks()[0];
-        const settings = videoTrack.getSettings();
-        watermarkerRef.current = new StreamWatermarker(
-          settings.width || 1280,
-          settings.height || 720,
-          watermarkConfig || undefined
-        );
-        watermarkerRef.current.setStream(webcam);
-        const watermarkedStream = watermarkerRef.current.start();
-        setPreviewStream(watermarkedStream);
       } else if (screen) {
+        // Screen only - use raw stream (watermark applied at export for trial users)
         setPreviewStream(screen);
       } else if (webcam) {
         setPreviewStream(webcam);
@@ -439,22 +403,20 @@ function App() {
         onAudioLevels: setAudioLevels,
       });
 
-      // Use composed/watermarked stream for recording
+      // Use raw streams for recording - watermarks are applied at export time
+      // This avoids canvas.captureStream() issues with hidden video elements
       let recordingScreen: MediaStream | null = screen;
 
       if (config.screenEnabled && config.webcamEnabled && compositorRef.current) {
-        // PiP mode - use compositor output
+        // PiP mode - use compositor output (required to combine screen + webcam)
+        // Note: PiP compositor is still needed but watermark will be added at export
         recordingScreen = new MediaStream([
           ...compositorRef.current.getCanvas().captureStream(30).getVideoTracks(),
           ...(screen?.getAudioTracks() || []),
         ]);
-      } else if (watermarkerRef.current) {
-        // Single source with watermark
-        recordingScreen = new MediaStream([
-          ...watermarkerRef.current.getCanvas().captureStream(30).getVideoTracks(),
-          ...(screen?.getAudioTracks() || webcam?.getAudioTracks() || []),
-        ]);
       }
+      // For single-source recordings (screen-only or webcam-only), use raw stream
+      // Watermark will be applied during export for trial users
 
       await recorderRef.current.initialize(recordingScreen, webcam, mic, config);
 
@@ -480,7 +442,6 @@ function App() {
     startRecording,
     stopAllStreams,
     saveRecording,
-    isTrial,
   ]);
 
   // Keyboard shortcuts
