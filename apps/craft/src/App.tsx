@@ -10,7 +10,7 @@ import {
   requestMicrophone,
   stopStream,
 } from './core/permissions';
-import { Recorder } from './core/recorder';
+import { createRecorder, type AnyRecorder } from './core/recorder-factory';
 import { Compositor } from './core/compositor';
 import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
@@ -46,7 +46,7 @@ function App() {
 
   const { isTrial } = useAuth();
 
-  const recorderRef = useRef<Recorder | null>(null);
+  const recorderRef = useRef<AnyRecorder | null>(null);
   const compositorRef = useRef<Compositor | null>(null);
   const watermarkerRef = useRef<StreamWatermarker | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
@@ -407,8 +407,8 @@ function App() {
         setPreviewStream(webcam);
       }
 
-      // Initialize recorder
-      recorderRef.current = new Recorder({
+      // Initialize recorder (uses WebCodecs if available for proper WebM containers)
+      recorderRef.current = createRecorder({
         onStart: () => {
           setState('recording');
           analytics.recordingStarted();
