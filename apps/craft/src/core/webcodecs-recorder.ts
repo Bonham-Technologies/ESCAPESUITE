@@ -367,6 +367,7 @@ export class WebCodecsRecorder {
   /**
    * Start frame capture using MediaStreamTrackProcessor (preferred method)
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async startTrackProcessorCapture(_frameDurationUs: number): Promise<void> {
     if (!this.frameReader || !this.videoEncoder) return;
 
