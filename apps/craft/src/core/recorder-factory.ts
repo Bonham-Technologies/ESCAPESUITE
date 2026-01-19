@@ -5,16 +5,27 @@
  */
 
 import { Recorder, type RecorderCallbacks } from './recorder';
-import { WebCodecsRecorder, isWebCodecsRecordingSupported, type WebCodecsRecorderCallbacks } from './webcodecs-recorder';
+import { WebCodecsRecorder, type WebCodecsRecorderCallbacks } from './webcodecs-recorder';
+// Note: isWebCodecsRecordingSupported is available but WebCodecs recording is disabled
 
 export type AnyRecorder = Recorder | WebCodecsRecorder;
 export type AnyRecorderCallbacks = RecorderCallbacks | WebCodecsRecorderCallbacks;
 
 /**
- * Check if WebCodecs-based recording is available
+ * Check if WebCodecs-based recording is available.
+ *
+ * NOTE: WebCodecs recording is currently disabled due to browser limitations
+ * with capturing frames from hidden video elements. Browsers optimize away
+ * frame decoding for non-visible elements, causing frozen video output.
+ *
+ * We keep the WebCodecs infrastructure for post-recording conversion
+ * (WebM Compatible, MP4 options) which works reliably.
  */
 export function canUseWebCodecsRecorder(): boolean {
-  return isWebCodecsRecordingSupported();
+  // Disabled - WebCodecs recording has frame capture issues
+  // See: https://github.com/mrbonha/ESCAPESUITE/pull/93
+  return false;
+  // Original: return isWebCodecsRecordingSupported();
 }
 
 /**
