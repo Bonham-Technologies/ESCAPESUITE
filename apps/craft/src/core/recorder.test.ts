@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Recorder, RecorderCallbacks } from './recorder'
 import type { RecordingConfig } from '../store/types'
 
-// Mock fix-webm-duration
-vi.mock('fix-webm-duration', () => ({
+// Mock webm-duration-fix
+vi.mock('webm-duration-fix', () => ({
   default: vi.fn((blob: Blob) => Promise.resolve(blob)),
 }))
 
@@ -417,7 +417,7 @@ describe('Recorder', () => {
     })
 
     it('should fix WebM duration on stop', async () => {
-      const fixWebmDuration = await import('fix-webm-duration')
+      const fixWebmDuration = await import('webm-duration-fix')
 
       recorder.stop()
 
@@ -425,7 +425,7 @@ describe('Recorder', () => {
     })
 
     it('should fall back to raw blob if fix fails', async () => {
-      const fixWebmDuration = await import('fix-webm-duration')
+      const fixWebmDuration = await import('webm-duration-fix')
       vi.mocked(fixWebmDuration.default).mockRejectedValueOnce(
         new Error('Fix failed')
       )

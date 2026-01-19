@@ -15,6 +15,7 @@ import { Compositor } from './core/compositor';
 import { StreamWatermarker } from './core/watermark';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
+import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, type ConversionProgress } from './core/converter';
 import { useAuth, isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -56,6 +57,10 @@ function App() {
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null); // recording ID or null
+  const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
+  const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [showHelpModal, setShowHelpModal] = useState(false);
 
   // Capture thumbnail from preview video element
   const capturePreviewThumbnail = useCallback((): Promise<Blob | null> => {
@@ -107,6 +112,21 @@ function App() {
       previewRef.current.play().catch(() => {});
     }
   }, [previewStream]);
+
+  // Close download menu when clicking outside
+  useEffect(() => {
+    if (!downloadMenuOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest(`.${styles.downloadDropdown}`)) {
+        setDownloadMenuOpen(null);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [downloadMenuOpen]);
 
   // Stop all streams helper
   const stopAllStreams = useCallback(() => {
@@ -541,21 +561,117 @@ function App() {
     setPlaybackName('');
   };
 
-  // Download a recording
-  const handleDownloadRecording = async (id: string, name: string) => {
+  // Download a recording as WebM
+  const handleDownloadWebM = async (id: string, name: string) => {
+    setDownloadMenuOpen(null);
+
     const blob = await getVideoBlob(id);
-    if (blob) {
+    if (!blob) return;
+
+    try {
+      // Fix WebM metadata for proper seeking/playback (near-instant, no re-encoding)
+      const fixedBlob = await fixWebMMetadata(blob);
+
       analytics.recordingDownloaded();
-      const url = createBlobUrl(blob);
+      const url = createBlobUrl(fixedBlob);
       const a = document.createElement('a');
       a.href = url;
-      // Create a safe filename
       const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
       a.download = `${safeName}.webm`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       revokeBlobUrl(url);
+    } catch (error) {
+      console.error('WebM metadata fix failed:', error);
+      // Fall back to raw download
+      analytics.recordingDownloaded();
+      const url = createBlobUrl(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      a.download = `${safeName}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      revokeBlobUrl(url);
+    }
+  };
+
+  // Download a recording as MP4 (convert from WebM)
+  const handleDownloadMP4 = async (id: string, name: string) => {
+    setDownloadMenuOpen(null);
+    setConvertingId(id);
+    setConversionProgress({ phase: 'preparing', progress: 0, message: 'Starting conversion...' });
+
+    try {
+      const blob = await getVideoBlob(id);
+      if (!blob) {
+        throw new Error('Recording not found');
+      }
+
+      const mp4Blob = await convertToMP4(blob, (progress) => {
+        setConversionProgress(progress);
+      });
+
+      // Download the MP4
+      analytics.recordingDownloaded();
+      const url = createBlobUrl(mp4Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      a.download = `${safeName}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      revokeBlobUrl(url);
+    } catch (error) {
+      console.error('MP4 conversion failed:', error);
+      alert('Failed to convert to MP4. Please try downloading as WebM instead.');
+    } finally {
+      setConvertingId(null);
+      setConversionProgress(null);
+    }
+  };
+
+  // Download a recording as WebM with proper container (re-encoded for compatibility)
+  const handleDownloadWebMCompatible = async (id: string, name: string) => {
+    setDownloadMenuOpen(null);
+
+    // Find the recording to get its duration
+    const recording = recordings.find(r => r.id === id);
+    if (!recording) return;
+
+    setConvertingId(id);
+    setConversionProgress({ phase: 'preparing', progress: 0, message: 'Preparing WebM...' });
+
+    try {
+      const blob = await getVideoBlob(id);
+      if (!blob) {
+        throw new Error('Recording not found');
+      }
+
+      const remuxedBlob = await remuxToWebM(blob, recording.duration, (progress) => {
+        setConversionProgress(progress);
+      });
+
+      // Download the remuxed WebM
+      analytics.recordingDownloaded();
+      const url = createBlobUrl(remuxedBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      a.download = `${safeName}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      revokeBlobUrl(url);
+    } catch (error) {
+      console.error('WebM remuxing failed:', error);
+      alert('Failed to create compatible WebM. Please try MP4 instead.');
+    } finally {
+      setConvertingId(null);
+      setConversionProgress(null);
     }
   };
 
@@ -605,6 +721,18 @@ function App() {
         </div>
 
         <div className={styles.headerRight}>
+          <button
+            className={styles.headerButton}
+            onClick={() => setShowHelpModal(true)}
+            title="Recording Tips"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Help
+          </button>
           <button
             className={`${styles.headerButton} ${styles.editorButton}`}
             onClick={() => window.open('/artist/', 'escapeartist')}
@@ -804,13 +932,52 @@ function App() {
                       >
                         <PlayIcon />
                       </button>
-                      <button
-                        className={styles.iconButton}
-                        onClick={() => handleDownloadRecording(recording.id, recording.name)}
-                        title="Download"
-                      >
-                        <DownloadIcon />
-                      </button>
+                      <div className={styles.downloadDropdown}>
+                        <button
+                          className={styles.iconButton}
+                          onClick={() => setDownloadMenuOpen(downloadMenuOpen === recording.id ? null : recording.id)}
+                          title="Download"
+                          disabled={convertingId === recording.id}
+                        >
+                          {convertingId === recording.id ? (
+                            <span className={styles.spinnerSmall} />
+                          ) : (
+                            <DownloadIcon />
+                          )}
+                        </button>
+                        {downloadMenuOpen === recording.id && (
+                          <div className={styles.downloadMenu}>
+                            <button
+                              className={styles.downloadMenuItem}
+                              onClick={() => handleDownloadWebM(recording.id, recording.name)}
+                              title="Fast download, works in browsers and VLC"
+                            >
+                              <span>WebM</span>
+                              <span className={styles.downloadMenuHint}>Instant</span>
+                            </button>
+                            {isWebMRemuxSupported() && (
+                              <button
+                                className={styles.downloadMenuItem}
+                                onClick={() => handleDownloadWebMCompatible(recording.id, recording.name)}
+                                title="Re-encoded for Windows Media Player compatibility"
+                              >
+                                <span>WebM</span>
+                                <span className={styles.downloadMenuHint}>Compatible</span>
+                              </button>
+                            )}
+                            {isMP4ConversionSupported() && (
+                              <button
+                                className={styles.downloadMenuItem}
+                                onClick={() => handleDownloadMP4(recording.id, recording.name)}
+                                title="Universal compatibility (H.264 + AAC)"
+                              >
+                                <span>MP4</span>
+                                <span className={styles.downloadMenuHint}>Universal</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <button
                         className={styles.iconButton}
                         onClick={() => handleSendToEditor(recording.id)}
@@ -826,6 +993,19 @@ function App() {
                         <TrashIcon />
                       </button>
                     </div>
+                    {convertingId === recording.id && conversionProgress && (
+                      <div className={styles.conversionProgress}>
+                        <div className={styles.conversionProgressBar}>
+                          <div
+                            className={styles.conversionProgressFill}
+                            style={{ width: `${conversionProgress.progress}%` }}
+                          />
+                        </div>
+                        <span className={styles.conversionProgressText}>
+                          {conversionProgress.message}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -946,6 +1126,93 @@ function App() {
               controls
               autoPlay
             />
+          </div>
+        </div>
+      )}
+
+      {/* Help Modal */}
+      {showHelpModal && (
+        <div className={styles.helpModal} onClick={() => setShowHelpModal(false)}>
+          <div className={styles.helpContent} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.helpHeader}>
+              <h2 className={styles.helpTitle}>Recording Tips</h2>
+              <button
+                className={styles.helpClose}
+                onClick={() => setShowHelpModal(false)}
+                title="Close"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className={styles.helpBody}>
+              <section className={styles.helpSection}>
+                <h3>Choosing What to Record</h3>
+                <p>When you start recording, your browser will ask what you want to capture:</p>
+                <ul>
+                  <li>
+                    <strong>Entire Screen</strong> (Recommended) - Captures everything on your monitor.
+                    Best for tutorials and demos where you switch between apps.
+                  </li>
+                  <li>
+                    <strong>Window</strong> - Captures a specific application window.
+                    Note: For browser windows, only the active tab is visible.
+                  </li>
+                  <li>
+                    <strong>Browser Tab</strong> - Captures a single browser tab.
+                    Good for recording web content without distractions.
+                  </li>
+                </ul>
+              </section>
+
+              <section className={styles.helpSection}>
+                <h3>Best Practices</h3>
+                <ul>
+                  <li>
+                    <strong>Use "Entire Screen" for multi-app recordings</strong> - This ensures
+                    everything you do is captured, regardless of which window is focused.
+                  </li>
+                  <li>
+                    <strong>Keep ESCAPECRAFT in a separate window</strong> - If using window capture,
+                    run ESCAPECRAFT in its own browser window so it doesn't appear in your recording.
+                  </li>
+                  <li>
+                    <strong>Check "Share system audio"</strong> - Enable this in the capture dialog
+                    to record sounds from videos, games, and other applications.
+                  </li>
+                  <li>
+                    <strong>Use keyboard shortcuts</strong> - Press <kbd>R</kbd> to start,
+                    <kbd>P</kbd> to pause, <kbd>S</kbd> to stop, and <kbd>Esc</kbd> to cancel.
+                  </li>
+                </ul>
+              </section>
+
+              <section className={styles.helpSection}>
+                <h3>Recording Modes</h3>
+                <ul>
+                  <li><strong>Screen Only</strong> - Just your screen, no audio</li>
+                  <li><strong>Screen + Mic</strong> - Screen with your voice narration</li>
+                  <li><strong>Screen + System Audio</strong> - Screen with app sounds</li>
+                  <li><strong>Screen + Both</strong> - Screen with mic and system audio</li>
+                  <li><strong>Webcam Only</strong> - Just your camera with microphone</li>
+                  <li><strong>Picture-in-Picture</strong> - Screen with webcam overlay</li>
+                </ul>
+              </section>
+
+              <section className={styles.helpSection}>
+                <h3>Download Formats</h3>
+                <ul>
+                  <li>
+                    <strong>WebM</strong> - Native browser format. Instant download, works great
+                    in Chrome, Firefox, and most video editors.
+                  </li>
+                  <li>
+                    <strong>MP4</strong> - Universal format. Takes a moment to convert but plays
+                    everywhere including Windows Media Player and QuickTime.
+                  </li>
+                </ul>
+              </section>
+            </div>
           </div>
         </div>
       )}

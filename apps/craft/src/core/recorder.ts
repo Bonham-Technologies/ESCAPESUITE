@@ -1,6 +1,6 @@
 // Core recording engine using MediaRecorder API
 
-import fixWebmDuration from 'fix-webm-duration';
+import fixWebmDuration from 'webm-duration-fix';
 import { getSupportedMimeType, stopStream } from './permissions';
 import type { RecordingConfig, AudioLevels } from '../store/types';
 
@@ -25,6 +25,7 @@ export class Recorder {
   private startTime: number = 0;
   private pausedDuration: number = 0;
   private pauseStartTime: number = 0;
+  private trackEndedHandlers: Map<MediaStreamTrack, () => void> = new Map();
 
   constructor(callbacks: RecorderCallbacks = {}) {
     this.callbacks = callbacks;
@@ -100,6 +101,21 @@ export class Recorder {
 
     this.combinedStream = new MediaStream(tracks);
 
+    // Listen for track ended events (e.g., user stops screen share)
+    // This helps handle cases where the capture source is stopped externally
+    for (const track of tracks) {
+      const handler = () => {
+        console.warn(`Track ended: ${track.kind} - ${track.label}`);
+        // If a video track ends while recording, stop the recording gracefully
+        if (track.kind === 'video' && this.mediaRecorder?.state === 'recording') {
+          console.warn('Video track ended during recording, stopping...');
+          this.stop();
+        }
+      };
+      track.addEventListener('ended', handler);
+      this.trackEndedHandlers.set(track, handler);
+    }
+
     // Create MediaRecorder
     const mimeType = getSupportedMimeType();
     this.mediaRecorder = new MediaRecorder(this.combinedStream, {
@@ -115,12 +131,12 @@ export class Recorder {
 
     this.mediaRecorder.onstop = async () => {
       const rawBlob = new Blob(this.chunks, { type: mimeType });
-      const duration = this.getDuration() * 1000; // Convert to milliseconds
 
-      // Fix WebM duration/seek metadata for proper scrubbing support
+      // Fix WebM metadata (duration, seek cues) for proper playback
+      // webm-duration-fix adds Duration, SeekHead, and Cues elements
       let fixedBlob: Blob;
       try {
-        fixedBlob = await fixWebmDuration(rawBlob, duration, { logger: false });
+        fixedBlob = await fixWebmDuration(rawBlob);
       } catch {
         // Fall back to raw blob if fixing fails
         fixedBlob = rawBlob;
@@ -264,6 +280,12 @@ export class Recorder {
       this.audioContext.close();
       this.audioContext = null;
     }
+
+    // Remove track ended event listeners
+    for (const [track, handler] of this.trackEndedHandlers) {
+      track.removeEventListener('ended', handler);
+    }
+    this.trackEndedHandlers.clear();
 
     this.micAnalyser = null;
     this.systemAnalyser = null;
