@@ -113,10 +113,13 @@ export class WebCodecsRecorder {
     this.height = settings.height || 1080;
 
     // Set up video element to capture frames from the stream
+    // IMPORTANT: Video element must be attached to the DOM for browsers to decode frames
     this.videoElement = document.createElement('video');
     this.videoElement.srcObject = new MediaStream([this.videoTrack]);
     this.videoElement.muted = true;
     this.videoElement.playsInline = true;
+    this.videoElement.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+    document.body.appendChild(this.videoElement);
     await this.videoElement.play();
 
     // Set up canvas for frame capture
@@ -318,39 +321,83 @@ export class WebCodecsRecorder {
     this.frameCount = 0;
     this.audioTimestamp = 0;
 
-    // Start frame capture loop
-    const frameDurationMs = 1000 / this.frameRate;
     const frameDurationUs = Math.round((1 / this.frameRate) * 1_000_000);
 
-    const captureFrame = () => {
-      if (!this.isRecordingActive) return;
+    // Check if requestVideoFrameCallback is available (more reliable for video frame capture)
+    const hasRequestVideoFrameCallback = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
-      if (!this.isPausedState && this.videoElement && this.ctx && this.canvas) {
-        try {
-          // Draw current video frame to canvas
-          this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
+    if (hasRequestVideoFrameCallback) {
+      // Use requestVideoFrameCallback for more accurate frame capture
+      const captureFrameRVFC = () => {
+        if (!this.isRecordingActive) return;
 
-          // Create VideoFrame from canvas
-          const frame = new VideoFrame(this.canvas, {
-            timestamp: this.frameCount * frameDurationUs,
-            duration: frameDurationUs,
-          });
+        if (!this.isPausedState && this.videoElement && this.ctx && this.canvas && this.videoEncoder) {
+          try {
+            // Draw current video frame to canvas
+            this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
 
-          // Encode frame (keyframe every 2 seconds)
-          const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
-          this.videoEncoder?.encode(frame, { keyFrame });
-          frame.close();
+            // Create VideoFrame from canvas
+            const frame = new VideoFrame(this.canvas, {
+              timestamp: this.frameCount * frameDurationUs,
+              duration: frameDurationUs,
+            });
 
-          this.frameCount++;
-        } catch (e) {
-          console.error('Frame capture error:', e);
+            // Encode frame (keyframe every 2 seconds)
+            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
+            this.videoEncoder.encode(frame, { keyFrame });
+            frame.close();
+
+            this.frameCount++;
+          } catch (e) {
+            console.error('Frame capture error:', e);
+          }
         }
-      }
 
-      this.frameInterval = window.setTimeout(captureFrame, frameDurationMs);
-    };
+        // Request next frame callback
+        if (this.isRecordingActive && this.videoElement) {
+          (this.videoElement as HTMLVideoElement & { requestVideoFrameCallback: (cb: () => void) => number })
+            .requestVideoFrameCallback(captureFrameRVFC);
+        }
+      };
 
-    captureFrame();
+      // Start the frame callback loop
+      (this.videoElement as HTMLVideoElement & { requestVideoFrameCallback: (cb: () => void) => number })
+        .requestVideoFrameCallback(captureFrameRVFC);
+    } else {
+      // Fallback to setTimeout-based frame capture
+      const frameDurationMs = 1000 / this.frameRate;
+
+      const captureFrame = () => {
+        if (!this.isRecordingActive) return;
+
+        if (!this.isPausedState && this.videoElement && this.ctx && this.canvas && this.videoEncoder) {
+          try {
+            // Draw current video frame to canvas
+            this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
+
+            // Create VideoFrame from canvas
+            const frame = new VideoFrame(this.canvas, {
+              timestamp: this.frameCount * frameDurationUs,
+              duration: frameDurationUs,
+            });
+
+            // Encode frame (keyframe every 2 seconds)
+            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
+            this.videoEncoder.encode(frame, { keyFrame });
+            frame.close();
+
+            this.frameCount++;
+          } catch (e) {
+            console.error('Frame capture error:', e);
+          }
+        }
+
+        this.frameInterval = window.setTimeout(captureFrame, frameDurationMs);
+      };
+
+      captureFrame();
+    }
+
     this.callbacks.onStart?.();
   }
 
@@ -516,6 +563,10 @@ export class WebCodecsRecorder {
     if (this.videoElement) {
       this.videoElement.pause();
       this.videoElement.srcObject = null;
+      // Remove from DOM since we attached it during initialization
+      if (this.videoElement.parentNode) {
+        this.videoElement.parentNode.removeChild(this.videoElement);
+      }
       this.videoElement = null;
     }
 
