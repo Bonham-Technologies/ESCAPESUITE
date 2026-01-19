@@ -152,6 +152,7 @@ VITE_BUILD_MODE=saas              # or 'standalone' for air-gapped builds
 
 - **Unit tests**: Vitest with Testing Library, fake-indexeddb for storage mocking
 - **E2E tests**: Playwright with Chromium
+- **Journey tests**: Comprehensive user flow tests covering trial, subscription, and license workflows
 - **CI behavior**: In CI (`process.env.CI=true`), only smoke tests run; auth-dependent tests are skipped
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
@@ -159,7 +160,7 @@ Test counts:
 - ESCAPEPLAN: 47 tests
 - ESCAPECRAFT: 143 tests
 - ESCAPEARTIST: 570 tests
-- E2E: 62 tests (smoke tests run in CI)
+- E2E: 62 structural tests + 29 journey tests (smoke tests run in CI)
 
 ## Key Constraints
 

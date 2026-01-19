@@ -2,3 +2,7 @@
 export * from './auth'
 export * from './indexeddb'
 export * from './media-mocks'
+export * from './stripe-mocks'
+export * from './subscription-mocks'
+export * from './license-mocks'
+export * from './watermark-verification'
