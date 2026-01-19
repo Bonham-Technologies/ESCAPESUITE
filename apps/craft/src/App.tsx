@@ -510,9 +510,20 @@ function App() {
 
     const blob = await getVideoBlob(id);
     if (blob) {
-      const url = createBlobUrl(blob);
-      setPlaybackUrl(url);
-      setPlaybackName(name);
+      // Fix WebM metadata for proper seeking/scrubbing
+      // MediaRecorder WebM files lack seek cues, making timeline scrubbing unreliable
+      try {
+        const fixedBlob = await fixWebMMetadata(blob);
+        const url = createBlobUrl(fixedBlob);
+        setPlaybackUrl(url);
+        setPlaybackName(name);
+      } catch (error) {
+        // Fall back to raw blob if metadata fix fails
+        console.warn('WebM metadata fix failed for playback:', error);
+        const url = createBlobUrl(blob);
+        setPlaybackUrl(url);
+        setPlaybackName(name);
+      }
     }
   };
 
