@@ -100,9 +100,11 @@ dist/
 
 ### ESCAPECRAFT (apps/craft)
 - Zustand store in `src/store/recorderStore.ts`
-- Core modules in `src/core/`: `recorder.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `watermark.ts`
+- Core modules in `src/core/`: `recorder.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `watermark.ts`, `converter.ts`
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
-- Outputs WebM (requires `fix-webm-duration` for proper seek metadata)
+- Outputs WebM (requires `webm-duration-fix` for proper seek metadata)
+- Export to MP4 (H.264+AAC) or WebM (VP9+Opus) via WebCodecs + Mediabunny
+- Export features: cancellation support, background tab support, ~real-time encoding speed
 
 ### ESCAPEARTIST (apps/artist)
 - Zustand store in `src/store/projectStore.ts`
@@ -155,7 +157,7 @@ VITE_BUILD_MODE=saas              # or 'standalone' for air-gapped builds
 
 Test counts:
 - ESCAPEPLAN: 47 tests
-- ESCAPECRAFT: 95 tests
+- ESCAPECRAFT: 143 tests
 - ESCAPEARTIST: 570 tests
 - E2E: 62 tests (smoke tests run in CI)
 

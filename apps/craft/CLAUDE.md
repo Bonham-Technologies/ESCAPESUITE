@@ -70,12 +70,24 @@ Three download options with different speed/compatibility trade-offs:
 - **WebM (Compatible)**: Re-encoded with WebCodecs + Mediabunny for Windows Media Player
 - **MP4 (Universal)**: H.264 + AAC conversion for maximum compatibility
 
+### Export Features
+- **Cancellation**: All exports can be cancelled mid-conversion via AbortController
+- **Background Tab Support**: Uses MessageChannel for yielding instead of setTimeout to avoid browser throttling
+- **Play-based Frame Capture**: Uses `requestVideoFrameCallback` for fast encoding (~real-time speed vs minutes with seek-based approach)
+- **Progress Tracking**: Real-time progress updates during conversion
+
 ### WebM Handling
 - MediaRecorder produces WebM without proper seek metadata
 - `webm-duration-fix` library adds Duration, SeekHead, and Cues elements
 - Thumbnails captured from live preview (more reliable than from blob)
 - Metadata extraction has fallbacks for problematic WebM files
 - Compatible WebM option re-encodes with VP9 + Opus via Mediabunny
+- Playback viewer fixes metadata before playback for proper scrubbing
+
+### Trial User Watermarking
+- Watermarks are applied at **export time only**, not during recording
+- This ensures raw recording stream works properly (browser optimizations can break watermarked streams)
+- Trial users see watermark on exported files but not during live preview/recording
 
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`
