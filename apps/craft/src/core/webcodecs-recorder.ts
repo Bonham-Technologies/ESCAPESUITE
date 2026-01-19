@@ -126,11 +126,13 @@ export class WebCodecsRecorder {
     this.width = settings.width || 1920;
     this.height = settings.height || 1080;
 
-    // Set up frame capture - prefer MediaStreamTrackProcessor if available
-    const hasTrackProcessor = typeof MediaStreamTrackProcessor !== 'undefined';
+    // Set up frame capture - use video element + canvas approach
+    // Note: MediaStreamTrackProcessor has issues with frame lifecycle management,
+    // so we use the video element approach which is more reliable
+    const hasTrackProcessor = false; // Disabled for now - see comment above
 
-    if (hasTrackProcessor) {
-      // Use MediaStreamTrackProcessor for direct frame access (most reliable)
+    if (hasTrackProcessor && typeof MediaStreamTrackProcessor !== 'undefined') {
+      // Use MediaStreamTrackProcessor for direct frame access
       console.log('Using MediaStreamTrackProcessor for frame capture');
       this.trackProcessor = new MediaStreamTrackProcessor!({ track: this.videoTrack });
       this.frameReader = this.trackProcessor.readable.getReader();
@@ -367,8 +369,7 @@ export class WebCodecsRecorder {
   /**
    * Start frame capture using MediaStreamTrackProcessor (preferred method)
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private async startTrackProcessorCapture(_frameDurationUs: number): Promise<void> {
+  private async startTrackProcessorCapture(frameDurationUs: number): Promise<void> {
     if (!this.frameReader || !this.videoEncoder) return;
 
     const targetFrameInterval = 1000 / this.frameRate;
@@ -376,40 +377,46 @@ export class WebCodecsRecorder {
 
     try {
       while (this.frameReaderActive && this.isRecordingActive) {
-        const { value: frame, done } = await this.frameReader.read();
+        const { value: sourceFrame, done } = await this.frameReader.read();
 
         if (done) break;
-        if (!frame) continue;
+        if (!sourceFrame) continue;
 
         // Throttle to target frame rate
         const now = performance.now();
         if (now - lastFrameTime < targetFrameInterval * 0.8) {
-          frame.close();
+          sourceFrame.close();
           continue;
         }
         lastFrameTime = now;
 
         if (this.isPausedState) {
-          // When paused, just close the frame and continue
-          frame.close();
+          sourceFrame.close();
           continue;
         }
 
         if (this.videoEncoder && this.videoEncoder.state !== 'closed') {
           try {
-            // Encode frame directly - encoder takes ownership, so DON'T close it after
-            // The frame's original timestamp from the capture is used
+            // Create a new frame with controlled timestamp for consistent timing
+            const frame = new VideoFrame(sourceFrame, {
+              timestamp: this.frameCount * frameDurationUs,
+            });
+            // Close source frame immediately - we've copied the data we need
+            sourceFrame.close();
+
+            // Encode frame (keyframe every 2 seconds)
             const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
             this.videoEncoder.encode(frame, { keyFrame });
+            // Close frame after encoding - encoder copies the data it needs
+            frame.close();
+
             this.frameCount++;
-            // Note: Do NOT call frame.close() here - encoder now owns the frame
           } catch (e) {
             console.error('Frame encoding error:', e);
-            // Only close frame if encoding failed
-            frame.close();
+            sourceFrame.close();
           }
         } else {
-          frame.close();
+          sourceFrame.close();
         }
       }
     } catch (e) {
@@ -446,7 +453,8 @@ export class WebCodecsRecorder {
             // Encode frame (keyframe every 2 seconds)
             const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
             this.videoEncoder.encode(frame, { keyFrame });
-            // Note: encoder takes ownership of frame, don't close it
+            // Close frame after encoding - encoder copies data synchronously
+            frame.close();
 
             this.frameCount++;
           } catch (e) {
@@ -485,7 +493,8 @@ export class WebCodecsRecorder {
             // Encode frame (keyframe every 2 seconds)
             const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
             this.videoEncoder.encode(frame, { keyFrame });
-            // Note: encoder takes ownership of frame, don't close it
+            // Close frame after encoding - encoder copies data synchronously
+            frame.close();
 
             this.frameCount++;
           } catch (e) {
