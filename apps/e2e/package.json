@@ -13,8 +13,12 @@
     "test:integration": "playwright test tests/integration",
     "test:standalone": "playwright test --config=playwright.standalone.config.ts",
     "test:standalone:headed": "playwright test --config=playwright.standalone.config.ts --headed",
+    "test:journeys": "playwright test --config=playwright.journeys.config.ts",
+    "test:journeys:headed": "playwright test --config=playwright.journeys.config.ts --headed",
+    "test:journeys:ui": "playwright test --config=playwright.journeys.config.ts --ui",
     "report": "playwright show-report",
-    "report:standalone": "playwright show-report playwright-report-standalone"
+    "report:standalone": "playwright show-report playwright-report-standalone",
+    "report:journeys": "playwright show-report playwright-report-journeys"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",

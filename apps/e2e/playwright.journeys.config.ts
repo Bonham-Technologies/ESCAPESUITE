@@ -1,18 +1,34 @@
 import { defineConfig, devices } from '@playwright/test'
 
+/**
+ * Playwright configuration for user journey tests.
+ *
+ * Journey tests are comprehensive, multi-step tests that simulate real user
+ * workflows. They have extended timeouts and run serially to maintain state.
+ */
 export default defineConfig({
-  testDir: './tests',
-  testIgnore: ['**/standalone/**'], // Standalone tests use separate config
-  fullyParallel: true,
+  testDir: './tests/journeys',
+  fullyParallel: false, // Journeys run serially for proper flow testing
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  retries: process.env.CI ? 1 : 0,
+  workers: 1, // Single worker for sequential execution
+  reporter: [
+    ['html', { outputFolder: 'playwright-report-journeys' }],
+    ['list'],
+  ],
+
+  // Extended timeouts for multi-step flows
+  timeout: 60000, // 60s per test (vs 30s default)
+  expect: {
+    timeout: 10000, // 10s for assertions
+  },
 
   use: {
     trace: 'on-first-retry',
-    video: 'on-first-retry',
+    video: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    actionTimeout: 15000,
+    navigationTimeout: 30000,
   },
 
   projects: [
@@ -22,6 +38,7 @@ export default defineConfig({
     },
   ],
 
+  // Start all three apps for full journey testing
   webServer: [
     {
       command: 'pnpm run dev',

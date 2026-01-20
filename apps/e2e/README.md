@@ -20,6 +20,8 @@ pnpm test:headed         # Run with visible browser
 pnpm test:escapeplan     # Test only ESCAPEPLAN
 pnpm test:escapecraft    # Test only ESCAPECRAFT
 pnpm test:escapeartist   # Test only ESCAPEARTIST
+pnpm test:journeys       # Run user journey tests
+pnpm test:journeys:headed # Journey tests with visible browser
 ```
 
 ## Test Structure
@@ -28,7 +30,11 @@ pnpm test:escapeartist   # Test only ESCAPEARTIST
 tests/
 ├── escapeplan/              # ESCAPEPLAN tests
 │   ├── landing.spec.ts      # Landing page and navigation
-│   └── dashboard.spec.ts    # Dashboard functionality
+│   ├── dashboard.spec.ts    # Dashboard functionality
+│   ├── pricing.spec.ts      # Pricing page and tiers
+│   ├── downloads.spec.ts    # License downloads
+│   ├── invite.spec.ts       # Team invitations
+│   └── team.spec.ts         # Team management
 ├── escapecraft/             # ESCAPECRAFT tests
 │   └── recording-flow.spec.ts # Recording features
 ├── escapeartist/            # ESCAPEARTIST tests
@@ -36,19 +42,134 @@ tests/
 │   └── timeline-editing.spec.ts # Timeline operations
 ├── integration/             # Cross-app integration tests
 │   └── craft-to-artist.spec.ts # CRAFT → ARTIST workflow
-└── standalone/              # Standalone build tests
-    ├── craft.spec.ts        # ESCAPECRAFT standalone
-    └── artist.spec.ts       # ESCAPEARTIST standalone
+├── standalone/              # Standalone build tests
+│   ├── craft.spec.ts        # ESCAPECRAFT standalone
+│   └── artist.spec.ts       # ESCAPEARTIST standalone
+└── journeys/                # User journey tests
+    ├── 01-visitor-to-trial.spec.ts
+    ├── 02-trial-record-edit-export.spec.ts
+    ├── 03-trial-to-pro-upgrade.spec.ts
+    ├── 04-pro-cancellation-flow.spec.ts
+    ├── 05-standalone-purchase-download.spec.ts
+    ├── 06-team-admin-workflow.spec.ts
+    ├── 07-standalone-license-activation.spec.ts
+    ├── 08-team-purchase-flow.spec.ts
+    ├── 09-member-invitation-flow.spec.ts
+    ├── 10-team-role-management.spec.ts
+    ├── 11-member-removal-flow.spec.ts
+    ├── 12-team-settings.spec.ts
+    ├── 13-audit-logs-enterprise.spec.ts
+    └── 14-seat-management.spec.ts
+```
+
+## User Journey Tests
+
+The `journeys/` directory contains comprehensive E2E tests covering critical user paths:
+
+### Individual User Journeys
+
+| Journey | Description | Tests |
+|---------|-------------|-------|
+| 01 | Visitor → Browse → Pricing → Trial | 3 |
+| 02 | Trial → Record (CRAFT) → Edit (ARTIST) → Export | 4 |
+| 03 | Trial → Upgrade to Pro | 4 |
+| 04 | Pro → Cancel → Access until period end → Expired | 4 |
+| 05 | User → Purchase standalone license → Download | 5 |
+| 06 | Team admin → Create org → Invite → Member accepts | 3 |
+| 07 | Standalone → Manual license entry → Activation | 6 |
+
+### Team & Enterprise Journeys
+
+| Journey | Description | Tests |
+|---------|-------------|-------|
+| 08 | Team purchase flow (pricing → checkout → dashboard) | 4 |
+| 09 | Member invitation flow (invite → accept → join) | 7 |
+| 10 | Role management (owner/admin/member permissions) | 5 |
+| 11 | Member removal and leave organization | 6 |
+| 12 | Team settings (name, security, enterprise features) | 6 |
+| 13 | Audit logs (Enterprise feature) | 6 |
+| 14 | Seat management and capacity | 6 |
+
+**Total: 69 journey tests**
+
+### Running Journey Tests
+
+```bash
+pnpm test:journeys           # Run all journey tests
+pnpm test:journeys:headed    # Run with browser visible
+pnpm test:journeys:ui        # Run with Playwright UI
+pnpm report:journeys         # View HTML report
+```
+
+Journey tests use extended timeouts (60s per test) and run serially to maintain proper flow state.
+
+## Test Utilities
+
+The `utils/` directory provides reusable testing utilities:
+
+| Utility | Purpose |
+|---------|---------|
+| `auth.ts` | Mock Clerk authentication |
+| `indexeddb.ts` | IndexedDB management |
+| `media-mocks.ts` | Mock getUserMedia and MediaRecorder |
+| `stripe-mocks.ts` | Mock Stripe checkout and portal |
+| `subscription-mocks.ts` | Mock subscription states |
+| `license-mocks.ts` | Mock license validation |
+| `watermark-verification.ts` | Verify watermark presence |
+| `organization-mocks.ts` | Mock team/organization APIs |
+
+### Test Fixtures
+
+The `fixtures/auth-fixtures.ts` provides pre-configured user fixtures:
+
+```typescript
+import { test, expect } from '../../fixtures/auth-fixtures'
+
+// Available fixtures:
+// - trialUser: Trial user with 14 days remaining
+// - proUser: Pro Monthly subscriber
+// - foundingUser: Founding Member (lifetime)
+// - expiredUser: Expired subscription
+// - canceledUser: Canceled but access until period end
+// - licensedUser: Valid standalone license
+// - signedOutUser: Visitor (no auth)
+
+test('trial user sees upgrade prompt', async ({ trialUser }) => {
+  const { page } = trialUser
+  await page.goto('http://localhost:5173/dashboard')
+  // Test with pre-mocked trial subscription state
+})
 ```
 
 See also: [Standalone Test Battery](../../docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists.
 
 ## CI Behavior
 
-In CI (`process.env.CI=true`):
-- Only smoke tests run (tests tagged `@smoke`)
-- Auth-dependent tests are skipped
+The CI workflow is optimized to balance thoroughness with speed:
+
+### Default PR Behavior
+- **Fast E2E tests** run on every PR (excludes journey tests)
+- Journey tests are excluded using `--grep-invert "Journey"`
+- Playwright browsers are cached to speed up runs
+- Concurrent runs are cancelled when new commits are pushed
+
+### Full E2E (Including Journeys)
+To run the complete test suite including all 69 journey tests:
+1. Add the `run-full-e2e` label to your PR, OR
+2. Merge to `main` branch (full tests run automatically)
+
+### CI Optimizations
+| Optimization | Benefit |
+|--------------|---------|
+| Concurrency control | Cancels duplicate runs on new pushes |
+| Combined lint + type-check | Saves ~30s runner setup |
+| Playwright browser caching | Saves ~1min per E2E job |
+| Journey tests excluded by default | Saves ~3-5min per PR |
+
+### Test Configuration
 - Tests run against development servers started by Playwright
+- Mock Clerk key is used when `VITE_CLERK_PUBLISHABLE_KEY` is not set
+- Route mocking intercepts all external API calls (Clerk, Stripe, Supabase)
 
 ## Configuration
 
