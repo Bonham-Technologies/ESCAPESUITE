@@ -30,8 +30,8 @@ importers:
         specifier: ^8.0.3
         version: 8.0.3
       mediabunny:
-        specifier: ^1.27.6
-        version: 1.27.6
+        specifier: ^1.29.0
+        version: 1.29.0
       mp4box:
         specifier: ^2.3.0
         version: 2.3.0
@@ -124,8 +124,8 @@ importers:
         specifier: ^8.0.3
         version: 8.0.3
       mediabunny:
-        specifier: ^1.27.6
-        version: 1.27.6
+        specifier: ^1.29.0
+        version: 1.29.0
       react:
         specifier: ^19.2.3
         version: 19.2.3
@@ -2080,8 +2080,8 @@ packages:
   mdn-data@2.12.2:
     resolution: {integrity: sha512-IEn+pegP1aManZuckezWCO+XZQDplx1366JoVhTpMpBB1sPey/SbveZQUosKiKiGYjg1wH4pMlNgXbCiYgihQA==}
 
-  mediabunny@1.27.6:
-    resolution: {integrity: sha512-Y6QLjH5lAea9swaLcfXzcK/Xw1cFW4KDLvkm+0fUFcwfp8SEnAiMh8RSBtMBVADoE7hTCA9yn7JoYJv3VBd/yQ==}
+  mediabunny@1.29.0:
+    resolution: {integrity: sha512-18B8w/rhO/ph/AFsIXvzZg8RaSQZ+ZYfJ99MZlTjDmlgCT58jV3azrnWQ/OSquYDi8q0xmn64mnfTEHgww3+zw==}
 
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
@@ -4547,7 +4547,7 @@ snapshots:
 
   mdn-data@2.12.2: {}
 
-  mediabunny@1.27.6:
+  mediabunny@1.29.0:
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.11
       '@types/dom-webcodecs': 0.1.13
