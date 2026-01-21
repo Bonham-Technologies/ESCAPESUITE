@@ -312,6 +312,46 @@
   color: var(--text-primary);
 }
 
+.billingToggle {
+  display: flex;
+  gap: 1rem;
+}
+
+.billingOption {
+  flex: 1;
+  padding: 1rem;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.billingOption:hover {
+  border-color: var(--accent);
+}
+
+.billingOption.active {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--accent);
+}
+
+.savingsBadge {
+  background: var(--success);
+  color: white;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
 .calculatorTotal {
   background: var(--bg-tertiary);
   border-radius: 12px;

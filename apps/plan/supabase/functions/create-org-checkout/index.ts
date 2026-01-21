@@ -53,8 +53,8 @@ serve(async (req) => {
       )
     }
 
-    // Validate seat count
-    const minSeats = plan === 'team' ? 2 : 5
+    // Validate seat count (must match frontend: Team=5, Enterprise=25)
+    const minSeats = plan === 'team' ? 5 : 25
     if (seatCount < minSeats) {
       return new Response(
         JSON.stringify({ error: `Minimum ${minSeats} seats required for ${plan} plan` }),

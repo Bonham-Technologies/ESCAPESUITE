@@ -130,23 +130,23 @@ For users who want cloud features, sync, and web-based access.
 | Founding Member | $149 once | Lifetime access |
 
 ### SaaS Subscriptions (Teams)
-For organizations with multiple users.
+For organizations with multiple users. Supports monthly or annual billing (2 months free with annual).
 
-| Tier | Price | Minimum | Features |
-|------|-------|---------|----------|
-| Team | $7/seat/month | 5 seats | Centralized billing, member management |
-| Enterprise | $12/seat/month | 25 seats | SSO*, audit logging, allowed domains |
+| Tier | Monthly | Annual | Minimum | Features |
+|------|---------|--------|---------|----------|
+| Team | $7/seat/mo | $70/seat/yr | 5 seats | Centralized billing, member management |
+| Enterprise | $12/seat/mo | $120/seat/yr | 25 seats | SSO*, audit logging, allowed domains |
 
 *SSO requires Clerk Enterprise ($100+/mo) - currently disabled
 
 ### Standalone Licenses
-For users who want offline-only desktop apps without subscriptions.
+For users who want offline-only desktop apps without subscriptions. Requires sign-in to purchase.
 
 | Product | Standard | Pro | Lifetime |
 |---------|----------|-----|----------|
 | ESCAPECRAFT | $49 | $99 | $199 |
-| ESCAPEARTIST | $69 | $149 | $299 |
-| Suite Bundle | $99 | $199 | $399 |
+| ESCAPEARTIST | $69 | $129 | $249 |
+| Suite Bundle | $99 | $199 | $349 |
 
 License tiers differ by update duration:
 - Standard: 1 year updates
