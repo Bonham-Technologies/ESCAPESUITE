@@ -72,30 +72,45 @@ serve(async (req) => {
     // Check if slug is already taken
     const { data: existingOrg } = await supabase
       .from('organizations')
-      .select('id')
+      .select('id, stripe_subscription_id')
       .eq('slug', slug)
       .single()
-
-    if (existingOrg) {
-      return new Response(
-        JSON.stringify({ error: 'Organization slug already taken' }),
-        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
 
     // Check if user already owns an organization
     const { data: existingMembership } = await supabase
       .from('organization_members')
-      .select('organization_id')
+      .select('organization_id, joined_at')
       .eq('user_id', clerkUserId)
       .eq('role', 'owner')
       .single()
 
-    if (existingMembership) {
+    // If org exists with this slug, check if it's an abandoned checkout by this user
+    if (existingOrg) {
+      const isAbandonedByThisUser = existingMembership &&
+        existingMembership.organization_id === existingOrg.id &&
+        !existingMembership.joined_at &&
+        !existingOrg.stripe_subscription_id
+
+      if (!isAbandonedByThisUser) {
+        return new Response(
+          JSON.stringify({ error: 'Organization slug already taken' }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Reuse the abandoned org - delete it so we can recreate with updated settings
+      await supabase.from('organization_members').delete().eq('organization_id', existingOrg.id)
+      await supabase.from('organizations').delete().eq('id', existingOrg.id)
+    } else if (existingMembership && existingMembership.joined_at) {
+      // User already owns an active organization
       return new Response(
         JSON.stringify({ error: 'User already owns an organization' }),
         { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    } else if (existingMembership && !existingMembership.joined_at) {
+      // User has an abandoned checkout for a different org - clean it up
+      await supabase.from('organization_members').delete().eq('organization_id', existingMembership.organization_id)
+      await supabase.from('organizations').delete().eq('id', existingMembership.organization_id)
     }
 
     // Get or create Stripe price for the plan
@@ -171,34 +186,30 @@ serve(async (req) => {
       throw memberError
     }
 
-    // Get or create the price
-    // In production, use environment variables for price IDs
+    // Get price ID from environment variables
     const teamMonthlyPriceId = Deno.env.get('STRIPE_PRICE_TEAM_MONTHLY')
     const teamAnnualPriceId = Deno.env.get('STRIPE_PRICE_TEAM_ANNUAL')
     const enterpriseMonthlyPriceId = Deno.env.get('STRIPE_PRICE_ENTERPRISE_MONTHLY')
     const enterpriseAnnualPriceId = Deno.env.get('STRIPE_PRICE_ENTERPRISE_ANNUAL')
 
-    let priceId: string
+    let priceId: string | undefined
 
     if (plan === 'team') {
-      priceId = billingPeriod === 'monthly' ? teamMonthlyPriceId! : teamAnnualPriceId!
+      priceId = billingPeriod === 'monthly' ? teamMonthlyPriceId : teamAnnualPriceId
     } else {
-      priceId = billingPeriod === 'monthly' ? enterpriseMonthlyPriceId! : enterpriseAnnualPriceId!
+      priceId = billingPeriod === 'monthly' ? enterpriseMonthlyPriceId : enterpriseAnnualPriceId
     }
 
-    // If no price ID configured, create dynamic price
+    // Require price ID to be configured - no dynamic price creation
     if (!priceId) {
-      const price = await stripe.prices.create({
-        unit_amount: pricePerSeat,
-        currency: 'usd',
-        recurring: {
-          interval: billingPeriod === 'monthly' ? 'month' : 'year',
-        },
-        product_data: {
-          name: `ESCAPESUITE ${plan.charAt(0).toUpperCase() + plan.slice(1)} Plan`,
-        },
-      })
-      priceId = price.id
+      const missingVar = plan === 'team'
+        ? (billingPeriod === 'monthly' ? 'STRIPE_PRICE_TEAM_MONTHLY' : 'STRIPE_PRICE_TEAM_ANNUAL')
+        : (billingPeriod === 'monthly' ? 'STRIPE_PRICE_ENTERPRISE_MONTHLY' : 'STRIPE_PRICE_ENTERPRISE_ANNUAL')
+      console.error(`Missing Stripe price configuration: ${missingVar}`)
+      return new Response(
+        JSON.stringify({ error: `Stripe price not configured for ${plan} ${billingPeriod}. Please contact support.` }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     // Create checkout session
