@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react'
 import { useSubscription } from '../../hooks/useSubscription'
@@ -42,7 +42,7 @@ export default function Pricing() {
   const navigate = useNavigate()
   const initialTab = (searchParams.get('tab') as PricingTab) || 'individual'
 
-  const { isSignedIn, user } = useUser()
+  const { isSignedIn, isLoaded, user } = useUser()
   const { subscription, checkout, refetch } = useSubscription()
   const [activeTab, setActiveTab] = useState<PricingTab>(initialTab)
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
@@ -52,7 +52,8 @@ export default function Pricing() {
   const [teamSeats, setTeamSeats] = useState(5)
   const [teamPlan, setTeamPlan] = useState<'team' | 'enterprise'>('team')
   const [teamBillingPeriod, setTeamBillingPeriod] = useState<'monthly' | 'annual'>('monthly')
-  const [teamOrgSlug, setTeamOrgSlug] = useState<string | null>(null)
+  // Use ref for org slug to avoid stale closure issues with Stripe's onComplete callback
+  const teamOrgSlugRef = useRef<string | null>(null)
 
   // Standalone state
   const [standaloneProduct, setStandaloneProduct] = useState<StandaloneProduct>('suite')
@@ -64,10 +65,11 @@ export default function Pricing() {
   const handleCheckoutComplete = async () => {
     setCheckoutClientSecret(null)
     await refetch()
-    // Navigate based on checkout type
-    if (teamOrgSlug) {
-      navigate(`/team/${teamOrgSlug}?success=true`)
-      setTeamOrgSlug(null)
+    // Navigate based on checkout type - use ref to avoid stale closure
+    const orgSlug = teamOrgSlugRef.current
+    if (orgSlug) {
+      teamOrgSlugRef.current = null
+      navigate(`/team/${orgSlug}?success=true`)
     } else {
       navigate('/dashboard?success=true')
     }
@@ -77,6 +79,12 @@ export default function Pricing() {
   const handleSaaSCheckout = async (plan: CheckoutPlan) => {
     if (!isSignedIn) {
       window.location.href = '/sign-up'
+      return
+    }
+
+    // Wait for user to be fully loaded
+    if (!isLoaded || !user?.id) {
+      alert('Please wait for authentication to complete.')
       return
     }
 
@@ -100,6 +108,12 @@ export default function Pricing() {
       return
     }
 
+    // Wait for user to be fully loaded
+    if (!isLoaded || !user?.id) {
+      alert('Please wait for authentication to complete.')
+      return
+    }
+
     try {
       setCheckoutLoading('standalone')
 
@@ -111,8 +125,8 @@ export default function Pricing() {
           'Authorization': `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({
-          clerkUserId: user?.id,
-          email: user?.primaryEmailAddress?.emailAddress,
+          clerkUserId: user.id,
+          email: user.primaryEmailAddress?.emailAddress,
           product: standaloneProduct,
           tier: standaloneTier,
           seats: 1,
@@ -142,6 +156,12 @@ export default function Pricing() {
       return
     }
 
+    // Wait for user to be fully loaded
+    if (!isLoaded || !user?.id) {
+      alert('Please wait for authentication to complete.')
+      return
+    }
+
     try {
       setCheckoutLoading('team')
 
@@ -153,12 +173,12 @@ export default function Pricing() {
           'Authorization': `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({
-          clerkUserId: user?.id,
-          email: user?.primaryEmailAddress?.emailAddress,
+          clerkUserId: user.id,
+          email: user.primaryEmailAddress?.emailAddress,
           plan: teamPlan,
           seatCount: teamSeats,
           billingPeriod: teamBillingPeriod,
-          organizationName: `${user?.firstName || 'User'}'s Team`,
+          organizationName: `${user.firstName || 'User'}'s Team`,
         }),
       })
 
@@ -168,8 +188,8 @@ export default function Pricing() {
         throw new Error(data.error || 'Checkout failed')
       }
 
-      // Store org slug for redirect after checkout
-      setTeamOrgSlug(data.organizationSlug)
+      // Store org slug in ref for redirect after checkout (avoids stale closure)
+      teamOrgSlugRef.current = data.organizationSlug
       // Open embedded checkout modal
       setCheckoutClientSecret(data.clientSecret)
     } catch (error) {
@@ -678,7 +698,7 @@ export default function Pricing() {
           clientSecret={checkoutClientSecret}
           onClose={() => {
             setCheckoutClientSecret(null)
-            setTeamOrgSlug(null)
+            teamOrgSlugRef.current = null
           }}
           onComplete={handleCheckoutComplete}
         />
