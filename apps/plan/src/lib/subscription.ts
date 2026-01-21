@@ -47,8 +47,7 @@ export async function createCheckoutSession(
     body: JSON.stringify({
       clerkUserId,
       plan,
-      successUrl: `${window.location.origin}/dashboard?success=true`,
-      cancelUrl: `${window.location.origin}/?canceled=true`,
+      returnUrl: `${window.location.origin}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
     }),
   })
 
@@ -57,8 +56,8 @@ export async function createCheckoutSession(
     throw new Error(error.error || 'Failed to create checkout session')
   }
 
-  const { url } = await response.json()
-  return url
+  const { clientSecret } = await response.json()
+  return clientSecret
 }
 
 export async function createPortalSession(clerkUserId: string): Promise<string> {

@@ -32,7 +32,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { clerkUserId, plan, successUrl, cancelUrl } = await req.json()
+    const { clerkUserId, plan, returnUrl } = await req.json()
 
     if (!clerkUserId || !plan) {
       return new Response(
@@ -88,13 +88,13 @@ serve(async (req) => {
     const price = await stripe.prices.retrieve(priceId)
     const isOneTime = price.type === 'one_time'
 
-    // Create checkout session
+    // Create checkout session with embedded mode
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
       mode: isOneTime ? 'payment' : 'subscription',
-      success_url: successUrl || `${req.headers.get('origin')}/dashboard?success=true`,
-      cancel_url: cancelUrl || `${req.headers.get('origin')}/?canceled=true`,
+      ui_mode: 'embedded',
+      return_url: returnUrl || `${req.headers.get('origin')}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         clerk_user_id: clerkUserId,
         price_id: priceId,
@@ -104,7 +104,7 @@ serve(async (req) => {
     })
 
     return new Response(
-      JSON.stringify({ url: session.url }),
+      JSON.stringify({ clientSecret: session.client_secret }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {

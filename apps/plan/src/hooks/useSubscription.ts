@@ -12,7 +12,7 @@ interface UseSubscriptionReturn {
   isLoading: boolean
   error: string | null
   refetch: () => Promise<void>
-  checkout: (plan: CheckoutPlan) => Promise<void>
+  checkout: (plan: CheckoutPlan) => Promise<string>
   openPortal: () => Promise<void>
 }
 
@@ -59,14 +59,14 @@ export function useSubscription(): UseSubscriptionReturn {
   }, [isLoaded, fetchSubscription])
 
   const checkout = useCallback(
-    async (plan: CheckoutPlan) => {
+    async (plan: CheckoutPlan): Promise<string> => {
       if (!user?.id) {
         throw new Error('User not authenticated')
       }
 
       try {
-        const url = await createCheckoutSession(user.id, plan)
-        window.location.href = url
+        const clientSecret = await createCheckoutSession(user.id, plan)
+        return clientSecret
       } catch (err) {
         console.error('Checkout error:', err)
         throw err

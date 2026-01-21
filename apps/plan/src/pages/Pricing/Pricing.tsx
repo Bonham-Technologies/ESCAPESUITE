@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react'
 import { useSubscription } from '../../hooks/useSubscription'
 import type { CheckoutPlan } from '../../lib/subscription'
 import { analytics } from '../../lib/analytics'
 import { functionsUrl, supabaseAnonKey } from '../../lib/supabase'
+import { CheckoutModal } from '../../components/Checkout'
 import styles from './Pricing.module.css'
 
 type PricingTab = 'individual' | 'team' | 'standalone'
@@ -38,23 +39,39 @@ const TEAM_PRICES = {
 
 export default function Pricing() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const initialTab = (searchParams.get('tab') as PricingTab) || 'individual'
 
   const { isSignedIn, user } = useUser()
-  const { subscription, checkout } = useSubscription()
+  const { subscription, checkout, refetch } = useSubscription()
   const [activeTab, setActiveTab] = useState<PricingTab>(initialTab)
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
+  const [checkoutClientSecret, setCheckoutClientSecret] = useState<string | null>(null)
 
   // Team pricing state
   const [teamSeats, setTeamSeats] = useState(5)
   const [teamPlan, setTeamPlan] = useState<'team' | 'enterprise'>('team')
   const [teamBillingPeriod, setTeamBillingPeriod] = useState<'monthly' | 'annual'>('monthly')
+  const [teamOrgSlug, setTeamOrgSlug] = useState<string | null>(null)
 
   // Standalone state
   const [standaloneProduct, setStandaloneProduct] = useState<StandaloneProduct>('suite')
   const [standaloneTier, setStandaloneTier] = useState<StandaloneTier>('pro')
 
   const hasActiveSubscription = subscription?.hasActiveSubscription || false
+
+  // Handle checkout completion
+  const handleCheckoutComplete = async () => {
+    setCheckoutClientSecret(null)
+    await refetch()
+    // Navigate based on checkout type
+    if (teamOrgSlug) {
+      navigate(`/team/${teamOrgSlug}?success=true`)
+      setTeamOrgSlug(null)
+    } else {
+      navigate('/dashboard?success=true')
+    }
+  }
 
   // Handle SaaS checkout
   const handleSaaSCheckout = async (plan: CheckoutPlan) => {
@@ -66,7 +83,8 @@ export default function Pricing() {
     try {
       setCheckoutLoading(plan)
       analytics.checkoutStarted(plan)
-      await checkout(plan)
+      const clientSecret = await checkout(plan)
+      setCheckoutClientSecret(clientSecret)
     } catch (error) {
       console.error('Checkout error:', error)
       alert('Failed to start checkout. Please try again.')
@@ -107,8 +125,8 @@ export default function Pricing() {
         throw new Error(data.error || 'Checkout failed')
       }
 
-      // Redirect to Stripe checkout
-      window.location.href = data.url
+      // Open embedded checkout modal
+      setCheckoutClientSecret(data.clientSecret)
     } catch (error) {
       console.error('Standalone checkout error:', error)
       alert('Failed to start checkout. Please try again.')
@@ -150,8 +168,10 @@ export default function Pricing() {
         throw new Error(data.error || 'Checkout failed')
       }
 
-      // Redirect to Stripe checkout
-      window.location.href = data.url
+      // Store org slug for redirect after checkout
+      setTeamOrgSlug(data.organizationSlug)
+      // Open embedded checkout modal
+      setCheckoutClientSecret(data.clientSecret)
     } catch (error) {
       console.error('Team checkout error:', error)
       alert('Failed to start checkout. Please try again.')
@@ -651,6 +671,18 @@ export default function Pricing() {
           </div>
         </div>
       </section>
+
+      {/* Embedded Checkout Modal */}
+      {checkoutClientSecret && (
+        <CheckoutModal
+          clientSecret={checkoutClientSecret}
+          onClose={() => {
+            setCheckoutClientSecret(null)
+            setTeamOrgSlug(null)
+          }}
+          onComplete={handleCheckoutComplete}
+        />
+      )}
     </div>
   )
 }

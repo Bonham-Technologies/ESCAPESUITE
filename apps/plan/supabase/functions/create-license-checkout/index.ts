@@ -26,8 +26,7 @@ interface CheckoutRequest {
   product: 'craft' | 'artist' | 'suite'
   tier: 'standard' | 'pro' | 'lifetime'
   seats?: number
-  successUrl?: string
-  cancelUrl?: string
+  returnUrl?: string
 }
 
 serve(async (req) => {
@@ -53,8 +52,7 @@ serve(async (req) => {
       product,
       tier,
       seats = 1,
-      successUrl,
-      cancelUrl,
+      returnUrl,
     } = body
 
     // Validate required fields
@@ -122,7 +120,7 @@ serve(async (req) => {
       customerId = customer.id
     }
 
-    // Create checkout session for one-time license purchase
+    // Create checkout session for one-time license purchase with embedded mode
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       customer: customerId,
       line_items: [
@@ -132,8 +130,8 @@ serve(async (req) => {
         },
       ],
       mode: 'payment', // Always one-time for licenses
-      success_url: successUrl || `${req.headers.get('origin')}/portal/downloads?purchase=success`,
-      cancel_url: cancelUrl || `${req.headers.get('origin')}/pricing?canceled=true`,
+      ui_mode: 'embedded',
+      return_url: returnUrl || `${req.headers.get('origin')}/portal/downloads?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         type: 'license',
         product,
@@ -156,7 +154,7 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        url: session.url,
+        clientSecret: session.client_secret,
         sessionId: session.id,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

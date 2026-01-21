@@ -242,13 +242,13 @@ In production (Vercel), all tools are on the same domain:
 ### Vercel (Frontend) - Required
 ```env
 VITE_CLERK_PUBLISHABLE_KEY    # Clerk publishable key (pk_test_* or pk_live_*)
+VITE_STRIPE_PUBLISHABLE_KEY   # Stripe publishable key for embedded checkout (pk_test_* or pk_live_*)
 VITE_SUPABASE_URL             # Supabase project URL (https://xxx.supabase.co)
 VITE_SUPABASE_ANON_KEY        # Supabase anon/public key (JWT)
 ```
 
-> **Note:** All Stripe configuration is handled server-side via Supabase Edge Functions.
-> The frontend sends plan names (e.g., "monthly", "annual", "founding") and the
-> backend handles all Stripe API calls. No `VITE_STRIPE_*` variables are needed.
+> **Note:** Stripe Price IDs are configured server-side via Supabase Edge Functions.
+> The frontend uses the publishable key only for the embedded checkout UI.
 
 ### Supabase Edge Function Secrets - Required
 Set in: Supabase Dashboard → Settings → Edge Functions → Secrets

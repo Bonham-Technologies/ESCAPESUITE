@@ -15,8 +15,7 @@ interface CreateOrgCheckoutRequest {
   plan: 'team' | 'enterprise'
   seatCount: number
   billingPeriod: 'monthly' | 'annual'
-  successUrl?: string
-  cancelUrl?: string
+  returnUrl?: string
 }
 
 serve(async (req) => {
@@ -42,8 +41,7 @@ serve(async (req) => {
       plan,
       seatCount,
       billingPeriod,
-      successUrl,
-      cancelUrl,
+      returnUrl,
     } = body
 
     if (!clerkUserId || !email || !organizationName || !plan || !seatCount || !billingPeriod) {
@@ -212,7 +210,7 @@ serve(async (req) => {
       )
     }
 
-    // Create checkout session
+    // Create checkout session with embedded mode
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       line_items: [{
@@ -220,8 +218,8 @@ serve(async (req) => {
         quantity: seatCount,
       }],
       mode: 'subscription',
-      success_url: successUrl || `${req.headers.get('origin')}/team/${slug}?success=true`,
-      cancel_url: cancelUrl || `${req.headers.get('origin')}/pricing?canceled=true`,
+      ui_mode: 'embedded',
+      return_url: returnUrl || `${req.headers.get('origin')}/team/${slug}?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         clerk_user_id: clerkUserId,
         organization_id: organization.id,
@@ -242,7 +240,7 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        url: session.url,
+        clientSecret: session.client_secret,
         organizationId: organization.id,
         organizationSlug: organization.slug,
       }),
