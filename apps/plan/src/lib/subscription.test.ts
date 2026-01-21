@@ -71,13 +71,13 @@ describe('subscription', () => {
   })
 
   describe('createCheckoutSession', () => {
-    it('creates checkout session and returns URL', async () => {
+    it('creates checkout session and returns clientSecret for embedded checkout', async () => {
       vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ url: 'https://checkout.stripe.com/session123' }),
+        json: () => Promise.resolve({ clientSecret: 'cs_test_secret123' }),
       } as Response)
 
-      const result = await createCheckoutSession('user-123', 'price_pro_monthly')
+      const result = await createCheckoutSession('user-123', 'monthly')
 
       expect(fetch).toHaveBeenCalledWith(
         'https://test.supabase.co/functions/v1/create-checkout',
@@ -85,22 +85,21 @@ describe('subscription', () => {
           method: 'POST',
           body: JSON.stringify({
             clerkUserId: 'user-123',
-            priceId: 'price_pro_monthly',
-            successUrl: 'http://localhost:5173/dashboard?success=true',
-            cancelUrl: 'http://localhost:5173/?canceled=true',
+            plan: 'monthly',
+            returnUrl: 'http://localhost:5173/dashboard?session_id={CHECKOUT_SESSION_ID}',
           }),
         })
       )
-      expect(result).toBe('https://checkout.stripe.com/session123')
+      expect(result).toBe('cs_test_secret123')
     })
 
     it('throws error on failed request', async () => {
       vi.mocked(fetch).mockResolvedValueOnce({
         ok: false,
-        json: () => Promise.resolve({ error: 'Invalid price ID' }),
+        json: () => Promise.resolve({ error: 'Invalid plan' }),
       } as Response)
 
-      await expect(createCheckoutSession('user-123', 'invalid')).rejects.toThrow('Invalid price ID')
+      await expect(createCheckoutSession('user-123', 'monthly')).rejects.toThrow('Invalid plan')
     })
   })
 

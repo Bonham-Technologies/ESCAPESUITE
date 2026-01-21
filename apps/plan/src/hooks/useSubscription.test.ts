@@ -124,7 +124,7 @@ describe('useSubscription - checkout flow', () => {
     vi.clearAllMocks()
   })
 
-  it('calls createCheckoutSession when checkout is invoked', async () => {
+  it('calls createCheckoutSession and returns clientSecret when checkout is invoked', async () => {
     vi.mocked(getSubscription).mockResolvedValue({
       status: 'trialing',
       plan: 'trial',
@@ -134,13 +134,7 @@ describe('useSubscription - checkout flow', () => {
       hasActiveSubscription: false,
       canAccessPro: true,
     })
-    vi.mocked(createCheckoutSession).mockResolvedValue('https://checkout.stripe.com/session123')
-
-    // Mock window.location
-    const originalLocation = window.location
-    // @ts-expect-error - mocking location
-    delete window.location
-    window.location = { ...originalLocation, href: '' }
+    vi.mocked(createCheckoutSession).mockResolvedValue('cs_test_secret123')
 
     const { result } = renderHook(() => useSubscription())
 
@@ -148,13 +142,10 @@ describe('useSubscription - checkout flow', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    await result.current.checkout('price_123')
+    const clientSecret = await result.current.checkout('monthly')
 
-    expect(createCheckoutSession).toHaveBeenCalledWith('user_123', 'price_123')
-    expect(window.location.href).toBe('https://checkout.stripe.com/session123')
-
-    // Restore
-    window.location = originalLocation
+    expect(createCheckoutSession).toHaveBeenCalledWith('user_123', 'monthly')
+    expect(clientSecret).toBe('cs_test_secret123')
   })
 
   it('calls createPortalSession when openPortal is invoked', async () => {
