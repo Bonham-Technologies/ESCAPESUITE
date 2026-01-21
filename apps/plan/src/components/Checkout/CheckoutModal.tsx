@@ -33,11 +33,14 @@ export function CheckoutModal({ clientSecret, onClose, onComplete }: CheckoutMod
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <button className={styles.closeButton} onClick={onClose} aria-label="Close checkout">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className={styles.header}>
+          <h3 className={styles.headerTitle}>Complete your purchase</h3>
+          <button className={styles.closeButton} onClick={onClose} aria-label="Close checkout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
         <div className={styles.checkoutContainer}>
           <EmbeddedCheckout clientSecret={clientSecret} onComplete={onComplete} />
         </div>
