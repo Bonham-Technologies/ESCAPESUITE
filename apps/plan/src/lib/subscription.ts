@@ -31,9 +31,11 @@ export async function getSubscription(clerkUserId: string): Promise<Subscription
   return response.json()
 }
 
+export type CheckoutPlan = 'monthly' | 'annual' | 'founding'
+
 export async function createCheckoutSession(
   clerkUserId: string,
-  priceId: string
+  plan: CheckoutPlan
 ): Promise<string> {
   const response = await fetch(`${functionsUrl}/create-checkout`, {
     method: 'POST',
@@ -44,9 +46,8 @@ export async function createCheckoutSession(
     },
     body: JSON.stringify({
       clerkUserId,
-      priceId,
-      successUrl: `${window.location.origin}/dashboard?success=true`,
-      cancelUrl: `${window.location.origin}/?canceled=true`,
+      plan,
+      returnUrl: `${window.location.origin}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
     }),
   })
 
@@ -55,8 +56,8 @@ export async function createCheckoutSession(
     throw new Error(error.error || 'Failed to create checkout session')
   }
 
-  const { url } = await response.json()
-  return url
+  const { clientSecret } = await response.json()
+  return clientSecret
 }
 
 export async function createPortalSession(clerkUserId: string): Promise<string> {

@@ -242,15 +242,13 @@ In production (Vercel), all tools are on the same domain:
 ### Vercel (Frontend) - Required
 ```env
 VITE_CLERK_PUBLISHABLE_KEY    # Clerk publishable key (pk_test_* or pk_live_*)
-VITE_STRIPE_PUBLISHABLE_KEY   # Stripe publishable key (pk_test_* or pk_live_*)
+VITE_STRIPE_PUBLISHABLE_KEY   # Stripe publishable key for embedded checkout (pk_test_* or pk_live_*)
 VITE_SUPABASE_URL             # Supabase project URL (https://xxx.supabase.co)
 VITE_SUPABASE_ANON_KEY        # Supabase anon/public key (JWT)
-
-# Individual subscription prices (for checkout buttons)
-VITE_STRIPE_PRICE_PRO_MONTHLY # Stripe price ID for monthly (price_xxx)
-VITE_STRIPE_PRICE_PRO_ANNUAL  # Stripe price ID for annual (price_xxx)
-VITE_STRIPE_PRICE_FOUNDING    # Stripe price ID for founding member (price_xxx)
 ```
+
+> **Note:** Stripe Price IDs are configured server-side via Supabase Edge Functions.
+> The frontend uses the publishable key only for the embedded checkout UI.
 
 ### Supabase Edge Function Secrets - Required
 Set in: Supabase Dashboard → Settings → Edge Functions → Secrets
@@ -262,6 +260,11 @@ STRIPE_WEBHOOK_SECRET         # Stripe webhook signing secret (whsec_*)
 # License Management
 LICENSE_PRIVATE_KEY           # Ed25519 private key for signing (64-char hex)
 LICENSE_PUBLIC_KEY            # Ed25519 public key for validation (64-char hex)
+
+# Individual Subscription Prices (for individual checkout)
+STRIPE_PRICE_PRO_MONTHLY      # Pro monthly subscription (price_xxx)
+STRIPE_PRICE_PRO_ANNUAL       # Pro annual subscription (price_xxx)
+STRIPE_PRICE_FOUNDING         # Founding member one-time (price_xxx)
 
 # Team/Organization Prices (for team checkout)
 STRIPE_PRICE_TEAM_MONTHLY     # Team monthly per-seat (price_xxx)
