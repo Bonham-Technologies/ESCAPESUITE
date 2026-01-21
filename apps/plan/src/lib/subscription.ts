@@ -31,9 +31,11 @@ export async function getSubscription(clerkUserId: string): Promise<Subscription
   return response.json()
 }
 
+export type CheckoutPlan = 'monthly' | 'annual' | 'founding'
+
 export async function createCheckoutSession(
   clerkUserId: string,
-  priceId: string
+  plan: CheckoutPlan
 ): Promise<string> {
   const response = await fetch(`${functionsUrl}/create-checkout`, {
     method: 'POST',
@@ -44,7 +46,7 @@ export async function createCheckoutSession(
     },
     body: JSON.stringify({
       clerkUserId,
-      priceId,
+      plan,
       successUrl: `${window.location.origin}/dashboard?success=true`,
       cancelUrl: `${window.location.origin}/?canceled=true`,
     }),

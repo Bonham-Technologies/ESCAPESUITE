@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react'
 import { useSubscription } from '../../hooks/useSubscription'
+import type { CheckoutPlan } from '../../lib/subscription'
 import { analytics } from '../../lib/analytics'
 import { functionsUrl, supabaseAnonKey } from '../../lib/supabase'
 import styles from './Pricing.module.css'
@@ -9,12 +10,6 @@ import styles from './Pricing.module.css'
 type PricingTab = 'individual' | 'team' | 'standalone'
 type StandaloneProduct = 'craft' | 'artist' | 'suite'
 type StandaloneTier = 'standard' | 'pro' | 'lifetime'
-
-const SAAS_PRICE_IDS = {
-  monthly: import.meta.env.VITE_STRIPE_PRICE_PRO_MONTHLY,
-  annual: import.meta.env.VITE_STRIPE_PRICE_PRO_ANNUAL,
-  founding: import.meta.env.VITE_STRIPE_PRICE_FOUNDING,
-}
 
 // Standalone prices (configured in Stripe)
 const STANDALONE_PRICES: Record<StandaloneProduct, Record<StandaloneTier, { amount: number; label: string }>> = {
@@ -62,16 +57,16 @@ export default function Pricing() {
   const hasActiveSubscription = subscription?.hasActiveSubscription || false
 
   // Handle SaaS checkout
-  const handleSaaSCheckout = async (priceId: string, planName: string) => {
+  const handleSaaSCheckout = async (plan: CheckoutPlan) => {
     if (!isSignedIn) {
       window.location.href = '/sign-up'
       return
     }
 
     try {
-      setCheckoutLoading(planName)
-      analytics.checkoutStarted(planName)
-      await checkout(priceId)
+      setCheckoutLoading(plan)
+      analytics.checkoutStarted(plan)
+      await checkout(plan)
     } catch (error) {
       console.error('Checkout error:', error)
       alert('Failed to start checkout. Please try again.')
@@ -252,7 +247,7 @@ export default function Pricing() {
                 ) : (
                   <button
                     className="primary"
-                    onClick={() => handleSaaSCheckout(SAAS_PRICE_IDS.annual, 'annual')}
+                    onClick={() => handleSaaSCheckout('annual')}
                     disabled={checkoutLoading !== null}
                   >
                     {checkoutLoading === 'annual' ? 'Loading...' : 'Upgrade Now'}
@@ -284,7 +279,7 @@ export default function Pricing() {
                   </Link>
                 ) : (
                   <button
-                    onClick={() => handleSaaSCheckout(SAAS_PRICE_IDS.monthly, 'monthly')}
+                    onClick={() => handleSaaSCheckout('monthly')}
                     disabled={checkoutLoading !== null}
                   >
                     {checkoutLoading === 'monthly' ? 'Loading...' : 'Upgrade Now'}
@@ -309,7 +304,7 @@ export default function Pricing() {
               ) : (
                 <button
                   className="primary"
-                  onClick={() => handleSaaSCheckout(SAAS_PRICE_IDS.founding, 'founding')}
+                  onClick={() => handleSaaSCheckout('founding')}
                   disabled={checkoutLoading !== null}
                 >
                   {checkoutLoading === 'founding' ? 'Loading...' : 'Become a Founder'}

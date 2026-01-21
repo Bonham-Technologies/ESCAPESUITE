@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useUser } from '@clerk/clerk-react'
-import type { Subscription } from '../lib/subscription'
+import type { Subscription, CheckoutPlan } from '../lib/subscription'
 import {
   getSubscription,
   createCheckoutSession,
@@ -12,7 +12,7 @@ interface UseSubscriptionReturn {
   isLoading: boolean
   error: string | null
   refetch: () => Promise<void>
-  checkout: (priceId: string) => Promise<void>
+  checkout: (plan: CheckoutPlan) => Promise<void>
   openPortal: () => Promise<void>
 }
 
@@ -59,13 +59,13 @@ export function useSubscription(): UseSubscriptionReturn {
   }, [isLoaded, fetchSubscription])
 
   const checkout = useCallback(
-    async (priceId: string) => {
+    async (plan: CheckoutPlan) => {
       if (!user?.id) {
         throw new Error('User not authenticated')
       }
 
       try {
-        const url = await createCheckoutSession(user.id, priceId)
+        const url = await createCheckoutSession(user.id, plan)
         window.location.href = url
       } catch (err) {
         console.error('Checkout error:', err)

@@ -7,6 +7,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Price ID mapping from environment variables
+const PRICE_IDS = {
+  monthly: () => Deno.env.get('STRIPE_PRICE_PRO_MONTHLY'),
+  annual: () => Deno.env.get('STRIPE_PRICE_PRO_ANNUAL'),
+  founding: () => Deno.env.get('STRIPE_PRICE_FOUNDING'),
+}
+
+type PlanType = 'monthly' | 'annual' | 'founding'
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -23,12 +32,30 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { clerkUserId, priceId, successUrl, cancelUrl } = await req.json()
+    const { clerkUserId, plan, successUrl, cancelUrl } = await req.json()
 
-    if (!clerkUserId || !priceId) {
+    if (!clerkUserId || !plan) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
+        JSON.stringify({ error: 'Missing required fields: clerkUserId, plan' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Validate plan type
+    if (!['monthly', 'annual', 'founding'].includes(plan)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid plan. Must be: monthly, annual, or founding' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Get price ID from environment
+    const priceId = PRICE_IDS[plan as PlanType]()
+    if (!priceId) {
+      console.error(`Missing Stripe price configuration: STRIPE_PRICE_${plan.toUpperCase()}`)
+      return new Response(
+        JSON.stringify({ error: `Stripe price not configured for ${plan}. Please contact support.` }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 

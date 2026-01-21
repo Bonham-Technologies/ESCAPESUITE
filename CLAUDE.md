@@ -138,15 +138,12 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx
 
-# ESCAPEPLAN only
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
-VITE_STRIPE_PRICE_PRO_MONTHLY=price_xxx
-VITE_STRIPE_PRICE_PRO_ANNUAL=price_xxx
-VITE_STRIPE_PRICE_FOUNDING=price_xxx
-
 # Optional
 VITE_BUILD_MODE=saas              # or 'standalone' for air-gapped builds
 ```
+
+> **Note:** All Stripe configuration is handled server-side via Supabase Edge Function secrets.
+> No `VITE_STRIPE_*` variables are needed. See `apps/plan/CLAUDE.md` for the complete list.
 
 ## Testing
 
