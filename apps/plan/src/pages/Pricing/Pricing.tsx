@@ -53,6 +53,7 @@ export default function Pricing() {
   // Team pricing state
   const [teamSeats, setTeamSeats] = useState(5)
   const [teamPlan, setTeamPlan] = useState<'team' | 'enterprise'>('team')
+  const [teamBillingPeriod, setTeamBillingPeriod] = useState<'monthly' | 'annual'>('monthly')
 
   // Standalone state
   const [standaloneProduct, setStandaloneProduct] = useState<StandaloneProduct>('suite')
@@ -81,6 +82,11 @@ export default function Pricing() {
 
   // Handle standalone license checkout
   const handleStandaloneCheckout = async () => {
+    if (!isSignedIn) {
+      window.location.href = '/sign-up?redirect=/pricing?tab=standalone'
+      return
+    }
+
     try {
       setCheckoutLoading('standalone')
 
@@ -138,6 +144,7 @@ export default function Pricing() {
           email: user?.primaryEmailAddress?.emailAddress,
           plan: teamPlan,
           seatCount: teamSeats,
+          billingPeriod: teamBillingPeriod,
           organizationName: `${user?.firstName || 'User'}'s Team`,
         }),
       })
@@ -160,7 +167,8 @@ export default function Pricing() {
 
   const standalonePrice = STANDALONE_PRICES[standaloneProduct][standaloneTier]
   const teamPrice = TEAM_PRICES[teamPlan]
-  const teamTotal = teamPrice.perSeat * teamSeats
+  const teamMonthlyTotal = teamPrice.perSeat * teamSeats
+  const teamAnnualTotal = teamMonthlyTotal * 10 // 2 months free with annual
 
   return (
     <div className={styles.pricing}>
@@ -368,12 +376,48 @@ export default function Pricing() {
               </div>
             </div>
 
+            <div className={styles.calculatorSection}>
+              <h3>Billing Period</h3>
+              <div className={styles.billingToggle}>
+                <button
+                  className={`${styles.billingOption} ${teamBillingPeriod === 'monthly' ? styles.active : ''}`}
+                  onClick={() => setTeamBillingPeriod('monthly')}
+                >
+                  Monthly
+                </button>
+                <button
+                  className={`${styles.billingOption} ${teamBillingPeriod === 'annual' ? styles.active : ''}`}
+                  onClick={() => setTeamBillingPeriod('annual')}
+                >
+                  Annual
+                  <span className={styles.savingsBadge}>Save 17%</span>
+                </button>
+              </div>
+            </div>
+
             <div className={styles.calculatorTotal}>
               <div className={styles.totalBreakdown}>
-                <span>{teamSeats} seats x ${teamPrice.perSeat}/mo</span>
-                <span className={styles.totalAmount}>${teamTotal}/mo</span>
+                {teamBillingPeriod === 'monthly' ? (
+                  <>
+                    <span>{teamSeats} seats x ${teamPrice.perSeat}/mo</span>
+                    <span className={styles.totalAmount}>${teamMonthlyTotal}/mo</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{teamSeats} seats x ${teamPrice.perSeat * 10}/yr</span>
+                    <span className={styles.totalAmount}>${teamAnnualTotal}/yr</span>
+                  </>
+                )}
               </div>
-              <p className={styles.annualNote}>Billed annually: ${teamTotal * 12}/year</p>
+              {teamBillingPeriod === 'monthly' ? (
+                <p className={styles.annualNote}>
+                  Switch to annual billing and save ${teamMonthlyTotal * 2}/year
+                </p>
+              ) : (
+                <p className={styles.annualNote}>
+                  Equivalent to ${(teamAnnualTotal / 12).toFixed(0)}/mo (2 months free)
+                </p>
+              )}
 
               <SignedOut>
                 <Link to="/sign-up">

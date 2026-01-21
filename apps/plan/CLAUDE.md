@@ -130,23 +130,23 @@ For users who want cloud features, sync, and web-based access.
 | Founding Member | $149 once | Lifetime access |
 
 ### SaaS Subscriptions (Teams)
-For organizations with multiple users.
+For organizations with multiple users. Supports monthly or annual billing (2 months free with annual).
 
-| Tier | Price | Minimum | Features |
-|------|-------|---------|----------|
-| Team | $7/seat/month | 5 seats | Centralized billing, member management |
-| Enterprise | $12/seat/month | 25 seats | SSO*, audit logging, allowed domains |
+| Tier | Monthly | Annual | Minimum | Features |
+|------|---------|--------|---------|----------|
+| Team | $7/seat/mo | $70/seat/yr | 5 seats | Centralized billing, member management |
+| Enterprise | $12/seat/mo | $120/seat/yr | 25 seats | SSO*, audit logging, allowed domains |
 
 *SSO requires Clerk Enterprise ($100+/mo) - currently disabled
 
 ### Standalone Licenses
-For users who want offline-only desktop apps without subscriptions.
+For users who want offline-only desktop apps without subscriptions. Requires sign-in to purchase.
 
 | Product | Standard | Pro | Lifetime |
 |---------|----------|-----|----------|
 | ESCAPECRAFT | $49 | $99 | $199 |
-| ESCAPEARTIST | $69 | $149 | $299 |
-| Suite Bundle | $99 | $199 | $399 |
+| ESCAPEARTIST | $69 | $129 | $249 |
+| Suite Bundle | $99 | $199 | $349 |
 
 License tiers differ by update duration:
 - Standard: 1 year updates
@@ -238,32 +238,51 @@ In production (Vercel), all tools are on the same domain:
 - `/artist/` → ESCAPEARTIST
 
 ## Environment Variables
+
+### Vercel (Frontend) - Required
 ```env
-# Required for all functionality
-VITE_CLERK_PUBLISHABLE_KEY    # Clerk publishable key
-VITE_STRIPE_PUBLISHABLE_KEY   # Stripe publishable key
-VITE_SUPABASE_URL             # Supabase project URL
-VITE_SUPABASE_ANON_KEY        # Supabase anon/public key
+VITE_CLERK_PUBLISHABLE_KEY    # Clerk publishable key (pk_test_* or pk_live_*)
+VITE_STRIPE_PUBLISHABLE_KEY   # Stripe publishable key (pk_test_* or pk_live_*)
+VITE_SUPABASE_URL             # Supabase project URL (https://xxx.supabase.co)
+VITE_SUPABASE_ANON_KEY        # Supabase anon/public key (JWT)
 
-# Individual subscription prices
-VITE_STRIPE_PRICE_PRO_MONTHLY # Stripe price ID for monthly
-VITE_STRIPE_PRICE_PRO_ANNUAL  # Stripe price ID for annual
-VITE_STRIPE_PRICE_FOUNDING    # Stripe price ID for founding member
+# Individual subscription prices (for checkout buttons)
+VITE_STRIPE_PRICE_PRO_MONTHLY # Stripe price ID for monthly (price_xxx)
+VITE_STRIPE_PRICE_PRO_ANNUAL  # Stripe price ID for annual (price_xxx)
+VITE_STRIPE_PRICE_FOUNDING    # Stripe price ID for founding member (price_xxx)
+```
 
-# Team/Organization prices
-VITE_STRIPE_PRICE_TEAM_SEAT   # Stripe price ID for team seat
-VITE_STRIPE_PRICE_ENTERPRISE_SEAT # Stripe price ID for enterprise seat
+### Supabase Edge Function Secrets - Required
+Set in: Supabase Dashboard → Settings → Edge Functions → Secrets
+```env
+# Core Infrastructure
+STRIPE_SECRET_KEY             # Stripe secret API key (sk_test_* or sk_live_*)
+STRIPE_WEBHOOK_SECRET         # Stripe webhook signing secret (whsec_*)
 
-# Standalone license prices (per product/tier)
-VITE_STRIPE_PRICE_CRAFT_STANDARD
-VITE_STRIPE_PRICE_CRAFT_PRO
-VITE_STRIPE_PRICE_CRAFT_LIFETIME
-VITE_STRIPE_PRICE_ARTIST_STANDARD
-VITE_STRIPE_PRICE_ARTIST_PRO
-VITE_STRIPE_PRICE_ARTIST_LIFETIME
-VITE_STRIPE_PRICE_SUITE_STANDARD
-VITE_STRIPE_PRICE_SUITE_PRO
-VITE_STRIPE_PRICE_SUITE_LIFETIME
+# License Management
+LICENSE_PRIVATE_KEY           # Ed25519 private key for signing (64-char hex)
+LICENSE_PUBLIC_KEY            # Ed25519 public key for validation (64-char hex)
+
+# Team/Organization Prices (for team checkout)
+STRIPE_PRICE_TEAM_MONTHLY     # Team monthly per-seat (price_xxx)
+STRIPE_PRICE_TEAM_ANNUAL      # Team annual per-seat (price_xxx)
+STRIPE_PRICE_ENTERPRISE_MONTHLY  # Enterprise monthly per-seat (price_xxx)
+STRIPE_PRICE_ENTERPRISE_ANNUAL   # Enterprise annual per-seat (price_xxx)
+
+# Standalone License Prices (for license checkout)
+STRIPE_PRICE_CRAFT_STANDARD   # ESCAPECRAFT Standard (price_xxx)
+STRIPE_PRICE_CRAFT_PRO        # ESCAPECRAFT Pro (price_xxx)
+STRIPE_PRICE_CRAFT_LIFETIME   # ESCAPECRAFT Lifetime (price_xxx)
+STRIPE_PRICE_ARTIST_STANDARD  # ESCAPEARTIST Standard (price_xxx)
+STRIPE_PRICE_ARTIST_PRO       # ESCAPEARTIST Pro (price_xxx)
+STRIPE_PRICE_ARTIST_LIFETIME  # ESCAPEARTIST Lifetime (price_xxx)
+STRIPE_PRICE_SUITE_STANDARD   # Suite Bundle Standard (price_xxx)
+STRIPE_PRICE_SUITE_PRO        # Suite Bundle Pro (price_xxx)
+STRIPE_PRICE_SUITE_LIFETIME   # Suite Bundle Lifetime (price_xxx)
+
+# Optional Services
+RESEND_API_KEY                # Email service for license delivery (re_xxx)
+APP_URL                       # Base URL for invite links (default: https://escapesuite.io)
 ```
 
 ## Theme Support

@@ -138,6 +138,21 @@ serve(async (req) => {
             .eq('user_id', clerkUserId)
             .eq('role', 'owner')
 
+          // Get actual period dates from Stripe subscription
+          let periodStart = new Date().toISOString()
+          let periodEnd: string | null = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+          if (session.subscription) {
+            try {
+              const stripeSubscription = await stripe.subscriptions.retrieve(session.subscription as string)
+              periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString()
+              periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString()
+            } catch (subError) {
+              console.error('Failed to retrieve subscription details:', subError)
+              // Fall back to defaults
+            }
+          }
+
           // Create subscription record linked to organization
           await supabase.from('subscriptions').upsert({
             clerk_user_id: clerkUserId,
@@ -147,8 +162,8 @@ serve(async (req) => {
             plan: orgPlan,
             organization_id: organizationId,
             seat_count: seatCount,
-            current_period_start: new Date().toISOString(),
-            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            current_period_start: periodStart,
+            current_period_end: periodEnd,
           }, {
             onConflict: 'clerk_user_id',
           })
@@ -196,6 +211,22 @@ serve(async (req) => {
           status = 'lifetime'
         }
 
+        // Get actual period dates from Stripe subscription (for subscriptions only)
+        let periodStart = new Date().toISOString()
+        let periodEnd: string | null = null
+
+        if (status !== 'lifetime' && session.subscription) {
+          try {
+            const stripeSubscription = await stripe.subscriptions.retrieve(session.subscription as string)
+            periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString()
+            periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString()
+          } catch (subError) {
+            console.error('Failed to retrieve subscription details:', subError)
+            // Fall back to 30-day default
+            periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          }
+        }
+
         // Update subscription record
         await supabase.from('subscriptions').upsert({
           clerk_user_id: clerkUserId,
@@ -203,10 +234,8 @@ serve(async (req) => {
           stripe_subscription_id: session.subscription as string || null,
           status,
           plan,
-          current_period_start: new Date().toISOString(),
-          current_period_end: status === 'lifetime'
-            ? null
-            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+          current_period_start: periodStart,
+          current_period_end: periodEnd,
         }, {
           onConflict: 'clerk_user_id',
         })
