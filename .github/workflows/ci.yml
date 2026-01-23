@@ -572,6 +572,11 @@ jobs:
         github.actor == 'dependabot[bot]' ||
         startsWith(github.head_ref, 'changeset-release/')
       )
+    # Don't cancel ci-status when new commits are pushed - let it complete
+    # This prevents "canceled" status from blocking PRs when commits are pushed quickly
+    concurrency:
+      group: ci-status-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Check CI Status
         run: |
