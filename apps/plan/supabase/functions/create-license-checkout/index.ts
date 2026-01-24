@@ -131,6 +131,7 @@ serve(async (req) => {
       ],
       mode: 'payment', // Always one-time for licenses
       ui_mode: 'embedded',
+      redirect_on_completion: 'if_required',
       return_url: returnUrl || `${req.headers.get('origin')}/portal/downloads?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         type: 'license',
