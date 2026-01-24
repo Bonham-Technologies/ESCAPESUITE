@@ -26,10 +26,10 @@
 
 .closeButton {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
-  width: 2.5rem;
-  height: 2.5rem;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 2rem;
+  height: 2rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -38,6 +38,9 @@
   border-radius: 50%;
   cursor: pointer;
   z-index: 10;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--text-primary);
   transition: background 0.2s, transform 0.2s, border-color 0.2s;
 }
 
@@ -47,25 +50,18 @@
   transform: scale(1.05);
 }
 
-.closeButton svg {
-  width: 1.25rem;
-  height: 1.25rem;
-  color: var(--text-primary);
-  stroke-width: 2.5;
-}
-
 .checkoutContainer {
-  padding: 1.5rem;
-  padding-top: 3.5rem;
-  min-height: 450px;
+  padding: 0.5rem;
+  padding-top: 2.5rem;
+  min-height: 500px;
   overflow-y: auto;
-  max-height: calc(90vh - 2rem);
+  max-height: calc(90vh - 1rem);
 }
 
 /* Ensure Stripe iframe fills container properly */
 .checkoutContainer iframe {
   width: 100% !important;
-  min-height: 450px;
+  min-height: 500px;
 }
 
 @media (max-width: 640px) {
