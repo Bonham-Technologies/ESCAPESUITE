@@ -37,3 +37,28 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* Ensure SVG icons are visible */
+.option svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Mobile - larger touch targets */
+@media (max-width: 768px) {
+  .container {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .option {
+    width: 36px;
+    height: 36px;
+  }
+
+  .option svg {
+    width: 18px;
+    height: 18px;
+  }
+}
