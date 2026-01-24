@@ -219,6 +219,7 @@ serve(async (req) => {
       }],
       mode: 'subscription',
       ui_mode: 'embedded',
+      redirect_on_completion: 'if_required',
       return_url: returnUrl || `${req.headers.get('origin')}/team/${slug}?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         clerk_user_id: clerkUserId,

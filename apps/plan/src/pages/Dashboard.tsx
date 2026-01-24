@@ -1,22 +1,20 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { useSubscription } from '../hooks/useSubscription'
 import { useOrganization } from '../hooks/useOrganization'
 import { getPlanDisplayName } from '../lib/subscription'
 import { analytics } from '../lib/analytics'
+import { CheckoutModal } from '../components/Checkout'
 import styles from './Dashboard.module.css'
 
-const PRICE_IDS = {
-  monthly: import.meta.env.VITE_STRIPE_PRICE_PRO_MONTHLY,
-  annual: import.meta.env.VITE_STRIPE_PRICE_PRO_ANNUAL,
-}
-
 export default function Dashboard() {
-  const { user } = useUser()
-  const { subscription, isLoading, checkout, openPortal } = useSubscription()
+  const navigate = useNavigate()
+  const { user, isLoaded } = useUser()
+  const { subscription, isLoading, checkout, openPortal, refetch } = useSubscription()
   const { organizations, fetchOrganizations, loading: orgsLoading } = useOrganization()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [checkoutClientSecret, setCheckoutClientSecret] = useState<string | null>(null)
 
   // Fetch user's organizations on mount
   useEffect(() => {
@@ -25,10 +23,24 @@ export default function Dashboard() {
     }
   }, [user?.id, fetchOrganizations])
 
+  // Handle checkout completion
+  const handleCheckoutComplete = async () => {
+    setCheckoutClientSecret(null)
+    await refetch()
+    navigate('/dashboard?success=true')
+  }
+
   const handleUpgrade = async () => {
+    // Wait for user to be fully loaded
+    if (!isLoaded || !user?.id) {
+      alert('Please wait for authentication to complete.')
+      return
+    }
+
     try {
       setActionLoading('upgrade')
-      await checkout(PRICE_IDS.annual)
+      const clientSecret = await checkout('annual')
+      setCheckoutClientSecret(clientSecret)
     } catch (error) {
       console.error('Upgrade error:', error)
       alert('Failed to start checkout. Please try again.')
@@ -258,6 +270,15 @@ export default function Dashboard() {
           </div>
         </section>
       </div>
+
+      {/* Embedded Checkout Modal */}
+      {checkoutClientSecret && (
+        <CheckoutModal
+          clientSecret={checkoutClientSecret}
+          onClose={() => setCheckoutClientSecret(null)}
+          onComplete={handleCheckoutComplete}
+        />
+      )}
     </div>
   )
 }
