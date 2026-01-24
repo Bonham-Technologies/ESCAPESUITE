@@ -51,17 +51,18 @@
 }
 
 .checkoutContainer {
-  padding: 0.5rem;
-  padding-top: 2.5rem;
+  padding: 0.75rem;
   min-height: 500px;
   overflow-y: auto;
   max-height: calc(90vh - 1rem);
+  border-radius: 12px;
 }
 
 /* Ensure Stripe iframe fills container properly */
 .checkoutContainer iframe {
   width: 100% !important;
   min-height: 500px;
+  border-radius: 8px;
 }
 
 @media (max-width: 640px) {
