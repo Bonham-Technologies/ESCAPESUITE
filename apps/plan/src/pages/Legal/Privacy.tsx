@@ -215,7 +215,7 @@ export default function Privacy() {
 
         <h2>14. Contact Us</h2>
         <div className={styles.contactInfo}>
-          <h3>Bonham Technologies, LLC</h3>
+          <h3><a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
           <p>Email: privacy@escapesuite.io</p>
           <p>For data requests: privacy@escapesuite.io</p>
           <p>For general inquiries: support@escapesuite.io</p>
