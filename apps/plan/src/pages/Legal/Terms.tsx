@@ -255,7 +255,7 @@ export default function Terms() {
 
         <h2>17. Contact Us</h2>
         <div className={styles.contactInfo}>
-          <h3>Bonham Technologies, LLC</h3>
+          <h3><a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
           <p>Email: legal@escapesuite.io</p>
           <p>For support inquiries: support@escapesuite.io</p>
           <p>For privacy-related requests: privacy@escapesuite.io</p>
