@@ -1,0 +1,16 @@
+# CODEOWNERS - Auto-assign reviewers to pull requests
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @mrbonha
+
+# App-specific ownership (can be expanded as team grows)
+/apps/plan/      @mrbonha
+/apps/craft/     @mrbonha
+/apps/artist/    @mrbonha
+/apps/e2e/       @mrbonha
+/packages/       @mrbonha
+
+# Infrastructure
+/.github/        @mrbonha
+/scripts/        @mrbonha
