@@ -1,6 +1,6 @@
 # ESCAPE Suite
 
-[![CI](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml)
+[![CI](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml)
 
 Privacy-first, client-side media creation tools that run entirely in the browser. All video processing happens locally - no cloud uploads required.
 
@@ -40,7 +40,7 @@ Privacy-first, client-side media creation tools that run entirely in the browser
 
 ```bash
 # Clone the repository
-git clone https://github.com/mrbonha/ESCAPESUITE.git
+git clone https://github.com/bonham-technologies/ESCAPESUITE.git
 cd ESCAPESUITE
 
 # Install dependencies

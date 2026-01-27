@@ -147,4 +147,4 @@ Click the overlay buttons to add:
 
 ---
 
-**Need help?** Open an issue on [GitHub](https://github.com/mrbonha/ESCAPEARTIST/issues).
+**Need help?** Open an issue on [GitHub](https://github.com/bonham-technologies/ESCAPESUITE/issues).

@@ -1,6 +1,6 @@
 # ESCAPEARTIST
 
-[![CI](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbonha/ESCAPESUITE/actions/workflows/ci.yml)
+[![CI](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
 
 A powerful, client-side video editor built entirely for the browser. No server required, no uploads needed - edit videos directly in your browser using modern web technologies.
@@ -84,7 +84,7 @@ TODO: Add screenshot or demo GIF showing the editor interface
 
 ```bash
 # Clone the monorepo
-git clone https://github.com/mrbonha/ESCAPESUITE.git
+git clone https://github.com/bonham-technologies/ESCAPESUITE.git
 cd ESCAPESUITE
 
 # Install dependencies

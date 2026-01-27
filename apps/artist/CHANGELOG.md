@@ -165,94 +165,94 @@ All notable changes to ESCAPEARTIST are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [1.4.0](https://github.com/mrbonha/ESCAPEARTIST/compare/v1.3.0...v1.4.0) (2026-01-05)
+## [1.4.0](https://github.com/bonham-technologies/ESCAPESUITE/compare/v1.3.0...v1.4.0) (2026-01-05)
 
 ### Features
 
-- add Clerk auth integration and trial watermarks ([101edea](https://github.com/mrbonha/ESCAPEARTIST/commit/101edea5dee3b9e4c116a7ebd9e9598ed8921a4a))
-- add Clerk auth integration and trial watermarks ([7882e85](https://github.com/mrbonha/ESCAPEARTIST/commit/7882e85d9b6986b28fd3f064cf2b2bccd72d2e68))
-- add ESCAPECRAFT recorder integration ([dc321ad](https://github.com/mrbonha/ESCAPEARTIST/commit/dc321ad4c397ecf7cab5a1a47a73ad9de2264103))
-- add ESCAPECRAFT recorder integration ([6b08bbd](https://github.com/mrbonha/ESCAPEARTIST/commit/6b08bbdc7e64442f7f27b8fa3a3338f24a0e7f26))
-- add storage management - clear unused media and frame cache ([0f46b30](https://github.com/mrbonha/ESCAPEARTIST/commit/0f46b303907bbf467cecb65f46c87e01a78c6ebc))
-- integrate frame cache for instant scrubbing ([a38cba9](https://github.com/mrbonha/ESCAPEARTIST/commit/a38cba99e156b5868b414e0cc3309abb8f37d017))
-- integrate frame cache for instant scrubbing ([81754b6](https://github.com/mrbonha/ESCAPEARTIST/commit/81754b6f1d5cad2611738f49dee183cc27c4d1a1))
-- replace hand tool with ripple edit tool ([66e64f8](https://github.com/mrbonha/ESCAPEARTIST/commit/66e64f8d649ad79ef3968e50bc50893c95d0f30b))
-- replace hand tool with ripple edit tool ([2071f11](https://github.com/mrbonha/ESCAPEARTIST/commit/2071f11dd105fa5a9a790ad579b70974fac5027d))
+- add Clerk auth integration and trial watermarks ([101edea](https://github.com/bonham-technologies/ESCAPESUITE/commit/101edea5dee3b9e4c116a7ebd9e9598ed8921a4a))
+- add Clerk auth integration and trial watermarks ([7882e85](https://github.com/bonham-technologies/ESCAPESUITE/commit/7882e85d9b6986b28fd3f064cf2b2bccd72d2e68))
+- add ESCAPECRAFT recorder integration ([dc321ad](https://github.com/bonham-technologies/ESCAPESUITE/commit/dc321ad4c397ecf7cab5a1a47a73ad9de2264103))
+- add ESCAPECRAFT recorder integration ([6b08bbd](https://github.com/bonham-technologies/ESCAPESUITE/commit/6b08bbdc7e64442f7f27b8fa3a3338f24a0e7f26))
+- add storage management - clear unused media and frame cache ([0f46b30](https://github.com/bonham-technologies/ESCAPESUITE/commit/0f46b303907bbf467cecb65f46c87e01a78c6ebc))
+- integrate frame cache for instant scrubbing ([a38cba9](https://github.com/bonham-technologies/ESCAPESUITE/commit/a38cba99e156b5868b414e0cc3309abb8f37d017))
+- integrate frame cache for instant scrubbing ([81754b6](https://github.com/bonham-technologies/ESCAPESUITE/commit/81754b6f1d5cad2611738f49dee183cc27c4d1a1))
+- replace hand tool with ripple edit tool ([66e64f8](https://github.com/bonham-technologies/ESCAPESUITE/commit/66e64f8d649ad79ef3968e50bc50893c95d0f30b))
+- replace hand tool with ripple edit tool ([2071f11](https://github.com/bonham-technologies/ESCAPESUITE/commit/2071f11dd105fa5a9a790ad579b70974fac5027d))
 
 ### Bug Fixes
 
-- add dashboard navigation link in header ([b0b9d02](https://github.com/mrbonha/ESCAPEARTIST/commit/b0b9d02c8496da50aa5bf1e7ec2bfcc9b20064d2))
-- razor tool cuts at correct position after first split ([06b34b8](https://github.com/mrbonha/ESCAPEARTIST/commit/06b34b82ec06794d4d00d9977c3d8ca3df0aeb11))
-- resolve lint errors in AuthGate.tsx ([f5a4fbb](https://github.com/mrbonha/ESCAPEARTIST/commit/f5a4fbbd15b8d77de6d2a90ead8fbe490e89af40))
-- show Clear All button based on actual storage usage ([99beeaf](https://github.com/mrbonha/ESCAPEARTIST/commit/99beeafe741f2b912cd28288057403b6f10bddc5))
+- add dashboard navigation link in header ([b0b9d02](https://github.com/bonham-technologies/ESCAPESUITE/commit/b0b9d02c8496da50aa5bf1e7ec2bfcc9b20064d2))
+- razor tool cuts at correct position after first split ([06b34b8](https://github.com/bonham-technologies/ESCAPESUITE/commit/06b34b82ec06794d4d00d9977c3d8ca3df0aeb11))
+- resolve lint errors in AuthGate.tsx ([f5a4fbb](https://github.com/bonham-technologies/ESCAPESUITE/commit/f5a4fbbd15b8d77de6d2a90ead8fbe490e89af40))
+- show Clear All button based on actual storage usage ([99beeaf](https://github.com/bonham-technologies/ESCAPESUITE/commit/99beeafe741f2b912cd28288057403b6f10bddc5))
 
-## [1.3.0](https://github.com/mrbonha/ESCAPEARTIST/compare/v1.2.0...v1.3.0) (2026-01-03)
+## [1.3.0](https://github.com/bonham-technologies/ESCAPESUITE/compare/v1.2.0...v1.3.0) (2026-01-03)
 
 ### Features
 
-- add toolbar, keyboard shortcuts, markers, and preview manipulation improvements ([7ce49cf](https://github.com/mrbonha/ESCAPEARTIST/commit/7ce49cfc2cc9267fb0b5af90984ca2fdb5ba61ee))
-- improve track UI with vertical volume slider and editable names ([c2b3e6a](https://github.com/mrbonha/ESCAPEARTIST/commit/c2b3e6a24f0518c718cf56e08aea5ddff15642bc))
-- improve track UI with vertical volume slider and editable names ([81ff143](https://github.com/mrbonha/ESCAPEARTIST/commit/81ff143e41833e7bad685e39f7fe6770f4d94c0e))
-- UX improvements - toolbar, keyboard shortcuts, markers, and preview manipulation ([d942f83](https://github.com/mrbonha/ESCAPEARTIST/commit/d942f83e6cc68b4356ffc52ad3508caf88ea708a))
+- add toolbar, keyboard shortcuts, markers, and preview manipulation improvements ([7ce49cf](https://github.com/bonham-technologies/ESCAPESUITE/commit/7ce49cfc2cc9267fb0b5af90984ca2fdb5ba61ee))
+- improve track UI with vertical volume slider and editable names ([c2b3e6a](https://github.com/bonham-technologies/ESCAPESUITE/commit/c2b3e6a24f0518c718cf56e08aea5ddff15642bc))
+- improve track UI with vertical volume slider and editable names ([81ff143](https://github.com/bonham-technologies/ESCAPESUITE/commit/81ff143e41833e7bad685e39f7fe6770f4d94c0e))
+- UX improvements - toolbar, keyboard shortcuts, markers, and preview manipulation ([d942f83](https://github.com/bonham-technologies/ESCAPESUITE/commit/d942f83e6cc68b4356ffc52ad3508caf88ea708a))
 
 ### Bug Fixes
 
-- auto-create start keyframe for proper animation interpolation ([0c53561](https://github.com/mrbonha/ESCAPEARTIST/commit/0c535611815918700f5bd0b521757b7ac9fb21c0))
-- blur overlays now respect z-order and only affect lower layers ([52250e7](https://github.com/mrbonha/ESCAPEARTIST/commit/52250e73e40d81241f44012736e2b70524a4c583))
-- resolve nested button accessibility error in CollapsibleSection ([8ae87c6](https://github.com/mrbonha/ESCAPEARTIST/commit/8ae87c63134201d87e67993c5832110db7e3e01f))
+- auto-create start keyframe for proper animation interpolation ([0c53561](https://github.com/bonham-technologies/ESCAPESUITE/commit/0c535611815918700f5bd0b521757b7ac9fb21c0))
+- blur overlays now respect z-order and only affect lower layers ([52250e7](https://github.com/bonham-technologies/ESCAPESUITE/commit/52250e73e40d81241f44012736e2b70524a4c583))
+- resolve nested button accessibility error in CollapsibleSection ([8ae87c6](https://github.com/bonham-technologies/ESCAPESUITE/commit/8ae87c63134201d87e67993c5832110db7e3e01f))
 
 ### Performance Improvements
 
-- add advanced performance optimizations with full test coverage ([24f7438](https://github.com/mrbonha/ESCAPEARTIST/commit/24f74382c0525727566ecbd011f44793938cfc4d))
-- implement performance quick wins ([9a5415c](https://github.com/mrbonha/ESCAPEARTIST/commit/9a5415cabaad5c654f38b386937f4e4ac2152cac))
+- add advanced performance optimizations with full test coverage ([24f7438](https://github.com/bonham-technologies/ESCAPESUITE/commit/24f74382c0525727566ecbd011f44793938cfc4d))
+- implement performance quick wins ([9a5415c](https://github.com/bonham-technologies/ESCAPESUITE/commit/9a5415cabaad5c654f38b386937f4e4ac2152cac))
 
-## [1.2.0](https://github.com/mrbonha/ESCAPEARTIST/compare/v1.1.0...v1.2.0) (2026-01-02)
-
-### Features
-
-- add Adobe Premiere-style keyframe editor ([a99b8de](https://github.com/mrbonha/ESCAPEARTIST/commit/a99b8de14d989018c652f12308aa63ccb664fb53))
-- add collapsible media library sidebar ([81e8bfb](https://github.com/mrbonha/ESCAPEARTIST/commit/81e8bfbdfb99ce8484d6eec5fd0b36f05f710ac8))
-- add collapsible media library sidebar ([a5d72cd](https://github.com/mrbonha/ESCAPEARTIST/commit/a5d72cd8017c605be7494639e89020a27da11213))
-- add interactive overlay transform controls on preview ([28fcd0b](https://github.com/mrbonha/ESCAPEARTIST/commit/28fcd0bb5b477a1363259587d92a89a1b0fb52f6))
-- add interactive overlay transform controls on preview ([e4bb211](https://github.com/mrbonha/ESCAPEARTIST/commit/e4bb21179b437d77ea0771786e0ee1ef30ad8222))
-- add keyframe preview manipulation with composite frame rendering ([5a3143b](https://github.com/mrbonha/ESCAPEARTIST/commit/5a3143b18bd23df229144fb7c157893e4d0387a6))
-- Adobe Premiere-style keyframe editor ([389f0ac](https://github.com/mrbonha/ESCAPEARTIST/commit/389f0acfc14106cddfa6592d4c6b04ac9831c3d8))
-- keyframe preview manipulation ([583cd43](https://github.com/mrbonha/ESCAPEARTIST/commit/583cd4372342f6231ca78b88f98d8bfc5eb415ec))
-- reuse empty tracks and UI improvements ([f23b9b6](https://github.com/mrbonha/ESCAPEARTIST/commit/f23b9b6dc60829ea4f7eca5fc96a5bbfeb6be2b8))
-- reuse empty tracks and UI improvements ([03fda3e](https://github.com/mrbonha/ESCAPEARTIST/commit/03fda3e7024c4c9c6fad6bae60caad6e98699c71))
-
-### Bug Fixes
-
-- add rotation support to preview playback and export ([fa037e8](https://github.com/mrbonha/ESCAPEARTIST/commit/fa037e80b130c6752e48ab0f33a3e029a8467c20))
-- correct keyframe positioning and enable value dragging ([cba2711](https://github.com/mrbonha/ESCAPEARTIST/commit/cba2711c1e874b6b652a181445ee8c12d42108bb))
-- correct SVG coordinate calculation for preserveAspectRatio ([6c1e291](https://github.com/mrbonha/ESCAPEARTIST/commit/6c1e291e716e022efbe0c7e6675d1a3e0469eecf))
-- improve graph keyframe dragging and add delete functionality ([f3f71a0](https://github.com/mrbonha/ESCAPEARTIST/commit/f3f71a076c1a880f91721d1042863f2f3c5fce33))
-- improve keyframe editor UX with better drag handling and sizing ([4ed0452](https://github.com/mrbonha/ESCAPEARTIST/commit/4ed04522ad51d316fce5b0b246f7a7222407bd35))
-- selection handles follow animated keyframe values ([cd2fd37](https://github.com/mrbonha/ESCAPEARTIST/commit/cd2fd37db51cf6d451f4b01bb00c8ce78a780148))
-- wait for video seeks before drawing in keyframe preview ([b49b04a](https://github.com/mrbonha/ESCAPEARTIST/commit/b49b04a6b083d59c35dba9d4ef289c896389fa39))
-
-## [1.1.0](https://github.com/mrbonha/ESCAPEARTIST/compare/v1.0.0...v1.1.0) (2026-01-01)
+## [1.2.0](https://github.com/bonham-technologies/ESCAPESUITE/compare/v1.1.0...v1.2.0) (2026-01-02)
 
 ### Features
 
-- add track audio control, auto-track creation, no-fill option, and blur overlay ([295e85a](https://github.com/mrbonha/ESCAPEARTIST/commit/295e85a2c31c5df21fb400dea3e2cd0532c88c5c))
+- add Adobe Premiere-style keyframe editor ([a99b8de](https://github.com/bonham-technologies/ESCAPESUITE/commit/a99b8de14d989018c652f12308aa63ccb664fb53))
+- add collapsible media library sidebar ([81e8bfb](https://github.com/bonham-technologies/ESCAPESUITE/commit/81e8bfbdfb99ce8484d6eec5fd0b36f05f710ac8))
+- add collapsible media library sidebar ([a5d72cd](https://github.com/bonham-technologies/ESCAPESUITE/commit/a5d72cd8017c605be7494639e89020a27da11213))
+- add interactive overlay transform controls on preview ([28fcd0b](https://github.com/bonham-technologies/ESCAPESUITE/commit/28fcd0bb5b477a1363259587d92a89a1b0fb52f6))
+- add interactive overlay transform controls on preview ([e4bb211](https://github.com/bonham-technologies/ESCAPESUITE/commit/e4bb21179b437d77ea0771786e0ee1ef30ad8222))
+- add keyframe preview manipulation with composite frame rendering ([5a3143b](https://github.com/bonham-technologies/ESCAPESUITE/commit/5a3143b18bd23df229144fb7c157893e4d0387a6))
+- Adobe Premiere-style keyframe editor ([389f0ac](https://github.com/bonham-technologies/ESCAPESUITE/commit/389f0acfc14106cddfa6592d4c6b04ac9831c3d8))
+- keyframe preview manipulation ([583cd43](https://github.com/bonham-technologies/ESCAPESUITE/commit/583cd4372342f6231ca78b88f98d8bfc5eb415ec))
+- reuse empty tracks and UI improvements ([f23b9b6](https://github.com/bonham-technologies/ESCAPESUITE/commit/f23b9b6dc60829ea4f7eca5fc96a5bbfeb6be2b8))
+- reuse empty tracks and UI improvements ([03fda3e](https://github.com/bonham-technologies/ESCAPESUITE/commit/03fda3e7024c4c9c6fad6bae60caad6e98699c71))
 
 ### Bug Fixes
 
-- audio mixing and blur overlay behavior ([50cbe59](https://github.com/mrbonha/ESCAPEARTIST/commit/50cbe593928e19a2825e0a991c4b587585ff201a))
-- blur rotation no longer rotates underlying content ([dc28675](https://github.com/mrbonha/ESCAPEARTIST/commit/dc286752b8af9a0dbf975423be245d5c6ef374c2))
+- add rotation support to preview playback and export ([fa037e8](https://github.com/bonham-technologies/ESCAPESUITE/commit/fa037e80b130c6752e48ab0f33a3e029a8467c20))
+- correct keyframe positioning and enable value dragging ([cba2711](https://github.com/bonham-technologies/ESCAPESUITE/commit/cba2711c1e874b6b652a181445ee8c12d42108bb))
+- correct SVG coordinate calculation for preserveAspectRatio ([6c1e291](https://github.com/bonham-technologies/ESCAPESUITE/commit/6c1e291e716e022efbe0c7e6675d1a3e0469eecf))
+- improve graph keyframe dragging and add delete functionality ([f3f71a0](https://github.com/bonham-technologies/ESCAPESUITE/commit/f3f71a076c1a880f91721d1042863f2f3c5fce33))
+- improve keyframe editor UX with better drag handling and sizing ([4ed0452](https://github.com/bonham-technologies/ESCAPESUITE/commit/4ed04522ad51d316fce5b0b246f7a7222407bd35))
+- selection handles follow animated keyframe values ([cd2fd37](https://github.com/bonham-technologies/ESCAPESUITE/commit/cd2fd37db51cf6d451f4b01bb00c8ce78a780148))
+- wait for video seeks before drawing in keyframe preview ([b49b04a](https://github.com/bonham-technologies/ESCAPESUITE/commit/b49b04a6b083d59c35dba9d4ef289c896389fa39))
+
+## [1.1.0](https://github.com/bonham-technologies/ESCAPESUITE/compare/v1.0.0...v1.1.0) (2026-01-01)
+
+### Features
+
+- add track audio control, auto-track creation, no-fill option, and blur overlay ([295e85a](https://github.com/bonham-technologies/ESCAPESUITE/commit/295e85a2c31c5df21fb400dea3e2cd0532c88c5c))
+
+### Bug Fixes
+
+- audio mixing and blur overlay behavior ([50cbe59](https://github.com/bonham-technologies/ESCAPESUITE/commit/50cbe593928e19a2825e0a991c4b587585ff201a))
+- blur rotation no longer rotates underlying content ([dc28675](https://github.com/bonham-technologies/ESCAPESUITE/commit/dc286752b8af9a0dbf975423be245d5c6ef374c2))
 
 ## 1.0.0 (2026-01-01)
 
 ### Features
 
-- add README badges, LICENSE, release-please, and CodeQL ([1635a48](https://github.com/mrbonha/ESCAPEARTIST/commit/1635a48abb3141dc3a13eb0bd9f66ccdbac5b71f))
-- add README badges, LICENSE, release-please, and CodeQL ([0e4d3f4](https://github.com/mrbonha/ESCAPEARTIST/commit/0e4d3f4d5e888b47754b27acba2d86a1c5857ede))
+- add README badges, LICENSE, release-please, and CodeQL ([1635a48](https://github.com/bonham-technologies/ESCAPESUITE/commit/1635a48abb3141dc3a13eb0bd9f66ccdbac5b71f))
+- add README badges, LICENSE, release-please, and CodeQL ([0e4d3f4](https://github.com/bonham-technologies/ESCAPESUITE/commit/0e4d3f4d5e888b47754b27acba2d86a1c5857ede))
 
 ### Bug Fixes
 
-- replace CodeQL with npm audit for security scanning ([8222f1d](https://github.com/mrbonha/ESCAPEARTIST/commit/8222f1d54f1ecf4f8630ce5ab80ba6ac247fc795))
-- replace CodeQL with npm audit for security scanning ([c551f60](https://github.com/mrbonha/ESCAPEARTIST/commit/c551f60be023853619b13fac7d5f8423e0829746))
+- replace CodeQL with npm audit for security scanning ([8222f1d](https://github.com/bonham-technologies/ESCAPESUITE/commit/8222f1d54f1ecf4f8630ce5ab80ba6ac247fc795))
+- replace CodeQL with npm audit for security scanning ([c551f60](https://github.com/bonham-technologies/ESCAPESUITE/commit/c551f60be023853619b13fac7d5f8423e0829746))
 
 ---
 
