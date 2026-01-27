@@ -147,4 +147,4 @@ Click the overlay buttons to add:
 
 ---
 
-**Need help?** Open an issue on [GitHub](https://github.com/bonham-technologies/ESCAPESUITE/issues).
+**Need help?** Open an issue in [Jira](https://bonham.atlassian.net/jira/software/projects/ESCSUITE/summary).
