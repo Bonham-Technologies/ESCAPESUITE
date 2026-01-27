@@ -210,6 +210,12 @@ All apps use `@vercel/analytics` for pageview and custom event tracking:
 - `<Analytics />` component in each app's `main.tsx`
 - Custom events via `track()` in `*/analytics.ts` files
 
+## Issue Tracking
+
+Issues and work items are tracked in Jira:
+- **Project**: [ESCSUITE](https://bonham.atlassian.net/jira/software/projects/ESCSUITE/summary)
+- **Board**: https://bonham.atlassian.net/jira/software/projects/ESCSUITE/boards
+
 ## Per-App Documentation
 
 Each app has its own CLAUDE.md with detailed architecture:
