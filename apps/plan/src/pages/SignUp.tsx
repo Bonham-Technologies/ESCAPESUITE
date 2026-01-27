@@ -9,7 +9,7 @@ export default function SignUpPage() {
         path="/sign-up"
         routing="path"
         signInUrl="/sign-in"
-        afterSignUpUrl="/dashboard"
+        forceRedirectUrl="/dashboard"
         appearance={{
           baseTheme: dark,
           variables: {
