@@ -23,7 +23,7 @@ export type AnyRecorderCallbacks = RecorderCallbacks | WebCodecsRecorderCallback
  */
 export function canUseWebCodecsRecorder(): boolean {
   // Disabled - WebCodecs recording has frame capture issues
-  // See: https://github.com/mrbonha/ESCAPESUITE/pull/93
+  // See: https://github.com/bonham-technologies/ESCAPESUITE/pull/93
   return false;
   // Original: return isWebCodecsRecordingSupported();
 }

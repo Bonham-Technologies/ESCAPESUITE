@@ -17,7 +17,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 **Use GitHub's Private Vulnerability Reporting:**
 
-1. Go to the [Security tab](https://github.com/mrbonha/ESCAPESUITE/security) of this repository
+1. Go to the [Security tab](https://github.com/bonham-technologies/ESCAPESUITE/security) of this repository
 2. Click "Report a vulnerability"
 3. Fill out the form with details about the vulnerability
 
