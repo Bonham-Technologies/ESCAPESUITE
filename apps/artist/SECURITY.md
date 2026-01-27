@@ -15,11 +15,11 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ### How to Report
 
-**Use GitHub's Private Vulnerability Reporting:**
+**Create a security issue in Jira:**
 
-1. Go to the [Security tab](https://github.com/bonham-technologies/ESCAPESUITE/security) of this repository
-2. Click "Report a vulnerability"
-3. Fill out the form with details about the vulnerability
+1. Go to the [ESCSUITE Jira project](https://bonham.atlassian.net/jira/software/projects/ESCSUITE/summary)
+2. Create a new issue with type "Bug" and label "security"
+3. Mark the issue as confidential if it contains sensitive details
 
 ### What to Include
 
