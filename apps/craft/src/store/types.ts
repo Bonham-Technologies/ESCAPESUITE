@@ -38,6 +38,32 @@ export interface EnvironmentCapabilities {
   mediaRecorder: boolean;
 }
 
+/** Reasons why a capability might be unavailable */
+export type CapabilityUnavailableReason =
+  | 'api_not_supported'      // Browser doesn't support the API
+  | 'permission_denied'      // User denied permission
+  | 'permission_dismissed'   // User dismissed the permission prompt
+  | 'no_device'              // No hardware device found
+  | 'not_secure_context'     // Requires HTTPS
+  | 'browser_not_supported'  // Feature not supported in this browser
+  | 'policy_blocked';        // Blocked by enterprise/browser policy
+
+/** Detailed capability info including reason for unavailability */
+export interface CapabilityInfo {
+  available: boolean;
+  reason?: CapabilityUnavailableReason;
+  message?: string;
+}
+
+/** Extended capabilities with reasons */
+export interface DetailedCapabilities {
+  screenCapture: CapabilityInfo;
+  webcam: CapabilityInfo;
+  microphone: CapabilityInfo;
+  systemAudio: CapabilityInfo;
+  mediaRecorder: CapabilityInfo;
+}
+
 export interface AudioLevels {
   microphone: number; // 0-1
   system: number; // 0-1
@@ -59,6 +85,7 @@ export interface RecorderStore {
   state: RecordingState;
   config: RecordingConfig;
   capabilities: EnvironmentCapabilities;
+  detailedCapabilities: DetailedCapabilities;
   recordings: Recording[];
 
   // Current recording data
@@ -73,6 +100,7 @@ export interface RecorderStore {
   // Actions
   setConfig: (config: Partial<RecordingConfig>) => void;
   setCapabilities: (caps: EnvironmentCapabilities) => void;
+  setDetailedCapabilities: (caps: DetailedCapabilities) => void;
   setState: (state: RecordingState) => void;
   setCountdown: (value: number) => void;
   setCurrentDuration: (duration: number) => void;

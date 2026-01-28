@@ -25,6 +25,7 @@ function App() {
     state,
     config,
     capabilities,
+    detailedCapabilities,
     recordings,
     currentDuration,
     countdownValue,
@@ -33,6 +34,7 @@ function App() {
     webcamStream,
     setConfig,
     setCapabilities,
+    setDetailedCapabilities,
     setState,
     setCountdown,
     setCurrentDuration,
@@ -99,9 +101,12 @@ function App() {
 
   // Detect capabilities on mount
   useEffect(() => {
-    detectCapabilities().then(setCapabilities);
+    detectCapabilities().then((result) => {
+      setCapabilities(result.capabilities);
+      setDetailedCapabilities(result.detailed);
+    });
     loadRecordings();
-  }, [setCapabilities, loadRecordings]);
+  }, [setCapabilities, setDetailedCapabilities, loadRecordings]);
 
   // Update preview video element
   useEffect(() => {
@@ -757,10 +762,16 @@ function App() {
           <section className={styles.sidebarSection}>
             <h3 className={styles.sidebarTitle}>Sources</h3>
             <div className={styles.sourceToggles}>
-              <div className={styles.sourceToggle}>
+              <div
+                className={`${styles.sourceToggle} ${!detailedCapabilities.screenCapture.available ? styles.sourceUnavailable : ''}`}
+                title={detailedCapabilities.screenCapture.message}
+              >
                 <span className={styles.sourceLabel}>
                   <ScreenIcon className={styles.sourceIcon} />
                   Screen
+                  {!detailedCapabilities.screenCapture.available && (
+                    <UnavailableIcon className={styles.unavailableIcon} />
+                  )}
                 </span>
                 <button
                   className={`${styles.toggle} ${config.screenEnabled ? styles.active : ''}`}
@@ -771,10 +782,16 @@ function App() {
                 </button>
               </div>
 
-              <div className={styles.sourceToggle}>
+              <div
+                className={`${styles.sourceToggle} ${!detailedCapabilities.webcam.available ? styles.sourceUnavailable : ''}`}
+                title={detailedCapabilities.webcam.message}
+              >
                 <span className={styles.sourceLabel}>
                   <WebcamIcon className={styles.sourceIcon} />
                   Webcam
+                  {!detailedCapabilities.webcam.available && (
+                    <UnavailableIcon className={styles.unavailableIcon} />
+                  )}
                 </span>
                 <button
                   className={`${styles.toggle} ${config.webcamEnabled ? styles.active : ''}`}
@@ -785,10 +802,16 @@ function App() {
                 </button>
               </div>
 
-              <div className={styles.sourceToggle}>
+              <div
+                className={`${styles.sourceToggle} ${!detailedCapabilities.microphone.available ? styles.sourceUnavailable : ''}`}
+                title={detailedCapabilities.microphone.message}
+              >
                 <span className={styles.sourceLabel}>
                   <MicIcon className={styles.sourceIcon} />
                   Microphone
+                  {!detailedCapabilities.microphone.available && (
+                    <UnavailableIcon className={styles.unavailableIcon} />
+                  )}
                 </span>
                 <button
                   className={`${styles.toggle} ${config.microphoneEnabled ? styles.active : ''}`}
@@ -799,10 +822,16 @@ function App() {
                 </button>
               </div>
 
-              <div className={styles.sourceToggle}>
+              <div
+                className={`${styles.sourceToggle} ${!detailedCapabilities.systemAudio.available ? styles.sourceUnavailable : ''}`}
+                title={detailedCapabilities.systemAudio.message}
+              >
                 <span className={styles.sourceLabel}>
                   <SpeakerIcon className={styles.sourceIcon} />
                   System Audio
+                  {!detailedCapabilities.systemAudio.available && (
+                    <UnavailableIcon className={styles.unavailableIcon} />
+                  )}
                 </span>
                 <button
                   className={`${styles.toggle} ${config.systemAudioEnabled ? styles.active : ''}`}
@@ -1282,6 +1311,15 @@ function SpeakerIcon({ className }: { className?: string }) {
       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
       <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
       <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    </svg>
+  );
+}
+
+function UnavailableIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
     </svg>
   );
 }

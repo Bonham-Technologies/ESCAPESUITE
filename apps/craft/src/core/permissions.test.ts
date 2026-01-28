@@ -13,13 +13,15 @@ describe('permissions', () => {
 
   describe('detectCapabilities', () => {
     it('should detect MediaRecorder availability', async () => {
-      const capabilities = await detectCapabilities()
-      expect(capabilities.mediaRecorder).toBe(true)
+      const result = await detectCapabilities()
+      expect(result.capabilities.mediaRecorder).toBe(true)
+      expect(result.detailed.mediaRecorder.available).toBe(true)
     })
 
     it('should detect screen capture availability', async () => {
-      const capabilities = await detectCapabilities()
-      expect(capabilities.screenCapture).toBe(true)
+      const result = await detectCapabilities()
+      expect(result.capabilities.screenCapture).toBe(true)
+      expect(result.detailed.screenCapture.available).toBe(true)
     })
 
     it('should detect webcam from enumerated devices', async () => {
@@ -27,8 +29,9 @@ describe('permissions', () => {
         { kind: 'videoinput', deviceId: '1', groupId: '1', label: 'Webcam', toJSON: () => ({}) },
       ] as MediaDeviceInfo[])
 
-      const capabilities = await detectCapabilities()
-      expect(capabilities.webcam).toBe(true)
+      const result = await detectCapabilities()
+      expect(result.capabilities.webcam).toBe(true)
+      expect(result.detailed.webcam.available).toBe(true)
     })
 
     it('should detect microphone from enumerated devices', async () => {
@@ -36,8 +39,9 @@ describe('permissions', () => {
         { kind: 'audioinput', deviceId: '1', groupId: '1', label: 'Mic', toJSON: () => ({}) },
       ] as MediaDeviceInfo[])
 
-      const capabilities = await detectCapabilities()
-      expect(capabilities.microphone).toBe(true)
+      const result = await detectCapabilities()
+      expect(result.capabilities.microphone).toBe(true)
+      expect(result.detailed.microphone.available).toBe(true)
     })
 
     it('should handle enumerateDevices failure gracefully', async () => {
@@ -45,10 +49,22 @@ describe('permissions', () => {
         new Error('Permission denied')
       )
 
-      const capabilities = await detectCapabilities()
+      const result = await detectCapabilities()
       // Should assume capabilities exist on failure
-      expect(capabilities.webcam).toBe(true)
-      expect(capabilities.microphone).toBe(true)
+      expect(result.capabilities.webcam).toBe(true)
+      expect(result.capabilities.microphone).toBe(true)
+    })
+
+    it('should return detailed info with unavailability reasons', async () => {
+      vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue([])
+
+      const result = await detectCapabilities()
+      // No devices found
+      expect(result.detailed.webcam.available).toBe(false)
+      expect(result.detailed.webcam.reason).toBe('no_device')
+      expect(result.detailed.webcam.message).toBeDefined()
+      expect(result.detailed.microphone.available).toBe(false)
+      expect(result.detailed.microphone.reason).toBe('no_device')
     })
   })
 
