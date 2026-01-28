@@ -9,6 +9,15 @@ import type { WaveformPeak } from '../../store/types';
 import { resamplePeaks, getPeaksForRange } from '../../utils/waveform';
 import styles from './AudioWaveform.module.css';
 
+/**
+ * Maximum canvas width in CSS pixels before DPR scaling.
+ * Browsers have hard limits on canvas dimensions (typically ~32,767 pixels).
+ * With a 2x DPR, a 16,000px CSS width would hit this limit.
+ * We use a conservative 4000px to ensure reliability across all devices.
+ * The canvas will be CSS-scaled up if the clip is wider than this.
+ */
+const MAX_CANVAS_WIDTH = 4000;
+
 interface AudioWaveformProps {
   /** Peak data from the source media */
   peaks: WaveformPeak[];
@@ -49,13 +58,19 @@ export function AudioWaveform({
     return getPeaksForRange(peaks, sourceDuration, startTime, endTime);
   }, [peaks, sourceDuration, startTime, endTime]);
 
+  // Calculate the effective canvas width (clamped to max for browser compatibility)
+  const effectiveCanvasWidth = useMemo(() => {
+    return Math.min(Math.floor(width), MAX_CANVAS_WIDTH);
+  }, [width]);
+
   // Resample to fit display width
   const displayPeaks = useMemo(() => {
     if (visiblePeaks.length === 0 || width <= 0) return [];
     // Use 1 sample per pixel for crisp rendering, max 2000 samples
-    const targetSamples = Math.min(Math.ceil(width), 2000);
+    // Use effectiveCanvasWidth to match actual canvas resolution
+    const targetSamples = Math.min(Math.ceil(effectiveCanvasWidth), 2000);
     return resamplePeaks(visiblePeaks, targetSamples);
-  }, [visiblePeaks, width]);
+  }, [visiblePeaks, width, effectiveCanvasWidth]);
 
   // Draw waveform on canvas
   useEffect(() => {
@@ -66,15 +81,24 @@ export function AudioWaveform({
     if (!ctx) return;
 
     // Set canvas size (use device pixel ratio for crisp rendering)
+    // Clamp canvas dimensions to prevent exceeding browser limits
     const dpr = window.devicePixelRatio || 1;
-    const canvasWidth = Math.floor(width);
+    const canvasWidth = effectiveCanvasWidth;
     const canvasHeight = Math.floor(height);
 
-    canvas.width = canvasWidth * dpr;
-    canvas.height = canvasHeight * dpr;
-    canvas.style.width = `${canvasWidth}px`;
+    // Ensure canvas dimensions don't exceed browser limits even with DPR
+    // Most browsers limit to ~32,767 pixels per dimension
+    const maxDimension = 16000; // Safe limit with 2x DPR = 32,000
+    const scaledWidth = Math.min(canvasWidth * dpr, maxDimension);
+    const scaledHeight = Math.min(canvasHeight * dpr, maxDimension);
+    const actualDpr = scaledWidth / canvasWidth;
+
+    canvas.width = scaledWidth;
+    canvas.height = scaledHeight;
+    // CSS width is the full requested width - canvas will be scaled up if needed
+    canvas.style.width = `${Math.floor(width)}px`;
     canvas.style.height = `${canvasHeight}px`;
-    ctx.scale(dpr, dpr);
+    ctx.scale(actualDpr, actualDpr);
 
     // Clear canvas
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -104,7 +128,7 @@ export function AudioWaveform({
       const barHeight = Math.max(1, maxY - minY);
       ctx.fillRect(x, minY, 1, barHeight);
     }
-  }, [displayPeaks, width, height, color, isAudioClip, isSelected]);
+  }, [displayPeaks, width, height, color, isAudioClip, isSelected, effectiveCanvasWidth]);
 
   if (!peaks || peaks.length === 0 || width <= 0 || height <= 0) {
     return null;

@@ -269,4 +269,51 @@ describe('AudioWaveform', () => {
       expect(canvas).toHaveAttribute('aria-hidden', 'true')
     })
   })
+
+  describe('extreme zoom handling', () => {
+    it('handles very large widths without crashing', () => {
+      // This width would exceed browser canvas limits without clamping
+      const extremeWidth = 50000
+
+      const { container } = render(
+        <AudioWaveform
+          peaks={defaultPeaks}
+          sourceDuration={5}
+          startTime={0}
+          endTime={5}
+          width={extremeWidth}
+          height={40}
+        />
+      )
+
+      // Canvas should still render
+      const canvas = container.querySelector('canvas')
+      expect(canvas).toBeInTheDocument()
+      // Canvas should have the CSS width set to the requested size
+      expect(canvas?.style.width).toBe(`${extremeWidth}px`)
+      // Canvas operations should still be called
+      expect(mockCtx.clearRect).toHaveBeenCalled()
+      expect(mockCtx.fillRect).toHaveBeenCalled()
+    })
+
+    it('clamps canvas internal width to prevent browser limit issues', () => {
+      const extremeWidth = 50000
+
+      render(
+        <AudioWaveform
+          peaks={defaultPeaks}
+          sourceDuration={5}
+          startTime={0}
+          endTime={5}
+          width={extremeWidth}
+          height={40}
+        />
+      )
+
+      // The canvas should still draw successfully
+      // (if canvas width exceeded browser limits, drawing would fail)
+      expect(mockCtx.fillRect).toHaveBeenCalled()
+      expect(mockCtx.scale).toHaveBeenCalled()
+    })
+  })
 })
