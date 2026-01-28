@@ -4,6 +4,7 @@ import type {
   RecordingState,
   RecordingConfig,
   EnvironmentCapabilities,
+  DetailedCapabilities,
   AudioLevels,
   Recording,
 } from './types';
@@ -20,6 +21,13 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
     microphone: false,
     systemAudio: false,
     mediaRecorder: false,
+  },
+  detailedCapabilities: {
+    screenCapture: { available: false, reason: 'api_not_supported', message: 'Checking...' },
+    webcam: { available: false, reason: 'api_not_supported', message: 'Checking...' },
+    microphone: { available: false, reason: 'api_not_supported', message: 'Checking...' },
+    systemAudio: { available: false, reason: 'api_not_supported', message: 'Checking...' },
+    mediaRecorder: { available: false, reason: 'api_not_supported', message: 'Checking...' },
   },
   recordings: [],
 
@@ -40,6 +48,9 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   setCapabilities: (capabilities: EnvironmentCapabilities) =>
     set({ capabilities }),
+
+  setDetailedCapabilities: (detailedCapabilities: DetailedCapabilities) =>
+    set({ detailedCapabilities }),
 
   setState: (newState: RecordingState) =>
     set({ state: newState }),

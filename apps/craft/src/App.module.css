@@ -528,6 +528,16 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 0;
+  transition: opacity 0.2s ease;
+}
+
+.sourceToggle.sourceUnavailable {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sourceToggle.sourceUnavailable .sourceLabel {
+  color: var(--text-muted);
 }
 
 .sourceLabel {
@@ -541,6 +551,18 @@
   width: 20px;
   height: 20px;
   color: var(--text-secondary);
+}
+
+.sourceUnavailable .sourceIcon {
+  color: var(--text-muted);
+}
+
+.unavailableIcon {
+  width: 14px;
+  height: 14px;
+  color: var(--error, #ef4444);
+  margin-left: 0.25rem;
+  flex-shrink: 0;
 }
 
 /* Toggle switch */
