@@ -1978,7 +1978,7 @@ export async function exportToMP4(
   }
 
   const { width, height } = getResolution(options.resolution, baseWidth, baseHeight);
-  const { videoBitrate } = getQualitySettings(options.quality);
+  const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;
 
@@ -2062,12 +2062,12 @@ export async function exportToMP4(
   // Create audio packet source if we have audio
   let audioSource: EncodedAudioPacketSource | null = null;
   if (audioData) {
-    // Check if AAC is supported
+    // Check if AAC is supported with the requested bitrate
     const aacConfig = {
       codec: 'mp4a.40.2', // AAC-LC
       sampleRate,
       numberOfChannels: 2,
-      bitrate: 128000, // Use standard 128kbps - widely supported
+      bitrate: audioBitrate, // Use quality-based bitrate (128k/192k/256k)
     };
 
     try {
@@ -2088,32 +2088,62 @@ export async function exportToMP4(
   // Start the output
   await output.start();
 
-  // Create video encoder
+  // H.264 codec profiles to try, in order of preference (quality -> compatibility)
+  const h264Codecs = [
+    'avc1.640028', // High Profile Level 4.0 - best quality
+    'avc1.4d0028', // Main Profile Level 4.0 - good compatibility
+    'avc1.42001f', // Baseline Profile Level 3.1 - maximum compatibility
+  ];
+
+  // Find a supported H.264 codec configuration
+  let videoConfig: VideoEncoderConfig | null = null;
+  for (const codec of h264Codecs) {
+    const config: VideoEncoderConfig = {
+      codec,
+      width,
+      height,
+      bitrate: videoBitrate,
+      framerate: frameRate,
+    };
+    try {
+      const support = await VideoEncoder.isConfigSupported(config);
+      if (support.supported) {
+        videoConfig = support.config || config;
+        console.log(`[MP4 Export] Using H.264 codec: ${codec}`);
+        break;
+      }
+    } catch {
+      // This codec not supported, try next
+    }
+  }
+
+  if (!videoConfig) {
+    throw new Error('No supported H.264 codec found. MP4 export requires H.264 support.');
+  }
+
+  // Create video encoder with error tracking
+  let videoEncoderError: Error | null = null;
   const videoEncoder = new VideoEncoder({
     output: async (chunk, meta) => {
       await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
     },
     error: (e) => {
       console.error('Video encoder error:', e);
+      videoEncoderError = e instanceof Error ? e : new Error(String(e));
     },
   });
 
-  await videoEncoder.configure({
-    codec: 'avc1.640028', // H.264 High Profile Level 4.0 for better quality
-    width,
-    height,
-    bitrate: videoBitrate,
-    framerate: frameRate,
-  });
+  await videoEncoder.configure(videoConfig);
 
   // Create audio encoder if we have audio
   let audioEncoder: AudioEncoder | null = null;
+  let audioEncoderError: Error | null = null;
   if (audioData && audioSource) {
     const aacConfig = {
       codec: 'mp4a.40.2', // AAC-LC
       sampleRate,
       numberOfChannels: 2,
-      bitrate: 128000,
+      bitrate: audioBitrate, // Use quality-based bitrate
     };
 
     audioEncoder = new AudioEncoder({
@@ -2122,6 +2152,7 @@ export async function exportToMP4(
       },
       error: (e) => {
         console.error('Audio encoder error:', e);
+        audioEncoderError = e instanceof Error ? e : new Error(String(e));
       },
     });
 
@@ -2155,6 +2186,11 @@ export async function exportToMP4(
 
       // Clean up frames from previous iteration before starting new one
       cleanupIterationFrames(frameManager);
+
+      // Check for encoder errors at start of each frame
+      if (videoEncoderError) {
+        throw videoEncoderError;
+      }
 
       const currentTime = frameIndex / frameRate;
 
@@ -2333,7 +2369,17 @@ export async function exportToMP4(
 
     // Backpressure: wait for encoder to catch up if queue is too large
     // This prevents memory exhaustion while allowing smooth encoding
+    const backpressureStart = Date.now();
+    const backpressureTimeout = 30000; // 30 second timeout
     while (videoEncoder.encodeQueueSize > 20) {
+      // Check for encoder errors during backpressure wait
+      if (videoEncoderError) {
+        throw videoEncoderError;
+      }
+      // Check for timeout (encoder might be stuck)
+      if (Date.now() - backpressureStart > backpressureTimeout) {
+        throw new Error('Video encoder backpressure timeout - encoder may be stuck');
+      }
       await new Promise(resolve => setTimeout(resolve, 5));
     }
 
@@ -2391,6 +2437,14 @@ export async function exportToMP4(
         audioEncoder.encode(audioDataObj);
         audioDataObj.close();
       }
+    }
+
+    // Check for any encoder errors before finalizing
+    if (videoEncoderError) {
+      throw videoEncoderError;
+    }
+    if (audioEncoderError) {
+      throw audioEncoderError;
     }
 
     // Flush and finalize
