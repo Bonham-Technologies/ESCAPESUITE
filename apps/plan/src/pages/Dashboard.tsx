@@ -67,7 +67,7 @@ export default function Dashboard() {
       name: 'ESCAPECRAFT',
       description: 'Record screen, webcam, and audio with ease',
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
           <circle cx="12" cy="12" r="4" fill="currentColor" />
         </svg>
@@ -80,7 +80,7 @@ export default function Dashboard() {
       name: 'ESCAPEARTIST',
       description: 'Edit videos with a professional timeline editor',
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <path d="M12 20h9" />
           <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
         </svg>
@@ -126,13 +126,14 @@ export default function Dashboard() {
                 className={styles.toolCard}
                 onClick={() => handleLaunchTool(tool.url, tool.id as 'craft' | 'artist')}
                 style={{ '--tool-color': tool.color } as React.CSSProperties}
+                aria-label={`Launch ${tool.name} - ${tool.description}`}
               >
-                <div className={styles.toolIcon}>{tool.icon}</div>
+                <div className={styles.toolIcon} aria-hidden="true">{tool.icon}</div>
                 <div className={styles.toolInfo}>
                   <h3>{tool.name}</h3>
                   <p>{tool.description}</p>
                 </div>
-                <div className={styles.toolArrow}>
+                <div className={styles.toolArrow} aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 12h14M12 5l7 7-7 7" />
                   </svg>
@@ -195,6 +196,7 @@ export default function Dashboard() {
                 className="primary"
                 onClick={handleUpgrade}
                 disabled={actionLoading !== null}
+                aria-label={actionLoading === 'upgrade' ? 'Loading checkout...' : 'Upgrade to Pro subscription'}
               >
                 {actionLoading === 'upgrade' ? 'Loading...' : 'Upgrade to Pro'}
               </button>
@@ -203,6 +205,7 @@ export default function Dashboard() {
               <button
                 onClick={handleManageSubscription}
                 disabled={actionLoading !== null}
+                aria-label={actionLoading === 'manage' ? 'Loading subscription portal...' : 'Manage your subscription'}
               >
                 {actionLoading === 'manage' ? 'Loading...' : 'Manage Subscription'}
               </button>
@@ -215,7 +218,7 @@ export default function Dashboard() {
           <div className={styles.teamsSectionHeader}>
             <h2>Your Teams</h2>
             <Link to="/pricing?tab=team">
-              <button>Create Team</button>
+              <button aria-label="Create a new team">Create Team</button>
             </Link>
           </div>
           {orgsLoading ? (
@@ -223,14 +226,14 @@ export default function Dashboard() {
           ) : organizations.length > 0 ? (
             <div className={styles.teamsGrid}>
               {organizations.map((org) => (
-                <Link key={org.id} to={`/team/${org.slug}`} className={styles.teamCard}>
+                <Link key={org.id} to={`/team/${org.slug}`} className={styles.teamCard} aria-label={`View ${org.name} team dashboard`}>
                   <div className={styles.teamInfo}>
                     <h3>{org.name}</h3>
                     <span className={styles.teamPlan}>
                       {org.plan === 'enterprise' ? 'Enterprise' : 'Team'} Plan
                     </span>
                   </div>
-                  <div className={styles.teamArrow}>
+                  <div className={styles.teamArrow} aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M5 12h14M12 5l7 7-7 7" />
                     </svg>
@@ -252,15 +255,15 @@ export default function Dashboard() {
         <section className={styles.quickLinks}>
           <h2>Quick Links</h2>
           <div className={styles.linksGrid}>
-            <Link to="/pricing" className={styles.linkCard}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Link to="/pricing" className={styles.linkCard} aria-label="View pricing plans">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <line x1="12" y1="1" x2="12" y2="23" />
                 <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
               </svg>
               <span>View Pricing</span>
             </Link>
-            <Link to="/portal/downloads" className={styles.linkCard}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Link to="/portal/downloads" className={styles.linkCard} aria-label="View downloads and licenses">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />

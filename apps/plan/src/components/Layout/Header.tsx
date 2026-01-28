@@ -6,8 +6,8 @@ import styles from './Layout.module.css'
 export default function Header() {
   return (
     <header className={styles.header}>
-      <Link to="/" className={styles.logo}>
-        <svg className={styles.logoIcon} viewBox="0 0 24 24" fill="currentColor">
+      <Link to="/" className={styles.logo} aria-label="ESCAPE Suite Home">
+        <svg className={styles.logoIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
                 stroke="currentColor"
                 strokeWidth="2"
@@ -19,13 +19,13 @@ export default function Header() {
         <span className={styles.logoSuite}>Suite</span>
       </Link>
 
-      <nav className={styles.nav}>
+      <nav className={styles.nav} aria-label="Main navigation">
         <Link to="/pricing">Pricing</Link>
         <ThemeToggle />
         <SignedOut>
           <Link to="/sign-in">Sign In</Link>
           <Link to="/sign-up">
-            <button className="primary">Get Started</button>
+            <button className="primary" aria-label="Get started with ESCAPE Suite">Get Started</button>
           </Link>
         </SignedOut>
         <SignedIn>
