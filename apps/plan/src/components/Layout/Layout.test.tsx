@@ -68,8 +68,8 @@ describe('Header', () => {
 
   it('has link to homepage', () => {
     renderHeader()
-    // Logo link combines ESCAPE and Suite text, accessible name is "ESCAPESuite"
-    const logoLink = screen.getByRole('link', { name: /ESCAPESuite/i })
+    // Logo link has aria-label "ESCAPE Suite Home"
+    const logoLink = screen.getByRole('link', { name: /ESCAPE Suite Home/i })
     expect(logoLink).toHaveAttribute('href', '/')
   })
 
