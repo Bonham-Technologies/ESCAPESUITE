@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import styles from './App.module.css';
+import { VideoPlayer } from './components/VideoPlayer';
 import { useRecorderStore } from './store/recorderStore';
 import type { WebcamPosition, WebcamShape } from './store/types';
 import {
@@ -1140,16 +1141,17 @@ function App() {
               <button
                 className={styles.playbackClose}
                 onClick={handleClosePlayback}
-                title="Close"
+                title="Close (Esc)"
               >
                 <CloseIcon />
               </button>
             </div>
-            <video
-              className={styles.playbackVideo}
+            <VideoPlayer
               src={playbackUrl}
-              controls
+              title={playbackName}
               autoPlay
+              onClose={handleClosePlayback}
+              onError={(error) => console.error('Video playback error:', error)}
             />
           </div>
         </div>
