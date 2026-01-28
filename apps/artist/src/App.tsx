@@ -580,6 +580,7 @@ function App() {
             }
             className={styles.projectName}
             placeholder="Project Name"
+            aria-label="Project name"
           />
         </div>
 
@@ -589,21 +590,24 @@ function App() {
             <button
               className={styles.headerButton}
               onClick={() => setShowFileMenu(!showFileMenu)}
+              aria-expanded={showFileMenu}
+              aria-haspopup="menu"
+              aria-label="File menu"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
               </svg>
               File
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
 
             {showFileMenu && (
               <>
-                <div className={styles.menuBackdrop} onClick={() => setShowFileMenu(false)} />
-                <div className={styles.menuDropdown}>
+                <div className={styles.menuBackdrop} onClick={() => setShowFileMenu(false)} aria-hidden="true" />
+                <div className={styles.menuDropdown} role="menu" aria-label="File options">
                   <button
                     className={styles.menuItem}
                     onClick={() => { handleNewProject(); setShowFileMenu(false); }}
@@ -642,8 +646,8 @@ function App() {
           </div>
 
           {/* Quick action buttons */}
-          <button className={styles.headerButton} onClick={handleSaveProject} disabled={isSaving} title="Save (Ctrl+S)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <button className={styles.headerButton} onClick={handleSaveProject} disabled={isSaving} title="Save (Ctrl+S)" aria-label="Save project">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
               <polyline points="17 21 17 13 7 13 7 21" />
               <polyline points="7 3 7 8 15 8" />
@@ -655,8 +659,9 @@ function App() {
             onClick={() => setShowExport(true)}
             disabled={clips.length === 0}
             title="Export (Ctrl+E)"
+            aria-label="Export video"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
@@ -674,13 +679,15 @@ function App() {
         {/* Left sidebar - Video library */}
         <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
           <div className={styles.sidebarHeader}>
-            {!sidebarCollapsed && <span>Media Library</span>}
+            {!sidebarCollapsed && <span id="media-library-title">Media Library</span>}
             <button
               className={styles.collapseButton}
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={sidebarCollapsed ? 'Expand media library sidebar' : 'Collapse media library sidebar'}
+              aria-expanded={!sidebarCollapsed}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 {sidebarCollapsed ? (
                   <polyline points="9 18 15 12 9 6" />
                 ) : (
@@ -710,15 +717,17 @@ function App() {
         </section>
 
         {/* Right sidebar - Clip Inspector */}
-        <aside className={`${styles.propertiesSidebar} ${inspectorCollapsed ? styles.inspectorCollapsed : ''}`}>
+        <aside className={`${styles.propertiesSidebar} ${inspectorCollapsed ? styles.inspectorCollapsed : ''}`} aria-labelledby="inspector-title">
           <div className={styles.sidebarHeader}>
-            <span>Inspector</span>
+            <span id="inspector-title">Inspector</span>
             <button
               className={styles.collapseButton}
               onClick={() => setInspectorCollapsed(!inspectorCollapsed)}
               title={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'}
+              aria-label={inspectorCollapsed ? 'Show inspector panel' : 'Hide inspector panel'}
+              aria-expanded={!inspectorCollapsed}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 {inspectorCollapsed ? (
                   <polyline points="15 18 9 12 15 6" />
                 ) : (
@@ -735,8 +744,10 @@ function App() {
           className={styles.mobileInspectorToggle}
           onClick={() => setInspectorCollapsed(!inspectorCollapsed)}
           title="Toggle inspector"
+          aria-label={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'}
+          aria-expanded={!inspectorCollapsed}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
             <line x1="15" y1="3" x2="15" y2="21" />
           </svg>
@@ -756,24 +767,24 @@ function App() {
       {/* Timeline */}
       <footer className={styles.footer} style={{ height: timelineHeight }}>
         <div className={styles.timelineControls}>
-          <button className={styles.addTrackButton} onClick={() => addTrack()} title="Add new track">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <button className={styles.addTrackButton} onClick={() => addTrack()} title="Add new track" aria-label="Add new track">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             <span>Add Track</span>
           </button>
-          <div className={styles.controlsDivider} />
-          <button className={styles.zoomButton} onClick={handleZoomOut} title="Zoom out">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <div className={styles.controlsDivider} aria-hidden="true" />
+          <button className={styles.zoomButton} onClick={handleZoomOut} title="Zoom out" aria-label="Zoom out timeline">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
               <line x1="8" y1="11" x2="14" y2="11" />
             </svg>
           </button>
-          <span className={styles.zoomLabel}>{Math.round(zoom * 100)}%</span>
-          <button className={styles.zoomButton} onClick={handleZoomIn} title="Zoom in">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <span className={styles.zoomLabel} aria-label={`Zoom level ${Math.round(zoom * 100)}%`}>{Math.round(zoom * 100)}%</span>
+          <button className={styles.zoomButton} onClick={handleZoomIn} title="Zoom in" aria-label="Zoom in timeline">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
               <line x1="11" y1="8" x2="11" y2="14" />
@@ -792,24 +803,24 @@ function App() {
 
       {/* Notification */}
       {notification && (
-        <div className={`${styles.notification} ${styles[notification.type]}`}>
+        <div className={`${styles.notification} ${styles[notification.type]}`} role="status" aria-live="polite">
           {notification.message}
         </div>
       )}
 
       {/* Loading overlay */}
       {isLoading && (
-        <div className={styles.loadingOverlay}>
-          <div className={styles.spinner} />
-          <p>Loading project...</p>
+        <div className={styles.loadingOverlay} role="dialog" aria-modal="true" aria-labelledby="loading-message">
+          <div className={styles.spinner} aria-hidden="true" />
+          <p id="loading-message">Loading project...</p>
         </div>
       )}
 
       {/* Session restore prompt */}
       {showSessionPrompt && pendingSession && (
-        <div className={styles.loadingOverlay}>
+        <div className={styles.loadingOverlay} role="dialog" aria-modal="true" aria-labelledby="session-prompt-title">
           <div className={styles.sessionPrompt}>
-            <h3>Resume Previous Session?</h3>
+            <h3 id="session-prompt-title">Resume Previous Session?</h3>
             <p>
               You have an unsaved session from{' '}
               {new Date(pendingSession.timestamp).toLocaleString()}

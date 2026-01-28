@@ -20,6 +20,20 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'mobile',
+      use: { ...devices['Pixel 5'] },
+      testMatch: '**/responsive/**',
+    },
+    {
+      name: 'tablet',
+      use: {
+        viewport: { width: 768, height: 1024 },
+        isMobile: false,
+        hasTouch: true,
+      },
+      testMatch: '**/responsive/**',
+    },
   ],
 
   webServer: [
