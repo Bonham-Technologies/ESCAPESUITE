@@ -33,17 +33,33 @@ pnpm lint                # Run ESLint
 
 ### State Management
 - **Zustand store** (`src/store/recorderStore.ts`): Single source of truth for recorder state
-- Core types defined in `src/store/types.ts`: `RecordingState`, `RecordingConfig`, `Recording`, `EnvironmentCapabilities`
+- Core types defined in `src/store/types.ts`: `RecordingState`, `RecordingConfig`, `Recording`, `EnvironmentCapabilities`, `DetailedCapabilities`, `CapabilityInfo`
 - Recordings stored in shared IndexedDB with ESCAPEARTIST
 
 ### Core Modules (`src/core/`)
 - `storage.ts`: Shared IndexedDB layer (same database as ESCAPEARTIST: `video-editor-db`)
 - `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring
-- `permissions.ts`: Environment capability detection and stream acquisition
+- `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction
 - `watermark.ts`: Watermark rendering for trial/free users
 - `converter.ts`: Video format conversion using WebCodecs + Mediabunny
+
+### VideoPlayer Component (`src/components/VideoPlayer/`)
+Reusable video player with full playback controls:
+- **Play/Pause**: Toggle playback with button or spacebar
+- **Seeking**: Click progress bar or use arrow keys (±5s), with Shift for ±10s
+- **Volume**: Adjustable with mute toggle (M key)
+- **Fullscreen**: Toggle with F key or button
+- **Loop detection**: Automatically resets to beginning when video ends
+- **Keyboard shortcuts**: Space (play/pause), M (mute), F (fullscreen), arrows (seek)
+
+### Capability Detection (`src/core/permissions.ts`)
+Enhanced capability detection with detailed unavailability reasons:
+- **CapabilityUnavailableReason**: `'api_not_supported'`, `'permission_denied'`, `'permission_dismissed'`, `'no_device'`, `'not_secure_context'`, `'browser_not_supported'`, `'policy_blocked'`
+- **DetailedCapabilities**: Returns both boolean availability and reason/message for each capability
+- **UI Integration**: Unavailable options are greyed out with explanatory tooltips
+- Checks Permissions API where available for pre-emptive status detection
 
 ### Recording Modes
 - **Screen Only**: Display capture without audio

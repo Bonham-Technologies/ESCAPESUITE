@@ -124,6 +124,15 @@ The export pipeline includes several optimizations to improve performance:
 - **Cache lifecycle**: `clearSeekPositions()` and `clearAnimationCache()` called at export start
 - **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
 
+### MP4 Export Reliability (`src/core/exporter.ts`)
+MP4 export includes robust error handling and codec compatibility:
+- **H.264 codec validation**: Uses `VideoEncoder.isConfigSupported()` to verify codec support before encoding
+- **Codec fallback chain**: Tries profiles in order: High Profile (`avc1.640028`) → Main Profile (`avc1.4d0028`) → Baseline Profile (`avc1.42001f`)
+- **Encoder error tracking**: Captures errors from encoder callbacks and propagates them instead of silent failures
+- **Backpressure timeout**: 30-second timeout on encoder queue wait to detect stuck encoders
+- **Quality-based audio bitrate**: Audio bitrate scales with quality setting (128k/192k/256k) instead of hardcoded value
+- **Error checkpoints**: Validates encoder state at loop start, during backpressure, and before finalization
+
 ### Black Flash Prevention (`src/core/exporter.ts`)
 To prevent black frames during export:
 - **Seek timeout**: 500ms for reliable seeking
@@ -144,6 +153,7 @@ Waveform visualization adapts to clip selection state:
 - **Default colors**: Purple (`rgba(138, 43, 226, 0.6)`) for audio, blue tint for video with audio
 - **Selected state**: White (`rgba(255, 255, 255, 0.85)`) for high contrast against blue selection background
 - **Custom color**: `color` prop overrides default/selected colors when provided
+- **Extreme zoom handling**: Canvas width clamped to `MAX_CANVAS_WIDTH` (4000px) to prevent exceeding browser limits (~32,767px). CSS scales the canvas up for wider clips while maintaining visual quality.
 
 ## Key Constraints
 
