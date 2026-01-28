@@ -33,7 +33,7 @@ The ESCAPE Suite is a collection of privacy-first, client-side media creation to
 - Dashboard with tool launchers
 - Analytics (Vercel Analytics) and error tracking (Sentry)
 
-**Test Coverage:** 21 unit tests (subscription API, analytics)
+**Test Coverage:** 120 unit tests (subscription API, analytics, routing, components)
 
 ---
 
@@ -49,8 +49,10 @@ The ESCAPE Suite is a collection of privacy-first, client-side media creation to
 - Audio level monitoring
 - WebM output with metadata fixing
 - Shared IndexedDB storage with ESCAPEARTIST
+- Full-featured video player with keyboard shortcuts
+- Capability detection with detailed unavailability reasons
 
-**Test Coverage:** 44 unit tests (storage, permissions, thumbnails, store)
+**Test Coverage:** 165 unit tests (storage, permissions, thumbnails, store, VideoPlayer, capability detection)
 
 ---
 
@@ -65,10 +67,11 @@ The ESCAPE Suite is a collection of privacy-first, client-side media creation to
 - Keyframe animation system (position, scale, rotation, opacity, blur)
 - Text & shape overlays
 - 11 transition types
-- WebM (VP9+Opus) and MP4 (H.264+AAC) export
+- WebM (VP9+Opus) and MP4 (H.264+AAC) export with codec fallbacks
 - Project save/load
+- Audio waveform visualization with extreme zoom support
 
-**Test Coverage:** 380 unit tests (comprehensive coverage)
+**Test Coverage:** 572 unit tests (comprehensive coverage including exporter, waveform, animation)
 
 ---
 
@@ -140,14 +143,11 @@ cd ESCAPEARTIST && npm install && npm run dev
 ### Running Unit Tests
 
 ```bash
-# ESCAPEPLAN (21 tests)
-cd ESCAPEPLAN && npm run test:run
-
-# ESCAPECRAFT (44 tests)
-cd ESCAPECRAFT && npm run test:run
-
-# ESCAPEARTIST (380 tests)
-cd ESCAPEARTIST && npm run test:run
+# From monorepo root using pnpm:
+pnpm test                                    # All apps
+pnpm test --filter=@escapesuite/plan         # ESCAPEPLAN (120 tests)
+pnpm test --filter=@escapesuite/craft        # ESCAPECRAFT (165 tests)
+pnpm test --filter=@escapesuite/artist       # ESCAPEARTIST (572 tests)
 ```
 
 ### Running E2E Tests

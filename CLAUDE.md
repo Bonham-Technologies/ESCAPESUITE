@@ -156,9 +156,9 @@ VITE_BUILD_MODE=saas              # or 'standalone' for air-gapped builds
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts:
-- ESCAPEPLAN: 47 tests
-- ESCAPECRAFT: 143 tests
-- ESCAPEARTIST: 570 tests
+- ESCAPEPLAN: 120 tests
+- ESCAPECRAFT: 165 tests
+- ESCAPEARTIST: 572 tests
 - E2E: 62 structural tests + 69 journey tests
 
 ## Key Constraints
