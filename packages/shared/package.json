@@ -12,7 +12,8 @@
     "./storage": "./src/storage/index.ts",
     "./utils": "./src/utils/index.ts",
     "./watermark": "./src/watermark/index.ts",
-    "./bootstrap": "./src/bootstrap/index.tsx"
+    "./bootstrap": "./src/bootstrap/index.tsx",
+    "./test/setup": "./src/test/setup.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
