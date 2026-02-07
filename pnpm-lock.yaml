@@ -18,8 +18,8 @@ importers:
   apps/artist:
     dependencies:
       '@clerk/clerk-react':
-        specifier: ^5.59.6
-        version: 5.59.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^5.60.0
+        version: 5.60.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@escapesuite/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -115,8 +115,8 @@ importers:
   apps/craft:
     dependencies:
       '@clerk/clerk-react':
-        specifier: ^5.59.6
-        version: 5.59.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^5.60.0
+        version: 5.60.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@escapesuite/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -236,11 +236,11 @@ importers:
   apps/plan:
     dependencies:
       '@clerk/clerk-react':
-        specifier: ^5.59.6
-        version: 5.59.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^5.60.0
+        version: 5.60.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@clerk/themes':
-        specifier: ^2.4.50
-        version: 2.4.50(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^2.4.51
+        version: 2.4.51(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@escapesuite/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -330,8 +330,8 @@ importers:
   packages/shared:
     dependencies:
       '@clerk/clerk-react':
-        specifier: ^5.59.6
-        version: 5.59.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^5.60.0
+        version: 5.60.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@vercel/analytics':
         specifier: ^1.6.1
         version: 1.6.1(react@19.2.4)
@@ -578,15 +578,15 @@ packages:
   '@changesets/write@0.4.0':
     resolution: {integrity: sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q==}
 
-  '@clerk/clerk-react@5.59.6':
-    resolution: {integrity: sha512-jkNDBQ9zgJBEro/L8YZjctSmXxebsLGlWyIuO3j+dD8Althi9E+eZZhuZQu/GUyPyfTSdiQml74by62RMS6V6w==}
+  '@clerk/clerk-react@5.60.0':
+    resolution: {integrity: sha512-P88FncsJpq/3WZJhhlj+md8mYb35BIXpr462C/figwsBGHsinr8VuBQUMcMZZ/6M34C8ABfLTPa6PHVp6+3D5Q==}
     engines: {node: '>=18.17.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
       react-dom: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
 
-  '@clerk/shared@3.43.2':
-    resolution: {integrity: sha512-kR8q14/9Kz8Oah6aVTSLOI64gPAV44UqxTswRdu01cVRG36oyRbnJfFl/udZpDBdnPVuu2GyDLH7AztY8Td0fw==}
+  '@clerk/shared@3.44.0':
+    resolution: {integrity: sha512-kH+chNeZwqml3IDpWLgebWECfOZifyUQO4OISd/96w1EuCY1Bzw6cBq/ZbpsoO8jyG8/6bGr/MGXLhDzTrpPfA==}
     engines: {node: '>=18.17.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
@@ -597,8 +597,8 @@ packages:
       react-dom:
         optional: true
 
-  '@clerk/themes@2.4.50':
-    resolution: {integrity: sha512-ITBzKoQRz0owrh7IbbA/Vo9DHMDm66p9mLHZtVQ3vRtY0coisg6gSb2ATZyCGHNzBQO/ExKWMHGYul/uvYXdlg==}
+  '@clerk/themes@2.4.51':
+    resolution: {integrity: sha512-g50S8xUzKe4XMnWRZLi05+BE/HwqUi5Zjz2YwTkhGKtArailK2S+2Yir+Z1STEnuqqlSGv3o4BuG4TQRn1VAFg==}
     engines: {node: '>=18.17.0'}
 
   '@csstools/color-helpers@5.1.0':
@@ -3217,14 +3217,14 @@ snapshots:
       human-id: 4.1.3
       prettier: 2.8.8
 
-  '@clerk/clerk-react@5.59.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@clerk/clerk-react@5.60.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
-      '@clerk/shared': 3.43.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@clerk/shared': 3.44.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
       tslib: 2.8.1
 
-  '@clerk/shared@3.43.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@clerk/shared@3.44.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       csstype: 3.1.3
       dequal: 2.0.3
@@ -3236,9 +3236,9 @@ snapshots:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
 
-  '@clerk/themes@2.4.50(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@clerk/themes@2.4.51(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
-      '@clerk/shared': 3.43.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@clerk/shared': 3.44.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       tslib: 2.8.1
     transitivePeerDependencies:
       - react
