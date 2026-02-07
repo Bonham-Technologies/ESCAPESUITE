@@ -21,16 +21,51 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
-      name: 'mobile',
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'mobile-chromium',
       use: { ...devices['Pixel 5'] },
       testMatch: '**/responsive/**',
     },
     {
-      name: 'tablet',
+      name: 'mobile-firefox',
+      use: { ...devices['Pixel 5'], browserName: 'firefox' },
+      testMatch: '**/responsive/**',
+    },
+    {
+      name: 'mobile-webkit',
+      use: { ...devices['iPhone 12'] },
+      testMatch: '**/responsive/**',
+    },
+    {
+      name: 'tablet-chromium',
       use: {
         viewport: { width: 768, height: 1024 },
         isMobile: false,
         hasTouch: true,
+      },
+      testMatch: '**/responsive/**',
+    },
+    {
+      name: 'tablet-firefox',
+      use: {
+        ...devices['Desktop Firefox'],
+        viewport: { width: 768, height: 1024 },
+        hasTouch: true,
+      },
+      testMatch: '**/responsive/**',
+    },
+    {
+      name: 'tablet-webkit',
+      use: {
+        ...devices['iPad (gen 7)'],
+        isMobile: false,
       },
       testMatch: '**/responsive/**',
     },

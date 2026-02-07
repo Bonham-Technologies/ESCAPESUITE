@@ -231,11 +231,11 @@ jobs:
 
       - name: Install Playwright Browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
+        run: pnpm --filter=@escapesuite/e2e exec playwright install --with-deps
 
       - name: Install Playwright deps (if cached)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium
+        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps
 
       - name: Run E2E tests (excluding journeys)
         run: pnpm --filter=@escapesuite/e2e exec playwright test --ignore-snapshots --grep-invert "Journey"
@@ -294,11 +294,11 @@ jobs:
 
       - name: Install Playwright Browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
+        run: pnpm --filter=@escapesuite/e2e exec playwright install --with-deps
 
       - name: Install Playwright deps (if cached)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium
+        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps
 
       - name: Run full E2E tests
         run: pnpm test:e2e
@@ -436,11 +436,11 @@ jobs:
 
       - name: Install Playwright Browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
+        run: pnpm --filter=@escapesuite/e2e exec playwright install --with-deps
 
       - name: Install Playwright deps (if cached)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium
+        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps
 
       - name: Run standalone E2E tests
         run: pnpm test:e2e:standalone
