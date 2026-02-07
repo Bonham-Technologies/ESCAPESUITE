@@ -76,9 +76,15 @@ export async function mockMediaRecorder(page: Page) {
 }
 
 /**
- * Grant media permissions without prompting
+ * Grant media permissions without prompting.
+ * Only works on Chromium — Firefox and WebKit don't support granting
+ * camera/microphone permissions via Playwright, so we silently skip.
  */
 export async function grantMediaPermissions(page: Page) {
   const context = page.context()
-  await context.grantPermissions(['camera', 'microphone'])
+  try {
+    await context.grantPermissions(['camera', 'microphone'])
+  } catch {
+    // Firefox and WebKit don't support granting camera/microphone permissions
+  }
 }
