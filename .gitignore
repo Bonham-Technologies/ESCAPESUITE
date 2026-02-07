@@ -24,6 +24,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Bundle analysis
+bundle-stats.html
+
 # Test coverage
 coverage/
 

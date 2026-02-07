@@ -12,7 +12,8 @@
     "./storage": "./src/storage/index.ts",
     "./utils": "./src/utils/index.ts",
     "./watermark": "./src/watermark/index.ts",
-    "./bootstrap": "./src/bootstrap/index.tsx"
+    "./bootstrap": "./src/bootstrap/index.tsx",
+    "./test/setup": "./src/test/setup.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -39,7 +40,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/react": "^19.2.9",
+    "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.0.18",

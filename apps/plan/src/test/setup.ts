@@ -1,10 +1,8 @@
-import '@testing-library/jest-dom'
-import { cleanup } from '@testing-library/react'
+import '@escapesuite/shared/test/setup'
 import { afterEach, vi } from 'vitest'
 
-// Cleanup after each test
+// Plan-specific: restore all mocks after each test
 afterEach(() => {
-  cleanup()
   vi.restoreAllMocks()
 })
 
@@ -19,28 +17,6 @@ Object.defineProperty(window, 'location', {
     pathname: '/',
   },
   writable: true,
-})
-
-// Mock matchMedia for component tests
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-})
-
-// Mock ResizeObserver
-vi.stubGlobal('ResizeObserver', class ResizeObserver {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
 })
 
 // Mock IntersectionObserver (used by analytics for pricing section)

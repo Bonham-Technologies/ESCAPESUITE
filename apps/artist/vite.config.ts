@@ -2,17 +2,24 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
+import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
-    viteSingleFile()
-  ],
+    viteSingleFile(),
+    // Run with ANALYZE=true to generate bundle-stats.html
+    process.env.ANALYZE === 'true' && visualizer({
+      filename: 'bundle-stats.html',
+      open: true,
+      gzipSize: true,
+    }),
+  ].filter(Boolean),
   build: {
     target: 'esnext',
-    assetsInlineLimit: 100000000,
-    chunkSizeWarningLimit: 100000000,
+    assetsInlineLimit: 100000000, // Required for vite-plugin-singlefile
+    chunkSizeWarningLimit: 5000,  // 5MB - flag unexpected bloat
     cssCodeSplit: false,
     rollupOptions: {
       output: {
