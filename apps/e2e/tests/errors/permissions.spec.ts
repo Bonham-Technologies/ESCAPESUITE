@@ -250,10 +250,9 @@ test.describe('Permission Recovery', () => {
     await page.waitForLoadState('networkidle')
 
     // Grant permissions (Chromium-only; Firefox/WebKit don't support this)
-    try {
+    const browserName = context.browser()?.browserType().name()
+    if (browserName === 'chromium') {
       await context.grantPermissions(['camera', 'microphone'])
-    } catch {
-      // Firefox and WebKit don't support granting camera/microphone permissions
     }
 
     // Refresh to pick up new permissions

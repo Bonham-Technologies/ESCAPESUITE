@@ -35,7 +35,11 @@ export default defineConfig({
     },
     {
       name: 'mobile-firefox',
-      use: { ...devices['Pixel 5'], browserName: 'firefox' },
+      use: {
+        ...devices['Desktop Firefox'],
+        viewport: { width: 393, height: 851 },
+        hasTouch: true,
+      },
       testMatch: '**/responsive/**',
     },
     {
