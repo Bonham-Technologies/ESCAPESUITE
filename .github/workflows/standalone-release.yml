@@ -130,7 +130,7 @@ jobs:
           cat dist/version.json
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: standalone-release
           path: dist/
