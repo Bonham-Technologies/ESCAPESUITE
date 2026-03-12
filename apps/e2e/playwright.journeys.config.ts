@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const isCI = !!process.env.CI
+
 /**
  * Playwright configuration for user journey tests.
  *
@@ -9,8 +11,8 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/journeys',
   fullyParallel: false, // Journeys run serially for proper flow testing
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  forbidOnly: isCI,
+  retries: isCI ? 1 : 0,
   workers: 1, // Single worker for sequential execution
   reporter: [
     ['html', { outputFolder: 'playwright-report-journeys' }],
@@ -36,6 +38,13 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    // Cross-browser projects only run locally (not in CI)
+    ...(isCI
+      ? []
+      : [
+          { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+          { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+        ]),
   ],
 
   // Start all three apps for full journey testing
