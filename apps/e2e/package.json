@@ -13,6 +13,8 @@
     "test:integration": "playwright test tests/integration",
     "test:standalone": "playwright test --config=playwright.standalone.config.ts",
     "test:standalone:headed": "playwright test --config=playwright.standalone.config.ts --headed",
+    "test:browsers": "playwright test --project=chromium --project=firefox --project=webkit",
+    "test:browsers:all": "playwright test",
     "test:journeys": "playwright test --config=playwright.journeys.config.ts",
     "test:journeys:headed": "playwright test --config=playwright.journeys.config.ts --headed",
     "test:journeys:ui": "playwright test --config=playwright.journeys.config.ts --ui",
