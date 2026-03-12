@@ -264,10 +264,10 @@ export async function requestScreenCapture(
   } catch (error) {
     if (error instanceof Error) {
       if (error.name === 'NotAllowedError') {
-        throw new Error('Screen capture permission denied');
+        throw new Error('Screen capture permission denied', { cause: error });
       }
       if (error.name === 'NotFoundError') {
-        throw new Error('No screen available for capture');
+        throw new Error('No screen available for capture', { cause: error });
       }
     }
     throw error;
@@ -292,10 +292,10 @@ export async function requestWebcam(): Promise<MediaStream> {
   } catch (error) {
     if (error instanceof Error) {
       if (error.name === 'NotAllowedError') {
-        throw new Error('Webcam permission denied');
+        throw new Error('Webcam permission denied', { cause: error });
       }
       if (error.name === 'NotFoundError') {
-        throw new Error('No webcam found');
+        throw new Error('No webcam found', { cause: error });
       }
     }
     throw error;
@@ -320,10 +320,10 @@ export async function requestMicrophone(): Promise<MediaStream> {
   } catch (error) {
     if (error instanceof Error) {
       if (error.name === 'NotAllowedError') {
-        throw new Error('Microphone permission denied');
+        throw new Error('Microphone permission denied', { cause: error });
       }
       if (error.name === 'NotFoundError') {
-        throw new Error('No microphone found');
+        throw new Error('No microphone found', { cause: error });
       }
     }
     throw error;
