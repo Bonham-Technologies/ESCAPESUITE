@@ -23,7 +23,7 @@
   "author": "Bonham Technologies, LLC",
   "license": "SEE LICENSE IN ../../LICENSE",
   "dependencies": {
-    "@clerk/clerk-react": "^5.60.0",
+    "@clerk/clerk-react": "^5.60.1",
     "@escapesuite/shared": "workspace:*",
     "@vercel/analytics": "^1.6.1",
     "idb": "^8.0.3",
