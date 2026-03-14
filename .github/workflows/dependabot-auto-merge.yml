@@ -1,7 +1,10 @@
 name: Dependabot Auto-Merge
 
+# Use pull_request_target so the workflow runs with base branch permissions,
+# which allows approving and enabling auto-merge on Dependabot PRs.
+# This is safe because we only run for dependabot[bot] and don't checkout PR code.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
