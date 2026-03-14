@@ -25,6 +25,7 @@
 
 - [ ] Unit tests pass (`pnpm test`)
 - [ ] E2E tests pass (`pnpm test:e2e`)
+- [ ] Cross-browser E2E tests pass (`pnpm test:e2e:browsers`) — Chromium, Firefox, WebKit
 - [ ] Manually tested in browser
 
 ## Jira Issue

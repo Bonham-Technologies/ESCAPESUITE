@@ -249,8 +249,11 @@ test.describe('Permission Recovery', () => {
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
-    // Grant permissions
-    await context.grantPermissions(['camera', 'microphone'])
+    // Grant permissions (Chromium-only; Firefox/WebKit don't support this)
+    const browserName = context.browser()?.browserType().name()
+    if (browserName === 'chromium') {
+      await context.grantPermissions(['camera', 'microphone'])
+    }
 
     // Refresh to pick up new permissions
     await page.reload()
