@@ -22,6 +22,8 @@
     "test:watch": "turbo test",
     "test:coverage": "turbo test:coverage",
     "test:e2e": "turbo test --filter=@escapesuite/e2e",
+    "test:e2e:browsers": "pnpm --filter=@escapesuite/e2e run test:browsers",
+    "test:e2e:browsers:all": "pnpm --filter=@escapesuite/e2e run test:browsers:all",
     "test:e2e:standalone": "pnpm --filter=@escapesuite/e2e run test:standalone",
     "clean": "turbo clean && rm -rf node_modules && rm -rf dist",
     "changeset": "changeset",

@@ -1,12 +1,59 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const isCI = !!process.env.CI
+
+const crossBrowserProjects = [
+  {
+    name: 'firefox',
+    use: { ...devices['Desktop Firefox'] },
+  },
+  {
+    name: 'webkit',
+    use: { ...devices['Desktop Safari'] },
+  },
+]
+
+const crossBrowserResponsiveProjects = [
+  {
+    name: 'mobile-firefox',
+    use: {
+      ...devices['Desktop Firefox'],
+      viewport: { width: 393, height: 851 },
+      hasTouch: true,
+    },
+    testMatch: '**/responsive/**',
+  },
+  {
+    name: 'mobile-webkit',
+    use: { ...devices['iPhone 12'] },
+    testMatch: '**/responsive/**',
+  },
+  {
+    name: 'tablet-firefox',
+    use: {
+      ...devices['Desktop Firefox'],
+      viewport: { width: 768, height: 1024 },
+      hasTouch: true,
+    },
+    testMatch: '**/responsive/**',
+  },
+  {
+    name: 'tablet-webkit',
+    use: {
+      ...devices['iPad (gen 7)'],
+      isMobile: false,
+    },
+    testMatch: '**/responsive/**',
+  },
+]
+
 export default defineConfig({
   testDir: './tests',
   testIgnore: ['**/standalone/**'], // Standalone tests use separate config
   fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  forbidOnly: isCI,
+  retries: isCI ? 2 : 0,
+  workers: isCI ? 1 : undefined,
   reporter: 'html',
 
   use: {
@@ -20,13 +67,15 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    // Cross-browser projects only run locally (not in CI)
+    ...(isCI ? [] : crossBrowserProjects),
     {
-      name: 'mobile',
+      name: 'mobile-chromium',
       use: { ...devices['Pixel 5'] },
       testMatch: '**/responsive/**',
     },
     {
-      name: 'tablet',
+      name: 'tablet-chromium',
       use: {
         viewport: { width: 768, height: 1024 },
         isMobile: false,
@@ -34,6 +83,8 @@ export default defineConfig({
       },
       testMatch: '**/responsive/**',
     },
+    // Cross-browser responsive projects only run locally
+    ...(isCI ? [] : crossBrowserResponsiveProjects),
   ],
 
   webServer: [
