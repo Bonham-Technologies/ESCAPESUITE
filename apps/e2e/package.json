@@ -13,6 +13,8 @@
     "test:integration": "playwright test tests/integration",
     "test:standalone": "playwright test --config=playwright.standalone.config.ts",
     "test:standalone:headed": "playwright test --config=playwright.standalone.config.ts --headed",
+    "test:browsers": "playwright test --project=chromium --project=firefox --project=webkit",
+    "test:browsers:all": "playwright test",
     "test:journeys": "playwright test --config=playwright.journeys.config.ts",
     "test:journeys:headed": "playwright test --config=playwright.journeys.config.ts --headed",
     "test:journeys:ui": "playwright test --config=playwright.journeys.config.ts --ui",
@@ -21,10 +23,10 @@
     "report:journeys": "playwright show-report playwright-report-journeys"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.10.1",
+    "@axe-core/playwright": "^4.11.1",
     "@playwright/test": "^1.58.1",
     "@types/node": "^25.2.2",
-    "serve": "^14.2.4",
+    "serve": "^14.2.6",
     "wait-on": "^9.0.3"
   }
 }

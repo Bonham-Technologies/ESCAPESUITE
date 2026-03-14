@@ -56,7 +56,9 @@ pnpm build:deploy        # Combined build for Vercel (outputs to /dist)
 # Testing
 pnpm test                # Unit tests for all apps
 pnpm test:coverage       # With coverage reports
-pnpm test:e2e            # Playwright E2E tests
+pnpm test:e2e            # Playwright E2E tests (Chromium only in CI)
+pnpm test:e2e:browsers   # Cross-browser E2E (Chromium + Firefox + WebKit)
+pnpm test:e2e:browsers:all # Cross-browser E2E including responsive variants
 
 # Linting
 pnpm lint                # Lint all apps

@@ -2,24 +2,27 @@ import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
-// Node.js 22+ has a native localStorage global that lacks the full Web Storage API
-// (e.g., no clear() method). Override with a proper in-memory implementation for tests.
-if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localStorage.clear !== 'function') {
-  const store = new Map<string, string>()
-  const storage: Storage = {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => { store.set(key, String(value)) },
-    removeItem: (key: string) => { store.delete(key) },
-    clear: () => { store.clear() },
-    key: (index: number) => [...store.keys()][index] ?? null,
-    get length() { return store.size },
+// Provide a full localStorage mock (Node 22+ exposes a built-in localStorage
+// that lacks clear/getItem/setItem when --localstorage-file is not set, which
+// breaks tests that call localStorage.clear()).
+const localStorageMock = (() => {
+  let store: Record<string, string> = {}
+  const storage = {
+    getItem: vi.fn((key: string) => store[key] ?? null),
+    setItem: vi.fn((key: string, value: string) => { store[key] = String(value) }),
+    removeItem: vi.fn((key: string) => { delete store[key] }),
+    clear: vi.fn(() => { store = {} }),
+    get length() { return Object.keys(store).length },
+    key: vi.fn((index: number) => Object.keys(store)[index] ?? null),
   }
-  Object.defineProperty(globalThis, 'localStorage', { value: storage, writable: true, configurable: true })
-}
+  return storage
+})()
+Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true })
 
 // Cleanup after each test
 afterEach(() => {
   cleanup()
+  localStorageMock.clear()
 })
 
 // Mock matchMedia for component tests
