@@ -33,6 +33,8 @@ updates:
           - "jsdom"
           - "@playwright/test"
           - "@axe-core/*"
+          - "wait-on"
+          - "serve"
       linting:
         patterns:
           - "eslint*"
@@ -50,19 +52,6 @@ updates:
           - "@types/*"
         exclude-patterns:
           - "@types/react*"  # Already in react group
-
-  # E2E app dependencies (separate lockfile)
-  - package-ecosystem: "npm"
-    directory: "/apps/e2e"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 3
-    rebase-strategy: "auto"
-    groups:
-      e2e-deps:
-        patterns:
-          - "*"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
