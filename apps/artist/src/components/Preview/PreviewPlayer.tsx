@@ -432,7 +432,7 @@ export function PreviewPlayer() {
     // Audio clips don't render visually - skip drawing
     if (isAudio) return;
 
-    let drawSource: HTMLVideoElement | HTMLImageElement | null = null;
+    let drawSource: HTMLVideoElement | HTMLImageElement;
     let sourceWidth: number;
     let sourceHeight: number;
 
