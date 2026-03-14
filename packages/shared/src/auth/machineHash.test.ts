@@ -67,7 +67,7 @@ describe('machineHash', () => {
 
     it('should handle localStorage errors gracefully', async () => {
       // Mock localStorage to throw
-      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
         throw new Error('QuotaExceeded')
       })
 
@@ -77,7 +77,7 @@ describe('machineHash', () => {
       expect(hash).toHaveLength(64)
 
       // Restore
-      vi.mocked(localStorage.setItem).mockRestore()
+      spy.mockRestore()
     })
   })
 })
