@@ -14,9 +14,9 @@ on:
     types: [opened, synchronize, reopened]
 
 # Cancel in-progress runs when a new commit is pushed to the same branch/PR
-# This saves minutes by not running duplicate workflows
+# Include event_name to prevent pull_request and pull_request_target from cancelling each other
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
