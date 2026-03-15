@@ -63,7 +63,7 @@ vi.mock('../../core/exporter', () => ({
 
 // Mock storage for settings persistence
 const { mockGetSetting, mockSetSetting } = vi.hoisted(() => ({
-  mockGetSetting: vi.fn(() => Promise.resolve(undefined)),
+  mockGetSetting: vi.fn((): Promise<unknown> => Promise.resolve(undefined)),
   mockSetSetting: vi.fn(() => Promise.resolve()),
 }))
 
@@ -279,8 +279,8 @@ describe('ExportDialog', () => {
 
   it('primary button exports with default settings (WebM, medium, project)', async () => {
     let capturedOptions: unknown
-    mockExportToWebM.mockImplementation((_clips: unknown, _videos: unknown, options: unknown) => {
-      capturedOptions = options
+    mockExportToWebM.mockImplementation((...args: unknown[]) => {
+      capturedOptions = args[2]
       return Promise.resolve(new Blob())
     })
 
@@ -302,8 +302,8 @@ describe('ExportDialog', () => {
 
   it('advanced export button uses configured settings', async () => {
     let capturedOptions: unknown
-    mockExportToWebM.mockImplementation((_clips: unknown, _videos: unknown, options: unknown) => {
-      capturedOptions = options
+    mockExportToWebM.mockImplementation((...args: unknown[]) => {
+      capturedOptions = args[2]
       return Promise.resolve(new Blob())
     })
 

@@ -645,11 +645,11 @@ export async function exportToMP4(
 
     // Check for any encoder errors before finalizing
     if (videoEncoderError) {
-      log('error', `Video encoder error before finalize: ${videoEncoderError.message}`);
+      log('error', `Video encoder error before finalize: ${(videoEncoderError as Error).message}`);
       throw videoEncoderError;
     }
     if (audioEncoderError) {
-      log('error', `Audio encoder error before finalize: ${audioEncoderError.message}`);
+      log('error', `Audio encoder error before finalize: ${(audioEncoderError as Error).message}`);
       throw audioEncoderError;
     }
 

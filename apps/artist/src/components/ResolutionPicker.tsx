@@ -28,7 +28,7 @@ export function ResolutionPicker() {
   const currentPreset = getCurrentPresetKey(resolution.width, resolution.height);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const key = e.target.value as PresetKey;
+    const key = e.target.value as PresetKey | 'custom';
     if (key === 'custom') return;
     const preset = RESOLUTION_PRESETS[key];
     if (preset.width === resolution.width && preset.height === resolution.height) return;

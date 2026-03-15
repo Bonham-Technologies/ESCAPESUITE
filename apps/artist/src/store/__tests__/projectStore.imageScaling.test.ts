@@ -17,27 +17,6 @@ function createSourceVideo(overrides: Partial<SourceVideo> = {}): SourceVideo {
   };
 }
 
-function addSourceAndClip(source: SourceVideo) {
-  const store = useEditorStore.getState();
-  store.addSourceVideo(source);
-  store.addClipToTimeline({
-    id: 'clip-1',
-    sourceVideoId: source.id,
-    name: source.name,
-    startTime: 0,
-    endTime: source.duration,
-    duration: source.duration,
-    trackId: '',
-    timelinePosition: 0,
-    blendMode: 'normal',
-    transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-    effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-    transition: { type: 'none', duration: 0 },
-  });
-
-  return useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-1')!;
-}
-
 describe('Image Scaling Relative to Project Resolution', () => {
   beforeEach(() => {
     useEditorStore.getState().resetProject();
@@ -64,12 +43,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 5,
         duration: 5,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-large')!;
@@ -98,12 +71,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 5,
         duration: 5,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-wide')!;
@@ -134,12 +101,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 5,
         duration: 5,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-small')!;
@@ -167,12 +128,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 5,
         duration: 5,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-exact')!;
@@ -201,12 +156,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 10,
         duration: 10,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-4k')!;
@@ -237,12 +186,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 10,
         duration: 10,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-720')!;
@@ -272,12 +215,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 120,
         duration: 120,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-audio')!;
@@ -309,12 +246,6 @@ describe('Image Scaling Relative to Project Resolution', () => {
         startTime: 0,
         endTime: 5,
         duration: 5,
-        trackId: '',
-        timelinePosition: 0,
-        blendMode: 'normal',
-        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-        effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0, rotation: 0, flipH: false, flipV: false, speed: 1 },
-        transition: { type: 'none', duration: 0 },
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-hd')!;
