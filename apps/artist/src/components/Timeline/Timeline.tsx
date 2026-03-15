@@ -66,6 +66,8 @@ export function Timeline() {
   const shiftClipsAfter = useEditorStore((state) => state.shiftClipsAfter);
   const markers = useEditorStore((state) => state.markers);
   const removeMarker = useEditorStore((state) => state.removeMarker);
+  const isPlaying = useEditorStore((state) => state.isPlaying);
+  const setIsPlaying = useEditorStore((state) => state.setIsPlaying);
   const activeTool = useEditorStore((state) => state.activeTool);
   const splitClip = useEditorStore((state) => state.splitClip);
 
@@ -164,10 +166,14 @@ export function Timeline() {
     });
   }, [markers, pixelsPerSecond]);
 
-  // Handle ruler click to seek
+  // Handle ruler click to seek (and pause if playing)
   const handleRulerClick = useCallback(
     (e: React.MouseEvent) => {
       if (!rulerRef.current) return;
+
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
 
       const rect = rulerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + rulerRef.current.scrollLeft;
@@ -175,10 +181,10 @@ export function Timeline() {
       const clampedTime = Math.max(0, Math.min(time, timelineDuration || minTimelineDuration));
       setCurrentTime(clampedTime);
     },
-    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime]
+    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying]
   );
 
-  // Handle click on track to seek and deselect
+  // Handle click on track to seek, pause, and deselect
   const handleTrackClick = useCallback(
     (e: React.MouseEvent) => {
       if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
@@ -191,6 +197,10 @@ export function Timeline() {
       // Don't seek or deselect when clicking playhead
       if (isClickOnPlayhead) return;
 
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+
       const rect = trackContainerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + trackContainerRef.current.scrollLeft;
       const time = pixelsToTime(x, pixelsPerSecond);
@@ -202,7 +212,7 @@ export function Timeline() {
         setSelectedClipId(null);
       }
     },
-    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, isDraggingPlayhead, dragState]
+    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, isDraggingPlayhead, dragState, isPlaying, setIsPlaying]
   );
 
   // Handle playhead drag
