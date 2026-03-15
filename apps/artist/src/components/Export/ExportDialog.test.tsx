@@ -16,6 +16,7 @@ vi.mock('../../store/projectStore', () => ({
     const state = {
       project: {
         name: 'Test Project',
+        resolution: { width: 1920, height: 1080 },
         timeline: {
           clips: mockClips,
           tracks: [{ id: 'track1', name: 'Track 1', index: 0 }],
@@ -115,9 +116,10 @@ describe('ExportDialog', () => {
     expect(screen.getByText('High (slower export)')).toBeInTheDocument()
   })
 
-  it('displays resolution options', () => {
+  it('displays resolution options with project resolution as default', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
+    expect(screen.getByText('Project (1920x1080)')).toBeInTheDocument()
     expect(screen.getByText('Original')).toBeInTheDocument()
     expect(screen.getByText('1080p')).toBeInTheDocument()
     expect(screen.getByText('720p')).toBeInTheDocument()
@@ -186,7 +188,7 @@ describe('ExportDialog', () => {
   it('allows changing resolution selection', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
-    const resolutionSelect = screen.getByDisplayValue('Original')
+    const resolutionSelect = screen.getByDisplayValue('Project (1920x1080)')
     fireEvent.change(resolutionSelect, { target: { value: '720p' } })
 
     expect(resolutionSelect).toHaveValue('720p')

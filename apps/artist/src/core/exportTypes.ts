@@ -154,14 +154,26 @@ export function getQualitySettings(quality: ExportOptions['quality']) {
 }
 
 /**
- * Get resolution dimensions
+ * Get resolution dimensions.
+ * When resolution is 'project', uses projectResolution if provided.
+ * When resolution is 'original', uses the source video dimensions.
+ * Preset resolutions (1080p, 720p, 480p) scale based on the source aspect ratio.
  */
 export function getResolution(
   resolution: ExportOptions['resolution'],
   originalWidth: number,
-  originalHeight: number
+  originalHeight: number,
+  projectResolution?: { width: number; height: number }
 ): { width: number; height: number } {
-  if (resolution === 'original') {
+  if (resolution === 'project' && projectResolution) {
+    return {
+      width: projectResolution.width % 2 === 0 ? projectResolution.width : projectResolution.width + 1,
+      height: projectResolution.height % 2 === 0 ? projectResolution.height : projectResolution.height + 1,
+    };
+  }
+
+  if (resolution === 'original' || resolution === 'project') {
+    // Fall back to original if 'project' but no projectResolution provided
     return {
       width: originalWidth % 2 === 0 ? originalWidth : originalWidth + 1,
       height: originalHeight % 2 === 0 ? originalHeight : originalHeight + 1

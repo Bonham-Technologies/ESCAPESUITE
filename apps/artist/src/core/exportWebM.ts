@@ -48,7 +48,8 @@ export async function exportToWebM(
   onProgress: ProgressCallback,
   tracks?: Track[],
   watermark?: WatermarkConfig | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  projectResolution?: { width: number; height: number }
 ): Promise<Blob> {
   if (!isWebMExportSupported()) {
     throw new Error('WebM export requires WebCodecs API (Chrome/Edge)');
@@ -92,7 +93,7 @@ export async function exportToWebM(
     }
   }
 
-  const { width, height } = getResolution(options.resolution, baseWidth, baseHeight);
+  const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;

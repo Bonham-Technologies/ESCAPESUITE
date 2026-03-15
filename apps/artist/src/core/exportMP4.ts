@@ -54,7 +54,8 @@ export async function exportToMP4(
   onProgress: ProgressCallback,
   tracks?: Track[],
   watermark?: WatermarkConfig | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  projectResolution?: { width: number; height: number }
 ): Promise<Blob> {
   if (!isMP4ExportSupported()) {
     throw new Error('MP4 export requires WebCodecs API (Chrome/Edge)');
@@ -98,7 +99,7 @@ export async function exportToMP4(
     }
   }
 
-  const { width, height } = getResolution(options.resolution, baseWidth, baseHeight);
+  const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;

@@ -502,7 +502,7 @@ export interface EditorState {
 export interface ExportOptions {
   format: 'webm' | 'mp4';
   quality: 'low' | 'medium' | 'high';
-  resolution: 'original' | '1080p' | '720p' | '480p';
+  resolution: 'project' | 'original' | '1080p' | '720p' | '480p';
 }
 
 export interface ExportProgress {

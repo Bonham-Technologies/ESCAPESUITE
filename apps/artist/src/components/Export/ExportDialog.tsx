@@ -17,12 +17,13 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const projectName = useEditorStore((state) => state.project.name);
+  const projectResolution = useEditorStore((state) => state.project.resolution);
   const { isTrial } = useAuth();
 
   const [options, setOptions] = useState<ExportOptions>({
     format: 'webm',
     quality: 'high',
-    resolution: 'original',
+    resolution: 'project',
   });
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,10 +59,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       const watermark = isTrial ? defaultWatermarkConfig : null;
 
       if (options.format === 'mp4' && mp4Supported) {
-        blob = await exportToMP4(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal);
+        blob = await exportToMP4(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal, projectResolution);
         extension = 'mp4';
       } else {
-        blob = await exportToWebM(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal);
+        blob = await exportToWebM(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal, projectResolution);
         extension = 'webm';
       }
 
@@ -103,7 +104,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       // Clear the abort controller reference
       abortControllerRef.current = null;
     }
-  }, [clips, tracks, sourceVideos, options, projectName, mp4Supported, onClose, isTrial]);
+  }, [clips, tracks, sourceVideos, options, projectName, projectResolution, mp4Supported, onClose, isTrial]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
@@ -195,6 +196,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   value={options.resolution}
                   onChange={(e) => setOptions({ ...options, resolution: e.target.value as ExportOptions['resolution'] })}
                 >
+                  <option value="project">Project ({projectResolution.width}x{projectResolution.height})</option>
                   <option value="original">Original</option>
                   <option value="1080p">1080p</option>
                   <option value="720p">720p</option>
