@@ -391,9 +391,13 @@ export interface EditorState {
 
   // Selection state
   selectedClipId: string | null;
+  selectedClipIds: Set<string>;        // Multi-select set
   selectedTrackId: string | null;
   selectedOverlayId: string | null;
   selectedOverlayType: 'text' | 'shape' | null;
+
+  // Clipboard (for copy/paste)
+  clipboard: Clip[] | null;
 
   // UI state
   zoom: number;
@@ -469,6 +473,17 @@ export interface EditorState {
   setSelectedClipId: (id: string | null) => void;
   setSelectedTrackId: (id: string | null) => void;
   setSelectedOverlay: (id: string | null, type: 'text' | 'shape' | null) => void;
+
+  // Actions - Multi-Select
+  toggleClipSelection: (clipId: string) => void;
+  selectClipsInRange: (clipIds: string[]) => void;
+  clearMultiSelection: () => void;
+  moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
+  deleteSelectedClips: () => void;
+  copySelectedClips: () => void;
+  pasteClips: () => void;
+  muteSelectedClips: () => void;
+  unmuteSelectedClips: () => void;
 
   // Actions - UI
   setZoom: (zoom: number) => void;
