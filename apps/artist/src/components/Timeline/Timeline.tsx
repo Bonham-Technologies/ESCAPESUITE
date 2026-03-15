@@ -51,12 +51,15 @@ export function Timeline() {
   const timelineDuration = useEditorStore((state) => state.project.timeline.duration);
   const currentTime = useEditorStore((state) => state.currentTime);
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
+  const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
   const zoom = useEditorStore((state) => state.zoom);
   const snapEnabled = useEditorStore((state) => state.snapEnabled);
   const snapThreshold = useEditorStore((state) => state.snapThreshold);
 
   const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
   const setSelectedClipId = useEditorStore((state) => state.setSelectedClipId);
+  const toggleClipSelection = useEditorStore((state) => state.toggleClipSelection);
+  const moveSelectedClips = useEditorStore((state) => state.moveSelectedClips);
   const setClipTimelinePosition = useEditorStore((state) => state.setClipTimelinePosition);
   const moveClipToTrack = useEditorStore((state) => state.moveClipToTrack);
   const updateTrack = useEditorStore((state) => state.updateTrack);
@@ -327,6 +330,12 @@ export function Timeline() {
         return;
       }
 
+      // Ctrl+click (or Cmd+click on Mac) toggles multi-selection
+      if (e.ctrlKey || e.metaKey) {
+        toggleClipSelection(clip.id);
+        return;
+      }
+
       setSelectedClipId(clip.id);
 
       const track = tracks.find(t => t.id === clip.trackId);
@@ -346,7 +355,7 @@ export function Timeline() {
         offsetX,
       });
     },
-    [tracks, setSelectedClipId, activeTool, handleRazorClick]
+    [tracks, setSelectedClipId, toggleClipSelection, activeTool, handleRazorClick]
   );
 
   // Handle drag movement
@@ -410,22 +419,30 @@ export function Timeline() {
       if (dragState) {
         const clip = clips.find(c => c.id === dragState.clipId);
         if (clip) {
-          // Check for overlaps before committing
-          const overlap = wouldOverlap(
-            clips,
-            dragState.currentTrackId,
-            dragState.currentPosition,
-            clip.duration,
-            dragState.clipId
-          );
+          const deltaTime = dragState.currentPosition - dragState.originalPosition;
 
-          if (!overlap) {
-            // Commit the move
-            if (dragState.currentTrackId !== dragState.originalTrackId) {
-              moveClipToTrack(dragState.clipId, dragState.currentTrackId);
-            }
-            if (dragState.currentPosition !== dragState.originalPosition) {
-              setClipTimelinePosition(dragState.clipId, dragState.currentPosition);
+          // Bulk drag: if dragged clip is part of multi-selection, move all selected clips
+          if (selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1 && deltaTime !== 0) {
+            moveSelectedClips(deltaTime, 0);
+          } else {
+            // Single clip move
+            // Check for overlaps before committing
+            const overlap = wouldOverlap(
+              clips,
+              dragState.currentTrackId,
+              dragState.currentPosition,
+              clip.duration,
+              dragState.clipId
+            );
+
+            if (!overlap) {
+              // Commit the move
+              if (dragState.currentTrackId !== dragState.originalTrackId) {
+                moveClipToTrack(dragState.clipId, dragState.currentTrackId);
+              }
+              if (deltaTime !== 0) {
+                setClipTimelinePosition(dragState.clipId, dragState.currentPosition);
+              }
             }
           }
         }
@@ -440,7 +457,7 @@ export function Timeline() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState, clips, snapEnabled, snapThreshold, pixelsPerSecond, moveClipToTrack, setClipTimelinePosition]);
+  }, [dragState, clips, snapEnabled, snapThreshold, pixelsPerSecond, moveClipToTrack, setClipTimelinePosition, selectedClipIds, moveSelectedClips]);
 
   // Handle trim edge mouse down
   const handleTrimMouseDown = useCallback(
@@ -849,6 +866,7 @@ export function Timeline() {
                   const clipX = timeToPixels(displayPosition, pixelsPerSecond);
                   const clipWidth = timeToPixels(clip.duration, pixelsPerSecond);
                   const isSelected = clip.id === selectedClipId;
+                  const isMultiSelected = selectedClipIds.has(clip.id);
 
                   const isTrimming = trimState?.clipId === clip.id;
 
@@ -866,7 +884,7 @@ export function Timeline() {
                     <div
                       key={clip.id}
                       data-clip-id={clip.id}
-                      className={`${styles.clip} ${isSelected ? styles.clipSelected : ''} ${isDragging ? styles.clipDragging : ''} ${isTrimming ? styles.clipTrimming : ''} ${isAudioClip ? styles.clipAudio : ''} ${isImageClip ? styles.clipImage : ''} ${isTextOverlay ? styles.clipText : ''} ${isShapeOverlay ? styles.clipShape : ''}`}
+                      className={`${styles.clip} ${isSelected ? styles.clipSelected : ''} ${isMultiSelected && !isSelected ? styles.clipMultiSelected : ''} ${isDragging ? styles.clipDragging : ''} ${isTrimming ? styles.clipTrimming : ''} ${isAudioClip ? styles.clipAudio : ''} ${isImageClip ? styles.clipImage : ''} ${isTextOverlay ? styles.clipText : ''} ${isShapeOverlay ? styles.clipShape : ''}`}
                       style={{
                         left: clipX,
                         width: clipWidth,

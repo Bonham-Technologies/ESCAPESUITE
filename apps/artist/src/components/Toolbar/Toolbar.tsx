@@ -20,6 +20,11 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
   const redo = useEditorStore((state) => state.redo);
   const canUndo = useEditorStore((state) => state.canUndo);
   const canRedo = useEditorStore((state) => state.canRedo);
+  const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
+  const deleteSelectedClips = useEditorStore((state) => state.deleteSelectedClips);
+  const muteSelectedClips = useEditorStore((state) => state.muteSelectedClips);
+  const unmuteSelectedClips = useEditorStore((state) => state.unmuteSelectedClips);
+  const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
 
   const handleToolChange = useCallback((tool: ToolType) => {
     setActiveTool(tool);
@@ -158,6 +163,57 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
           </svg>
         </button>
       </div>
+
+      {/* Multi-select actions */}
+      {selectedClipIds.size > 1 && (
+        <>
+          <div className={styles.divider} />
+          <div className={styles.multiSelectGroup}>
+            <span className={styles.multiSelectLabel}>{selectedClipIds.size} clips selected</span>
+            <div className={styles.buttonGroup}>
+              <button
+                className={styles.toolButton}
+                onClick={muteSelectedClips}
+                title="Mute selected clips"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <line x1="23" y1="9" x2="17" y2="15" />
+                  <line x1="17" y1="9" x2="23" y2="15" />
+                </svg>
+              </button>
+              <button
+                className={styles.toolButton}
+                onClick={unmuteSelectedClips}
+                title="Unmute selected clips"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
+              </button>
+              <button
+                className={`${styles.toolButton} ${styles.deleteButton}`}
+                onClick={deleteSelectedClips}
+                title="Delete selected clips (Delete)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
+            </div>
+            <button
+              className={styles.clearSelectionButton}
+              onClick={clearMultiSelection}
+              title="Clear selection (Escape)"
+            >
+              Clear
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Spacer */}
       <div className={styles.spacer} />

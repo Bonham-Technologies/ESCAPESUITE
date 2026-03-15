@@ -80,6 +80,12 @@ function App() {
   const goToNextMarker = useEditorStore((state) => state.goToNextMarker);
   const goToPreviousMarker = useEditorStore((state) => state.goToPreviousMarker);
   const splitClip = useEditorStore((state) => state.splitClip);
+  const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
+  const deleteSelectedClips = useEditorStore((state) => state.deleteSelectedClips);
+  const copySelectedClips = useEditorStore((state) => state.copySelectedClips);
+  const pasteClips = useEditorStore((state) => state.pasteClips);
+  const clipboard = useEditorStore((state) => state.clipboard);
+  const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
 
   // Show notification
   const showNotification = useCallback((message: string, type: 'info' | 'error' | 'success' = 'info') => {
@@ -244,17 +250,44 @@ function App() {
         return;
       }
 
-      // Delete or Backspace = Delete selected clip
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedClipId) {
-        e.preventDefault();
-        if (activeTool === 'ripple') {
-          rippleDeleteClip(selectedClipId);
-          showNotification('Clip deleted (ripple)', 'info');
-        } else {
-          removeClipFromTimeline(selectedClipId);
-          showNotification('Clip deleted', 'info');
+      // Delete or Backspace = Delete selected clip(s)
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedClipIds.size > 0) {
+          e.preventDefault();
+          deleteSelectedClips();
+          showNotification(`${selectedClipIds.size} clip${selectedClipIds.size !== 1 ? 's' : ''} deleted`, 'info');
+          return;
+        } else if (selectedClipId) {
+          e.preventDefault();
+          if (activeTool === 'ripple') {
+            rippleDeleteClip(selectedClipId);
+            showNotification('Clip deleted (ripple)', 'info');
+          } else {
+            removeClipFromTimeline(selectedClipId);
+            showNotification('Clip deleted', 'info');
+          }
+          return;
         }
-        return;
+      }
+
+      // Ctrl/Cmd + C = Copy selected clips
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        if (selectedClipIds.size > 0) {
+          e.preventDefault();
+          copySelectedClips();
+          showNotification(`${selectedClipIds.size} clip${selectedClipIds.size !== 1 ? 's' : ''} copied`, 'info');
+          return;
+        }
+      }
+
+      // Ctrl/Cmd + V = Paste clips
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        if (clipboard && clipboard.length > 0) {
+          e.preventDefault();
+          pasteClips();
+          showNotification(`${clipboard.length} clip${clipboard.length !== 1 ? 's' : ''} pasted`, 'info');
+          return;
+        }
       }
 
       // Ctrl/Cmd + D = Duplicate selected clip
@@ -383,10 +416,15 @@ function App() {
         return;
       }
 
-      // Escape = Close shortcuts panel or deselect clip
+      // Escape = Close shortcuts panel, clear multi-selection, or deselect clip
       if (e.key === 'Escape') {
         if (showShortcuts) {
           setShowShortcuts(false);
+          return;
+        }
+        if (selectedClipIds.size > 0) {
+          e.preventDefault();
+          clearMultiSelection();
           return;
         }
         if (selectedClipId) {
@@ -404,7 +442,8 @@ function App() {
     duplicateClip, handleSaveProject, handleLoadProject, clips.length,
     handleZoomIn, handleZoomOut, showNotification, keyframePanelOpen, setKeyframePanelOpen,
     setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker, currentTime,
-    goToNextMarker, goToPreviousMarker, showShortcuts, splitClip
+    goToNextMarker, goToPreviousMarker, showShortcuts, splitClip,
+    selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection
   ]);
 
   // Timeline resize handlers

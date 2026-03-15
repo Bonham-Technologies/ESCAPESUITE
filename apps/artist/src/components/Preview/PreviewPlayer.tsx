@@ -145,6 +145,7 @@ export function PreviewPlayer() {
   const loopPlayback = useEditorStore((state) => state.loopPlayback);
 
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
+  const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
   const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
   const setIsPlaying = useEditorStore((state) => state.setIsPlaying);
   const updateTextOverlayData = useEditorStore((state) => state.updateTextOverlayData);
@@ -1526,6 +1527,46 @@ export function PreviewPlayer() {
     ctx.restore();
   }, [clips, selectedClipId, isPlaying, getOverlayBounds, isManipulableClip, hasCustomKeyframes, keyframePanelOpen]);
 
+  // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
+  const drawMultiSelectHandles = useCallback((time: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || selectedClipIds.size <= 1 || isPlaying) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    for (const clipId of selectedClipIds) {
+      // Skip the primary selected clip - it already has full handles
+      if (clipId === selectedClipId) continue;
+
+      const clip = clips.find(c => c.id === clipId);
+      if (!clip || !isManipulableClip(clip)) continue;
+
+      // Check if clip is visible at current time
+      const clipEnd = clip.timelinePosition + clip.duration;
+      if (time < clip.timelinePosition || time >= clipEnd) continue;
+
+      const bounds = getOverlayBounds(clip, canvas, time);
+      if (!bounds) continue;
+
+      const { centerX, centerY, width, height, rotation } = bounds;
+      const halfW = width / 2;
+      const halfH = height / 2;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate((rotation * Math.PI) / 180);
+
+      // Draw dashed bounding box for multi-selected clips
+      ctx.strokeStyle = '#2196F3';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(-halfW, -halfH, width, height);
+
+      ctx.restore();
+    }
+  }, [clips, selectedClipId, selectedClipIds, isPlaying, getOverlayBounds, isManipulableClip]);
+
   // Get mouse position relative to canvas in normalized coordinates (0-1)
   // Accounts for object-fit: contain which letterboxes the canvas content
   const getCanvasPosition = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
@@ -2111,8 +2152,9 @@ export function PreviewPlayer() {
     requestAnimationFrame(() => {
       drawFrame(currentTime);
       drawSelectionHandles(currentTime);
+      drawMultiSelectHandles(currentTime);
     });
-  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate]);
+  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, drawMultiSelectHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate]);
 
   const handleMouseUp = useCallback(() => {
     if (dragState) {
@@ -2245,9 +2287,10 @@ export function PreviewPlayer() {
     const timeout = setTimeout(() => {
       drawFrame(currentTimeRef.current);
       drawSelectionHandles(currentTimeRef.current);
+      drawMultiSelectHandles(currentTimeRef.current);
     }, 50);
     return () => clearTimeout(timeout);
-  }, [videoUrlsKey, imageUrlsKey, isPlaying, drawFrame, drawSelectionHandles]);
+  }, [videoUrlsKey, imageUrlsKey, isPlaying, drawFrame, drawSelectionHandles, drawMultiSelectHandles]);
 
   // Handle scrubbing (when not playing)
   // Key insight: Check cache first, then draw with current video frame, then update after seek completes
@@ -2264,6 +2307,7 @@ export function PreviewPlayer() {
     // If cache hit, drawFrame returns early after drawing the cached frame
     drawFrame(currentTime, true);
     drawSelectionHandles(currentTime);
+    drawMultiSelectHandles(currentTime);
     setDisplayTime(currentTime);
 
     // If we got a cache hit, we're done - no need to seek or re-render
@@ -2328,6 +2372,7 @@ export function PreviewPlayer() {
           if (cancelled) return;
           drawFrame(currentTime, false); // Force fresh render, don't use cache
           drawSelectionHandles(currentTime);
+          drawMultiSelectHandles(currentTime);
 
           // Cache the freshly rendered frame for instant scrubbing later
           const canvas = canvasRef.current;
@@ -2348,7 +2393,7 @@ export function PreviewPlayer() {
     return () => {
       cancelled = true;
     };
-  }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, sourceVideos]);
+  }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos]);
 
   // Invalidate frame cache when timeline content changes
   // This ensures we don't show stale cached frames after edits
@@ -2391,6 +2436,7 @@ export function PreviewPlayer() {
       requestAnimationFrame(() => {
         drawFrame(currentTimeRef.current);
         drawSelectionHandles(currentTimeRef.current);
+        drawMultiSelectHandles(currentTimeRef.current);
       });
       return;
     }
