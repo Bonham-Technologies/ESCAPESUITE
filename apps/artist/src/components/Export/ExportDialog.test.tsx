@@ -61,6 +61,17 @@ vi.mock('../../core/exporter', () => ({
   ExportError: MockExportError,
 }))
 
+// Mock storage for settings persistence
+const { mockGetSetting, mockSetSetting } = vi.hoisted(() => ({
+  mockGetSetting: vi.fn(() => Promise.resolve(undefined)),
+  mockSetSetting: vi.fn(() => Promise.resolve()),
+}))
+
+vi.mock('../../core/storage', () => ({
+  getSetting: mockGetSetting,
+  setSetting: mockSetSetting,
+}))
+
 // Mock CSS modules
 vi.mock('./ExportDialog.module.css', () => ({
   default: {
@@ -70,6 +81,14 @@ vi.mock('./ExportDialog.module.css', () => ({
     title: 'title',
     closeButton: 'closeButton',
     body: 'body',
+    primarySection: 'primarySection',
+    primaryExportButton: 'primaryExportButton',
+    advancedSection: 'advancedSection',
+    advancedToggle: 'advancedToggle',
+    advancedChevron: 'advancedChevron',
+    advancedChevronOpen: 'advancedChevronOpen',
+    advancedContent: 'advancedContent',
+    advancedExportButton: 'advancedExportButton',
     section: 'section',
     label: 'label',
     radioGroup: 'radioGroup',
@@ -97,6 +116,7 @@ describe('ExportDialog', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockGetSetting.mockResolvedValue(undefined)
   })
 
   it('does not render when isOpen is false', () => {
@@ -109,28 +129,50 @@ describe('ExportDialog', () => {
     expect(screen.getByText('Export Video')).toBeInTheDocument()
   })
 
-  it('displays format options', () => {
+  it('shows primary Download WebM button', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+    expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
+  })
+
+  it('shows Advanced options toggle', () => {
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+    expect(screen.getByRole('button', { name: /advanced options/i })).toBeInTheDocument()
+  })
+
+  it('does not show format options by default', () => {
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+    expect(screen.queryByText('WebM (VP9 + Opus)')).not.toBeInTheDocument()
+    expect(screen.queryByText('MP4 (H.264 + AAC)')).not.toBeInTheDocument()
+  })
+
+  it('shows format/quality/resolution options when Advanced options is clicked', () => {
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    const advancedToggle = screen.getByRole('button', { name: /advanced options/i })
+    fireEvent.click(advancedToggle)
 
     expect(screen.getByText('WebM (VP9 + Opus)')).toBeInTheDocument()
     expect(screen.getByText('MP4 (H.264 + AAC)')).toBeInTheDocument()
+    expect(screen.getByText('Quality')).toBeInTheDocument()
+    expect(screen.getByText('Resolution')).toBeInTheDocument()
   })
 
-  it('displays quality options', () => {
+  it('displays quality options in advanced section', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
-    // Quality label and options
-    expect(screen.getByText('Quality')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+
     expect(screen.getByText('Low (faster export)')).toBeInTheDocument()
     expect(screen.getByText('Medium')).toBeInTheDocument()
     expect(screen.getByText('High (slower export)')).toBeInTheDocument()
   })
 
-  it('displays resolution options with project resolution as default', () => {
+  it('displays resolution options with project resolution', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+
     expect(screen.getByText('Project (1920x1080)')).toBeInTheDocument()
-    expect(screen.getByText('Original')).toBeInTheDocument()
     expect(screen.getByText('1080p')).toBeInTheDocument()
     expect(screen.getByText('720p')).toBeInTheDocument()
     expect(screen.getByText('480p')).toBeInTheDocument()
@@ -170,8 +212,10 @@ describe('ExportDialog', () => {
     expect(mockOnClose).toHaveBeenCalledTimes(1)
   })
 
-  it('allows changing format selection', () => {
+  it('allows changing format selection in advanced options', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
 
     const webmRadio = screen.getByRole('radio', { name: /webm/i })
     const mp4Radio = screen.getByRole('radio', { name: /mp4/i })
@@ -186,17 +230,21 @@ describe('ExportDialog', () => {
     expect(webmRadio).not.toBeChecked()
   })
 
-  it('allows changing quality selection', () => {
+  it('allows changing quality selection in advanced options', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
-    const qualitySelect = screen.getByDisplayValue('High (slower export)')
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+
+    const qualitySelect = screen.getByDisplayValue('Medium')
     fireEvent.change(qualitySelect, { target: { value: 'low' } })
 
     expect(qualitySelect).toHaveValue('low')
   })
 
-  it('allows changing resolution selection', () => {
+  it('allows changing resolution selection in advanced options', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
 
     const resolutionSelect = screen.getByDisplayValue('Project (1920x1080)')
     fireEvent.change(resolutionSelect, { target: { value: '720p' } })
@@ -204,15 +252,133 @@ describe('ExportDialog', () => {
     expect(resolutionSelect).toHaveValue('720p')
   })
 
-  it('has an enabled export button when clips exist', () => {
+  it('has an enabled primary export button when clips exist', () => {
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
-    const exportButton = screen.getByRole('button', { name: /export/i })
+    const exportButton = screen.getByRole('button', { name: /download webm/i })
     expect(exportButton).not.toBeDisabled()
   })
 
+  it('advanced export button label changes based on format', () => {
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+
+    // Default format is WebM - there should be two "Download WebM" buttons (primary + advanced)
+    const webmButtons = screen.getAllByRole('button', { name: /download webm/i })
+    expect(webmButtons).toHaveLength(2)
+
+    // Change to MP4
+    fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+    // Advanced button should update to Download MP4
+    expect(screen.getByRole('button', { name: /download mp4/i })).toBeInTheDocument()
+    // Primary button should still say Download WebM
+    expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
+  })
+
+  it('primary button exports with default settings (WebM, medium, project)', async () => {
+    let capturedOptions: unknown
+    mockExportToWebM.mockImplementation((_clips: unknown, _videos: unknown, options: unknown) => {
+      capturedOptions = options
+      return Promise.resolve(new Blob())
+    })
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    const primaryButton = screen.getByRole('button', { name: /download webm/i })
+    fireEvent.click(primaryButton)
+
+    await vi.waitFor(() => {
+      expect(mockExportToWebM).toHaveBeenCalled()
+    })
+
+    expect(capturedOptions).toEqual({
+      format: 'webm',
+      quality: 'medium',
+      resolution: 'project',
+    })
+  })
+
+  it('advanced export button uses configured settings', async () => {
+    let capturedOptions: unknown
+    mockExportToWebM.mockImplementation((_clips: unknown, _videos: unknown, options: unknown) => {
+      capturedOptions = options
+      return Promise.resolve(new Blob())
+    })
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    // Open advanced options
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+
+    // Change quality to high
+    const qualitySelect = screen.getByDisplayValue('Medium')
+    fireEvent.change(qualitySelect, { target: { value: 'high' } })
+
+    // Change resolution to 720p
+    const resolutionSelect = screen.getByDisplayValue('Project (1920x1080)')
+    fireEvent.change(resolutionSelect, { target: { value: '720p' } })
+
+    // Click the advanced download button (the second "Download WebM" button)
+    const buttons = screen.getAllByRole('button', { name: /download webm/i })
+    const advancedButton = buttons[buttons.length - 1] // The one inside advanced section
+    fireEvent.click(advancedButton)
+
+    await vi.waitFor(() => {
+      expect(mockExportToWebM).toHaveBeenCalled()
+    })
+
+    expect(capturedOptions).toEqual({
+      format: 'webm',
+      quality: 'high',
+      resolution: '720p',
+    })
+  })
+
+  it('saves settings to IndexedDB when using advanced export', async () => {
+    mockExportToWebM.mockResolvedValue(new Blob())
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    // Open advanced and change settings
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+    const qualitySelect = screen.getByDisplayValue('Medium')
+    fireEvent.change(qualitySelect, { target: { value: 'high' } })
+
+    // Click advanced download button
+    const buttons = screen.getAllByRole('button', { name: /download webm/i })
+    fireEvent.click(buttons[buttons.length - 1])
+
+    await vi.waitFor(() => {
+      expect(mockSetSetting).toHaveBeenCalledWith('lastExportSettings', {
+        format: 'webm',
+        quality: 'high',
+        resolution: 'project',
+      })
+    })
+  })
+
+  it('loads saved settings and expands advanced on open', async () => {
+    mockGetSetting.mockResolvedValue({
+      format: 'webm',
+      quality: 'high',
+      resolution: '720p',
+    })
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    // Wait for settings to load and advanced to expand
+    await vi.waitFor(() => {
+      expect(screen.getByText('Quality')).toBeInTheDocument()
+    })
+
+    // Verify settings are populated
+    expect(screen.getByDisplayValue('High (slower export)')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('720p')).toBeInTheDocument()
+  })
+
   it('passes AbortSignal to export function when exporting', async () => {
-    // Create a long-running export that we can inspect
     let capturedSignal: AbortSignal | undefined
     mockExportToWebM.mockImplementation((...args: unknown[]) => {
       // The signal is the 7th argument (index 6)
@@ -222,7 +388,7 @@ describe('ExportDialog', () => {
 
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
-    const exportButton = screen.getByRole('button', { name: /export/i })
+    const exportButton = screen.getByRole('button', { name: /download webm/i })
     fireEvent.click(exportButton)
 
     // Wait for the export to be called
@@ -243,7 +409,7 @@ describe('ExportDialog', () => {
 
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
-    const exportButton = screen.getByRole('button', { name: /export/i })
+    const exportButton = screen.getByRole('button', { name: /download webm/i })
     fireEvent.click(exportButton)
 
     // Wait for the export to be called and rejected
@@ -267,12 +433,31 @@ describe('ExportDialog', () => {
 
     render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
 
-    const exportButton = screen.getByRole('button', { name: /export/i })
-    fireEvent.click(exportButton)
+    // Open advanced to see error display
+    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+
+    // Click the advanced download button
+    const buttons = screen.getAllByRole('button', { name: /download webm/i })
+    fireEvent.click(buttons[buttons.length - 1])
 
     // Wait for error to be displayed
     await vi.waitFor(() => {
       expect(screen.getByText(/encoding failed/i)).toBeInTheDocument()
     })
+  })
+
+  it('does not save settings when using primary export button', async () => {
+    mockExportToWebM.mockResolvedValue(new Blob())
+
+    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+    // Click primary download button directly
+    fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
+
+    await vi.waitFor(() => {
+      expect(mockExportToWebM).toHaveBeenCalled()
+    })
+
+    expect(mockSetSetting).not.toHaveBeenCalled()
   })
 })

@@ -53,6 +53,102 @@
   gap: var(--spacing-lg);
 }
 
+/* Primary export section */
+
+.primarySection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.primaryExportButton {
+  width: 100%;
+  padding: var(--spacing-md) var(--spacing-lg);
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: var(--accent-primary);
+  border: none;
+  color: white;
+}
+
+.primaryExportButton:hover:not(:disabled) {
+  background: #3a8eef;
+}
+
+.primaryExportButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Advanced options section */
+
+.advancedSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.advancedToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--transition-fast);
+}
+
+.advancedToggle:hover {
+  color: var(--text-primary);
+}
+
+.advancedChevron {
+  transition: transform var(--transition-fast);
+}
+
+.advancedChevronOpen {
+  transform: rotate(90deg);
+}
+
+.advancedContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding-top: var(--spacing-xs);
+}
+
+.advancedExportButton {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.advancedExportButton:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.advancedExportButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Common section styles */
+
 .section {
   display: flex;
   flex-direction: column;
@@ -143,6 +239,7 @@
   text-align: center;
   font-size: 13px;
   color: var(--text-muted);
+  width: 100%;
 }
 
 .progressSection {

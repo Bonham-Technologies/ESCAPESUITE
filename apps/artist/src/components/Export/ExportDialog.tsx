@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useEditorStore } from '../../store/projectStore';
 import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError, ExportError } from '../../core/exporter';
+import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { useAuth } from '../../auth';
 import { defaultWatermarkConfig } from '../../utils/watermark';
@@ -12,6 +13,12 @@ interface ExportDialogProps {
   onClose: () => void;
 }
 
+interface LastExportSettings {
+  format: ExportOptions['format'];
+  quality: ExportOptions['quality'];
+  resolution: ExportOptions['resolution'];
+}
+
 export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -20,11 +27,12 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const projectResolution = useEditorStore((state) => state.project.resolution);
   const { isTrial } = useAuth();
 
-  const [options, setOptions] = useState<ExportOptions>({
+  const [advancedOptions, setAdvancedOptions] = useState<ExportOptions>({
     format: 'webm',
-    quality: 'high',
+    quality: 'medium',
     resolution: 'project',
   });
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mp4FailedError, setMp4FailedError] = useState<string | null>(null);
@@ -34,7 +42,23 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
   const mp4Supported = isMP4ExportSupported();
 
-  const handleExport = useCallback(async (formatOverride?: 'webm' | 'mp4') => {
+  // Load last export settings on dialog open
+  useEffect(() => {
+    if (isOpen) {
+      getSetting<LastExportSettings>('lastExportSettings').then((saved) => {
+        if (saved) {
+          setAdvancedOptions({
+            format: saved.format,
+            quality: saved.quality,
+            resolution: saved.resolution,
+          });
+          setShowAdvanced(true);
+        }
+      });
+    }
+  }, [isOpen]);
+
+  const handleExport = useCallback(async (formatOverride?: 'webm' | 'mp4', useAdvanced?: boolean) => {
     if (clips.length === 0) {
       setError('No clips to export');
       return;
@@ -48,9 +72,23 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const requestedFormat = formatOverride || options.format;
+    // Determine options: primary button uses defaults, advanced button uses configured options
+    const exportOptions: ExportOptions = useAdvanced
+      ? advancedOptions
+      : { format: 'webm', quality: 'medium', resolution: 'project' };
+
+    const requestedFormat = formatOverride || exportOptions.format;
     const format = requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
     analytics.exportStarted(format);
+
+    // Save advanced settings if using advanced options
+    if (useAdvanced) {
+      setSetting('lastExportSettings', {
+        format: advancedOptions.format,
+        quality: advancedOptions.quality,
+        resolution: advancedOptions.resolution,
+      });
+    }
 
     try {
       const onProgress = (p: ExportProgress) => setProgress(p);
@@ -62,10 +100,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       const watermark = isTrial ? defaultWatermarkConfig : null;
 
       if (format === 'mp4') {
-        blob = await exportToMP4(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal, projectResolution);
+        blob = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, watermark, abortController.signal, projectResolution);
         extension = 'mp4';
       } else {
-        blob = await exportToWebM(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal, projectResolution);
+        blob = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, watermark, abortController.signal, projectResolution);
         extension = 'webm';
       }
 
@@ -124,7 +162,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       // Clear the abort controller reference
       abortControllerRef.current = null;
     }
-  }, [clips, tracks, sourceVideos, options, projectName, projectResolution, mp4Supported, onClose, isTrial]);
+  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, isTrial]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
@@ -139,7 +177,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
   const handleWebMFallback = useCallback(() => {
     // Start a WebM export with the same quality/resolution settings
-    handleExport('webm');
+    handleExport('webm', true);
   }, [handleExport]);
 
   if (!isOpen) return null;
@@ -185,78 +223,119 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
             </div>
           ) : (
             <>
-              <div className={styles.section}>
-                <label className={styles.label}>Format</label>
-                <div className={styles.radioGroup}>
-                  <label className={styles.radio}>
-                    <input
-                      type="radio"
-                      name="format"
-                      value="webm"
-                      checked={options.format === 'webm'}
-                      onChange={() => setOptions({ ...options, format: 'webm' })}
-                    />
-                    <span>WebM (VP9 + Opus)</span>
-                    <span className={styles.radioHint}>Smaller file size</span>
-                  </label>
-                  <label className={`${styles.radio} ${!mp4Supported ? styles.radioDisabled : ''}`}>
-                    <input
-                      type="radio"
-                      name="format"
-                      value="mp4"
-                      checked={options.format === 'mp4'}
-                      onChange={() => setOptions({ ...options, format: 'mp4' })}
-                      disabled={!mp4Supported}
-                    />
-                    <span>MP4 (H.264 + AAC)</span>
-                    <span className={styles.radioHint}>
-                      {mp4Supported ? 'Best compatibility' : 'Not supported in this browser'}
-                    </span>
-                  </label>
+              <div className={styles.primarySection}>
+                <button
+                  className={styles.primaryExportButton}
+                  onClick={() => handleExport(undefined, false)}
+                  disabled={clips.length === 0}
+                >
+                  Download WebM
+                </button>
+                <div className={styles.summary}>
+                  <span>{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
                 </div>
               </div>
 
-              <div className={styles.section}>
-                <label className={styles.label}>Quality</label>
-                <select
-                  className={styles.select}
-                  value={options.quality}
-                  onChange={(e) => setOptions({ ...options, quality: e.target.value as ExportOptions['quality'] })}
+              <div className={styles.advancedSection}>
+                <button
+                  className={styles.advancedToggle}
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  aria-expanded={showAdvanced}
                 >
-                  <option value="low">Low (faster export)</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High (slower export)</option>
-                </select>
-              </div>
-
-              <div className={styles.section}>
-                <label className={styles.label}>Resolution</label>
-                <select
-                  className={styles.select}
-                  value={options.resolution}
-                  onChange={(e) => setOptions({ ...options, resolution: e.target.value as ExportOptions['resolution'] })}
-                >
-                  <option value="project">Project ({projectResolution.width}x{projectResolution.height})</option>
-                  <option value="original">Original</option>
-                  <option value="1080p">1080p</option>
-                  <option value="720p">720p</option>
-                  <option value="480p">480p</option>
-                </select>
-              </div>
-
-              {error && (
-                <div className={styles.error}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="15" y1="9" x2="9" y2="15" />
-                    <line x1="9" y1="9" x2="15" y2="15" />
+                  <svg
+                    className={`${styles.advancedChevron} ${showAdvanced ? styles.advancedChevronOpen : ''}`}
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <polyline points="9 18 15 12 9 6" />
                   </svg>
-                  {error}
-                </div>
-              )}
+                  Advanced options
+                </button>
 
-              <div className={styles.summary}>
-                <span>{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
+                {showAdvanced && (
+                  <div className={styles.advancedContent}>
+                    <div className={styles.section}>
+                      <label className={styles.label}>Format</label>
+                      <div className={styles.radioGroup}>
+                        <label className={styles.radio}>
+                          <input
+                            type="radio"
+                            name="format"
+                            value="webm"
+                            checked={advancedOptions.format === 'webm'}
+                            onChange={() => setAdvancedOptions({ ...advancedOptions, format: 'webm' })}
+                          />
+                          <span>WebM (VP9 + Opus)</span>
+                          <span className={styles.radioHint}>Smaller file size</span>
+                        </label>
+                        <label className={`${styles.radio} ${!mp4Supported ? styles.radioDisabled : ''}`}>
+                          <input
+                            type="radio"
+                            name="format"
+                            value="mp4"
+                            checked={advancedOptions.format === 'mp4'}
+                            onChange={() => setAdvancedOptions({ ...advancedOptions, format: 'mp4' })}
+                            disabled={!mp4Supported}
+                          />
+                          <span>MP4 (H.264 + AAC)</span>
+                          <span className={styles.radioHint}>
+                            {mp4Supported ? 'Best compatibility' : 'Not supported in this browser'}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className={styles.section}>
+                      <label className={styles.label}>Quality</label>
+                      <select
+                        className={styles.select}
+                        value={advancedOptions.quality}
+                        onChange={(e) => setAdvancedOptions({ ...advancedOptions, quality: e.target.value as ExportOptions['quality'] })}
+                      >
+                        <option value="low">Low (faster export)</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High (slower export)</option>
+                      </select>
+                    </div>
+
+                    <div className={styles.section}>
+                      <label className={styles.label}>Resolution</label>
+                      <select
+                        className={styles.select}
+                        value={advancedOptions.resolution}
+                        onChange={(e) => setAdvancedOptions({ ...advancedOptions, resolution: e.target.value as ExportOptions['resolution'] })}
+                      >
+                        <option value="project">Project ({projectResolution.width}x{projectResolution.height})</option>
+                        <option value="1080p">1080p</option>
+                        <option value="720p">720p</option>
+                        <option value="480p">480p</option>
+                      </select>
+                    </div>
+
+                    {error && (
+                      <div className={styles.error}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="15" y1="9" x2="9" y2="15" />
+                          <line x1="9" y1="9" x2="15" y2="15" />
+                        </svg>
+                        {error}
+                      </div>
+                    )}
+
+                    <button
+                      className={styles.advancedExportButton}
+                      onClick={() => handleExport(undefined, true)}
+                      disabled={clips.length === 0}
+                    >
+                      Download {advancedOptions.format === 'mp4' ? 'MP4' : 'WebM'}
+                    </button>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -282,18 +361,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
               </button>
             )
           ) : (
-            <>
-              <button className={styles.cancelButton} onClick={handleCancel}>
-                Cancel
-              </button>
-              <button
-                className={styles.exportButton}
-                onClick={() => handleExport()}
-                disabled={clips.length === 0}
-              >
-                Export
-              </button>
-            </>
+            <button className={styles.cancelButton} onClick={handleCancel}>
+              Cancel
+            </button>
           )}
         </div>
       </div>
