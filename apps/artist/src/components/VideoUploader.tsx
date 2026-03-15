@@ -5,6 +5,7 @@ import { getStorageEstimate, clearAllVideos, deleteVideo } from '../core/storage
 import { getFrameCache } from '../core/frameCache';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
+import { ResolutionMismatchDialog } from './ResolutionMismatchDialog';
 import styles from './VideoUploader.module.css';
 
 interface UploadProgress {
@@ -354,14 +355,67 @@ export function VideoUploader() {
 }
 
 // Video Library component to show uploaded videos
+// Check if media dimensions differ significantly from project resolution
+function hasResolutionMismatch(
+  mediaWidth: number,
+  mediaHeight: number,
+  projectWidth: number,
+  projectHeight: number
+): boolean {
+  if (mediaWidth === 0 || mediaHeight === 0) return false; // audio files
+  return (
+    Math.abs(1 - mediaWidth / projectWidth) > 0.1 ||
+    Math.abs(1 - mediaHeight / projectHeight) > 0.1
+  );
+}
+
+interface PendingMedia {
+  media: { id: string; name: string; duration: number; width: number; height: number; mediaType?: string };
+}
+
 export function VideoLibrary() {
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const addClipToTimeline = useEditorStore((state) => state.addClipToTimeline);
+  const updateClipTransform = useEditorStore((state) => state.updateClipTransform);
   const removeSourceVideo = useEditorStore((state) => state.removeSourceVideo);
+  const projectResolution = useEditorStore((state) => state.project.resolution);
+
+  const [mismatchDialog, setMismatchDialog] = useState<PendingMedia | null>(null);
+
+  const addClipWithScale = useCallback(
+    (media: PendingMedia['media'], scaleX: number, scaleY: number) => {
+      const duration = media.mediaType === 'image' ? DEFAULT_IMAGE_DURATION : media.duration;
+      const clipId = crypto.randomUUID();
+      addClipToTimeline({
+        id: clipId,
+        sourceVideoId: media.id,
+        name: media.name,
+        startTime: 0,
+        endTime: duration,
+        duration: duration,
+      });
+      // Apply scale transform if not default (1, 1)
+      if (scaleX !== 1 || scaleY !== 1) {
+        updateClipTransform(clipId, { scaleX, scaleY });
+      }
+    },
+    [addClipToTimeline, updateClipTransform]
+  );
 
   const handleAddToTimeline = useCallback(
     (media: typeof sourceVideos[0]) => {
-      // For images, use the default image duration
+      // Check for resolution mismatch (skip audio files)
+      if (
+        media.mediaType !== 'audio' &&
+        media.width > 0 &&
+        media.height > 0 &&
+        hasResolutionMismatch(media.width, media.height, projectResolution.width, projectResolution.height)
+      ) {
+        setMismatchDialog({ media });
+        return;
+      }
+
+      // No mismatch — add directly
       const duration = media.mediaType === 'image' ? DEFAULT_IMAGE_DURATION : media.duration;
       addClipToTimeline({
         id: crypto.randomUUID(),
@@ -372,8 +426,28 @@ export function VideoLibrary() {
         duration: duration,
       });
     },
-    [addClipToTimeline]
+    [addClipToTimeline, projectResolution]
   );
+
+  const handleScaleToFit = useCallback(() => {
+    if (!mismatchDialog) return;
+    const { media } = mismatchDialog;
+    const scale = Math.min(
+      projectResolution.width / media.width,
+      projectResolution.height / media.height
+    );
+    addClipWithScale(media, scale, scale);
+    setMismatchDialog(null);
+  }, [mismatchDialog, projectResolution, addClipWithScale]);
+
+  const handleKeepOriginal = useCallback(() => {
+    if (!mismatchDialog) return;
+    const { media } = mismatchDialog;
+    const scaleX = media.width / projectResolution.width;
+    const scaleY = media.height / projectResolution.height;
+    addClipWithScale(media, scaleX, scaleY);
+    setMismatchDialog(null);
+  }, [mismatchDialog, projectResolution, addClipWithScale]);
 
   const handleRemoveVideo = useCallback(
     async (id: string) => {
@@ -474,6 +548,18 @@ export function VideoLibrary() {
           );
         })}
       </div>
+
+      <ResolutionMismatchDialog
+        isOpen={mismatchDialog !== null}
+        mediaName={mismatchDialog?.media.name ?? ''}
+        mediaDimensions={{
+          width: mismatchDialog?.media.width ?? 0,
+          height: mismatchDialog?.media.height ?? 0,
+        }}
+        projectDimensions={projectResolution}
+        onScaleToFit={handleScaleToFit}
+        onKeepOriginal={handleKeepOriginal}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useEditorStore } from './store/projectStore';
 import { VideoUploader, VideoLibrary } from './components/VideoUploader';
+import { ResolutionPicker } from './components/ResolutionPicker';
 import { Timeline } from './components/Timeline/Timeline';
 import { PreviewPlayer, PlaybackControls } from './components/Preview/PreviewPlayer';
 import { ClipEditor } from './components/ClipEditor/ClipEditor';
@@ -701,6 +702,7 @@ function App() {
             <>
               <div className={styles.uploaderContainer}>
                 <VideoUploader />
+                <ResolutionPicker />
               </div>
 
               <div className={styles.libraryContainer}>
