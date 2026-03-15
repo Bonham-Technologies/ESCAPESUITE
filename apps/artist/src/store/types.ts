@@ -14,6 +14,14 @@ export type { MediaType, MediaSource, WaveformPeak, SourceVideo }
 // Default duration for images when added to timeline (seconds)
 export const DEFAULT_IMAGE_DURATION = 5;
 
+// Resolution presets for project canvas dimensions
+export const RESOLUTION_PRESETS = {
+  '720p': { width: 1280, height: 720 },
+  '1080p': { width: 1920, height: 1080 },
+  '1440p': { width: 2560, height: 1440 },
+  '4K': { width: 3840, height: 2160 },
+} as const;
+
 // Blend modes for video compositing
 export type BlendMode =
   | 'normal'      // Default - top layer covers bottom
@@ -329,6 +337,7 @@ export interface Project {
   name: string;
   created: number;
   modified: number;
+  resolution: { width: number; height: number };
   timeline: Timeline;
 }
 
@@ -404,6 +413,7 @@ export interface EditorState {
   // Actions - Project
   setProject: (project: Project) => void;
   resetProject: () => void;
+  setProjectResolution: (width: number, height: number) => void;
 
   // Actions - Source videos
   addSourceVideo: (video: SourceVideo) => void;

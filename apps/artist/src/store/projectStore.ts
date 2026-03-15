@@ -114,6 +114,7 @@ function createEmptyProject(): Project {
     name: 'Untitled Project',
     created: Date.now(),
     modified: Date.now(),
+    resolution: { width: 1280, height: 720 },
     timeline: createEmptyTimeline(),
   };
 }
@@ -161,6 +162,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     selectedTrackId: null,
     selectedOverlayId: null,
     selectedOverlayType: null,
+    history: pushToHistory(state),
+  })),
+
+  setProjectResolution: (width: number, height: number) => set((state) => ({
+    project: {
+      ...state.project,
+      modified: Date.now(),
+      resolution: { width, height },
+    },
     history: pushToHistory(state),
   })),
 
@@ -1331,6 +1341,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
 // Ensure timeline has tracks and overlays arrays (migration helper)
 function ensureTimelineHasTracks(project: Project): Project {
+  // Ensure resolution exists (migration for older projects)
+  if (!project.resolution) {
+    project = { ...project, resolution: { width: 1280, height: 720 } };
+  }
+
   const timeline = project.timeline;
   let needsMigration = false;
 

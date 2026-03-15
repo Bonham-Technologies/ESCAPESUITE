@@ -164,6 +164,7 @@ describe('storage', () => {
       name,
       created: Date.now(),
       modified: Date.now(),
+      resolution: { width: 1280, height: 720 },
       timeline: {
         tracks: [{ id: 'track1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }],
         clips: [],
@@ -268,6 +269,7 @@ describe('storage', () => {
           name: 'Test',
           created: Date.now(),
           modified: Date.now(),
+          resolution: { width: 1280, height: 720 },
           timeline: {
             tracks: [],
             clips: [],
@@ -301,6 +303,7 @@ describe('storage', () => {
           name: 'Test',
           created: Date.now(),
           modified: Date.now(),
+          resolution: { width: 1280, height: 720 },
           timeline: {
             tracks: [],
             clips: [],
@@ -348,6 +351,7 @@ describe('storage', () => {
         name: 'Test',
         created: Date.now(),
         modified: Date.now(),
+        resolution: { width: 1280, height: 720 },
         timeline: { tracks: [], clips: [], textOverlays: [], shapeOverlays: [], duration: 0 },
       })
       await storage.setSetting('key', 'value')
@@ -384,6 +388,7 @@ describe('storage', () => {
         name: 'Test',
         created: Date.now(),
         modified: Date.now(),
+        resolution: { width: 1280, height: 720 },
         timeline: { tracks: [], clips: [], textOverlays: [], shapeOverlays: [], duration: 0 },
       })
 
