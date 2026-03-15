@@ -94,7 +94,19 @@ const EASING_TYPES: { value: EasingType; label: string }[] = [
 ];
 
 export function ClipEditor() {
-  const [scaleLocked, setScaleLocked] = useState(true);
+  // Read scaleLocked from the selected clip's transform (default true for backwards compat)
+  const scaleLocked = useEditorStore((state) => {
+    const clip = state.project.timeline.clips.find(c => c.id === state.selectedClipId);
+    return clip?.transform.scaleLocked ?? true;
+  });
+  const setScaleLocked = useCallback((locked: boolean) => {
+    const clip = useEditorStore.getState().project.timeline.clips.find(
+      c => c.id === useEditorStore.getState().selectedClipId
+    );
+    if (clip) {
+      useEditorStore.getState().updateClipTransform(clip.id, { scaleLocked: locked });
+    }
+  }, []);
 
   const selectedClip = useEditorStore(selectSelectedClip);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);

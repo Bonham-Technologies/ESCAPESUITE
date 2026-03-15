@@ -1981,14 +1981,26 @@ export function PreviewPlayer() {
         newY = dragState.startOverlayY + deltaY / 2;
       }
 
-      // For corner handles, maintain aspect ratio with shift key (optional - always maintain for now on corners)
+      // Corner handles: Shift toggles lock state. When locked, scale uniformly.
       if (mode === 'resize-nw' || mode === 'resize-ne' || mode === 'resize-sw' || mode === 'resize-se') {
+        // Determine effective lock: Shift temporarily toggles the clip's scaleLocked setting
+        const clipScaleLocked = clip?.transform.scaleLocked ?? true;
+        const effectiveLock = e.shiftKey ? !clipScaleLocked : clipScaleLocked;
+
+        const widthRatio = newWidth / dragState.startWidth;
+        const heightRatio = newHeight / dragState.startHeight;
+
         if (isKeyframeMode) {
           // Calculate scale values for keyframes
-          const widthRatio = newWidth / dragState.startWidth;
-          const heightRatio = newHeight / dragState.startHeight;
-          applyChange('scaleX', Math.max(0.1, widthRatio * dragState.startScaleX));
-          applyChange('scaleY', Math.max(0.1, heightRatio * dragState.startScaleY));
+          if (effectiveLock) {
+            // Uniform scale: use the diagonal (larger ratio) for both axes
+            const uniformRatio = Math.max(widthRatio, heightRatio);
+            applyChange('scaleX', Math.max(0.1, uniformRatio * dragState.startScaleX));
+            applyChange('scaleY', Math.max(0.1, uniformRatio * dragState.startScaleY));
+          } else {
+            applyChange('scaleX', Math.max(0.1, widthRatio * dragState.startScaleX));
+            applyChange('scaleY', Math.max(0.1, heightRatio * dragState.startScaleY));
+          }
           applyChange('x', newX);
           applyChange('y', newY);
         } else {
@@ -1998,27 +2010,44 @@ export function PreviewPlayer() {
           // Use throttled updates for smoother drag performance
           if (dragState.clipType === 'text') {
             // Calculate scale based on the larger dimension change
-            const widthRatio = newWidth / dragState.startWidth;
-            const heightRatio = newHeight / dragState.startHeight;
             const newScale = Math.max(0.1, dragState.startScaleX * Math.max(widthRatio, heightRatio));
             throttledTextUpdate.scheduleUpdate(
               ({ id, data }) => updateTextOverlayData(id, data, true),
               { id: dragState.clipId, data: { scale: newScale, x: newX, y: newY } }
             );
           } else if (dragState.clipType === 'shape') {
-            throttledShapeUpdate.scheduleUpdate(
-              ({ id, data }) => updateShapeOverlayData(id, data, true),
-              { id: dragState.clipId, data: { width: newWidth, height: newHeight, x: newX, y: newY } }
-            );
+            if (effectiveLock) {
+              // Uniform scale for shapes: use the larger ratio for both dimensions
+              const uniformRatio = Math.max(widthRatio, heightRatio);
+              const uniformWidth = Math.max(0.02, dragState.startWidth * uniformRatio);
+              const uniformHeight = Math.max(0.02, dragState.startHeight * uniformRatio);
+              throttledShapeUpdate.scheduleUpdate(
+                ({ id, data }) => updateShapeOverlayData(id, data, true),
+                { id: dragState.clipId, data: { width: uniformWidth, height: uniformHeight, x: newX, y: newY } }
+              );
+            } else {
+              throttledShapeUpdate.scheduleUpdate(
+                ({ id, data }) => updateShapeOverlayData(id, data, true),
+                { id: dragState.clipId, data: { width: newWidth, height: newHeight, x: newX, y: newY } }
+              );
+            }
           } else if (dragState.clipType === 'image' || dragState.clipType === 'video') {
-            const widthRatio = newWidth / dragState.startWidth;
-            const heightRatio = newHeight / dragState.startHeight;
-            const newScaleX = Math.max(0.1, dragState.startScaleX * widthRatio);
-            const newScaleY = Math.max(0.1, dragState.startScaleY * heightRatio);
-            throttledTransformUpdate.scheduleUpdate(
-              ({ id, transform }) => updateClipTransform(id, transform, true),
-              { id: dragState.clipId, transform: { scaleX: newScaleX, scaleY: newScaleY, x: newX, y: newY } }
-            );
+            if (effectiveLock) {
+              // Uniform scale: use the larger ratio for both axes
+              const uniformRatio = Math.max(widthRatio, heightRatio);
+              const newScale = Math.max(0.1, dragState.startScaleX * uniformRatio);
+              throttledTransformUpdate.scheduleUpdate(
+                ({ id, transform }) => updateClipTransform(id, transform, true),
+                { id: dragState.clipId, transform: { scaleX: newScale, scaleY: newScale, x: newX, y: newY } }
+              );
+            } else {
+              const newScaleX = Math.max(0.1, dragState.startScaleX * widthRatio);
+              const newScaleY = Math.max(0.1, dragState.startScaleY * heightRatio);
+              throttledTransformUpdate.scheduleUpdate(
+                ({ id, transform }) => updateClipTransform(id, transform, true),
+                { id: dragState.clipId, transform: { scaleX: newScaleX, scaleY: newScaleY, x: newX, y: newY } }
+              );
+            }
           }
         }
       } else {

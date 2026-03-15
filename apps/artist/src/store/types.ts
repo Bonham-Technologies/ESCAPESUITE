@@ -41,6 +41,7 @@ export interface ClipTransform {
   scaleY: number;   // Vertical scale (1 = 100%)
   rotation: number; // Rotation in degrees (future use)
   opacity: number;  // 0-1
+  scaleLocked?: boolean;  // Lock aspect ratio during resize (default: true)
 }
 
 // Default transform (full frame, centered)
@@ -51,6 +52,7 @@ export const DEFAULT_TRANSFORM: ClipTransform = {
   scaleY: 1,
   rotation: 0,
   opacity: 1,
+  scaleLocked: true,
 };
 
 // Visual effects for clips
