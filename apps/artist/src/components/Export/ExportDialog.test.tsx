@@ -29,18 +29,27 @@ vi.mock('../../store/projectStore', () => ({
 }))
 
 // Mock the exporter - use vi.hoisted for variables referenced in vi.mock
-const { mockExportToWebM, mockExportToMP4, MockExportAbortedError } = vi.hoisted(() => {
-  // Define mock class inside hoisted block
+const { mockExportToWebM, mockExportToMP4, MockExportAbortedError, MockExportError } = vi.hoisted(() => {
+  // Define mock classes inside hoisted block
   class MockExportAbortedError extends Error {
     constructor() {
       super('Export was cancelled')
       this.name = 'ExportAbortedError'
     }
   }
+  class MockExportError extends Error {
+    public readonly exportLog: Array<{ phase: string; detail: string; timestamp: number }>;
+    constructor(message: string, exportLog: Array<{ phase: string; detail: string; timestamp: number }>) {
+      super(message)
+      this.name = 'ExportError'
+      this.exportLog = exportLog
+    }
+  }
   return {
     mockExportToWebM: vi.fn(() => Promise.resolve(new Blob())),
     mockExportToMP4: vi.fn(() => Promise.resolve(new Blob())),
     MockExportAbortedError,
+    MockExportError,
   }
 })
 
@@ -49,6 +58,7 @@ vi.mock('../../core/exporter', () => ({
   exportToMP4: mockExportToMP4,
   isMP4ExportSupported: vi.fn(() => true),
   ExportAbortedError: MockExportAbortedError,
+  ExportError: MockExportError,
 }))
 
 // Mock CSS modules

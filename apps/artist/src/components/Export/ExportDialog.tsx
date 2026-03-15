@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { useEditorStore } from '../../store/projectStore';
-import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError } from '../../core/exporter';
+import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError, ExportError } from '../../core/exporter';
 import { analytics } from '../../utils/analytics';
 import { useAuth } from '../../auth';
 import { defaultWatermarkConfig } from '../../utils/watermark';
@@ -27,26 +27,29 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   });
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mp4FailedError, setMp4FailedError] = useState<string | null>(null);
 
   // AbortController for cancelling exports
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const mp4Supported = isMP4ExportSupported();
 
-  const handleExport = useCallback(async () => {
+  const handleExport = useCallback(async (formatOverride?: 'webm' | 'mp4') => {
     if (clips.length === 0) {
       setError('No clips to export');
       return;
     }
 
     setError(null);
+    setMp4FailedError(null);
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
     // Create new AbortController for this export
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const format = options.format === 'mp4' && mp4Supported ? 'mp4' : 'webm';
+    const requestedFormat = formatOverride || options.format;
+    const format = requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
     analytics.exportStarted(format);
 
     try {
@@ -58,7 +61,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       // Add watermark for trial users
       const watermark = isTrial ? defaultWatermarkConfig : null;
 
-      if (options.format === 'mp4' && mp4Supported) {
+      if (format === 'mp4') {
         blob = await exportToMP4(clips, sourceVideos, options, onProgress, tracks, watermark, abortController.signal, projectResolution);
         extension = 'mp4';
       } else {
@@ -97,9 +100,26 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         return;
       }
 
+      const errorMessage = err instanceof Error ? err.message : 'Export failed';
+      const errorType = err instanceof ExportError ? 'ExportError' : (err instanceof Error ? err.name : 'unknown');
+      const failProgress = progress ? progress.progress / 100 : 0;
+
       console.error('Export failed:', err);
-      setError(err instanceof Error ? err.message : 'Export failed');
-      setProgress(null);
+      if (err instanceof ExportError) {
+        console.debug('[MP4 Export] Diagnostic log:', err.exportLog);
+      }
+
+      // Track the failure
+      analytics.exportFailed(format, errorType, failProgress);
+
+      // If MP4 failed, show the fallback dialog instead of just an error
+      if (format === 'mp4') {
+        setMp4FailedError(errorMessage);
+        setProgress(null);
+      } else {
+        setError(errorMessage);
+        setProgress(null);
+      }
     } finally {
       // Clear the abort controller reference
       abortControllerRef.current = null;
@@ -113,8 +133,14 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       abortControllerRef.current = null;
     }
     setProgress(null);
+    setMp4FailedError(null);
     onClose();
   }, [onClose]);
+
+  const handleWebMFallback = useCallback(() => {
+    // Start a WebM export with the same quality/resolution settings
+    handleExport('webm');
+  }, [handleExport]);
 
   if (!isOpen) return null;
 
@@ -129,7 +155,21 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         </div>
 
         <div className={styles.body}>
-          {progress ? (
+          {mp4FailedError ? (
+            <div className={styles.section}>
+              <div className={styles.error}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="15" y1="9" x2="9" y2="15" />
+                  <line x1="9" y1="9" x2="15" y2="15" />
+                </svg>
+                MP4 export failed: {mp4FailedError}
+              </div>
+              <p className={styles.radioHint} style={{ marginTop: '8px' }}>
+                You can try exporting as WebM instead. WebM files work in most browsers and video players.
+              </p>
+            </div>
+          ) : progress ? (
             <div className={styles.progressSection}>
               <div className={styles.progressInfo}>
                 <span className={styles.progressPhase}>{progress.phase}</span>
@@ -223,7 +263,19 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         </div>
 
         <div className={styles.footer}>
-          {progress ? (
+          {mp4FailedError ? (
+            <>
+              <button className={styles.cancelButton} onClick={handleCancel}>
+                Close
+              </button>
+              <button
+                className={styles.exportButton}
+                onClick={handleWebMFallback}
+              >
+                Try WebM Instead
+              </button>
+            </>
+          ) : progress ? (
             progress.phase !== 'complete' && (
               <button className={styles.cancelButton} onClick={handleCancel}>
                 Cancel
@@ -236,7 +288,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
               </button>
               <button
                 className={styles.exportButton}
-                onClick={handleExport}
+                onClick={() => handleExport()}
                 disabled={clips.length === 0}
               >
                 Export
