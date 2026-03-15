@@ -10,6 +10,7 @@ import { KeyframePanel } from './components/KeyframePanel';
 import { Toolbar } from './components/Toolbar';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { saveProject, loadProject, showOpenProjectDialog } from './core/projectManager';
+import { ProjectLoadDialog } from './components/ProjectLoadDialog';
 import { initIntegration, parseUrlParams, loadVideoFromUrl, sendMessage } from './utils/integration';
 import { processVideoFile } from './core/videoProcessor';
 import { saveSessionState, getSessionState, clearSessionState, getVideo, getThumbnail, type SessionState } from './core/storage';
@@ -46,6 +47,8 @@ function App() {
   const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
   const [notification, setNotification] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
   const [showFileMenu, setShowFileMenu] = useState(false);
+  const [showProjectLoadDialog, setShowProjectLoadDialog] = useState(false);
+  const [pendingProjectFile, setPendingProjectFile] = useState<File | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -120,11 +123,8 @@ function App() {
     }
   }, [project, sourceVideos, showNotification]);
 
-  // Handle load project
-  const handleLoadProject = useCallback(async () => {
-    const file = await showOpenProjectDialog();
-    if (!file) return;
-
+  // Load a project file (shared by Ctrl+O and drag-drop paths)
+  const loadProjectFile = useCallback(async (file: File) => {
     setIsLoading(true);
     try {
       const { project: loadedProject, sourceVideos: loadedVideos } = await loadProject(file);
@@ -142,6 +142,47 @@ function App() {
       setIsLoading(false);
     }
   }, [resetProject, setProject, addSourceVideo, showNotification]);
+
+  // Handle load project (Ctrl+O / File menu)
+  const handleLoadProject = useCallback(async () => {
+    const file = await showOpenProjectDialog();
+    if (!file) return;
+
+    if (clips.length > 0) {
+      setPendingProjectFile(file);
+      setShowProjectLoadDialog(true);
+    } else {
+      loadProjectFile(file);
+    }
+  }, [clips.length, loadProjectFile]);
+
+  const handleProjectLoadCancel = useCallback(() => {
+    setPendingProjectFile(null);
+    setShowProjectLoadDialog(false);
+  }, []);
+
+  const handleProjectLoadSaveAndLoad = useCallback(async () => {
+    setShowProjectLoadDialog(false);
+    const file = pendingProjectFile;
+    setPendingProjectFile(null);
+    if (!file) return;
+    try {
+      await saveProject(project, sourceVideos);
+      showNotification('Project saved', 'success');
+    } catch (error) {
+      console.error('Failed to save current project:', error);
+      showNotification('Failed to save project', 'error');
+    }
+    await loadProjectFile(file);
+  }, [pendingProjectFile, project, sourceVideos, loadProjectFile, showNotification]);
+
+  const handleProjectLoadDiscardAndLoad = useCallback(async () => {
+    setShowProjectLoadDialog(false);
+    const file = pendingProjectFile;
+    setPendingProjectFile(null);
+    if (!file) return;
+    await loadProjectFile(file);
+  }, [pendingProjectFile, loadProjectFile]);
 
   // Handle new project
   const handleNewProject = useCallback(() => {
@@ -927,6 +968,14 @@ function App() {
 
       {/* Keyboard shortcuts panel */}
       <KeyboardShortcuts isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
+      {/* Project load safety dialog */}
+      <ProjectLoadDialog
+        isOpen={showProjectLoadDialog}
+        onCancel={handleProjectLoadCancel}
+        onSaveAndLoad={handleProjectLoadSaveAndLoad}
+        onDiscardAndLoad={handleProjectLoadDiscardAndLoad}
+      />
     </div>
   );
 }
