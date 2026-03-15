@@ -348,6 +348,26 @@
   color: var(--text-primary);
 }
 
+.fitToCanvasButton {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  width: 100%;
+  text-align: center;
+  margin-top: var(--spacing-xs);
+}
+
+.fitToCanvasButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
 /* Transform controls */
 .transformControls {
   display: flex;

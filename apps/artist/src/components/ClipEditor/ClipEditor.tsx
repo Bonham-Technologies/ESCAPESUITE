@@ -111,6 +111,7 @@ export function ClipEditor() {
   const selectedClip = useEditorStore(selectSelectedClip);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
+  const resolution = useEditorStore((state) => state.project.resolution);
   const currentTime = useEditorStore((state) => state.currentTime);
 
   const removeClipFromTimeline = useEditorStore((state) => state.removeClipFromTimeline);
@@ -306,6 +307,15 @@ export function ClipEditor() {
       });
     }
   }, [selectedClip, updateClipTransform, updateTextOverlayData, updateShapeOverlayData]);
+
+  const handleFitToCanvas = useCallback(() => {
+    if (!selectedClip || !sourceVideo) return;
+    const fitScale = Math.min(
+      resolution.width / sourceVideo.width,
+      resolution.height / sourceVideo.height
+    );
+    updateClipTransform(selectedClip.id, { scaleX: fitScale, scaleY: fitScale });
+  }, [selectedClip, sourceVideo, resolution, updateClipTransform]);
 
   // Text overlay handlers
   const handleTextDataChange = useCallback(
@@ -792,6 +802,16 @@ export function ClipEditor() {
                       <span>{Math.round(selectedClip.transform.scaleY * 100)}%</span>
                     </div>
                   </>
+                )}
+
+                {sourceVideo && (
+                  <button
+                    className={styles.fitToCanvasButton}
+                    onClick={handleFitToCanvas}
+                    title="Scale clip to fit within the project canvas"
+                  >
+                    Fit to Canvas
+                  </button>
                 )}
               </>
             )}

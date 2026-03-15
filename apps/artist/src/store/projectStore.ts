@@ -306,12 +306,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Use playhead position if no position specified
     const timelinePosition = position ?? state.currentTime;
 
+    // Calculate initial scale based on source media dimensions vs project resolution
+    const source = state.sourceVideos.find(v => v.id === clipData.sourceVideoId);
+    const { resolution } = state.project;
+    let initialScaleX = 1, initialScaleY = 1;
+
+    if (source && (source.mediaType === 'image' || source.mediaType === 'video' || (!source.mediaType && source.width > 0 && source.height > 0))) {
+      const nativeScaleX = source.width / resolution.width;
+      const nativeScaleY = source.height / resolution.height;
+
+      if (nativeScaleX > 1 || nativeScaleY > 1) {
+        // Auto-fit: scale down to contain within canvas
+        const fitScale = Math.min(resolution.width / source.width, resolution.height / source.height);
+        initialScaleX = initialScaleY = fitScale;
+      } else {
+        // Keep native size relative to project
+        initialScaleX = nativeScaleX;
+        initialScaleY = nativeScaleY;
+      }
+    }
+
     const newClip: Clip = {
       ...clipData,
       trackId: targetTrackId,
       timelinePosition,
       blendMode: 'normal',
-      transform: { ...DEFAULT_TRANSFORM },
+      transform: { ...DEFAULT_TRANSFORM, scaleX: initialScaleX, scaleY: initialScaleY },
       effects: { ...DEFAULT_EFFECTS },
       transition: { ...DEFAULT_TRANSITION },
     };
