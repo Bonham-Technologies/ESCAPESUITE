@@ -6,11 +6,13 @@ import { analytics } from '../../utils/analytics';
 import { useAuth } from '../../auth';
 import { defaultWatermarkConfig } from '../../utils/watermark';
 import type { ExportOptions, ExportProgress } from '../../store/types';
+import { formatTime } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
 
 interface ExportDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  timeRange?: { start: number; end: number };
 }
 
 interface LastExportSettings {
@@ -19,7 +21,7 @@ interface LastExportSettings {
   resolution: ExportOptions['resolution'];
 }
 
-export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
+export function ExportDialog({ isOpen, onClose, timeRange }: ExportDialogProps) {
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
@@ -74,8 +76,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
     // Determine options: primary button uses defaults, advanced button uses configured options
     const exportOptions: ExportOptions = useAdvanced
-      ? advancedOptions
-      : { format: 'webm', quality: 'medium', resolution: 'project' };
+      ? { ...advancedOptions, timeRange }
+      : { format: 'webm', quality: 'medium', resolution: 'project', timeRange };
 
     const requestedFormat = formatOverride || exportOptions.format;
     const format = requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
@@ -162,7 +164,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       // Clear the abort controller reference
       abortControllerRef.current = null;
     }
-  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, isTrial]);
+  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, isTrial, timeRange]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
@@ -229,10 +231,15 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   onClick={() => handleExport(undefined, false)}
                   disabled={clips.length === 0}
                 >
-                  Download WebM
+                  {timeRange ? 'Download Selection (WebM)' : 'Download WebM'}
                 </button>
                 <div className={styles.summary}>
                   <span>{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
+                  {timeRange && (
+                    <span style={{ marginLeft: '8px', color: 'var(--accent-primary)' }}>
+                      {formatTime(timeRange.start)} - {formatTime(timeRange.end)} ({formatTime(timeRange.end - timeRange.start)})
+                    </span>
+                  )}
                 </div>
               </div>
 

@@ -98,16 +98,30 @@ export async function exportToWebM(
   const frameRate = 30;
   const sampleRate = 48000;
 
-  // Calculate total duration
-  const totalDuration = calculateTimelineDuration(clips);
+  // Calculate total duration, respecting timeRange if specified
+  const fullDuration = calculateTimelineDuration(clips);
+  const rangeStart = options.timeRange?.start ?? 0;
+  const rangeEnd = options.timeRange?.end ?? fullDuration;
+  const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
   // Extract and mix audio first (uses Web Worker if available, falls back to main thread)
+  // Note: we extract the full timeline audio, then slice it later
   onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
-  const audioData = await extractAndMixAudioWithWorker(clips, exportTracks, totalDuration, (p) => {
+  const fullAudioData = await extractAndMixAudioWithWorker(clips, exportTracks, fullDuration, (p) => {
     onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
   });
+
+  // Slice audio to the selected time range
+  const audioData = fullAudioData && rangeStart > 0 ? (() => {
+    const startSample = Math.floor(rangeStart * sampleRate);
+    const endSample = Math.floor(rangeEnd * sampleRate);
+    return fullAudioData.slice(startSample, endSample);
+  })() : fullAudioData && options.timeRange ? (() => {
+    const endSample = Math.floor(rangeEnd * sampleRate);
+    return fullAudioData.slice(0, endSample);
+  })() : fullAudioData;
 
   // Create canvas for frame rendering
   const canvas = document.createElement('canvas');
@@ -282,7 +296,7 @@ export async function exportToWebM(
       // Check for abort at start of each frame
       checkAborted(signal);
 
-      const currentTime = frameIndex / frameRate;
+      const currentTime = rangeStart + frameIndex / frameRate;
 
       // Check for active transition
       const activeTransition = getActiveTransition(clips, exportTracks, currentTime);

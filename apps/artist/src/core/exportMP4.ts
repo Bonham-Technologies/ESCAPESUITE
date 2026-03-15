@@ -138,18 +138,32 @@ export async function exportToMP4(
   const frameRate = 30;
   const sampleRate = 48000;
 
-  // Calculate total duration
-  const totalDuration = calculateTimelineDuration(clips);
+  // Calculate total duration, respecting timeRange if specified
+  const fullDuration = calculateTimelineDuration(clips);
+  const rangeStart = options.timeRange?.start ?? 0;
+  const rangeEnd = options.timeRange?.end ?? fullDuration;
+  const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
   // Extract and mix audio first (uses Web Worker if available, falls back to main thread)
+  // Note: we extract the full timeline audio, then slice it later
   onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
   log('audio', 'Starting audio extraction');
-  let audioData: Float32Array | null = await extractAndMixAudioWithWorker(clips, exportTracks, totalDuration, (p) => {
+  let fullAudioData: Float32Array | null = await extractAndMixAudioWithWorker(clips, exportTracks, fullDuration, (p) => {
     onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
   });
-  log('audio', audioData ? `Audio extracted: ${audioData.length} samples` : 'No audio data');
+  log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');
+
+  // Slice audio to the selected time range
+  let audioData: Float32Array | null = fullAudioData && rangeStart > 0 ? (() => {
+    const startSample = Math.floor(rangeStart * sampleRate);
+    const endSample = Math.floor(rangeEnd * sampleRate);
+    return fullAudioData.slice(startSample, endSample);
+  })() : fullAudioData && options.timeRange ? (() => {
+    const endSample = Math.floor(rangeEnd * sampleRate);
+    return fullAudioData.slice(0, endSample);
+  })() : fullAudioData;
 
   // Create canvas for frame rendering
   const canvas = document.createElement('canvas');
@@ -352,7 +366,7 @@ export async function exportToMP4(
         throw videoEncoderError;
       }
 
-      const currentTime = frameIndex / frameRate;
+      const currentTime = rangeStart + frameIndex / frameRate;
 
       // Check for active transition
       const activeTransition = getActiveTransition(clips, exportTracks, currentTime);

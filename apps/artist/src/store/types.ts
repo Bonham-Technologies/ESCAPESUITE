@@ -399,6 +399,10 @@ export interface EditorState {
   // Clipboard (for copy/paste)
   clipboard: Clip[] | null;
 
+  // In/Out points for section selection
+  inPoint: number | null;
+  outPoint: number | null;
+
   // UI state
   zoom: number;
   snapEnabled: boolean;
@@ -485,6 +489,11 @@ export interface EditorState {
   muteSelectedClips: () => void;
   unmuteSelectedClips: () => void;
 
+  // Actions - In/Out Points
+  setInPoint: (time: number) => void;
+  setOutPoint: (time: number) => void;
+  clearInOutPoints: () => void;
+
   // Actions - UI
   setZoom: (zoom: number) => void;
   setSnapEnabled: (enabled: boolean) => void;
@@ -520,6 +529,7 @@ export interface ExportOptions {
   format: 'webm' | 'mp4';
   quality: 'low' | 'medium' | 'high';
   resolution: 'project' | 'original' | '1080p' | '720p' | '480p';
+  timeRange?: { start: number; end: number };
 }
 
 export interface ExportProgress {

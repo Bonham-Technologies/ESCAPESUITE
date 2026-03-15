@@ -35,7 +35,11 @@ interface TrimState {
   originalTimelinePosition: number;
 }
 
-export function Timeline() {
+interface TimelineProps {
+  onExportSelection?: (timeRange: { start: number; end: number }) => void;
+}
+
+export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +84,13 @@ export function Timeline() {
   const splitClip = useEditorStore((state) => state.splitClip);
   const selectClipsInRange = useEditorStore((state) => state.selectClipsInRange);
   const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
+  const inPoint = useEditorStore((state) => state.inPoint);
+  const outPoint = useEditorStore((state) => state.outPoint);
+  const setInPoint = useEditorStore((state) => state.setInPoint);
+  const setOutPoint = useEditorStore((state) => state.setOutPoint);
+
+  const [isDraggingInPoint, setIsDraggingInPoint] = useState(false);
+  const [isDraggingOutPoint, setIsDraggingOutPoint] = useState(false);
 
   const pixelsPerSecond = PIXELS_PER_SECOND_BASE * zoom;
   const minTimelineDuration = Math.max(timelineDuration, 60);
@@ -263,6 +274,40 @@ export function Timeline() {
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDraggingPlayhead, pixelsPerSecond, timelineDuration, setCurrentTime]);
+
+  // Handle in/out point marker drag
+  useEffect(() => {
+    if (!isDraggingInPoint && !isDraggingOutPoint) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const ref = trackContainerRef.current || rulerRef.current;
+      if (!ref) return;
+
+      const rect = ref.getBoundingClientRect();
+      const x = e.clientX - rect.left + ref.scrollLeft;
+      const time = pixelsToTime(x, pixelsPerSecond);
+      const clampedTime = Math.max(0, Math.min(time, timelineDuration));
+
+      if (isDraggingInPoint) {
+        setInPoint(clampedTime);
+      } else {
+        setOutPoint(clampedTime);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingInPoint(false);
+      setIsDraggingOutPoint(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingInPoint, isDraggingOutPoint, pixelsPerSecond, timelineDuration, setInPoint, setOutPoint]);
 
   // Sync ruler scroll (horizontal) and track headers scroll (vertical) with track container scroll
   const handleTrackScroll = useCallback(() => {
@@ -802,6 +847,39 @@ export function Timeline() {
           <div className={styles.rulerContent} style={{ width: timelineWidth }}>
             {renderRuler()}
             {renderMarkers()}
+
+            {/* In/Out point markers in ruler */}
+            {inPoint !== null && (
+              <div
+                className={styles.inOutMarker}
+                style={{ left: timeToPixels(inPoint, pixelsPerSecond) }}
+                onMouseDown={(e) => { e.stopPropagation(); setIsDraggingInPoint(true); }}
+                title={`In point: ${formatTime(inPoint)}`}
+              >
+                <div className={`${styles.inOutMarkerHead} ${styles.inMarkerHead}`}>I</div>
+              </div>
+            )}
+            {outPoint !== null && (
+              <div
+                className={styles.inOutMarker}
+                style={{ left: timeToPixels(outPoint, pixelsPerSecond) }}
+                onMouseDown={(e) => { e.stopPropagation(); setIsDraggingOutPoint(true); }}
+                title={`Out point: ${formatTime(outPoint)}`}
+              >
+                <div className={`${styles.inOutMarkerHead} ${styles.outMarkerHead}`}>O</div>
+              </div>
+            )}
+
+            {/* In/Out region highlight in ruler */}
+            {inPoint !== null && outPoint !== null && (
+              <div
+                className={styles.inOutRulerRegion}
+                style={{
+                  left: timeToPixels(inPoint, pixelsPerSecond),
+                  width: timeToPixels(outPoint - inPoint, pixelsPerSecond),
+                }}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1094,6 +1172,40 @@ export function Timeline() {
               </div>
             ))}
 
+            {/* In/Out region highlight over tracks */}
+            {inPoint !== null && outPoint !== null && (
+              <div
+                className={styles.inOutRegion}
+                style={{
+                  left: timeToPixels(inPoint, pixelsPerSecond),
+                  width: timeToPixels(outPoint - inPoint, pixelsPerSecond),
+                  height: totalTracksHeight,
+                }}
+              />
+            )}
+
+            {/* In/Out point vertical lines */}
+            {inPoint !== null && (
+              <div
+                className={styles.inOutLine}
+                style={{
+                  left: timeToPixels(inPoint, pixelsPerSecond),
+                  height: totalTracksHeight,
+                  '--in-out-color': '#4ade80',
+                } as React.CSSProperties}
+              />
+            )}
+            {outPoint !== null && (
+              <div
+                className={styles.inOutLine}
+                style={{
+                  left: timeToPixels(outPoint, pixelsPerSecond),
+                  height: totalTracksHeight,
+                  '--in-out-color': '#f87171',
+                } as React.CSSProperties}
+              />
+            )}
+
             {/* Marker lines */}
             {renderMarkerLines()}
 
@@ -1132,6 +1244,20 @@ export function Timeline() {
       {/* Timeline info */}
       <div className={styles.info}>
         <span>{formatTime(currentTime)} / {formatTime(timelineDuration)}</span>
+        {inPoint !== null && outPoint !== null && (
+          <span className={styles.inOutInfo}>
+            Selection: {formatTime(inPoint)} - {formatTime(outPoint)} ({formatTime(outPoint - inPoint)})
+            {onExportSelection && (
+              <button
+                className={styles.exportSelectionBtn}
+                onClick={() => onExportSelection({ start: inPoint, end: outPoint })}
+                title="Export selected region"
+              >
+                Export Selection
+              </button>
+            )}
+          </span>
+        )}
         <span>{clips.length} clip{clips.length !== 1 ? 's' : ''} · {tracks.length} track{tracks.length !== 1 ? 's' : ''}</span>
       </div>
     </div>

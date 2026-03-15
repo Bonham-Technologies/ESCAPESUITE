@@ -17,10 +17,16 @@ import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
 import { isStandaloneMode } from './auth';
+import { formatTime } from './utils/timeUtils';
 import styles from './App.module.css';
 
 // Auto-save debounce delay (milliseconds)
 const AUTO_SAVE_DELAY = 2000;
+
+// Helper to format time for notification messages
+function formatTimeForNotification(time: number): string {
+  return formatTime(time);
+}
 
 // Timeline height constraints
 const MIN_TIMELINE_HEIGHT = 120;
@@ -32,6 +38,7 @@ const TIMELINE_HEIGHT_KEY = 'escapeartist-timeline-height';
 
 function App() {
   const [showExport, setShowExport] = useState(false);
+  const [exportTimeRange, setExportTimeRange] = useState<{ start: number; end: number } | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
@@ -86,6 +93,11 @@ function App() {
   const pasteClips = useEditorStore((state) => state.pasteClips);
   const clipboard = useEditorStore((state) => state.clipboard);
   const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
+  const inPoint = useEditorStore((state) => state.inPoint);
+  const outPoint = useEditorStore((state) => state.outPoint);
+  const setInPoint = useEditorStore((state) => state.setInPoint);
+  const setOutPoint = useEditorStore((state) => state.setOutPoint);
+  const clearInOutPoints = useEditorStore((state) => state.clearInOutPoints);
 
   // Show notification
   const showNotification = useCallback((message: string, type: 'info' | 'error' | 'success' = 'info') => {
@@ -409,6 +421,22 @@ function App() {
         return;
       }
 
+      // I = Set in point at playhead
+      if (e.key === 'i' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        setInPoint(currentTime);
+        showNotification(`In point: ${formatTimeForNotification(currentTime)}`, 'info');
+        return;
+      }
+
+      // O = Set out point at playhead
+      if (e.key === 'o' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        setOutPoint(currentTime);
+        showNotification(`Out point: ${formatTimeForNotification(currentTime)}`, 'info');
+        return;
+      }
+
       // ? = Show keyboard shortcuts
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
@@ -416,10 +444,16 @@ function App() {
         return;
       }
 
-      // Escape = Close shortcuts panel, clear multi-selection, or deselect clip
+      // Escape = Clear in/out points, close shortcuts panel, clear multi-selection, or deselect clip
       if (e.key === 'Escape') {
         if (showShortcuts) {
           setShowShortcuts(false);
+          return;
+        }
+        if (inPoint !== null || outPoint !== null) {
+          e.preventDefault();
+          clearInOutPoints();
+          showNotification('In/Out points cleared', 'info');
           return;
         }
         if (selectedClipIds.size > 0) {
@@ -443,7 +477,8 @@ function App() {
     handleZoomIn, handleZoomOut, showNotification, keyframePanelOpen, setKeyframePanelOpen,
     setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker, currentTime,
     goToNextMarker, goToPreviousMarker, showShortcuts, splitClip,
-    selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection
+    selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection,
+    setInPoint, setOutPoint, clearInOutPoints, inPoint, outPoint
   ]);
 
   // Timeline resize handlers
@@ -833,11 +868,11 @@ function App() {
             </svg>
           </button>
         </div>
-        <Timeline />
+        <Timeline onExportSelection={(timeRange) => { setExportTimeRange(timeRange); setShowExport(true); }} />
       </footer>
 
       {/* Export dialog */}
-      <ExportDialog isOpen={showExport} onClose={() => setShowExport(false)} />
+      <ExportDialog isOpen={showExport} onClose={() => { setShowExport(false); setExportTimeRange(undefined); }} timeRange={exportTimeRange} />
 
       {/* Keyframe panel */}
       <KeyframePanel />

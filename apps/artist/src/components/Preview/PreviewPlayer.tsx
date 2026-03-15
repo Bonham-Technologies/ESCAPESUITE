@@ -128,6 +128,8 @@ export function PreviewPlayer() {
   const isPlayingRef = useRef(false);
   const currentTimeRef = useRef(0);
   const loopPlaybackRef = useRef(false);
+  const inPointRef = useRef<number | null>(null);
+  const outPointRef = useRef<number | null>(null);
   const [videoUrls, setVideoUrls] = useState<Map<string, string>>(new Map());
   const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map());
   const [audioUrls, setAudioUrls] = useState<Map<string, string>>(new Map());
@@ -144,6 +146,8 @@ export function PreviewPlayer() {
   const isPlaying = useEditorStore((state) => state.isPlaying);
   const timelineDuration = useEditorStore((state) => state.project.timeline.duration);
   const loopPlayback = useEditorStore((state) => state.loopPlayback);
+  const inPoint = useEditorStore((state) => state.inPoint);
+  const outPoint = useEditorStore((state) => state.outPoint);
 
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
   const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
@@ -196,6 +200,11 @@ export function PreviewPlayer() {
   useEffect(() => {
     loopPlaybackRef.current = loopPlayback;
   }, [loopPlayback]);
+
+  useEffect(() => {
+    inPointRef.current = inPoint;
+    outPointRef.current = outPoint;
+  }, [inPoint, outPoint]);
 
   // Get clips at current time for display info
   const clipsAtTime = useMemo(() =>
@@ -2642,31 +2651,39 @@ export function PreviewPlayer() {
       const elapsed = (performance.now() - playbackStartTime) / 1000;
       const newTimelineTime = startTimelineTime + elapsed;
 
-      // Check if we've reached the end of the timeline
-      if (newTimelineTime >= timelineDuration) {
-        if (loopPlaybackRef.current) {
-          // Loop back to the beginning
-          // Reset playback start time to now, starting from timeline position 0
-          playbackStartTime = performance.now();
-          startTimelineTime = 0;
+      // Determine loop boundaries based on in/out points
+      const loopEnd = (loopPlaybackRef.current && inPointRef.current !== null && outPointRef.current !== null)
+        ? outPointRef.current
+        : timelineDuration;
+      const loopStart = (loopPlaybackRef.current && inPointRef.current !== null && outPointRef.current !== null)
+        ? inPointRef.current
+        : 0;
 
-          // Reset all videos to beginning and restart them
+      // Check if we've reached the end of the timeline (or out point when looping with in/out)
+      if (newTimelineTime >= loopEnd) {
+        if (loopPlaybackRef.current) {
+          // Loop back to the beginning (or in point)
+          // Reset playback start time to now, starting from loop start position
+          playbackStartTime = performance.now();
+          startTimelineTime = loopStart;
+
+          // Reset all videos to loop start and restart them
           videoElementsRef.current.forEach(video => {
-            video.currentTime = 0;
+            video.currentTime = loopStart;
             video.pause();
           });
 
           // Reset all audio clips
           audioElementsRef.current.forEach(audio => {
-            audio.currentTime = 0;
+            audio.currentTime = loopStart;
             audio.pause();
           });
 
           // Update display and continue
-          setCurrentTime(0);
-          setDisplayTime(0);
+          setCurrentTime(loopStart);
+          setDisplayTime(loopStart);
           lastActiveClipIds = new Set();
-          lastStoreUpdateTime = 0;
+          lastStoreUpdateTime = loopStart;
 
           // Continue animation loop
           animationFrameRef.current = requestAnimationFrame(animate);

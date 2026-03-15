@@ -137,6 +137,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedOverlayId: null,
   selectedOverlayType: null,
   clipboard: null,
+  inPoint: null,
+  outPoint: null,
   zoom: 1,
   snapEnabled: true,
   snapThreshold: 10, // pixels
@@ -166,6 +168,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     selectedOverlayId: null,
     selectedOverlayType: null,
     clipboard: null,
+    inPoint: null,
+    outPoint: null,
     history: pushToHistory(state),
   })),
 
@@ -1437,6 +1441,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSnapEnabled: (enabled: boolean) => set({ snapEnabled: enabled }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setLoopPlayback: (enabled: boolean) => set({ loopPlayback: enabled }),
+
+  // In/Out point actions
+  setInPoint: (time: number) => set((state) => {
+    if (state.outPoint !== null && time > state.outPoint) {
+      // Swap: in becomes out, out becomes in
+      return { inPoint: state.outPoint, outPoint: time };
+    }
+    return { inPoint: time };
+  }),
+
+  setOutPoint: (time: number) => set((state) => {
+    if (state.inPoint !== null && time < state.inPoint) {
+      // Swap: out becomes in, in becomes out
+      return { outPoint: state.inPoint, inPoint: time };
+    }
+    return { outPoint: time };
+  }),
+
+  clearInOutPoints: () => set({ inPoint: null, outPoint: null }),
 
   recalculateTimelineDuration: () => set((state) => ({
     project: {
