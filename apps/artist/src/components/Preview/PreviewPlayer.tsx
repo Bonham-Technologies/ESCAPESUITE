@@ -544,12 +544,17 @@ export function PreviewPlayer() {
     ctx.textAlign = textData.textAlign;
     ctx.textBaseline = 'middle';
 
+    // Split text into lines for multi-line support
+    const lines = textData.text.split('\n');
+    const lineHeight = textData.fontSize * 1.2;
+    const totalHeight = lines.length * lineHeight;
+
     // Draw background if set
     if (textData.backgroundColor && textData.backgroundColor !== '#00000000') {
-      const metrics = ctx.measureText(textData.text);
+      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
       const padding = textData.fontSize * 0.3;
-      const bgWidth = metrics.width + padding * 2;
-      const bgHeight = textData.fontSize * 1.4;
+      const bgWidth = maxLineWidth + padding * 2;
+      const bgHeight = totalHeight + padding * 2;
 
       let bgX = x - padding;
       if (textData.textAlign === 'center') {
@@ -562,9 +567,12 @@ export function PreviewPlayer() {
       ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
     }
 
-    // Draw text
+    // Draw each line of text
     ctx.fillStyle = textData.color;
-    ctx.fillText(textData.text, x, y);
+    lines.forEach((line, i) => {
+      const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
+      ctx.fillText(line, x, lineY);
+    });
 
     ctx.restore();
   }, []);
@@ -745,12 +753,17 @@ export function PreviewPlayer() {
     ctx.textAlign = textData.textAlign;
     ctx.textBaseline = 'middle';
 
+    // Split text into lines for multi-line support
+    const lines = textData.text.split('\n');
+    const lineHeight = textData.fontSize * 1.2;
+    const totalHeight = lines.length * lineHeight;
+
     // Draw background if set
     if (textData.backgroundColor && textData.backgroundColor !== '#00000000') {
-      const metrics = ctx.measureText(textData.text);
+      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
       const padding = textData.fontSize * 0.3;
-      const bgWidth = metrics.width + padding * 2;
-      const bgHeight = textData.fontSize * 1.4;
+      const bgWidth = maxLineWidth + padding * 2;
+      const bgHeight = totalHeight + padding * 2;
 
       let bgX = x - padding;
       if (textData.textAlign === 'center') {
@@ -763,9 +776,12 @@ export function PreviewPlayer() {
       ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
     }
 
-    // Draw text
+    // Draw each line of text
     ctx.fillStyle = textData.color;
-    ctx.fillText(textData.text, x, y);
+    lines.forEach((line, i) => {
+      const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
+      ctx.fillText(line, x, lineY);
+    });
 
     ctx.restore();
   }, []);
@@ -1185,12 +1201,17 @@ export function PreviewPlayer() {
       const x = overlay.x * canvas.width;
       const y = overlay.y * canvas.height;
 
+      // Split text into lines for multi-line support
+      const lines = overlay.text.split('\n');
+      const lineHeight = overlay.fontSize * 1.2;
+      const totalHeight = lines.length * lineHeight;
+
       // Draw background if set
       if (overlay.backgroundColor && overlay.backgroundColor !== '#00000000') {
-        const metrics = ctx.measureText(overlay.text);
+        const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
         const padding = overlay.fontSize * 0.3;
-        const bgWidth = metrics.width + padding * 2;
-        const bgHeight = overlay.fontSize * 1.4;
+        const bgWidth = maxLineWidth + padding * 2;
+        const bgHeight = totalHeight + padding * 2;
 
         let bgX = x - padding;
         if (overlay.textAlign === 'center') {
@@ -1203,9 +1224,12 @@ export function PreviewPlayer() {
         ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
       }
 
-      // Draw text
+      // Draw each line of text
       ctx.fillStyle = overlay.color;
-      ctx.fillText(overlay.text, x, y);
+      lines.forEach((line, i) => {
+        const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
+        ctx.fillText(line, x, lineY);
+      });
 
       ctx.restore();
     }
@@ -1299,9 +1323,12 @@ export function PreviewPlayer() {
       const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
       const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
       ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
-      const metrics = ctx.measureText(textData.text);
-      const textWidth = metrics.width * scale;
-      const textHeight = textData.fontSize * 1.4 * scale;
+      const lines = textData.text.split('\n');
+      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+      const lineHeight = textData.fontSize * 1.2;
+      const totalHeight = lines.length * lineHeight;
+      const textWidth = maxLineWidth * scale;
+      const textHeight = totalHeight * scale;
 
       // Adjust center based on text alignment
       let centerX = x * canvas.width;

@@ -53,12 +53,17 @@ export function drawTextOverlayToCanvasAnimated(
   ctx.textAlign = textData.textAlign;
   ctx.textBaseline = 'middle';
 
+  // Split text into lines for multi-line support
+  const lines = textData.text.split('\n');
+  const lineHeight = textData.fontSize * 1.2;
+  const totalHeight = lines.length * lineHeight;
+
   // Draw background if set
   if (textData.backgroundColor && textData.backgroundColor !== '#00000000') {
-    const metrics = ctx.measureText(textData.text);
+    const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
     const padding = textData.fontSize * 0.3;
-    const bgWidth = metrics.width + padding * 2;
-    const bgHeight = textData.fontSize * 1.4;
+    const bgWidth = maxLineWidth + padding * 2;
+    const bgHeight = totalHeight + padding * 2;
 
     let bgX = x - padding;
     if (textData.textAlign === 'center') {
@@ -71,9 +76,12 @@ export function drawTextOverlayToCanvasAnimated(
     ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
   }
 
-  // Draw text
+  // Draw each line of text
   ctx.fillStyle = textData.color;
-  ctx.fillText(textData.text, x, y);
+  lines.forEach((line, i) => {
+    const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
+    ctx.fillText(line, x, lineY);
+  });
 
   ctx.restore();
 }
