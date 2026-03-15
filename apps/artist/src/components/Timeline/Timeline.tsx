@@ -10,6 +10,7 @@ import { formatTime, timeToPixels, pixelsToTime } from '../../utils/timeUtils';
 import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
+import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
 
 const PIXELS_PER_SECOND_BASE = 50;
@@ -44,6 +45,10 @@ export function Timeline() {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editingTrackName, setEditingTrackName] = useState('');
+  const [tlMarqueeStart, setTlMarqueeStart] = useState<{x: number; y: number} | null>(null);
+  const [tlMarqueeCurrent, setTlMarqueeCurrent] = useState<{x: number; y: number} | null>(null);
+  const tlMarqueeActive = tlMarqueeStart !== null && tlMarqueeCurrent !== null;
+  const TL_MARQUEE_THRESHOLD = 5;
 
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -73,6 +78,8 @@ export function Timeline() {
   const setIsPlaying = useEditorStore((state) => state.setIsPlaying);
   const activeTool = useEditorStore((state) => state.activeTool);
   const splitClip = useEditorStore((state) => state.splitClip);
+  const selectClipsInRange = useEditorStore((state) => state.selectClipsInRange);
+  const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
 
   const pixelsPerSecond = PIXELS_PER_SECOND_BASE * zoom;
   const minTimelineDuration = Math.max(timelineDuration, 60);
@@ -190,6 +197,12 @@ export function Timeline() {
   // Handle click on track to seek, pause, and deselect
   const handleTrackClick = useCallback(
     (e: React.MouseEvent) => {
+      // If a marquee selection just completed, skip normal click behavior
+      if (marqueeJustFinished.current) {
+        marqueeJustFinished.current = false;
+        return;
+      }
+
       if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
 
       // Only deselect if clicking directly on the track container, not on a clip or playhead
@@ -212,10 +225,11 @@ export function Timeline() {
 
       // Deselect clip only when clicking on empty track space
       if (!isClickOnClip) {
+        clearMultiSelection();
         setSelectedClipId(null);
       }
     },
-    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, isDraggingPlayhead, dragState, isPlaying, setIsPlaying]
+    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying]
   );
 
   // Handle playhead drag
@@ -674,6 +688,111 @@ export function Timeline() {
     }
   }, [handleTrackNameBlur]);
 
+  // Track whether marquee was just completed so handleTrackClick can skip deselection
+  const marqueeJustFinished = useRef(false);
+
+  // Handle mousedown on track area to start marquee selection
+  const handleTrackMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
+
+      const target = e.target as HTMLElement;
+      const isClickOnClip = target.closest('[data-clip-id]');
+      const isClickOnPlayhead = target.closest('[data-playhead]');
+
+      // Only start marquee on empty space
+      if (isClickOnClip || isClickOnPlayhead) return;
+
+      const rect = trackContainerRef.current.getBoundingClientRect();
+      setTlMarqueeStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      setTlMarqueeCurrent(null);
+    },
+    [isDraggingPlayhead, dragState]
+  );
+
+  // Marquee mousemove/mouseup via useEffect (document-level events)
+  useEffect(() => {
+    if (!tlMarqueeStart) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!trackContainerRef.current) return;
+      const rect = trackContainerRef.current.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+      const dx = currentX - tlMarqueeStart.x;
+      const dy = currentY - tlMarqueeStart.y;
+      if (Math.sqrt(dx * dx + dy * dy) >= TL_MARQUEE_THRESHOLD) {
+        setTlMarqueeCurrent({ x: currentX, y: currentY });
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (tlMarqueeActive && trackContainerRef.current) {
+        const current = tlMarqueeCurrent!;
+        const scrollLeft = trackContainerRef.current.scrollLeft;
+
+        // Convert marquee X pixel positions to time values
+        const leftPx = Math.min(tlMarqueeStart.x, current.x) + scrollLeft;
+        const rightPx = Math.max(tlMarqueeStart.x, current.x) + scrollLeft;
+        const startTime = pixelsToTime(leftPx, pixelsPerSecond);
+        const endTime = pixelsToTime(rightPx, pixelsPerSecond);
+
+        // Determine which tracks the marquee spans by Y position
+        const topPx = Math.min(tlMarqueeStart.y, current.y);
+        const bottomPx = Math.max(tlMarqueeStart.y, current.y);
+
+        // Find track elements and match Y ranges
+        const trackElements = trackContainerRef.current.querySelectorAll('[data-track-id]');
+        const containerRect = trackContainerRef.current.getBoundingClientRect();
+        const scrollTop = trackContainerRef.current.scrollTop;
+
+        const spannedTrackIds = new Set<string>();
+        trackElements.forEach((el) => {
+          const elRect = el.getBoundingClientRect();
+          // Convert to container-relative coordinates
+          const elTop = elRect.top - containerRect.top + scrollTop;
+          const elBottom = elRect.bottom - containerRect.top + scrollTop;
+          // Check if track overlaps with marquee Y range
+          if (elBottom > topPx && elTop < bottomPx) {
+            const trackId = el.getAttribute('data-track-id');
+            if (trackId) spannedTrackIds.add(trackId);
+          }
+        });
+
+        // Find all clips within the time range on the spanned tracks
+        const intersecting = clips.filter(clip => {
+          if (!spannedTrackIds.has(clip.trackId)) return false;
+          const clipEnd = clip.timelinePosition + clip.duration;
+          // Clip overlaps the time range
+          return clipEnd > startTime && clip.timelinePosition < endTime;
+        }).map(c => c.id);
+
+        if (e.ctrlKey || e.metaKey) {
+          const existing = Array.from(selectedClipIds);
+          const combined = [...new Set([...existing, ...intersecting])];
+          selectClipsInRange(combined);
+        } else {
+          selectClipsInRange(intersecting);
+        }
+
+        marqueeJustFinished.current = true;
+      } else {
+        // No drag - let handleTrackClick handle the deselect + seek
+      }
+
+      setTlMarqueeStart(null);
+      setTlMarqueeCurrent(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [tlMarqueeStart, tlMarqueeActive, tlMarqueeCurrent, pixelsPerSecond, clips, selectedClipIds, selectClipsInRange]);
+
   return (
     <div className={styles.container} ref={containerRef}>
       {/* Ruler */}
@@ -843,6 +962,7 @@ export function Timeline() {
           className={`${styles.trackContainer} ${activeTool === 'razor' ? styles.razorCursor : ''} ${activeTool === 'ripple' ? styles.rippleCursor : ''}`}
           ref={trackContainerRef}
           onClick={handleTrackClick}
+          onMouseDown={handleTrackMouseDown}
           onScroll={handleTrackScroll}
         >
           <div className={styles.tracksContent} style={{ width: timelineWidth }}>
@@ -995,6 +1115,16 @@ export function Timeline() {
               <div className={styles.playheadHead} />
               <div className={styles.playheadLine} />
             </div>
+
+            {/* Marquee selection rectangle */}
+            {tlMarqueeActive && tlMarqueeStart && tlMarqueeCurrent && (
+              <MarqueeSelection
+                startX={tlMarqueeStart.x}
+                startY={tlMarqueeStart.y}
+                currentX={tlMarqueeCurrent.x}
+                currentY={tlMarqueeCurrent.y}
+              />
+            )}
           </div>
         </div>
       </div>

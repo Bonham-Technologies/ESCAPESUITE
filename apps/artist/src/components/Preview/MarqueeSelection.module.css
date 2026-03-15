@@ -1,0 +1,7 @@
+.marquee {
+  position: absolute;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  pointer-events: none;
+  z-index: 10;
+}

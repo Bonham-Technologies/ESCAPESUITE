@@ -8,6 +8,7 @@ import { useThrottledDragUpdate } from '../../hooks';
 import type { BlendMode, Clip, Track, TransitionType, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import { InlineTextEditor } from './InlineTextEditor';
+import { MarqueeSelection } from './MarqueeSelection';
 import styles from './PreviewPlayer.module.css';
 
 // Drag modes for different transform operations
@@ -151,6 +152,8 @@ export function PreviewPlayer() {
   const updateTextOverlayData = useEditorStore((state) => state.updateTextOverlayData);
   const updateShapeOverlayData = useEditorStore((state) => state.updateShapeOverlayData);
   const setSelectedClipId = useEditorStore((state) => state.setSelectedClipId);
+  const selectClipsInRange = useEditorStore((state) => state.selectClipsInRange);
+  const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
   const updateClipTransform = useEditorStore((state) => state.updateClipTransform);
 
   // Keyframe mode: when keyframe panel is open, manipulations create keyframes
@@ -165,6 +168,12 @@ export function PreviewPlayer() {
 
   // Drag state for overlay manipulation
   const [dragState, setDragState] = useState<DragState | null>(null);
+
+  // Marquee selection state
+  const [marqueeStart, setMarqueeStart] = useState<{x: number; y: number} | null>(null);
+  const [marqueeCurrent, setMarqueeCurrent] = useState<{x: number; y: number} | null>(null);
+  const marqueeActive = marqueeStart !== null && marqueeCurrent !== null;
+  const MARQUEE_THRESHOLD = 5; // pixels before starting marquee
 
   // Inline text editing state
   const [editingTextClipId, setEditingTextClipId] = useState<string | null>(null);
@@ -1906,12 +1915,33 @@ export function PreviewPlayer() {
       // Select the clip
       setSelectedClipId(hit.clipId);
     } else {
-      // Clicked on empty space - deselect
-      setSelectedClipId(null);
+      // Clicked on empty space - start tracking for marquee selection
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        setMarqueeStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        setMarqueeCurrent(null);
+      }
     }
   }, [isPlaying, getCanvasPosition, hitTestHandles, clips, setSelectedClipId, getOverlayBounds, keyframePanelOpen, selectedClipId, currentTime]);
 
   const handleMouseMove = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
+    // Handle marquee drag
+    if (marqueeStart && !dragState) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+        const dx = currentX - marqueeStart.x;
+        const dy = currentY - marqueeStart.y;
+        if (Math.sqrt(dx * dx + dy * dy) >= MARQUEE_THRESHOLD) {
+          setMarqueeCurrent({ x: currentX, y: currentY });
+        }
+      }
+      return;
+    }
+
     if (!dragState) return;
 
     const canvas = canvasRef.current;
@@ -2154,9 +2184,85 @@ export function PreviewPlayer() {
       drawSelectionHandles(currentTime);
       drawMultiSelectHandles(currentTime);
     });
-  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, drawMultiSelectHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate]);
+  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, drawMultiSelectHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e?: MouseEvent<HTMLCanvasElement>) => {
+    // Handle marquee selection completion
+    if (marqueeStart) {
+      if (marqueeActive && canvasRef.current) {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+
+        // Calculate rendered canvas area (accounting for object-fit: contain)
+        const canvasAspect = canvas.width / canvas.height;
+        const elementAspect = rect.width / rect.height;
+        let renderedWidth: number, renderedHeight: number, offsetX: number, offsetY: number;
+        if (canvasAspect > elementAspect) {
+          renderedWidth = rect.width;
+          renderedHeight = rect.width / canvasAspect;
+          offsetX = 0;
+          offsetY = (rect.height - renderedHeight) / 2;
+        } else {
+          renderedHeight = rect.height;
+          renderedWidth = rect.height * canvasAspect;
+          offsetX = (rect.width - renderedWidth) / 2;
+          offsetY = 0;
+        }
+
+        // Convert marquee rect from CSS pixels to normalized canvas coords (0-1)
+        const current = marqueeCurrent!;
+        const normLeft = Math.min(marqueeStart.x, current.x);
+        const normTop = Math.min(marqueeStart.y, current.y);
+        const normRight = Math.max(marqueeStart.x, current.x);
+        const normBottom = Math.max(marqueeStart.y, current.y);
+
+        const mLeft = (normLeft - offsetX) / renderedWidth;
+        const mTop = (normTop - offsetY) / renderedHeight;
+        const mRight = (normRight - offsetX) / renderedWidth;
+        const mBottom = (normBottom - offsetY) / renderedHeight;
+
+        // Find overlay clips whose bounding boxes intersect the marquee
+        const intersecting: string[] = [];
+        for (const clip of clips) {
+          // Only check clips visible at current time
+          const clipEnd = clip.timelinePosition + clip.duration;
+          if (currentTime < clip.timelinePosition || currentTime >= clipEnd) continue;
+
+          const bounds = getOverlayBounds(clip, canvas, currentTime);
+          if (!bounds) continue;
+
+          // Convert bounds to normalized coords
+          const bLeft = (bounds.centerX - bounds.width / 2) / canvas.width;
+          const bTop = (bounds.centerY - bounds.height / 2) / canvas.height;
+          const bRight = (bounds.centerX + bounds.width / 2) / canvas.width;
+          const bBottom = (bounds.centerY + bounds.height / 2) / canvas.height;
+
+          // Check AABB intersection (ignoring rotation for simplicity)
+          if (bRight > mLeft && bLeft < mRight && bBottom > mTop && bTop < mBottom) {
+            intersecting.push(clip.id);
+          }
+        }
+
+        const nativeEvent = e as unknown as { ctrlKey?: boolean; metaKey?: boolean } | undefined;
+        if (nativeEvent?.ctrlKey || nativeEvent?.metaKey) {
+          // Add to existing selection
+          const existing = Array.from(selectedClipIds);
+          const combined = [...new Set([...existing, ...intersecting])];
+          selectClipsInRange(combined);
+        } else {
+          selectClipsInRange(intersecting);
+        }
+      } else {
+        // No drag happened - just a click on empty space: deselect
+        clearMultiSelection();
+        setSelectedClipId(null);
+      }
+
+      setMarqueeStart(null);
+      setMarqueeCurrent(null);
+      return;
+    }
+
     if (dragState) {
       // Flush any pending throttled updates to ensure state is current
       throttledTextUpdate.flush();
@@ -2196,7 +2302,7 @@ export function PreviewPlayer() {
       }
     }
     setDragState(null);
-  }, [dragState, clips, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, keyframePanelOpen, selectedClipId, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate]);
+  }, [dragState, clips, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, keyframePanelOpen, selectedClipId, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, getOverlayBounds, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId]);
 
   const handleMouseLeave = useCallback(() => {
     // Cancel any pending throttled updates when mouse leaves
@@ -2204,6 +2310,8 @@ export function PreviewPlayer() {
     throttledShapeUpdate.cancel();
     throttledTransformUpdate.cancel();
     setDragState(null);
+    setMarqueeStart(null);
+    setMarqueeCurrent(null);
   }, [throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate]);
 
   // Double-click handler to enter inline text editing
@@ -2832,6 +2940,14 @@ export function PreviewPlayer() {
             />
           );
         })()}
+        {marqueeActive && marqueeStart && marqueeCurrent && (
+          <MarqueeSelection
+            startX={marqueeStart.x}
+            startY={marqueeStart.y}
+            currentX={marqueeCurrent.x}
+            currentY={marqueeCurrent.y}
+          />
+        )}
       </div>
 
       <div className={styles.info}>
