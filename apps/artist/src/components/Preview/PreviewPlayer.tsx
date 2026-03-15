@@ -48,9 +48,9 @@ const blendModeToCanvas: Record<BlendMode, GlobalCompositeOperation> = {
   add: 'lighter',
 };
 
-// Default canvas dimensions
-const DEFAULT_WIDTH = 1920;
-const DEFAULT_HEIGHT = 1080;
+// Fallback canvas dimensions (used if resolution not yet available)
+const DEFAULT_WIDTH = 1280;
+const DEFAULT_HEIGHT = 720;
 
 // Helper to get transition info between clips
 interface TransitionInfo {
@@ -130,9 +130,9 @@ export function PreviewPlayer() {
   const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map());
   const [audioUrls, setAudioUrls] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
-  const [canvasDimensions, setCanvasDimensions] = useState({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
   const [displayTime, setDisplayTime] = useState(0);
 
+  const resolution = useEditorStore((state) => state.project.resolution);
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const textOverlays = useEditorStore((state) => state.project.timeline.textOverlays || []);
@@ -154,6 +154,12 @@ export function PreviewPlayer() {
   // Keyframe mode: when keyframe panel is open, manipulations create keyframes
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
   const setClipKeyframe = useEditorStore((state) => state.setClipKeyframe);
+
+  // Canvas dimensions come from project resolution (fallback to defaults for safety)
+  const canvasDimensions = useMemo(() => ({
+    width: resolution?.width || DEFAULT_WIDTH,
+    height: resolution?.height || DEFAULT_HEIGHT,
+  }), [resolution?.width, resolution?.height]);
 
   // Drag state for overlay manipulation
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -320,32 +326,8 @@ export function PreviewPlayer() {
 
     videoElementsRef.current = newVideos;
 
-    // Set canvas dimensions from the bottom-most track's source (lowest index = base layer)
-    // The base layer typically contains the main video content, with overlays on top
-    if (clips.length > 0 && tracks.length > 0) {
-      // Sort clips by track index (lower = base/bottom)
-      const sortedClips = [...clips].sort((a, b) => {
-        const trackA = tracks.find(t => t.id === a.trackId);
-        const trackB = tracks.find(t => t.id === b.trackId);
-        return (trackA?.index ?? 0) - (trackB?.index ?? 0);
-      });
-
-      // Find bottom-most media clip with dimensions (skip overlays)
-      for (const clip of sortedClips) {
-        if (clip.overlayType) continue; // Skip overlays
-        const source = sourceVideos.find(s => s.id === clip.sourceVideoId);
-        if (source && source.width && source.height) {
-          setCanvasDimensions({ width: source.width, height: source.height });
-          break;
-        }
-      }
-    } else if (sourceVideos.length > 0) {
-      // Fallback to first source if no clips yet
-      const firstSource = sourceVideos[0];
-      if (firstSource.width && firstSource.height) {
-        setCanvasDimensions({ width: firstSource.width, height: firstSource.height });
-      }
-    }
+    // Canvas dimensions are now driven by project.resolution from the store
+    // No need to derive from source video dimensions
   }, [videoUrls, sourceVideos, clips, tracks]);
 
   // Create/update image elements
