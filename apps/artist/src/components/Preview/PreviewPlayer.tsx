@@ -7,6 +7,7 @@ import { getAnimatedValues, getAnimatedVolume } from '../../utils/animation';
 import { useThrottledDragUpdate } from '../../hooks';
 import type { BlendMode, Clip, Track, TransitionType, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
+import { InlineTextEditor } from './InlineTextEditor';
 import styles from './PreviewPlayer.module.css';
 
 // Drag modes for different transform operations
@@ -163,6 +164,9 @@ export function PreviewPlayer() {
 
   // Drag state for overlay manipulation
   const [dragState, setDragState] = useState<DragState | null>(null);
+
+  // Inline text editing state
+  const [editingTextClipId, setEditingTextClipId] = useState<string | null>(null);
 
   // Throttled updates for smooth drag performance
   // Updates are batched per animation frame to reduce store updates
@@ -998,10 +1002,13 @@ export function PreviewPlayer() {
       );
 
       // Draw overlay with animated transform values
+      // Skip drawing text that is currently being inline-edited (to avoid duplicate)
       if (clip.overlayType === 'shape' && clip.shapeData) {
         drawShapeOverlayAnimated(ctx, canvas, clip.shapeData, animated);
       } else if (clip.overlayType === 'text' && clip.textData) {
-        drawTextOverlayAnimated(ctx, canvas, clip.textData, animated);
+        if (clip.id !== editingTextClipId) {
+          drawTextOverlayAnimated(ctx, canvas, clip.textData, animated);
+        }
       }
     };
 
@@ -1233,7 +1240,7 @@ export function PreviewPlayer() {
 
       ctx.restore();
     }
-  }, [clips, tracks, sourceVideos, textOverlays, shapeOverlays, drawClip, drawTextOverlay, drawShapeOverlay, drawTextOverlayAnimated, drawShapeOverlayAnimated]);
+  }, [clips, tracks, sourceVideos, textOverlays, shapeOverlays, drawClip, drawTextOverlay, drawShapeOverlay, drawTextOverlayAnimated, drawShapeOverlayAnimated, editingTextClipId]);
 
   // Get overlay bounds in canvas pixels for a given clip
   // Uses animated values from keyframes when available
@@ -2157,6 +2164,41 @@ export function PreviewPlayer() {
     setDragState(null);
   }, [throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate]);
 
+  // Double-click handler to enter inline text editing
+  const handleDoubleClick = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
+    if (isPlaying) return;
+
+    const pos = getCanvasPosition(e);
+    const hit = hitTestHandles(pos.x, pos.y);
+
+    if (hit && hit.clipType === 'text') {
+      e.preventDefault();
+      e.stopPropagation();
+      setEditingTextClipId(hit.clipId);
+      setSelectedClipId(hit.clipId);
+    }
+  }, [isPlaying, getCanvasPosition, hitTestHandles, setSelectedClipId]);
+
+  // Commit handler for inline text editing
+  const handleInlineTextCommit = useCallback((newText: string) => {
+    if (editingTextClipId) {
+      updateTextOverlayData(editingTextClipId, { text: newText });
+    }
+    setEditingTextClipId(null);
+  }, [editingTextClipId, updateTextOverlayData]);
+
+  // Cancel handler for inline text editing
+  const handleInlineTextCancel = useCallback(() => {
+    setEditingTextClipId(null);
+  }, []);
+
+  // Clear editing state when playing starts
+  useEffect(() => {
+    if (isPlaying) {
+      setEditingTextClipId(null);
+    }
+  }, [isPlaying]);
+
   // Get cursor based on drag mode
   const getCursorForMode = (mode: DragMode): string => {
     switch (mode) {
@@ -2650,12 +2692,100 @@ export function PreviewPlayer() {
             width={canvasDimensions.width}
             height={canvasDimensions.height}
             style={{ cursor }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMoveForCursor}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseLeave}
+            onMouseDown={editingTextClipId ? undefined : handleMouseDown}
+            onMouseMove={editingTextClipId ? undefined : handleMouseMoveForCursor}
+            onMouseUp={editingTextClipId ? undefined : handleMouseUp}
+            onMouseLeave={editingTextClipId ? undefined : handleMouseLeave}
+            onDoubleClick={handleDoubleClick}
           />
         )}
+        {editingTextClipId && canvasRef.current && (() => {
+          const editingClip = clips.find(c => c.id === editingTextClipId);
+          if (!editingClip?.textData) return null;
+
+          const canvas = canvasRef.current!;
+          const rect = canvas.getBoundingClientRect();
+          const textData = editingClip.textData;
+
+          // Calculate rendered canvas area within the element (object-fit: contain)
+          const canvasAspect = canvas.width / canvas.height;
+          const elementAspect = rect.width / rect.height;
+
+          let renderedWidth: number;
+          let renderedHeight: number;
+          let offsetX: number;
+          let offsetY: number;
+
+          if (canvasAspect > elementAspect) {
+            renderedWidth = rect.width;
+            renderedHeight = rect.width / canvasAspect;
+            offsetX = 0;
+            offsetY = (rect.height - renderedHeight) / 2;
+          } else {
+            renderedHeight = rect.height;
+            renderedWidth = rect.height * canvasAspect;
+            offsetX = (rect.width - renderedWidth) / 2;
+            offsetY = 0;
+          }
+
+          const scaleX = renderedWidth / canvas.width;
+          const scaleY = renderedHeight / canvas.height;
+
+          // Get text bounds from canvas
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return null;
+
+          const fontStyleStr = textData.fontStyle === 'italic' ? 'italic ' : '';
+          const fontWeightStr = textData.fontWeight === 'bold' ? 'bold ' : '';
+          ctx.font = `${fontStyleStr}${fontWeightStr}${textData.fontSize}px ${textData.fontFamily}`;
+
+          const lines = textData.text.split('\n');
+          const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+          const lineHeight = textData.fontSize * 1.2;
+          const totalHeight = lines.length * lineHeight;
+          const scale = textData.scale ?? 1;
+
+          // Canvas-space coordinates
+          const canvasX = textData.x * canvas.width;
+          const canvasY = textData.y * canvas.height;
+          const textWidth = maxLineWidth * scale;
+          const textHeight = totalHeight * scale;
+
+          // Adjust x based on textAlign
+          let textLeft = canvasX;
+          if (textData.textAlign === 'center') {
+            textLeft = canvasX - textWidth / 2;
+          } else if (textData.textAlign === 'right') {
+            textLeft = canvasX - textWidth;
+          }
+          const textTop = canvasY - textHeight / 2;
+
+          // Convert to screen-space relative to videoWrapper
+          const screenX = offsetX + textLeft * scaleX;
+          const screenY = offsetY + textTop * scaleY;
+          const screenWidth = textWidth * scaleX;
+          const screenHeight = textHeight * scaleY;
+          const screenFontSize = textData.fontSize * scale * scaleY;
+
+          return (
+            <InlineTextEditor
+              clipId={editingTextClipId}
+              text={textData.text}
+              x={screenX}
+              y={screenY}
+              width={screenWidth}
+              height={screenHeight}
+              fontFamily={textData.fontFamily}
+              fontSize={screenFontSize}
+              fontWeight={textData.fontWeight}
+              fontStyle={textData.fontStyle}
+              color={textData.color}
+              textAlign={textData.textAlign}
+              onCommit={handleInlineTextCommit}
+              onCancel={handleInlineTextCancel}
+            />
+          );
+        })()}
       </div>
 
       <div className={styles.info}>
