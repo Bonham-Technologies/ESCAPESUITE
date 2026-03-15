@@ -150,7 +150,7 @@ export async function exportToMP4(
   onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
   log('audio', 'Starting audio extraction');
-  let fullAudioData: Float32Array | null = await extractAndMixAudioWithWorker(clips, exportTracks, fullDuration, (p) => {
+  const fullAudioData: Float32Array | null = await extractAndMixAudioWithWorker(clips, exportTracks, fullDuration, (p) => {
     onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
   });
   log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');
