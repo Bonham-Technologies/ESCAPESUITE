@@ -23,8 +23,8 @@ describe('Image Scaling Relative to Project Resolution', () => {
     useEditorStore.getState().clearHistory();
   });
 
-  describe('large images are auto-fit scaled down', () => {
-    it('should scale a 4000x3000 image to fit within 1280x720 canvas', () => {
+  describe('all media imports at 100% native scale', () => {
+    it('should import a 4000x3000 image at scale 1 (native size)', () => {
       const source = createSourceVideo({
         id: 'img-large',
         name: 'large.png',
@@ -46,13 +46,11 @@ describe('Image Scaling Relative to Project Resolution', () => {
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-large')!;
-      // fitScale = min(1280/4000, 720/3000) = min(0.32, 0.24) = 0.24
-      const expectedScale = Math.min(1280 / 4000, 720 / 3000);
-      expect(clip.transform.scaleX).toBeCloseTo(expectedScale);
-      expect(clip.transform.scaleY).toBeCloseTo(expectedScale);
+      expect(clip.transform.scaleX).toBe(1);
+      expect(clip.transform.scaleY).toBe(1);
     });
 
-    it('should scale a wide panorama image to fit', () => {
+    it('should import a wide panorama image at scale 1', () => {
       const source = createSourceVideo({
         id: 'img-wide',
         name: 'panorama.jpg',
@@ -74,15 +72,13 @@ describe('Image Scaling Relative to Project Resolution', () => {
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-wide')!;
-      // fitScale = min(1280/5000, 720/500) = min(0.256, 1.44) = 0.256
-      const expectedScale = Math.min(1280 / 5000, 720 / 500);
-      expect(clip.transform.scaleX).toBeCloseTo(expectedScale);
-      expect(clip.transform.scaleY).toBeCloseTo(expectedScale);
+      expect(clip.transform.scaleX).toBe(1);
+      expect(clip.transform.scaleY).toBe(1);
     });
   });
 
-  describe('small images keep native scale', () => {
-    it('should keep native scale for a 150x100 image on 1280x720 project', () => {
+  describe('small images also import at native scale', () => {
+    it('should import a 150x100 image at scale 1', () => {
       const source = createSourceVideo({
         id: 'img-small',
         name: 'icon.png',
@@ -104,17 +100,16 @@ describe('Image Scaling Relative to Project Resolution', () => {
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-small')!;
-      // nativeScaleX = 150/1280, nativeScaleY = 100/720 — both < 1, so keep native
-      expect(clip.transform.scaleX).toBeCloseTo(150 / 1280);
-      expect(clip.transform.scaleY).toBeCloseTo(100 / 720);
+      expect(clip.transform.scaleX).toBe(1);
+      expect(clip.transform.scaleY).toBe(1);
     });
 
-    it('should keep native scale for an image exactly matching the canvas', () => {
+    it('should import an image exactly matching the canvas at scale 1', () => {
       const source = createSourceVideo({
         id: 'img-exact',
         name: 'exact.png',
-        width: 1280,
-        height: 720,
+        width: 1920,
+        height: 1080,
         mediaType: 'image',
         mimeType: 'image/png',
       });
@@ -131,14 +126,13 @@ describe('Image Scaling Relative to Project Resolution', () => {
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-exact')!;
-      // nativeScale = 1280/1280 = 1, 720/720 = 1 — exactly 1, not > 1, so keep native
       expect(clip.transform.scaleX).toBe(1);
       expect(clip.transform.scaleY).toBe(1);
     });
   });
 
-  describe('videos are properly scaled', () => {
-    it('should auto-fit a 4K video to 720p project', () => {
+  describe('videos import at native scale', () => {
+    it('should import a 4K video at scale 1 on 1080p project', () => {
       const source = createSourceVideo({
         id: 'vid-4k',
         name: '4k-video.mp4',
@@ -159,16 +153,11 @@ describe('Image Scaling Relative to Project Resolution', () => {
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-4k')!;
-      // fitScale = min(1280/3840, 720/2160) = min(0.333, 0.333) = 0.333
-      const expectedScale = Math.min(1280 / 3840, 720 / 2160);
-      expect(clip.transform.scaleX).toBeCloseTo(expectedScale);
-      expect(clip.transform.scaleY).toBeCloseTo(expectedScale);
+      expect(clip.transform.scaleX).toBe(1);
+      expect(clip.transform.scaleY).toBe(1);
     });
 
-    it('should keep native scale for a 720p video on 1080p project', () => {
-      // Change project resolution to 1080p
-      useEditorStore.getState().setProjectResolution(1920, 1080);
-
+    it('should import a 720p video at scale 1 on 1080p project', () => {
       const source = createSourceVideo({
         id: 'vid-720',
         name: '720p-video.mp4',
@@ -189,9 +178,8 @@ describe('Image Scaling Relative to Project Resolution', () => {
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-720')!;
-      // nativeScaleX = 1280/1920 = 0.667, nativeScaleY = 720/1080 = 0.667
-      expect(clip.transform.scaleX).toBeCloseTo(1280 / 1920);
-      expect(clip.transform.scaleY).toBeCloseTo(720 / 1080);
+      expect(clip.transform.scaleX).toBe(1);
+      expect(clip.transform.scaleY).toBe(1);
     });
   });
 
@@ -225,7 +213,7 @@ describe('Image Scaling Relative to Project Resolution', () => {
   });
 
   describe('works with different project resolutions', () => {
-    it('should scale relative to 4K project resolution', () => {
+    it('should import at scale 1 regardless of project resolution', () => {
       useEditorStore.getState().setProjectResolution(3840, 2160);
 
       const source = createSourceVideo({
@@ -249,9 +237,8 @@ describe('Image Scaling Relative to Project Resolution', () => {
       });
 
       const clip = useEditorStore.getState().project.timeline.clips.find(c => c.id === 'clip-hd')!;
-      // On 4K canvas, 1920x1080 is smaller: nativeScaleX = 1920/3840 = 0.5
-      expect(clip.transform.scaleX).toBeCloseTo(0.5);
-      expect(clip.transform.scaleY).toBeCloseTo(0.5);
+      expect(clip.transform.scaleX).toBe(1);
+      expect(clip.transform.scaleY).toBe(1);
     });
   });
 });

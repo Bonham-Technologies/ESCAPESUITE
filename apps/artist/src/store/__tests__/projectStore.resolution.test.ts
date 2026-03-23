@@ -10,14 +10,14 @@ describe('Project Resolution', () => {
   });
 
   describe('default resolution', () => {
-    it('should have 720p (1280x720) as default resolution', () => {
+    it('should have 1080p (1920x1080) as default resolution', () => {
       const { project } = useEditorStore.getState();
-      expect(project.resolution).toEqual({ width: 1280, height: 720 });
+      expect(project.resolution).toEqual({ width: 1920, height: 1080 });
     });
 
-    it('should match the 720p preset', () => {
+    it('should match the 1080p preset', () => {
       const { project } = useEditorStore.getState();
-      expect(project.resolution).toEqual(RESOLUTION_PRESETS['720p']);
+      expect(project.resolution).toEqual(RESOLUTION_PRESETS['1080p']);
     });
   });
 
@@ -72,34 +72,34 @@ describe('Project Resolution', () => {
       const { project: original } = useEditorStore.getState();
       const originalResolution = { ...original.resolution };
 
-      useEditorStore.getState().setProjectResolution(1920, 1080);
-      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1920, height: 1080 });
+      useEditorStore.getState().setProjectResolution(3840, 2160);
+      expect(useEditorStore.getState().project.resolution).toEqual({ width: 3840, height: 2160 });
 
       useEditorStore.getState().undo();
       expect(useEditorStore.getState().project.resolution).toEqual(originalResolution);
     });
 
     it('should redo resolution change', () => {
-      useEditorStore.getState().setProjectResolution(1920, 1080);
+      useEditorStore.getState().setProjectResolution(3840, 2160);
       useEditorStore.getState().undo();
 
-      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1280, height: 720 });
+      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1920, height: 1080 });
 
       useEditorStore.getState().redo();
-      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1920, height: 1080 });
+      expect(useEditorStore.getState().project.resolution).toEqual({ width: 3840, height: 2160 });
     });
 
     it('should support multiple undo steps', () => {
-      useEditorStore.getState().setProjectResolution(1920, 1080);
+      useEditorStore.getState().setProjectResolution(2560, 1440);
       useEditorStore.getState().setProjectResolution(3840, 2160);
 
       expect(useEditorStore.getState().project.resolution).toEqual({ width: 3840, height: 2160 });
 
       useEditorStore.getState().undo();
-      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1920, height: 1080 });
+      expect(useEditorStore.getState().project.resolution).toEqual({ width: 2560, height: 1440 });
 
       useEditorStore.getState().undo();
-      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1280, height: 720 });
+      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1920, height: 1080 });
     });
   });
 
@@ -119,11 +119,11 @@ describe('Project Resolution', () => {
 
     it('should preserve resolution across resetProject', () => {
       // resetProject creates a new project, which should have the default resolution
-      useEditorStore.getState().setProjectResolution(1920, 1080);
+      useEditorStore.getState().setProjectResolution(3840, 2160);
       useEditorStore.getState().resetProject();
 
       // After reset, resolution should be back to default
-      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1280, height: 720 });
+      expect(useEditorStore.getState().project.resolution).toEqual({ width: 1920, height: 1080 });
     });
   });
 });

@@ -316,10 +316,7 @@ describe('VideoLibrary', () => {
     expect(screen.getByTitle('Remove media')).toBeInTheDocument()
   })
 
-  it('adds clip to timeline when add button clicked (matching resolution)', () => {
-    // Set project resolution to match video dimensions
-    useEditorStore.getState().setProjectResolution(1920, 1080)
-
+  it('adds clip to timeline when add button clicked', () => {
     const video: SourceVideo = {
       id: 'video1',
       name: 'test.mp4',
@@ -341,85 +338,9 @@ describe('VideoLibrary', () => {
     const clips = useEditorStore.getState().project.timeline.clips
     expect(clips).toHaveLength(1)
     expect(clips[0].sourceVideoId).toBe('video1')
-  })
-
-  it('shows resolution mismatch dialog for mismatched media', () => {
-    // Default project is 1280x720, video is 1920x1080
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-
-    useEditorStore.getState().addSourceVideo(video)
-
-    render(<VideoLibrary />)
-
-    const addButton = screen.getByTitle('Add to timeline')
-    fireEvent.click(addButton)
-
-    // Dialog should be shown, no clip added yet
-    expect(screen.getByTestId('resolution-mismatch-dialog')).toBeInTheDocument()
-    expect(screen.getByText(/Scale to Fit/)).toBeInTheDocument()
-    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
-  })
-
-  it('adds clip with scale when "Scale to Fit" clicked', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-
-    useEditorStore.getState().addSourceVideo(video)
-
-    render(<VideoLibrary />)
-
-    fireEvent.click(screen.getByTitle('Add to timeline'))
-    fireEvent.click(screen.getByText('Scale to Fit'))
-
-    const clips = useEditorStore.getState().project.timeline.clips
-    expect(clips).toHaveLength(1)
-    // Scale to fit: Math.min(1280/1920, 720/1080) = Math.min(0.667, 0.667) ≈ 0.667
-    const expectedScale = Math.min(1280 / 1920, 720 / 1080)
-    expect(clips[0].transform.scaleX).toBeCloseTo(expectedScale)
-    expect(clips[0].transform.scaleY).toBeCloseTo(expectedScale)
-  })
-
-  it('adds clip with original scale when "Keep Original Size" clicked', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-
-    useEditorStore.getState().addSourceVideo(video)
-
-    render(<VideoLibrary />)
-
-    fireEvent.click(screen.getByTitle('Add to timeline'))
-    fireEvent.click(screen.getByText('Keep Original Size'))
-
-    const clips = useEditorStore.getState().project.timeline.clips
-    expect(clips).toHaveLength(1)
-    // Keep original: scaleX = 1920/1280 = 1.5, scaleY = 1080/720 = 1.5
-    expect(clips[0].transform.scaleX).toBeCloseTo(1920 / 1280)
-    expect(clips[0].transform.scaleY).toBeCloseTo(1080 / 720)
+    // All clips are imported at 100% native scale (scaleX = scaleY = 1)
+    expect(clips[0].transform.scaleX).toBe(1)
+    expect(clips[0].transform.scaleY).toBe(1)
   })
 
   it('removes video when remove button clicked', async () => {

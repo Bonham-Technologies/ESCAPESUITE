@@ -23,6 +23,8 @@ vi.mock('../../store/projectStore', () => ({
         },
       },
       sourceVideos: mockSourceVideos,
+      inPoint: null,
+      outPoint: null,
     }
     return selector(state)
   }),
@@ -176,11 +178,6 @@ describe('ExportDialog', () => {
     expect(screen.getByText('1080p')).toBeInTheDocument()
     expect(screen.getByText('720p')).toBeInTheDocument()
     expect(screen.getByText('480p')).toBeInTheDocument()
-  })
-
-  it('displays clip count in summary', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-    expect(screen.getByText('1 clip')).toBeInTheDocument()
   })
 
   it('calls onClose when cancel button is clicked', () => {
