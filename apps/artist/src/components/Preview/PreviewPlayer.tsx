@@ -2467,9 +2467,6 @@ export function PreviewPlayer() {
 
     setDisplayTime(currentTime);
 
-    // Invalidate any cached frame at this time — we're about to seek fresh
-    const frameCache = getFrameCache();
-
     const activeClips = getClipsAtTime(clips, tracks, currentTime);
 
     // No active clips — draw black, done
@@ -2522,9 +2519,7 @@ export function PreviewPlayer() {
       return;
     }
 
-    // Poll-redraw: draw as video seeks settle.
-    // Use seeked events for precise timing instead of blind polling.
-    let frameId: number;
+    // Event-driven redraw: listen for seeked events instead of polling.
     let settled = false;
 
     // Listen for seeked events on all active videos to know when to redraw
@@ -3003,8 +2998,6 @@ export function PreviewPlayer() {
               text={textData.text}
               x={screenX}
               y={screenY}
-              width={screenWidth}
-              height={screenHeight}
               fontFamily={textData.fontFamily}
               fontSize={screenFontSize}
               fontWeight={textData.fontWeight}

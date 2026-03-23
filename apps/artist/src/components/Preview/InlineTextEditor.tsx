@@ -6,8 +6,6 @@ export interface InlineTextEditorProps {
   text: string;
   x: number;           // CSS pixel position on preview container
   y: number;
-  width: number;
-  height: number;
   fontFamily: string;
   fontSize: number;     // CSS pixel size (scaled from canvas)
   fontWeight: string;
@@ -22,8 +20,6 @@ export function InlineTextEditor({
   text,
   x,
   y,
-  width,
-  height,
   fontFamily,
   fontSize,
   fontWeight,

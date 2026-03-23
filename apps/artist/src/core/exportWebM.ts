@@ -231,7 +231,6 @@ export async function exportToWebM(
   // Use real-time playback approach for reliable frame capture
   // This plays videos at normal speed and captures frames, avoiding seek issues
   const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-  const frameDurationMs = 1000 / frameRate;
   let frameCount = 0;
 
   // Track which videos are currently playing and their state
@@ -269,9 +268,6 @@ export async function exportToWebM(
       });
     }
   };
-
-  // Process frames using requestAnimationFrame for smooth timing
-  const exportStartTime = performance.now();
 
   // Helper to clean up resources on abort or completion
   const cleanup = () => {

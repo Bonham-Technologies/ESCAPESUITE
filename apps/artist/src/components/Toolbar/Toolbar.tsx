@@ -21,6 +21,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
   const outPoint = useEditorStore((state) => state.outPoint);
   const setInPoint = useEditorStore((state) => state.setInPoint);
   const setOutPoint = useEditorStore((state) => state.setOutPoint);
+  const clearInOutPoints = useEditorStore((state) => state.clearInOutPoints);
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const canUndo = useEditorStore((state) => state.canUndo);
@@ -177,7 +178,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
         <div className={styles.buttonGroup}>
           <button
             className={`${styles.toolButton} ${inPoint !== null ? styles.active : ''}`}
-            onClick={() => setInPoint(inPoint === currentTime ? null : currentTime)}
+            onClick={() => { if (inPoint === currentTime) clearInOutPoints(); else setInPoint(currentTime); }}
             title={`Set in point (I)${inPoint !== null ? ` — ${formatTimecode(inPoint)}` : ''}`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -186,7 +187,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
           </button>
           <button
             className={`${styles.toolButton} ${outPoint !== null ? styles.active : ''}`}
-            onClick={() => setOutPoint(outPoint === currentTime ? null : currentTime)}
+            onClick={() => { if (outPoint === currentTime) clearInOutPoints(); else setOutPoint(currentTime); }}
             title={`Set out point (O)${outPoint !== null ? ` — ${formatTimecode(outPoint)}` : ''}`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -196,7 +197,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
           {(inPoint !== null || outPoint !== null) && (
             <button
               className={styles.toolButton}
-              onClick={() => { setInPoint(null); setOutPoint(null); }}
+              onClick={clearInOutPoints}
               title="Clear in/out points"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
