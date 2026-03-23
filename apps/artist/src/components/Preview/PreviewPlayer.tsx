@@ -2988,8 +2988,6 @@ export function PreviewPlayer() {
           // Convert to screen-space relative to videoWrapper
           const screenX = offsetX + textLeft * scaleX;
           const screenY = offsetY + textTop * scaleY;
-          const screenWidth = textWidth * scaleX;
-          const screenHeight = textHeight * scaleY;
           const screenFontSize = textData.fontSize * scale * scaleY;
 
           return (
