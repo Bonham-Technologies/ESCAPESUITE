@@ -275,26 +275,10 @@ export function drawClipToCanvas(
   const videoWidth = sourceWidth || canvasWidth;
   const videoHeight = sourceHeight || canvasHeight;
 
-  // Calculate scale to fill canvas (cover mode - fills canvas, may crop)
-  const videoAspect = videoWidth / videoHeight;
-  const canvasAspect = canvasWidth / canvasHeight;
-
-  let baseWidth: number;
-  let baseHeight: number;
-
-  if (videoAspect > canvasAspect) {
-    // Video is wider - fit to height, crop width
-    baseHeight = canvasHeight;
-    baseWidth = canvasHeight * videoAspect;
-  } else {
-    // Video is taller - fit to width, crop height
-    baseWidth = canvasWidth;
-    baseHeight = canvasWidth / videoAspect;
-  }
-
-  // Apply animated scale on top of the base fill size
-  const scaledWidth = baseWidth * animated.scaleX;
-  const scaledHeight = baseHeight * animated.scaleY;
+  // Base dimensions = native source pixels.
+  // Scale 1.0 = actual source size on the canvas.
+  const scaledWidth = videoWidth * animated.scaleX;
+  const scaledHeight = videoHeight * animated.scaleY;
 
   // Apply animated position with transition offset
   const offsetX = transitionModifiers?.offsetX || 0;
@@ -426,24 +410,10 @@ export function drawImageToCanvasWithModifiers(
   const imageWidth = image.naturalWidth || canvasWidth;
   const imageHeight = image.naturalHeight || canvasHeight;
 
-  // Calculate scale to fill canvas (cover mode)
-  const imageAspect = imageWidth / imageHeight;
-  const canvasAspect = canvasWidth / canvasHeight;
-
-  let baseWidth: number;
-  let baseHeight: number;
-
-  if (imageAspect > canvasAspect) {
-    baseHeight = canvasHeight;
-    baseWidth = canvasHeight * imageAspect;
-  } else {
-    baseWidth = canvasWidth;
-    baseHeight = canvasWidth / imageAspect;
-  }
-
-  // Apply animated scale
-  const scaledWidth = baseWidth * animated.scaleX;
-  const scaledHeight = baseHeight * animated.scaleY;
+  // Base dimensions = native source pixels.
+  // Scale 1.0 = actual source size on the canvas.
+  const scaledWidth = imageWidth * animated.scaleX;
+  const scaledHeight = imageHeight * animated.scaleY;
 
   // Apply animated position with transition offset
   const offsetX = transitionModifiers?.offsetX || 0;

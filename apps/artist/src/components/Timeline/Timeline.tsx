@@ -395,7 +395,11 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
         return;
       }
 
-      setSelectedClipId(clip.id);
+      // If the clip is part of a multi-selection, keep the selection for bulk drag
+      // Otherwise, select just this clip
+      if (!selectedClipIds.has(clip.id)) {
+        setSelectedClipId(clip.id);
+      }
 
       const track = tracks.find(t => t.id === clip.trackId);
       if (!track || track.locked) return;
@@ -414,7 +418,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
         offsetX,
       });
     },
-    [tracks, setSelectedClipId, toggleClipSelection, activeTool, handleRazorClick]
+    [tracks, setSelectedClipId, toggleClipSelection, selectedClipIds, activeTool, handleRazorClick]
   );
 
   // Handle drag movement
@@ -1054,7 +1058,10 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
                 {/* Clips on this track */}
                 {getTrackClips(track.id).map((clip) => {
                   const isDragging = dragState?.clipId === clip.id;
-                  const displayPosition = isDragging ? dragState.currentPosition : clip.timelinePosition;
+                  // During bulk drag, show all multi-selected clips moving together
+                  const isBulkDragging = !isDragging && dragState && selectedClipIds.has(clip.id) && selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1;
+                  const bulkDragDelta = isBulkDragging ? dragState.currentPosition - dragState.originalPosition : 0;
+                  const displayPosition = isDragging ? dragState.currentPosition : clip.timelinePosition + bulkDragDelta;
                   const displayTrackId = isDragging ? dragState.currentTrackId : clip.trackId;
 
                   // Only render if on this track (or being dragged to this track)
@@ -1082,7 +1089,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
                     <div
                       key={clip.id}
                       data-clip-id={clip.id}
-                      className={`${styles.clip} ${isSelected ? styles.clipSelected : ''} ${isMultiSelected && !isSelected ? styles.clipMultiSelected : ''} ${isDragging ? styles.clipDragging : ''} ${isTrimming ? styles.clipTrimming : ''} ${isAudioClip ? styles.clipAudio : ''} ${isImageClip ? styles.clipImage : ''} ${isTextOverlay ? styles.clipText : ''} ${isShapeOverlay ? styles.clipShape : ''}`}
+                      className={`${styles.clip} ${isSelected ? styles.clipSelected : ''} ${isMultiSelected && !isSelected ? styles.clipMultiSelected : ''} ${isDragging || isBulkDragging ? styles.clipDragging : ''} ${isTrimming ? styles.clipTrimming : ''} ${isAudioClip ? styles.clipAudio : ''} ${isImageClip ? styles.clipImage : ''} ${isTextOverlay ? styles.clipText : ''} ${isShapeOverlay ? styles.clipShape : ''}`}
                       style={{
                         left: clipX,
                         width: clipWidth,

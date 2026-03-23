@@ -156,13 +156,12 @@ export async function exportToMP4(
   log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');
 
   // Slice audio to the selected time range
-  let audioData: Float32Array | null = fullAudioData && rangeStart > 0 ? (() => {
-    const startSample = Math.floor(rangeStart * sampleRate);
-    const endSample = Math.floor(rangeEnd * sampleRate);
+  // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
+  const audioChannels = 2;
+  let audioData: Float32Array | null = fullAudioData && options.timeRange ? (() => {
+    const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
+    const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
     return fullAudioData.slice(startSample, endSample);
-  })() : fullAudioData && options.timeRange ? (() => {
-    const endSample = Math.floor(rangeEnd * sampleRate);
-    return fullAudioData.slice(0, endSample);
   })() : fullAudioData;
 
   // Create canvas for frame rendering
@@ -276,6 +275,8 @@ export async function exportToMP4(
       height,
       bitrate: videoBitrate,
       framerate: frameRate,
+      latencyMode: 'quality',
+      hardwareAcceleration: 'prefer-hardware',
     };
     try {
       const support = await VideoEncoder.isConfigSupported(config);
@@ -527,8 +528,9 @@ export async function exportToMP4(
         drawWatermark(ctx, width, height, watermark);
       }
 
-      // Create VideoFrame from canvas
-      const timestamp = Math.round(currentTime * 1_000_000);
+      // Create VideoFrame from canvas — timestamp relative to export start (not timeline)
+      const exportTime = currentTime - rangeStart;
+      const timestamp = Math.round(exportTime * 1_000_000);
       const frame = new VideoFrame(canvas, {
         timestamp,
         duration: frameDurationUs,
@@ -566,7 +568,7 @@ export async function exportToMP4(
       // This prevents memory exhaustion while allowing smooth encoding
       const backpressureStart = Date.now();
       const backpressureTimeout = 30000; // 30 second timeout
-      while (videoEncoder.encodeQueueSize > 20) {
+      while (videoEncoder.encodeQueueSize > 5) {
         // Check for encoder errors during backpressure wait
         if (videoEncoderError) {
           log('error', `Encoder error during backpressure: ${videoEncoderError.message}`);

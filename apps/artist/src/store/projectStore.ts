@@ -114,7 +114,7 @@ function createEmptyProject(): Project {
     name: 'Untitled Project',
     created: Date.now(),
     modified: Date.now(),
-    resolution: { width: 1280, height: 720 },
+    resolution: { width: 1920, height: 1080 },
     timeline: createEmptyTimeline(),
   };
 }
@@ -314,25 +314,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Use playhead position if no position specified
     const timelinePosition = position ?? state.currentTime;
 
-    // Calculate initial scale based on source media dimensions vs project resolution
-    const source = state.sourceVideos.find(v => v.id === clipData.sourceVideoId);
-    const { resolution } = state.project;
-    let initialScaleX = 1, initialScaleY = 1;
-
-    if (source && (source.mediaType === 'image' || source.mediaType === 'video' || (!source.mediaType && source.width > 0 && source.height > 0))) {
-      const nativeScaleX = source.width / resolution.width;
-      const nativeScaleY = source.height / resolution.height;
-
-      if (nativeScaleX > 1 || nativeScaleY > 1) {
-        // Auto-fit: scale down to contain within canvas
-        const fitScale = Math.min(resolution.width / source.width, resolution.height / source.height);
-        initialScaleX = initialScaleY = fitScale;
-      } else {
-        // Keep native size relative to project
-        initialScaleX = nativeScaleX;
-        initialScaleY = nativeScaleY;
-      }
-    }
+    // Import at 100% scale (native source pixels on canvas).
+    // Scale 1.0 = actual source size. Use "Fit to Canvas" to fill.
+    const initialScaleX = 1, initialScaleY = 1;
 
     const newClip: Clip = {
       ...clipData,
@@ -1586,7 +1570,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 function ensureTimelineHasTracks(project: Project): Project {
   // Ensure resolution exists (migration for older projects)
   if (!project.resolution) {
-    project = { ...project, resolution: { width: 1280, height: 720 } };
+    project = { ...project, resolution: { width: 1920, height: 1080 } };
   }
 
   const timeline = project.timeline;

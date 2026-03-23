@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useEditorStore, selectSelectedClip } from '../../store/projectStore';
 import { formatTimecode } from '../../utils/timeUtils';
+import { DEFAULT_TRANSFORM } from '../../store/types';
 import type { BlendMode, TransitionType, TextAlign, ShapeType, TextOverlayData, ShapeOverlayData, AnimationPresetType, EasingType } from '../../store/types';
 import { hasAnimation } from '../../utils/animation';
 import styles from './ClipEditor.module.css';
@@ -442,7 +443,19 @@ export function ClipEditor() {
           <textarea
             className={styles.textarea}
             value={selectedClip.textData.text}
-            onChange={(e) => handleTextDataChange({ text: e.target.value })}
+            onChange={(e) => {
+              handleTextDataChange({ text: e.target.value });
+              // Auto-expand: reset height then set to scrollHeight
+              const el = e.target;
+              el.style.height = 'auto';
+              el.style.height = el.scrollHeight + 'px';
+            }}
+            onFocus={(e) => {
+              // Expand on focus in case content already exceeds 2 rows
+              const el = e.target;
+              el.style.height = 'auto';
+              el.style.height = el.scrollHeight + 'px';
+            }}
             rows={2}
             placeholder="Enter text..."
           />
@@ -450,15 +463,16 @@ export function ClipEditor() {
           <div className={styles.row}>
             <select
               className={styles.select}
+              style={{ flex: '1 1 0', width: 'auto' }}
               value={selectedClip.textData.fontFamily}
               onChange={(e) => handleTextDataChange({ fontFamily: e.target.value })}
             >
               <option value="Arial">Arial</option>
               <option value="Helvetica">Helvetica</option>
-              <option value="Times New Roman">Times New Roman</option>
+              <option value="Times New Roman">Times</option>
               <option value="Georgia">Georgia</option>
               <option value="Verdana">Verdana</option>
-              <option value="Courier New">Courier New</option>
+              <option value="Courier New">Courier</option>
               <option value="Impact">Impact</option>
             </select>
             <input
@@ -468,6 +482,7 @@ export function ClipEditor() {
               onChange={(e) => handleTextDataChange({ fontSize: Math.max(8, parseInt(e.target.value) || 48) })}
               min={8}
               max={200}
+              title="Font size"
             />
           </div>
 
@@ -805,13 +820,22 @@ export function ClipEditor() {
                 )}
 
                 {sourceVideo && (
-                  <button
-                    className={styles.fitToCanvasButton}
-                    onClick={handleFitToCanvas}
-                    title="Scale clip to fit within the project canvas"
-                  >
-                    Fit to Canvas
-                  </button>
+                  <>
+                    <button
+                      className={styles.fitToCanvasButton}
+                      onClick={handleFitToCanvas}
+                      title="Scale clip to fit within the project canvas"
+                    >
+                      Fit to Canvas
+                    </button>
+                    <button
+                      className={styles.fitToCanvasButton}
+                      onClick={() => updateClipTransform(selectedClip!.id, { ...DEFAULT_TRANSFORM })}
+                      title="Reset position, scale, and rotation to defaults"
+                    >
+                      Reset
+                    </button>
+                  </>
                 )}
               </>
             )}

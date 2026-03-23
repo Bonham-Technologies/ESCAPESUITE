@@ -114,13 +114,12 @@ export async function exportToWebM(
   });
 
   // Slice audio to the selected time range
-  const audioData = fullAudioData && rangeStart > 0 ? (() => {
-    const startSample = Math.floor(rangeStart * sampleRate);
-    const endSample = Math.floor(rangeEnd * sampleRate);
+  // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
+  const audioChannels = 2;
+  const audioData = fullAudioData && options.timeRange ? (() => {
+    const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
+    const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
     return fullAudioData.slice(startSample, endSample);
-  })() : fullAudioData && options.timeRange ? (() => {
-    const endSample = Math.floor(rangeEnd * sampleRate);
-    return fullAudioData.slice(0, endSample);
   })() : fullAudioData;
 
   // Create canvas for frame rendering
@@ -204,6 +203,7 @@ export async function exportToWebM(
     height,
     bitrate: videoBitrate,
     framerate: frameRate,
+    latencyMode: 'quality',
   });
 
   // Create audio encoder if we have audio
@@ -245,36 +245,29 @@ export async function exportToWebM(
   }
 
   // Helper to sync a video to target time - uses playback for small forward movements
-  const syncVideoToTime = async (video: HTMLVideoElement, sourceId: string, targetTime: number): Promise<void> => {
-    const state = videoPlaybackState.get(sourceId)!;
-    const currentPos = video.currentTime;
-    const diff = targetTime - currentPos;
-
-    // If we need to go backwards or jump more than 0.5s forward, seek
-    if (diff < -0.05 || diff > 0.5) {
-      video.pause();
+  const syncVideoToTime = async (video: HTMLVideoElement, _sourceId: string, targetTime: number): Promise<void> => {
+    // Always seek to exact time for frame-accurate export.
+    // Skip if already within half a frame of the target.
+    const frameDuration = 1 / frameRate;
+    if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
       video.currentTime = targetTime;
-      state.playing = false;
-      // Wait for seek to complete
       await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked, { once: true });
-        // Timeout fallback
-        setTimeout(resolve, 200);
+        video.addEventListener('seeked', () => resolve(), { once: true });
+        setTimeout(resolve, 500);
       });
-    } else if (diff > 0.05) {
-      // Small forward movement - let video play to catch up
-      if (!state.playing) {
-        video.play().catch(() => {});
-        state.playing = true;
-      }
     }
-    // If diff is very small (-0.05 to 0.05), we're close enough - do nothing
 
-    state.targetTime = targetTime;
+    // Ensure frame data is decoded (readyState >= 2 = HAVE_CURRENT_DATA)
+    if (video.readyState < 2) {
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (video.readyState >= 2) resolve();
+          else requestAnimationFrame(check);
+        };
+        check();
+        setTimeout(resolve, 300);
+      });
+    }
   };
 
   // Process frames using requestAnimationFrame for smooth timing
@@ -360,13 +353,6 @@ export async function exportToWebM(
 
       await Promise.all(syncPromises);
 
-      // Wait for the real-time frame interval to maintain proper pacing
-      const targetRealTime = exportStartTime + (frameIndex * frameDurationMs);
-      const now = performance.now();
-      if (now < targetRealTime) {
-        await new Promise(resolve => setTimeout(resolve, targetRealTime - now));
-      }
-
       // Helper to calculate clip time
       const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
 
@@ -380,9 +366,9 @@ export async function exportToWebM(
 
         const clipTime = getClipTime(clip);
 
-        // Try video first, then image - use readyState >= 1 (like preview player)
+        // Try video first, then image - require readyState >= 2 (frame data available)
         const video = videoElements.get(clip.sourceVideoId);
-        if (video && video.readyState >= 1) {
+        if (video && video.readyState >= 2) {
           drawClipToCanvas(ctx, video, clip, clipTime, width, height);
           continue;
         }
@@ -453,15 +439,16 @@ export async function exportToWebM(
         drawWatermark(ctx, width, height, watermark);
       }
 
-      // Create VideoFrame from canvas
-      const timestamp = Math.round(currentTime * 1_000_000);
+      // Create VideoFrame from canvas — timestamp relative to export start (not timeline)
+      const exportTime = currentTime - rangeStart;
+      const timestamp = Math.round(exportTime * 1_000_000);
       const frame = new VideoFrame(canvas, {
         timestamp,
         duration: frameDurationUs,
       });
 
       // Encode frame (keyframe every 2 seconds)
-      const keyFrame = frameCount % (frameRate * 2) === 0;
+      const keyFrame = frameCount % frameRate === 0;
       videoEncoder.encode(frame, { keyFrame });
       frame.close();
 

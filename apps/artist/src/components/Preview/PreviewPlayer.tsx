@@ -51,8 +51,8 @@ const blendModeToCanvas: Record<BlendMode, GlobalCompositeOperation> = {
 };
 
 // Fallback canvas dimensions (used if resolution not yet available)
-const DEFAULT_WIDTH = 1280;
-const DEFAULT_HEIGHT = 720;
+const DEFAULT_WIDTH = 1920;
+const DEFAULT_HEIGHT = 1080;
 
 // Helper to get transition info between clips
 interface TransitionInfo {
@@ -121,6 +121,9 @@ function getActiveTransition(clips: Clip[], tracks: Track[], time: number): Tran
 
 export function PreviewPlayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasCtxRef = useRef<CanvasRenderingContext2D | null>(null); // Cached 2d context
+  const blurCanvasRef = useRef<HTMLCanvasElement | null>(null); // Reusable offscreen canvas for blur
+  const blurCtxRef = useRef<CanvasRenderingContext2D | null>(null); // Cached blur context
   const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const imageElementsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -492,26 +495,11 @@ export function PreviewPlayer() {
       ctx.clip();
     }
 
-    // Calculate scale to fill canvas (cover mode - fills canvas, may crop)
-    const sourceAspect = sourceWidth / sourceHeight;
-    const canvasAspect = canvas.width / canvas.height;
-
-    let baseWidth: number;
-    let baseHeight: number;
-
-    if (sourceAspect > canvasAspect) {
-      // Source is wider - fit to height, crop width
-      baseHeight = canvas.height;
-      baseWidth = canvas.height * sourceAspect;
-    } else {
-      // Source is taller - fit to width, crop height
-      baseWidth = canvas.width;
-      baseHeight = canvas.width / sourceAspect;
-    }
-
-    // Apply animated scale on top of the base fill size
-    const scaledWidth = baseWidth * animated.scaleX;
-    const scaledHeight = baseHeight * animated.scaleY;
+    // Base dimensions = native source pixels.
+    // Scale 1.0 = actual source size on the canvas.
+    // "Fit to canvas" is handled by setting scale to Math.min(canvasW/sourceW, canvasH/sourceH).
+    const scaledWidth = sourceWidth * animated.scaleX;
+    const scaledHeight = sourceHeight * animated.scaleY;
 
     // Apply animated position with transition offset
     const offsetX = transitionModifiers?.offsetX || 0;
@@ -633,14 +621,17 @@ export function PreviewPlayer() {
     // For 'blur' type, always apply blur effect regardless of blurAmount setting
     const effectiveBlurAmount = shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
     if (effectiveBlurAmount > 0 && (shapeData.type === 'rectangle' || shapeData.type === 'ellipse' || shapeData.type === 'blur')) {
-      // Create an offscreen canvas to capture current content
-      // This prevents issues with drawing canvas onto itself
-      const offscreen = document.createElement('canvas');
-      offscreen.width = canvas.width;
-      offscreen.height = canvas.height;
-      const offCtx = offscreen.getContext('2d');
+      // Reuse offscreen canvas for blur (avoids allocating 8MB+ per frame)
+      if (!blurCanvasRef.current || blurCanvasRef.current.width !== canvas.width || blurCanvasRef.current.height !== canvas.height) {
+        blurCanvasRef.current = document.createElement('canvas');
+        blurCanvasRef.current.width = canvas.width;
+        blurCanvasRef.current.height = canvas.height;
+        blurCtxRef.current = blurCanvasRef.current.getContext('2d');
+      }
+      const offCtx = blurCtxRef.current;
       if (offCtx) {
         // Copy current canvas content to offscreen
+        offCtx.clearRect(0, 0, canvas.width, canvas.height);
         offCtx.drawImage(canvas, 0, 0);
 
         ctx.save();
@@ -666,7 +657,7 @@ export function PreviewPlayer() {
 
         // Draw from offscreen canvas (source) to main canvas (destination) with blur
         // The content is drawn unrotated, but clipped to the rotated shape
-        ctx.drawImage(offscreen, 0, 0);
+        ctx.drawImage(blurCanvasRef.current!, 0, 0);
 
         ctx.restore();
       }
@@ -844,11 +835,16 @@ export function PreviewPlayer() {
     // If blur is enabled, capture and blur the region underneath
     const effectiveBlurAmount = shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
     if (effectiveBlurAmount > 0 && (shapeData.type === 'rectangle' || shapeData.type === 'ellipse' || shapeData.type === 'blur')) {
-      const offscreen = document.createElement('canvas');
-      offscreen.width = canvas.width;
-      offscreen.height = canvas.height;
-      const offCtx = offscreen.getContext('2d');
+      // Reuse offscreen canvas for blur (avoids allocating 8MB+ per frame)
+      if (!blurCanvasRef.current || blurCanvasRef.current.width !== canvas.width || blurCanvasRef.current.height !== canvas.height) {
+        blurCanvasRef.current = document.createElement('canvas');
+        blurCanvasRef.current.width = canvas.width;
+        blurCanvasRef.current.height = canvas.height;
+        blurCtxRef.current = blurCanvasRef.current.getContext('2d');
+      }
+      const offCtx = blurCtxRef.current;
       if (offCtx) {
+        offCtx.clearRect(0, 0, canvas.width, canvas.height);
         offCtx.drawImage(canvas, 0, 0);
 
         ctx.save();
@@ -865,7 +861,7 @@ export function PreviewPlayer() {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.filter = `blur(${effectiveBlurAmount}px)`;
         ctx.globalAlpha = animated.opacity;
-        ctx.drawImage(offscreen, 0, 0);
+        ctx.drawImage(blurCanvasRef.current, 0, 0);
 
         ctx.restore();
       }
@@ -944,7 +940,11 @@ export function PreviewPlayer() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    // Cache the 2d context — getContext returns the same object but the lookup adds up
+    if (!canvasCtxRef.current || canvasCtxRef.current.canvas !== canvas) {
+      canvasCtxRef.current = canvas.getContext('2d');
+    }
+    const ctx = canvasCtxRef.current;
     if (!ctx) return;
 
     // Check frame cache first (only when not playing and cache is enabled)
@@ -1384,28 +1384,12 @@ export function PreviewPlayer() {
       const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
       if (!sourceMedia) return null;
 
-      // Calculate the clip's dimensions based on source aspect ratio and scale
-      // This matches the "cover" mode used in drawClip (fills canvas, may crop)
-      const sourceAspect = sourceMedia.width / sourceMedia.height;
-      const canvasAspect = canvas.width / canvas.height;
-
-      let baseWidth: number;
-      let baseHeight: number;
-      if (sourceAspect > canvasAspect) {
-        // Source is wider - fit to height, crop width
-        baseHeight = canvas.height;
-        baseWidth = canvas.height * sourceAspect;
-      } else {
-        // Source is taller - fit to width, crop height
-        baseWidth = canvas.width;
-        baseHeight = canvas.width / sourceAspect;
-      }
-
+      // Base dimensions = native source pixels (matches drawClip)
       return {
         centerX: x * canvas.width,
         centerY: y * canvas.height,
-        width: baseWidth * scaleX,
-        height: baseHeight * scaleY,
+        width: sourceMedia.width * scaleX,
+        height: sourceMedia.height * scaleY,
         rotation,
       };
     }
@@ -1587,7 +1571,8 @@ export function PreviewPlayer() {
 
   // Get mouse position relative to canvas in normalized coordinates (0-1)
   // Accounts for object-fit: contain which letterboxes the canvas content
-  const getCanvasPosition = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
+  // Accepts any MouseEvent (canvas or window) so dragging works outside the canvas
+  const getCanvasPosition = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
 
@@ -1620,10 +1605,10 @@ export function PreviewPlayer() {
     const mouseX = e.clientX - rect.left - offsetX;
     const mouseY = e.clientY - rect.top - offsetY;
 
-    // Return normalized coordinates (0-1), clamped to valid range
+    // Return normalized coordinates — NOT clamped, so dragging outside canvas works
     return {
-      x: Math.max(0, Math.min(1, mouseX / renderedWidth)),
-      y: Math.max(0, Math.min(1, mouseY / renderedHeight)),
+      x: mouseX / renderedWidth,
+      y: mouseY / renderedHeight,
     };
   }, []);
 
@@ -1660,6 +1645,7 @@ export function PreviewPlayer() {
             const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
 
             const handleHitSize = HANDLE_SIZE * 1.5;
+            const edgeHitSize = HANDLE_SIZE * 1.2; // Narrower zone for edge detection
 
             // Check rotation handle
             const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
@@ -1667,7 +1653,7 @@ export function PreviewPlayer() {
               return { clipId: selectedClipId, clipType: selectedClipType, mode: 'rotate' };
             }
 
-            // Check corner handles
+            // Check corner handles (small zones right at corners)
             const corners: { x: number; y: number; mode: DragMode }[] = [
               { x: -halfW, y: -halfH, mode: 'resize-nw' },
               { x: halfW, y: -halfH, mode: 'resize-ne' },
@@ -1680,17 +1666,22 @@ export function PreviewPlayer() {
               }
             }
 
-            // Check side handles
-            const sides: { x: number; y: number; mode: DragMode }[] = [
-              { x: 0, y: -halfH, mode: 'resize-n' },
-              { x: 0, y: halfH, mode: 'resize-s' },
-              { x: -halfW, y: 0, mode: 'resize-w' },
-              { x: halfW, y: 0, mode: 'resize-e' },
-            ];
-            for (const side of sides) {
-              if (Math.abs(localX - side.x) < handleHitSize && Math.abs(localY - side.y) < handleHitSize) {
-                return { clipId: selectedClipId, clipType: selectedClipType, mode: side.mode };
-              }
+            // Check edges — entire edge is a hit zone, not just the midpoint handle
+            // Top edge: along the full width, near the top border
+            if (Math.abs(localY - (-halfH)) < edgeHitSize && Math.abs(localX) <= halfW) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-n' };
+            }
+            // Bottom edge
+            if (Math.abs(localY - halfH) < edgeHitSize && Math.abs(localX) <= halfW) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-s' };
+            }
+            // Left edge
+            if (Math.abs(localX - (-halfW)) < edgeHitSize && Math.abs(localY) <= halfH) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-w' };
+            }
+            // Right edge
+            if (Math.abs(localX - halfW) < edgeHitSize && Math.abs(localY) <= halfH) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-e' };
             }
 
             // Check body for move
@@ -1742,6 +1733,7 @@ export function PreviewPlayer() {
             const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
 
             const handleHitSize = HANDLE_SIZE * 1.5;
+            const edgeHitSize = HANDLE_SIZE * 1.2;
 
             // Check rotation handle
             const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
@@ -1762,17 +1754,18 @@ export function PreviewPlayer() {
               }
             }
 
-            // Check side handles
-            const sides: { x: number; y: number; mode: DragMode }[] = [
-              { x: 0, y: -halfH, mode: 'resize-n' },
-              { x: 0, y: halfH, mode: 'resize-s' },
-              { x: -halfW, y: 0, mode: 'resize-w' },
-              { x: halfW, y: 0, mode: 'resize-e' },
-            ];
-            for (const side of sides) {
-              if (Math.abs(localX - side.x) < handleHitSize && Math.abs(localY - side.y) < handleHitSize) {
-                return { clipId: selectedClipId, clipType: selectedClipType, mode: side.mode };
-              }
+            // Check edges — entire edge is a hit zone
+            if (Math.abs(localY - (-halfH)) < edgeHitSize && Math.abs(localX) <= halfW) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-n' };
+            }
+            if (Math.abs(localY - halfH) < edgeHitSize && Math.abs(localX) <= halfW) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-s' };
+            }
+            if (Math.abs(localX - (-halfW)) < edgeHitSize && Math.abs(localY) <= halfH) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-w' };
+            }
+            if (Math.abs(localX - halfW) < edgeHitSize && Math.abs(localY) <= halfH) {
+              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-e' };
             }
           }
         }
@@ -2120,12 +2113,14 @@ export function PreviewPlayer() {
             }
           } else if (dragState.clipType === 'image' || dragState.clipType === 'video') {
             if (effectiveLock) {
-              // Uniform scale: use the larger ratio for both axes
+              // Uniform scale: apply the same ratio to both axes,
+              // preserving any existing difference between scaleX and scaleY
               const uniformRatio = Math.max(widthRatio, heightRatio);
-              const newScale = Math.max(0.1, dragState.startScaleX * uniformRatio);
+              const newScaleX = Math.max(0.1, dragState.startScaleX * uniformRatio);
+              const newScaleY = Math.max(0.1, dragState.startScaleY * uniformRatio);
               throttledTransformUpdate.scheduleUpdate(
                 ({ id, transform }) => updateClipTransform(id, transform, true),
-                { id: dragState.clipId, transform: { scaleX: newScale, scaleY: newScale, x: newX, y: newY } }
+                { id: dragState.clipId, transform: { scaleX: newScaleX, scaleY: newScaleY, x: newX, y: newY } }
               );
             } else {
               const newScaleX = Math.max(0.1, dragState.startScaleX * widthRatio);
@@ -2314,29 +2309,82 @@ export function PreviewPlayer() {
   }, [dragState, clips, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, keyframePanelOpen, selectedClipId, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, getOverlayBounds, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId]);
 
   const handleMouseLeave = useCallback(() => {
-    // Cancel any pending throttled updates when mouse leaves
-    throttledTextUpdate.cancel();
-    throttledShapeUpdate.cancel();
-    throttledTransformUpdate.cancel();
-    setDragState(null);
+    // Don't cancel drag when mouse leaves canvas — window listeners handle it
+    if (dragState) return;
+
+    // Only cancel non-drag operations
     setMarqueeStart(null);
     setMarqueeCurrent(null);
-  }, [throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate]);
+  }, [dragState]);
+
+  // Window-level mouse listeners during drag — allows dragging outside the canvas
+  useEffect(() => {
+    if (!dragState) return;
+
+    const onWindowMouseMove = (e: globalThis.MouseEvent) => {
+      handleMouseMove(e as unknown as MouseEvent<HTMLCanvasElement>);
+    };
+
+    const onWindowMouseUp = () => {
+      handleMouseUp();
+    };
+
+    window.addEventListener('mousemove', onWindowMouseMove);
+    window.addEventListener('mouseup', onWindowMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', onWindowMouseMove);
+      window.removeEventListener('mouseup', onWindowMouseUp);
+    };
+  }, [dragState, handleMouseMove, handleMouseUp]);
 
   // Double-click handler to enter inline text editing
+  // Works even in keyframe mode — double-click always opens text editor
   const handleDoubleClick = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
     if (isPlaying) return;
 
-    const pos = getCanvasPosition(e);
-    const hit = hitTestHandles(pos.x, pos.y);
-
-    if (hit && hit.clipType === 'text') {
-      e.preventDefault();
-      e.stopPropagation();
-      setEditingTextClipId(hit.clipId);
-      setSelectedClipId(hit.clipId);
+    // Cancel any drag that started from the first click of the double-click
+    if (dragState) {
+      setDragState(null);
     }
-  }, [isPlaying, getCanvasPosition, hitTestHandles, setSelectedClipId]);
+
+    const pos = getCanvasPosition(e);
+
+    // Check all active text clips, not just via hitTestHandles (which is keyframe-restricted)
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const mouseX = pos.x * canvas.width;
+    const mouseY = pos.y * canvas.height;
+
+    const activeClips = getClipsAtTime(clips, tracks, currentTime);
+    // Check in reverse z-order (top-most first)
+    for (const { clip } of [...activeClips].reverse()) {
+      if (clip.overlayType !== 'text' || !clip.textData) continue;
+
+      const bounds = getOverlayBounds(clip, canvas, currentTime);
+      if (!bounds) continue;
+
+      const { centerX, centerY, width, height, rotation } = bounds;
+      const halfW = width / 2;
+      const halfH = height / 2;
+
+      // Transform mouse into local space (accounting for rotation)
+      const rad = (-rotation * Math.PI) / 180;
+      const dx = mouseX - centerX;
+      const dy = mouseY - centerY;
+      const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+      const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+      if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
+        e.preventDefault();
+        e.stopPropagation();
+        setEditingTextClipId(clip.id);
+        setSelectedClipId(clip.id);
+        return;
+      }
+    }
+  }, [isPlaying, dragState, getCanvasPosition, clips, tracks, currentTime, getOverlayBounds, setSelectedClipId]);
 
   // Commit handler for inline text editing
   const handleInlineTextCommit = useCallback((newText: string) => {
@@ -2410,105 +2458,119 @@ export function PreviewPlayer() {
   }, [videoUrlsKey, imageUrlsKey, isPlaying, drawFrame, drawSelectionHandles, drawMultiSelectHandles]);
 
   // Handle scrubbing (when not playing)
-  // Key insight: Check cache first, then draw with current video frame, then update after seek completes
-  // Frame caching provides instant scrubbing through previously viewed frames
+  // Simple approach: seek videos, then poll-redraw as seeks settle.
+  // No cancelled flags, no complex ref machinery. Each currentTime change
+  // starts its own seek+poll cycle; cleanup just cancels the rAF poll.
+  // The last poll cycle always wins because it draws at the latest currentTime.
   useEffect(() => {
     if (isPlaying) return;
 
-    let cancelled = false;
+    setDisplayTime(currentTime);
+
+    // Invalidate any cached frame at this time — we're about to seek fresh
     const frameCache = getFrameCache();
 
     const activeClips = getClipsAtTime(clips, tracks, currentTime);
 
-    // First, try to draw from cache - this gives instant scrubbing for previously viewed frames
-    // If cache hit, drawFrame returns early after drawing the cached frame
-    drawFrame(currentTime, true);
-    drawSelectionHandles(currentTime);
-    drawMultiSelectHandles(currentTime);
-    setDisplayTime(currentTime);
-
-    // If we got a cache hit, we're done - no need to seek or re-render
-    if (frameCache.has(currentTime)) {
-      return;
-    }
-
-    // If no active clips, we're done (black frame was drawn above)
+    // No active clips — draw black, done
     if (activeClips.length === 0) {
+      drawFrame(currentTime, false);
+      drawSelectionHandles(currentTime);
+      drawMultiSelectHandles(currentTime);
       return;
     }
 
-    // Check for active transitions - need to also seek incoming clip
+    // Check if any active clips need video seeking
     const activeTransition = getActiveTransition(clips, tracks, currentTime);
-
-    // Seek all active videos in background and redraw when ready
-    const seekPromises: Promise<void>[] = [];
-
-    // Helper to seek a video
-    const seekVideoIfNeeded = (clip: Clip, sourceTime: number) => {
-      const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-      if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') return;
-
-      const video = videoElementsRef.current.get(clip.sourceVideoId);
-      if (!video) return;
-
-      // Only seek if we're more than a small threshold away from target
-      if (Math.abs(video.currentTime - sourceTime) > 0.05) {
-        const seekPromise = new Promise<void>((resolve) => {
-          const onSeeked = () => {
-            video.removeEventListener('seeked', onSeeked);
-            resolve();
-          };
-          video.addEventListener('seeked', onSeeked);
-          video.currentTime = sourceTime;
-          // Timeout fallback in case seeked event doesn't fire
-          setTimeout(resolve, 150);
-        });
-        seekPromises.push(seekPromise);
-      }
-    };
+    let needsVideoSeek = false;
 
     for (const { clip, clipTime } of activeClips) {
+      if (clip.overlayType) continue; // Text/shape overlays don't need seeking
+      const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
+      if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') continue;
+
+      const video = videoElementsRef.current.get(clip.sourceVideoId);
+      if (!video) continue;
+
       const sourceTime = clip.startTime + clipTime;
-      seekVideoIfNeeded(clip, sourceTime);
-    }
-
-    // Also seek incoming clip during transitions
-    if (activeTransition) {
-      const { incomingClip } = activeTransition;
-      const incomingClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
-      const incomingSourceTime = incomingClip.startTime + incomingClipTime;
-      seekVideoIfNeeded(incomingClip, incomingSourceTime);
-    }
-
-    // If we need to seek, redraw after seeks complete for accurate frame
-    if (seekPromises.length > 0) {
-      Promise.all(seekPromises).then(() => {
-        if (cancelled) return;
-        // Redraw with properly seeked video frames (bypass cache to get fresh render)
-        requestAnimationFrame(() => {
-          if (cancelled) return;
-          drawFrame(currentTime, false); // Force fresh render, don't use cache
-          drawSelectionHandles(currentTime);
-          drawMultiSelectHandles(currentTime);
-
-          // Cache the freshly rendered frame for instant scrubbing later
-          const canvas = canvasRef.current;
-          if (canvas) {
-            frameCache.cacheFromCanvas(currentTime, canvas);
-          }
-        });
-      });
-    } else {
-      // No seeks needed - videos were already at correct position
-      // Cache this frame for future scrubbing
-      const canvas = canvasRef.current;
-      if (canvas) {
-        frameCache.cacheFromCanvas(currentTime, canvas);
+      if (Math.abs(video.currentTime - sourceTime) > 0.05) {
+        video.currentTime = sourceTime;
+        needsVideoSeek = true;
       }
     }
 
+    if (activeTransition) {
+      const { incomingClip } = activeTransition;
+      const inClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
+      const inSourceTime = incomingClip.startTime + inClipTime;
+      const sourceMedia = sourceVideos.find(s => s.id === incomingClip.sourceVideoId);
+      if (sourceMedia?.mediaType !== 'image' && sourceMedia?.mediaType !== 'audio') {
+        const video = videoElementsRef.current.get(incomingClip.sourceVideoId);
+        if (video && Math.abs(video.currentTime - inSourceTime) > 0.05) {
+          video.currentTime = inSourceTime;
+          needsVideoSeek = true;
+        }
+      }
+    }
+
+    // If no video seeking needed (overlays only, or videos already at position),
+    // draw once and be done — no poll needed
+    if (!needsVideoSeek) {
+      drawFrame(currentTime, false);
+      drawSelectionHandles(currentTime);
+      drawMultiSelectHandles(currentTime);
+      return;
+    }
+
+    // Poll-redraw: draw as video seeks settle.
+    // Use seeked events for precise timing instead of blind polling.
+    let frameId: number;
+    let settled = false;
+
+    // Listen for seeked events on all active videos to know when to redraw
+    const seekedHandler = () => {
+      if (settled) return;
+      settled = true;
+      // One final accurate draw after seek completes
+      requestAnimationFrame(() => {
+        drawFrame(currentTime, false);
+        drawSelectionHandles(currentTime);
+        drawMultiSelectHandles(currentTime);
+      });
+    };
+
+    const activeVideos: HTMLVideoElement[] = [];
+    for (const { clip } of activeClips) {
+      if (clip.overlayType) continue;
+      const video = videoElementsRef.current.get(clip.sourceVideoId);
+      if (video) {
+        video.addEventListener('seeked', seekedHandler, { once: true });
+        activeVideos.push(video);
+      }
+    }
+
+    // Draw once immediately with best available frame
+    drawFrame(currentTime, false);
+    drawSelectionHandles(currentTime);
+    drawMultiSelectHandles(currentTime);
+
+    // Fallback: if seeked doesn't fire within 300ms, draw anyway
+    const fallbackTimeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        drawFrame(currentTime, false);
+        drawSelectionHandles(currentTime);
+        drawMultiSelectHandles(currentTime);
+      }
+    }, 300);
+
+    // Cleanup just removes listeners — no rAF loop to cancel
     return () => {
-      cancelled = true;
+      settled = true;
+      clearTimeout(fallbackTimeout);
+      for (const video of activeVideos) {
+        video.removeEventListener('seeked', seekedHandler);
+      }
     };
   }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos]);
 
@@ -2549,12 +2611,9 @@ export function PreviewPlayer() {
         animationFrameRef.current = null;
       }
 
-      // Draw the current frame when paused to ensure we don't show black
-      requestAnimationFrame(() => {
-        drawFrame(currentTimeRef.current);
-        drawSelectionHandles(currentTimeRef.current);
-        drawMultiSelectHandles(currentTimeRef.current);
-      });
+      // Don't draw here — the scrubbing effect (which watches currentTime when !isPlaying)
+      // handles drawing the correct frame. Drawing here with currentTimeRef would race
+      // with timeline seek and overwrite the seeked frame with the stale playback position.
       return;
     }
 
@@ -2985,7 +3044,6 @@ export function PlaybackControls() {
   const currentTime = useEditorStore((state) => state.currentTime);
   const timelineDuration = useEditorStore((state) => state.project.timeline.duration);
   const clips = useEditorStore((state) => state.project.timeline.clips);
-
   const setIsPlaying = useEditorStore((state) => state.setIsPlaying);
   const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
 
@@ -3108,6 +3166,7 @@ export function PlaybackControls() {
           <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
         </svg>
       </button>
+
     </div>
   );
 }

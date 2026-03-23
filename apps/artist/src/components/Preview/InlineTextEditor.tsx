@@ -37,14 +37,27 @@ export function InlineTextEditor({
   const [value, setValue] = useState(text);
   const committedRef = useRef(false);
 
+  // Auto-size the textarea to fit its content
+  const autoSize = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    // Reset to auto so scrollWidth/scrollHeight reflect content
+    textarea.style.width = 'auto';
+    textarea.style.height = 'auto';
+    // Set to content size (scrollWidth includes the longest line)
+    textarea.style.width = `${Math.max(textarea.scrollWidth + 4, 60)}px`;
+    textarea.style.height = `${Math.max(textarea.scrollHeight, fontSize * 1.4)}px`;
+  }, [fontSize]);
+
   // Auto-focus and select all text on mount
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.focus();
       textarea.select();
+      autoSize();
     }
-  }, []);
+  }, [autoSize]);
 
   const doCommit = useCallback(() => {
     if (committedRef.current) return;
@@ -85,7 +98,11 @@ export function InlineTextEditor({
       ref={textareaRef}
       className={styles.inlineTextEditor}
       value={value}
-      onChange={(e) => setValue(e.target.value)}
+      onChange={(e) => {
+        setValue(e.target.value);
+        // Auto-size after React updates the value
+        requestAnimationFrame(autoSize);
+      }}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
       onMouseDown={(e) => e.stopPropagation()}
@@ -96,8 +113,6 @@ export function InlineTextEditor({
       style={{
         left: `${x - padding}px`,
         top: `${y - padding}px`,
-        width: `${Math.max(width + padding * 2, 60)}px`,
-        height: `${Math.max(height + padding * 2, fontSize * 1.4)}px`,
         fontFamily,
         fontSize: `${fontSize}px`,
         fontWeight,

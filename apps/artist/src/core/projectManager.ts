@@ -178,12 +178,74 @@ export async function loadProject(
 }
 
 /**
- * Extract video metadata from a blob
+ * Extract metadata from a blob (handles video, image, and audio)
  */
 async function extractMetadataFromBlob(
   blob: Blob,
   savedData: { id: string; name: string; mimeType: string }
 ): Promise<SourceVideo> {
+  const mimeType = savedData.mimeType;
+
+  if (mimeType.startsWith('image/')) {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img');
+      const url = URL.createObjectURL(blob);
+      img.src = url;
+
+      img.onload = () => {
+        const metadata: SourceVideo = {
+          id: savedData.id,
+          name: savedData.name,
+          duration: 5, // Default image duration
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          frameRate: 1,
+          mimeType,
+          size: blob.size,
+          mediaType: 'image',
+        };
+        URL.revokeObjectURL(url);
+        resolve(metadata);
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error(`Failed to load image: ${savedData.name}`));
+      };
+    });
+  }
+
+  if (mimeType.startsWith('audio/')) {
+    return new Promise((resolve, reject) => {
+      const audio = document.createElement('audio');
+      audio.preload = 'metadata';
+      const url = URL.createObjectURL(blob);
+      audio.src = url;
+
+      audio.onloadedmetadata = () => {
+        const metadata: SourceVideo = {
+          id: savedData.id,
+          name: savedData.name,
+          duration: audio.duration,
+          width: 0,
+          height: 0,
+          frameRate: 0,
+          mimeType,
+          size: blob.size,
+          mediaType: 'audio',
+        };
+        URL.revokeObjectURL(url);
+        resolve(metadata);
+      };
+
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error(`Failed to load audio: ${savedData.name}`));
+      };
+    });
+  }
+
+  // Default: treat as video
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.preload = 'metadata';
@@ -198,8 +260,8 @@ async function extractMetadataFromBlob(
         duration: video.duration,
         width: video.videoWidth,
         height: video.videoHeight,
-        frameRate: 30, // Default
-        mimeType: savedData.mimeType,
+        frameRate: 30,
+        mimeType,
         size: blob.size,
       };
 

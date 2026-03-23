@@ -21,13 +21,20 @@ interface LastExportSettings {
   resolution: ExportOptions['resolution'];
 }
 
-export function ExportDialog({ isOpen, onClose, timeRange }: ExportDialogProps) {
+export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: ExportDialogProps) {
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const projectName = useEditorStore((state) => state.project.name);
   const projectResolution = useEditorStore((state) => state.project.resolution);
+  const inPoint = useEditorStore((state) => state.inPoint);
+  const outPoint = useEditorStore((state) => state.outPoint);
   const { isTrial } = useAuth();
+
+  // Use prop timeRange if provided, otherwise derive from in/out points
+  const timeRange = timeRangeProp ?? (inPoint !== null && outPoint !== null
+    ? { start: Math.min(inPoint, outPoint), end: Math.max(inPoint, outPoint) }
+    : undefined);
 
   const [advancedOptions, setAdvancedOptions] = useState<ExportOptions>({
     format: 'webm',
@@ -60,7 +67,7 @@ export function ExportDialog({ isOpen, onClose, timeRange }: ExportDialogProps) 
     }
   }, [isOpen]);
 
-  const handleExport = useCallback(async (formatOverride?: 'webm' | 'mp4', useAdvanced?: boolean) => {
+  const handleExport = useCallback(async (formatOverride?: 'webm' | 'mp4', useAdvanced?: boolean, exportFullVideo?: boolean) => {
     if (clips.length === 0) {
       setError('No clips to export');
       return;
@@ -75,9 +82,10 @@ export function ExportDialog({ isOpen, onClose, timeRange }: ExportDialogProps) 
     abortControllerRef.current = abortController;
 
     // Determine options: primary button uses defaults, advanced button uses configured options
+    const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
     const exportOptions: ExportOptions = useAdvanced
-      ? { ...advancedOptions, timeRange }
-      : { format: 'webm', quality: 'medium', resolution: 'project', timeRange };
+      ? { ...advancedOptions, timeRange: effectiveTimeRange }
+      : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
 
     const requestedFormat = formatOverride || exportOptions.format;
     const format = requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
@@ -226,21 +234,33 @@ export function ExportDialog({ isOpen, onClose, timeRange }: ExportDialogProps) 
           ) : (
             <>
               <div className={styles.primarySection}>
-                <button
-                  className={styles.primaryExportButton}
-                  onClick={() => handleExport(undefined, false)}
-                  disabled={clips.length === 0}
-                >
-                  {timeRange ? 'Download Selection (WebM)' : 'Download WebM'}
-                </button>
-                <div className={styles.summary}>
-                  <span>{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
-                  {timeRange && (
-                    <span style={{ marginLeft: '8px', color: 'var(--accent-primary)' }}>
-                      {formatTime(timeRange.start)} - {formatTime(timeRange.end)} ({formatTime(timeRange.end - timeRange.start)})
-                    </span>
-                  )}
-                </div>
+                {timeRange ? (
+                  <>
+                    <button
+                      className={styles.primaryExportButton}
+                      onClick={() => handleExport(undefined, false)}
+                      disabled={clips.length === 0}
+                    >
+                      Export Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})
+                    </button>
+                    <button
+                      className={styles.primaryExportButton}
+                      onClick={() => handleExport(undefined, false, true)}
+                      disabled={clips.length === 0}
+                      style={{ background: 'var(--bg-hover)', color: 'var(--text-primary)' }}
+                    >
+                      Export Full Video
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className={styles.primaryExportButton}
+                    onClick={() => handleExport(undefined, false)}
+                    disabled={clips.length === 0}
+                  >
+                    Download WebM
+                  </button>
+                )}
               </div>
 
               <div className={styles.advancedSection}>

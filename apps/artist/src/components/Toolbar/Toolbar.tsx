@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useEditorStore } from '../../store/projectStore';
+import { formatTimecode } from '../../utils/timeUtils';
 import type { ToolType } from '../../store/types';
 import styles from './Toolbar.module.css';
 
@@ -16,6 +17,10 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
   const setLoopPlayback = useEditorStore((state) => state.setLoopPlayback);
   const currentTime = useEditorStore((state) => state.currentTime);
   const addMarker = useEditorStore((state) => state.addMarker);
+  const inPoint = useEditorStore((state) => state.inPoint);
+  const outPoint = useEditorStore((state) => state.outPoint);
+  const setInPoint = useEditorStore((state) => state.setInPoint);
+  const setOutPoint = useEditorStore((state) => state.setOutPoint);
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const canUndo = useEditorStore((state) => state.canUndo);
@@ -162,6 +167,44 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
             <path d="M5 5l7 4 7-4" />
           </svg>
         </button>
+      </div>
+
+      <div className={styles.divider} />
+
+      {/* In/Out Points */}
+      <div className={styles.toolGroup}>
+        <span className={styles.groupLabel}>Section</span>
+        <div className={styles.buttonGroup}>
+          <button
+            className={`${styles.toolButton} ${inPoint !== null ? styles.active : ''}`}
+            onClick={() => setInPoint(inPoint === currentTime ? null : currentTime)}
+            title={`Set in point (I)${inPoint !== null ? ` — ${formatTimecode(inPoint)}` : ''}`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M7 4v16M7 4l10 8-10 8" />
+            </svg>
+          </button>
+          <button
+            className={`${styles.toolButton} ${outPoint !== null ? styles.active : ''}`}
+            onClick={() => setOutPoint(outPoint === currentTime ? null : currentTime)}
+            title={`Set out point (O)${outPoint !== null ? ` — ${formatTimecode(outPoint)}` : ''}`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M17 4v16M17 4L7 12l10 8" />
+            </svg>
+          </button>
+          {(inPoint !== null || outPoint !== null) && (
+            <button
+              className={styles.toolButton}
+              onClick={() => { setInPoint(null); setOutPoint(null); }}
+              title="Clear in/out points"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Multi-select actions */}
