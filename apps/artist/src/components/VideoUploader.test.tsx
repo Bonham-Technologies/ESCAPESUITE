@@ -338,6 +338,9 @@ describe('VideoLibrary', () => {
     const clips = useEditorStore.getState().project.timeline.clips
     expect(clips).toHaveLength(1)
     expect(clips[0].sourceVideoId).toBe('video1')
+    // All clips are imported at 100% native scale (scaleX = scaleY = 1)
+    expect(clips[0].transform.scaleX).toBe(1)
+    expect(clips[0].transform.scaleY).toBe(1)
   })
 
   it('removes video when remove button clicked', async () => {

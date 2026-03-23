@@ -20,6 +20,7 @@ describe('projectManager', () => {
     name: 'Test Project',
     created: 1234567890000,
     modified: 1234567890000,
+    resolution: { width: 1280, height: 720 },
     timeline: {
       tracks: [
         { id: 'track1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },

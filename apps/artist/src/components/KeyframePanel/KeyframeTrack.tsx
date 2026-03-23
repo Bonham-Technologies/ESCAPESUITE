@@ -71,7 +71,8 @@ export function KeyframeTrack({
     } else if (property === 'volume') {
       defaultValue = 1; // Volume default is 1 (100%)
     } else {
-      defaultValue = transform?.[property as keyof ClipTransform] ?? 0;
+      const val = transform?.[property as keyof ClipTransform];
+      defaultValue = typeof val === 'number' ? val : 0;
     }
     return interpolateKeyframes(keyframes, currentTime, defaultValue);
   }, [keyframes, currentTime, property, transform, effects]);

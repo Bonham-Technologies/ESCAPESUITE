@@ -314,6 +314,7 @@ describe('integration', () => {
         name: 'Test Project',
         created: 1234567890,
         modified: 1234567890,
+        resolution: { width: 1280, height: 720 },
         timeline: {
           tracks: [],
           clips: [],
@@ -336,6 +337,7 @@ describe('integration', () => {
         name: 'Test',
         created: Date.now(),
         modified: Date.now(),
+        resolution: { width: 1280, height: 720 },
         timeline: {
           tracks: [],
           clips: [],
@@ -359,6 +361,7 @@ describe('integration', () => {
         name: 'Test',
         created: Date.now(),
         modified: Date.now(),
+        resolution: { width: 1280, height: 720 },
         timeline: {
           tracks: [],
           clips: [],
@@ -388,6 +391,7 @@ describe('integration', () => {
         name: 'Test',
         created: Date.now(),
         modified: Date.now(),
+        resolution: { width: 1280, height: 720 },
         timeline: {
           tracks: [],
           clips: [],

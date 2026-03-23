@@ -21,4 +21,6 @@ export const analytics = {
     trackEvent('Export Started', { format }),
   exportCompleted: (format: 'webm' | 'mp4', durationSeconds: number) =>
     trackEvent('Export Completed', { format, duration: Math.round(durationSeconds) }),
+  exportFailed: (format: string, errorType: string, progress: number) =>
+    trackEvent('Export Failed', { format, errorType, progress: Math.round(progress * 100) }),
 }

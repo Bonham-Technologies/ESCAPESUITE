@@ -10,6 +10,7 @@ import { formatTime, timeToPixels, pixelsToTime } from '../../utils/timeUtils';
 import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
+import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
 
 const PIXELS_PER_SECOND_BASE = 50;
@@ -34,7 +35,11 @@ interface TrimState {
   originalTimelinePosition: number;
 }
 
-export function Timeline() {
+interface TimelineProps {
+  onExportSelection?: (timeRange: { start: number; end: number }) => void;
+}
+
+export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
@@ -44,6 +49,10 @@ export function Timeline() {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editingTrackName, setEditingTrackName] = useState('');
+  const [tlMarqueeStart, setTlMarqueeStart] = useState<{x: number; y: number} | null>(null);
+  const [tlMarqueeCurrent, setTlMarqueeCurrent] = useState<{x: number; y: number} | null>(null);
+  const tlMarqueeActive = tlMarqueeStart !== null && tlMarqueeCurrent !== null;
+  const TL_MARQUEE_THRESHOLD = 5;
 
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -51,12 +60,15 @@ export function Timeline() {
   const timelineDuration = useEditorStore((state) => state.project.timeline.duration);
   const currentTime = useEditorStore((state) => state.currentTime);
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
+  const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
   const zoom = useEditorStore((state) => state.zoom);
   const snapEnabled = useEditorStore((state) => state.snapEnabled);
   const snapThreshold = useEditorStore((state) => state.snapThreshold);
 
   const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
   const setSelectedClipId = useEditorStore((state) => state.setSelectedClipId);
+  const toggleClipSelection = useEditorStore((state) => state.toggleClipSelection);
+  const moveSelectedClips = useEditorStore((state) => state.moveSelectedClips);
   const setClipTimelinePosition = useEditorStore((state) => state.setClipTimelinePosition);
   const moveClipToTrack = useEditorStore((state) => state.moveClipToTrack);
   const updateTrack = useEditorStore((state) => state.updateTrack);
@@ -66,8 +78,19 @@ export function Timeline() {
   const shiftClipsAfter = useEditorStore((state) => state.shiftClipsAfter);
   const markers = useEditorStore((state) => state.markers);
   const removeMarker = useEditorStore((state) => state.removeMarker);
+  const isPlaying = useEditorStore((state) => state.isPlaying);
+  const setIsPlaying = useEditorStore((state) => state.setIsPlaying);
   const activeTool = useEditorStore((state) => state.activeTool);
   const splitClip = useEditorStore((state) => state.splitClip);
+  const selectClipsInRange = useEditorStore((state) => state.selectClipsInRange);
+  const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
+  const inPoint = useEditorStore((state) => state.inPoint);
+  const outPoint = useEditorStore((state) => state.outPoint);
+  const setInPoint = useEditorStore((state) => state.setInPoint);
+  const setOutPoint = useEditorStore((state) => state.setOutPoint);
+
+  const [isDraggingInPoint, setIsDraggingInPoint] = useState(false);
+  const [isDraggingOutPoint, setIsDraggingOutPoint] = useState(false);
 
   const pixelsPerSecond = PIXELS_PER_SECOND_BASE * zoom;
   const minTimelineDuration = Math.max(timelineDuration, 60);
@@ -164,10 +187,14 @@ export function Timeline() {
     });
   }, [markers, pixelsPerSecond]);
 
-  // Handle ruler click to seek
+  // Handle ruler click to seek (and pause if playing)
   const handleRulerClick = useCallback(
     (e: React.MouseEvent) => {
       if (!rulerRef.current) return;
+
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
 
       const rect = rulerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + rulerRef.current.scrollLeft;
@@ -175,12 +202,18 @@ export function Timeline() {
       const clampedTime = Math.max(0, Math.min(time, timelineDuration || minTimelineDuration));
       setCurrentTime(clampedTime);
     },
-    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime]
+    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying]
   );
 
-  // Handle click on track to seek and deselect
+  // Handle click on track to seek, pause, and deselect
   const handleTrackClick = useCallback(
     (e: React.MouseEvent) => {
+      // If a marquee selection just completed, skip normal click behavior
+      if (marqueeJustFinished.current) {
+        marqueeJustFinished.current = false;
+        return;
+      }
+
       if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
 
       // Only deselect if clicking directly on the track container, not on a clip or playhead
@@ -191,6 +224,10 @@ export function Timeline() {
       // Don't seek or deselect when clicking playhead
       if (isClickOnPlayhead) return;
 
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+
       const rect = trackContainerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + trackContainerRef.current.scrollLeft;
       const time = pixelsToTime(x, pixelsPerSecond);
@@ -199,10 +236,11 @@ export function Timeline() {
 
       // Deselect clip only when clicking on empty track space
       if (!isClickOnClip) {
+        clearMultiSelection();
         setSelectedClipId(null);
       }
     },
-    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, isDraggingPlayhead, dragState]
+    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying]
   );
 
   // Handle playhead drag
@@ -236,6 +274,40 @@ export function Timeline() {
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDraggingPlayhead, pixelsPerSecond, timelineDuration, setCurrentTime]);
+
+  // Handle in/out point marker drag
+  useEffect(() => {
+    if (!isDraggingInPoint && !isDraggingOutPoint) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const ref = trackContainerRef.current || rulerRef.current;
+      if (!ref) return;
+
+      const rect = ref.getBoundingClientRect();
+      const x = e.clientX - rect.left + ref.scrollLeft;
+      const time = pixelsToTime(x, pixelsPerSecond);
+      const clampedTime = Math.max(0, Math.min(time, timelineDuration));
+
+      if (isDraggingInPoint) {
+        setInPoint(clampedTime);
+      } else {
+        setOutPoint(clampedTime);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingInPoint(false);
+      setIsDraggingOutPoint(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingInPoint, isDraggingOutPoint, pixelsPerSecond, timelineDuration, setInPoint, setOutPoint]);
 
   // Sync ruler scroll (horizontal) and track headers scroll (vertical) with track container scroll
   const handleTrackScroll = useCallback(() => {
@@ -317,7 +389,17 @@ export function Timeline() {
         return;
       }
 
-      setSelectedClipId(clip.id);
+      // Ctrl+click (or Cmd+click on Mac) toggles multi-selection
+      if (e.ctrlKey || e.metaKey) {
+        toggleClipSelection(clip.id);
+        return;
+      }
+
+      // If the clip is part of a multi-selection, keep the selection for bulk drag
+      // Otherwise, select just this clip
+      if (!selectedClipIds.has(clip.id)) {
+        setSelectedClipId(clip.id);
+      }
 
       const track = tracks.find(t => t.id === clip.trackId);
       if (!track || track.locked) return;
@@ -336,7 +418,7 @@ export function Timeline() {
         offsetX,
       });
     },
-    [tracks, setSelectedClipId, activeTool, handleRazorClick]
+    [tracks, setSelectedClipId, toggleClipSelection, selectedClipIds, activeTool, handleRazorClick]
   );
 
   // Handle drag movement
@@ -400,22 +482,30 @@ export function Timeline() {
       if (dragState) {
         const clip = clips.find(c => c.id === dragState.clipId);
         if (clip) {
-          // Check for overlaps before committing
-          const overlap = wouldOverlap(
-            clips,
-            dragState.currentTrackId,
-            dragState.currentPosition,
-            clip.duration,
-            dragState.clipId
-          );
+          const deltaTime = dragState.currentPosition - dragState.originalPosition;
 
-          if (!overlap) {
-            // Commit the move
-            if (dragState.currentTrackId !== dragState.originalTrackId) {
-              moveClipToTrack(dragState.clipId, dragState.currentTrackId);
-            }
-            if (dragState.currentPosition !== dragState.originalPosition) {
-              setClipTimelinePosition(dragState.clipId, dragState.currentPosition);
+          // Bulk drag: if dragged clip is part of multi-selection, move all selected clips
+          if (selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1 && deltaTime !== 0) {
+            moveSelectedClips(deltaTime, 0);
+          } else {
+            // Single clip move
+            // Check for overlaps before committing
+            const overlap = wouldOverlap(
+              clips,
+              dragState.currentTrackId,
+              dragState.currentPosition,
+              clip.duration,
+              dragState.clipId
+            );
+
+            if (!overlap) {
+              // Commit the move
+              if (dragState.currentTrackId !== dragState.originalTrackId) {
+                moveClipToTrack(dragState.clipId, dragState.currentTrackId);
+              }
+              if (deltaTime !== 0) {
+                setClipTimelinePosition(dragState.clipId, dragState.currentPosition);
+              }
             }
           }
         }
@@ -430,7 +520,7 @@ export function Timeline() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState, clips, snapEnabled, snapThreshold, pixelsPerSecond, moveClipToTrack, setClipTimelinePosition]);
+  }, [dragState, clips, snapEnabled, snapThreshold, pixelsPerSecond, moveClipToTrack, setClipTimelinePosition, selectedClipIds, moveSelectedClips]);
 
   // Handle trim edge mouse down
   const handleTrimMouseDown = useCallback(
@@ -647,6 +737,111 @@ export function Timeline() {
     }
   }, [handleTrackNameBlur]);
 
+  // Track whether marquee was just completed so handleTrackClick can skip deselection
+  const marqueeJustFinished = useRef(false);
+
+  // Handle mousedown on track area to start marquee selection
+  const handleTrackMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
+
+      const target = e.target as HTMLElement;
+      const isClickOnClip = target.closest('[data-clip-id]');
+      const isClickOnPlayhead = target.closest('[data-playhead]');
+
+      // Only start marquee on empty space
+      if (isClickOnClip || isClickOnPlayhead) return;
+
+      const rect = trackContainerRef.current.getBoundingClientRect();
+      setTlMarqueeStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      setTlMarqueeCurrent(null);
+    },
+    [isDraggingPlayhead, dragState]
+  );
+
+  // Marquee mousemove/mouseup via useEffect (document-level events)
+  useEffect(() => {
+    if (!tlMarqueeStart) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!trackContainerRef.current) return;
+      const rect = trackContainerRef.current.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+      const dx = currentX - tlMarqueeStart.x;
+      const dy = currentY - tlMarqueeStart.y;
+      if (Math.sqrt(dx * dx + dy * dy) >= TL_MARQUEE_THRESHOLD) {
+        setTlMarqueeCurrent({ x: currentX, y: currentY });
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (tlMarqueeActive && trackContainerRef.current) {
+        const current = tlMarqueeCurrent!;
+        const scrollLeft = trackContainerRef.current.scrollLeft;
+
+        // Convert marquee X pixel positions to time values
+        const leftPx = Math.min(tlMarqueeStart.x, current.x) + scrollLeft;
+        const rightPx = Math.max(tlMarqueeStart.x, current.x) + scrollLeft;
+        const startTime = pixelsToTime(leftPx, pixelsPerSecond);
+        const endTime = pixelsToTime(rightPx, pixelsPerSecond);
+
+        // Determine which tracks the marquee spans by Y position
+        const topPx = Math.min(tlMarqueeStart.y, current.y);
+        const bottomPx = Math.max(tlMarqueeStart.y, current.y);
+
+        // Find track elements and match Y ranges
+        const trackElements = trackContainerRef.current.querySelectorAll('[data-track-id]');
+        const containerRect = trackContainerRef.current.getBoundingClientRect();
+        const scrollTop = trackContainerRef.current.scrollTop;
+
+        const spannedTrackIds = new Set<string>();
+        trackElements.forEach((el) => {
+          const elRect = el.getBoundingClientRect();
+          // Convert to container-relative coordinates
+          const elTop = elRect.top - containerRect.top + scrollTop;
+          const elBottom = elRect.bottom - containerRect.top + scrollTop;
+          // Check if track overlaps with marquee Y range
+          if (elBottom > topPx && elTop < bottomPx) {
+            const trackId = el.getAttribute('data-track-id');
+            if (trackId) spannedTrackIds.add(trackId);
+          }
+        });
+
+        // Find all clips within the time range on the spanned tracks
+        const intersecting = clips.filter(clip => {
+          if (!spannedTrackIds.has(clip.trackId)) return false;
+          const clipEnd = clip.timelinePosition + clip.duration;
+          // Clip overlaps the time range
+          return clipEnd > startTime && clip.timelinePosition < endTime;
+        }).map(c => c.id);
+
+        if (e.ctrlKey || e.metaKey) {
+          const existing = Array.from(selectedClipIds);
+          const combined = [...new Set([...existing, ...intersecting])];
+          selectClipsInRange(combined);
+        } else {
+          selectClipsInRange(intersecting);
+        }
+
+        marqueeJustFinished.current = true;
+      } else {
+        // No drag - let handleTrackClick handle the deselect + seek
+      }
+
+      setTlMarqueeStart(null);
+      setTlMarqueeCurrent(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [tlMarqueeStart, tlMarqueeActive, tlMarqueeCurrent, pixelsPerSecond, clips, selectedClipIds, selectClipsInRange]);
+
   return (
     <div className={styles.container} ref={containerRef}>
       {/* Ruler */}
@@ -656,6 +851,39 @@ export function Timeline() {
           <div className={styles.rulerContent} style={{ width: timelineWidth }}>
             {renderRuler()}
             {renderMarkers()}
+
+            {/* In/Out point markers in ruler */}
+            {inPoint !== null && (
+              <div
+                className={styles.inOutMarker}
+                style={{ left: timeToPixels(inPoint, pixelsPerSecond) }}
+                onMouseDown={(e) => { e.stopPropagation(); setIsDraggingInPoint(true); }}
+                title={`In point: ${formatTime(inPoint)}`}
+              >
+                <div className={`${styles.inOutMarkerHead} ${styles.inMarkerHead}`}>I</div>
+              </div>
+            )}
+            {outPoint !== null && (
+              <div
+                className={styles.inOutMarker}
+                style={{ left: timeToPixels(outPoint, pixelsPerSecond) }}
+                onMouseDown={(e) => { e.stopPropagation(); setIsDraggingOutPoint(true); }}
+                title={`Out point: ${formatTime(outPoint)}`}
+              >
+                <div className={`${styles.inOutMarkerHead} ${styles.outMarkerHead}`}>O</div>
+              </div>
+            )}
+
+            {/* In/Out region highlight in ruler */}
+            {inPoint !== null && outPoint !== null && (
+              <div
+                className={styles.inOutRulerRegion}
+                style={{
+                  left: timeToPixels(inPoint, pixelsPerSecond),
+                  width: timeToPixels(outPoint - inPoint, pixelsPerSecond),
+                }}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -816,6 +1044,7 @@ export function Timeline() {
           className={`${styles.trackContainer} ${activeTool === 'razor' ? styles.razorCursor : ''} ${activeTool === 'ripple' ? styles.rippleCursor : ''}`}
           ref={trackContainerRef}
           onClick={handleTrackClick}
+          onMouseDown={handleTrackMouseDown}
           onScroll={handleTrackScroll}
         >
           <div className={styles.tracksContent} style={{ width: timelineWidth }}>
@@ -829,7 +1058,10 @@ export function Timeline() {
                 {/* Clips on this track */}
                 {getTrackClips(track.id).map((clip) => {
                   const isDragging = dragState?.clipId === clip.id;
-                  const displayPosition = isDragging ? dragState.currentPosition : clip.timelinePosition;
+                  // During bulk drag, show all multi-selected clips moving together
+                  const isBulkDragging = !isDragging && dragState && selectedClipIds.has(clip.id) && selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1;
+                  const bulkDragDelta = isBulkDragging ? dragState.currentPosition - dragState.originalPosition : 0;
+                  const displayPosition = isDragging ? dragState.currentPosition : clip.timelinePosition + bulkDragDelta;
                   const displayTrackId = isDragging ? dragState.currentTrackId : clip.trackId;
 
                   // Only render if on this track (or being dragged to this track)
@@ -839,6 +1071,7 @@ export function Timeline() {
                   const clipX = timeToPixels(displayPosition, pixelsPerSecond);
                   const clipWidth = timeToPixels(clip.duration, pixelsPerSecond);
                   const isSelected = clip.id === selectedClipId;
+                  const isMultiSelected = selectedClipIds.has(clip.id);
 
                   const isTrimming = trimState?.clipId === clip.id;
 
@@ -856,7 +1089,7 @@ export function Timeline() {
                     <div
                       key={clip.id}
                       data-clip-id={clip.id}
-                      className={`${styles.clip} ${isSelected ? styles.clipSelected : ''} ${isDragging ? styles.clipDragging : ''} ${isTrimming ? styles.clipTrimming : ''} ${isAudioClip ? styles.clipAudio : ''} ${isImageClip ? styles.clipImage : ''} ${isTextOverlay ? styles.clipText : ''} ${isShapeOverlay ? styles.clipShape : ''}`}
+                      className={`${styles.clip} ${isSelected ? styles.clipSelected : ''} ${isMultiSelected && !isSelected ? styles.clipMultiSelected : ''} ${isDragging || isBulkDragging ? styles.clipDragging : ''} ${isTrimming ? styles.clipTrimming : ''} ${isAudioClip ? styles.clipAudio : ''} ${isImageClip ? styles.clipImage : ''} ${isTextOverlay ? styles.clipText : ''} ${isShapeOverlay ? styles.clipShape : ''}`}
                       style={{
                         left: clipX,
                         width: clipWidth,
@@ -946,6 +1179,40 @@ export function Timeline() {
               </div>
             ))}
 
+            {/* In/Out region highlight over tracks */}
+            {inPoint !== null && outPoint !== null && (
+              <div
+                className={styles.inOutRegion}
+                style={{
+                  left: timeToPixels(inPoint, pixelsPerSecond),
+                  width: timeToPixels(outPoint - inPoint, pixelsPerSecond),
+                  height: totalTracksHeight,
+                }}
+              />
+            )}
+
+            {/* In/Out point vertical lines */}
+            {inPoint !== null && (
+              <div
+                className={styles.inOutLine}
+                style={{
+                  left: timeToPixels(inPoint, pixelsPerSecond),
+                  height: totalTracksHeight,
+                  '--in-out-color': '#4ade80',
+                } as React.CSSProperties}
+              />
+            )}
+            {outPoint !== null && (
+              <div
+                className={styles.inOutLine}
+                style={{
+                  left: timeToPixels(outPoint, pixelsPerSecond),
+                  height: totalTracksHeight,
+                  '--in-out-color': '#f87171',
+                } as React.CSSProperties}
+              />
+            )}
+
             {/* Marker lines */}
             {renderMarkerLines()}
 
@@ -967,6 +1234,16 @@ export function Timeline() {
               <div className={styles.playheadHead} />
               <div className={styles.playheadLine} />
             </div>
+
+            {/* Marquee selection rectangle */}
+            {tlMarqueeActive && tlMarqueeStart && tlMarqueeCurrent && (
+              <MarqueeSelection
+                startX={tlMarqueeStart.x}
+                startY={tlMarqueeStart.y}
+                currentX={tlMarqueeCurrent.x}
+                currentY={tlMarqueeCurrent.y}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -974,6 +1251,20 @@ export function Timeline() {
       {/* Timeline info */}
       <div className={styles.info}>
         <span>{formatTime(currentTime)} / {formatTime(timelineDuration)}</span>
+        {inPoint !== null && outPoint !== null && (
+          <span className={styles.inOutInfo}>
+            Selection: {formatTime(inPoint)} - {formatTime(outPoint)} ({formatTime(outPoint - inPoint)})
+            {onExportSelection && (
+              <button
+                className={styles.exportSelectionBtn}
+                onClick={() => onExportSelection({ start: inPoint, end: outPoint })}
+                title="Export selected region"
+              >
+                Export Selection
+              </button>
+            )}
+          </span>
+        )}
         <span>{clips.length} clip{clips.length !== 1 ? 's' : ''} · {tracks.length} track{tracks.length !== 1 ? 's' : ''}</span>
       </div>
     </div>

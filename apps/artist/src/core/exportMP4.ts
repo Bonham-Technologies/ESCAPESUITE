@@ -44,6 +44,32 @@ import {
 import { extractAndMixAudioWithWorker } from './audioMixer';
 
 /**
+ * Structured log entry for export diagnostics
+ */
+export interface ExportLogEntry {
+  phase: string;
+  detail: string;
+  timestamp: number;
+}
+
+/**
+ * Error class that carries the export diagnostic log for debugging
+ */
+export class ExportError extends Error {
+  public readonly exportLog: ExportLogEntry[];
+  public readonly frameIndex: number | undefined;
+  public readonly totalFrames: number | undefined;
+
+  constructor(message: string, exportLog: ExportLogEntry[], frameIndex?: number, totalFrames?: number) {
+    super(message);
+    this.name = 'ExportError';
+    this.exportLog = exportLog;
+    this.frameIndex = frameIndex;
+    this.totalFrames = totalFrames;
+  }
+}
+
+/**
  * Export timeline to MP4 using WebCodecs + Mediabunny
  * Frame-by-frame encoding with H.264 video and AAC audio
  */
@@ -54,7 +80,8 @@ export async function exportToMP4(
   onProgress: ProgressCallback,
   tracks?: Track[],
   watermark?: WatermarkConfig | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  projectResolution?: { width: number; height: number }
 ): Promise<Blob> {
   if (!isMP4ExportSupported()) {
     throw new Error('MP4 export requires WebCodecs API (Chrome/Edge)');
@@ -66,6 +93,14 @@ export async function exportToMP4(
 
   // Check for early abort
   checkAborted(signal);
+
+  // Diagnostic logging for debugging export failures
+  const exportLog: ExportLogEntry[] = [];
+  const log = (phase: string, detail: string) => {
+    exportLog.push({ phase, detail, timestamp: performance.now() });
+  };
+
+  log('init', `Starting MP4 export with ${clips.length} clips`);
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
 
@@ -98,21 +133,36 @@ export async function exportToMP4(
     }
   }
 
-  const { width, height } = getResolution(options.resolution, baseWidth, baseHeight);
+  const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;
 
-  // Calculate total duration
-  const totalDuration = calculateTimelineDuration(clips);
+  // Calculate total duration, respecting timeRange if specified
+  const fullDuration = calculateTimelineDuration(clips);
+  const rangeStart = options.timeRange?.start ?? 0;
+  const rangeEnd = options.timeRange?.end ?? fullDuration;
+  const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
   // Extract and mix audio first (uses Web Worker if available, falls back to main thread)
+  // Note: we extract the full timeline audio, then slice it later
   onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
-  let audioData: Float32Array | null = await extractAndMixAudioWithWorker(clips, exportTracks, totalDuration, (p) => {
+  log('audio', 'Starting audio extraction');
+  const fullAudioData: Float32Array | null = await extractAndMixAudioWithWorker(clips, exportTracks, fullDuration, (p) => {
     onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
   });
+  log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');
+
+  // Slice audio to the selected time range
+  // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
+  const audioChannels = 2;
+  let audioData: Float32Array | null = fullAudioData && options.timeRange ? (() => {
+    const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
+    const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
+    return fullAudioData.slice(startSample, endSample);
+  })() : fullAudioData;
 
   // Create canvas for frame rendering
   const canvas = document.createElement('canvas');
@@ -225,11 +275,14 @@ export async function exportToMP4(
       height,
       bitrate: videoBitrate,
       framerate: frameRate,
+      latencyMode: 'quality',
+      hardwareAcceleration: 'prefer-hardware',
     };
     try {
       const support = await VideoEncoder.isConfigSupported(config);
       if (support.supported) {
         videoConfig = support.config || config;
+        log('codec', `Selected H.264 codec: ${codec} (${width}x${height} @ ${videoBitrate}bps)`);
         console.log(`[MP4 Export] Using H.264 codec: ${codec}`);
         break;
       }
@@ -299,6 +352,7 @@ export async function exportToMP4(
   };
 
   onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+  log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
 
   try {
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
@@ -313,7 +367,7 @@ export async function exportToMP4(
         throw videoEncoderError;
       }
 
-      const currentTime = frameIndex / frameRate;
+      const currentTime = rangeStart + frameIndex / frameRate;
 
       // Check for active transition
       const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
@@ -474,32 +528,61 @@ export async function exportToMP4(
         drawWatermark(ctx, width, height, watermark);
       }
 
-      // Create VideoFrame from canvas
-      const timestamp = Math.round(currentTime * 1_000_000);
+      // Create VideoFrame from canvas — timestamp relative to export start (not timeline)
+      const exportTime = currentTime - rangeStart;
+      const timestamp = Math.round(exportTime * 1_000_000);
       const frame = new VideoFrame(canvas, {
         timestamp,
         duration: frameDurationUs,
       });
 
-      // Encode frame (keyframe every 2 seconds)
+      // Encode frame (keyframe every 2 seconds) with single retry
       const keyFrame = frameCount % (frameRate * 2) === 0;
-      videoEncoder.encode(frame, { keyFrame });
+      try {
+        videoEncoder.encode(frame, { keyFrame });
+      } catch (encodeErr) {
+        log('retry', `Frame ${frameIndex} encode failed, retrying as keyframe: ${encodeErr}`);
+        try {
+          videoEncoder.encode(frame, { keyFrame: true });
+        } catch (retryErr) {
+          frame.close();
+          log('fatal', `Frame ${frameIndex} retry failed: ${retryErr}`);
+          throw new ExportError(
+            `Export failed at frame ${frameIndex}/${totalFrames}`,
+            exportLog,
+            frameIndex,
+            totalFrames
+          );
+        }
+      }
       frame.close();
 
       frameCount++;
+
+      // Log progress every 10th frame
+      if (frameCount % 10 === 0) {
+        log('progress', `Encoded frame ${frameCount}/${totalFrames}`);
+      }
 
       // Backpressure: wait for encoder to catch up if queue is too large
       // This prevents memory exhaustion while allowing smooth encoding
       const backpressureStart = Date.now();
       const backpressureTimeout = 30000; // 30 second timeout
-      while (videoEncoder.encodeQueueSize > 20) {
+      while (videoEncoder.encodeQueueSize > 5) {
         // Check for encoder errors during backpressure wait
         if (videoEncoderError) {
+          log('error', `Encoder error during backpressure: ${videoEncoderError.message}`);
           throw videoEncoderError;
         }
         // Check for timeout (encoder might be stuck)
         if (Date.now() - backpressureStart > backpressureTimeout) {
-          throw new Error('Video encoder backpressure timeout - encoder may be stuck');
+          log('fatal', `Backpressure timeout at frame ${frameIndex}, queue size: ${videoEncoder.encodeQueueSize}`);
+          throw new ExportError(
+            'Video encoder backpressure timeout - encoder may be stuck',
+            exportLog,
+            frameIndex,
+            totalFrames
+          );
         }
         await new Promise(resolve => setTimeout(resolve, 5));
       }
@@ -560,11 +643,15 @@ export async function exportToMP4(
       }
     }
 
+    log('frames', `Frame loop complete: ${frameCount} frames encoded`);
+
     // Check for any encoder errors before finalizing
     if (videoEncoderError) {
+      log('error', `Video encoder error before finalize: ${(videoEncoderError as Error).message}`);
       throw videoEncoderError;
     }
     if (audioEncoderError) {
+      log('error', `Audio encoder error before finalize: ${(audioEncoderError as Error).message}`);
       throw audioEncoderError;
     }
 
@@ -609,7 +696,14 @@ export async function exportToMP4(
       }
     } catch { /* ignore */ }
 
-    // Re-throw the error (including ExportAbortedError)
-    throw error;
+    // Re-throw ExportAbortedError and ExportError as-is
+    if (error instanceof ExportError || (error instanceof Error && error.name === 'ExportAbortedError')) {
+      throw error;
+    }
+
+    // Wrap other errors in ExportError to carry the diagnostic log
+    const message = error instanceof Error ? error.message : String(error);
+    log('error', `Export failed: ${message}`);
+    throw new ExportError(message, exportLog, frameCount, totalFrames);
   }
 }

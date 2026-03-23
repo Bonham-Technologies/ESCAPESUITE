@@ -89,7 +89,8 @@ export function KeyframeGraph({
   const defaultValue = useMemo(() => {
     if (property === 'blur') return effects?.blur ?? 0;
     if (property === 'volume') return 1; // Volume default is 1 (100%)
-    return transform?.[property as keyof ClipTransform] ?? 0;
+    const val = transform?.[property as keyof ClipTransform];
+    return typeof val === 'number' ? val : 0;
   }, [property, transform, effects]);
 
   // Calculate SVG dimensions and coordinate conversions

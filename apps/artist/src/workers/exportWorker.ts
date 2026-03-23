@@ -229,7 +229,7 @@ function computeAnimatedValues(
       if (keyframes && keyframes.length > 0) {
         const value = interpolateKeyframes(keyframes, clipTime);
         if (value !== null) {
-          (result as Record<string, number>)[prop] = value;
+          (result as unknown as Record<string, number>)[prop] = value;
         }
       }
     }

@@ -53,12 +53,17 @@ export function drawTextOverlayToCanvasAnimated(
   ctx.textAlign = textData.textAlign;
   ctx.textBaseline = 'middle';
 
+  // Split text into lines for multi-line support
+  const lines = textData.text.split('\n');
+  const lineHeight = textData.fontSize * 1.2;
+  const totalHeight = lines.length * lineHeight;
+
   // Draw background if set
   if (textData.backgroundColor && textData.backgroundColor !== '#00000000') {
-    const metrics = ctx.measureText(textData.text);
+    const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
     const padding = textData.fontSize * 0.3;
-    const bgWidth = metrics.width + padding * 2;
-    const bgHeight = textData.fontSize * 1.4;
+    const bgWidth = maxLineWidth + padding * 2;
+    const bgHeight = totalHeight + padding * 2;
 
     let bgX = x - padding;
     if (textData.textAlign === 'center') {
@@ -71,9 +76,12 @@ export function drawTextOverlayToCanvasAnimated(
     ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
   }
 
-  // Draw text
+  // Draw each line of text
   ctx.fillStyle = textData.color;
-  ctx.fillText(textData.text, x, y);
+  lines.forEach((line, i) => {
+    const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
+    ctx.fillText(line, x, lineY);
+  });
 
   ctx.restore();
 }
@@ -267,26 +275,10 @@ export function drawClipToCanvas(
   const videoWidth = sourceWidth || canvasWidth;
   const videoHeight = sourceHeight || canvasHeight;
 
-  // Calculate scale to fill canvas (cover mode - fills canvas, may crop)
-  const videoAspect = videoWidth / videoHeight;
-  const canvasAspect = canvasWidth / canvasHeight;
-
-  let baseWidth: number;
-  let baseHeight: number;
-
-  if (videoAspect > canvasAspect) {
-    // Video is wider - fit to height, crop width
-    baseHeight = canvasHeight;
-    baseWidth = canvasHeight * videoAspect;
-  } else {
-    // Video is taller - fit to width, crop height
-    baseWidth = canvasWidth;
-    baseHeight = canvasWidth / videoAspect;
-  }
-
-  // Apply animated scale on top of the base fill size
-  const scaledWidth = baseWidth * animated.scaleX;
-  const scaledHeight = baseHeight * animated.scaleY;
+  // Base dimensions = native source pixels.
+  // Scale 1.0 = actual source size on the canvas.
+  const scaledWidth = videoWidth * animated.scaleX;
+  const scaledHeight = videoHeight * animated.scaleY;
 
   // Apply animated position with transition offset
   const offsetX = transitionModifiers?.offsetX || 0;
@@ -418,24 +410,10 @@ export function drawImageToCanvasWithModifiers(
   const imageWidth = image.naturalWidth || canvasWidth;
   const imageHeight = image.naturalHeight || canvasHeight;
 
-  // Calculate scale to fill canvas (cover mode)
-  const imageAspect = imageWidth / imageHeight;
-  const canvasAspect = canvasWidth / canvasHeight;
-
-  let baseWidth: number;
-  let baseHeight: number;
-
-  if (imageAspect > canvasAspect) {
-    baseHeight = canvasHeight;
-    baseWidth = canvasHeight * imageAspect;
-  } else {
-    baseWidth = canvasWidth;
-    baseHeight = canvasWidth / imageAspect;
-  }
-
-  // Apply animated scale
-  const scaledWidth = baseWidth * animated.scaleX;
-  const scaledHeight = baseHeight * animated.scaleY;
+  // Base dimensions = native source pixels.
+  // Scale 1.0 = actual source size on the canvas.
+  const scaledWidth = imageWidth * animated.scaleX;
+  const scaledHeight = imageHeight * animated.scaleY;
 
   // Apply animated position with transition offset
   const offsetX = transitionModifiers?.offsetX || 0;

@@ -14,6 +14,14 @@ export type { MediaType, MediaSource, WaveformPeak, SourceVideo }
 // Default duration for images when added to timeline (seconds)
 export const DEFAULT_IMAGE_DURATION = 5;
 
+// Resolution presets for project canvas dimensions
+export const RESOLUTION_PRESETS = {
+  '720p': { width: 1280, height: 720 },
+  '1080p': { width: 1920, height: 1080 },
+  '1440p': { width: 2560, height: 1440 },
+  '4K': { width: 3840, height: 2160 },
+} as const;
+
 // Blend modes for video compositing
 export type BlendMode =
   | 'normal'      // Default - top layer covers bottom
@@ -33,6 +41,7 @@ export interface ClipTransform {
   scaleY: number;   // Vertical scale (1 = 100%)
   rotation: number; // Rotation in degrees (future use)
   opacity: number;  // 0-1
+  scaleLocked?: boolean;  // Lock aspect ratio during resize (default: true)
 }
 
 // Default transform (full frame, centered)
@@ -43,6 +52,7 @@ export const DEFAULT_TRANSFORM: ClipTransform = {
   scaleY: 1,
   rotation: 0,
   opacity: 1,
+  scaleLocked: true,
 };
 
 // Visual effects for clips
@@ -329,6 +339,7 @@ export interface Project {
   name: string;
   created: number;
   modified: number;
+  resolution: { width: number; height: number };
   timeline: Timeline;
 }
 
@@ -380,9 +391,17 @@ export interface EditorState {
 
   // Selection state
   selectedClipId: string | null;
+  selectedClipIds: Set<string>;        // Multi-select set
   selectedTrackId: string | null;
   selectedOverlayId: string | null;
   selectedOverlayType: 'text' | 'shape' | null;
+
+  // Clipboard (for copy/paste)
+  clipboard: Clip[] | null;
+
+  // In/Out points for section selection
+  inPoint: number | null;
+  outPoint: number | null;
 
   // UI state
   zoom: number;
@@ -404,6 +423,7 @@ export interface EditorState {
   // Actions - Project
   setProject: (project: Project) => void;
   resetProject: () => void;
+  setProjectResolution: (width: number, height: number) => void;
 
   // Actions - Source videos
   addSourceVideo: (video: SourceVideo) => void;
@@ -458,6 +478,22 @@ export interface EditorState {
   setSelectedTrackId: (id: string | null) => void;
   setSelectedOverlay: (id: string | null, type: 'text' | 'shape' | null) => void;
 
+  // Actions - Multi-Select
+  toggleClipSelection: (clipId: string) => void;
+  selectClipsInRange: (clipIds: string[]) => void;
+  clearMultiSelection: () => void;
+  moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
+  deleteSelectedClips: () => void;
+  copySelectedClips: () => void;
+  pasteClips: () => void;
+  muteSelectedClips: () => void;
+  unmuteSelectedClips: () => void;
+
+  // Actions - In/Out Points
+  setInPoint: (time: number) => void;
+  setOutPoint: (time: number) => void;
+  clearInOutPoints: () => void;
+
   // Actions - UI
   setZoom: (zoom: number) => void;
   setSnapEnabled: (enabled: boolean) => void;
@@ -492,7 +528,8 @@ export interface EditorState {
 export interface ExportOptions {
   format: 'webm' | 'mp4';
   quality: 'low' | 'medium' | 'high';
-  resolution: 'original' | '1080p' | '720p' | '480p';
+  resolution: 'project' | 'original' | '1080p' | '720p' | '480p';
+  timeRange?: { start: number; end: number };
 }
 
 export interface ExportProgress {

@@ -142,13 +142,14 @@ export function KeyframePanel() {
       } else if (property === 'volume') {
         keyframeValue = 1; // Volume default is 1 (100%)
       } else {
-        keyframeValue = transform?.[property as keyof typeof transform] ?? 0;
+        const val = transform?.[property as keyof typeof transform];
+        keyframeValue = typeof val === 'number' ? val : 0;
       }
     }
 
     setClipKeyframe(selectedClipId!, property, {
       time,
-      value: keyframeValue,
+      value: keyframeValue!,
       easing: 'ease-in-out',
     });
   }, [selectedClip, selectedClipId, setClipKeyframe]);

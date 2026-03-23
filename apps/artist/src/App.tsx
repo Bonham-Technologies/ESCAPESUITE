@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useEditorStore } from './store/projectStore';
 import { VideoUploader, VideoLibrary } from './components/VideoUploader';
+import { ResolutionPicker } from './components/ResolutionPicker';
 import { Timeline } from './components/Timeline/Timeline';
 import { PreviewPlayer, PlaybackControls } from './components/Preview/PreviewPlayer';
 import { ClipEditor } from './components/ClipEditor/ClipEditor';
@@ -9,6 +10,7 @@ import { KeyframePanel } from './components/KeyframePanel';
 import { Toolbar } from './components/Toolbar';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { saveProject, loadProject, showOpenProjectDialog } from './core/projectManager';
+import { ProjectLoadDialog } from './components/ProjectLoadDialog';
 import { initIntegration, parseUrlParams, loadVideoFromUrl, sendMessage } from './utils/integration';
 import { processVideoFile } from './core/videoProcessor';
 import { saveSessionState, getSessionState, clearSessionState, getVideo, getThumbnail, type SessionState } from './core/storage';
@@ -16,10 +18,16 @@ import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
 import { isStandaloneMode } from './auth';
+import { formatTime } from './utils/timeUtils';
 import styles from './App.module.css';
 
 // Auto-save debounce delay (milliseconds)
 const AUTO_SAVE_DELAY = 2000;
+
+// Helper to format time for notification messages
+function formatTimeForNotification(time: number): string {
+  return formatTime(time);
+}
 
 // Timeline height constraints
 const MIN_TIMELINE_HEIGHT = 120;
@@ -31,6 +39,7 @@ const TIMELINE_HEIGHT_KEY = 'escapeartist-timeline-height';
 
 function App() {
   const [showExport, setShowExport] = useState(false);
+  const [exportTimeRange, setExportTimeRange] = useState<{ start: number; end: number } | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
@@ -38,6 +47,8 @@ function App() {
   const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
   const [notification, setNotification] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
   const [showFileMenu, setShowFileMenu] = useState(false);
+  const [showProjectLoadDialog, setShowProjectLoadDialog] = useState(false);
+  const [pendingProjectFile, setPendingProjectFile] = useState<File | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -79,6 +90,17 @@ function App() {
   const goToNextMarker = useEditorStore((state) => state.goToNextMarker);
   const goToPreviousMarker = useEditorStore((state) => state.goToPreviousMarker);
   const splitClip = useEditorStore((state) => state.splitClip);
+  const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
+  const deleteSelectedClips = useEditorStore((state) => state.deleteSelectedClips);
+  const copySelectedClips = useEditorStore((state) => state.copySelectedClips);
+  const pasteClips = useEditorStore((state) => state.pasteClips);
+  const clipboard = useEditorStore((state) => state.clipboard);
+  const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
+  const inPoint = useEditorStore((state) => state.inPoint);
+  const outPoint = useEditorStore((state) => state.outPoint);
+  const setInPoint = useEditorStore((state) => state.setInPoint);
+  const setOutPoint = useEditorStore((state) => state.setOutPoint);
+  const clearInOutPoints = useEditorStore((state) => state.clearInOutPoints);
 
   // Show notification
   const showNotification = useCallback((message: string, type: 'info' | 'error' | 'success' = 'info') => {
@@ -101,11 +123,8 @@ function App() {
     }
   }, [project, sourceVideos, showNotification]);
 
-  // Handle load project
-  const handleLoadProject = useCallback(async () => {
-    const file = await showOpenProjectDialog();
-    if (!file) return;
-
+  // Load a project file (shared by Ctrl+O and drag-drop paths)
+  const loadProjectFile = useCallback(async (file: File) => {
     setIsLoading(true);
     try {
       const { project: loadedProject, sourceVideos: loadedVideos } = await loadProject(file);
@@ -123,6 +142,47 @@ function App() {
       setIsLoading(false);
     }
   }, [resetProject, setProject, addSourceVideo, showNotification]);
+
+  // Handle load project (Ctrl+O / File menu)
+  const handleLoadProject = useCallback(async () => {
+    const file = await showOpenProjectDialog();
+    if (!file) return;
+
+    if (clips.length > 0) {
+      setPendingProjectFile(file);
+      setShowProjectLoadDialog(true);
+    } else {
+      loadProjectFile(file);
+    }
+  }, [clips.length, loadProjectFile]);
+
+  const handleProjectLoadCancel = useCallback(() => {
+    setPendingProjectFile(null);
+    setShowProjectLoadDialog(false);
+  }, []);
+
+  const handleProjectLoadSaveAndLoad = useCallback(async () => {
+    setShowProjectLoadDialog(false);
+    const file = pendingProjectFile;
+    setPendingProjectFile(null);
+    if (!file) return;
+    try {
+      await saveProject(project, sourceVideos);
+      showNotification('Project saved', 'success');
+    } catch (error) {
+      console.error('Failed to save current project:', error);
+      showNotification('Failed to save project', 'error');
+    }
+    await loadProjectFile(file);
+  }, [pendingProjectFile, project, sourceVideos, loadProjectFile, showNotification]);
+
+  const handleProjectLoadDiscardAndLoad = useCallback(async () => {
+    setShowProjectLoadDialog(false);
+    const file = pendingProjectFile;
+    setPendingProjectFile(null);
+    if (!file) return;
+    await loadProjectFile(file);
+  }, [pendingProjectFile, loadProjectFile]);
 
   // Handle new project
   const handleNewProject = useCallback(() => {
@@ -243,17 +303,44 @@ function App() {
         return;
       }
 
-      // Delete or Backspace = Delete selected clip
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedClipId) {
-        e.preventDefault();
-        if (activeTool === 'ripple') {
-          rippleDeleteClip(selectedClipId);
-          showNotification('Clip deleted (ripple)', 'info');
-        } else {
-          removeClipFromTimeline(selectedClipId);
-          showNotification('Clip deleted', 'info');
+      // Delete or Backspace = Delete selected clip(s)
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedClipIds.size > 0) {
+          e.preventDefault();
+          deleteSelectedClips();
+          showNotification(`${selectedClipIds.size} clip${selectedClipIds.size !== 1 ? 's' : ''} deleted`, 'info');
+          return;
+        } else if (selectedClipId) {
+          e.preventDefault();
+          if (activeTool === 'ripple') {
+            rippleDeleteClip(selectedClipId);
+            showNotification('Clip deleted (ripple)', 'info');
+          } else {
+            removeClipFromTimeline(selectedClipId);
+            showNotification('Clip deleted', 'info');
+          }
+          return;
         }
-        return;
+      }
+
+      // Ctrl/Cmd + C = Copy selected clips
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        if (selectedClipIds.size > 0) {
+          e.preventDefault();
+          copySelectedClips();
+          showNotification(`${selectedClipIds.size} clip${selectedClipIds.size !== 1 ? 's' : ''} copied`, 'info');
+          return;
+        }
+      }
+
+      // Ctrl/Cmd + V = Paste clips
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        if (clipboard && clipboard.length > 0) {
+          e.preventDefault();
+          pasteClips();
+          showNotification(`${clipboard.length} clip${clipboard.length !== 1 ? 's' : ''} pasted`, 'info');
+          return;
+        }
       }
 
       // Ctrl/Cmd + D = Duplicate selected clip
@@ -375,6 +462,22 @@ function App() {
         return;
       }
 
+      // I = Set in point at playhead
+      if (e.key === 'i' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        setInPoint(currentTime);
+        showNotification(`In point: ${formatTimeForNotification(currentTime)}`, 'info');
+        return;
+      }
+
+      // O = Set out point at playhead
+      if (e.key === 'o' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        setOutPoint(currentTime);
+        showNotification(`Out point: ${formatTimeForNotification(currentTime)}`, 'info');
+        return;
+      }
+
       // ? = Show keyboard shortcuts
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
@@ -382,10 +485,21 @@ function App() {
         return;
       }
 
-      // Escape = Close shortcuts panel or deselect clip
+      // Escape = Clear in/out points, close shortcuts panel, clear multi-selection, or deselect clip
       if (e.key === 'Escape') {
         if (showShortcuts) {
           setShowShortcuts(false);
+          return;
+        }
+        if (inPoint !== null || outPoint !== null) {
+          e.preventDefault();
+          clearInOutPoints();
+          showNotification('In/Out points cleared', 'info');
+          return;
+        }
+        if (selectedClipIds.size > 0) {
+          e.preventDefault();
+          clearMultiSelection();
           return;
         }
         if (selectedClipId) {
@@ -403,7 +517,9 @@ function App() {
     duplicateClip, handleSaveProject, handleLoadProject, clips.length,
     handleZoomIn, handleZoomOut, showNotification, keyframePanelOpen, setKeyframePanelOpen,
     setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker, currentTime,
-    goToNextMarker, goToPreviousMarker, showShortcuts, splitClip
+    goToNextMarker, goToPreviousMarker, showShortcuts, splitClip,
+    selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection,
+    setInPoint, setOutPoint, clearInOutPoints, inPoint, outPoint
   ]);
 
   // Timeline resize handlers
@@ -701,6 +817,7 @@ function App() {
             <>
               <div className={styles.uploaderContainer}>
                 <VideoUploader />
+                <ResolutionPicker />
               </div>
 
               <div className={styles.libraryContainer}>
@@ -792,11 +909,11 @@ function App() {
             </svg>
           </button>
         </div>
-        <Timeline />
+        <Timeline onExportSelection={(timeRange) => { setExportTimeRange(timeRange); setShowExport(true); }} />
       </footer>
 
       {/* Export dialog */}
-      <ExportDialog isOpen={showExport} onClose={() => setShowExport(false)} />
+      <ExportDialog isOpen={showExport} onClose={() => { setShowExport(false); setExportTimeRange(undefined); }} timeRange={exportTimeRange} />
 
       {/* Keyframe panel */}
       <KeyframePanel />
@@ -851,6 +968,14 @@ function App() {
 
       {/* Keyboard shortcuts panel */}
       <KeyboardShortcuts isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
+      {/* Project load safety dialog */}
+      <ProjectLoadDialog
+        isOpen={showProjectLoadDialog}
+        onCancel={handleProjectLoadCancel}
+        onSaveAndLoad={handleProjectLoadSaveAndLoad}
+        onDiscardAndLoad={handleProjectLoadDiscardAndLoad}
+      />
     </div>
   );
 }

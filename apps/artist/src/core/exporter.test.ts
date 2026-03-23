@@ -250,9 +250,17 @@ describe('exporter - resolution calculation', () => {
   const getResolution = (
     resolution: string,
     originalWidth: number,
-    originalHeight: number
+    originalHeight: number,
+    projectResolution?: { width: number; height: number }
   ): { width: number; height: number } => {
-    if (resolution === 'original') {
+    if (resolution === 'project' && projectResolution) {
+      return {
+        width: projectResolution.width % 2 === 0 ? projectResolution.width : projectResolution.width + 1,
+        height: projectResolution.height % 2 === 0 ? projectResolution.height : projectResolution.height + 1,
+      }
+    }
+
+    if (resolution === 'original' || resolution === 'project') {
       return {
         width: originalWidth % 2 === 0 ? originalWidth : originalWidth + 1,
         height: originalHeight % 2 === 0 ? originalHeight : originalHeight + 1
@@ -274,6 +282,26 @@ describe('exporter - resolution calculation', () => {
       height: targetHeight % 2 === 0 ? targetHeight : targetHeight + 1,
     }
   }
+
+  it('uses project resolution when resolution is project', () => {
+    const result = getResolution('project', 1920, 1080, { width: 1280, height: 720 })
+    expect(result.width).toBe(1280)
+    expect(result.height).toBe(720)
+  })
+
+  it('ensures even dimensions for odd project resolution', () => {
+    const result = getResolution('project', 1920, 1080, { width: 1281, height: 721 })
+    expect(result.width).toBe(1282)
+    expect(result.height).toBe(722)
+    expect(result.width % 2).toBe(0)
+    expect(result.height % 2).toBe(0)
+  })
+
+  it('falls back to original when project resolution is not provided', () => {
+    const result = getResolution('project', 1920, 1080)
+    expect(result.width).toBe(1920)
+    expect(result.height).toBe(1080)
+  })
 
   it('keeps original dimensions when resolution is original', () => {
     const result = getResolution('original', 1920, 1080)

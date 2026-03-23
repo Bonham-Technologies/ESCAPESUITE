@@ -9,7 +9,7 @@
 
 // Public API - export functions
 export { exportToWebM } from './exportWebM';
-export { exportToMP4 } from './exportMP4';
+export { exportToMP4, ExportError } from './exportMP4';
 
 // Public API - capability checks
 export { isMP4ExportSupported, isWebMExportSupported } from './exportTypes';
