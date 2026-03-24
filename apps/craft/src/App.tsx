@@ -11,7 +11,7 @@ import {
   requestMicrophone,
   stopStream,
 } from './core/permissions';
-import { createRecorder, type AnyRecorder } from './core/recorder-factory';
+import { createRecorder, getRecorderType, type AnyRecorder } from './core/recorder-factory';
 import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
@@ -47,6 +47,7 @@ function App() {
   } = useRecorderStore();
 
   const recorderRef = useRef<AnyRecorder | null>(null);
+  const recorderTypeRef = useRef<'webcodecs' | 'mediarecorder'>('mediarecorder');
   const compositorRef = useRef<Compositor | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
   const canvasPreviewRef = useRef<HTMLDivElement>(null);
@@ -236,7 +237,7 @@ function App() {
     capturedThumbnailRef.current = await capturePreviewThumbnail();
 
     if (recorderRef.current) {
-      recorderRef.current.stop();
+      await recorderRef.current.stop();
     }
   }, [capturePreviewThumbnail]);
 
@@ -288,15 +289,17 @@ function App() {
     setState('saving');
 
     try {
-      // Fix WebM duration metadata (fast — no re-encoding).
-      // This makes duration/progress bar work in players.
-      // Note: seeking may be limited in some browsers due to sparse keyframes
-      // from MediaRecorder, but VLC handles it well. For full editing, use ARTIST.
       let blob: Blob;
-      try {
-        blob = await fixWebMMetadata(rawBlob);
-      } catch {
+      if (recorderTypeRef.current === 'webcodecs') {
+        // WebCodecs output is already a proper WebM with Cues — no fix needed
         blob = rawBlob;
+      } else {
+        // MediaRecorder output needs duration/Cues metadata fix
+        try {
+          blob = await fixWebMMetadata(rawBlob);
+        } catch {
+          blob = rawBlob;
+        }
       }
 
       const id = uuidv4();
@@ -429,7 +432,10 @@ function App() {
         setPreviewStream(webcam);
       }
 
-      // Initialize recorder (uses WebCodecs if available for proper WebM containers)
+      // Determine if we're in PiP mode (screen + webcam with compositor)
+      const isPiP = config.screenEnabled && config.webcamEnabled && !!compositorRef.current;
+
+      // Initialize recorder (uses WebCodecs for non-PiP if available)
       recorderRef.current = createRecorder({
         onStart: () => {
           setState('recording');
@@ -466,7 +472,8 @@ function App() {
           stopAllStreams();
         },
         onAudioLevels: setAudioLevels,
-      });
+      }, isPiP);
+      recorderTypeRef.current = getRecorderType(isPiP);
 
       // Use raw streams for recording - watermarks are applied at export time
       // This avoids canvas.captureStream() issues with hidden video elements
