@@ -1,50 +1,40 @@
-/**
- * Factory for creating the best available recorder implementation.
- * Uses WebCodecsRecorder when available (proper WebM containers),
- * falls back to MediaRecorder-based Recorder otherwise.
- */
-
 import { Recorder, type RecorderCallbacks } from './recorder';
-import { WebCodecsRecorder, type WebCodecsRecorderCallbacks } from './webcodecs-recorder';
-// Note: isWebCodecsRecordingSupported is available but WebCodecs recording is disabled
+import { WebCodecsRecorder, isWebCodecsRecordingSupported, type WebCodecsRecorderCallbacks } from './webcodecs-recorder';
 
 export type AnyRecorder = Recorder | WebCodecsRecorder;
 export type AnyRecorderCallbacks = RecorderCallbacks | WebCodecsRecorderCallbacks;
 
 /**
- * Check if WebCodecs-based recording is available.
+ * Check if WebCodecs-based recording can be used for the given mode.
  *
- * NOTE: WebCodecs recording is currently disabled due to browser limitations
- * with capturing frames from hidden video elements. Browsers optimize away
- * frame decoding for non-visible elements, causing frozen video output.
+ * WebCodecs recording produces seekable WebM with proper keyframes and Cues.
+ * It works reliably for screen-only and webcam-only modes where the video
+ * source is a direct stream (not a compositor canvas).
  *
- * We keep the WebCodecs infrastructure for post-recording conversion
- * (WebM Compatible, MP4 options) which works reliably.
+ * PiP mode uses MediaRecorder because the compositor's hidden video elements
+ * cause frame capture issues with WebCodecs (browsers optimize away decoding
+ * for non-visible elements).
  */
-export function canUseWebCodecsRecorder(): boolean {
-  // Disabled - WebCodecs recording has frame capture issues
-  // See: https://github.com/bonham-technologies/ESCAPESUITE/pull/93
-  return false;
-  // Original: return isWebCodecsRecordingSupported();
+export function canUseWebCodecsRecorder(isPiP: boolean = false): boolean {
+  if (isPiP) return false;
+  return isWebCodecsRecordingSupported();
 }
 
 /**
- * Create the best available recorder implementation.
- * Returns WebCodecsRecorder if WebCodecs is supported, otherwise Recorder.
+ * Create the best available recorder for the given mode.
+ * @param callbacks - Recorder event callbacks
+ * @param isPiP - Whether PiP mode is active (forces MediaRecorder)
  */
-export function createRecorder(callbacks: AnyRecorderCallbacks): AnyRecorder {
-  if (canUseWebCodecsRecorder()) {
-    console.log('Using WebCodecs-based recorder for proper WebM containers');
+export function createRecorder(callbacks: AnyRecorderCallbacks, isPiP: boolean = false): AnyRecorder {
+  if (canUseWebCodecsRecorder(isPiP)) {
+    console.log('Using WebCodecs-based recorder (seekable output)');
     return new WebCodecsRecorder(callbacks);
   } else {
-    console.log('Using MediaRecorder-based recorder (WebCodecs not available)');
+    console.log(`Using MediaRecorder-based recorder${isPiP ? ' (PiP mode)' : ''}`);
     return new Recorder(callbacks);
   }
 }
 
-/**
- * Get a description of which recorder implementation is being used
- */
-export function getRecorderType(): 'webcodecs' | 'mediarecorder' {
-  return canUseWebCodecsRecorder() ? 'webcodecs' : 'mediarecorder';
+export function getRecorderType(isPiP: boolean = false): 'webcodecs' | 'mediarecorder' {
+  return canUseWebCodecsRecorder(isPiP) ? 'webcodecs' : 'mediarecorder';
 }
