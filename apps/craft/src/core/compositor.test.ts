@@ -165,6 +165,80 @@ describe('Compositor - border rendering', () => {
   })
 })
 
+describe('Compositor - getOutputStream', () => {
+  it('should return null before start() is called', async () => {
+    // Mock canvas and its context for the Compositor constructor
+    const mockCaptureStream = vi.fn(() => ({ getVideoTracks: () => [] }))
+    const mockCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        fillStyle: '',
+        fillRect: vi.fn(),
+        drawImage: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        arc: vi.fn(),
+        clip: vi.fn(),
+        stroke: vi.fn(),
+        closePath: vi.fn(),
+        roundRect: vi.fn(),
+        strokeStyle: '',
+        lineWidth: 0,
+      }),
+      captureStream: mockCaptureStream,
+    }
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      if (tag === 'canvas') return mockCanvas as unknown as HTMLCanvasElement
+      // Return a minimal video element for setScreenStream/setWebcamStream
+      return { style: {}, muted: false, play: vi.fn(), srcObject: null, remove: vi.fn() } as unknown as HTMLVideoElement
+    })
+
+    const { Compositor } = await import('./compositor')
+    const compositor = new Compositor(1280, 720)
+    expect(compositor.getOutputStream()).toBeNull()
+
+    vi.restoreAllMocks()
+  })
+
+  it('should return the stream created by start()', async () => {
+    const mockStream = { getVideoTracks: () => [] }
+    const mockCaptureStream = vi.fn(() => mockStream)
+    const mockCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        fillStyle: '',
+        fillRect: vi.fn(),
+        drawImage: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        arc: vi.fn(),
+        clip: vi.fn(),
+        stroke: vi.fn(),
+        closePath: vi.fn(),
+        roundRect: vi.fn(),
+        strokeStyle: '',
+        lineWidth: 0,
+      }),
+      captureStream: mockCaptureStream,
+    }
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      if (tag === 'canvas') return mockCanvas as unknown as HTMLCanvasElement
+      return { style: {}, muted: false, play: vi.fn(), srcObject: null, remove: vi.fn() } as unknown as HTMLVideoElement
+    })
+
+    const { Compositor } = await import('./compositor')
+    const compositor = new Compositor(1280, 720)
+    const stream = compositor.start(30)
+    expect(compositor.getOutputStream()).toBe(stream)
+
+    vi.restoreAllMocks()
+  })
+})
+
 describe('Compositor - video readyState checks', () => {
   it('only draws when readyState >= 2', () => {
     const testCases = [

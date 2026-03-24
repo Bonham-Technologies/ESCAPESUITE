@@ -473,12 +473,15 @@ function App() {
       let recordingScreen: MediaStream | null = screen;
 
       if (config.screenEnabled && config.webcamEnabled && compositorRef.current) {
-        // PiP mode - use compositor output (required to combine screen + webcam)
-        // Note: PiP compositor is still needed but watermark will be added at export
-        recordingScreen = new MediaStream([
-          ...compositorRef.current.getCanvas().captureStream(30).getVideoTracks(),
-          ...(screen?.getAudioTracks() || []),
-        ]);
+        // PiP mode - use compositor's existing output stream (already created by start())
+        // Avoids calling captureStream() a second time, which would double CPU cost
+        const compositorStream = compositorRef.current.getOutputStream();
+        if (compositorStream) {
+          recordingScreen = new MediaStream([
+            ...compositorStream.getVideoTracks(),
+            ...(screen?.getAudioTracks() || []),
+          ]);
+        }
       }
       // For single-source recordings (screen-only or webcam-only), use raw stream
       // Watermark will be applied during export for trial users

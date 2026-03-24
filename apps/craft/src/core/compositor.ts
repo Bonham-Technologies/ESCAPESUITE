@@ -142,6 +142,14 @@ export class Compositor {
   }
 
   /**
+   * Get the output stream created by start().
+   * Returns null if the compositor hasn't been started yet.
+   */
+  getOutputStream(): MediaStream | null {
+    return this.outputStream;
+  }
+
+  /**
    * Render loop — throttled to target frame rate to save CPU.
    * No need to draw at 60fps when captureStream only captures at 30fps.
    */
