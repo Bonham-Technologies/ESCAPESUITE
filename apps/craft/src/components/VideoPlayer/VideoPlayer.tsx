@@ -5,11 +5,12 @@ interface VideoPlayerProps {
   src: string;
   title?: string;
   autoPlay?: boolean;
+  knownDuration?: number; // Use this instead of video.duration for WebM files
   onClose?: () => void;
   onError?: (error: Error) => void;
 }
 
-export function VideoPlayer({ src, title, autoPlay = true, onClose, onError }: VideoPlayerProps) {
+export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClose, onError }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
@@ -38,11 +39,16 @@ export function VideoPlayer({ src, title, autoPlay = true, onClose, onError }: V
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current;
     if (video) {
-      setDuration(video.duration);
+      // WebM from MediaRecorder often reports Infinity or 0 duration
+      const videoDuration = video.duration;
+      const effectiveDuration = (isFinite(videoDuration) && videoDuration > 0)
+        ? videoDuration
+        : (knownDuration || 0);
+      setDuration(effectiveDuration);
       setIsLoaded(true);
       setHasError(false);
     }
-  }, []);
+  }, [knownDuration]);
 
   // Handle time update during playback
   const handleTimeUpdate = useCallback(() => {
@@ -62,12 +68,22 @@ export function VideoPlayer({ src, title, autoPlay = true, onClose, onError }: V
     }
   }, []);
 
-  // Handle video error
+  // Handle video error — only treat as fatal if video hasn't loaded yet
+  // Seek errors in WebM files are common and shouldn't kill the player
   const handleError = useCallback(() => {
-    setHasError(true);
-    setIsPlaying(false);
-    onError?.(new Error('Failed to load video'));
-  }, [onError]);
+    const video = videoRef.current;
+    const error = video?.error;
+
+    // MEDIA_ERR_SRC_NOT_SUPPORTED or error before metadata loaded = fatal
+    if (!isLoaded || error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+      setHasError(true);
+      setIsPlaying(false);
+      onError?.(new Error('Failed to load video'));
+    } else {
+      // Non-fatal error (seek failure, decode hiccup) — log but don't kill player
+      console.warn('Video playback error (non-fatal):', error?.message);
+    }
+  }, [onError, isLoaded]);
 
   // Toggle play/pause
   const togglePlayPause = useCallback(() => {
@@ -87,14 +103,23 @@ export function VideoPlayer({ src, title, autoPlay = true, onClose, onError }: V
   const handlePlay = useCallback(() => setIsPlaying(true), []);
   const handlePause = useCallback(() => setIsPlaying(false), []);
 
-  // Seek to position
+  // Seek to position — use fastSeek for WebM compatibility, fall back to currentTime
   const seekTo = useCallback((time: number) => {
     const video = videoRef.current;
     if (!video || !isLoaded) return;
 
     const clampedTime = Math.max(0, Math.min(time, duration));
-    video.currentTime = clampedTime;
-    setCurrentTime(clampedTime);
+    try {
+      // fastSeek snaps to nearest keyframe — faster and more reliable for WebM
+      if (typeof video.fastSeek === 'function') {
+        video.fastSeek(clampedTime);
+      } else {
+        video.currentTime = clampedTime;
+      }
+      setCurrentTime(clampedTime);
+    } catch {
+      // Seek not supported — ignore silently
+    }
   }, [duration, isLoaded]);
 
   // Handle progress bar click/drag
@@ -249,6 +274,8 @@ export function VideoPlayer({ src, title, autoPlay = true, onClose, onError }: V
           className={styles.video}
           src={src}
           autoPlay={autoPlay}
+          preload="auto"
+          playsInline
           onLoadedMetadata={handleLoadedMetadata}
           onTimeUpdate={handleTimeUpdate}
           onEnded={handleEnded}
