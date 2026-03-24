@@ -1,6 +1,5 @@
 // Core recording engine using MediaRecorder API
 
-import fixWebmDuration from 'webm-duration-fix';
 import { getSupportedMimeType, stopStream } from './permissions';
 import type { RecordingConfig, AudioLevels } from '../store/types';
 

@@ -15,7 +15,7 @@ import { createRecorder, getRecorderType, type AnyRecorder } from './core/record
 import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
-import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, ConversionAbortedError, type ConversionProgress } from './core/converter';
+import { fixWebMMetadata } from './core/converter';
 import { isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -54,14 +54,10 @@ function App() {
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
-  const conversionAbortRef = useRef<AbortController | null>(null);
-
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
   const [playbackDuration, setPlaybackDuration] = useState<number>(0);
-  const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null); // recording ID or null
-  const [downloadMenuPosition, setDownloadMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   // Capture thumbnail from preview (video element or compositor canvas)
@@ -150,22 +146,6 @@ function App() {
       previewRef.current.play().catch(() => {});
     }
   }, [previewStream]);
-
-  // Close download menu when clicking outside
-  useEffect(() => {
-    if (!downloadMenuOpen) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Element;
-      if (!target.closest(`.${styles.downloadDropdown}`)) {
-        setDownloadMenuOpen(null);
-        setDownloadMenuPosition(null);
-      }
-    };
-
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [downloadMenuOpen]);
 
   // Stop all streams helper
   const stopAllStreams = useCallback(() => {
@@ -615,13 +595,6 @@ function App() {
     a.click();
     document.body.removeChild(a);
     revokeBlobUrl(url);
-  };
-
-  // Cancel ongoing conversion (kept for potential future use)
-  const handleCancelConversion = () => {
-    if (conversionAbortRef.current) {
-      conversionAbortRef.current.abort();
-    }
   };
 
   // Toggle source
