@@ -1,6 +1,5 @@
 // Core recording engine using MediaRecorder API
 
-import fixWebmDuration from 'webm-duration-fix';
 import { getSupportedMimeType, stopStream } from './permissions';
 import type { RecordingConfig, AudioLevels } from '../store/types';
 
@@ -120,7 +119,7 @@ export class Recorder {
     const mimeType = getSupportedMimeType();
     this.mediaRecorder = new MediaRecorder(this.combinedStream, {
       mimeType,
-      videoBitsPerSecond: 5000000, // 5 Mbps
+      videoBitsPerSecond: 2500000, // 2.5 Mbps — good quality for screen capture, less CPU pressure
     });
 
     this.mediaRecorder.ondataavailable = (event) => {
@@ -129,20 +128,13 @@ export class Recorder {
       }
     };
 
-    this.mediaRecorder.onstop = async () => {
+    this.mediaRecorder.onstop = () => {
       const rawBlob = new Blob(this.chunks, { type: mimeType });
 
-      // Fix WebM metadata (duration, seek cues) for proper playback
-      // webm-duration-fix adds Duration, SeekHead, and Cues elements
-      let fixedBlob: Blob;
-      try {
-        fixedBlob = await fixWebmDuration(rawBlob);
-      } catch {
-        // Fall back to raw blob if fixing fails
-        fixedBlob = rawBlob;
-      }
-
-      this.callbacks.onStop?.(fixedBlob);
+      // Fire onStop immediately with the raw blob — don't block on metadata fix.
+      // The webm-duration-fix is expensive (parses entire blob) and should happen
+      // in the save pipeline, not in the stop handler.
+      this.callbacks.onStop?.(rawBlob);
       this.cleanup();
     };
 
@@ -234,13 +226,19 @@ export class Recorder {
    * Start monitoring audio levels.
    */
   private startAudioLevelMonitoring(): void {
-    const monitor = () => {
-      const levels: AudioLevels = {
-        microphone: this.getAudioLevel(this.micAnalyser),
-        system: this.getAudioLevel(this.systemAnalyser),
-      };
+    let lastUpdate = 0;
+    const updateInterval = 80; // ~12fps — plenty for a level meter, saves CPU
 
-      this.callbacks.onAudioLevels?.(levels);
+    const monitor = () => {
+      const now = performance.now();
+      if (now - lastUpdate >= updateInterval) {
+        lastUpdate = now;
+        const levels: AudioLevels = {
+          microphone: this.getAudioLevel(this.micAnalyser),
+          system: this.getAudioLevel(this.systemAnalyser),
+        };
+        this.callbacks.onAudioLevels?.(levels);
+      }
       this.animationFrameId = requestAnimationFrame(monitor);
     };
 

@@ -20,11 +20,22 @@ export class Compositor {
   private animationFrameId: number | null = null;
   private config: CompositorConfig;
   private outputStream: MediaStream | null = null;
+  private targetFrameRate: number = 30;
+  private lastFrameTime: number = 0;
 
   constructor(width: number, height: number, config: Partial<CompositorConfig> = {}) {
     this.canvas = document.createElement('canvas');
-    this.canvas.width = width;
-    this.canvas.height = height;
+    // Cap compositor resolution to 720p — reduces draw cost by ~55% vs 1080p
+    // MediaRecorder re-encodes anyway so full resolution isn't needed here
+    const maxDim = 1280;
+    if (width > maxDim) {
+      const scale = maxDim / width;
+      this.canvas.width = maxDim;
+      this.canvas.height = Math.round(height * scale);
+    } else {
+      this.canvas.width = width;
+      this.canvas.height = height;
+    }
 
     const ctx = this.canvas.getContext('2d');
     if (!ctx) {
@@ -92,6 +103,8 @@ export class Compositor {
    * Start compositing and return the output stream.
    */
   start(frameRate: number = 30): MediaStream {
+    this.targetFrameRate = frameRate;
+    this.lastFrameTime = 0;
     this.outputStream = this.canvas.captureStream(frameRate);
     this.render();
     return this.outputStream;
@@ -129,11 +142,26 @@ export class Compositor {
   }
 
   /**
-   * Render a single frame.
+   * Get the output stream created by start().
+   * Returns null if the compositor hasn't been started yet.
+   */
+  getOutputStream(): MediaStream | null {
+    return this.outputStream;
+  }
+
+  /**
+   * Render loop — throttled to target frame rate to save CPU.
+   * No need to draw at 60fps when captureStream only captures at 30fps.
    */
   private render = (): void => {
-    this.drawFrame();
     this.animationFrameId = requestAnimationFrame(this.render);
+
+    const now = performance.now();
+    const frameInterval = 1000 / this.targetFrameRate;
+    if (now - this.lastFrameTime < frameInterval) return;
+    this.lastFrameTime = now;
+
+    this.drawFrame();
   };
 
   /**

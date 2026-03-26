@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRecorder, canUseWebCodecsRecorder, getRecorderType } from './recorder-factory'
 import { Recorder } from './recorder'
-// WebCodecsRecorder import removed - WebCodecs recording is disabled due to browser limitations
+import { WebCodecsRecorder } from './webcodecs-recorder'
 
 // Mock WebCodecs APIs
 const mockVideoEncoder = vi.fn().mockImplementation(() => ({
@@ -68,20 +68,27 @@ vi.mock('mediabunny', () => ({
 }))
 
 describe('recorder-factory', () => {
-  // NOTE: WebCodecs recording is disabled due to browser limitations with capturing
-  // frames from hidden video elements. canUseWebCodecsRecorder() always returns false.
-
   describe('canUseWebCodecsRecorder', () => {
-    it('should return false (WebCodecs recording is disabled)', () => {
-      // WebCodecs recording is disabled due to frame capture issues
-      // See: recorder-factory.ts comments for details
-      expect(canUseWebCodecsRecorder()).toBe(false)
+    it('should return false when isPiP is true', () => {
+      expect(canUseWebCodecsRecorder(true)).toBe(false)
+    })
+
+    it('should return true when isPiP is false and WebCodecs is available', () => {
+      expect(canUseWebCodecsRecorder(false)).toBe(true)
+    })
+
+    it('should return true by default (non-PiP)', () => {
+      expect(canUseWebCodecsRecorder()).toBe(true)
     })
   })
 
   describe('getRecorderType', () => {
-    it('should return mediarecorder (WebCodecs recording is disabled)', () => {
-      expect(getRecorderType()).toBe('mediarecorder')
+    it('should return webcodecs for non-PiP mode', () => {
+      expect(getRecorderType(false)).toBe('webcodecs')
+    })
+
+    it('should return mediarecorder for PiP mode', () => {
+      expect(getRecorderType(true)).toBe('mediarecorder')
     })
   })
 
@@ -96,15 +103,15 @@ describe('recorder-factory', () => {
       vi.clearAllMocks()
     })
 
-    it('should create Recorder (MediaRecorder-based) since WebCodecs is disabled', () => {
-      const recorder = createRecorder(callbacks)
-      expect(recorder).toBeInstanceOf(Recorder)
+    it('should create WebCodecsRecorder for non-PiP mode', () => {
+      const recorder = createRecorder(callbacks, false)
+      expect(recorder).toBeInstanceOf(WebCodecsRecorder)
       recorder.dispose()
     })
 
-    it('should create a recorder with the provided callbacks', () => {
-      const recorder = createRecorder(callbacks)
-      expect(recorder).toBeDefined()
+    it('should create Recorder (MediaRecorder-based) for PiP mode', () => {
+      const recorder = createRecorder(callbacks, true)
+      expect(recorder).toBeInstanceOf(Recorder)
       recorder.dispose()
     })
   })
@@ -133,11 +140,11 @@ describe('recorder-factory without WebCodecs', () => {
   })
 
   it('should return false for canUseWebCodecsRecorder when WebCodecs is not available', () => {
-    expect(canUseWebCodecsRecorder()).toBe(false)
+    expect(canUseWebCodecsRecorder(false)).toBe(false)
   })
 
   it('should return mediarecorder for getRecorderType when WebCodecs is not available', () => {
-    expect(getRecorderType()).toBe('mediarecorder')
+    expect(getRecorderType(false)).toBe('mediarecorder')
   })
 
   it('should create Recorder when WebCodecs is not available', () => {
@@ -146,7 +153,7 @@ describe('recorder-factory without WebCodecs', () => {
       onStop: vi.fn(),
       onError: vi.fn(),
     }
-    const recorder = createRecorder(callbacks)
+    const recorder = createRecorder(callbacks, false)
     expect(recorder).toBeInstanceOf(Recorder)
     recorder.dispose()
   })

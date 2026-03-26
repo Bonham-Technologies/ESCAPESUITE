@@ -11,11 +11,11 @@ import {
   requestMicrophone,
   stopStream,
 } from './core/permissions';
-import { createRecorder, type AnyRecorder } from './core/recorder-factory';
+import { createRecorder, getRecorderType, type AnyRecorder } from './core/recorder-factory';
 import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
-import { convertToMP4, fixWebMMetadata, remuxToWebM, isMP4ConversionSupported, isWebMRemuxSupported, ConversionAbortedError, type ConversionProgress } from './core/converter';
+import { fixWebMMetadata } from './core/converter';
 import { isStandaloneMode } from './auth';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -47,25 +47,48 @@ function App() {
   } = useRecorderStore();
 
   const recorderRef = useRef<AnyRecorder | null>(null);
+  const recorderTypeRef = useRef<'webcodecs' | 'mediarecorder'>('mediarecorder');
   const compositorRef = useRef<Compositor | null>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
+  const canvasPreviewRef = useRef<HTMLDivElement>(null);
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
-  const conversionAbortRef = useRef<AbortController | null>(null);
-
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  const [isPiPActive, setIsPiPActive] = useState(false);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
-  const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null); // recording ID or null
-  const [downloadMenuPosition, setDownloadMenuPosition] = useState<{ top: number; left: number } | null>(null);
-  const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
-  const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [playbackDuration, setPlaybackDuration] = useState<number>(0);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
-  // Capture thumbnail from preview video element
+  // Capture thumbnail from preview (video element or compositor canvas)
   const capturePreviewThumbnail = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
+      // Try compositor canvas first (PiP mode)
+      if (compositorRef.current) {
+        const srcCanvas = compositorRef.current.getCanvas();
+        if (srcCanvas.width > 0) {
+          const thumbCanvas = document.createElement('canvas');
+          thumbCanvas.width = 320;
+          thumbCanvas.height = 180;
+          const ctx = thumbCanvas.getContext('2d');
+          if (ctx) {
+            try {
+              ctx.drawImage(srcCanvas, 0, 0, 320, 180);
+              thumbCanvas.toBlob(
+                (blob) => resolve(blob),
+                'image/jpeg',
+                0.8
+              );
+              return;
+            } catch {
+              // Fall through to video element
+            }
+          }
+        }
+      }
+
+      // Fall back to video element (screen-only / webcam-only modes)
       const video = previewRef.current;
       if (!video || video.videoWidth === 0) {
         resolve(null);
@@ -109,29 +132,21 @@ function App() {
     loadRecordings();
   }, [setCapabilities, setDetailedCapabilities, loadRecordings]);
 
-  // Update preview video element
+  // Update preview — use canvas directly for PiP, video element for other modes
   useEffect(() => {
-    if (previewRef.current && previewStream) {
+    if (compositorRef.current && canvasPreviewRef.current) {
+      // PiP mode: attach compositor canvas directly to the preview div
+      const canvas = compositorRef.current.getCanvas();
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      canvas.style.objectFit = 'contain';
+      canvasPreviewRef.current.innerHTML = '';
+      canvasPreviewRef.current.appendChild(canvas);
+    } else if (previewRef.current && previewStream) {
       previewRef.current.srcObject = previewStream;
       previewRef.current.play().catch(() => {});
     }
   }, [previewStream]);
-
-  // Close download menu when clicking outside
-  useEffect(() => {
-    if (!downloadMenuOpen) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Element;
-      if (!target.closest(`.${styles.downloadDropdown}`)) {
-        setDownloadMenuOpen(null);
-        setDownloadMenuPosition(null);
-      }
-    };
-
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [downloadMenuOpen]);
 
   // Stop all streams helper
   const stopAllStreams = useCallback(() => {
@@ -143,6 +158,12 @@ function App() {
     if (compositorRef.current) {
       compositorRef.current.dispose();
       compositorRef.current = null;
+      setIsPiPActive(false);
+    }
+
+    // Clear the canvas preview container (removes stale last frame)
+    if (canvasPreviewRef.current) {
+      canvasPreviewRef.current.innerHTML = '';
     }
   }, [screenStream, webcamStream, setStreams]);
 
@@ -198,7 +219,7 @@ function App() {
     capturedThumbnailRef.current = await capturePreviewThumbnail();
 
     if (recorderRef.current) {
-      recorderRef.current.stop();
+      await recorderRef.current.stop();
     }
   }, [capturePreviewThumbnail]);
 
@@ -246,10 +267,23 @@ function App() {
   }, [config, capabilities]);
 
   // Save recording to storage
-  const saveRecording = useCallback(async (blob: Blob, recordedDuration: number) => {
+  const saveRecording = useCallback(async (rawBlob: Blob, recordedDuration: number) => {
     setState('saving');
 
     try {
+      let blob: Blob;
+      if (recorderTypeRef.current === 'webcodecs') {
+        // WebCodecs output is already a proper WebM with Cues — no fix needed
+        blob = rawBlob;
+      } else {
+        // MediaRecorder output needs duration/Cues metadata fix
+        try {
+          blob = await fixWebMMetadata(rawBlob);
+        } catch {
+          blob = rawBlob;
+        }
+      }
+
       const id = uuidv4();
       // Pass the known duration since WebM from MediaRecorder often has issues
       const metadata = await extractVideoMetadata(blob, recordedDuration);
@@ -373,6 +407,7 @@ function App() {
         compositorRef.current.setWebcamStream(webcam);
         const composedStream = compositorRef.current.start();
         setPreviewStream(composedStream);
+        setIsPiPActive(true);
       } else if (screen) {
         // Screen only - use raw stream (watermark applied at export for trial users)
         setPreviewStream(screen);
@@ -380,7 +415,10 @@ function App() {
         setPreviewStream(webcam);
       }
 
-      // Initialize recorder (uses WebCodecs if available for proper WebM containers)
+      // Determine if we're in PiP mode (screen + webcam with compositor)
+      const isPiP = config.screenEnabled && config.webcamEnabled && !!compositorRef.current;
+
+      // Initialize recorder (uses WebCodecs for non-PiP if available)
       recorderRef.current = createRecorder({
         onStart: () => {
           setState('recording');
@@ -394,14 +432,21 @@ function App() {
         },
         onPause: () => setState('paused'),
         onResume: () => setState('recording'),
-        onStop: async (blob) => {
+        onStop: (blob) => {
           // Capture duration before resetting
           const recordedDuration = recorderRef.current?.getDuration() || useRecorderStore.getState().currentDuration;
-          await saveRecording(blob, recordedDuration);
           analytics.recordingCompleted(recordedDuration);
-          setState('idle');
+          // Update UI immediately — don't block on save
+          setState('saving');
           setCurrentDuration(0);
           stopAllStreams();
+          // Save in background
+          saveRecording(blob, recordedDuration).then(() => {
+            setState('idle');
+          }).catch((err) => {
+            console.error('Failed to save recording:', err);
+            setState('idle');
+          });
         },
         onError: (error) => {
           console.error('Recording error:', error);
@@ -410,19 +455,23 @@ function App() {
           stopAllStreams();
         },
         onAudioLevels: setAudioLevels,
-      });
+      }, isPiP);
+      recorderTypeRef.current = getRecorderType(isPiP);
 
       // Use raw streams for recording - watermarks are applied at export time
       // This avoids canvas.captureStream() issues with hidden video elements
       let recordingScreen: MediaStream | null = screen;
 
       if (config.screenEnabled && config.webcamEnabled && compositorRef.current) {
-        // PiP mode - use compositor output (required to combine screen + webcam)
-        // Note: PiP compositor is still needed but watermark will be added at export
-        recordingScreen = new MediaStream([
-          ...compositorRef.current.getCanvas().captureStream(30).getVideoTracks(),
-          ...(screen?.getAudioTracks() || []),
-        ]);
+        // PiP mode - use compositor's existing output stream (already created by start())
+        // Avoids calling captureStream() a second time, which would double CPU cost
+        const compositorStream = compositorRef.current.getOutputStream();
+        if (compositorStream) {
+          recordingScreen = new MediaStream([
+            ...compositorStream.getVideoTracks(),
+            ...(screen?.getAudioTracks() || []),
+          ]);
+        }
       }
       // For single-source recordings (screen-only or webcam-only), use raw stream
       // Watermark will be applied during export for trial users
@@ -516,20 +565,12 @@ function App() {
 
     const blob = await getVideoBlob(id);
     if (blob) {
-      // Fix WebM metadata for proper seeking/scrubbing
-      // MediaRecorder WebM files lack seek cues, making timeline scrubbing unreliable
-      try {
-        const fixedBlob = await fixWebMMetadata(blob);
-        const url = createBlobUrl(fixedBlob);
-        setPlaybackUrl(url);
-        setPlaybackName(name);
-      } catch (error) {
-        // Fall back to raw blob if metadata fix fails
-        console.warn('WebM metadata fix failed for playback:', error);
-        const url = createBlobUrl(blob);
-        setPlaybackUrl(url);
-        setPlaybackName(name);
-      }
+      const url = createBlobUrl(blob);
+      setPlaybackUrl(url);
+      setPlaybackName(name);
+      // Pass known duration so the player doesn't depend on WebM metadata
+      const recording = recordings.find(r => r.id === id);
+      setPlaybackDuration(recording?.duration || 0);
     }
   };
 
@@ -542,144 +583,21 @@ function App() {
     setPlaybackName('');
   };
 
-  // Download a recording as WebM
-  const handleDownloadWebM = async (id: string, name: string) => {
-    setDownloadMenuOpen(null);
-    setDownloadMenuPosition(null);
-
+  // Download a recording as WebM (instant — blob is already fixed during save)
+  const handleDownload = async (id: string, name: string) => {
     const blob = await getVideoBlob(id);
     if (!blob) return;
 
-    try {
-      // Fix WebM metadata for proper seeking/playback (near-instant, no re-encoding)
-      const fixedBlob = await fixWebMMetadata(blob);
-
-      analytics.recordingDownloaded();
-      const url = createBlobUrl(fixedBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      a.download = `${safeName}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      revokeBlobUrl(url);
-    } catch (error) {
-      console.error('WebM metadata fix failed:', error);
-      // Fall back to raw download
-      analytics.recordingDownloaded();
-      const url = createBlobUrl(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      a.download = `${safeName}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      revokeBlobUrl(url);
-    }
-  };
-
-  // Download a recording as MP4 (convert from WebM)
-  const handleDownloadMP4 = async (id: string, name: string) => {
-    setDownloadMenuOpen(null);
-    setDownloadMenuPosition(null);
-    setConvertingId(id);
-    setConversionProgress({ phase: 'preparing', progress: 0, message: 'Starting conversion...' });
-
-    // Create AbortController for cancellation
-    conversionAbortRef.current = new AbortController();
-
-    try {
-      const blob = await getVideoBlob(id);
-      if (!blob) {
-        throw new Error('Recording not found');
-      }
-
-      const mp4Blob = await convertToMP4(blob, (progress) => {
-        setConversionProgress(progress);
-      }, conversionAbortRef.current.signal);
-
-      // Download the MP4
-      analytics.recordingDownloaded();
-      const url = createBlobUrl(mp4Blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      a.download = `${safeName}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      revokeBlobUrl(url);
-    } catch (error) {
-      if (error instanceof ConversionAbortedError) {
-        console.log('MP4 conversion cancelled by user');
-      } else {
-        console.error('MP4 conversion failed:', error);
-        alert('Failed to convert to MP4. Please try downloading as WebM instead.');
-      }
-    } finally {
-      conversionAbortRef.current = null;
-      setConvertingId(null);
-      setConversionProgress(null);
-    }
-  };
-
-  // Download a recording as WebM with proper container (re-encoded for compatibility)
-  const handleDownloadWebMCompatible = async (id: string, name: string) => {
-    setDownloadMenuOpen(null);
-    setDownloadMenuPosition(null);
-
-    // Find the recording to get its duration
-    const recording = recordings.find(r => r.id === id);
-    if (!recording) return;
-
-    setConvertingId(id);
-    setConversionProgress({ phase: 'preparing', progress: 0, message: 'Preparing WebM...' });
-
-    // Create AbortController for cancellation
-    conversionAbortRef.current = new AbortController();
-
-    try {
-      const blob = await getVideoBlob(id);
-      if (!blob) {
-        throw new Error('Recording not found');
-      }
-
-      const remuxedBlob = await remuxToWebM(blob, recording.duration, (progress) => {
-        setConversionProgress(progress);
-      }, conversionAbortRef.current.signal);
-
-      // Download the remuxed WebM
-      analytics.recordingDownloaded();
-      const url = createBlobUrl(remuxedBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      a.download = `${safeName}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      revokeBlobUrl(url);
-    } catch (error) {
-      if (error instanceof ConversionAbortedError) {
-        console.log('WebM conversion cancelled by user');
-      } else {
-        console.error('WebM remuxing failed:', error);
-        alert('Failed to create compatible WebM. Please try MP4 instead.');
-      }
-    } finally {
-      conversionAbortRef.current = null;
-      setConvertingId(null);
-      setConversionProgress(null);
-    }
-  };
-
-  // Cancel ongoing conversion
-  const handleCancelConversion = () => {
-    if (conversionAbortRef.current) {
-      conversionAbortRef.current.abort();
-    }
+    analytics.recordingDownloaded();
+    const url = createBlobUrl(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    a.download = `${safeName}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    revokeBlobUrl(url);
   };
 
   // Toggle source
@@ -724,6 +642,9 @@ function App() {
           )}
           {state === 'paused' && (
             <span className={styles.pausedIndicator} role="status">Paused</span>
+          )}
+          {state === 'saving' && (
+            <span className={styles.pausedIndicator} role="status">Saving...</span>
           )}
         </div>
 
@@ -971,66 +892,12 @@ function App() {
                       <div className={styles.downloadDropdown}>
                         <button
                           className={styles.iconButton}
-                          onClick={(e) => {
-                            if (downloadMenuOpen === recording.id) {
-                              setDownloadMenuOpen(null);
-                              setDownloadMenuPosition(null);
-                            } else {
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              setDownloadMenuPosition({
-                                top: rect.bottom + 4,
-                                left: rect.left + rect.width / 2 - 70, // Center the 140px menu
-                              });
-                              setDownloadMenuOpen(recording.id);
-                            }
-                          }}
-                          title="Download"
+                          onClick={() => handleDownload(recording.id, recording.name)}
+                          title="Download WebM"
                           aria-label={`Download ${recording.name}`}
-                          aria-expanded={downloadMenuOpen === recording.id}
-                          aria-haspopup="menu"
-                          disabled={convertingId === recording.id}
                         >
-                          {convertingId === recording.id ? (
-                            <span className={styles.spinnerSmall} aria-label="Converting..." />
-                          ) : (
-                            <DownloadIcon />
-                          )}
+                          <DownloadIcon />
                         </button>
-                        {downloadMenuOpen === recording.id && downloadMenuPosition && (
-                          <div
-                            className={styles.downloadMenu}
-                            style={{ top: downloadMenuPosition.top, left: downloadMenuPosition.left }}
-                          >
-                            <button
-                              className={styles.downloadMenuItem}
-                              onClick={() => handleDownloadWebM(recording.id, recording.name)}
-                              title="Fast download, works in browsers and VLC"
-                            >
-                              <span>WebM</span>
-                              <span className={styles.downloadMenuHint}>Instant</span>
-                            </button>
-                            {isWebMRemuxSupported() && (
-                              <button
-                                className={styles.downloadMenuItem}
-                                onClick={() => handleDownloadWebMCompatible(recording.id, recording.name)}
-                                title="Re-encoded for Windows Media Player compatibility"
-                              >
-                                <span>WebM</span>
-                                <span className={styles.downloadMenuHint}>Compatible</span>
-                              </button>
-                            )}
-                            {isMP4ConversionSupported() && (
-                              <button
-                                className={styles.downloadMenuItem}
-                                onClick={() => handleDownloadMP4(recording.id, recording.name)}
-                                title="Universal compatibility (H.264 + AAC)"
-                              >
-                                <span>MP4</span>
-                                <span className={styles.downloadMenuHint}>Universal</span>
-                              </button>
-                            )}
-                          </div>
-                        )}
                       </div>
                       <button
                         className={styles.iconButton}
@@ -1049,29 +916,6 @@ function App() {
                         <TrashIcon />
                       </button>
                     </div>
-                    {convertingId === recording.id && conversionProgress && (
-                      <div className={styles.conversionProgress}>
-                        <div className={styles.conversionProgressHeader}>
-                          <span className={styles.conversionProgressText}>
-                            {conversionProgress.message}
-                          </span>
-                          <button
-                            className={styles.conversionCancelButton}
-                            onClick={handleCancelConversion}
-                            title="Cancel conversion"
-                            aria-label="Cancel conversion"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                        <div className={styles.conversionProgressBar}>
-                          <div
-                            className={styles.conversionProgressFill}
-                            style={{ width: `${conversionProgress.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ))
               )}
@@ -1084,7 +928,13 @@ function App() {
           {/* Preview */}
           <div className={styles.previewContainer}>
             <div className={styles.preview}>
-              {previewStream ? (
+              {isPiPActive ? (
+                // PiP mode: show compositor canvas directly — avoids encode/decode round-trip
+                <div
+                  ref={canvasPreviewRef}
+                  style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                />
+              ) : previewStream ? (
                 <video
                   ref={previewRef}
                   autoPlay
@@ -1194,6 +1044,7 @@ function App() {
               src={playbackUrl}
               title={playbackName}
               autoPlay
+              knownDuration={playbackDuration}
               onClose={handleClosePlayback}
               onError={(error) => console.error('Video playback error:', error)}
             />

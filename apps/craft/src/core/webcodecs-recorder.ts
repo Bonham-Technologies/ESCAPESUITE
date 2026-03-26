@@ -126,10 +126,10 @@ export class WebCodecsRecorder {
     this.width = settings.width || 1920;
     this.height = settings.height || 1080;
 
-    // Set up frame capture - use video element + canvas approach
-    // Note: MediaStreamTrackProcessor has issues with frame lifecycle management,
-    // so we use the video element approach which is more reliable
-    const hasTrackProcessor = false; // Disabled for now - see comment above
+    // Safe to re-enable: WebCodecsRecorder is only used for non-PiP modes (factory enforces this).
+    // The original PiP frame capture issue (PR #93) was caused by the compositor's hidden video
+    // elements, not by MediaStreamTrackProcessor itself. For direct screen/webcam streams, it works.
+    const hasTrackProcessor = typeof MediaStreamTrackProcessor !== 'undefined';
 
     if (hasTrackProcessor && typeof MediaStreamTrackProcessor !== 'undefined') {
       // Use MediaStreamTrackProcessor for direct frame access
@@ -404,8 +404,8 @@ export class WebCodecsRecorder {
             // Close source frame immediately - we've copied the data we need
             sourceFrame.close();
 
-            // Encode frame (keyframe every 2 seconds)
-            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
+            // Encode frame (keyframe every 1 second)
+            const keyFrame = this.frameCount % this.frameRate === 0;
             this.videoEncoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies the data it needs
             frame.close();
@@ -450,8 +450,8 @@ export class WebCodecsRecorder {
               duration: frameDurationUs,
             });
 
-            // Encode frame (keyframe every 2 seconds)
-            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
+            // Encode frame (keyframe every 1 second)
+            const keyFrame = this.frameCount % this.frameRate === 0;
             this.videoEncoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies data synchronously
             frame.close();
@@ -490,8 +490,8 @@ export class WebCodecsRecorder {
               duration: frameDurationUs,
             });
 
-            // Encode frame (keyframe every 2 seconds)
-            const keyFrame = this.frameCount % (this.frameRate * 2) === 0;
+            // Encode frame (keyframe every 1 second)
+            const keyFrame = this.frameCount % this.frameRate === 0;
             this.videoEncoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies data synchronously
             frame.close();

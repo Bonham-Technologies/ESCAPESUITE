@@ -237,8 +237,8 @@ describe('Recorder', () => {
         defaultConfig
       )
 
-      // Advance a frame to trigger the animation frame callback
-      vi.advanceTimersByTime(16)
+      // Advance past the throttle interval (80ms) to trigger the level callback
+      vi.advanceTimersByTime(100)
 
       expect(callbacks.onAudioLevels).toHaveBeenCalled()
     })
@@ -416,26 +416,13 @@ describe('Recorder', () => {
       freshRecorder.dispose()
     })
 
-    it('should fix WebM duration on stop', async () => {
-      const fixWebmDuration = await import('webm-duration-fix')
-
+    it('should pass raw blob to onStop without metadata fix', () => {
+      // Metadata fix was moved to the save pipeline for performance
+      // The recorder now passes the raw blob immediately on stop
       recorder.stop()
 
-      expect(fixWebmDuration.default).toHaveBeenCalled()
-    })
-
-    it('should fall back to raw blob if fix fails', async () => {
-      const fixWebmDuration = await import('webm-duration-fix')
-      vi.mocked(fixWebmDuration.default).mockRejectedValueOnce(
-        new Error('Fix failed')
-      )
-
-      recorder.stop()
-
-      // Wait for async onstop handler to complete
-      await vi.waitFor(() => {
-        expect(callbacks.onStop).toHaveBeenCalled()
-      })
+      // Wait for onstop handler
+      expect(callbacks.onStop).toHaveBeenCalled()
     })
   })
 
@@ -627,7 +614,7 @@ describe('Recorder', () => {
         defaultConfig
       )
 
-      vi.advanceTimersByTime(16)
+      vi.advanceTimersByTime(100) // Audio monitoring is throttled to ~80ms intervals
 
       expect(callbacks.onAudioLevels).toHaveBeenCalledWith(
         expect.objectContaining({
