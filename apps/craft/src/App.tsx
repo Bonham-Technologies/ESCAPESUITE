@@ -55,6 +55,7 @@ function App() {
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  const [isPiPActive, setIsPiPActive] = useState(false);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
   const [playbackDuration, setPlaybackDuration] = useState<number>(0);
@@ -157,6 +158,7 @@ function App() {
     if (compositorRef.current) {
       compositorRef.current.dispose();
       compositorRef.current = null;
+      setIsPiPActive(false);
     }
 
     // Clear the canvas preview container (removes stale last frame)
@@ -405,6 +407,7 @@ function App() {
         compositorRef.current.setWebcamStream(webcam);
         const composedStream = compositorRef.current.start();
         setPreviewStream(composedStream);
+        setIsPiPActive(true);
       } else if (screen) {
         // Screen only - use raw stream (watermark applied at export for trial users)
         setPreviewStream(screen);
@@ -925,7 +928,7 @@ function App() {
           {/* Preview */}
           <div className={styles.previewContainer}>
             <div className={styles.preview}>
-              {compositorRef.current ? (
+              {isPiPActive ? (
                 // PiP mode: show compositor canvas directly — avoids encode/decode round-trip
                 <div
                   ref={canvasPreviewRef}
