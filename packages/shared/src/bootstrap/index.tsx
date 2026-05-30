@@ -17,8 +17,6 @@ export interface BootstrapConfig {
   importSaaSAuthGate: () => Promise<{
     SaaSAuthGate: ComponentType<{ children: ReactNode; userId: string | undefined; isLoaded: boolean }>
   }>
-  /** Dynamic import for Clerk key */
-  importClerkKey: () => Promise<{ CLERK_KEY: string }>
 }
 
 /**
@@ -26,7 +24,7 @@ export interface BootstrapConfig {
  *
  * This handles:
  * - SaaS vs Standalone mode detection
- * - Dynamic loading of Clerk (excludes from standalone bundle)
+ * - Supabase session wiring (SaaS) without bundling auth into standalone
  * - Proper auth gate wrapping
  * - Analytics integration
  */
@@ -37,7 +35,6 @@ export async function bootstrapApp(config: BootstrapConfig): Promise<void> {
     isSaaSMode,
     StandaloneAuthGate,
     importSaaSAuthGate,
-    importClerkKey,
   } = config
 
   const rootElement = document.getElementById(rootId)
@@ -48,16 +45,16 @@ export async function bootstrapApp(config: BootstrapConfig): Promise<void> {
   const root = createRoot(rootElement)
 
   if (isSaaSMode()) {
-    // Dynamically import Clerk to avoid bundling it in standalone builds
-    const { ClerkProvider, useUser } = await import('@clerk/clerk-react')
+    // Dynamically import the Supabase session hook so standalone builds never
+    // pull in Supabase Auth.
     const { SaaSAuthGate } = await importSaaSAuthGate()
-    const { CLERK_KEY } = await importClerkKey()
+    const { useSupabaseUser } = await import('../auth/useSupabaseUser')
 
-    // Wrapper component that uses Clerk hooks
+    // Wrapper component that reads the shared Supabase session.
     function SaaSApp() {
-      const { user, isLoaded } = useUser()
+      const { user, loading } = useSupabaseUser()
       return (
-        <SaaSAuthGate userId={user?.id} isLoaded={isLoaded}>
+        <SaaSAuthGate userId={user?.id} isLoaded={!loading}>
           <App />
         </SaaSAuthGate>
       )
@@ -65,9 +62,7 @@ export async function bootstrapApp(config: BootstrapConfig): Promise<void> {
 
     root.render(
       <StrictMode>
-        <ClerkProvider publishableKey={CLERK_KEY}>
-          <SaaSApp />
-        </ClerkProvider>
+        <SaaSApp />
         <Analytics />
       </StrictMode>
     )

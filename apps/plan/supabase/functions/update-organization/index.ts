@@ -1,13 +1,13 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import {
+  requireUser,
+  serviceClient,
+  assertOrgRole,
+  AuthError,
+} from '../_shared/auth.ts'
 
 interface UpdateOrganizationRequest {
-  clerkUserId: string
   organizationId: string
   name?: string
   settings?: {
@@ -19,41 +19,24 @@ interface UpdateOrganizationRequest {
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    const user = await requireUser(req)
+    const supabase = serviceClient()
 
     const body: UpdateOrganizationRequest = await req.json()
-    const { clerkUserId, organizationId, name, settings } = body
+    const { organizationId, name, settings } = body
 
-    if (!clerkUserId || !organizationId) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields: clerkUserId, organizationId' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    if (!organizationId) {
+      return jsonResponse(
+        { error: 'Missing required fields: organizationId' },
+        400
       )
     }
 
     // Check if user is owner or admin
-    const { data: membership } = await supabase
-      .from('organization_members')
-      .select('role')
-      .eq('organization_id', organizationId)
-      .eq('user_id', clerkUserId)
-      .not('joined_at', 'is', null)
-      .single()
-
-    if (!membership || !['owner', 'admin'].includes(membership.role)) {
-      return new Response(
-        JSON.stringify({ error: 'Only owners and admins can update organization settings' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    await assertOrgRole(supabase, organizationId, user.id, ['owner', 'admin'])
 
     // Get current organization
     const { data: organization, error: orgError } = await supabase
@@ -63,10 +46,7 @@ serve(async (req) => {
       .single()
 
     if (orgError || !organization) {
-      return new Response(
-        JSON.stringify({ error: 'Organization not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Organization not found' }, 404)
     }
 
     // Build update object
@@ -82,9 +62,9 @@ serve(async (req) => {
       // Some settings are enterprise-only
       if (organization.plan !== 'enterprise') {
         if (settings.sso_enabled) {
-          return new Response(
-            JSON.stringify({ error: 'SSO is only available on Enterprise plan' }),
-            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          return jsonResponse(
+            { error: 'SSO is only available on Enterprise plan' },
+            400
           )
         }
       }
@@ -98,10 +78,7 @@ serve(async (req) => {
     }
 
     if (Object.keys(updates).length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'No changes provided' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'No changes provided' }, 400)
     }
 
     // Update the organization
@@ -120,7 +97,7 @@ serve(async (req) => {
     if (updated.settings?.audit_logging) {
       await supabase.from('audit_logs').insert({
         organization_id: organizationId,
-        user_id: clerkUserId,
+        user_id: user.id,
         action: 'organization.updated',
         resource_type: 'organization',
         resource_id: organizationId,
@@ -128,26 +105,23 @@ serve(async (req) => {
       })
     }
 
-    return new Response(
-      JSON.stringify({
-        organization: {
-          id: updated.id,
-          name: updated.name,
-          slug: updated.slug,
-          plan: updated.plan,
-          seatCount: updated.seat_count,
-          settings: updated.settings,
-          updatedAt: updated.updated_at,
-        },
-        message: 'Organization updated successfully',
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({
+      organization: {
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        plan: updated.plan,
+        seatCount: updated.seat_count,
+        settings: updated.settings,
+        updatedAt: updated.updated_at,
+      },
+      message: 'Organization updated successfully',
+    })
   } catch (error) {
+    if (error instanceof AuthError) {
+      return jsonResponse({ error: error.message }, error.status)
+    }
     console.error('Update organization error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: error.message }, 500)
   }
 })

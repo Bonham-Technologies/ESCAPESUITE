@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { useUser, SignedIn, SignedOut, SignInButton } from '@clerk/clerk-react'
+import { useUser, SignedIn, SignedOut } from '../../lib/auth'
 import { useAcceptInvite } from '../../hooks/useOrganization'
 
 export default function AcceptInvite() {
@@ -84,11 +84,12 @@ export default function AcceptInvite() {
           <h1>You've Been Invited</h1>
           <p>You've been invited to join a team on ESCAPE Suite.</p>
           <p className="sign-in-prompt">Sign in to accept this invitation.</p>
-          <SignInButton mode="modal">
-            <button className="btn btn-primary btn-large">
-              Sign In to Continue
-            </button>
-          </SignInButton>
+          <Link
+            to={`/sign-in?redirect=/invite/${token}`}
+            className="btn btn-primary btn-large"
+          >
+            Sign In to Continue
+          </Link>
           <p className="help-text">
             Don't have an account?{' '}
             <Link to={`/sign-up?redirect_url=/invite/${token}`}>Sign up</Link>

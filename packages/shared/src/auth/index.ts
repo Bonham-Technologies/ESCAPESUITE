@@ -2,7 +2,6 @@
 export {
   BUILD_MODE,
   LICENSE_KEY,
-  CLERK_KEY,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   isSaaSMode,
@@ -10,6 +9,10 @@ export {
 } from './config'
 
 export { AuthContext, useAuth, type AuthState } from './context'
+
+// Supabase Auth client + reactive session hook
+export { getSupabase } from './supabaseClient'
+export { useSupabaseUser, type SupabaseUserState } from './useSupabaseUser'
 
 export {
   validateLicense,

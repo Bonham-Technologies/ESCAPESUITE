@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../lib/auth'
 import type { Subscription, CheckoutPlan } from '../lib/subscription'
 import {
   getSubscription,

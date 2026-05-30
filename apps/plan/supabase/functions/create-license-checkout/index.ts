@@ -1,11 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import { requireUser, serviceClient, AuthError } from '../_shared/auth.ts'
 
 // Product price IDs from environment
 const PRICE_IDS = {
@@ -21,8 +17,6 @@ const PRICE_IDS = {
 }
 
 interface CheckoutRequest {
-  clerkUserId?: string
-  email?: string
   product: 'craft' | 'artist' | 'suite'
   tier: 'standard' | 'pro' | 'lifetime'
   seats?: number
@@ -31,24 +25,18 @@ interface CheckoutRequest {
 
 serve(async (req) => {
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   try {
+    const user = await requireUser(req)
+    const supabase = serviceClient()
+
     const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
       apiVersion: '2023-10-16',
     })
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
     const body: CheckoutRequest = await req.json()
     const {
-      clerkUserId,
-      email,
       product,
       tier,
       seats = 1,
@@ -57,25 +45,16 @@ serve(async (req) => {
 
     // Validate required fields
     if (!product || !tier) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields: product, tier' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Missing required fields: product, tier' }, 400)
     }
 
     // Validate product and tier
     if (!['craft', 'artist', 'suite'].includes(product)) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid product. Must be: craft, artist, or suite' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Invalid product. Must be: craft, artist, or suite' }, 400)
     }
 
     if (!['standard', 'pro', 'lifetime'].includes(tier)) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid tier. Must be: standard, pro, or lifetime' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Invalid tier. Must be: standard, pro, or lifetime' }, 400)
     }
 
     // Get the price ID for this product/tier combination
@@ -83,37 +62,32 @@ serve(async (req) => {
     const priceId = PRICE_IDS[priceKey]
 
     if (!priceId) {
-      return new Response(
-        JSON.stringify({ error: `No price configured for ${product} ${tier}` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: `No price configured for ${product} ${tier}` }, 400)
     }
 
-    // Find or create Stripe customer
+    // Find or create Stripe customer.
+    // Reuse the customer already on the authenticated user's subscription.
     let customerId: string | undefined
 
-    if (clerkUserId) {
-      // Check if user already has a Stripe customer ID
-      const { data: existingSub } = await supabase
-        .from('subscriptions')
-        .select('stripe_customer_id')
-        .eq('clerk_user_id', clerkUserId)
-        .single()
+    const { data: existingSub } = await supabase
+      .from('subscriptions')
+      .select('stripe_customer_id')
+      .eq('auth_user_id', user.id)
+      .single()
 
-      customerId = existingSub?.stripe_customer_id
-    }
+    customerId = existingSub?.stripe_customer_id
 
     // Create customer if doesn't exist
     if (!customerId) {
       const customerData: Stripe.CustomerCreateParams = {
         metadata: {
-          ...(clerkUserId && { clerk_user_id: clerkUserId }),
+          supabase_user_id: user.id,
           purchase_type: 'license',
         },
       }
 
-      if (email) {
-        customerData.email = email
+      if (user.email) {
+        customerData.email = user.email
       }
 
       const customer = await stripe.customers.create(customerData)
@@ -138,33 +112,21 @@ serve(async (req) => {
         product,
         tier,
         seats: seats.toString(),
-        ...(clerkUserId && { clerk_user_id: clerkUserId }),
+        supabase_user_id: user.id,
       },
-      // Collect email if not provided
-      ...(!email && { customer_creation: 'always' }),
       // Allow promotion codes for discounts
       allow_promotion_codes: true,
     }
 
-    // Collect customer email if they're not logged in
-    if (!clerkUserId && !email) {
-      sessionParams.customer_email = undefined // Let Stripe collect it
-    }
-
     const session = await stripe.checkout.sessions.create(sessionParams)
 
-    return new Response(
-      JSON.stringify({
-        clientSecret: session.client_secret,
-        sessionId: session.id,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({
+      clientSecret: session.client_secret,
+      sessionId: session.id,
+    })
   } catch (error) {
+    if (error instanceof AuthError) return jsonResponse({ error: error.message }, error.status)
     console.error('License checkout error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: error.message }, 500)
   }
 })

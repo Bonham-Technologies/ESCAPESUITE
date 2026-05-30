@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { SignedIn, SignedOut } from '@clerk/clerk-react'
+import { SignedIn, SignedOut } from '../lib/auth'
 import { analytics } from '../lib/analytics'
 import styles from './Home.module.css'
 

@@ -12,6 +12,12 @@ const supabase = createClient(
 const PRIVATE_KEY_HEX = Deno.env.get('LICENSE_PRIVATE_KEY')!
 const PUBLIC_KEY_HEX = Deno.env.get('LICENSE_PUBLIC_KEY')!
 
+const baseHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
+}
+
 interface LicensePayload {
   id: string
   version: 1
@@ -29,7 +35,9 @@ interface LicensePayload {
 }
 
 interface GenerateLicenseRequest {
-  customerId: string
+  // Supabase auth.users UUID (null for guest purchases) + Stripe customer id.
+  authUserId?: string | null
+  stripeCustomerId?: string | null
   customerEmail: string
   customerName?: string
   product: 'craft' | 'artist' | 'suite'
@@ -110,19 +118,23 @@ function createLicenseKey(payload: LicensePayload, signature: string): string {
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
-      },
-    })
+    return new Response(null, { headers: baseHeaders })
   }
 
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
+  // Internal-only: minting licenses requires the service-role key. This is
+  // called server-to-server by the Stripe webhook, never by browsers.
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
+  if (!token || token !== Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403,
+      headers: { ...baseHeaders, 'Content-Type': 'application/json' },
     })
   }
 
@@ -130,7 +142,8 @@ serve(async (req) => {
     const body: GenerateLicenseRequest = await req.json()
 
     const {
-      customerId,
+      authUserId,
+      stripeCustomerId,
       customerEmail,
       customerName,
       product,
@@ -142,10 +155,10 @@ serve(async (req) => {
     } = body
 
     // Validate required fields
-    if (!customerId || !customerEmail || !product) {
+    if (!customerEmail || !product) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: customerId, customerEmail, product' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Missing required fields: customerEmail, product' }),
+        { status: 400, headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -153,7 +166,7 @@ serve(async (req) => {
     if (!['craft', 'artist', 'suite'].includes(product)) {
       return new Response(
         JSON.stringify({ error: 'Invalid product. Must be: craft, artist, or suite' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { status: 400, headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -172,12 +185,15 @@ serve(async (req) => {
       features.push('no_watermark', 'priority_support')
     }
 
+    // Stable identifier embedded in the signed (offline) license.
+    const licenseCustomerId = authUserId || stripeCustomerId || customerEmail
+
     // Create license payload
     const payload: LicensePayload = {
       id: licenseId,
       version: 1,
       customer: {
-        id: customerId,
+        id: licenseCustomerId,
         email: customerEmail,
         ...(customerName && { name: customerName }),
       },
@@ -198,7 +214,8 @@ serve(async (req) => {
     // Store in database
     const { error: dbError } = await supabase.from('licenses').insert({
       id: licenseId,
-      customer_id: customerId,
+      auth_user_id: authUserId || null,
+      stripe_customer_id: stripeCustomerId || null,
       customer_email: customerEmail,
       customer_name: customerName || null,
       organization_id: organizationId || null,
@@ -215,7 +232,7 @@ serve(async (req) => {
       console.error('Database error:', dbError)
       return new Response(
         JSON.stringify({ error: 'Failed to store license' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+        { status: 500, headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -223,7 +240,7 @@ serve(async (req) => {
     if (organizationId) {
       await supabase.from('audit_logs').insert({
         organization_id: organizationId,
-        user_id: customerId,
+        user_id: authUserId || null,
         action: 'license.created',
         resource_type: 'license',
         resource_id: licenseId,
@@ -243,25 +260,13 @@ serve(async (req) => {
         features,
         message: 'License generated successfully',
       }),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      }
+      { status: 200, headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
     console.error('Error generating license:', error)
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
-      {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      }
+      { status: 500, headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })

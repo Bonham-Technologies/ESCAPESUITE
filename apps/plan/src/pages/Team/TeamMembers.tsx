@@ -7,7 +7,7 @@ import {
   canChangeRole,
   canRemoveMember,
 } from '../../lib/organization'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../../lib/auth'
 
 export default function TeamMembers() {
   const { slug } = useParams<{ slug: string }>()

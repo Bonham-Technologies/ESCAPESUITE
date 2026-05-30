@@ -1,4 +1,4 @@
-import { functionsUrl, supabaseAnonKey } from './supabase'
+import { supabase } from './supabase'
 
 export interface Subscription {
   status: 'trialing' | 'active' | 'canceled' | 'expired' | 'lifetime' | 'past_due'
@@ -10,77 +10,85 @@ export interface Subscription {
   canAccessPro: boolean
 }
 
-export async function getSubscription(clerkUserId: string): Promise<Subscription> {
-  const response = await fetch(
-    `${functionsUrl}/get-subscription?clerkUserId=${encodeURIComponent(clerkUserId)}`,
-    {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': supabaseAnonKey,
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-      },
-    }
-  )
+interface SubscriptionRow {
+  status: string
+  plan: string
+  trial_end: string | null
+  current_period_end: string | null
+}
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to get subscription')
+function formatSubscription(row: SubscriptionRow): Subscription {
+  let status = row.status
+  let trialDaysRemaining = 0
+
+  if (status === 'trialing' && row.trial_end) {
+    const diff = new Date(row.trial_end).getTime() - Date.now()
+    trialDaysRemaining = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)))
+    if (diff < 0) status = 'expired'
   }
 
-  return response.json()
+  return {
+    status: status as Subscription['status'],
+    plan: row.plan as Subscription['plan'],
+    trialEnd: row.trial_end,
+    trialDaysRemaining,
+    periodEnd: row.current_period_end,
+    hasActiveSubscription: ['active', 'lifetime'].includes(status),
+    canAccessPro: ['active', 'lifetime', 'trialing'].includes(status),
+  }
+}
+
+// Reads the caller's own subscription. RLS (auth.uid() = auth_user_id) scopes it.
+// The `authUserId` argument is the Supabase auth.users UUID.
+export async function getSubscription(authUserId: string): Promise<Subscription> {
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('status, plan, trial_end, current_period_end')
+    .eq('auth_user_id', authUserId)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+
+  if (!data) {
+    // Trigger seeds a trial on signup; defensive fallback.
+    return {
+      status: 'trialing',
+      plan: 'trial',
+      trialEnd: null,
+      trialDaysRemaining: 14,
+      periodEnd: null,
+      hasActiveSubscription: false,
+      canAccessPro: true,
+    }
+  }
+
+  return formatSubscription(data as SubscriptionRow)
 }
 
 export type CheckoutPlan = 'monthly' | 'annual' | 'founding'
 
 export async function createCheckoutSession(
-  clerkUserId: string,
+  _authUserId: string,
   plan: CheckoutPlan
 ): Promise<string> {
-  const response = await fetch(`${functionsUrl}/create-checkout`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': supabaseAnonKey,
-      'Authorization': `Bearer ${supabaseAnonKey}`,
-    },
-    body: JSON.stringify({
-      clerkUserId,
+  const { data, error } = await supabase.functions.invoke('create-checkout', {
+    body: {
       plan,
       returnUrl: `${window.location.origin}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
-    }),
+    },
   })
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create checkout session')
-  }
-
-  const { clientSecret } = await response.json()
-  return clientSecret
+  if (error) throw new Error(error.message || 'Failed to create checkout session')
+  return data.clientSecret
 }
 
-export async function createPortalSession(clerkUserId: string): Promise<string> {
-  const response = await fetch(`${functionsUrl}/create-portal`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': supabaseAnonKey,
-      'Authorization': `Bearer ${supabaseAnonKey}`,
-    },
-    body: JSON.stringify({
-      clerkUserId,
-      returnUrl: `${window.location.origin}/dashboard`,
-    }),
+export async function createPortalSession(_authUserId: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('create-portal', {
+    body: { returnUrl: `${window.location.origin}/dashboard` },
   })
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create portal session')
-  }
-
-  const { url } = await response.json()
-  return url
+  if (error) throw new Error(error.message || 'Failed to create portal session')
+  return data.url
 }
 
 export function getPlanDisplayName(plan: string): string {

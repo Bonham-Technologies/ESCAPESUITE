@@ -1,14 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import { requireUser, serviceClient, AuthError } from '../_shared/auth.ts'
 
 interface CreateOrgRequest {
-  clerkUserId: string
-  email: string
   name: string
   slug?: string
   plan?: 'team' | 'enterprise'
@@ -16,24 +10,22 @@ interface CreateOrgRequest {
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    const user = await requireUser(req)
+    const supabase = serviceClient()
 
     const body: CreateOrgRequest = await req.json()
-    const { clerkUserId, email, name, plan = 'team', seatCount = 5 } = body
+    const { name, plan = 'team', seatCount = 5 } = body
 
-    if (!clerkUserId || !email || !name) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields: clerkUserId, email, name' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    if (!name) {
+      return jsonResponse({ error: 'Missing required field: name' }, 400)
+    }
+
+    const email = user.email
+    if (!email) {
+      return jsonResponse({ error: 'Your account has no email address' }, 400)
     }
 
     // Generate slug from name if not provided
@@ -51,25 +43,19 @@ serve(async (req) => {
       .single()
 
     if (existingOrg) {
-      return new Response(
-        JSON.stringify({ error: 'Organization slug already taken' }),
-        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Organization slug already taken' }, 409)
     }
 
     // Check if user already owns an organization
     const { data: existingMembership } = await supabase
       .from('organization_members')
       .select('organization_id')
-      .eq('user_id', clerkUserId)
+      .eq('user_id', user.id)
       .eq('role', 'owner')
       .single()
 
     if (existingMembership) {
-      return new Response(
-        JSON.stringify({ error: 'User already owns an organization' }),
-        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'User already owns an organization' }, 409)
     }
 
     // Create the organization
@@ -100,7 +86,7 @@ serve(async (req) => {
       .from('organization_members')
       .insert({
         organization_id: organization.id,
-        user_id: clerkUserId,
+        user_id: user.id,
         email,
         role: 'owner',
         joined_at: new Date().toISOString(),
@@ -117,7 +103,7 @@ serve(async (req) => {
     if (organization.settings.audit_logging) {
       await supabase.from('audit_logs').insert({
         organization_id: organization.id,
-        user_id: clerkUserId,
+        user_id: user.id,
         action: 'organization.created',
         resource_type: 'organization',
         resource_id: organization.id,
@@ -125,25 +111,20 @@ serve(async (req) => {
       })
     }
 
-    return new Response(
-      JSON.stringify({
-        organization: {
-          id: organization.id,
-          name: organization.name,
-          slug: organization.slug,
-          plan: organization.plan,
-          seatCount: organization.seat_count,
-          settings: organization.settings,
-          createdAt: organization.created_at,
-        },
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({
+      organization: {
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        plan: organization.plan,
+        seatCount: organization.seat_count,
+        settings: organization.settings,
+        createdAt: organization.created_at,
+      },
+    })
   } catch (error) {
+    if (error instanceof AuthError) return jsonResponse({ error: error.message }, error.status)
     console.error('Create organization error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: error.message }, 500)
   }
 })

@@ -1,5 +1,7 @@
-// Subscription API client for SaaS mode
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config'
+// Subscription read for SaaS mode (craft/artist gate).
+// Reads the caller's own subscription row directly; Postgres RLS
+// (auth.uid() = auth_user_id) scopes it — no edge function, no IDOR surface.
+import { getSupabase } from './supabaseClient'
 
 export interface Subscription {
   status: 'trialing' | 'active' | 'canceled' | 'expired' | 'lifetime' | 'past_due'
@@ -11,31 +13,60 @@ export interface Subscription {
   canAccessPro: boolean
 }
 
-const functionsUrl = `${SUPABASE_URL}/functions/v1`
+interface SubscriptionRow {
+  status: string
+  plan: string
+  trial_end: string | null
+  current_period_end: string | null
+}
 
-export async function getSubscription(clerkUserId: string): Promise<Subscription> {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new Error('Supabase not configured')
+function formatSubscription(row: SubscriptionRow): Subscription {
+  let status = row.status
+  let trialDaysRemaining = 0
+
+  if (status === 'trialing' && row.trial_end) {
+    const diff = new Date(row.trial_end).getTime() - Date.now()
+    trialDaysRemaining = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)))
+    // Effective expiry: a trial past its end is treated as expired for gating,
+    // even if a background job hasn't flipped the row yet.
+    if (diff < 0) status = 'expired'
   }
 
-  const response = await fetch(
-    `${functionsUrl}/get-subscription?clerkUserId=${encodeURIComponent(clerkUserId)}`,
-    {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      },
+  return {
+    status: status as Subscription['status'],
+    plan: row.plan as Subscription['plan'],
+    trialEnd: row.trial_end,
+    trialDaysRemaining,
+    periodEnd: row.current_period_end,
+    hasActiveSubscription: ['active', 'lifetime'].includes(status),
+    canAccessPro: ['active', 'lifetime', 'trialing'].includes(status),
+  }
+}
+
+export async function getSubscription(authUserId: string): Promise<Subscription> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('status, plan, trial_end, current_period_end')
+    .eq('auth_user_id', authUserId)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+
+  if (!data) {
+    // Trigger seeds a trial on signup; this is a defensive fallback only.
+    return {
+      status: 'trialing',
+      plan: 'trial',
+      trialEnd: null,
+      trialDaysRemaining: 14,
+      periodEnd: null,
+      hasActiveSubscription: false,
+      canAccessPro: true,
     }
-  )
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to get subscription')
   }
 
-  return response.json()
+  return formatSubscription(data as SubscriptionRow)
 }
 
 export function isPaidUser(subscription: Subscription | null): boolean {

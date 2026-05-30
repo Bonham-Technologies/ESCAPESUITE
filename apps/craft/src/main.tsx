@@ -8,5 +8,4 @@ bootstrapApp({
   isSaaSMode,
   StandaloneAuthGate,
   importSaaSAuthGate: () => import('./auth'),
-  importClerkKey: () => import('./auth/config'),
 })

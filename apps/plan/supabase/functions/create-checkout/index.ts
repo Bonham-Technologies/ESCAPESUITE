@@ -1,11 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import { requireUser, serviceClient, AuthError } from '../_shared/auth.ts'
 
 // Price ID mapping from environment variables
 const PRICE_IDS = {
@@ -17,102 +13,81 @@ const PRICE_IDS = {
 type PlanType = 'monthly' | 'annual' | 'founding'
 
 serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   try {
+    // Identity comes from the verified JWT, never the request body.
+    const user = await requireUser(req)
+
     const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
       apiVersion: '2023-10-16',
     })
+    const supabase = serviceClient()
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    const { plan, returnUrl } = await req.json()
 
-    const { clerkUserId, plan, returnUrl } = await req.json()
-
-    if (!clerkUserId || !plan) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields: clerkUserId, plan' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    if (!plan) {
+      return jsonResponse({ error: 'Missing required field: plan' }, 400)
     }
-
-    // Validate plan type
     if (!['monthly', 'annual', 'founding'].includes(plan)) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid plan. Must be: monthly, annual, or founding' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Invalid plan. Must be: monthly, annual, or founding' }, 400)
     }
 
-    // Get price ID from environment
     const priceId = PRICE_IDS[plan as PlanType]()
     if (!priceId) {
       console.error(`Missing Stripe price configuration: STRIPE_PRICE_${plan.toUpperCase()}`)
-      return new Response(
-        JSON.stringify({ error: `Stripe price not configured for ${plan}. Please contact support.` }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: `Stripe price not configured for ${plan}. Please contact support.` }, 500)
     }
 
-    // Check if user already has a subscription record
+    // Reuse an existing Stripe customer for this user if we have one.
     const { data: existingSub } = await supabase
       .from('subscriptions')
       .select('stripe_customer_id')
-      .eq('clerk_user_id', clerkUserId)
-      .single()
+      .eq('auth_user_id', user.id)
+      .maybeSingle()
 
     let customerId = existingSub?.stripe_customer_id
 
-    // Create Stripe customer if doesn't exist
     if (!customerId) {
       const customer = await stripe.customers.create({
-        metadata: { clerk_user_id: clerkUserId },
+        email: user.email,
+        metadata: { supabase_user_id: user.id },
       })
       customerId = customer.id
 
-      // Create subscription record
-      await supabase.from('subscriptions').upsert({
-        clerk_user_id: clerkUserId,
-        stripe_customer_id: customerId,
-        status: 'trialing',
-        plan: 'trial',
-      })
+      await supabase.from('subscriptions').upsert(
+        {
+          auth_user_id: user.id,
+          stripe_customer_id: customerId,
+          status: 'trialing',
+          plan: 'trial',
+        },
+        { onConflict: 'auth_user_id' }
+      )
     }
 
-    // Determine if this is a one-time payment (Founding Member) or subscription
     const price = await stripe.prices.retrieve(priceId)
     const isOneTime = price.type === 'one_time'
 
-    // Create checkout session with embedded mode
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
       mode: isOneTime ? 'payment' : 'subscription',
       ui_mode: 'embedded',
       redirect_on_completion: 'if_required',
-      return_url: returnUrl || `${req.headers.get('origin')}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
+      return_url:
+        returnUrl || `${req.headers.get('origin')}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
-        clerk_user_id: clerkUserId,
+        supabase_user_id: user.id,
         price_id: priceId,
       },
-      // For subscriptions, allow promotion codes
       ...(isOneTime ? {} : { allow_promotion_codes: true }),
     })
 
-    return new Response(
-      JSON.stringify({ clientSecret: session.client_secret }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ clientSecret: session.client_secret })
   } catch (error) {
+    if (error instanceof AuthError) return jsonResponse({ error: error.message }, error.status)
     console.error('Checkout error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: error.message }, 500)
   }
 })

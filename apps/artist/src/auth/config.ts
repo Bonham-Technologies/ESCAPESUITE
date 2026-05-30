@@ -2,7 +2,6 @@
 export {
   BUILD_MODE,
   LICENSE_KEY,
-  CLERK_KEY,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   isSaaSMode,
