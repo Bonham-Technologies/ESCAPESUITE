@@ -1,16 +1,20 @@
+import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Home from './Home'
 
-// Mock Clerk
-vi.mock('@clerk/clerk-react', () => ({
+// Override the auth adapter for this file: simulate a SIGNED-OUT visitor so the
+// landing page renders its unauthenticated CTAs ("Start Free Trial" / "Sign In").
+// SignedOut renders its children, SignedIn renders nothing.
+vi.mock('../lib/auth', () => ({
   useUser: vi.fn(() => ({
     user: null,
     isLoaded: true,
+    isSignedIn: false,
   })),
-  SignedIn: ({ children: _children }: { children: React.ReactNode }) => null,
-  SignedOut: ({ children }: { children: React.ReactNode }) => children,
+  SignedIn: (_props: { children: ReactNode }) => null,
+  SignedOut: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
 
 // Mock analytics

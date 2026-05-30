@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- auth adapter intentionally exports a hook + components together */
 // Clerk-compatible auth adapter over Supabase Auth.
 //
 // Exposes the small slice of Clerk's API the app used (useUser/SignedIn/

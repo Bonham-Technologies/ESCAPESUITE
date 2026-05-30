@@ -2,17 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useOrganization, useAcceptInvite } from './useOrganization'
 
-// Mock Clerk
-vi.mock('@clerk/clerk-react', () => ({
-  useUser: vi.fn(() => ({
-    user: {
-      id: 'user_123',
-      primaryEmailAddress: { emailAddress: 'test@example.com' },
-    },
-  })),
-}))
-
-// Mock organization lib
+// Mock organization lib so we can control return values and assert calls.
 vi.mock('../lib/organization', () => ({
   getOrganization: vi.fn(),
   getOrganizations: vi.fn(),
@@ -86,7 +76,7 @@ describe('useOrganization - fetching', () => {
       expect(result.current.organizations).toEqual(mockOrganizations)
     })
 
-    expect(getOrganizations).toHaveBeenCalledWith('user_123')
+    expect(getOrganizations).toHaveBeenCalledWith('test-user-id')
   })
 
   it('fetches specific organization by slug', async () => {
@@ -110,10 +100,9 @@ describe('useOrganization - fetching', () => {
       expect(result.current.organization).toEqual(mockOrg)
     })
 
-    expect(getOrganization).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      slug: 'test-org',
-    })
+    expect(getOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: 'test-org' })
+    )
   })
 
   it('fetches specific organization by UUID', async () => {
@@ -137,10 +126,11 @@ describe('useOrganization - fetching', () => {
       expect(result.current.organization).toEqual(mockOrg)
     })
 
-    expect(getOrganization).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      organizationId: '550e8400-e29b-41d4-a716-446655440000',
-    })
+    expect(getOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: '550e8400-e29b-41d4-a716-446655440000',
+      })
+    )
   })
 
   it('handles fetch error', async () => {
@@ -189,12 +179,13 @@ describe('useOrganization - member actions', () => {
     // Then invite a member
     const inviteResult = await result.current.invite('newuser@example.com', 'member')
 
-    expect(inviteMember).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      organizationId: 'org_1',
-      email: 'newuser@example.com',
-      role: 'member',
-    })
+    expect(inviteMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org_1',
+        email: 'newuser@example.com',
+        role: 'member',
+      })
+    )
     expect(inviteResult.inviteUrl).toBe('https://example.com/invite/token123')
   })
 
@@ -222,12 +213,13 @@ describe('useOrganization - member actions', () => {
 
     await result.current.updateRole('member_1', 'admin')
 
-    expect(updateMemberRole).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      organizationId: 'org_1',
-      memberId: 'member_1',
-      newRole: 'admin',
-    })
+    expect(updateMemberRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org_1',
+        memberId: 'member_1',
+        newRole: 'admin',
+      })
+    )
   })
 
   it('removes a member', async () => {
@@ -254,11 +246,12 @@ describe('useOrganization - member actions', () => {
 
     await result.current.remove('member_1')
 
-    expect(removeMember).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      organizationId: 'org_1',
-      memberId: 'member_1',
-    })
+    expect(removeMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org_1',
+        memberId: 'member_1',
+      })
+    )
   })
 })
 
@@ -293,10 +286,15 @@ describe('useOrganization - settings', () => {
 
     await result.current.updateName('New Name')
 
-    expect(updateOrganization).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      organizationId: 'org_1',
-      name: 'New Name',
+    expect(updateOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org_1',
+        name: 'New Name',
+      })
+    )
+
+    await waitFor(() => {
+      expect(result.current.organization).toEqual(updatedOrg)
     })
   })
 
@@ -326,10 +324,15 @@ describe('useOrganization - settings', () => {
 
     await result.current.updateSettings({ require_2fa: true })
 
-    expect(updateOrganization).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      organizationId: 'org_1',
-      settings: { require_2fa: true },
+    expect(updateOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org_1',
+        settings: { require_2fa: true },
+      })
+    )
+
+    await waitFor(() => {
+      expect(result.current.organization).toEqual(updatedOrg)
     })
   })
 })
@@ -359,14 +362,15 @@ describe('useOrganization - checkout', () => {
       billingPeriod: 'monthly',
     })
 
-    expect(createOrgCheckout).toHaveBeenCalledWith({
-      clerkUserId: 'user_123',
-      email: 'test@example.com',
-      organizationName: 'New Team',
-      plan: 'team',
-      seatCount: 5,
-      billingPeriod: 'monthly',
-    })
+    expect(createOrgCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'test@example.com',
+        organizationName: 'New Team',
+        plan: 'team',
+        seatCount: 5,
+        billingPeriod: 'monthly',
+      })
+    )
     expect(window.location.href).toBe('https://checkout.stripe.com/session123')
 
     // Restore

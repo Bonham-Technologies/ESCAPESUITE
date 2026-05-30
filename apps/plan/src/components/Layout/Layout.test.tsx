@@ -4,11 +4,12 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import Layout from './Layout'
 import Header from './Header'
 
-// Mock Clerk
-vi.mock('@clerk/clerk-react', () => ({
-  SignedIn: ({ children: _children }: { children: React.ReactNode }) => null,
+// Mock the auth adapter as signed-out so the Header shows Sign In / Get Started
+vi.mock('../../lib/auth', () => ({
+  SignedIn: (_props: { children: React.ReactNode }) => null,
   SignedOut: ({ children }: { children: React.ReactNode }) => children,
-  UserButton: () => <div data-testid="user-button">UserButton</div>,
+  useUser: () => ({ user: null, isLoaded: true, isSignedIn: false }),
+  signOut: vi.fn(),
 }))
 
 // Mock shared theme
