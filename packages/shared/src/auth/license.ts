@@ -82,8 +82,15 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 // Verify Ed25519 signature using Web Crypto API
 async function verifySignatureAsync(payload: SignedLicensePayload): Promise<boolean> {
   if (!PUBLIC_KEY_HEX) {
-    console.warn('No license public key configured - signature verification skipped')
-    return true // Allow in development
+    // Only skip verification in local development. A production build that ships
+    // without an embedded public key must FAIL CLOSED rather than accept every
+    // license (otherwise a misconfigured build silently gives the product away).
+    if (import.meta.env.DEV) {
+      console.warn('No license public key configured - signature verification skipped (development only)')
+      return true
+    }
+    console.error('No license public key embedded in this build - rejecting license')
+    return false
   }
 
   try {
@@ -189,10 +196,12 @@ export function validateLicense(licenseKey: string, product: 'craft' | 'artist')
         console.error('License signature verification failed')
         validatedLicenses.set(cacheKey, null)
       }
-    }).catch(() => {
-      // Web Crypto Ed25519 may not be available in all browsers
-      // In that case, we rely on server-side validation when online
-      console.warn('Ed25519 verification not available in this browser')
+    }).catch((error) => {
+      // Fail closed: if the signature cannot be verified at all (e.g. Web Crypto
+      // Ed25519 is unavailable in this browser), do not keep trusting the
+      // unverified license — drop it from the cache so the next check re-evaluates.
+      console.error('License signature could not be verified - rejecting license', error)
+      validatedLicenses.set(cacheKey, null)
     })
 
     return license

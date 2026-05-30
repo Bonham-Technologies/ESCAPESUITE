@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   validateLicense,
+  validateLicenseAsync,
   getLicenseInfo,
   hasFeature,
   getLicenseStorageKey,
@@ -180,6 +181,71 @@ describe('validateLicense', () => {
     const key = createTestLicenseKey(validArtistPayload)
     const result = validateLicense(key, 'artist')
     expect(result?.customer).toBe('artist@example.com')
+  })
+})
+
+describe('validateLicenseAsync', () => {
+  const basePayload = {
+    id: 'lic_async_1',
+    version: 1,
+    customer: { id: 'cus_async', email: 'async@example.com', name: 'Async User' },
+    product: 'craft' as const,
+    tier: 'standard' as const,
+    seats: 1,
+    issued: '2024-01-01T00:00:00Z',
+    features: ['recorder'],
+  }
+
+  it('returns null for empty license key', async () => {
+    expect(await validateLicenseAsync('', 'craft')).toBeNull()
+  })
+
+  it('returns null for invalid format', async () => {
+    expect(await validateLicenseAsync('not-a-license', 'craft')).toBeNull()
+  })
+
+  it('returns null when required fields are missing', async () => {
+    const json = JSON.stringify({
+      id: 'x', version: 1, customer: { id: 'c' }, product: 'craft',
+      tier: 'standard', seats: 1, issued: '2024-01-01T00:00:00Z', signature: 'sig',
+    })
+    expect(await validateLicenseAsync(`ESCAPE-${btoa(json)}`, 'craft')).toBeNull()
+  })
+
+  it('rejects a license for the wrong product', async () => {
+    const key = createTestLicenseKey(basePayload) // product: craft
+    expect(await validateLicenseAsync(key, 'artist')).toBeNull()
+  })
+
+  it('rejects an expired license', async () => {
+    const key = createTestLicenseKey({ ...basePayload, expires: '2020-01-01T00:00:00Z' })
+    expect(await validateLicenseAsync(key, 'craft')).toBeNull()
+  })
+
+  it('accepts a structurally valid license in development (no key embedded ⇒ verification skipped)', async () => {
+    const key = createTestLicenseKey(basePayload)
+    const result = await validateLicenseAsync(key, 'craft')
+    expect(result).not.toBeNull()
+    expect(result?.email).toBe('async@example.com')
+  })
+})
+
+describe('signature verification fails closed in production', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('rejects a license when a production build ships with no embedded public key', async () => {
+    // In a real production build VITE_LICENSE_PUBLIC_KEY is embedded; if it is
+    // missing we must reject rather than fail open. (Public key is stubbed to ''.)
+    vi.stubEnv('DEV', false)
+    const json = JSON.stringify({
+      id: 'lic_prod', version: 1, customer: { id: 'c', email: 'p@example.com' },
+      product: 'craft', tier: 'standard', seats: 1, issued: '2024-01-01T00:00:00Z',
+      signature: 'unsigned',
+    })
+    const key = `ESCAPE-${btoa(json)}`
+    expect(await validateLicenseAsync(key, 'craft')).toBeNull()
   })
 })
 
