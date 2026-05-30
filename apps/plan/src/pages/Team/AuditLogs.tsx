@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../../lib/auth'
 import { useOrganization } from '../../hooks/useOrganization'
 import {
   getAuditLogs,

@@ -1,53 +1,33 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import { requireUser, serviceClient, assertOrgRole, AuthError } from '../_shared/auth.ts'
 
 interface RemoveMemberRequest {
-  clerkUserId: string
   organizationId: string
   memberId: string
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    const user = await requireUser(req)
+    const supabase = serviceClient()
 
     const body: RemoveMemberRequest = await req.json()
-    const { clerkUserId, organizationId, memberId } = body
+    const { organizationId, memberId } = body
 
-    if (!clerkUserId || !organizationId || !memberId) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    if (!organizationId || !memberId) {
+      return jsonResponse({ error: 'Missing required fields' }, 400)
     }
 
-    // Get requester's membership
-    const { data: requesterMembership } = await supabase
-      .from('organization_members')
-      .select('role')
-      .eq('organization_id', organizationId)
-      .eq('user_id', clerkUserId)
-      .not('joined_at', 'is', null)
-      .single()
-
-    if (!requesterMembership) {
-      return new Response(
-        JSON.stringify({ error: 'Not a member of this organization' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    // Get requester's membership (verifies they are a joined member and gives us their role)
+    const requesterMembership = await assertOrgRole(
+      supabase,
+      organizationId,
+      user.id,
+      ['owner', 'admin', 'member']
+    )
 
     // Get the target member
     const { data: targetMember, error: memberError } = await supabase
@@ -58,14 +38,11 @@ serve(async (req) => {
       .single()
 
     if (memberError || !targetMember) {
-      return new Response(
-        JSON.stringify({ error: 'Member not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Member not found' }, 404)
     }
 
     // Check permissions
-    const isSelfRemove = targetMember.user_id === clerkUserId
+    const isSelfRemove = targetMember.user_id === user.id
     const isOwner = requesterMembership.role === 'owner'
     const isAdmin = requesterMembership.role === 'admin'
 
@@ -74,26 +51,20 @@ serve(async (req) => {
     // Admins can remove members (not other admins or owner)
 
     if (targetMember.role === 'owner') {
-      return new Response(
-        JSON.stringify({ error: 'Cannot remove the owner. Transfer ownership first.' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      return jsonResponse(
+        { error: 'Cannot remove the owner. Transfer ownership first.' },
+        400
       )
     }
 
     if (!isSelfRemove) {
       if (!isOwner && !isAdmin) {
-        return new Response(
-          JSON.stringify({ error: 'Only owners and admins can remove members' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        return jsonResponse({ error: 'Only owners and admins can remove members' }, 403)
       }
 
       // Admins can only remove members, not other admins
       if (isAdmin && targetMember.role === 'admin') {
-        return new Response(
-          JSON.stringify({ error: 'Admins cannot remove other admins' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        return jsonResponse({ error: 'Admins cannot remove other admins' }, 403)
       }
     }
 
@@ -118,7 +89,7 @@ serve(async (req) => {
     if (organization?.settings?.audit_logging) {
       await supabase.from('audit_logs').insert({
         organization_id: organizationId,
-        user_id: clerkUserId,
+        user_id: user.id,
         action: isSelfRemove ? 'member.left' : 'member.removed',
         resource_type: 'member',
         resource_id: memberId,
@@ -126,28 +97,23 @@ serve(async (req) => {
           targetUserId: targetMember.user_id,
           email: targetMember.email,
           role: targetMember.role,
-          removedBy: isSelfRemove ? 'self' : clerkUserId,
+          removedBy: isSelfRemove ? 'self' : user.id,
         },
       })
     }
 
-    return new Response(
-      JSON.stringify({
-        message: isSelfRemove
-          ? 'You have left the organization'
-          : `${targetMember.email} has been removed`,
-        removedMember: {
-          id: memberId,
-          email: targetMember.email,
-        },
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({
+      message: isSelfRemove
+        ? 'You have left the organization'
+        : `${targetMember.email} has been removed`,
+      removedMember: {
+        id: memberId,
+        email: targetMember.email,
+      },
+    })
   } catch (error) {
+    if (error instanceof AuthError) return jsonResponse({ error: error.message }, error.status)
     console.error('Remove member error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: error.message }, 500)
   }
 })

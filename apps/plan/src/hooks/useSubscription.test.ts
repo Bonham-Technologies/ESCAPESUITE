@@ -2,15 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useSubscription } from './useSubscription'
 
-// Mock Clerk
-vi.mock('@clerk/clerk-react', () => ({
-  useUser: vi.fn(() => ({
-    user: { id: 'user_123', primaryEmailAddress: { emailAddress: 'test@example.com' } },
-    isLoaded: true,
-  })),
-}))
+// Auth is globally mocked in src/test/setup.ts: useUser() returns a signed-in
+// test user with id 'test-user-id' and isLoaded === true.
 
-// Mock subscription module
+// Mock subscription module to control return values.
 vi.mock('../lib/subscription', () => ({
   getSubscription: vi.fn(),
   createCheckoutSession: vi.fn(),
@@ -52,7 +47,7 @@ describe('useSubscription', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    expect(getSubscription).toHaveBeenCalledWith('user_123')
+    expect(getSubscription).toHaveBeenCalledWith('test-user-id')
     expect(result.current.subscription).toEqual(mockSubscription)
   })
 
@@ -144,11 +139,11 @@ describe('useSubscription - checkout flow', () => {
 
     const clientSecret = await result.current.checkout('monthly')
 
-    expect(createCheckoutSession).toHaveBeenCalledWith('user_123', 'monthly')
+    expect(createCheckoutSession).toHaveBeenCalledWith('test-user-id', 'monthly')
     expect(clientSecret).toBe('cs_test_secret123')
   })
 
-  it('calls createPortalSession when openPortal is invoked', async () => {
+  it('calls createPortalSession and navigates when openPortal is invoked', async () => {
     vi.mocked(getSubscription).mockResolvedValue({
       status: 'active',
       plan: 'pro_monthly',
@@ -160,12 +155,6 @@ describe('useSubscription - checkout flow', () => {
     })
     vi.mocked(createPortalSession).mockResolvedValue('https://billing.stripe.com/portal123')
 
-    // Mock window.location
-    const originalLocation = window.location
-    // @ts-expect-error - mocking location
-    delete window.location
-    window.location = { ...originalLocation, href: '' }
-
     const { result } = renderHook(() => useSubscription())
 
     await waitFor(() => {
@@ -174,10 +163,7 @@ describe('useSubscription - checkout flow', () => {
 
     await result.current.openPortal()
 
-    expect(createPortalSession).toHaveBeenCalledWith('user_123')
+    expect(createPortalSession).toHaveBeenCalledWith('test-user-id')
     expect(window.location.href).toBe('https://billing.stripe.com/portal123')
-
-    // Restore
-    window.location = originalLocation
   })
 })

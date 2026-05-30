@@ -1,9 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import { AuthError } from '../_shared/auth.ts'
 
 interface SendLicenseEmailRequest {
   licenseKey: string
@@ -50,18 +47,22 @@ function escapeHtml(text: string): string {
 
 serve(async (req) => {
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   if (req.method !== 'POST') {
-    return new Response(
-      JSON.stringify({ error: 'Method not allowed' }),
-      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: 'Method not allowed' }, 405)
   }
 
   try {
+    // Internal-only guard: this function is called server-to-server by the
+    // webhook. Reject unless the bearer token is the service-role key.
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const token = authHeader.replace(/^Bearer\s+/i, '')
+    if (!serviceRoleKey || token !== serviceRoleKey) {
+      throw new AuthError('Forbidden', 403)
+    }
+
     const {
       licenseKey,
       customerEmail,
@@ -72,19 +73,13 @@ serve(async (req) => {
 
     // Validate required fields
     if (!licenseKey || !customerEmail || !product || !tier) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Missing required fields' }, 400)
     }
 
     const resendApiKey = Deno.env.get('RESEND_API_KEY')
     if (!resendApiKey) {
       console.warn('RESEND_API_KEY not configured, skipping email')
-      return new Response(
-        JSON.stringify({ success: true, message: 'Email skipped (no API key)' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ success: true, message: 'Email skipped (no API key)' })
     }
 
     const productName = getProductDisplayName(product)
@@ -236,28 +231,20 @@ serve(async (req) => {
     if (!response.ok) {
       const error = await response.text()
       console.error('Failed to send license email:', error)
-      return new Response(
-        JSON.stringify({ error: 'Failed to send email', details: error }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'Failed to send email', details: error }, 500)
     }
 
     const result = await response.json()
     console.log('License email sent to', customerEmail, 'Email ID:', result.id)
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: 'License email sent successfully',
-        emailId: result.id,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({
+      success: true,
+      message: 'License email sent successfully',
+      emailId: result.id,
+    })
   } catch (error) {
+    if (error instanceof AuthError) return jsonResponse({ error: error.message }, error.status)
     console.error('Send license email error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message || 'An unexpected error occurred' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: error.message || 'An unexpected error occurred' }, 500)
   }
 })

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../lib/auth'
 import { useSubscription } from '../hooks/useSubscription'
 import { useOrganization } from '../hooks/useOrganization'
 import { getPlanDisplayName } from '../lib/subscription'

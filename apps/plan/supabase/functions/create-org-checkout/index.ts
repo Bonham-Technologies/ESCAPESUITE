@@ -1,15 +1,9 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import { requireUser, serviceClient, AuthError } from '../_shared/auth.ts'
 
 interface CreateOrgCheckoutRequest {
-  clerkUserId: string
-  email: string
   organizationName: string
   organizationSlug?: string
   plan: 'team' | 'enterprise'
@@ -19,24 +13,18 @@ interface CreateOrgCheckoutRequest {
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   try {
+    const user = await requireUser(req)
+    const supabase = serviceClient()
+
     const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
       apiVersion: '2023-10-16',
     })
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
     const body: CreateOrgCheckoutRequest = await req.json()
     const {
-      clerkUserId,
-      email,
       organizationName,
       plan,
       seatCount,
@@ -44,20 +32,16 @@ serve(async (req) => {
       returnUrl,
     } = body
 
-    if (!clerkUserId || !email || !organizationName || !plan || !seatCount || !billingPeriod) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    const email = user.email
+
+    if (!email || !organizationName || !plan || !seatCount || !billingPeriod) {
+      return jsonResponse({ error: 'Missing required fields' }, 400)
     }
 
     // Validate seat count (must match frontend: Team=5, Enterprise=25)
     const minSeats = plan === 'team' ? 5 : 25
     if (seatCount < minSeats) {
-      return new Response(
-        JSON.stringify({ error: `Minimum ${minSeats} seats required for ${plan} plan` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: `Minimum ${minSeats} seats required for ${plan} plan` }, 400)
     }
 
     // Generate slug from name if not provided
@@ -78,7 +62,7 @@ serve(async (req) => {
     const { data: existingMembership } = await supabase
       .from('organization_members')
       .select('organization_id, joined_at')
-      .eq('user_id', clerkUserId)
+      .eq('user_id', user.id)
       .eq('role', 'owner')
       .single()
 
@@ -90,10 +74,7 @@ serve(async (req) => {
         !existingOrg.stripe_subscription_id
 
       if (!isAbandonedByThisUser) {
-        return new Response(
-          JSON.stringify({ error: 'Organization slug already taken' }),
-          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        return jsonResponse({ error: 'Organization slug already taken' }, 409)
       }
 
       // Reuse the abandoned org - delete it so we can recreate with updated settings
@@ -101,10 +82,7 @@ serve(async (req) => {
       await supabase.from('organizations').delete().eq('id', existingOrg.id)
     } else if (existingMembership && existingMembership.joined_at) {
       // User already owns an active organization
-      return new Response(
-        JSON.stringify({ error: 'User already owns an organization' }),
-        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'User already owns an organization' }, 409)
     } else if (existingMembership && !existingMembership.joined_at) {
       // User has an abandoned checkout for a different org - clean it up
       await supabase.from('organization_members').delete().eq('organization_id', existingMembership.organization_id)
@@ -125,7 +103,7 @@ serve(async (req) => {
     const { data: existingSub } = await supabase
       .from('subscriptions')
       .select('stripe_customer_id')
-      .eq('clerk_user_id', clerkUserId)
+      .eq('auth_user_id', user.id)
       .single()
 
     if (existingSub?.stripe_customer_id) {
@@ -134,7 +112,7 @@ serve(async (req) => {
       const customer = await stripe.customers.create({
         email,
         metadata: {
-          clerk_user_id: clerkUserId,
+          supabase_user_id: user.id,
           organization_name: organizationName,
         },
       })
@@ -170,7 +148,7 @@ serve(async (req) => {
       .from('organization_members')
       .insert({
         organization_id: organization.id,
-        user_id: clerkUserId,
+        user_id: user.id,
         email,
         role: 'owner',
         invited_at: new Date().toISOString(),
@@ -204,10 +182,7 @@ serve(async (req) => {
         ? (billingPeriod === 'monthly' ? 'STRIPE_PRICE_TEAM_MONTHLY' : 'STRIPE_PRICE_TEAM_ANNUAL')
         : (billingPeriod === 'monthly' ? 'STRIPE_PRICE_ENTERPRISE_MONTHLY' : 'STRIPE_PRICE_ENTERPRISE_ANNUAL')
       console.error(`Missing Stripe price configuration: ${missingVar}`)
-      return new Response(
-        JSON.stringify({ error: `Stripe price not configured for ${plan} ${billingPeriod}. Please contact support.` }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: `Stripe price not configured for ${plan} ${billingPeriod}. Please contact support.` }, 500)
     }
 
     // Create checkout session with embedded mode
@@ -222,7 +197,7 @@ serve(async (req) => {
       redirect_on_completion: 'if_required',
       return_url: returnUrl || `${req.headers.get('origin')}/team/${slug}?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
-        clerk_user_id: clerkUserId,
+        supabase_user_id: user.id,
         organization_id: organization.id,
         plan,
         seat_count: seatCount.toString(),
@@ -230,7 +205,7 @@ serve(async (req) => {
       },
       subscription_data: {
         metadata: {
-          clerk_user_id: clerkUserId,
+          supabase_user_id: user.id,
           organization_id: organization.id,
           plan,
           seat_count: seatCount.toString(),
@@ -239,19 +214,14 @@ serve(async (req) => {
       allow_promotion_codes: true,
     })
 
-    return new Response(
-      JSON.stringify({
-        clientSecret: session.client_secret,
-        organizationId: organization.id,
-        organizationSlug: organization.slug,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({
+      clientSecret: session.client_secret,
+      organizationId: organization.id,
+      organizationSlug: organization.slug,
+    })
   } catch (error) {
+    if (error instanceof AuthError) return jsonResponse({ error: error.message }, error.status)
     console.error('Org checkout error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ error: error.message }, 500)
   }
 })

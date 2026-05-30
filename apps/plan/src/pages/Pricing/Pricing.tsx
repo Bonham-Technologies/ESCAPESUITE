@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react'
+import { SignedIn, SignedOut, useUser } from '../../lib/auth'
 import { useSubscription } from '../../hooks/useSubscription'
 import type { CheckoutPlan } from '../../lib/subscription'
 import { analytics } from '../../lib/analytics'
-import { functionsUrl, supabaseAnonKey } from '../../lib/supabase'
+import { supabase } from '../../lib/supabase'
 import { CheckoutModal } from '../../components/Checkout'
 import styles from './Pricing.module.css'
 
@@ -117,26 +117,16 @@ export default function Pricing() {
     try {
       setCheckoutLoading('standalone')
 
-      const response = await fetch(`${functionsUrl}/create-license-checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseAnonKey,
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({
-          clerkUserId: user.id,
-          email: user.primaryEmailAddress?.emailAddress,
+      const { data, error } = await supabase.functions.invoke('create-license-checkout', {
+        body: {
           product: standaloneProduct,
           tier: standaloneTier,
           seats: 1,
-        }),
+        },
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Checkout failed')
+      if (error) {
+        throw new Error(error.message || 'Checkout failed')
       }
 
       // Open embedded checkout modal
@@ -165,27 +155,17 @@ export default function Pricing() {
     try {
       setCheckoutLoading('team')
 
-      const response = await fetch(`${functionsUrl}/create-org-checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseAnonKey,
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({
-          clerkUserId: user.id,
-          email: user.primaryEmailAddress?.emailAddress,
+      const { data, error } = await supabase.functions.invoke('create-org-checkout', {
+        body: {
           plan: teamPlan,
           seatCount: teamSeats,
           billingPeriod: teamBillingPeriod,
           organizationName: `${user.firstName || 'User'}'s Team`,
-        }),
+        },
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Checkout failed')
+      if (error) {
+        throw new Error(error.message || 'Checkout failed')
       }
 
       // Store org slug in ref for redirect after checkout (avoids stale closure)

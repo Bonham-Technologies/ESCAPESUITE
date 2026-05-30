@@ -1,17 +1,12 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { encode as base64Encode } from 'https://deno.land/std@0.168.0/encoding/base64.ts'
-
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-)
+import { jsonResponse, handleOptions } from '../_shared/cors.ts'
+import { requireUser, serviceClient, AuthError } from '../_shared/auth.ts'
 
 const PRIVATE_KEY_HEX = Deno.env.get('LICENSE_PRIVATE_KEY')!
 
 interface GetLicenseKeyRequest {
   licenseId: string
-  clerkUserId: string
 }
 
 // Convert hex string to Uint8Array
@@ -59,33 +54,23 @@ async function signPayload(payload: Record<string, unknown>): Promise<string> {
   return base64Encode(new Uint8Array(signature))
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
 serve(async (req) => {
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Method not allowed' }, 405)
   }
 
   try {
-    const body: GetLicenseKeyRequest = await req.json()
-    const { licenseId, clerkUserId } = body
+    const user = await requireUser(req)
+    const supabase = serviceClient()
 
-    if (!licenseId || !clerkUserId) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    const body: GetLicenseKeyRequest = await req.json()
+    const { licenseId } = body
+
+    if (!licenseId) {
+      return jsonResponse({ error: 'Missing required fields' }, 400)
     }
 
     // Fetch the license from database
@@ -96,26 +81,17 @@ serve(async (req) => {
       .single()
 
     if (licenseError || !license) {
-      return new Response(
-        JSON.stringify({ error: 'License not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'License not found' }, 404)
     }
 
-    // Verify ownership
-    if (license.customer_id !== clerkUserId) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    // Verify ownership: identity comes from the verified JWT, never the body
+    if (license.auth_user_id !== user.id) {
+      return jsonResponse({ error: 'Unauthorized' }, 403)
     }
 
     // Check if revoked
     if (license.revoked_at) {
-      return new Response(
-        JSON.stringify({ error: 'License has been revoked' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'License has been revoked' }, 400)
     }
 
     // Build the license payload
@@ -123,7 +99,7 @@ serve(async (req) => {
       id: license.id,
       version: 1,
       customer: {
-        id: license.customer_id,
+        id: license.auth_user_id,
         email: license.customer_email,
         ...(license.customer_name && { name: license.customer_name }),
       },
@@ -155,7 +131,7 @@ serve(async (req) => {
       if (org?.settings?.audit_logging) {
         await supabase.from('audit_logs').insert({
           organization_id: license.organization_id,
-          user_id: clerkUserId,
+          user_id: user.id,
           action: 'license.key_retrieved',
           resource_type: 'license',
           resource_id: licenseId,
@@ -167,31 +143,22 @@ serve(async (req) => {
     // Track license download (ignore errors if table doesn't exist)
     await supabase.from('license_downloads').insert({
       license_id: licenseId,
-      user_id: clerkUserId,
+      user_id: user.id,
       downloaded_at: new Date().toISOString(),
     })
 
-    return new Response(
-      JSON.stringify({
-        licenseKey,
-        product: license.product,
-        tier: license.tier,
-        expiresAt: license.expires_at,
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    )
+    return jsonResponse({
+      licenseKey,
+      product: license.product,
+      tier: license.tier,
+      expiresAt: license.expires_at,
+    })
   } catch (error) {
+    if (error instanceof AuthError) {
+      return jsonResponse({ error: error.message }, error.status)
+    }
     console.error('Error retrieving license key:', error)
     const errorMessage = error instanceof Error ? error.message : String(error)
-    return new Response(
-      JSON.stringify({ error: errorMessage, stack: error instanceof Error ? error.stack : undefined }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    )
+    return jsonResponse({ error: errorMessage }, 500)
   }
 })

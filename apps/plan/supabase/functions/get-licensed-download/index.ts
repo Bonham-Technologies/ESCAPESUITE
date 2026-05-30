@@ -1,11 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { encode as base64Encode } from 'https://deno.land/std@0.168.0/encoding/base64.ts'
-
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-)
+import { jsonResponse, handleOptions, corsHeaders } from '../_shared/cors.ts'
+import { requireUser, serviceClient, AuthError } from '../_shared/auth.ts'
 
 const PRIVATE_KEY_HEX = Deno.env.get('LICENSE_PRIVATE_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -14,7 +10,6 @@ const LICENSE_PLACEHOLDER = '__ESCAPE_LICENSE_PLACEHOLDER__'
 
 interface GetLicensedDownloadRequest {
   licenseId: string
-  clerkUserId: string
   product: 'craft' | 'artist'
 }
 
@@ -69,7 +64,7 @@ async function generateLicenseKey(license: Record<string, unknown>): Promise<str
     id: license.id,
     version: 1,
     customer: {
-      id: license.customer_id,
+      id: license.auth_user_id,
       email: license.customer_email,
       ...(license.customer_name && { name: license.customer_name }),
     },
@@ -88,39 +83,32 @@ async function generateLicenseKey(license: Record<string, unknown>): Promise<str
   return `ESCAPE-${encoded}`
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
 serve(async (req) => {
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return handleOptions()
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Method not allowed' }, 405)
   }
 
   try {
-    const body: GetLicensedDownloadRequest = await req.json()
-    const { licenseId, clerkUserId, product } = body
+    const user = await requireUser(req)
+    const supabase = serviceClient()
 
-    if (!licenseId || !clerkUserId || !product) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields: licenseId, clerkUserId, product' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    const body: GetLicensedDownloadRequest = await req.json()
+    const { licenseId, product } = body
+
+    if (!licenseId || !product) {
+      return jsonResponse(
+        { error: 'Missing required fields: licenseId, product' },
+        400
       )
     }
 
     if (product !== 'craft' && product !== 'artist') {
-      return new Response(
-        JSON.stringify({ error: 'Invalid product. Must be "craft" or "artist"' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      return jsonResponse(
+        { error: 'Invalid product. Must be "craft" or "artist"' },
+        400
       )
     }
 
@@ -132,33 +120,27 @@ serve(async (req) => {
       .single()
 
     if (licenseError || !license) {
-      return new Response(
-        JSON.stringify({ error: 'License not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'License not found' }, 404)
     }
 
-    // Verify ownership
-    if (license.customer_id !== clerkUserId) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized - you do not own this license' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    // Verify ownership (identity from the verified JWT, not the request body)
+    if (license.auth_user_id !== user.id) {
+      return jsonResponse(
+        { error: 'Unauthorized - you do not own this license' },
+        403
       )
     }
 
     // Check if revoked
     if (license.revoked_at) {
-      return new Response(
-        JSON.stringify({ error: 'License has been revoked' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonResponse({ error: 'License has been revoked' }, 400)
     }
 
     // Verify the license covers the requested product
     if (license.product !== product && license.product !== 'suite') {
-      return new Response(
-        JSON.stringify({ error: `License is for ${license.product}, not ${product}` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      return jsonResponse(
+        { error: `License is for ${license.product}, not ${product}` },
+        400
       )
     }
 
@@ -172,9 +154,9 @@ serve(async (req) => {
     const htmlResponse = await fetch(storageUrl)
     if (!htmlResponse.ok) {
       console.error(`Failed to fetch base HTML: ${htmlResponse.status} ${htmlResponse.statusText}`)
-      return new Response(
-        JSON.stringify({ error: 'Failed to fetch download file. Please try again later.' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      return jsonResponse(
+        { error: 'Failed to fetch download file. Please try again later.' },
+        500
       )
     }
 
@@ -183,9 +165,9 @@ serve(async (req) => {
     // Check if the placeholder exists
     if (!html.includes(LICENSE_PLACEHOLDER)) {
       console.error('License placeholder not found in HTML file')
-      return new Response(
-        JSON.stringify({ error: 'Download file is not configured for license injection' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      return jsonResponse(
+        { error: 'Download file is not configured for license injection' },
+        500
       )
     }
 
@@ -195,7 +177,7 @@ serve(async (req) => {
     // Log the download
     await supabase.from('license_downloads').insert({
       license_id: licenseId,
-      user_id: clerkUserId,
+      user_id: user.id,
       downloaded_at: new Date().toISOString(),
       metadata: { product, type: 'pre-licensed' },
     })
@@ -211,7 +193,7 @@ serve(async (req) => {
       if (org?.settings?.audit_logging) {
         await supabase.from('audit_logs').insert({
           organization_id: license.organization_id,
-          user_id: clerkUserId,
+          user_id: user.id,
           action: 'license.pre_licensed_download',
           resource_type: 'license',
           resource_id: licenseId,
@@ -233,14 +215,11 @@ serve(async (req) => {
       },
     })
   } catch (error) {
+    if (error instanceof AuthError) {
+      return jsonResponse({ error: error.message }, error.status)
+    }
     console.error('Error generating licensed download:', error)
     const errorMessage = error instanceof Error ? error.message : String(error)
-    return new Response(
-      JSON.stringify({ error: errorMessage }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    )
+    return jsonResponse({ error: errorMessage }, 500)
   }
 })

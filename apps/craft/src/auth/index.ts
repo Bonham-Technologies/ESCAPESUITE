@@ -1,6 +1,6 @@
 export { StandaloneAuthGate, SaaSAuthGate } from './AuthGate'
 export { AuthContext, useAuth, type AuthState } from './AuthContext'
 export { ErrorScreen, LoadingScreen } from '@escapesuite/shared/auth'
-export { isSaaSMode, isStandaloneMode, CLERK_KEY } from './config'
+export { isSaaSMode, isStandaloneMode } from './config'
 export { validateLicense, getLicenseInfo, type License } from './license'
 export { getSubscription, isPaidUser, isTrialUser, type Subscription } from './subscription'

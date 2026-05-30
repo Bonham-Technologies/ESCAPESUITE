@@ -33,7 +33,8 @@ serve(async (req) => {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
-        const clerkUserId = session.metadata?.clerk_user_id
+        // Identity is carried in Stripe metadata as the Supabase auth.users UUID.
+        const supabaseUserId = session.metadata?.supabase_user_id
         const priceId = session.metadata?.price_id
         const checkoutType = session.metadata?.type // 'organization', 'license', or undefined (individual)
         const organizationId = session.metadata?.organization_id
@@ -45,11 +46,11 @@ serve(async (req) => {
           const seats = parseInt(session.metadata?.seats || '1', 10)
           const customerEmail = session.customer_details?.email || ''
           const customerName = session.customer_details?.name || undefined
-          const customerId = session.customer as string
+          const stripeCustomerId = session.customer as string
 
           console.log(`License purchase: ${product} ${tier} x${seats} for ${customerEmail}`)
 
-          // Generate license via the generate-license function
+          // Generate license via the generate-license function (service-role auth)
           const licenseResponse = await fetch(
             `${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-license`,
             {
@@ -59,7 +60,8 @@ serve(async (req) => {
                 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
               },
               body: JSON.stringify({
-                customerId: clerkUserId || customerId,
+                authUserId: supabaseUserId || null,
+                stripeCustomerId,
                 customerEmail,
                 customerName,
                 product,
@@ -82,6 +84,7 @@ serve(async (req) => {
           // Track the license for analytics
           await supabase.from('license_downloads').insert({
             license_id: licenseData.licenseId,
+            user_id: supabaseUserId || null,
             downloaded_at: new Date().toISOString(),
             metadata: { source: 'purchase', product, tier },
           })
@@ -123,8 +126,8 @@ serve(async (req) => {
 
         // Handle organization checkout
         if (checkoutType === 'organization' && organizationId) {
-          if (!clerkUserId) {
-            console.error('No clerk_user_id in session metadata for organization checkout')
+          if (!supabaseUserId) {
+            console.error('No supabase_user_id in session metadata for organization checkout')
             break
           }
           const orgPlan = session.metadata?.plan || 'team'
@@ -135,7 +138,7 @@ serve(async (req) => {
             .from('organization_members')
             .update({ joined_at: new Date().toISOString() })
             .eq('organization_id', organizationId)
-            .eq('user_id', clerkUserId)
+            .eq('user_id', supabaseUserId)
             .eq('role', 'owner')
 
           // Get actual period dates from Stripe subscription
@@ -155,7 +158,7 @@ serve(async (req) => {
 
           // Create subscription record linked to organization
           await supabase.from('subscriptions').upsert({
-            clerk_user_id: clerkUserId,
+            auth_user_id: supabaseUserId,
             stripe_customer_id: session.customer as string,
             stripe_subscription_id: session.subscription as string || null,
             status: 'active',
@@ -165,7 +168,7 @@ serve(async (req) => {
             current_period_start: periodStart,
             current_period_end: periodEnd,
           }, {
-            onConflict: 'clerk_user_id',
+            onConflict: 'auth_user_id',
           })
 
           // Log the action (if audit logging enabled)
@@ -178,7 +181,7 @@ serve(async (req) => {
           if (org?.settings?.audit_logging) {
             await supabase.from('audit_logs').insert({
               organization_id: organizationId,
-              user_id: clerkUserId,
+              user_id: supabaseUserId,
               action: 'subscription.created',
               resource_type: 'subscription',
               resource_id: session.subscription as string,
@@ -191,8 +194,8 @@ serve(async (req) => {
         }
 
         // Handle individual checkout (existing logic)
-        if (!clerkUserId) {
-          console.error('No clerk_user_id in session metadata for individual checkout')
+        if (!supabaseUserId) {
+          console.error('No supabase_user_id in session metadata for individual checkout')
           break
         }
 
@@ -229,7 +232,7 @@ serve(async (req) => {
 
         // Update subscription record
         await supabase.from('subscriptions').upsert({
-          clerk_user_id: clerkUserId,
+          auth_user_id: supabaseUserId,
           stripe_customer_id: session.customer as string,
           stripe_subscription_id: session.subscription as string || null,
           status,
@@ -237,10 +240,10 @@ serve(async (req) => {
           current_period_start: periodStart,
           current_period_end: periodEnd,
         }, {
-          onConflict: 'clerk_user_id',
+          onConflict: 'auth_user_id',
         })
 
-        console.log(`Subscription created/updated for ${clerkUserId}: ${plan}`)
+        console.log(`Subscription created/updated for ${supabaseUserId}: ${plan}`)
         break
       }
 
@@ -248,10 +251,10 @@ serve(async (req) => {
         const subscription = event.data.object as Stripe.Subscription
         const customerId = subscription.customer as string
 
-        // Get clerk_user_id from our database
+        // Resolve the local user via the Stripe customer id (reverse lookup).
         const { data: subRecord } = await supabase
           .from('subscriptions')
-          .select('clerk_user_id')
+          .select('auth_user_id')
           .eq('stripe_customer_id', customerId)
           .single()
 
@@ -268,9 +271,9 @@ serve(async (req) => {
           status,
           current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
           current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-        }).eq('clerk_user_id', subRecord.clerk_user_id)
+        }).eq('auth_user_id', subRecord.auth_user_id)
 
-        console.log(`Subscription updated for ${subRecord.clerk_user_id}: ${status}`)
+        console.log(`Subscription updated for ${subRecord.auth_user_id}: ${status}`)
         break
       }
 

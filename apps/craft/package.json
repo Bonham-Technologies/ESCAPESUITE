@@ -17,7 +17,6 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@clerk/clerk-react": "^5.61.3",
     "@escapesuite/shared": "workspace:*",
     "@vercel/analytics": "^2.0.1",
     "idb": "^8.0.3",

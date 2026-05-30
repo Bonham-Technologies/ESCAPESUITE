@@ -1,5 +1,5 @@
-import { Routes, Route } from 'react-router-dom'
-import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useUser } from './lib/auth'
 import Layout from './components/Layout/Layout'
 import Home from './pages/Home'
 import Dashboard from './pages/Dashboard'
@@ -17,14 +17,18 @@ import { Pricing } from './pages/Pricing'
 import { Privacy, Terms } from './pages/Legal'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <SignedIn>{children}</SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </>
-  )
+  const { isLoaded, isSignedIn } = useUser()
+  const location = useLocation()
+
+  // Wait for the session to resolve before deciding.
+  if (!isLoaded) return null
+
+  if (!isSignedIn) {
+    const redirect = encodeURIComponent(location.pathname + location.search)
+    return <Navigate to={`/sign-in?redirect=${redirect}`} replace />
+  }
+
+  return <>{children}</>
 }
 
 function App() {

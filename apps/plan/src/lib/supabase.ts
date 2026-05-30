@@ -1,16 +1,9 @@
-import { createClient } from '@supabase/supabase-js'
+// Plan app's Supabase client — the single shared browser client (auth + data).
+import { getSupabase } from '@escapesuite/shared/auth'
 
+export const supabase = getSupabase()
+
+// Edge Function base URL + anon key (kept for any direct fetch helpers).
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-
-if (!supabaseUrl || !anonKey) {
-  throw new Error('Missing Supabase environment variables')
-}
-
-export const supabase = createClient(supabaseUrl, anonKey)
-
-// Edge Function base URL
 export const functionsUrl = `${supabaseUrl}/functions/v1`
-
-// Export anon key for Edge Function calls
-export const supabaseAnonKey = anonKey
+export const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY

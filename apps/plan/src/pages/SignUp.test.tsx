@@ -1,27 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import SignUpPage from './SignUp'
-
-// Mock Clerk SignUp component
-vi.mock('@clerk/clerk-react', () => ({
-  SignUp: ({ forceRedirectUrl, path, signInUrl }: {
-    forceRedirectUrl?: string
-    path?: string
-    signInUrl?: string
-  }) => (
-    <div data-testid="clerk-sign-up">
-      <span data-testid="force-redirect-url">{forceRedirectUrl}</span>
-      <span data-testid="path">{path}</span>
-      <span data-testid="sign-in-url">{signInUrl}</span>
-    </div>
-  ),
-}))
-
-// Mock Clerk themes
-vi.mock('@clerk/themes', () => ({
-  dark: { baseTheme: 'dark' },
-}))
 
 describe('SignUp Page', () => {
   beforeEach(() => {
@@ -41,33 +21,42 @@ describe('SignUp Page', () => {
     expect(document.body).toBeDefined()
   })
 
-  it('renders the Clerk SignUp component', () => {
+  it('renders the sign-up heading and subtitle', () => {
     renderSignUp()
-    expect(screen.getByTestId('clerk-sign-up')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: /create your account/i })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/14-day free trial/i)).toBeInTheDocument()
   })
 
-  it('configures forceRedirectUrl to /dashboard', () => {
+  it('renders email and password inputs', () => {
     renderSignUp()
-    expect(screen.getByTestId('force-redirect-url')).toHaveTextContent('/dashboard')
+    const email = screen.getByLabelText(/email/i)
+    const password = screen.getByLabelText(/password/i)
+    expect(email).toBeInTheDocument()
+    expect(email).toHaveAttribute('type', 'email')
+    expect(password).toBeInTheDocument()
+    expect(password).toHaveAttribute('type', 'password')
   })
 
-  it('configures path to /sign-up', () => {
+  it('renders a "Create account" submit button', () => {
     renderSignUp()
-    expect(screen.getByTestId('path')).toHaveTextContent('/sign-up')
+    const submit = screen.getByRole('button', { name: /create account/i })
+    expect(submit).toBeInTheDocument()
+    expect(submit).toHaveAttribute('type', 'submit')
   })
 
-  it('configures signInUrl to /sign-in', () => {
+  it('renders a magic-link button', () => {
     renderSignUp()
-    expect(screen.getByTestId('sign-in-url')).toHaveTextContent('/sign-in')
+    expect(
+      screen.getByRole('button', { name: /magic link/i })
+    ).toBeInTheDocument()
   })
 
-  it('does not use deprecated afterSignUpUrl prop', () => {
-    // This test documents that we migrated from afterSignUpUrl to forceRedirectUrl
-    // The Clerk SDK v5 deprecated afterSignUpUrl in favor of forceRedirectUrl
+  it('links to the sign-in page', () => {
     renderSignUp()
-    const signUp = screen.getByTestId('clerk-sign-up')
-    // If afterSignUpUrl were still used, the component would not receive forceRedirectUrl
-    expect(screen.getByTestId('force-redirect-url')).toHaveTextContent('/dashboard')
-    expect(signUp).toBeInTheDocument()
+    const signInLink = screen.getByRole('link', { name: /sign in/i })
+    expect(signInLink).toBeInTheDocument()
+    expect(signInLink).toHaveAttribute('href', '/sign-in')
   })
 })

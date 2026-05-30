@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
 
 // Get Supabase URL from environment
@@ -101,14 +101,16 @@ export default function Downloads() {
       setError(null)
 
       try {
-        // Use Edge Function to fetch licenses (bypasses RLS)
-        const response = await supabase.functions.invoke('get-user-licenses', {
-          body: { clerkUserId: user.id },
-        })
+        // Direct query — RLS scopes licenses to the signed-in user.
+        const { data, error } = await supabase
+          .from('licenses')
+          .select('id, product, tier, seat_count, issued_at, expires_at, metadata')
+          .is('revoked_at', null)
+          .order('issued_at', { ascending: false })
 
-        if (response.error) throw response.error
+        if (error) throw error
 
-        setLicenses(response.data?.licenses || [])
+        setLicenses((data ?? []) as LicenseRecord[])
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load licenses')
       } finally {
