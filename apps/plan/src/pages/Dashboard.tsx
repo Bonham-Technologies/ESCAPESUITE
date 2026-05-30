@@ -143,40 +143,31 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Quick Stats */}
-        <section className={styles.statsSection}>
-          <h2>Quick Stats</h2>
-          <div className={styles.statsGrid}>
-            <div className={styles.statCard}>
-              <div className={styles.statValue}>--</div>
-              <div className={styles.statLabel}>Recordings</div>
-            </div>
-            <div className={styles.statCard}>
-              <div className={styles.statValue}>--</div>
-              <div className={styles.statLabel}>Projects</div>
-            </div>
-            {subscription?.status === 'trialing' && (
-              <div className={styles.statCard}>
-                <div className={styles.statValue}>
-                  {isLoading ? '--' : subscription.trialDaysRemaining}
-                </div>
-                <div className={styles.statLabel}>Days Left in Trial</div>
-              </div>
-            )}
-          </div>
-          <p className={styles.statsNote}>
-            Project stats will be available once you start creating!
-          </p>
-        </section>
-
         {/* Subscription Status */}
         <section className={styles.subscriptionSection}>
           <h2>Subscription</h2>
           <div className={styles.subscriptionCard}>
             <div className={styles.subscriptionInfo}>
-              <h3>{isLoading ? 'Loading...' : getPlanDisplayName(subscription?.plan || 'trial')}</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0 }}>{isLoading ? 'Loading...' : getPlanDisplayName(subscription?.plan || 'trial')}</h3>
+                {subscription?.status === 'trialing' && !isLoading && (
+                  <span
+                    style={{
+                      background: 'rgba(99,102,241,0.15)',
+                      color: '#818cf8',
+                      border: '1px solid rgba(99,102,241,0.35)',
+                      borderRadius: '999px',
+                      padding: '0.2rem 0.7rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {subscription.trialDaysRemaining} {subscription.trialDaysRemaining === 1 ? 'day' : 'days'} left in trial
+                  </span>
+                )}
+              </div>
               {subscription?.status === 'trialing' && (
-                <p>You're on a free trial with {subscription.trialDaysRemaining} days remaining. Exports will have a watermark.</p>
+                <p>You're on a free trial. Exports will have a watermark until you upgrade.</p>
               )}
               {subscription?.status === 'active' && (
                 <p>Your Pro subscription is active. Enjoy watermark-free exports!</p>

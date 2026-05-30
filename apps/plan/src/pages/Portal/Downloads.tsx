@@ -119,7 +119,7 @@ export default function Downloads() {
     }
 
     fetchLicenses()
-  }, [user, isLoaded])
+  }, [user?.id, isLoaded])
 
   const copyLicenseKey = async (licenseId: string) => {
     try {
