@@ -57,10 +57,9 @@ describe('Home', () => {
 
   it('shows sign up call to action for unauthenticated users', () => {
     renderHome()
-    // Multiple "Start Free Trial" buttons exist on page
-    const freeTrialButtons = screen.getAllByText('Start Free Trial')
-    expect(freeTrialButtons.length).toBeGreaterThan(0)
-    expect(screen.getByText('Sign In')).toBeInTheDocument()
+    expect(screen.getByText('Start Free Trial')).toBeInTheDocument()
+    // Hosted-apps CTA appears in the hero and the pricing section.
+    expect(screen.getAllByText('Try the hosted apps free').length).toBeGreaterThan(0)
   })
 })
 
@@ -69,14 +68,14 @@ describe('Home - feature highlights', () => {
     vi.clearAllMocks()
   })
 
-  it('highlights privacy-first approach', () => {
+  it('highlights the air-gapped / privacy-first approach', () => {
     render(
       <MemoryRouter>
         <Home />
       </MemoryRouter>
     )
-    // Check for privacy-related content in hero section
-    expect(screen.getByText(/locally on your device/i)).toBeInTheDocument()
+    // Hero leads with the air-gap wedge.
+    expect(screen.getByText(/leaving the building/i)).toBeInTheDocument()
   })
 
   it('shows ESCAPECRAFT tool', () => {

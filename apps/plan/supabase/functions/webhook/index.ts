@@ -124,6 +124,95 @@ serve(async (req) => {
           break
         }
 
+        // Handle site-license purchase (annual subscription -> downloadable Suite license)
+        if (checkoutType === 'site_license') {
+          if (!supabaseUserId) {
+            console.error('No supabase_user_id in session metadata for site_license checkout')
+            break
+          }
+          const band = session.metadata?.band || 'team'
+          const seats = parseInt(session.metadata?.seats || '25', 10)
+          const customerEmail = session.customer_details?.email || ''
+          const customerName = session.customer_details?.name || undefined
+          const stripeCustomerId = session.customer as string
+
+          // Annual term from the Stripe subscription -> the license expiry.
+          let periodStart = new Date().toISOString()
+          let periodEnd = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+          if (session.subscription) {
+            try {
+              const sub = await stripe.subscriptions.retrieve(session.subscription as string)
+              periodStart = new Date(sub.current_period_start * 1000).toISOString()
+              periodEnd = new Date(sub.current_period_end * 1000).toISOString()
+            } catch (e) {
+              console.error('Failed to retrieve subscription for site license:', e)
+            }
+          }
+
+          // Mint the Suite license (full features; expires at term end -> renewal re-issues).
+          const licenseResponse = await fetch(
+            `${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-license`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+              },
+              body: JSON.stringify({
+                authUserId: supabaseUserId,
+                stripeCustomerId,
+                customerEmail,
+                customerName,
+                product: 'suite',
+                tier: 'pro',
+                seats,
+                expiresAt: periodEnd,
+                stripePaymentId: session.subscription as string,
+              }),
+            }
+          )
+          if (!licenseResponse.ok) {
+            const errorText = await licenseResponse.text()
+            console.error('Failed to generate site license:', errorText)
+            throw new Error(`Failed to generate site license: ${errorText}`)
+          }
+          const licenseData = await licenseResponse.json()
+          console.log(`Site license generated (${band}): ${licenseData.licenseId}`)
+
+          // Record the subscription (drives status + renewal handling below).
+          await supabase.from('subscriptions').upsert({
+            auth_user_id: supabaseUserId,
+            stripe_customer_id: stripeCustomerId,
+            stripe_subscription_id: session.subscription as string || null,
+            status: 'active',
+            plan: `site_${band}`,
+            seat_count: seats,
+            current_period_start: periodStart,
+            current_period_end: periodEnd,
+          }, { onConflict: 'auth_user_id' })
+
+          // Email the license key (best-effort).
+          try {
+            await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-license-email`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+              },
+              body: JSON.stringify({
+                licenseKey: licenseData.licenseKey,
+                customerEmail,
+                customerName,
+                product: 'suite',
+                tier: 'pro',
+              }),
+            })
+          } catch (e) {
+            console.error('Site license email failed (non-fatal):', e)
+          }
+          break
+        }
+
         // Handle organization checkout
         if (checkoutType === 'organization' && organizationId) {
           if (!supabaseUserId) {
@@ -254,7 +343,7 @@ serve(async (req) => {
         // Resolve the local user via the Stripe customer id (reverse lookup).
         const { data: subRecord } = await supabase
           .from('subscriptions')
-          .select('auth_user_id')
+          .select('auth_user_id, plan')
           .eq('stripe_customer_id', customerId)
           .single()
 
@@ -267,11 +356,23 @@ serve(async (req) => {
                        subscription.status === 'canceled' ? 'canceled' :
                        subscription.status === 'trialing' ? 'trialing' : 'expired'
 
+        const newPeriodEnd = new Date(subscription.current_period_end * 1000).toISOString()
+
         await supabase.from('subscriptions').update({
           status,
           current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-          current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          current_period_end: newPeriodEnd,
         }).eq('auth_user_id', subRecord.auth_user_id)
+
+        // Site licenses: on renewal, extend the downloadable Suite license's
+        // expiry to the new term end (the org re-downloads a fresh bundle).
+        if (subRecord.plan?.startsWith('site_') && status === 'active') {
+          await supabase.from('licenses')
+            .update({ expires_at: newPeriodEnd })
+            .eq('auth_user_id', subRecord.auth_user_id)
+            .eq('product', 'suite')
+            .is('revoked_at', null)
+        }
 
         console.log(`Subscription updated for ${subRecord.auth_user_id}: ${status}`)
         break
