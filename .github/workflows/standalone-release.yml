@@ -8,18 +8,18 @@ on:
     types: [completed]
     branches: [main, dev]
 
-env:
-  # Supabase project URLs
-  SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL }}
-  SUPABASE_URL_DEV: ${{ secrets.SUPABASE_URL_DEV }}
-  SUPABASE_SERVICE_KEY_PROD: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-  SUPABASE_SERVICE_KEY_DEV: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
+# Serialize deploys per branch so overlapping CI completions don't race on
+# Supabase uploads / release creation. Never cancel an in-flight deploy.
+concurrency:
+  group: standalone-release-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
 
 jobs:
   # Prepare artifacts from CI workflow
   prepare:
     name: Prepare Standalone Artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Only run if CI workflow succeeded
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
@@ -141,9 +141,15 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.is_pr == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: development
     permissions:
       pull-requests: write
+    # Dev Supabase credentials scoped to this job only (kept out of `prepare`,
+    # which checks out code and downloads artifacts).
+    env:
+      SUPABASE_URL_DEV: ${{ secrets.SUPABASE_URL_DEV }}
+      SUPABASE_SERVICE_KEY_DEV: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
 
     steps:
       - name: Download artifacts
@@ -215,9 +221,15 @@ jobs:
     # Deploy to prod when CI passes for a push to main (not a PR)
     if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: production
     permissions:
       contents: write
+    # Prod Supabase credentials scoped to this job only (kept out of `prepare`,
+    # which checks out code and downloads artifacts).
+    env:
+      SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY_PROD: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
     steps:
       - name: Download artifacts
@@ -313,17 +325,3 @@ jobs:
               draft: false,
               prerelease: false
             });
-
-  cleanup-old-releases:
-    name: Cleanup Old Dev Builds
-    needs: [prepare, deploy-dev]
-    if: needs.prepare.outputs.is_pr == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: List and cleanup old PR builds
-        run: |
-          # This is a placeholder - implement based on your retention policy
-          # You could use Supabase Storage API to list and delete old PR builds
-          echo "Cleanup job - implement retention policy as needed"
-          # Example: Delete builds older than 30 days or from closed PRs
