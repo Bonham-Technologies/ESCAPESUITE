@@ -220,7 +220,7 @@ export default function Pricing() {
               <h3>Free Trial</h3>
               <div className={styles.price}>
                 <span className={styles.amount}>$0</span>
-                <span className={styles.period}>14 days</span>
+                <span className={styles.period}>7 days</span>
               </div>
               <ul className={styles.features}>
                 <li>Full access to both apps</li>
@@ -308,29 +308,6 @@ export default function Pricing() {
             </div>
           </div>
 
-          <div className={styles.foundingMember}>
-            <div className={styles.foundingBadge}>Limited Time</div>
-            <h3>Founding Member — $149 one-time</h3>
-            <p>Lifetime access to the hosted apps. Limited to the first 100 supporters.</p>
-            <SignedOut>
-              <Link to="/sign-up">
-                <button className="primary">Become a Founder</button>
-              </Link>
-            </SignedOut>
-            <SignedIn>
-              {hasActiveSubscription && subscription?.plan === 'founding_member' ? (
-                <button disabled>You're a Founding Member!</button>
-              ) : (
-                <button
-                  className="primary"
-                  onClick={() => handleSaaSCheckout('founding')}
-                  disabled={checkoutLoading !== null}
-                >
-                  {checkoutLoading === 'founding' ? 'Loading…' : 'Become a Founder'}
-                </button>
-              )}
-            </SignedIn>
-          </div>
         </div>
       )}
 

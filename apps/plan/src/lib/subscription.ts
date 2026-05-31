@@ -55,7 +55,7 @@ export async function getSubscription(authUserId: string): Promise<Subscription>
       status: 'trialing',
       plan: 'trial',
       trialEnd: null,
-      trialDaysRemaining: 14,
+      trialDaysRemaining: 7,
       periodEnd: null,
       hasActiveSubscription: false,
       canAccessPro: true,
@@ -65,7 +65,7 @@ export async function getSubscription(authUserId: string): Promise<Subscription>
   return formatSubscription(data as SubscriptionRow)
 }
 
-export type CheckoutPlan = 'monthly' | 'annual' | 'founding'
+export type CheckoutPlan = 'monthly' | 'annual'
 
 export async function createCheckoutSession(
   _authUserId: string,

@@ -74,8 +74,6 @@ export default function Terms() {
         <ul>
           <li><strong>Free Plan</strong> - Basic access with watermarked exports</li>
           <li><strong>Pro Plan</strong> - Full access to all features, no watermarks</li>
-          <li><strong>Team Plan</strong> - Pro features for organizations with team management</li>
-          <li><strong>Founding Member</strong> - Lifetime access for early supporters</li>
         </ul>
 
         <h3>4.2 Billing</h3>

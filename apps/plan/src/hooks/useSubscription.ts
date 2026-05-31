@@ -42,7 +42,7 @@ export function useSubscription(): UseSubscriptionReturn {
         status: 'trialing',
         plan: 'trial',
         trialEnd: null,
-        trialDaysRemaining: 14,
+        trialDaysRemaining: 7,
         periodEnd: null,
         hasActiveSubscription: false,
         canAccessPro: true,

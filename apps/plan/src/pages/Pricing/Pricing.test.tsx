@@ -67,8 +67,6 @@ describe('Pricing', () => {
     fireEvent.click(screen.getByText('Individual'))
     expect(screen.getByText('Free Trial')).toBeInTheDocument()
     expect(screen.getByText('Pro Annual')).toBeInTheDocument()
-    expect(screen.getByText(/Founding Member/i)).toBeInTheDocument()
-    expect(screen.getByText(/\$149/)).toBeInTheDocument()
   })
 
   it('displays the questions section', () => {

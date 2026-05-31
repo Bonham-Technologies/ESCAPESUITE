@@ -91,7 +91,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
         <h1 className={styles.title}>{isSignUp ? 'Create your account' : 'Welcome back'}</h1>
         <p className={styles.subtitle}>
           {isSignUp
-            ? 'Start your 14-day free trial of ESCAPE Suite.'
+            ? 'Start your 7-day free trial of ESCAPE Suite.'
             : 'Sign in to your ESCAPE Suite account.'}
         </p>
 
