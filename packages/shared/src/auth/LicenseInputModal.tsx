@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { validateLicense, saveLicense, type License } from './license'
+import { validateLicenseAsync, saveLicense, type License } from './license'
 import styles from './LicenseInputModal.module.css'
 
 type AppProduct = 'craft' | 'artist'
@@ -34,8 +34,9 @@ export function LicenseInputModal({
     setError(null)
 
     try {
-      // Validate the license locally
-      const license = validateLicense(trimmedKey, product)
+      // Validate the license locally, awaiting Ed25519 signature verification
+      // (fails closed on an invalid/forged signature).
+      const license = await validateLicenseAsync(trimmedKey, product)
 
       if (!license) {
         setError('Invalid license key. Please check and try again.')

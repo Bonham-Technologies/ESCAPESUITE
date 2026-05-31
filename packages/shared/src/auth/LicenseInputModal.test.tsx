@@ -9,6 +9,7 @@ vi.mock('./license', async () => {
   return {
     ...actual,
     validateLicense: vi.fn(),
+    validateLicenseAsync: vi.fn(),
     saveLicense: vi.fn(),
   }
 })
@@ -81,7 +82,7 @@ describe('LicenseInputModal', () => {
   })
 
   it('should show error for invalid license', async () => {
-    vi.mocked(licenseModule.validateLicense).mockReturnValue(null)
+    vi.mocked(licenseModule.validateLicenseAsync).mockResolvedValue(null)
 
     render(
       <LicenseInputModal
@@ -104,7 +105,7 @@ describe('LicenseInputModal', () => {
   })
 
   it('should show error for wrong product license', async () => {
-    vi.mocked(licenseModule.validateLicense).mockReturnValue({
+    vi.mocked(licenseModule.validateLicenseAsync).mockResolvedValue({
       id: 'lic_123',
       customer: 'Test User',
       email: 'test@example.com',
@@ -148,7 +149,7 @@ describe('LicenseInputModal', () => {
       expires: null,
       features: [],
     }
-    vi.mocked(licenseModule.validateLicense).mockReturnValue(mockLicense)
+    vi.mocked(licenseModule.validateLicenseAsync).mockResolvedValue(mockLicense)
 
     render(
       <LicenseInputModal
@@ -185,7 +186,7 @@ describe('LicenseInputModal', () => {
       expires: null,
       features: [],
     }
-    vi.mocked(licenseModule.validateLicense).mockReturnValue(mockLicense)
+    vi.mocked(licenseModule.validateLicenseAsync).mockResolvedValue(mockLicense)
 
     vi.useFakeTimers()
 
@@ -204,8 +205,9 @@ describe('LicenseInputModal', () => {
     const button = screen.getByText('Activate License')
     fireEvent.click(button)
 
-    // Advance timers to trigger the delayed success callback
-    vi.advanceTimersByTime(1100)
+    // Flush the awaited validateLicenseAsync microtask, then advance timers to
+    // trigger the delayed success callback.
+    await vi.advanceTimersByTimeAsync(1100)
 
     expect(mockOnSuccess).toHaveBeenCalledWith(mockLicense)
 
@@ -224,7 +226,7 @@ describe('LicenseInputModal', () => {
       expires: '2027-01-01',
       features: [],
     }
-    vi.mocked(licenseModule.validateLicense).mockReturnValue(mockLicense)
+    vi.mocked(licenseModule.validateLicenseAsync).mockResolvedValue(mockLicense)
 
     render(
       <LicenseInputModal
@@ -258,7 +260,7 @@ describe('LicenseInputModal', () => {
       expires: null,
       features: [],
     }
-    vi.mocked(licenseModule.validateLicense).mockReturnValue(mockLicense)
+    vi.mocked(licenseModule.validateLicenseAsync).mockResolvedValue(mockLicense)
 
     render(
       <LicenseInputModal
@@ -312,7 +314,7 @@ describe('LicenseInputModal', () => {
       expires: null,
       features: [],
     }
-    vi.mocked(licenseModule.validateLicense).mockReturnValue(mockLicense)
+    vi.mocked(licenseModule.validateLicenseAsync).mockResolvedValue(mockLicense)
 
     render(
       <LicenseInputModal
