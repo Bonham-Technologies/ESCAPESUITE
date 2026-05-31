@@ -35,8 +35,13 @@ serve(async (req) => {
       )
     }
 
-    // Check if user is owner or admin
+    // Admins may rename the org, but only owners may change security-sensitive
+    // settings (SSO, 2FA, audit logging, allowed domains). Previously any admin
+    // could flip these — including disabling the audit trail and org-wide 2FA. (audit M5)
     await assertOrgRole(supabase, organizationId, user.id, ['owner', 'admin'])
+    if (settings && Object.keys(settings).length > 0) {
+      await assertOrgRole(supabase, organizationId, user.id, ['owner'])
+    }
 
     // Get current organization
     const { data: organization, error: orgError } = await supabase
@@ -93,8 +98,9 @@ serve(async (req) => {
       throw updateError
     }
 
-    // Log the action (using updated settings in case audit_logging was just enabled)
-    if (updated.settings?.audit_logging) {
+    // Log the action. Check both old and new audit_logging so that *disabling*
+    // audit logging is itself recorded. (audit M5)
+    if (organization.settings?.audit_logging || updated.settings?.audit_logging) {
       await supabase.from('audit_logs').insert({
         organization_id: organizationId,
         user_id: user.id,

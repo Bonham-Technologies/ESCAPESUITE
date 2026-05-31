@@ -29,6 +29,27 @@ serve(async (req) => {
 
   console.log('Received event:', event.type)
 
+  // Idempotency: claim this event.id before processing. Stripe delivers
+  // at-least-once and retries on non-2xx, so without this a retried
+  // checkout.session.completed mints a duplicate (un-revocable) license per
+  // payment. The unique PK makes the claim atomic; if the claim already exists
+  // the event was processed (or is in-flight), so we ack and skip. On a
+  // processing error below we roll the claim back so Stripe's retry reprocesses.
+  const { error: claimError } = await supabase
+    .from('processed_stripe_events')
+    .insert({ event_id: event.id, event_type: event.type })
+  if (claimError) {
+    if (claimError.code === '23505') {
+      console.log(`Duplicate event ${event.id} (${event.type}); skipping`)
+      return new Response(JSON.stringify({ received: true, duplicate: true }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    // Non-conflict error (e.g. table not yet migrated): log and continue so the
+    // webhook keeps working, just without idempotency until the migration lands.
+    console.error('Idempotency claim failed (continuing without it):', claimError.message)
+  }
+
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
@@ -408,6 +429,9 @@ serve(async (req) => {
     }
   } catch (error) {
     console.error('Error processing webhook:', error)
+    // Roll back the idempotency claim so Stripe's retry of this *failed* event
+    // is reprocessed rather than skipped as a duplicate.
+    await supabase.from('processed_stripe_events').delete().eq('event_id', event.id)
     return new Response(`Webhook handler error: ${error.message}`, { status: 500 })
   }
 
