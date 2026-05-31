@@ -5,7 +5,7 @@ import { LoadingScreen } from './LoadingScreen'
 import { LicenseInputModal } from './LicenseInputModal'
 import { ExpirationBanner } from './ExpirationBanner'
 import { LICENSE_KEY } from './config'
-import { validateLicense, getLicenseInfo, loadLicense, type License } from './license'
+import { validateLicenseAsync, getLicenseInfo, loadLicense, type License } from './license'
 import { getSubscription, isTrialUser, isPaidUser } from './subscription'
 import { getMachineHash } from './machineHash'
 
@@ -19,17 +19,22 @@ interface AuthGateProps {
   product: AppProduct
 }
 
-// Initialize license state synchronously to avoid effect-based setState
-// First checks localStorage, then falls back to embedded LICENSE_KEY
-function initializeLicenseState(product: AppProduct): {
+// Resolve license state asynchronously, AWAITING Ed25519 signature
+// verification (validateLicenseAsync). The previous synchronous path returned a
+// fully-privileged license from the unsigned payload and only verified the
+// signature in a background promise the gate never read — so a hand-edited
+// `ESCAPE-` key unlocked the app. We now gate on the verified result and fail
+// closed: an unverifiable license never authorizes.
+// First checks localStorage, then falls back to embedded LICENSE_KEY.
+async function resolveLicenseState(product: AppProduct): Promise<{
   authState: AuthState
   licenseKey: string | null
   license: License | null
-} {
+}> {
   // First, try to load license from localStorage
   const storedLicense = loadLicense(product)
   if (storedLicense) {
-    const license = validateLicense(storedLicense, product)
+    const license = await validateLicenseAsync(storedLicense, product)
     if (license) {
       console.log('License validated (stored):', getLicenseInfo(license))
       return {
@@ -44,13 +49,14 @@ function initializeLicenseState(product: AppProduct): {
         license,
       }
     }
-    // Stored license is invalid - continue to check embedded key
-    console.warn('Stored license is invalid or expired')
+    // Stored license is invalid, expired, or failed signature verification -
+    // continue to check the embedded key.
+    console.warn('Stored license is invalid, expired, or failed signature verification')
   }
 
   // Fall back to embedded LICENSE_KEY
   if (LICENSE_KEY) {
-    const license = validateLicense(LICENSE_KEY, product)
+    const license = await validateLicenseAsync(LICENSE_KEY, product)
     if (license) {
       console.log('License validated (embedded):', getLicenseInfo(license))
       return {
@@ -100,10 +106,28 @@ interface StandaloneAuthGateProps {
 
 // Standalone mode auth gate - license-based with runtime license input
 export function StandaloneAuthGate({ children, appName, logo, product }: StandaloneAuthGateProps) {
-  const [{ authState, licenseKey, license }, setState] = useState(() => {
-    const result = initializeLicenseState(product)
-    return { authState: result.authState, licenseKey: result.licenseKey, license: result.license }
+  // Start in loading state; license validation (incl. signature verification)
+  // is async and runs on mount below.
+  const [{ authState, licenseKey, license }, setState] = useState<{
+    authState: AuthState
+    licenseKey: string | null
+    license: License | null
+  }>({
+    authState: { isAuthorized: false, isTrial: false, isLoading: true, error: null },
+    licenseKey: null,
+    license: null,
   })
+
+  // Validate the license on mount, awaiting Ed25519 signature verification.
+  useEffect(() => {
+    let cancelled = false
+    resolveLicenseState(product).then((result) => {
+      if (!cancelled) setState(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [product])
 
   // Track activation in background (don't block UI)
   useEffect(() => {

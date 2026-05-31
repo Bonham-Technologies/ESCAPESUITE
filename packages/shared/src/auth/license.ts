@@ -82,8 +82,15 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 // Verify Ed25519 signature using Web Crypto API
 async function verifySignatureAsync(payload: SignedLicensePayload): Promise<boolean> {
   if (!PUBLIC_KEY_HEX) {
-    console.warn('No license public key configured - signature verification skipped')
-    return true // Allow in development
+    // No public key was baked into this build, so the signature CANNOT be
+    // verified. This is only safe for local dev and the E2E suite (mock keys).
+    // SECURITY (audit H4): production standalone builds MUST bake
+    // VITE_LICENSE_PUBLIC_KEY, otherwise every structurally-valid license is
+    // accepted. Flipping this to fail closed requires the standalone build
+    // pipeline to reliably inject the key first (see PR notes) — doing it before
+    // then would reject all licenses on the currently-shipped (keyless) builds.
+    console.warn('[license] No public key configured — signature verification SKIPPED (dev/test only).')
+    return true
   }
 
   try {
@@ -123,7 +130,13 @@ async function verifySignatureAsync(payload: SignedLicensePayload): Promise<bool
 const validatedLicenses = new Map<string, License | null>()
 
 /**
- * Validate a license key for a specific product (synchronous, uses cache)
+ * Validate a license key for a specific product (synchronous, uses cache).
+ *
+ * WARNING: this does NOT verify the Ed25519 signature — it only checks the
+ * structure, product, and expiry. It must NOT be used for access decisions.
+ * Use {@link validateLicenseAsync}, which awaits signature verification and
+ * fails closed. Retained for back-compat / displaying license info.
+ *
  * @param licenseKey The license key to validate
  * @param product The product to validate against ('craft' or 'artist')
  */
@@ -179,22 +192,12 @@ export function validateLicense(licenseKey: string, product: 'craft' | 'artist')
       features: signedPayload.features || [],
     }
 
-    // For synchronous validation, we trust the format and verify async later
-    // The signature is verified when the app is online
+    // Structural check only — NO signature verification here. Previously this
+    // fired verifySignatureAsync as a background promise and invalidated the
+    // cache "later", but callers never re-read the result, so a forged license
+    // stayed authorized (audit H3/H5). Access decisions must go through
+    // validateLicenseAsync(), which awaits verification and fails closed.
     validatedLicenses.set(cacheKey, license)
-
-    // Trigger async signature verification in background
-    verifySignatureAsync(signedPayload).then((valid) => {
-      if (!valid) {
-        console.error('License signature verification failed')
-        validatedLicenses.set(cacheKey, null)
-      }
-    }).catch(() => {
-      // Web Crypto Ed25519 may not be available in all browsers
-      // In that case, we rely on server-side validation when online
-      console.warn('Ed25519 verification not available in this browser')
-    })
-
     return license
   }
 
