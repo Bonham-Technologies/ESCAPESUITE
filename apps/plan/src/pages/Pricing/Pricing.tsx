@@ -196,6 +196,11 @@ export default function Pricing() {
             host it on your network and you're done. No installers, no accounts for your users, no
             internet required.
           </p>
+          <p className={styles.downloadNote}>
+            Annual term, renews automatically — cancel anytime. By purchasing you agree to the{' '}
+            <Link to="/terms">Site License Agreement</Link> and certify your organization is within
+            the selected band.
+          </p>
         </div>
       )}
 
