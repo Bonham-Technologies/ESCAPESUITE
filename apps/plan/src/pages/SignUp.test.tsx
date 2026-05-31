@@ -26,7 +26,7 @@ describe('SignUp Page', () => {
     expect(
       screen.getByRole('heading', { name: /create your account/i })
     ).toBeInTheDocument()
-    expect(screen.getByText(/14-day free trial/i)).toBeInTheDocument()
+    expect(screen.getByText(/7-day free trial/i)).toBeInTheDocument()
   })
 
   it('renders email and password inputs', () => {

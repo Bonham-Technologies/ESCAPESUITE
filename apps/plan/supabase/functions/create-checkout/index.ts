@@ -7,10 +7,9 @@ import { requireUser, serviceClient, AuthError } from '../_shared/auth.ts'
 const PRICE_IDS = {
   monthly: () => Deno.env.get('STRIPE_PRICE_PRO_MONTHLY'),
   annual: () => Deno.env.get('STRIPE_PRICE_PRO_ANNUAL'),
-  founding: () => Deno.env.get('STRIPE_PRICE_FOUNDING'),
 }
 
-type PlanType = 'monthly' | 'annual' | 'founding'
+type PlanType = 'monthly' | 'annual'
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return handleOptions()
@@ -29,8 +28,8 @@ serve(async (req) => {
     if (!plan) {
       return jsonResponse({ error: 'Missing required field: plan' }, 400)
     }
-    if (!['monthly', 'annual', 'founding'].includes(plan)) {
-      return jsonResponse({ error: 'Invalid plan. Must be: monthly, annual, or founding' }, 400)
+    if (!['monthly', 'annual'].includes(plan)) {
+      return jsonResponse({ error: 'Invalid plan. Must be: monthly or annual' }, 400)
     }
 
     const priceId = PRICE_IDS[plan as PlanType]()

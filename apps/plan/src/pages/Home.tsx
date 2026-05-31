@@ -200,7 +200,7 @@ export default function Home() {
               <span className={styles.optionPrice}>$9<span>/mo</span></span>
             </div>
             <ul className={styles.optionFeatures}>
-              <li>14-day free trial</li>
+              <li>7-day free trial</li>
               <li>No watermark on Pro</li>
               <li>Use it at escapesuite.io</li>
             </ul>
@@ -227,7 +227,7 @@ export default function Home() {
       {/* CTA Section */}
       <section className={styles.cta}>
         <h2>Run it on your network</h2>
-        <p>License ESCAPE Suite for your network, or try the hosted apps free for 14 days.</p>
+        <p>License ESCAPE Suite for your network, or try the hosted apps free for 7 days.</p>
         <div className={styles.heroCta}>
           <Link to="/pricing?tab=site">
             <button className="primary">See Site Licensing</button>
