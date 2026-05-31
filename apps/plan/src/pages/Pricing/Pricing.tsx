@@ -33,7 +33,7 @@ export default function Pricing() {
     setCheckoutClientSecret(null)
     await refetch()
     const dest = postCheckoutRef.current
-    navigate(dest === 'downloads' ? '/portal/downloads?success=true' : '/dashboard?success=true')
+    navigate(dest === 'downloads' ? '/dashboard?tab=downloads&success=true' : '/dashboard?success=true')
   }
 
   // Site license (annual subscription -> downloadable Suite bundle)
