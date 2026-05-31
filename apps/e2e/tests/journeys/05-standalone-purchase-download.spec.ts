@@ -77,7 +77,7 @@ test.describe('Journey: Standalone Purchase and Download', () => {
       tier: 'pro',
     })
 
-    await navigateTo(page, 'plan', '/portal/downloads')
+    await navigateTo(page, 'plan', '/dashboard?tab=downloads')
 
     // Look for pre-licensed download option
     const preLicensedButton = page

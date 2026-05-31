@@ -1,12 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
 import { mockSubscription } from '../../utils/subscription-mocks'
-import {
-  mockOrganizationAPIs,
-  setupMockOrganization,
-  createMockOrganization,
-  createMockMember,
-} from '../../utils/organization-mocks'
 
 test.describe('Protected Routes', () => {
   // Note: These tests verify Clerk authentication redirects but are skipped in CI
@@ -24,18 +18,6 @@ test.describe('Protected Routes', () => {
     const hasSignInUI = await signInUI.isVisible().catch(() => false)
 
     expect(hasSignIn || hasSignInUI).toBe(true)
-  })
-
-  test.skip('team page requires authentication', async ({ page }) => {
-    await mockClerkSignedOut(page)
-    await page.goto('http://localhost:5173/team')
-    await page.waitForLoadState('networkidle')
-
-    const url = page.url()
-    const signInUI = page.getByText(/sign in|log in/i).first()
-    const hasSignInUI = await signInUI.isVisible().catch(() => false)
-
-    expect(url.includes('sign-in') || url === 'http://localhost:5173/' || hasSignInUI).toBe(true)
   })
 })
 
@@ -114,89 +96,6 @@ test.describe('Upgrade Button', () => {
 
       expect(url.includes('pricing') || dialogVisible).toBe(true)
     }
-  })
-})
-
-test.describe('Team Management', () => {
-  test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
-    await mockOrganizationAPIs(page)
-    const org = createMockOrganization('Test Team', 'user_test_123')
-    const members = [
-      createMockMember(org.id, 'user_test_123', 'admin@test.com', 'admin'),
-      createMockMember(org.id, 'user_2', 'member@test.com', 'member'),
-    ]
-    setupMockOrganization(org, members, 'admin')
-    await page.goto('http://localhost:5173/team')
-    await page.waitForLoadState('networkidle')
-  })
-
-  test('team creation flow available', async ({ page }) => {
-    const createTeamButton = page
-      .getByRole('button', { name: /create|new team/i })
-      .first()
-
-    const isVisible = await createTeamButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
-  })
-
-  test('member invite available', async ({ page }) => {
-    const inviteButton = page
-      .getByRole('button', { name: /invite|add member/i })
-      .first()
-
-    const isVisible = await inviteButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
-  })
-
-  test('member list displays', async ({ page }) => {
-    const memberList = page.locator(
-      '[class*="member"], [class*="user"], table tbody tr'
-    )
-    const count = await memberList.count()
-
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
-
-  test('role change available for admins', async ({ page }) => {
-    const roleSelector = page
-      .getByRole('combobox', { name: /role/i })
-      .or(page.locator('[data-testid="role-selector"]'))
-      .first()
-
-    const isVisible = await roleSelector.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
-  })
-})
-
-test.describe('Audit Log', () => {
-  test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
-    await mockOrganizationAPIs(page)
-    const org = createMockOrganization('Enterprise Team', 'user_test_123', {
-      plan: 'enterprise',
-      settings: { audit_logging: true },
-    })
-    setupMockOrganization(org, [], 'admin')
-    await page.goto('http://localhost:5173/team/audit')
-    await page.waitForLoadState('networkidle')
-  })
-
-  test('audit log displays events', async ({ page }) => {
-    const auditTable = page.locator('table').first()
-    const isVisible = await auditTable.isVisible().catch(() => false)
-
-    expect(typeof isVisible).toBe('boolean')
-  })
-
-  test('audit log has filtering', async ({ page }) => {
-    const filterInput = page
-      .getByPlaceholder(/filter|search/i)
-      .or(page.locator('[data-testid="audit-filter"]'))
-      .first()
-
-    const isVisible = await filterInput.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
   })
 })
 

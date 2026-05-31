@@ -488,6 +488,10 @@
   color: white;
 }
 
+.btnPrimary:hover {
+  background: var(--accent-dark, #4f46e5);
+}
+
 .btnSecondary {
   background: var(--bg-tertiary);
   color: var(--text-primary);

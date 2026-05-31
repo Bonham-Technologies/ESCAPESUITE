@@ -79,7 +79,7 @@ export async function mockLicenseCheckout(page: Page, options: LicenseCheckoutOp
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          url: `${page.url().split('/').slice(0, 3).join('/')}/portal/downloads?success=true&product=${product}&tier=${tier}`,
+          url: `${page.url().split('/').slice(0, 3).join('/')}/dashboard?tab=downloads&success=true&product=${product}&tier=${tier}`,
         }),
       })
     } else {
