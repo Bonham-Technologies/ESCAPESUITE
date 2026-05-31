@@ -8,90 +8,75 @@ import { supabase } from '../../lib/supabase'
 import { CheckoutModal } from '../../components/Checkout'
 import styles from './Pricing.module.css'
 
-type PricingTab = 'individual' | 'team' | 'standalone'
-type StandaloneProduct = 'craft' | 'artist' | 'suite'
-type StandaloneTier = 'standard' | 'pro' | 'lifetime'
+type PricingTab = 'site' | 'individual'
+type Band = 'team' | 'org'
 
-// Standalone prices (configured in Stripe)
-const STANDALONE_PRICES: Record<StandaloneProduct, Record<StandaloneTier, { amount: number; label: string }>> = {
-  craft: {
-    standard: { amount: 49, label: 'ESCAPECRAFT Standard' },
-    pro: { amount: 99, label: 'ESCAPECRAFT Pro' },
-    lifetime: { amount: 199, label: 'ESCAPECRAFT Lifetime' },
-  },
-  artist: {
-    standard: { amount: 69, label: 'ESCAPEARTIST Standard' },
-    pro: { amount: 129, label: 'ESCAPEARTIST Pro' },
-    lifetime: { amount: 249, label: 'ESCAPEARTIST Lifetime' },
-  },
-  suite: {
-    standard: { amount: 99, label: 'Suite Bundle Standard' },
-    pro: { amount: 199, label: 'Suite Bundle Pro' },
-    lifetime: { amount: 349, label: 'Suite Bundle Lifetime' },
-  },
-}
-
-// Team pricing
-const TEAM_PRICES = {
-  team: { perSeat: 7, minSeats: 5, label: 'Team' },
-  enterprise: { perSeat: 12, minSeats: 25, label: 'Enterprise' },
-}
+// Whole-network sales contact (founder can repoint this alias).
+const CONTACT_EMAIL = 'sales@escapesuite.io'
 
 export default function Pricing() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const initialTab = (searchParams.get('tab') as PricingTab) || 'individual'
+  const initialTab: PricingTab = searchParams.get('tab') === 'individual' ? 'individual' : 'site'
 
   const { isSignedIn, isLoaded, user } = useUser()
   const { subscription, checkout, refetch } = useSubscription()
   const [activeTab, setActiveTab] = useState<PricingTab>(initialTab)
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
   const [checkoutClientSecret, setCheckoutClientSecret] = useState<string | null>(null)
-
-  // Team pricing state
-  const [teamSeats, setTeamSeats] = useState(5)
-  const [teamPlan, setTeamPlan] = useState<'team' | 'enterprise'>('team')
-  const [teamBillingPeriod, setTeamBillingPeriod] = useState<'monthly' | 'annual'>('monthly')
-  // Use ref for org slug to avoid stale closure issues with Stripe's onComplete callback
-  const teamOrgSlugRef = useRef<string | null>(null)
-
-  // Standalone state
-  const [standaloneProduct, setStandaloneProduct] = useState<StandaloneProduct>('suite')
-  const [standaloneTier, setStandaloneTier] = useState<StandaloneTier>('pro')
+  // Where to land after the embedded checkout completes.
+  const postCheckoutRef = useRef<'downloads' | 'dashboard'>('dashboard')
 
   const hasActiveSubscription = subscription?.hasActiveSubscription || false
 
-  // Handle checkout completion
   const handleCheckoutComplete = async () => {
     setCheckoutClientSecret(null)
     await refetch()
-    // Navigate based on checkout type - use ref to avoid stale closure
-    const orgSlug = teamOrgSlugRef.current
-    if (orgSlug) {
-      teamOrgSlugRef.current = null
-      navigate(`/team/${orgSlug}?success=true`)
-    } else {
-      navigate('/dashboard?success=true')
+    const dest = postCheckoutRef.current
+    navigate(dest === 'downloads' ? '/portal/downloads?success=true' : '/dashboard?success=true')
+  }
+
+  // Site license (annual subscription -> downloadable Suite bundle)
+  const handleSiteLicenseCheckout = async (band: Band) => {
+    if (!isSignedIn) {
+      window.location.href = '/sign-up?redirect=/pricing?tab=site'
+      return
+    }
+    if (!isLoaded || !user?.id) {
+      alert('Please wait for authentication to complete.')
+      return
+    }
+    try {
+      setCheckoutLoading(band)
+      const { data, error } = await supabase.functions.invoke('create-site-license-checkout', {
+        body: { band },
+      })
+      if (error) throw new Error(error.message || 'Checkout failed')
+      postCheckoutRef.current = 'downloads'
+      setCheckoutClientSecret(data.clientSecret)
+    } catch (error) {
+      console.error('Site license checkout error:', error)
+      alert('Failed to start checkout. Please try again.')
+    } finally {
+      setCheckoutLoading(null)
     }
   }
 
-  // Handle SaaS checkout
+  // Individual SaaS (hosted convenience for connected users)
   const handleSaaSCheckout = async (plan: CheckoutPlan) => {
     if (!isSignedIn) {
       window.location.href = '/sign-up'
       return
     }
-
-    // Wait for user to be fully loaded
     if (!isLoaded || !user?.id) {
       alert('Please wait for authentication to complete.')
       return
     }
-
     try {
       setCheckoutLoading(plan)
       analytics.checkoutStarted(plan)
       const clientSecret = await checkout(plan)
+      postCheckoutRef.current = 'dashboard'
       setCheckoutClientSecret(clientSecret)
     } catch (error) {
       console.error('Checkout error:', error)
@@ -101,121 +86,130 @@ export default function Pricing() {
     }
   }
 
-  // Handle standalone license checkout
-  const handleStandaloneCheckout = async () => {
-    if (!isSignedIn) {
-      window.location.href = '/sign-up?redirect=/pricing?tab=standalone'
-      return
-    }
-
-    // Wait for user to be fully loaded
-    if (!isLoaded || !user?.id) {
-      alert('Please wait for authentication to complete.')
-      return
-    }
-
-    try {
-      setCheckoutLoading('standalone')
-
-      const { data, error } = await supabase.functions.invoke('create-license-checkout', {
-        body: {
-          product: standaloneProduct,
-          tier: standaloneTier,
-          seats: 1,
-        },
-      })
-
-      if (error) {
-        throw new Error(error.message || 'Checkout failed')
-      }
-
-      // Open embedded checkout modal
-      setCheckoutClientSecret(data.clientSecret)
-    } catch (error) {
-      console.error('Standalone checkout error:', error)
-      alert('Failed to start checkout. Please try again.')
-    } finally {
-      setCheckoutLoading(null)
-    }
-  }
-
-  // Handle team checkout
-  const handleTeamCheckout = async () => {
-    if (!isSignedIn) {
-      window.location.href = '/sign-up'
-      return
-    }
-
-    // Wait for user to be fully loaded
-    if (!isLoaded || !user?.id) {
-      alert('Please wait for authentication to complete.')
-      return
-    }
-
-    try {
-      setCheckoutLoading('team')
-
-      const { data, error } = await supabase.functions.invoke('create-org-checkout', {
-        body: {
-          plan: teamPlan,
-          seatCount: teamSeats,
-          billingPeriod: teamBillingPeriod,
-          organizationName: `${user.firstName || 'User'}'s Team`,
-        },
-      })
-
-      if (error) {
-        throw new Error(error.message || 'Checkout failed')
-      }
-
-      // Store org slug in ref for redirect after checkout (avoids stale closure)
-      teamOrgSlugRef.current = data.organizationSlug
-      // Open embedded checkout modal
-      setCheckoutClientSecret(data.clientSecret)
-    } catch (error) {
-      console.error('Team checkout error:', error)
-      alert('Failed to start checkout. Please try again.')
-    } finally {
-      setCheckoutLoading(null)
-    }
-  }
-
-  const standalonePrice = STANDALONE_PRICES[standaloneProduct][standaloneTier]
-  const teamPrice = TEAM_PRICES[teamPlan]
-  const teamMonthlyTotal = teamPrice.perSeat * teamSeats
-  const teamAnnualTotal = teamMonthlyTotal * 10 // 2 months free with annual
+  const siteFeatures = [
+    'Both apps — record (CRAFT) + edit (ARTIST)',
+    'One hosted copy serves your whole network',
+    'Runs 100% in-browser, fully offline — air-gap friendly',
+    'Signed bundle with your license embedded',
+    'No watermark, no telemetry, no cloud dependency',
+    'A year of updates + support; renews annually',
+  ]
 
   return (
     <div className={styles.pricing}>
       <header className={styles.header}>
-        <h1>Choose Your Plan</h1>
-        <p>Select the option that best fits your needs</p>
+        <h1>Pricing</h1>
+        <p>Run it on your network, or let us host it. One license covers your whole organization.</p>
       </header>
 
       <div className={styles.tabs}>
+        <button
+          className={`${styles.tab} ${activeTab === 'site' ? styles.active : ''}`}
+          onClick={() => setActiveTab('site')}
+        >
+          Site License
+        </button>
         <button
           className={`${styles.tab} ${activeTab === 'individual' ? styles.active : ''}`}
           onClick={() => setActiveTab('individual')}
         >
           Individual
         </button>
-        <button
-          className={`${styles.tab} ${activeTab === 'team' ? styles.active : ''}`}
-          onClick={() => setActiveTab('team')}
-        >
-          Teams
-        </button>
-        <button
-          className={`${styles.tab} ${activeTab === 'standalone' ? styles.active : ''}`}
-          onClick={() => setActiveTab('standalone')}
-        >
-          Standalone License
-        </button>
       </div>
 
-      {/* Individual SaaS Pricing */}
+      {/* Site License — the hero. One license = the whole org/network. */}
+      {activeTab === 'site' && (
+        <div className={styles.individualPricing}>
+          <div className={styles.standaloneInfo}>
+            <h3>ESCAPE Suite — Site License</h3>
+            <p>
+              Built for air-gapped and regulated networks. Host one copy internally; everyone on
+              your network records and edits in their browser — nothing ever leaves the building.
+              One annual license covers the whole organization.
+            </p>
+          </div>
+
+          <div className={styles.pricingGrid}>
+            <div className={styles.pricingCard}>
+              <h3>Team</h3>
+              <div className={styles.price}>
+                <span className={styles.amount}>$2,400</span>
+                <span className={styles.period}>per year</span>
+              </div>
+              <p className={styles.savings}>A single team or unit · up to ~25 people</p>
+              <ul className={styles.features}>
+                {siteFeatures.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+              <button
+                onClick={() => handleSiteLicenseCheckout('team')}
+                disabled={checkoutLoading !== null}
+              >
+                {checkoutLoading === 'team' ? 'Loading…' : 'Get Team License'}
+              </button>
+            </div>
+
+            <div className={`${styles.pricingCard} ${styles.featured}`}>
+              <div className={styles.badge}>Most Popular</div>
+              <h3>Organization</h3>
+              <div className={styles.price}>
+                <span className={styles.amount}>$9,600</span>
+                <span className={styles.period}>per year</span>
+              </div>
+              <p className={styles.savings}>A department or agency · up to ~250 people</p>
+              <ul className={styles.features}>
+                {siteFeatures.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+                <li>Priority support</li>
+              </ul>
+              <button
+                className="primary"
+                onClick={() => handleSiteLicenseCheckout('org')}
+                disabled={checkoutLoading !== null}
+              >
+                {checkoutLoading === 'org' ? 'Loading…' : 'Get Org License'}
+              </button>
+            </div>
+
+            <div className={styles.pricingCard}>
+              <h3>Enterprise / Site</h3>
+              <div className={styles.price}>
+                <span className={styles.amount}>Let's talk</span>
+              </div>
+              <p className={styles.savings}>Whole-network deployment · unlimited users</p>
+              <ul className={styles.features}>
+                <li>Everything in Organization</li>
+                <li>Unlimited users across your network</li>
+                <li>Procurement, PO & security review</li>
+                <li>Custom terms + onboarding</li>
+              </ul>
+              <a href={`mailto:${CONTACT_EMAIL}?subject=ESCAPE%20Suite%20Enterprise%2FSite%20License`}>
+                <button>Contact Us</button>
+              </a>
+            </div>
+          </div>
+
+          <p className={styles.downloadNote}>
+            After purchase you'll download a single, signed HTML bundle with your license embedded —
+            host it on your network and you're done. No installers, no accounts for your users, no
+            internet required.
+          </p>
+        </div>
+      )}
+
+      {/* Individual SaaS — hosted convenience for connected users */}
       {activeTab === 'individual' && (
         <div className={styles.individualPricing}>
+          <div className={styles.standaloneInfo}>
+            <h3>Individual</h3>
+            <p>
+              For solo creators who just want the hosted apps — sign in at escapesuite.io and start
+              recording. No air-gap needed.
+            </p>
+          </div>
+
           <div className={styles.pricingGrid}>
             <div className={styles.pricingCard}>
               <h3>Free Trial</h3>
@@ -224,7 +218,7 @@ export default function Pricing() {
                 <span className={styles.period}>14 days</span>
               </div>
               <ul className={styles.features}>
-                <li>Full access to all tools</li>
+                <li>Full access to both apps</li>
                 <li>Watermark on exports</li>
                 <li>No credit card required</li>
               </ul>
@@ -244,12 +238,12 @@ export default function Pricing() {
               <div className={styles.badge}>Most Popular</div>
               <h3>Pro Annual</h3>
               <div className={styles.price}>
-                <span className={styles.amount}>$79</span>
+                <span className={styles.amount}>$89</span>
                 <span className={styles.period}>per year</span>
               </div>
-              <p className={styles.savings}>Save $29 vs monthly</p>
+              <p className={styles.savings}>Save $19 vs monthly</p>
               <ul className={styles.features}>
-                <li>Full access to all tools</li>
+                <li>Full access to both apps</li>
                 <li>No watermark</li>
                 <li>All future updates</li>
                 <li>Priority support</li>
@@ -270,7 +264,7 @@ export default function Pricing() {
                     onClick={() => handleSaaSCheckout('annual')}
                     disabled={checkoutLoading !== null}
                   >
-                    {checkoutLoading === 'annual' ? 'Loading...' : 'Upgrade Now'}
+                    {checkoutLoading === 'annual' ? 'Loading…' : 'Upgrade Now'}
                   </button>
                 )}
               </SignedIn>
@@ -283,7 +277,7 @@ export default function Pricing() {
                 <span className={styles.period}>per month</span>
               </div>
               <ul className={styles.features}>
-                <li>Full access to all tools</li>
+                <li>Full access to both apps</li>
                 <li>No watermark</li>
                 <li>Cancel anytime</li>
               </ul>
@@ -302,7 +296,7 @@ export default function Pricing() {
                     onClick={() => handleSaaSCheckout('monthly')}
                     disabled={checkoutLoading !== null}
                   >
-                    {checkoutLoading === 'monthly' ? 'Loading...' : 'Upgrade Now'}
+                    {checkoutLoading === 'monthly' ? 'Loading…' : 'Upgrade Now'}
                   </button>
                 )}
               </SignedIn>
@@ -311,8 +305,8 @@ export default function Pricing() {
 
           <div className={styles.foundingMember}>
             <div className={styles.foundingBadge}>Limited Time</div>
-            <h3>Founding Member - $149 one-time</h3>
-            <p>Get lifetime access. Limited to first 100 supporters.</p>
+            <h3>Founding Member — $149 one-time</h3>
+            <p>Lifetime access to the hosted apps. Limited to the first 100 supporters.</p>
             <SignedOut>
               <Link to="/sign-up">
                 <button className="primary">Become a Founder</button>
@@ -327,7 +321,7 @@ export default function Pricing() {
                   onClick={() => handleSaaSCheckout('founding')}
                   disabled={checkoutLoading !== null}
                 >
-                  {checkoutLoading === 'founding' ? 'Loading...' : 'Become a Founder'}
+                  {checkoutLoading === 'founding' ? 'Loading…' : 'Become a Founder'}
                 </button>
               )}
             </SignedIn>
@@ -335,338 +329,31 @@ export default function Pricing() {
         </div>
       )}
 
-      {/* Team Pricing */}
-      {activeTab === 'team' && (
-        <div className={styles.teamPricing}>
-          <div className={styles.teamCalculator}>
-            <div className={styles.calculatorSection}>
-              <h3>Choose Your Plan</h3>
-              <div className={styles.planSelector}>
-                <button
-                  className={`${styles.planOption} ${teamPlan === 'team' ? styles.active : ''}`}
-                  onClick={() => {
-                    setTeamPlan('team')
-                    if (teamSeats < 5) setTeamSeats(5)
-                  }}
-                >
-                  <div className={styles.planName}>Team</div>
-                  <div className={styles.planPrice}>${TEAM_PRICES.team.perSeat}/seat/mo</div>
-                  <div className={styles.planMin}>Min 5 seats</div>
-                </button>
-                <button
-                  className={`${styles.planOption} ${teamPlan === 'enterprise' ? styles.active : ''}`}
-                  onClick={() => {
-                    setTeamPlan('enterprise')
-                    if (teamSeats < 25) setTeamSeats(25)
-                  }}
-                >
-                  <div className={styles.planName}>Enterprise</div>
-                  <div className={styles.planPrice}>${TEAM_PRICES.enterprise.perSeat}/seat/mo</div>
-                  <div className={styles.planMin}>Min 25 seats</div>
-                  <div className={styles.planBadge}>SSO + Audit</div>
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.calculatorSection}>
-              <h3>Number of Seats</h3>
-              <div className={styles.seatSlider}>
-                <input
-                  type="range"
-                  min={teamPrice.minSeats}
-                  max={100}
-                  value={teamSeats}
-                  onChange={(e) => setTeamSeats(parseInt(e.target.value))}
-                />
-                <div className={styles.seatValue}>
-                  <input
-                    type="number"
-                    min={teamPrice.minSeats}
-                    max={500}
-                    value={teamSeats}
-                    onChange={(e) => setTeamSeats(Math.max(teamPrice.minSeats, parseInt(e.target.value) || teamPrice.minSeats))}
-                  />
-                  <span>seats</span>
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.calculatorSection}>
-              <h3>Billing Period</h3>
-              <div className={styles.billingToggle}>
-                <button
-                  className={`${styles.billingOption} ${teamBillingPeriod === 'monthly' ? styles.active : ''}`}
-                  onClick={() => setTeamBillingPeriod('monthly')}
-                >
-                  Monthly
-                </button>
-                <button
-                  className={`${styles.billingOption} ${teamBillingPeriod === 'annual' ? styles.active : ''}`}
-                  onClick={() => setTeamBillingPeriod('annual')}
-                >
-                  Annual
-                  <span className={styles.savingsBadge}>Save 17%</span>
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.calculatorTotal}>
-              <div className={styles.totalBreakdown}>
-                {teamBillingPeriod === 'monthly' ? (
-                  <>
-                    <span>{teamSeats} seats x ${teamPrice.perSeat}/mo</span>
-                    <span className={styles.totalAmount}>${teamMonthlyTotal}/mo</span>
-                  </>
-                ) : (
-                  <>
-                    <span>{teamSeats} seats x ${teamPrice.perSeat * 10}/yr</span>
-                    <span className={styles.totalAmount}>${teamAnnualTotal}/yr</span>
-                  </>
-                )}
-              </div>
-              {teamBillingPeriod === 'monthly' ? (
-                <p className={styles.annualNote}>
-                  Switch to annual billing and save ${teamMonthlyTotal * 2}/year
-                </p>
-              ) : (
-                <p className={styles.annualNote}>
-                  Equivalent to ${(teamAnnualTotal / 12).toFixed(0)}/mo (2 months free)
-                </p>
-              )}
-
-              <SignedOut>
-                <Link to="/sign-up">
-                  <button className="primary">Sign Up to Continue</button>
-                </Link>
-              </SignedOut>
-              <SignedIn>
-                <button
-                  className="primary"
-                  onClick={handleTeamCheckout}
-                  disabled={checkoutLoading !== null}
-                >
-                  {checkoutLoading === 'team' ? 'Loading...' : 'Start Team Plan'}
-                </button>
-              </SignedIn>
-            </div>
-          </div>
-
-          <div className={styles.teamFeatures}>
-            <h3>{teamPlan === 'team' ? 'Team' : 'Enterprise'} Features</h3>
-            <div className={styles.featureGrid}>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>All Pro features</span>
-              </div>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>Team member management</span>
-              </div>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>Centralized billing</span>
-              </div>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>Priority support</span>
-              </div>
-              {teamPlan === 'enterprise' && (
-                <>
-                  <div className={styles.featureItem}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <span>SSO/SAML integration</span>
-                  </div>
-                  <div className={styles.featureItem}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <span>Audit logging</span>
-                  </div>
-                  <div className={styles.featureItem}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <span>Dedicated success manager</span>
-                  </div>
-                  <div className={styles.featureItem}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <span>99.9% SLA</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Standalone License Pricing */}
-      {activeTab === 'standalone' && (
-        <div className={styles.standalonePricing}>
-          <div className={styles.standaloneInfo}>
-            <h3>Standalone License</h3>
-            <p>
-              Purchase a one-time license for offline use. No subscription, no internet
-              required after activation. Download and run entirely on your device.
-            </p>
-          </div>
-
-          <div className={styles.standaloneCalculator}>
-            <div className={styles.productSelector}>
-              <h4>Select Product</h4>
-              <div className={styles.productOptions}>
-                <button
-                  className={`${styles.productOption} ${standaloneProduct === 'craft' ? styles.active : ''}`}
-                  onClick={() => setStandaloneProduct('craft')}
-                >
-                  <span className={styles.productIcon}>REC</span>
-                  <span className={styles.productName}>ESCAPECRAFT</span>
-                  <span className={styles.productDesc}>Screen Recorder</span>
-                </button>
-                <button
-                  className={`${styles.productOption} ${standaloneProduct === 'artist' ? styles.active : ''}`}
-                  onClick={() => setStandaloneProduct('artist')}
-                >
-                  <span className={styles.productIcon}>EDIT</span>
-                  <span className={styles.productName}>ESCAPEARTIST</span>
-                  <span className={styles.productDesc}>Video Editor</span>
-                </button>
-                <button
-                  className={`${styles.productOption} ${standaloneProduct === 'suite' ? styles.active : ''}`}
-                  onClick={() => setStandaloneProduct('suite')}
-                >
-                  <span className={styles.productIcon}>ALL</span>
-                  <span className={styles.productName}>Suite Bundle</span>
-                  <span className={styles.productDesc}>Both Apps - Save 20%</span>
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.tierSelector}>
-              <h4>Select Tier</h4>
-              <div className={styles.tierOptions}>
-                <button
-                  className={`${styles.tierOption} ${standaloneTier === 'standard' ? styles.active : ''}`}
-                  onClick={() => setStandaloneTier('standard')}
-                >
-                  <span className={styles.tierName}>Standard</span>
-                  <span className={styles.tierPrice}>${STANDALONE_PRICES[standaloneProduct].standard.amount}</span>
-                  <span className={styles.tierDesc}>1 year updates</span>
-                </button>
-                <button
-                  className={`${styles.tierOption} ${standaloneTier === 'pro' ? styles.active : ''}`}
-                  onClick={() => setStandaloneTier('pro')}
-                >
-                  <span className={styles.tierName}>Pro</span>
-                  <span className={styles.tierPrice}>${STANDALONE_PRICES[standaloneProduct].pro.amount}</span>
-                  <span className={styles.tierDesc}>2 years updates + priority support</span>
-                </button>
-                <button
-                  className={`${styles.tierOption} ${standaloneTier === 'lifetime' ? styles.active : ''}`}
-                  onClick={() => setStandaloneTier('lifetime')}
-                >
-                  <span className={styles.tierBadge}>Best Value</span>
-                  <span className={styles.tierName}>Lifetime</span>
-                  <span className={styles.tierPrice}>${STANDALONE_PRICES[standaloneProduct].lifetime.amount}</span>
-                  <span className={styles.tierDesc}>Forever updates + priority support</span>
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.standaloneTotal}>
-              <div className={styles.totalInfo}>
-                <span className={styles.selectedProduct}>{standalonePrice.label}</span>
-                <span className={styles.selectedPrice}>${standalonePrice.amount}</span>
-              </div>
-              <p className={styles.oneTimeNote}>One-time payment - no subscription</p>
-
-              <button
-                className="primary"
-                onClick={handleStandaloneCheckout}
-                disabled={checkoutLoading !== null}
-              >
-                {checkoutLoading === 'standalone' ? 'Loading...' : 'Purchase License'}
-              </button>
-
-              <p className={styles.downloadNote}>
-                After purchase, you'll receive a license key and download link via email.
-              </p>
-            </div>
-          </div>
-
-          <div className={styles.standaloneFeatures}>
-            <h4>What's Included</h4>
-            <div className={styles.featureGrid}>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>Works completely offline</span>
-              </div>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>Single HTML file - no install</span>
-              </div>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>No watermark</span>
-              </div>
-              <div className={styles.featureItem}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span>Use on multiple devices</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FAQ Section */}
+      {/* Common questions */}
       <section className={styles.faq}>
-        <h2>Frequently Asked Questions</h2>
+        <h2>Common questions</h2>
         <div className={styles.faqGrid}>
           <div className={styles.faqItem}>
-            <h4>What's the difference between SaaS and Standalone?</h4>
+            <h4>How does it run with no internet?</h4>
             <p>
-              SaaS is a subscription that requires an internet connection. Standalone is a
-              one-time purchase that works completely offline after activation.
+              You buy here and download one signed HTML file with your license baked in. Host it on
+              an internal server; anyone on the network opens it in a browser and records and edits
+              locally. Once you've carried the file in, it never touches the internet again.
             </p>
           </div>
           <div className={styles.faqItem}>
-            <h4>Can I switch from SaaS to Standalone later?</h4>
+            <h4>One license for our whole team?</h4>
             <p>
-              Yes! You can purchase a standalone license at any time. Your SaaS subscription
-              is separate and can be cancelled if you prefer standalone.
+              Yes — a Site License is per organization, not per seat. Host one copy and everyone uses
+              it. The Team and Organization bands just track roughly how many of you there are.
             </p>
           </div>
           <div className={styles.faqItem}>
-            <h4>How many devices can I use the standalone license on?</h4>
+            <h4>What happens when the year is up?</h4>
             <p>
-              Individual licenses work on up to 3 personal devices. Team licenses provide
-              one seat per user purchased.
-            </p>
-          </div>
-          <div className={styles.faqItem}>
-            <h4>Do you offer refunds?</h4>
-            <p>
-              Yes, we offer a 30-day money-back guarantee on all purchases if you're not
-              satisfied.
+              Each license carries an end date. When the term lapses, the apps stop working until you
+              renew and drop in the refreshed bundle — which is also how you pick up the latest fixes
+              and features. Stay current, stay running.
             </p>
           </div>
         </div>
@@ -676,10 +363,7 @@ export default function Pricing() {
       {checkoutClientSecret && (
         <CheckoutModal
           clientSecret={checkoutClientSecret}
-          onClose={() => {
-            setCheckoutClientSecret(null)
-            teamOrgSlugRef.current = null
-          }}
+          onClose={() => setCheckoutClientSecret(null)}
           onComplete={handleCheckoutComplete}
         />
       )}

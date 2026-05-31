@@ -33,26 +33,27 @@ export default function Home() {
       <section className={styles.hero}>
         <div className={styles.heroContent}>
           <h1 className={styles.heroTitle}>
-            Create stunning videos<br />
-            <span className={styles.gradient}>entirely in your browser</span>
+            How-to videos for networks<br />
+            <span className={styles.gradient}>the cloud can't reach.</span>
           </h1>
           <p className={styles.heroSubtitle}>
-            Record, edit, and export professional videos with no uploads,
-            no subscriptions to cloud services, and complete privacy.
-            Everything runs locally on your device.
+            ESCAPE Suite records and edits screencasts entirely in the browser. Host one copy on your
+            air-gapped or regulated network and your whole team can capture a walkthrough, trim the
+            mistakes, blur anything sensitive, and share it with shift workers and remote sites —
+            without a single byte leaving the building.
           </p>
           <div className={styles.heroCta}>
+            <Link to="/pricing?tab=site">
+              <button className="primary">See Site Licensing</button>
+            </Link>
             <SignedOut>
               <Link to="/sign-up">
-                <button className="primary">Start Free Trial</button>
-              </Link>
-              <Link to="/sign-in">
-                <button>Sign In</button>
+                <button>Try the hosted apps free</button>
               </Link>
             </SignedOut>
             <SignedIn>
               <Link to="/dashboard">
-                <button className="primary">Go to Dashboard</button>
+                <button>Go to Dashboard</button>
               </Link>
             </SignedIn>
           </div>
@@ -61,7 +62,7 @@ export default function Home() {
 
       {/* Tools Section */}
       <section className={styles.tools}>
-        <h2 className={styles.sectionTitle}>The Complete Video Creation Suite</h2>
+        <h2 className={styles.sectionTitle}>Capture it, clean it up, send it out</h2>
         <div className={styles.toolsGrid}>
           <div className={styles.toolCard}>
             <div className={styles.toolIcon}>
@@ -72,14 +73,14 @@ export default function Home() {
             </div>
             <h3>ESCAPECRAFT</h3>
             <p>
-              Record your screen, webcam, and audio with picture-in-picture support.
-              Perfect for tutorials, demos, and presentations.
+              One-shot a how-to: record your screen, webcam, and audio — picture-in-picture included.
+              Built for tutorials, SOPs, and handoffs between shifts.
             </p>
             <ul className={styles.featureList}>
-              <li>Screen & webcam capture</li>
-              <li>System & microphone audio</li>
+              <li>Screen &amp; webcam capture</li>
+              <li>System &amp; microphone audio</li>
               <li>Picture-in-Picture mode</li>
-              <li>Instant local saving</li>
+              <li>Saves locally, instantly</li>
             </ul>
           </div>
 
@@ -92,14 +93,14 @@ export default function Home() {
             </div>
             <h3>ESCAPEARTIST</h3>
             <p>
-              Edit videos with a professional timeline editor. Add overlays,
-              animations, and export to multiple formats.
+              Cut the fumbles, blur a password or PII, add a caption — then export. A real timeline
+              editor, no cloud render farm required.
             </p>
             <ul className={styles.featureList}>
               <li>Multi-track timeline</li>
+              <li>Blur &amp; redaction overlays</li>
               <li>Keyframe animations</li>
-              <li>Shape & blur overlays</li>
-              <li>MP4 & WebM export</li>
+              <li>MP4 &amp; WebM export</li>
             </ul>
           </div>
         </div>
@@ -107,7 +108,7 @@ export default function Home() {
 
       {/* Features Section */}
       <section className={styles.features}>
-        <h2 className={styles.sectionTitle}>Why ESCAPE Suite?</h2>
+        <h2 className={styles.sectionTitle}>Why teams behind a firewall choose ESCAPE</h2>
         <div className={styles.featuresGrid}>
           <div className={styles.feature}>
             <div className={styles.featureIcon}>
@@ -116,29 +117,32 @@ export default function Home() {
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
             </div>
-            <h3>100% Private</h3>
-            <p>Your videos never leave your device. No cloud uploads, no data collection.</p>
+            <h3>Runs air-gapped</h3>
+            <p>100% in-browser, fully offline. Drop the bundle onto your isolated network — no internet, ever.</p>
           </div>
 
           <div className={styles.feature}>
             <div className={styles.featureIcon}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
             </div>
-            <h3>Lightning Fast</h3>
-            <p>No upload wait times. Edit and export at full speed using your local hardware.</p>
+            <h3>One copy, whole org</h3>
+            <p>Host a single signed file internally; everyone on your network just opens it and works.</p>
           </div>
 
           <div className={styles.feature}>
             <div className={styles.featureIcon}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 6v6l4 2" />
+                <path d="M9 12l2 2 4-4" />
+                <path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.66 0 3.21.45 4.54 1.23" />
               </svg>
             </div>
-            <h3>Works Offline</h3>
-            <p>Once loaded, works without internet. Perfect for travel or restricted networks.</p>
+            <h3>Nothing leaves the building</h3>
+            <p>No uploads, no accounts for your users, no telemetry. Your footage stays on the device.</p>
           </div>
 
           <div className={styles.feature}>
@@ -147,20 +151,41 @@ export default function Home() {
                 <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
               </svg>
             </div>
-            <h3>No Installation</h3>
-            <p>Runs entirely in your browser. No downloads, no plugins, no hassle.</p>
+            <h3>No installers</h3>
+            <p>A single HTML file — no plugins, no admin rights, no deployment headaches.</p>
           </div>
         </div>
       </section>
 
       {/* Pricing Section */}
       <section className={styles.pricing} ref={pricingRef}>
-        <h2 className={styles.sectionTitle}>Simple, Transparent Pricing</h2>
+        <h2 className={styles.sectionTitle}>One license covers your whole network</h2>
         <p className={styles.pricingSubtitle}>
-          Choose how you want to use ESCAPE Suite
+          Buy a Site License for your organization — or grab the hosted apps if you're flying solo.
         </p>
 
         <div className={styles.pricingOptions}>
+          <div className={`${styles.pricingOption} ${styles.featured}`}>
+            <div className={styles.badge}>For organizations</div>
+            <div className={styles.optionIcon}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <path d="M9 9h6v6H9z" />
+              </svg>
+            </div>
+            <h3>Site License</h3>
+            <p>Host once, license your whole air-gapped network</p>
+            <div className={styles.optionPricing}>
+              <span className={styles.startingAt}>Starting at</span>
+              <span className={styles.optionPrice}>$2,400<span>/yr</span></span>
+            </div>
+            <ul className={styles.optionFeatures}>
+              <li>Both apps, full features, no watermark</li>
+              <li>Signed offline bundle, license embedded</li>
+              <li>One copy serves everyone</li>
+            </ul>
+          </div>
+
           <div className={styles.pricingOption}>
             <div className={styles.optionIcon}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -169,7 +194,7 @@ export default function Home() {
               </svg>
             </div>
             <h3>Individual</h3>
-            <p>For solo creators and professionals</p>
+            <p>Hosted apps for solo creators</p>
             <div className={styles.optionPricing}>
               <span className={styles.startingAt}>Starting at</span>
               <span className={styles.optionPrice}>$9<span>/mo</span></span>
@@ -177,62 +202,18 @@ export default function Home() {
             <ul className={styles.optionFeatures}>
               <li>14-day free trial</li>
               <li>No watermark on Pro</li>
-              <li>Priority support</li>
-            </ul>
-          </div>
-
-          <div className={`${styles.pricingOption} ${styles.featured}`}>
-            <div className={styles.badge}>Most Flexible</div>
-            <div className={styles.optionIcon}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-            </div>
-            <h3>Teams</h3>
-            <p>For teams and organizations</p>
-            <div className={styles.optionPricing}>
-              <span className={styles.startingAt}>Starting at</span>
-              <span className={styles.optionPrice}>$7<span>/seat/mo</span></span>
-            </div>
-            <ul className={styles.optionFeatures}>
-              <li>Centralized billing</li>
-              <li>Member management</li>
-              <li>SSO/SAML (Enterprise)</li>
-            </ul>
-          </div>
-
-          <div className={styles.pricingOption}>
-            <div className={styles.optionIcon}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-            </div>
-            <h3>Standalone</h3>
-            <p>One-time purchase, works offline</p>
-            <div className={styles.optionPricing}>
-              <span className={styles.startingAt}>Starting at</span>
-              <span className={styles.optionPrice}>$49<span> once</span></span>
-            </div>
-            <ul className={styles.optionFeatures}>
-              <li>No subscription required</li>
-              <li>Works completely offline</li>
-              <li>Single HTML file</li>
+              <li>Use it at escapesuite.io</li>
             </ul>
           </div>
         </div>
 
         <div className={styles.pricingCta}>
-          <Link to="/pricing">
-            <button className="primary">View All Pricing Options</button>
+          <Link to="/pricing?tab=site">
+            <button className="primary">View Site Licensing</button>
           </Link>
           <SignedOut>
             <Link to="/sign-up">
-              <button>Start Free Trial</button>
+              <button>Try the hosted apps free</button>
             </Link>
           </SignedOut>
           <SignedIn>
@@ -245,18 +226,23 @@ export default function Home() {
 
       {/* CTA Section */}
       <section className={styles.cta}>
-        <h2>Ready to create amazing videos?</h2>
-        <p>Start your free 14-day trial today. No credit card required.</p>
-        <SignedOut>
-          <Link to="/sign-up">
-            <button className="primary">Start Free Trial</button>
+        <h2>Run it on your network</h2>
+        <p>License ESCAPE Suite for your network, or try the hosted apps free for 14 days.</p>
+        <div className={styles.heroCta}>
+          <Link to="/pricing?tab=site">
+            <button className="primary">See Site Licensing</button>
           </Link>
-        </SignedOut>
-        <SignedIn>
-          <Link to="/dashboard">
-            <button className="primary">Go to Dashboard</button>
-          </Link>
-        </SignedIn>
+          <SignedOut>
+            <Link to="/sign-up">
+              <button>Start Free Trial</button>
+            </Link>
+          </SignedOut>
+          <SignedIn>
+            <Link to="/dashboard">
+              <button>Go to Dashboard</button>
+            </Link>
+          </SignedIn>
+        </div>
       </section>
     </div>
   )
