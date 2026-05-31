@@ -232,35 +232,3 @@ test.describe('ESCAPEPLAN Checkout Modal Responsive', () => {
     }
   })
 })
-
-test.describe('ESCAPEPLAN Team Management Responsive', () => {
-  test('team page works on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
-    await page.goto('http://localhost:5173/team')
-    await page.waitForLoadState('networkidle')
-
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
-  })
-
-  test('member table scrolls horizontally on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
-    await page.goto('http://localhost:5173/team')
-    await page.waitForLoadState('networkidle')
-
-    const table = page.locator('table').first()
-    const isVisible = await table.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const container = table.locator('..')
-      const overflow = await container.evaluate((el) => {
-        return window.getComputedStyle(el).overflowX
-      })
-
-      // Should allow horizontal scroll if needed
-      expect(['auto', 'scroll', 'visible']).toContain(overflow)
-    }
-  })
-})

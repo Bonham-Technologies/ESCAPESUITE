@@ -32,9 +32,7 @@ tests/
 │   ├── landing.spec.ts      # Landing page and navigation
 │   ├── dashboard.spec.ts    # Dashboard functionality
 │   ├── pricing.spec.ts      # Pricing page and tiers
-│   ├── downloads.spec.ts    # License downloads
-│   ├── invite.spec.ts       # Team invitations
-│   └── team.spec.ts         # Team management
+│   └── downloads.spec.ts    # License downloads (Dashboard ?tab=downloads)
 ├── escapecraft/             # ESCAPECRAFT tests
 │   └── recording-flow.spec.ts # Recording features
 ├── escapeartist/            # ESCAPEARTIST tests
@@ -51,15 +49,7 @@ tests/
     ├── 03-trial-to-pro-upgrade.spec.ts
     ├── 04-pro-cancellation-flow.spec.ts
     ├── 05-standalone-purchase-download.spec.ts
-    ├── 06-team-admin-workflow.spec.ts
-    ├── 07-standalone-license-activation.spec.ts
-    ├── 08-team-purchase-flow.spec.ts
-    ├── 09-member-invitation-flow.spec.ts
-    ├── 10-team-role-management.spec.ts
-    ├── 11-member-removal-flow.spec.ts
-    ├── 12-team-settings.spec.ts
-    ├── 13-audit-logs-enterprise.spec.ts
-    └── 14-seat-management.spec.ts
+    └── 07-standalone-license-activation.spec.ts
 ```
 
 ## User Journey Tests
@@ -75,22 +65,7 @@ The `journeys/` directory contains comprehensive E2E tests covering critical use
 | 03 | Trial → Upgrade to Pro | 4 |
 | 04 | Pro → Cancel → Access until period end → Expired | 4 |
 | 05 | User → Purchase standalone license → Download | 5 |
-| 06 | Team admin → Create org → Invite → Member accepts | 3 |
 | 07 | Standalone → Manual license entry → Activation | 6 |
-
-### Team & Enterprise Journeys
-
-| Journey | Description | Tests |
-|---------|-------------|-------|
-| 08 | Team purchase flow (pricing → checkout → dashboard) | 4 |
-| 09 | Member invitation flow (invite → accept → join) | 7 |
-| 10 | Role management (owner/admin/member permissions) | 5 |
-| 11 | Member removal and leave organization | 6 |
-| 12 | Team settings (name, security, enterprise features) | 6 |
-| 13 | Audit logs (Enterprise feature) | 6 |
-| 14 | Seat management and capacity | 6 |
-
-**Total: 69 journey tests**
 
 ### Running Journey Tests
 
@@ -116,7 +91,6 @@ The `utils/` directory provides reusable testing utilities:
 | `subscription-mocks.ts` | Mock subscription states |
 | `license-mocks.ts` | Mock license validation |
 | `watermark-verification.ts` | Verify watermark presence |
-| `organization-mocks.ts` | Mock team/organization APIs |
 
 ### Test Fixtures
 

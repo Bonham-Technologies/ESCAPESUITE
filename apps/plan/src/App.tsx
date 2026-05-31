@@ -5,14 +5,6 @@ import Home from './pages/Home'
 import Dashboard from './pages/Dashboard'
 import SignInPage from './pages/SignIn'
 import SignUpPage from './pages/SignUp'
-import {
-  TeamDashboard,
-  TeamMembers,
-  TeamSettings,
-  AcceptInvite,
-  AuditLogs,
-} from './pages/Team'
-import { Downloads } from './pages/Portal'
 import { Pricing } from './pages/Pricing'
 import { Privacy, Terms } from './pages/Legal'
 
@@ -49,47 +41,7 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="team/:slug"
-          element={
-            <ProtectedRoute>
-              <TeamDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="team/:slug/members"
-          element={
-            <ProtectedRoute>
-              <TeamMembers />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="team/:slug/settings"
-          element={
-            <ProtectedRoute>
-              <TeamSettings />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="team/:slug/audit-logs"
-          element={
-            <ProtectedRoute>
-              <AuditLogs />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="invite/:token" element={<AcceptInvite />} />
-        <Route
-          path="portal/downloads"
-          element={
-            <ProtectedRoute>
-              <Downloads />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="portal/downloads" element={<Navigate to="/dashboard?tab=downloads" replace />} />
       </Route>
     </Routes>
   )

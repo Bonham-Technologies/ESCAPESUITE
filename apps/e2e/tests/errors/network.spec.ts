@@ -131,40 +131,6 @@ test.describe('License Validation Errors', () => {
   })
 })
 
-test.describe('Organization API Errors', () => {
-  test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
-  })
-
-  test('handles organization fetch failure', async ({ page }) => {
-    await mockSupabaseError(page, 'get-organization', 500, 'Server error')
-    await page.goto('http://localhost:5173/team')
-    await page.waitForLoadState('networkidle')
-
-    // Should show error or redirect
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
-  })
-
-  test('handles team creation failure', async ({ page }) => {
-    await mockSupabaseError(page, 'create-organization', 400, 'Invalid organization data')
-    await page.goto('http://localhost:5173/team')
-    await page.waitForLoadState('networkidle')
-
-    // Try to create team
-    const createButton = page.getByRole('button', { name: /create|new team/i }).first()
-    const isVisible = await createButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await createButton.click()
-      await page.waitForTimeout(500)
-
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
-  })
-})
-
 test.describe('Graceful Degradation', () => {
   test('app works partially when some APIs fail', async ({ page }) => {
     await mockClerkAuth(page)
@@ -270,9 +236,9 @@ test.describe('401/403 Authentication Errors', () => {
 
   test('handles 403 forbidden', async ({ page }) => {
     await mockClerkAuth(page)
-    await mockAPIError(page, '**/functions/v1/get-organization', 403, 'Forbidden')
+    await mockAPIError(page, '**/functions/v1/get-subscription', 403, 'Forbidden')
 
-    await page.goto('http://localhost:5173/team')
+    await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
 
     // Should show access denied message

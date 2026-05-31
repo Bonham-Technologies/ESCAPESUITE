@@ -87,7 +87,7 @@ function AccountMenu() {
             Dashboard
           </Link>
           <Link
-            to="/portal/downloads"
+            to="/dashboard?tab=downloads"
             onClick={() => setOpen(false)}
             style={{ padding: '0.5rem 0.6rem', borderRadius: 6, color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.9rem' }}
           >
