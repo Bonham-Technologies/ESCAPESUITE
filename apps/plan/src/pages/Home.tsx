@@ -33,8 +33,8 @@ export default function Home() {
       <section className={styles.hero}>
         <div className={styles.heroContent}>
           <h1 className={styles.heroTitle}>
-            How-to videos,<br />
-            <span className={styles.gradient}>behind the wire.</span>
+            How-to videos for networks<br />
+            <span className={styles.gradient}>the cloud can't reach.</span>
           </h1>
           <p className={styles.heroSubtitle}>
             ESCAPE Suite records and edits screencasts entirely in the browser. Host one copy on your
@@ -118,7 +118,7 @@ export default function Home() {
               </svg>
             </div>
             <h3>Runs air-gapped</h3>
-            <p>100% in-browser, fully offline. Take the bundle behind the wire — no internet, ever.</p>
+            <p>100% in-browser, fully offline. Drop the bundle onto your isolated network — no internet, ever.</p>
           </div>
 
           <div className={styles.feature}>
@@ -226,7 +226,7 @@ export default function Home() {
 
       {/* CTA Section */}
       <section className={styles.cta}>
-        <h2>Bring it behind the wire</h2>
+        <h2>Run it on your network</h2>
         <p>License ESCAPE Suite for your network, or try the hosted apps free for 14 days.</p>
         <div className={styles.heroCta}>
           <Link to="/pricing?tab=site">

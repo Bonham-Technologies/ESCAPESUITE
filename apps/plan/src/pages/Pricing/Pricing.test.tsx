@@ -71,9 +71,9 @@ describe('Pricing', () => {
     expect(screen.getByText(/\$149/)).toBeInTheDocument()
   })
 
-  it('displays the FAQ section', () => {
+  it('displays the questions section', () => {
     renderPricing()
-    expect(screen.getByText('Frequently Asked Questions')).toBeInTheDocument()
-    expect(screen.getByText(/air-gapped Site License/i)).toBeInTheDocument()
+    expect(screen.getByText('Common questions')).toBeInTheDocument()
+    expect(screen.getByText(/run with no internet/i)).toBeInTheDocument()
   })
 })

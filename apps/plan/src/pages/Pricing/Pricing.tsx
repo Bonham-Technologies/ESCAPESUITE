@@ -238,10 +238,10 @@ export default function Pricing() {
               <div className={styles.badge}>Most Popular</div>
               <h3>Pro Annual</h3>
               <div className={styles.price}>
-                <span className={styles.amount}>$79</span>
+                <span className={styles.amount}>$89</span>
                 <span className={styles.period}>per year</span>
               </div>
-              <p className={styles.savings}>Save $29 vs monthly</p>
+              <p className={styles.savings}>Save $19 vs monthly</p>
               <ul className={styles.features}>
                 <li>Full access to both apps</li>
                 <li>No watermark</li>
@@ -329,39 +329,31 @@ export default function Pricing() {
         </div>
       )}
 
-      {/* FAQ Section */}
+      {/* Common questions */}
       <section className={styles.faq}>
-        <h2>Frequently Asked Questions</h2>
+        <h2>Common questions</h2>
         <div className={styles.faqGrid}>
           <div className={styles.faqItem}>
-            <h4>How does the air-gapped Site License work?</h4>
+            <h4>How does it run with no internet?</h4>
             <p>
-              You buy the license here, then download a single signed HTML bundle with your license
-              embedded. Host it on an internal web server; anyone on your network opens it in a
-              browser and records/edits locally. No internet is required after you've taken the file
-              in.
+              You buy here and download one signed HTML file with your license baked in. Host it on
+              an internal server; anyone on the network opens it in a browser and records and edits
+              locally. Once you've carried the file in, it never touches the internet again.
             </p>
           </div>
           <div className={styles.faqItem}>
-            <h4>Does one license really cover everyone?</h4>
+            <h4>One license for our whole team?</h4>
             <p>
-              Yes. A Site License is per organization, not per seat — host one copy and your whole
-              team uses it. The size bands (Team / Organization) just reflect how big your group is.
+              Yes — a Site License is per organization, not per seat. Host one copy and everyone uses
+              it. The Team and Organization bands just track roughly how many of you there are.
             </p>
           </div>
           <div className={styles.faqItem}>
-            <h4>What does "renews annually" mean for an offline app?</h4>
+            <h4>What happens when the year is up?</h4>
             <p>
-              Your bundle keeps working for its term. Renewing entitles you to download the latest
-              signed bundle (new features + fixes) and continued support. Don't renew, and you simply
-              keep running the version you have.
-            </p>
-          </div>
-          <div className={styles.faqItem}>
-            <h4>What's the Individual plan for?</h4>
-            <p>
-              It's the hosted convenience option for solo creators who don't need an air-gap — sign
-              in at escapesuite.io and go. Most organizations want the Site License.
+              Each license carries an end date. When the term lapses, the apps stop working until you
+              renew and drop in the refreshed bundle — which is also how you pick up the latest fixes
+              and features. Stay current, stay running.
             </p>
           </div>
         </div>
