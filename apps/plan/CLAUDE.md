@@ -76,18 +76,6 @@ supabase/
 │   ├── get-subscription/     # Get user's subscription status
 │   ├── webhook/              # Stripe webhook handler
 │   │
-│   │ # Team/Organization Management
-│   ├── create-organization/      # Create new organization
-│   ├── create-org-checkout/      # Stripe checkout for team plans
-│   ├── get-organization/         # Get org details for current user
-│   ├── get-organization-members/ # List org members
-│   ├── update-organization/      # Update org name/settings
-│   ├── invite-member/            # Send member invitation
-│   ├── accept-invite/            # Accept invitation
-│   ├── remove-member/            # Remove member from org
-│   ├── update-member-role/       # Change member role
-│   ├── get-audit-logs/           # Retrieve audit logs (Enterprise)
-│   │
 │   │ # Standalone Licensing
 │   ├── create-license-checkout/  # Stripe checkout for licenses
 │   ├── generate-license/         # Generate license key post-purchase
