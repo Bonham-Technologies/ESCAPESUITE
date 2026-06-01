@@ -120,26 +120,6 @@ serve(async (req) => {
     const encoded = base64Encode(new TextEncoder().encode(json))
     const licenseKey = `ESCAPE-${encoded}`
 
-    // Log the key retrieval
-    if (license.organization_id) {
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('settings')
-        .eq('id', license.organization_id)
-        .single()
-
-      if (org?.settings?.audit_logging) {
-        await supabase.from('audit_logs').insert({
-          organization_id: license.organization_id,
-          user_id: user.id,
-          action: 'license.key_retrieved',
-          resource_type: 'license',
-          resource_id: licenseId,
-          metadata: { product: license.product },
-        })
-      }
-    }
-
     // Track license download (ignore errors if table doesn't exist)
     await supabase.from('license_downloads').insert({
       license_id: licenseId,

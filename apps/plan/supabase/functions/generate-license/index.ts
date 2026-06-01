@@ -45,7 +45,6 @@ interface GenerateLicenseRequest {
   seats?: number
   expiresAt?: string
   stripePaymentId?: string
-  organizationId?: string
 }
 
 // Generate a random license ID
@@ -151,7 +150,6 @@ serve(async (req) => {
       seats = 1,
       expiresAt,
       stripePaymentId,
-      organizationId,
     } = body
 
     // Validate required fields
@@ -218,7 +216,6 @@ serve(async (req) => {
       stripe_customer_id: stripeCustomerId || null,
       customer_email: customerEmail,
       customer_name: customerName || null,
-      organization_id: organizationId || null,
       product,
       tier,
       seat_count: seats,
@@ -234,18 +231,6 @@ serve(async (req) => {
         JSON.stringify({ error: 'Failed to store license' }),
         { status: 500, headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
       )
-    }
-
-    // Log the license creation
-    if (organizationId) {
-      await supabase.from('audit_logs').insert({
-        organization_id: organizationId,
-        user_id: authUserId || null,
-        action: 'license.created',
-        resource_type: 'license',
-        resource_id: licenseId,
-        metadata: { product, tier, seats },
-      })
     }
 
     return new Response(
