@@ -362,10 +362,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify license public key is available
+        run: |
+          if [ -z "${{ secrets.LICENSE_PUBLIC_KEY }}" ]; then
+            echo "::error::LICENSE_PUBLIC_KEY secret is empty. Standalone builds fail closed (audit H4), so a keyless shipped build would reject ALL licenses. Set the secret before merging."
+            exit 1
+          fi
+
       - name: Build standalone versions
         run: pnpm build:standalone
         env:
           VITE_BUILD_MODE: standalone
+          # Baked into the shipped single-file builds so they can verify license
+          # signatures (audit H4). It's a PUBLIC key — safe to embed in client builds.
+          VITE_LICENSE_PUBLIC_KEY: ${{ secrets.LICENSE_PUBLIC_KEY }}
 
       - name: Report standalone bundle sizes
         run: |
@@ -405,7 +415,10 @@ jobs:
   test-standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: build-standalone
+    # Builds its OWN standalone bundle with a disposable test key so the
+    # fail-closed gate (audit H4) can verify the E2E's test-signed mock licenses.
+    # Does not consume the real-key build-standalone artifact.
+    needs: [lint-and-typecheck, test]
     if: |
       (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
       github.actor != 'dependabot[bot]'
@@ -428,21 +441,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Download standalone builds
-        uses: actions/download-artifact@v8
-        with:
-          name: standalone-builds
+      - name: Build standalone versions (disposable E2E test key)
+        run: pnpm build:standalone
+        env:
+          VITE_BUILD_MODE: standalone
+          # Disposable test PUBLIC key — matches the signing key in
+          # apps/e2e/utils/license-mocks.ts. NOT a production key. Lets the
+          # fail-closed gate (audit H4) verify the E2E's test-signed mock licenses.
+          VITE_LICENSE_PUBLIC_KEY: 334ad57afb4246efec5cea53dd64a0f25828cb3d32da5a38d9661e245436daee
 
-      - name: Move standalone builds to expected locations
+      - name: Verify standalone builds
         run: |
-          # Artifacts are downloaded as craft/dist and artist/dist at root
-          # Move them to apps/craft/dist and apps/artist/dist where serve expects them
-          mkdir -p apps/craft/dist apps/artist/dist
-          mv craft/dist/index.html apps/craft/dist/
-          mv artist/dist/index.html apps/artist/dist/
-          rm -rf craft artist
-
-          # Verify files are in place
           echo "ESCAPECRAFT standalone: $(du -h apps/craft/dist/index.html)"
           echo "ESCAPEARTIST standalone: $(du -h apps/artist/dist/index.html)"
 

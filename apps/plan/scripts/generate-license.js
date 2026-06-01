@@ -71,9 +71,12 @@ function generateLicense(customer, product, expiresDate, email, tier) {
     payload.expires = expiresDate
   }
 
-  // Generate a placeholder signature
-  // NOTE: This will pass validation ONLY when VITE_LICENSE_PUBLIC_KEY is not set
-  // (which triggers development mode in the validator)
+  // Generate a placeholder (NOT a real Ed25519) signature.
+  // NOTE: this only passes validation in a DEV build (import.meta.env.DEV) where
+  // no public key is baked in. Production / shipped standalone builds bake
+  // VITE_LICENSE_PUBLIC_KEY and fail closed (audit H4), so these dev licenses are
+  // rejected there. For a real signed license use the server's generate-license
+  // edge function (or the E2E test key in apps/e2e/utils/license-mocks.ts).
   const signatureData = JSON.stringify(payload)
   const hash = crypto.createHash('sha256').update(signatureData).digest('base64')
   payload.signature = hash
