@@ -399,9 +399,6 @@ export default function Dashboard() {
                   {subscription?.status === 'active' && (
                     <p>Your Pro subscription is active. Enjoy watermark-free exports!</p>
                   )}
-                  {subscription?.status === 'lifetime' && (
-                    <p>You're a Founding Member with lifetime access. Thank you for your support!</p>
-                  )}
                   {subscription?.status === 'expired' && (
                     <p>Your trial has expired. Upgrade to Pro to continue using all features without watermarks.</p>
                   )}

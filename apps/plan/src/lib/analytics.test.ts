@@ -55,8 +55,8 @@ describe('analytics', () => {
 
   describe('analytics.subscriptionActivated', () => {
     it('tracks Subscription Activated event with plan', () => {
-      analytics.subscriptionActivated('founding_member')
-      expect(track).toHaveBeenCalledWith('Subscription Activated', { plan: 'founding_member' })
+      analytics.subscriptionActivated('pro_annual')
+      expect(track).toHaveBeenCalledWith('Subscription Activated', { plan: 'pro_annual' })
     })
   })
 

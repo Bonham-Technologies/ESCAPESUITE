@@ -1,8 +1,31 @@
 # ESCAPESUITE Customer & Licensing System
 
+> **HISTORICAL PLANNING DOCUMENT — DOES NOT DESCRIBE THE CURRENT PRODUCT.**
+>
+> This file captures an earlier plan and is retained for historical context only. The product
+> has since been simplified. The CURRENT canonical model is:
+>
+> - **Site License** (hero, air-gapped/offline, per-org NOT per-seat): Team **$2,400/yr** (~up to 25),
+>   Organization **$9,600/yr** (~up to 250), Enterprise/Site = **"Contact us"** → sales@escapesuite.io.
+> - **Individual Pro** (connected SaaS side door): **$9/mo or $89/yr**, **7-day** free trial.
+> - **Auth = Supabase Auth** (migrated off Clerk). Transactional email = **Resend**. Also Stripe,
+>   Vercel Analytics. Entity = **Bonham Technologies, LLC**. Governing law = **Utah**.
+> - Downloads/licenses live at **`/dashboard?tab=downloads`** (`/portal/*` is redirect-only).
+>
+> **REMOVED — not part of the current product:** the per-seat SaaS Teams/Enterprise model
+> (organizations / members / invites / seats / roles / audit logs and the `/team/*` + `/portal/*`
+> pages and `organization*` Edge Functions described below); the **Founding Member ($149)** plan
+> (zero existing founding members); and the **multi-SKU consumer standalone grid**
+> ($49/$69/$99/$129/$199/$299/$349/$399). The "Track A" tables, the organization/audit DB schema,
+> and the page-structure tree in this doc reflect that retired design — do not treat them as live.
+
 ## Implementation Status
 
-### Track A: SaaS Teams & Enterprise (COMPLETE)
+> The status tables below are HISTORICAL. The org/team Edge Functions, `/team/*` and `/portal/*`
+> pages, `useOrganization` hook, and `lib/organization` listed here were removed. Do not point
+> automation at these paths as if they exist today.
+
+### Track A: SaaS Teams & Enterprise (REMOVED — historical)
 
 | Component | Status | Location |
 |-----------|--------|----------|
@@ -26,16 +49,21 @@
 | App.tsx routes | Done | `/team/:slug`, `/team/:slug/members`, `/team/:slug/settings`, `/invite/:token` |
 | Unit tests | Done | `apps/plan/src/lib/organization.test.ts` (27 tests) |
 
-### Track B: Standalone Licensing (COMPLETE)
+### Track B: Offline Licensing (signing/validation reused by the Site License)
+
+> The consumer multi-SKU standalone grid is RETIRED. The Ed25519 license signing/validation
+> machinery below survives, but it now backs the air-gapped **Site License** (per-org annual),
+> not a per-product consumer purchase. Downloads/licenses are surfaced at
+> `/dashboard?tab=downloads`, not a separate `/portal/*` page.
 
 | Component | Status | Location |
 |-----------|--------|----------|
 | generate-license | Done | `apps/plan/supabase/functions/generate-license/` |
 | validate-license | Done | `apps/plan/supabase/functions/validate-license/` |
 | get-license-key | Done | `apps/plan/supabase/functions/get-license-key/` |
-| create-license-checkout | Done | `apps/plan/supabase/functions/create-license-checkout/` |
+| create-site-license-checkout | Done | `apps/plan/supabase/functions/create-site-license-checkout/` |
 | License validation (client) | Done | `packages/shared/src/auth/license.ts` |
-| Downloads portal page | Done | `apps/plan/src/pages/Portal/Downloads.tsx` |
+| Downloads (Dashboard tab) | Done | `apps/plan/src/pages/Dashboard.tsx` (`?tab=downloads`) |
 | Unit tests | Done | `packages/shared/src/auth/license.test.ts` |
 
 ### Track C: Distribution & Updates (COMPLETE)
@@ -59,6 +87,10 @@
 
 ## Overview
 
+> HISTORICAL. The current product has two lines: the air-gapped **Site License** (per-org annual)
+> and **Individual Pro** (connected SaaS, $9/mo or $89/yr). The "teams/enterprise SaaS" and
+> "one-time consumer standalone" lines described below were retired.
+
 Two distinct product lines with unified customer management:
 - **SaaS**: Subscription-based cloud access (individuals, teams, enterprise)
 - **Standalone**: One-time purchase offline licenses (individuals, teams)
@@ -78,7 +110,7 @@ Two distinct product lines with unified customer management:
 │   │  • Team (2-N users)              │   │  • Suite Bundle License         │ │
 │   │  • Enterprise (N+ users)         │   │  • Team/Volume Licenses         │ │
 │   │                                  │   │                                  │ │
-│   │  Clerk Auth + Stripe Sub         │   │  Signed License Keys            │ │
+│   │  Supabase Auth + Stripe Sub      │   │  Signed License Keys            │ │
 │   │  Always online                   │   │  Works offline forever          │ │
 │   │  Auto-updates                    │   │  Manual update downloads        │ │
 │   │                                  │   │                                  │ │
@@ -242,13 +274,13 @@ ALTER TABLE subscriptions ADD COLUMN seat_count INTEGER DEFAULT 1;
 ## Key Workflows
 
 ### SaaS Individual
-1. User signs up (Clerk)
+1. User signs up (Supabase Auth)
 2. Selects plan → Stripe checkout
 3. Webhook creates subscription record
-4. Access granted via Clerk session
+4. Access granted via Supabase session
 
-### SaaS Team/Enterprise
-1. Admin signs up (Clerk)
+### SaaS Team/Enterprise  _(REMOVED — historical)_
+1. Admin signs up (Supabase Auth)
 2. Creates organization
 3. Selects plan + seat count → Stripe checkout
 4. Webhook creates org + subscription
@@ -279,14 +311,17 @@ ALTER TABLE subscriptions ADD COLUMN seat_count INTEGER DEFAULT 1;
 ### Edge Functions (Supabase)
 - `generate-license` - Create signed license
 - `validate-license` - Online validation + revocation check
-- `create-org-checkout` - Team/Enterprise Stripe session
+- `create-site-license-checkout` - Site License Stripe session (`create-org-checkout` was removed)
 - `webhook` - Handle all Stripe events
 
 ### ESCAPEPLAN Pages
-- `/pricing` - Calculator for all products
-- `/checkout/*` - Purchase flows
-- `/portal/*` - Unified customer portal
-- `/team/*` - Organization management
+> HISTORICAL. In the current product the only live surfaces are `/pricing`, `/dashboard`
+> (with `?tab=downloads`), `/terms`, `/privacy`, and the Supabase Auth sign-in/up pages.
+> `/portal/*` is a redirect to `/dashboard?tab=downloads`; `/team/*` and `/checkout/*` do not exist.
+- `/pricing` - Site License bands + Individual Pro
+- ~~`/checkout/*`~~ - removed (checkout handled by Edge Functions + Stripe embedded UI)
+- ~~`/portal/*`~~ - redirect-only → `/dashboard?tab=downloads`
+- ~~`/team/*`~~ - removed (no seat/member/org UI)
 
 ### CI/CD
 - Release workflow uploads builds to Supabase Storage
@@ -324,6 +359,10 @@ ALTER TABLE subscriptions ADD COLUMN seat_count INTEGER DEFAULT 1;
 
 ## ESCAPEPLAN Page Structure
 
+> HISTORICAL / ASPIRATIONAL TREE — NOT the shipped routing. The `/checkout/*`, `/portal/*`
+> (beyond the redirect), `/team/*`, and `/admin/*` branches below were never finalized or were
+> removed. See the Routes table in `apps/plan/CLAUDE.md` for the actual live routes.
+
 ```
 /                           # Landing/Marketing
 ├── /pricing                # Self-service pricing calculator
@@ -332,8 +371,8 @@ ALTER TABLE subscriptions ADD COLUMN seat_count INTEGER DEFAULT 1;
 │   ├── /checkout/pro
 │   ├── /checkout/team
 │   └── /checkout/enterprise
-├── /signup                 # Clerk signup
-├── /signin                 # Clerk signin
+├── /signup                 # Supabase Auth signup
+├── /signin                 # Supabase Auth signin
 │
 ├── /dashboard              # Personal dashboard (existing)
 │

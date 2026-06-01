@@ -3,8 +3,9 @@
 ## Prerequisites
 - [ ] Stripe test mode enabled (use `pk_test_*` and `sk_test_*` keys)
 - [ ] Supabase Edge Functions deployed
-- [ ] All `VITE_STRIPE_PRICE_*` environment variables configured
-- [ ] Test user account created in Clerk
+- [ ] Server-side Stripe Price IDs configured as Edge Function secrets
+      (`STRIPE_PRICE_PRO_MONTHLY`, `STRIPE_PRICE_PRO_ANNUAL`, `STRIPE_PRICE_SITE_TEAM`, `STRIPE_PRICE_SITE_ORG`)
+- [ ] Test user account created via Supabase Auth
 
 ## Test Environment
 - URL: `http://localhost:5173` (dev) or `https://escapesuite.dev` (staging)
@@ -12,13 +13,13 @@
 
 ---
 
-## Individual SaaS Plans
+## Individual Pro Plan (connected SaaS side door)
 
 ### 1. Pro Monthly Checkout (Signed In)
 - [ ] Navigate to `/pricing`
-- [ ] Ensure "Individual" tab is active
+- [ ] Ensure the Individual Pro section is visible
 - [ ] Click "Upgrade Now" on Pro Monthly card
-- [ ] **Expected**: Redirect to Stripe checkout with $9/month subscription
+- [ ] **Expected**: Redirect to Stripe checkout with $9/month subscription (7-day free trial)
 - [ ] Complete payment with test card
 - [ ] **Expected**: Redirect to `/dashboard?success=true`
 - [ ] **Expected**: Dashboard shows "Pro Monthly" status
@@ -26,87 +27,46 @@
 ### 2. Pro Annual Checkout (Signed In)
 - [ ] Navigate to `/pricing`
 - [ ] Click "Upgrade Now" on Pro Annual card
-- [ ] **Expected**: Redirect to Stripe checkout with $79/year subscription
+- [ ] **Expected**: Redirect to Stripe checkout with $89/year subscription (7-day free trial)
 - [ ] Cancel checkout (click back)
 - [ ] **Expected**: Redirect to `/?canceled=true`
 
-### 3. Founding Member Checkout (Signed In)
-- [ ] Navigate to `/pricing`
-- [ ] Click "Become a Founder" button
-- [ ] **Expected**: Redirect to Stripe checkout with $149 one-time payment
-- [ ] **Expected**: Mode is "payment" not "subscription"
-
-### 4. SaaS Checkout (Signed Out)
+### 3. Pro Checkout (Signed Out)
 - [ ] Sign out
 - [ ] Navigate to `/pricing`
 - [ ] Click any "Get Started" button
 - [ ] **Expected**: Redirect to `/sign-up`
 
----
-
-## Team Plans
-
-### 5. Team Plan Checkout - Monthly (5 seats)
-- [ ] Sign in
-- [ ] Navigate to `/pricing`
-- [ ] Click "Teams" tab
-- [ ] Select "Team" plan ($7/seat)
-- [ ] Set slider to 5 seats
-- [ ] Ensure "Monthly" billing is selected
-- [ ] Click "Start Team Plan"
-- [ ] **Expected**: Redirect to Stripe checkout with 5 x $7/mo = $35/month subscription
-- [ ] Complete payment
-- [ ] **Expected**: Redirect to `/team/:slug?success=true`
-
-### 6. Team Plan Checkout - Annual (10 seats)
-- [ ] Select "Team" plan
-- [ ] Set slider to 10 seats
-- [ ] Select "Annual" billing (Save 17% badge)
-- [ ] **Expected**: Total shows $700/yr (10 x $70/yr)
-- [ ] Click "Start Team Plan"
-- [ ] **Expected**: Redirect to Stripe checkout with annual subscription
-
-### 7. Enterprise Plan Checkout (25 seats)
-- [ ] Select "Enterprise" plan ($12/seat)
-- [ ] Set slider to 25 seats
-- [ ] Click "Start Team Plan"
-- [ ] **Expected**: Redirect to Stripe checkout with 25 x $12/mo subscription
+> Removed flows — must NOT appear and should not be tested: Founding Member ($149 one-time),
+> per-seat Team/Enterprise SaaS checkout, and the multi-SKU consumer standalone grid.
 
 ---
 
-## Standalone Licenses
+## Site License (air-gapped/offline, per-org annual)
 
-### 7. ESCAPECRAFT Standard License (Signed In)
+### 4. Site License — Team Band ($2,400/yr, Signed In)
 - [ ] Navigate to `/pricing`
-- [ ] Click "Standalone License" tab
-- [ ] Select "ESCAPECRAFT" product
-- [ ] Select "Standard" tier ($49)
-- [ ] Click "Purchase License"
-- [ ] **Expected**: Redirect to Stripe checkout with $49 one-time payment
+- [ ] In the Site License section, select the **Team** band ($2,400/yr, ~up to 25)
+- [ ] Click "Get Team License"
+- [ ] **Expected**: `create-site-license-checkout` → Stripe checkout, $2,400/year subscription
 - [ ] Complete payment
-- [ ] **Expected**: Redirect to `/portal/downloads?purchase=success`
-- [ ] **Expected**: License email sent (check Supabase logs)
+- [ ] **Expected**: Redirect to `/dashboard?tab=downloads&purchase=success`
+- [ ] **Expected**: License email sent via Resend (check Supabase logs)
 
-### 8. ESCAPEARTIST Pro License (Signed In)
-- [ ] Select "ESCAPEARTIST" product
-- [ ] Select "Pro" tier ($129)
-- [ ] Click "Purchase License"
-- [ ] **Expected**: Redirect to Stripe checkout with $129 one-time payment
+### 5. Site License — Organization Band ($9,600/yr, Signed In)
+- [ ] Select the **Organization** band ($9,600/yr, ~up to 250)
+- [ ] Click "Get Organization License"
+- [ ] **Expected**: `create-site-license-checkout` → Stripe checkout, $9,600/year subscription
 
-### 9. Suite Bundle Lifetime License (Signed In)
-- [ ] Select "Suite Bundle" product
-- [ ] Select "Lifetime" tier ($349)
-- [ ] Click "Purchase License"
-- [ ] **Expected**: Redirect to Stripe checkout with $349 one-time payment
+### 6. Enterprise / Site (Contact us)
+- [ ] Select the **Enterprise / Site** band
+- [ ] **Expected**: No self-serve checkout — a "Contact us" mailto to `sales@escapesuite.io`
 
-### 10. Standalone License (Signed Out)
+### 7. Site License (Signed Out)
 - [ ] Sign out
-- [ ] Navigate to `/pricing?tab=standalone`
-- [ ] Select any product/tier
-- [ ] Click "Purchase License"
-- [ ] **Expected**: Redirect to `/sign-up?redirect=/pricing?tab=standalone`
-- [ ] Sign up/sign in
-- [ ] **Expected**: Redirect back to pricing page with standalone tab active
+- [ ] Navigate to `/pricing`
+- [ ] Select a Site License band → click "Get ... License"
+- [ ] **Expected**: Redirect to `/sign-up` (then back to pricing after auth)
 
 ---
 
@@ -129,7 +89,7 @@
 ## Error Scenarios
 
 ### 13. Invalid Price ID
-- [ ] Temporarily remove `VITE_STRIPE_PRICE_PRO_MONTHLY` from .env
+- [ ] Temporarily unset the `STRIPE_PRICE_PRO_MONTHLY` Edge Function secret
 - [ ] Attempt Pro Monthly checkout
 - [ ] **Expected**: Error message displayed (not silent failure)
 
@@ -158,17 +118,13 @@ For each checkout attempt, check browser console for:
 |------|--------|-------|
 | 1. Pro Monthly | | |
 | 2. Pro Annual | | |
-| 3. Founding Member | | |
-| 4. SaaS Signed Out | | |
-| 5. Team Monthly | | |
-| 6. Team Annual | | |
-| 7. Enterprise Plan | | |
-| 8. CRAFT Standard | | |
-| 9. ARTIST Pro | | |
-| 10. Suite Lifetime | | |
-| 11. Standalone Signed Out | | |
-| 12. Customer Portal | | |
-| 13. Cancellation | | |
-| 14. Invalid Price ID | | |
-| 15. API Error | | |
-| 16. Network Failure | | |
+| 3. Pro Signed Out | | |
+| 4. Site License — Team | | |
+| 5. Site License — Organization | | |
+| 6. Enterprise / Site (Contact us) | | |
+| 7. Site License Signed Out | | |
+| 11. Customer Portal | | |
+| 12. Cancellation | | |
+| 13. Invalid Price ID | | |
+| 14. API Error | | |
+| 15. Network Failure | | |

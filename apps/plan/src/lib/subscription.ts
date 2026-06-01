@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 
 export interface Subscription {
   status: 'trialing' | 'active' | 'canceled' | 'expired' | 'lifetime' | 'past_due'
-  plan: 'trial' | 'pro_monthly' | 'pro_annual' | 'founding_member'
+  plan: 'trial' | 'pro_monthly' | 'pro_annual'
   trialEnd: string | null
   trialDaysRemaining: number
   periodEnd: string | null
@@ -99,8 +99,6 @@ export function getPlanDisplayName(plan: string): string {
       return 'Pro Monthly'
     case 'pro_annual':
       return 'Pro Annual'
-    case 'founding_member':
-      return 'Founding Member'
     default:
       return plan
   }

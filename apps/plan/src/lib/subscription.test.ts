@@ -160,7 +160,6 @@ describe('subscription', () => {
       expect(getPlanDisplayName('trial')).toBe('Free Trial')
       expect(getPlanDisplayName('pro_monthly')).toBe('Pro Monthly')
       expect(getPlanDisplayName('pro_annual')).toBe('Pro Annual')
-      expect(getPlanDisplayName('founding_member')).toBe('Founding Member')
     })
 
     it('returns original value for unknown plans', () => {

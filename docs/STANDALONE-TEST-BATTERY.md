@@ -1,10 +1,20 @@
-# Standalone Version Test Battery
+# Offline (Site License) Build Test Battery
 
-This document provides a complete test battery for testing the ESCAPESUITE standalone licensing and distribution system.
+This document provides a complete test battery for testing the ESCAPESUITE **Site License**
+licensing and distribution system — the air-gapped/offline build.
+
+> The license signing/validation and single-file offline build mechanics described here now back
+> the per-org annual **Site License** (Team $2,400/yr, Organization $9,600/yr, Enterprise/Site =
+> contact sales@escapesuite.io). The retired multi-SKU consumer standalone grid (per-product
+> Standard/Pro/Lifetime SKUs) is no longer sold; the `tier` values below are internal license
+> metadata only, not buyable consumer products. Auth in the connected app is **Supabase Auth**
+> (no Clerk anywhere); the offline build itself uses no cloud auth.
 
 ## Overview
 
-The standalone version allows customers to run ESCAPECRAFT and ESCAPEARTIST locally without requiring a SaaS subscription. Each standalone build has a license key embedded at build time.
+The Site License build (still produced via `VITE_BUILD_MODE=standalone`) lets organizations run
+ESCAPECRAFT and ESCAPEARTIST locally, fully air-gapped, without any cloud subscription. Each build
+has a license key embedded at build time.
 
 ## Test Scenarios
 
@@ -124,7 +134,7 @@ Expected: 27 tests pass (as of current version)
 
 #### ESCAPECRAFT (http://localhost:5184/)
 - [ ] App loads without sign-in prompt
-- [ ] No Clerk authentication UI visible
+- [ ] No cloud authentication UI visible (no Supabase Auth sign-in)
 - [ ] Recording UI shows correctly
 - [ ] Source selection (screen/webcam) works
 - [ ] Theme toggle works
@@ -132,7 +142,7 @@ Expected: 27 tests pass (as of current version)
 
 #### ESCAPEARTIST (http://localhost:5185/)
 - [ ] App loads without sign-in prompt
-- [ ] No Clerk authentication UI visible
+- [ ] No cloud authentication UI visible (no Supabase Auth sign-in)
 - [ ] Editor UI shows correctly
 - [ ] Import/upload button visible
 - [ ] Timeline component renders
@@ -184,8 +194,8 @@ Expected: 27 tests pass (as of current version)
 
 ## File Distribution Tests
 
-### Test: Pre-Licensed Download from Portal
-1. Sign in to ESCAPEPLAN at `/portal/downloads`
+### Test: Pre-Licensed Download from Dashboard
+1. Sign in to ESCAPEPLAN at `/dashboard?tab=downloads`
 2. Verify user has a valid license in the database
 3. Click "Download (Pre-Licensed)" button
 4. Verify download starts with `escapecraft-standalone.html` or `escapeartist-standalone.html`
@@ -194,7 +204,7 @@ Expected: 27 tests pass (as of current version)
 7. Console shows "License validated: Licensed to <customer>"
 
 ### Test: Generic Download Requires License Entry
-1. Sign in to ESCAPEPLAN at `/portal/downloads`
+1. Sign in to ESCAPEPLAN at `/dashboard?tab=downloads`
 2. Click "Generic" download button
 3. Open downloaded file locally
 4. Verify license input modal appears

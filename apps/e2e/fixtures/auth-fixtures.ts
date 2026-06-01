@@ -32,14 +32,13 @@ export interface LicensedUserFixture extends UserFixture {
 export const test = base.extend<{
   trialUser: UserFixture
   proUser: UserFixture
-  foundingUser: UserFixture
   expiredUser: UserFixture
   canceledUser: UserFixture
   licensedUser: LicensedUserFixture
   signedOutUser: Page
 }>({
   /**
-   * Trial user with 14 days remaining.
+   * Trial user with 7 days remaining.
    */
   trialUser: async ({ page }, use) => {
     const user: MockUser = {
@@ -77,27 +76,6 @@ export const test = base.extend<{
       page,
       user,
       subscriptionState: 'pro_monthly',
-    })
-  },
-
-  /**
-   * Founding Member with lifetime access.
-   */
-  foundingUser: async ({ page }, use) => {
-    const user: MockUser = {
-      id: 'user_founding_123',
-      email: 'founding@example.com',
-      name: 'Founding Member',
-    }
-
-    await mockClerkAuth(page, { user })
-    await mockSubscription(page, 'founding_member')
-    await mockAllStripeEndpoints(page)
-
-    await use({
-      page,
-      user,
-      subscriptionState: 'founding_member',
     })
   },
 

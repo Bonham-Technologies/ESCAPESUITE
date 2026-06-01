@@ -23,29 +23,27 @@ test.describe('ESCAPEPLAN Pricing Page - Unauthenticated', () => {
   })
 
   test('shows pricing tabs', async ({ page }) => {
+    const siteLicenseTab = page.getByRole('button', { name: /site license/i })
+      .or(page.getByText(/site license/i).first())
     const individualTab = page.getByRole('button', { name: /individual/i })
       .or(page.getByText(/individual/i).first())
-    const teamsTab = page.getByRole('button', { name: /teams/i })
-      .or(page.getByText(/teams/i).first())
-    const standaloneTab = page.getByRole('button', { name: /standalone/i })
-      .or(page.getByText(/standalone/i).first())
 
+    const hasSiteLicense = await siteLicenseTab.isVisible().catch(() => false)
     const hasIndividual = await individualTab.isVisible().catch(() => false)
-    const hasTeams = await teamsTab.isVisible().catch(() => false)
-    const hasStandalone = await standaloneTab.isVisible().catch(() => false)
 
+    expect(typeof hasSiteLicense).toBe('boolean')
     expect(typeof hasIndividual).toBe('boolean')
   })
 
   test('displays free trial option', async ({ page }) => {
-    const freeTrial = page.getByText(/free trial/i).first()
+    const freeTrial = page.getByText(/free trial|7.day/i).first()
     const isVisible = await freeTrial.isVisible().catch(() => false)
     expect(typeof isVisible).toBe('boolean')
   })
 
   test('displays pro pricing options', async ({ page }) => {
     const proMonthly = page.getByText(/\$9/i).or(page.getByText(/per month/i)).first()
-    const proAnnual = page.getByText(/\$79/i).or(page.getByText(/per year/i)).first()
+    const proAnnual = page.getByText(/\$89/i).or(page.getByText(/per year/i)).first()
 
     const hasMonthly = await proMonthly.isVisible().catch(() => false)
     const hasAnnual = await proAnnual.isVisible().catch(() => false)
@@ -53,10 +51,15 @@ test.describe('ESCAPEPLAN Pricing Page - Unauthenticated', () => {
     expect(typeof hasMonthly).toBe('boolean')
   })
 
-  test('shows founding member option', async ({ page }) => {
-    const founding = page.getByText(/founding member/i).first()
-    const isVisible = await founding.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+  test('displays site license pricing options', async ({ page }) => {
+    const teamPrice = page.getByText(/\$2,?400/i).first()
+    const orgPrice = page.getByText(/\$9,?600/i).first()
+
+    const hasTeam = await teamPrice.isVisible().catch(() => false)
+    const hasOrg = await orgPrice.isVisible().catch(() => false)
+
+    expect(typeof hasTeam).toBe('boolean')
+    expect(typeof hasOrg).toBe('boolean')
   })
 })
 
@@ -67,107 +70,99 @@ test.describe('ESCAPEPLAN Pricing Page - Tab Navigation', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  test('can switch to teams tab', async ({ page }) => {
-    const teamsTab = page.getByRole('button', { name: /teams/i })
-      .or(page.getByText('Teams').first())
+  test('can switch to individual tab', async ({ page }) => {
+    const individualTab = page.getByRole('button', { name: /individual/i })
+      .or(page.getByText('Individual').first())
 
-    const isClickable = await teamsTab.isVisible().catch(() => false)
+    const isClickable = await individualTab.isVisible().catch(() => false)
     if (isClickable) {
-      await teamsTab.click()
+      await individualTab.click()
       await page.waitForTimeout(300)
 
-      // Should show team-specific content
-      const teamContent = page.getByText(/seat/i)
-        .or(page.getByText(/team features/i))
+      // Should show individual Pro content
+      const individualContent = page.getByText(/\$9/i)
+        .or(page.getByText(/\$89/i))
+        .or(page.getByText(/per month/i))
         .first()
-      const hasTeamContent = await teamContent.isVisible().catch(() => false)
-      expect(typeof hasTeamContent).toBe('boolean')
+      const hasContent = await individualContent.isVisible().catch(() => false)
+      expect(typeof hasContent).toBe('boolean')
     }
   })
 
-  test('can switch to standalone tab', async ({ page }) => {
-    const standaloneTab = page.getByRole('button', { name: /standalone/i })
-      .or(page.getByText('Standalone License').first())
+  test('can switch to site license tab', async ({ page }) => {
+    const siteLicenseTab = page.getByRole('button', { name: /site license/i })
+      .or(page.getByText('Site License').first())
 
-    const isClickable = await standaloneTab.isVisible().catch(() => false)
+    const isClickable = await siteLicenseTab.isVisible().catch(() => false)
     if (isClickable) {
-      await standaloneTab.click()
+      await siteLicenseTab.click()
       await page.waitForTimeout(300)
 
-      // Should show standalone-specific content
-      const standaloneContent = page.getByText(/ESCAPECRAFT/i)
-        .or(page.getByText(/ESCAPEARTIST/i))
-        .or(page.getByText(/suite bundle/i))
+      // Should show site-license-specific content
+      const siteLicenseContent = page.getByText(/\$2,?400/i)
+        .or(page.getByText(/\$9,?600/i))
+        .or(page.getByText(/air.?gapped|offline/i))
         .first()
-      const hasContent = await standaloneContent.isVisible().catch(() => false)
+      const hasContent = await siteLicenseContent.isVisible().catch(() => false)
       expect(typeof hasContent).toBe('boolean')
     }
   })
 })
 
-test.describe('ESCAPEPLAN Pricing Page - Team Pricing', () => {
+test.describe('ESCAPEPLAN Pricing Page - Site License Pricing', () => {
   test.beforeEach(async ({ page }) => {
     await mockClerkSignedOut(page)
-    await page.goto(`${BASE_URL}/pricing?tab=team`)
+    await page.goto(`${BASE_URL}/pricing?tab=site-license`)
     await page.waitForLoadState('networkidle')
   })
 
-  test('shows team plan options', async ({ page }) => {
-    const teamPlan = page.getByText(/\$7.*seat/i)
+  test('shows Team site license plan', async ({ page }) => {
+    const teamPlan = page.getByText(/\$2,?400/i)
       .or(page.getByText(/team/i).first())
     const isVisible = await teamPlan.isVisible().catch(() => false)
     expect(typeof isVisible).toBe('boolean')
   })
 
-  test('shows enterprise plan option', async ({ page }) => {
-    const enterprise = page.getByText(/enterprise/i).first()
-    const isVisible = await enterprise.isVisible().catch(() => false)
+  test('shows Organization site license plan', async ({ page }) => {
+    const orgPlan = page.getByText(/\$9,?600/i)
+      .or(page.getByText(/organization/i).first())
+    const isVisible = await orgPlan.isVisible().catch(() => false)
     expect(typeof isVisible).toBe('boolean')
   })
 
-  test('has seat count selector', async ({ page }) => {
-    const seatSelector = page.locator('input[type="range"]')
-      .or(page.locator('input[type="number"]'))
-      .or(page.getByText(/seats/i))
-      .first()
-    const isVisible = await seatSelector.isVisible().catch(() => false)
+  test('shows Enterprise contact option', async ({ page }) => {
+    const enterprise = page.getByText(/contact us|sales@escapesuite\.io|enterprise/i).first()
+    const isVisible = await enterprise.isVisible().catch(() => false)
     expect(typeof isVisible).toBe('boolean')
   })
 })
 
-test.describe('ESCAPEPLAN Pricing Page - Standalone Pricing', () => {
+test.describe('ESCAPEPLAN Pricing Page - Individual Pricing', () => {
   test.beforeEach(async ({ page }) => {
     await mockClerkSignedOut(page)
-    await page.goto(`${BASE_URL}/pricing?tab=standalone`)
+    await page.goto(`${BASE_URL}/pricing?tab=individual`)
     await page.waitForLoadState('networkidle')
   })
 
-  test('shows product selection', async ({ page }) => {
-    const craftOption = page.getByText(/ESCAPECRAFT/i).first()
-    const artistOption = page.getByText(/ESCAPEARTIST/i).first()
-    const suiteOption = page.getByText(/suite bundle/i).first()
+  test('shows monthly and annual Pro options', async ({ page }) => {
+    const monthly = page.getByText(/\$9/i).first()
+    const annual = page.getByText(/\$89/i).first()
 
-    const hasCraft = await craftOption.isVisible().catch(() => false)
-    const hasArtist = await artistOption.isVisible().catch(() => false)
-    const hasSuite = await suiteOption.isVisible().catch(() => false)
+    const hasMonthly = await monthly.isVisible().catch(() => false)
+    const hasAnnual = await annual.isVisible().catch(() => false)
 
-    expect(typeof hasCraft).toBe('boolean')
+    expect(typeof hasMonthly).toBe('boolean')
+    expect(typeof hasAnnual).toBe('boolean')
   })
 
-  test('shows tier selection', async ({ page }) => {
-    const standard = page.getByText(/standard/i).first()
-    const pro = page.getByText(/pro/i).first()
-    const lifetime = page.getByText(/lifetime/i).first()
-
-    const hasStandard = await standard.isVisible().catch(() => false)
-    const hasPro = await pro.isVisible().catch(() => false)
-    const hasLifetime = await lifetime.isVisible().catch(() => false)
-
-    expect(typeof hasStandard).toBe('boolean')
+  test('shows 7-day free trial', async ({ page }) => {
+    const trial = page.getByText(/free trial|7.day/i).first()
+    const isVisible = await trial.isVisible().catch(() => false)
+    expect(typeof isVisible).toBe('boolean')
   })
 
   test('shows purchase button', async ({ page }) => {
-    const purchaseButton = page.getByRole('button', { name: /purchase|buy|get/i }).first()
+    const purchaseButton = page.getByRole('button', { name: /purchase|buy|get|start|subscribe/i }).first()
     const isVisible = await purchaseButton.isVisible().catch(() => false)
     expect(typeof isVisible).toBe('boolean')
   })

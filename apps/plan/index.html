@@ -6,16 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <!-- Primary meta -->
-    <title>ESCAPE Suite — Record &amp; edit video in your browser. Nothing uploads.</title>
-    <meta name="description" content="Record your screen and edit video entirely in your browser. No uploads, no install, works offline. Privacy-first media tools, with air-gapped builds for regulated teams." />
+    <title>ESCAPE Suite — How-to videos for networks the cloud can't reach.</title>
+    <meta name="description" content="Air-gapped Site License for screencasts on isolated and regulated networks. Host one signed, offline copy and your whole team records and edits walkthroughs in the browser — nothing leaves the network. Hosted in-browser recorder and editor also available." />
     <link rel="canonical" href="https://www.escapesuite.io/" />
     <meta name="theme-color" content="#6366f1" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="ESCAPE Suite" />
-    <meta property="og:title" content="ESCAPE Suite — Record &amp; edit video in your browser. Nothing uploads." />
-    <meta property="og:description" content="A privacy-first screen recorder and video editor that runs entirely in your browser. No uploads, works offline. Air-gapped builds available for regulated teams." />
+    <meta property="og:title" content="ESCAPE Suite — How-to videos for networks the cloud can't reach." />
+    <meta property="og:description" content="An air-gapped Site License for screencasts on isolated and regulated networks. Host one signed, offline copy and your whole team records and edits walkthroughs in the browser — nothing leaves the network. Hosted in-browser apps also available." />
     <meta property="og:url" content="https://www.escapesuite.io/" />
     <meta property="og:image" content="https://www.escapesuite.io/og-image.png" />
     <meta property="og:image:width" content="1200" />
@@ -23,8 +23,8 @@
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="ESCAPE Suite — Record &amp; edit video. Nothing leaves your device." />
-    <meta name="twitter:description" content="Privacy-first, in-browser screen recorder + video editor. No uploads. Air-gapped builds for regulated teams." />
+    <meta name="twitter:title" content="ESCAPE Suite — How-to videos for networks the cloud can't reach." />
+    <meta name="twitter:description" content="Air-gapped Site License: host one offline copy, your whole team records and edits screencasts in the browser, nothing leaves the network. Hosted in-browser apps also available." />
     <meta name="twitter:image" content="https://www.escapesuite.io/og-image.png" />
 
     <!-- Structured data -->
@@ -36,10 +36,66 @@
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "Web (Chrome, Edge)",
         "description": "Privacy-first screen recorder and video editor that runs entirely in the browser. No uploads. Air-gapped signed standalone builds available.",
-        "offers": [
-          { "@type": "Offer", "name": "Individual", "price": "9", "priceCurrency": "USD" },
-          { "@type": "Offer", "name": "Standalone license", "price": "49", "priceCurrency": "USD" }
-        ],
+        "offers": {
+          "@type": "AggregateOffer",
+          "priceCurrency": "USD",
+          "lowPrice": "9",
+          "highPrice": "9600",
+          "offers": [
+            {
+              "@type": "Offer",
+              "name": "Individual Pro (monthly)",
+              "priceCurrency": "USD",
+              "priceSpecification": {
+                "@type": "UnitPriceSpecification",
+                "price": "9",
+                "priceCurrency": "USD",
+                "billingDuration": 1,
+                "billingIncrement": 1,
+                "unitCode": "MON"
+              }
+            },
+            {
+              "@type": "Offer",
+              "name": "Individual Pro (annual)",
+              "priceCurrency": "USD",
+              "priceSpecification": {
+                "@type": "UnitPriceSpecification",
+                "price": "89",
+                "priceCurrency": "USD",
+                "billingDuration": 1,
+                "billingIncrement": 1,
+                "unitCode": "ANN"
+              }
+            },
+            {
+              "@type": "Offer",
+              "name": "Site License — Team (annual)",
+              "priceCurrency": "USD",
+              "priceSpecification": {
+                "@type": "UnitPriceSpecification",
+                "price": "2400",
+                "priceCurrency": "USD",
+                "billingDuration": 1,
+                "billingIncrement": 1,
+                "unitCode": "ANN"
+              }
+            },
+            {
+              "@type": "Offer",
+              "name": "Site License — Organization (annual)",
+              "priceCurrency": "USD",
+              "priceSpecification": {
+                "@type": "UnitPriceSpecification",
+                "price": "9600",
+                "priceCurrency": "USD",
+                "billingDuration": 1,
+                "billingIncrement": 1,
+                "unitCode": "ANN"
+              }
+            }
+          ]
+        },
         "publisher": { "@type": "Organization", "name": "Bonham Technologies, LLC", "url": "https://www.bonham.tech" }
       }
     </script>
@@ -48,9 +104,9 @@
     <div id="root"></div>
     <noscript>
       <div style="max-width:680px;margin:10vh auto;padding:0 24px;font-family:system-ui,-apple-system,sans-serif;line-height:1.55;color:#1f2937;text-align:center">
-        <h1>Record and edit video entirely in your browser</h1>
-        <p>ESCAPE Suite is a privacy-first screen recorder and video editor that runs on your device. Nothing uploads. It works offline, with air-gapped builds available for regulated teams.</p>
-        <p><strong>ESCAPECRAFT</strong> records your screen and webcam. <strong>ESCAPEARTIST</strong> is a full multi-track video editor. Export to WebM and MP4.</p>
+        <h1>How-to videos for networks the cloud can't reach</h1>
+        <p>ESCAPE Suite is an air-gapped Site License for screencasts on isolated and regulated networks. Host one signed, offline copy and your whole team records and edits walkthroughs in the browser — nothing leaves the network. A hosted in-browser recorder and editor is also available for solo creators.</p>
+        <p>Under the hood: <strong>ESCAPECRAFT</strong> records your screen and webcam, and <strong>ESCAPEARTIST</strong> is a full multi-track video editor. Export to WebM and MP4.</p>
         <p><a href="/pricing">View pricing</a> &nbsp;&middot;&nbsp; <a href="/sign-up">Start free</a></p>
         <p style="color:#6b7280;font-size:.9rem">This application requires JavaScript. Please enable it to use ESCAPE Suite.</p>
       </div>
