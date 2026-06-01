@@ -5,7 +5,7 @@ export default function Terms() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Terms of Service</h1>
-        <p className={styles.lastUpdated}>Last updated: January 16, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: May 31, 2026</p>
       </header>
 
       <div className={styles.content}>
@@ -25,7 +25,7 @@ export default function Terms() {
         </p>
 
         <h2>2. Description of Services</h2>
-        <p>ESCAPE Suite provides browser-based and standalone video creation tools:</p>
+        <p>ESCAPE Suite provides browser-based video creation tools, available both as connected applications and as a self-contained, air-gapped Site License bundle:</p>
         <ul>
           <li>
             <strong>ESCAPEPLAN</strong> - Central hub for account management, subscriptions, and
@@ -69,11 +69,12 @@ export default function Terms() {
 
         <h2>4. Subscriptions and Payments</h2>
 
-        <h3>4.1 Subscription Plans</h3>
-        <p>We offer the following subscription options:</p>
+        <h3>4.1 Plans and Offerings</h3>
+        <p>We currently offer the following options:</p>
         <ul>
-          <li><strong>Free Plan</strong> - Basic access with watermarked exports</li>
-          <li><strong>Pro Plan</strong> - Full access to all features, no watermarks</li>
+          <li><strong>Free Trial</strong> - A 7-day trial providing access to evaluate the connected applications</li>
+          <li><strong>Individual Pro</strong> - Full access to all features for a single user, with no watermarks, at $9 per month or $89 per year (billed through our connected services)</li>
+          <li><strong>Site License</strong> - An annual, organization-wide license for the air-gapped ESCAPE Suite bundle, as described in Section 5</li>
         </ul>
 
         <h3>4.2 Billing</h3>
@@ -98,28 +99,67 @@ export default function Terms() {
           period.
         </p>
 
-        <h2>5. Standalone Licenses</h2>
+        <h2>5. Site License</h2>
+        <p>
+          The ESCAPE Suite Site License is an annual, organization-wide license for the self-contained
+          ESCAPE Suite bundle (ESCAPECRAFT and ESCAPEARTIST), delivered as a single signed file with your
+          license embedded. The Software runs entirely on your organization's own network and may be
+          operated fully offline, including on air-gapped networks. These terms apply in addition to the
+          rest of these Terms.
+        </p>
 
         <h3>5.1 License Grant</h3>
         <p>
-          Standalone licenses provide offline access to ESCAPECRAFT and ESCAPEARTIST without
-          requiring an internet connection or subscription. Upon purchase, you receive a
-          perpetual, non-transferable license to use the software.
+          Subject to payment of fees and compliance with these Terms, we grant your organization a
+          non-exclusive, non-transferable, non-sublicensable, limited license, for the duration of the
+          Term, to host one (1) instance of the Software on your authorized network and to permit your
+          authorized users (up to the limit of your purchased band) to run that instance for your
+          organization's internal business purposes. The license is granted <strong>per-organization,
+          not per-seat or per-device</strong> — one hosted copy may serve all authorized users within
+          your band. You retain all content (recordings, edits, exports) you create, royalty-free.
         </p>
 
-        <h3>5.2 License Restrictions</h3>
-        <p>You may not:</p>
-        <ul>
-          <li>Share, sell, or transfer your license key to others</li>
-          <li>Use a single license on more devices than permitted by your license type</li>
-          <li>Reverse engineer, decompile, or disassemble the software</li>
-          <li>Remove or modify any proprietary notices or labels</li>
-        </ul>
-
-        <h3>5.3 License Verification</h3>
+        <h3>5.2 Organization-Size Bands and Self-Certification</h3>
         <p>
-          Standalone software may periodically verify license validity. Licenses obtained through
-          fraud or violation of these Terms may be revoked.
+          Your license is scoped to the organization-size band you purchase, which sets the maximum
+          number of authorized users:
+        </p>
+        <ul>
+          <li><strong>Team</strong> - up to approximately 25 authorized users ($2,400 per year)</li>
+          <li><strong>Organization</strong> - up to approximately 250 authorized users ($9,600 per year)</li>
+          <li><strong>Enterprise / Site</strong> - as specified on your order; contact sales@escapesuite.io</li>
+        </ul>
+        <p>
+          Because the Software runs offline and we do not monitor your usage, at purchase and at each
+          renewal you certify that your organization's number of authorized users is within the
+          purchased band. If your organization grows beyond your band, you agree to upgrade to the
+          appropriate band at the next renewal or sooner. Exceeding your band's user limit is a material
+          breach of these Terms.
+        </p>
+
+        <h3>5.3 Annual Term, Renewal, and Expiration</h3>
+        <p>
+          The Site License is an annual subscription. Your license carries an embedded expiration date.
+          Unless cancelled, the subscription <strong>automatically renews annually</strong> at the
+          then-current price; you may cancel renewal at any time, with cancellation taking effect at the
+          end of the current Term. When the Term ends and the license is not renewed, the Software's
+          functionality will become restricted or disabled until a renewed, valid license is installed.
+          Renewal entitles you to download a refreshed signed bundle containing the latest version and
+          continued support for the renewed Term.
+        </p>
+
+        <h3>5.4 Delivery, Updates, and Restrictions</h3>
+        <p>
+          Upon purchase you may download your signed Software bundle from your account portal under
+          Downloads. During an active Term you may re-download and re-deploy the latest released bundle
+          (the offline Software does not auto-update). You may not distribute, publish, resell,
+          sublicense, rent, lease, or otherwise make the Software or your license available outside your
+          organization; host or use it for the benefit of any other organization (no service-bureau,
+          time-sharing, or hosting-for-others arrangement); permit more authorized users than your band
+          allows; circumvent, disable, or tamper with the embedded license or its expiration date;
+          reverse engineer, decompile, or disassemble the Software; or remove or alter any proprietary
+          notice. The Software is licensed, not sold, and we retain all intellectual property rights in
+          it.
         </p>
 
         <h2>6. Content Ownership</h2>
@@ -150,19 +190,13 @@ export default function Terms() {
           <li>Circumvent any access restrictions or usage limits</li>
         </ul>
 
-        <h2>8. Team and Organization Accounts</h2>
-
-        <h3>8.1 Administrator Responsibilities</h3>
+        <h2>8. Organization Use</h2>
         <p>
-          Organization administrators are responsible for managing team members, ensuring compliance
-          with these Terms, and handling billing for their organization.
-        </p>
-
-        <h3>8.2 Member Access</h3>
-        <p>
-          Team members receive access based on their organization's subscription and administrator
-          settings. Access may be revoked by the administrator or if the organization's subscription
-          ends.
+          Organization-wide use of ESCAPE Suite is provided exclusively through the per-organization
+          Site License described in Section 5. We do not offer per-seat team or enterprise accounts,
+          member or administrator roles, or seat-based billing. The organization that purchases the Site
+          License is responsible for ensuring its authorized users comply with these Terms, for keeping
+          its license current, and for staying within its purchased organization-size band.
         </p>
 
         <h2>9. Privacy</h2>
@@ -225,8 +259,8 @@ export default function Terms() {
         <h2>13. Governing Law</h2>
         <p>
           These Terms shall be governed by and construed in accordance with the laws of the
-          United States and the State of Ohio, without regard to its conflict of law provisions.
-          Any disputes arising from these Terms shall be resolved in the courts located in Ohio.
+          United States and the State of Utah, without regard to its conflict of law provisions.
+          Any disputes arising from these Terms shall be resolved in the courts located in Utah.
         </p>
 
         <h2>14. Changes to Terms</h2>

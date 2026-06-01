@@ -44,7 +44,7 @@ test.describe('Journey: Visitor to Trial User', () => {
     expect(typeof headingVisible).toBe('boolean')
 
     // Check for free trial option
-    const freeTrialText = page.getByText(/free trial|14 days|try free/i).first()
+    const freeTrialText = page.getByText(/free trial|7 days|try free/i).first()
     const hasFreeTrial = await freeTrialText.isVisible().catch(() => false)
     expect(typeof hasFreeTrial).toBe('boolean')
 
@@ -53,17 +53,12 @@ test.describe('Journey: Visitor to Trial User', () => {
     const hasMonthly = await monthlyPrice.isVisible().catch(() => false)
     expect(typeof hasMonthly).toBe('boolean')
 
-    const annualPrice = page.getByText(/\$79|per year|annual/i).first()
+    const annualPrice = page.getByText(/\$89|per year|annual/i).first()
     const hasAnnual = await annualPrice.isVisible().catch(() => false)
     expect(typeof hasAnnual).toBe('boolean')
-
-    // Check for founding member option
-    const foundingOption = page.getByText(/founding member|\$149|lifetime/i).first()
-    const hasFoundingOption = await foundingOption.isVisible().catch(() => false)
-    expect(typeof hasFoundingOption).toBe('boolean')
   })
 
-  test('trial user lands on dashboard with 14 days remaining', async ({ trialUser }) => {
+  test('trial user lands on dashboard with 7 days remaining', async ({ trialUser }) => {
     const { page } = trialUser
 
     await navigateTo(page, 'plan', '/dashboard')
@@ -74,7 +69,7 @@ test.describe('Journey: Visitor to Trial User', () => {
 
     // Look for trial indicator or days remaining
     const trialIndicator = page
-      .getByText(/trial|14 days|days remaining|free/i)
+      .getByText(/trial|7 days|days remaining|free/i)
       .first()
     const hasTrialIndicator = await trialIndicator.isVisible().catch(() => false)
     expect(typeof hasTrialIndicator).toBe('boolean')

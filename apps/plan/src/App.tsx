@@ -43,6 +43,7 @@ function App() {
         />
         <Route path="portal/downloads" element={<Navigate to="/dashboard?tab=downloads" replace />} />
       </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

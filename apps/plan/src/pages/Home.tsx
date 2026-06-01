@@ -118,7 +118,7 @@ export default function Home() {
               </svg>
             </div>
             <h3>Runs air-gapped</h3>
-            <p>100% in-browser, fully offline. Drop the bundle onto your isolated network — no internet, ever.</p>
+            <p>The Site License build is 100% in-browser and fully offline. Drop the signed bundle onto your isolated network — no internet, ever.</p>
           </div>
 
           <div className={styles.feature}>
@@ -142,7 +142,7 @@ export default function Home() {
               </svg>
             </div>
             <h3>Nothing leaves the building</h3>
-            <p>No uploads, no accounts for your users, no telemetry. Your footage stays on the device.</p>
+            <p>On the air-gapped Site License build, there are no uploads, no accounts for your users, and no telemetry — your footage stays on the device. (The hosted apps at escapesuite.io use accounts and standard web services.)</p>
           </div>
 
           <div className={styles.feature}>

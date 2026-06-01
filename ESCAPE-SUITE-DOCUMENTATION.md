@@ -12,10 +12,10 @@ The ESCAPE Suite is a collection of privacy-first, client-side media creation to
 | **ESCAPE-E2E** | End-to-end test suite | N/A |
 
 **Key Value Proposition:**
-- 100% private (no cloud uploads)
 - Lightning fast (local hardware processing)
-- Works offline (entirely in-browser)
-- No installation required
+- Air-gapped Site License is 100% private — works offline, no cloud uploads
+- Connected Individual Pro side door uses Supabase, Stripe, Resend, and Vercel for auth, billing, and email
+- No installation required (browser-based)
 
 ---
 
@@ -24,12 +24,12 @@ The ESCAPE Suite is a collection of privacy-first, client-side media creation to
 ### ESCAPEPLAN
 **Role:** Hub/portal site for the ESCAPE Suite
 
-**Tech Stack:** React 19, TypeScript, Vite, Clerk (auth), Stripe (payments), Supabase (backend)
+**Tech Stack:** React 19, TypeScript, Vite, Supabase Auth, Stripe (payments), Resend (email), Supabase (backend)
 
 **Key Features:**
-- Landing page with pricing tiers
-- User authentication via Clerk
-- Subscription management (trial, pro monthly/annual, founding member)
+- Landing page with pricing tiers (Site License + Individual Pro)
+- User authentication via Supabase Auth
+- Subscription management (7-day trial, Individual Pro monthly/annual)
 - Dashboard with tool launchers
 - Analytics (Vercel Analytics) and error tracking (Sentry)
 
@@ -105,20 +105,18 @@ Each app requires environment variables. Create `.env.local` files:
 
 **ESCAPEPLAN/.env.local:**
 ```env
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx
-VITE_STRIPE_PRICE_PRO_MONTHLY=price_xxx
-VITE_STRIPE_PRICE_PRO_ANNUAL=price_xxx
-VITE_STRIPE_PRICE_FOUNDING=price_xxx
+VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
 VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 ```
+
+> Stripe Price IDs (Individual Pro + Site License bands) live server-side in Supabase Edge
+> Function secrets, not in the frontend env.
 
 **ESCAPECRAFT/.env.local & ESCAPEARTIST/.env.local:**
 ```env
 VITE_BUILD_MODE=saas
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx
 VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
@@ -206,7 +204,7 @@ Each app has a `.github/workflows/test.yml` that runs on push/PR to main:
 **CI Test Behavior:**
 - 4 smoke tests run (verify apps start and `#root` renders)
 - 28 auth-required tests are automatically skipped
-- Full test suite runs locally with Clerk authentication
+- Full test suite runs locally with Supabase Auth authentication
 
 ### Deployment Workflow
 
@@ -225,25 +223,31 @@ Each app has a `.github/workflows/test.yml` that runs on push/PR to main:
 
 ---
 
-## Enterprise Standalone Deployment
+## Site License Deployment (Air-Gapped)
 
-ESCAPECRAFT and ESCAPEARTIST support standalone builds that work without internet connectivity. This is offered as an **Enterprise-only** option for organizations with strict data sovereignty, air-gapped environments, or restricted network requirements.
+ESCAPECRAFT and ESCAPEARTIST support offline builds that work without internet connectivity. This is the **Site License** offering — the hero product — for organizations with strict data sovereignty, air-gapped environments, or restricted network requirements.
 
-### Enterprise Offering
+### Site License Offering
 
-**Standalone licensing is available exclusively for enterprise customers.** To request a quote:
+The Site License is a per-org annual license (NOT per-seat) that runs fully offline / air-gapped.
 
-1. Visit [escapesuite.io](https://www.escapesuite.io) and scroll to the Enterprise section
-2. Fill out the quote request form with your organization details
+| Band | Price | Approx. size |
+|------|-------|--------------|
+| Team | $2,400/year | up to ~25 |
+| Organization | $9,600/year | up to ~250 |
+| Enterprise / Site | Contact us | larger / custom |
+
+For the Team and Organization bands, purchase via the Pricing page. For Enterprise / Site:
+
+1. Visit [www.escapesuite.io](https://www.escapesuite.io) and use the "Contact us" flow
+2. Reach out to sales@escapesuite.io with your organization details
 3. Our team will provide a custom quote based on your requirements
 
-**$4,999/year** includes unlimited users within your organization.
+### Site License Features
 
-### Enterprise Features
-
-| Feature | SaaS Mode | Enterprise Standalone |
-|---------|-----------|----------------------|
-| Authentication | Clerk (cloud) | License key |
+| Feature | Individual Pro (connected SaaS) | Site License (air-gapped) |
+|---------|---------------------------------|---------------------------|
+| Authentication | Supabase Auth (cloud) | License key |
 | Subscription check | Supabase API | License validation |
 | Error tracking | Sentry | Disabled |
 | Analytics | Vercel Analytics | Disabled |
@@ -313,10 +317,10 @@ The standalone build produces a single HTML file that:
 | Area | Improvement | Priority |
 |------|-------------|----------|
 | Testing | Add component tests for Dashboard, Home pages | Medium |
-| Testing | Add Clerk auth integration tests | Medium |
+| Testing | Add Supabase Auth integration tests | Medium |
 | Features | Implement usage analytics dashboard | Low |
 | Features | Add project gallery/showcase | Low |
-| Performance | Code-split Clerk bundle | Low |
+| Performance | Code-split auth bundle | Low |
 | SEO | Add meta tags, OG images | Medium |
 
 ### ESCAPECRAFT
@@ -374,7 +378,7 @@ The standalone build produces a single HTML file that:
 │                        ESCAPEPLAN                                │
 │                    (Hub / Landing Page)                          │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   Clerk     │  │   Stripe    │  │  Supabase   │              │
+│  │  Supabase   │  │   Stripe    │  │  Supabase   │              │
 │  │   (Auth)    │  │ (Payments)  │  │  (Backend)  │              │
 │  └─────────────┘  └─────────────┘  └─────────────┘              │
 └────────────────────────┬────────────────────────────────────────┘
@@ -420,34 +424,38 @@ All ESCAPE Suite repositories are protected under a **Proprietary Software Licen
 - Authorized use only under valid license agreement
 - No warranty provided; liability limited
 
-### License Tiers (Standalone/EULA)
+### License Tiers (Site License)
 
-Standalone deployment is available exclusively for enterprise customers:
+The air-gapped Site License is a per-org annual license (NOT per-seat):
 
-| Tier | Users | Support | Price |
-|------|-------|---------|-------|
-| **Enterprise** | Unlimited (single org) | Dedicated + training | $4,999/year |
+| Band | Approx. size | Support | Price |
+|------|--------------|---------|-------|
+| **Team** | up to ~25 | Standard | $2,400/year |
+| **Organization** | up to ~250 | Dedicated + training | $9,600/year |
+| **Enterprise / Site** | larger / custom | Dedicated + training | Contact us |
 
-Custom pricing is available for multi-site deployments and extended support. Contact enterprise@escapesuite.io for a quote.
+Custom pricing is available for multi-site deployments and extended support. Contact sales@escapesuite.io for a quote.
 
 ### License Files
 
 | File | Purpose |
 |------|---------|
 | `LICENSE` | Proprietary license terms (all repos) |
-| `EULA-STANDALONE.md` | End User License Agreement for standalone customers |
 
-### SaaS vs Enterprise Standalone
+> Site License terms are folded into the `/terms` page (`Terms.tsx`); there is no separate
+> EULA document or route.
 
-| Aspect | SaaS Mode | Enterprise Standalone |
-|--------|-----------|----------------------|
-| Target | Individual/Teams | Organizations (25+ users) |
-| Authentication | Clerk (cloud) | License key validation |
-| Subscription | Stripe billing (monthly/annual) | Annual enterprise license |
+### Individual Pro vs Site License
+
+| Aspect | Individual Pro (connected SaaS) | Site License (air-gapped) |
+|--------|---------------------------------|---------------------------|
+| Target | Individuals | Organizations (per-org annual license) |
+| Authentication | Supabase Auth (cloud) | License key validation |
+| Subscription | Stripe billing ($9/mo or $89/yr) | Annual org license |
 | Updates | Automatic | Manual delivery |
 | Support | Standard (included) | Dedicated + training |
-| Data | Client-side (private) | Client-side (private) |
-| Internet | Required for auth | Not required |
+| Data | Client-side (private) | Client-side (private), offline |
+| Internet | Required for auth | Not required (air-gapped) |
 
 ---
 

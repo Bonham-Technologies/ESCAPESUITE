@@ -12,13 +12,12 @@ export type SubscriptionState =
   | 'trial'
   | 'pro_monthly'
   | 'pro_annual'
-  | 'founding_member'
   | 'canceled'
   | 'expired'
 
 export interface Subscription {
-  status: 'trialing' | 'active' | 'canceled' | 'expired' | 'lifetime' | 'past_due'
-  plan: 'trial' | 'pro_monthly' | 'pro_annual' | 'founding_member'
+  status: 'trialing' | 'active' | 'canceled' | 'expired' | 'past_due'
+  plan: 'trial' | 'pro_monthly' | 'pro_annual'
   trialEnd: string | null
   trialDaysRemaining: number
   periodEnd: string | null
@@ -30,7 +29,6 @@ export interface AuthState {
   isAuthenticated: boolean
   isTrial: boolean
   isPro: boolean
-  isFoundingMember: boolean
   subscription: Subscription | null
 }
 
@@ -39,7 +37,7 @@ export interface AuthState {
  */
 export function createMockSubscription(state: SubscriptionState): Subscription {
   const now = new Date()
-  const fourteenDaysFromNow = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
+  const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
   const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
 
@@ -48,8 +46,8 @@ export function createMockSubscription(state: SubscriptionState): Subscription {
       return {
         status: 'trialing',
         plan: 'trial',
-        trialEnd: fourteenDaysFromNow.toISOString(),
-        trialDaysRemaining: 14,
+        trialEnd: sevenDaysFromNow.toISOString(),
+        trialDaysRemaining: 7,
         periodEnd: null,
         hasActiveSubscription: false,
         canAccessPro: true,
@@ -73,17 +71,6 @@ export function createMockSubscription(state: SubscriptionState): Subscription {
         trialEnd: null,
         trialDaysRemaining: 0,
         periodEnd: new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-        hasActiveSubscription: true,
-        canAccessPro: true,
-      }
-
-    case 'founding_member':
-      return {
-        status: 'lifetime',
-        plan: 'founding_member',
-        trialEnd: null,
-        trialDaysRemaining: 0,
-        periodEnd: null,
         hasActiveSubscription: true,
         canAccessPro: true,
       }
@@ -146,9 +133,7 @@ export async function injectAuthState(page: Page, state: SubscriptionState) {
     isPro:
       state === 'pro_monthly' ||
       state === 'pro_annual' ||
-      state === 'founding_member' ||
       state === 'canceled',
-    isFoundingMember: state === 'founding_member',
     subscription,
   }
 
@@ -184,9 +169,7 @@ export async function updateSubscription(page: Page, newState: SubscriptionState
     isPro:
       newState === 'pro_monthly' ||
       newState === 'pro_annual' ||
-      newState === 'founding_member' ||
       newState === 'canceled',
-    isFoundingMember: newState === 'founding_member',
     subscription,
   }
 

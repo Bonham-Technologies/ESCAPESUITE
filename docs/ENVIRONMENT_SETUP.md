@@ -1,10 +1,10 @@
 # ESCAPESUITE Environment Setup Guide
 
-This guide covers complete setup for test and production environments across all supporting systems: Clerk, Stripe, Supabase, and Vercel.
+This guide covers complete setup for test and production environments across all supporting systems: Supabase (auth + backend), Stripe, Resend, and Vercel.
 
 ## Table of Contents
 - [Overview](#overview)
-- [1. Clerk Setup](#1-clerk-setup)
+- [1. Supabase Auth Setup](#1-supabase-auth-setup)
 - [2. Stripe Setup](#2-stripe-setup)
 - [3. Supabase Setup](#3-supabase-setup)
 - [4. Vercel Setup](#4-vercel-setup)
@@ -16,85 +16,67 @@ This guide covers complete setup for test and production environments across all
 
 ## Overview
 
-ESCAPESUITE requires four external services:
+ESCAPESUITE requires these external services:
 
 | Service | Purpose | Environments Needed |
 |---------|---------|---------------------|
-| **Clerk** | Authentication (sign in, sign up, user management) | Development, Production |
-| **Stripe** | Payments (subscriptions, one-time purchases, customer portal) | Test mode, Live mode |
-| **Supabase** | Backend (PostgreSQL database, Edge Functions) | Development/Staging, Production |
-| **Vercel** | Hosting (static sites, preview deployments) | Preview, Production |
+| **Supabase** | Authentication (Supabase Auth) + backend (PostgreSQL database, Edge Functions) | Development/Staging, Production |
+| **Stripe** | Payments (subscriptions, site-license purchases, customer portal) | Test mode, Live mode |
+| **Resend** | Transactional email (license delivery) | Test/Dev API key, Live API key |
+| **Vercel** | Hosting (static sites, preview deployments) + Vercel Analytics | Preview, Production |
 
 ### Recommended Environment Strategy
 
-| Environment | Clerk | Stripe | Supabase | Vercel |
-|-------------|-------|--------|----------|--------|
-| **Local Dev** | Development instance | Test mode | Dev project | N/A (localhost) |
-| **Preview/Staging** | Development instance | Test mode | Dev project | Preview deployments |
-| **Production** | Production instance | Live mode | Prod project | Production deployment |
+| Environment | Supabase (Auth + DB) | Stripe | Resend | Vercel |
+|-------------|----------------------|--------|--------|--------|
+| **Local Dev** | Dev project | Test mode | Dev API key | N/A (localhost) |
+| **Preview/Staging** | Dev project | Test mode | Dev API key | Preview deployments |
+| **Production** | Prod project | Live mode | Live API key | Production deployment |
 
 ---
 
-## 1. Clerk Setup
+## 1. Supabase Auth Setup
 
-### 1.1 Create Clerk Application
+Authentication uses **Supabase Auth** (the project migrated off Clerk — there is no Clerk
+anywhere). The same Supabase project provides both auth and the database/Edge Functions, so the
+auth client uses the same `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` as the rest of the app.
 
-1. Go to [clerk.com](https://clerk.com) and sign in
-2. Click "Add application"
-3. Name: `ESCAPESUITE` (or `ESCAPESUITE-Dev` for development)
-4. Select sign-in options:
-   - **Required**: Email
-   - **Recommended**: Google, GitHub (OAuth)
+### 1.1 Enable Auth Providers
 
-### 1.2 Development Instance (Test/Staging)
+In the Supabase Dashboard → **Authentication** → **Providers** (for both Dev and Prod projects):
 
-1. Your default instance is the development instance
-2. Go to **API Keys** and copy:
-   - `Publishable Key` (starts with `pk_test_`)
-   - `Secret Key` (starts with `sk_test_`) - only needed for backend if you add Clerk webhooks
+- **Required**: Email (password and/or magic link)
+- **Recommended**: Google, GitHub (OAuth)
 
-### 1.3 Production Instance
+### 1.2 Configure URLs and Redirects
 
-1. In Clerk Dashboard, go to **Settings** → **Instances**
-2. Click "Create production instance"
-3. Configure same sign-in options as development
-4. Go to **API Keys** and copy:
-   - `Publishable Key` (starts with `pk_live_`)
+In **Authentication** → **URL Configuration**:
 
-### 1.4 Configure Clerk Settings
-
-For **both** instances:
-
-**Paths (Settings → Paths)**:
 ```
-Sign-in URL: /sign-in
-Sign-up URL: /sign-up
-After sign-in URL: /dashboard
-After sign-up URL: /dashboard
+Site URL: https://www.escapesuite.io        # (http://localhost:5173 for local dev)
+Redirect URLs:
+  http://localhost:5173/dashboard
+  http://localhost:5174
+  http://localhost:5175
+  https://escapesuite.io/dashboard
+  https://www.escapesuite.io/dashboard
+  https://*.vercel.app
 ```
 
-**Allowed Origins (Settings → Domains)**:
-- Development: `http://localhost:5173`, `http://localhost:5174`, `http://localhost:5175`
-- Production: `https://escapesuite.io`, `https://*.vercel.app`
+After sign in/up, users land on `/dashboard`.
 
-### 1.5 Clerk Environment Variables
+### 1.3 Auth Environment Variables
+
+Supabase Auth reuses the project URL and anon key (no separate publishable key):
 
 ```env
-# Development/Staging
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Production
-VITE_CLERK_PUBLISHABLE_KEY=pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Development/Staging and Production both use the project's own URL + anon key
+VITE_SUPABASE_URL=https://xxxxxxxxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxxxxxxxxxxxx
 ```
 
-### 1.6 Optional: Clerk Webhooks (for user sync)
-
-If you want to sync Clerk users to Supabase:
-
-1. Go to **Webhooks** in Clerk Dashboard
-2. Add endpoint: `https://your-supabase-url.supabase.co/functions/v1/clerk-webhook`
-3. Select events: `user.created`, `user.updated`, `user.deleted`
-4. Copy the signing secret for webhook verification
+> There is **no** `VITE_CLERK_PUBLISHABLE_KEY` — that variable was removed with the migration
+> to Supabase Auth.
 
 ---
 
@@ -118,13 +100,18 @@ Test mode is automatically available. All test API keys start with `pk_test_` an
 
 You need to create products in **both** test and live modes.
 
-#### Individual Subscription Products
+> Price IDs are read **server-side** by Supabase Edge Functions (set as Edge Function secrets,
+> e.g. `STRIPE_PRICE_PRO_MONTHLY`). The frontend uses only the publishable key for the embedded
+> checkout UI — there are no `VITE_STRIPE_PRICE_*` variables.
 
-| Product | Price ID Name | Type | Amount |
-|---------|---------------|------|--------|
-| Pro Monthly | `VITE_STRIPE_PRICE_PRO_MONTHLY` | Recurring/month | $9.00 |
-| Pro Annual | `VITE_STRIPE_PRICE_PRO_ANNUAL` | Recurring/year | $79.00 |
-| Founding Member | `VITE_STRIPE_PRICE_FOUNDING` | One-time | $149.00 |
+#### Individual Pro Subscription Products (connected SaaS side door)
+
+| Product | Edge Function Secret | Type | Amount |
+|---------|----------------------|------|--------|
+| Pro Monthly | `STRIPE_PRICE_PRO_MONTHLY` | Recurring/month | $9.00 |
+| Pro Annual | `STRIPE_PRICE_PRO_ANNUAL` | Recurring/year | $89.00 |
+
+Individual Pro includes a **7-day** free trial.
 
 **Steps**:
 1. Go to **Products** → **Add product**
@@ -132,36 +119,22 @@ You need to create products in **both** test and live modes.
 3. Pricing: Recurring, $9.00 USD, Monthly
 4. After creation, copy the Price ID (starts with `price_`)
 
-#### Team Subscription Products
+#### Site License Products (air-gapped/offline, per-org annual — NOT per-seat)
 
-| Product | Price ID Name | Type | Amount |
-|---------|---------------|------|--------|
-| Team Seat | `VITE_STRIPE_PRICE_TEAM_SEAT` | Recurring/month (per unit) | $7.00 |
-| Enterprise Seat | `VITE_STRIPE_PRICE_ENTERPRISE_SEAT` | Recurring/month (per unit) | $12.00 |
+| Band | Edge Function Secret | Type | Amount |
+|------|----------------------|------|--------|
+| Team (~up to 25) | `STRIPE_PRICE_SITE_TEAM` | Recurring/year | $2,400.00 |
+| Organization (~up to 250) | `STRIPE_PRICE_SITE_ORG` | Recurring/year | $9,600.00 |
+| Enterprise / Site | — (no Price ID) | "Contact us" → sales@escapesuite.io | Custom |
 
 **Steps**:
 1. **Products** → **Add product**
-2. Name: "ESCAPESUITE Team"
-3. Pricing: Recurring, $7.00 USD, Monthly, **Per unit**
+2. Name: "ESCAPESUITE Site License — Team"
+3. Pricing: Recurring, $2,400.00 USD, Yearly
 4. Copy the Price ID
 
-#### Standalone License Products
-
-Create products for each combination:
-
-| Product | Tier | Price ID Suffix | Amount |
-|---------|------|-----------------|--------|
-| ESCAPECRAFT | Standard | `CRAFT_STANDARD` | $49 |
-| ESCAPECRAFT | Pro | `CRAFT_PRO` | $99 |
-| ESCAPECRAFT | Lifetime | `CRAFT_LIFETIME` | $199 |
-| ESCAPEARTIST | Standard | `ARTIST_STANDARD` | $69 |
-| ESCAPEARTIST | Pro | `ARTIST_PRO` | $149 |
-| ESCAPEARTIST | Lifetime | `ARTIST_LIFETIME` | $299 |
-| Suite Bundle | Standard | `SUITE_STANDARD` | $99 |
-| Suite Bundle | Pro | `SUITE_PRO` | $199 |
-| Suite Bundle | Lifetime | `SUITE_LIFETIME` | $399 |
-
-All standalone licenses are **one-time payments**.
+> The per-seat Teams/Enterprise SaaS plans, the Founding Member ($149 lifetime) plan, and the
+> multi-SKU consumer standalone grid were all removed. Do not recreate them in Stripe.
 
 ### 2.4 Configure Customer Portal
 
@@ -204,29 +177,16 @@ stripe listen --forward-to http://localhost:54321/functions/v1/webhook
 # Frontend (publishable - safe to expose)
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx  # or pk_live_xxx for production
 
-# Individual subscriptions
-VITE_STRIPE_PRICE_PRO_MONTHLY=price_xxx
-VITE_STRIPE_PRICE_PRO_ANNUAL=price_xxx
-VITE_STRIPE_PRICE_FOUNDING=price_xxx
-
-# Team subscriptions
-VITE_STRIPE_PRICE_TEAM_SEAT=price_xxx
-VITE_STRIPE_PRICE_ENTERPRISE_SEAT=price_xxx
-
-# Standalone licenses
-VITE_STRIPE_PRICE_CRAFT_STANDARD=price_xxx
-VITE_STRIPE_PRICE_CRAFT_PRO=price_xxx
-VITE_STRIPE_PRICE_CRAFT_LIFETIME=price_xxx
-VITE_STRIPE_PRICE_ARTIST_STANDARD=price_xxx
-VITE_STRIPE_PRICE_ARTIST_PRO=price_xxx
-VITE_STRIPE_PRICE_ARTIST_LIFETIME=price_xxx
-VITE_STRIPE_PRICE_SUITE_STANDARD=price_xxx
-VITE_STRIPE_PRICE_SUITE_PRO=price_xxx
-VITE_STRIPE_PRICE_SUITE_LIFETIME=price_xxx
-
 # Backend (Supabase Edge Functions - NEVER expose to frontend)
 STRIPE_SECRET_KEY=sk_test_xxx  # or sk_live_xxx for production
 STRIPE_WEBHOOK_SECRET=whsec_xxx
+
+# Price IDs live server-side in Edge Function secrets (not VITE_* vars):
+STRIPE_PRICE_PRO_MONTHLY=price_xxx   # Individual Pro, $9/mo
+STRIPE_PRICE_PRO_ANNUAL=price_xxx    # Individual Pro, $89/yr
+STRIPE_PRICE_SITE_TEAM=price_xxx     # Site License — Team, $2,400/yr
+STRIPE_PRICE_SITE_ORG=price_xxx      # Site License — Organization, $9,600/yr
+# Enterprise / Site is a "Contact us" flow (sales@escapesuite.io) — no Price ID
 ```
 
 ---
@@ -255,27 +215,26 @@ supabase db push
 ```
 
 **Migration order**:
-1. `20250104_create_subscriptions.sql` - Subscriptions table
-2. `20250109_create_enterprise_inquiries.sql` - Enterprise inquiries
-3. `20260110_create_organizations.sql` - Organizations, members, invites, audit logs
-4. `20260111_create_licenses.sql` - Licenses table (see below)
+1. `20250104_create_subscriptions.sql` - Subscriptions table (Individual Pro)
+2. `20250109_create_enterprise_inquiries.sql` - Enterprise/Site "Contact us" inquiries
+3. `20260111_create_licenses.sql` - Licenses table for Site License keys (see below)
+
+> The old `20260110_create_organizations.sql` migration (organizations/members/invites/audit
+> logs) belonged to the removed per-seat Teams/Enterprise SaaS model and is no longer applied.
 
 ### 3.3 Create Missing Licenses Table
 
 **IMPORTANT**: The `licenses` table is referenced but not yet in migrations. Run this SQL:
 
 ```sql
--- Create licenses table for standalone license keys
+-- Create licenses table for Site License keys (offline/air-gapped builds)
 CREATE TABLE IF NOT EXISTS licenses (
   id TEXT PRIMARY KEY, -- lic_xxx format
 
   -- Customer info
-  customer_id TEXT NOT NULL, -- Clerk user ID or Stripe customer ID
+  customer_id TEXT NOT NULL, -- Supabase user ID or Stripe customer ID
   customer_email TEXT NOT NULL,
   customer_name TEXT,
-
-  -- Organization (for team licenses)
-  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
 
   -- License details
   product TEXT NOT NULL CHECK (product IN ('craft', 'artist', 'suite')),
@@ -301,7 +260,6 @@ CREATE TABLE IF NOT EXISTS licenses (
 -- Indexes
 CREATE INDEX idx_licenses_customer_id ON licenses(customer_id);
 CREATE INDEX idx_licenses_customer_email ON licenses(customer_email);
-CREATE INDEX idx_licenses_organization_id ON licenses(organization_id);
 CREATE INDEX idx_licenses_product ON licenses(product);
 CREATE INDEX idx_licenses_expires_at ON licenses(expires_at);
 
@@ -318,7 +276,7 @@ CREATE TRIGGER update_licenses_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
-COMMENT ON TABLE licenses IS 'Standalone license keys for desktop app purchases';
+COMMENT ON TABLE licenses IS 'Site License keys for offline/air-gapped builds';
 ```
 
 ### 3.4 Deploy Edge Functions
@@ -400,13 +358,12 @@ In Vercel Dashboard → **Settings** → **Environment Variables**:
 
 | Variable | Environment | Value |
 |----------|-------------|-------|
-| `VITE_CLERK_PUBLISHABLE_KEY` | Production | `pk_live_xxx` |
-| `VITE_CLERK_PUBLISHABLE_KEY` | Preview, Development | `pk_test_xxx` |
 | `VITE_STRIPE_PUBLISHABLE_KEY` | Production | `pk_live_xxx` |
 | `VITE_STRIPE_PUBLISHABLE_KEY` | Preview, Development | `pk_test_xxx` |
 | `VITE_SUPABASE_URL` | Production | `https://prod-xxx.supabase.co` |
 | `VITE_SUPABASE_URL` | Preview, Development | `https://dev-xxx.supabase.co` |
-| ... | ... | ... |
+| `VITE_SUPABASE_ANON_KEY` | Production | `eyJ...` (prod anon key) |
+| `VITE_SUPABASE_ANON_KEY` | Preview, Development | `eyJ...` (dev anon key) |
 
 **Important**: Set environment-specific values for Production vs Preview/Development.
 
@@ -426,40 +383,19 @@ Create `apps/plan/.env.local`:
 
 ```env
 # =============================================================================
-# CLERK - Authentication
+# SUPABASE - Auth + Backend (one project provides both)
 # =============================================================================
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+VITE_SUPABASE_URL=https://xxxxxxxxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxxxxxxxxxxxx
 
 # =============================================================================
 # STRIPE - Payments (use test keys for development)
 # =============================================================================
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# Individual Subscription Price IDs
-VITE_STRIPE_PRICE_PRO_MONTHLY=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_PRO_ANNUAL=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_FOUNDING=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Team Subscription Price IDs
-VITE_STRIPE_PRICE_TEAM_SEAT=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_ENTERPRISE_SEAT=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Standalone License Price IDs
-VITE_STRIPE_PRICE_CRAFT_STANDARD=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_CRAFT_PRO=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_CRAFT_LIFETIME=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_ARTIST_STANDARD=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_ARTIST_PRO=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_ARTIST_LIFETIME=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_SUITE_STANDARD=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_SUITE_PRO=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_STRIPE_PRICE_SUITE_LIFETIME=price_xxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# =============================================================================
-# SUPABASE - Backend
-# =============================================================================
-VITE_SUPABASE_URL=https://xxxxxxxxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxxxxxxxxxxxx
+# Stripe Price IDs are NOT frontend env vars — they live in Supabase Edge Function
+# secrets (STRIPE_PRICE_PRO_MONTHLY, STRIPE_PRICE_PRO_ANNUAL, STRIPE_PRICE_SITE_TEAM,
+# STRIPE_PRICE_SITE_ORG). See "Supabase Edge Function Secrets" below.
 
 # =============================================================================
 # OPTIONAL
@@ -476,16 +412,25 @@ Set these in Supabase Dashboard → Edge Functions → Secrets:
 STRIPE_SECRET_KEY=sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# License signing (required for standalone licenses)
+# Stripe Price IDs (server-side)
+STRIPE_PRICE_PRO_MONTHLY=price_xxx   # Individual Pro, $9/mo
+STRIPE_PRICE_PRO_ANNUAL=price_xxx    # Individual Pro, $89/yr
+STRIPE_PRICE_SITE_TEAM=price_xxx     # Site License — Team, $2,400/yr
+STRIPE_PRICE_SITE_ORG=price_xxx      # Site License — Organization, $9,600/yr
+
+# License signing (required for Site License keys)
 LICENSE_PRIVATE_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 LICENSE_PUBLIC_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Transactional email (required for license delivery)
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ---
 
 ## 6. Testing Checklist
 
-### Clerk Testing
+### Supabase Auth Testing
 - [ ] Sign up with email
 - [ ] Sign in with email
 - [ ] Sign in with Google OAuth
@@ -493,34 +438,27 @@ LICENSE_PUBLIC_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - [ ] Sign out
 - [ ] Protected routes redirect to sign-in
 
-### Stripe Individual Subscription Testing
-- [ ] Pro Monthly checkout → success
-- [ ] Pro Annual checkout → success
-- [ ] Founding Member checkout → success
+### Stripe Individual Pro Subscription Testing
+- [ ] Pro Monthly ($9/mo) checkout → success
+- [ ] Pro Annual ($89/yr) checkout → success
+- [ ] 7-day free trial applies correctly
 - [ ] Subscription shows as active in dashboard
 - [ ] Customer portal opens
 - [ ] Cancel subscription in portal
 - [ ] Subscription shows as canceled
 
-### Stripe Team Subscription Testing
-- [ ] Create team checkout (5 seats) → success
-- [ ] Redirect to team dashboard
-- [ ] Team shows correct seat count
-- [ ] Invite member → invitation created
-- [ ] Accept invite → member joins
-- [ ] Change member role
-- [ ] Remove member
-
-### Stripe Standalone License Testing
-- [ ] Purchase ESCAPECRAFT license → success
+### Stripe Site License Testing
+- [ ] Team band ($2,400/yr) checkout → success
+- [ ] Organization band ($9,600/yr) checkout → success
+- [ ] Enterprise / Site "Contact us" mailto → sales@escapesuite.io
 - [ ] License key generated
-- [ ] License key appears in downloads page
-- [ ] Validate license via API
+- [ ] License key + download appear at `/dashboard?tab=downloads`
+- [ ] License email delivered via Resend
+- [ ] Validate license via API (offline/air-gapped build)
 
 ### Supabase Testing
 - [ ] Subscriptions table populated after checkout
-- [ ] Organizations table has correct data
-- [ ] Audit logs recorded (Enterprise)
+- [ ] Licenses table populated after Site License purchase
 - [ ] Edge Functions responding
 
 ### Vercel Testing
@@ -535,24 +473,24 @@ LICENSE_PUBLIC_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### Before Launch
 
-**Clerk**:
-- [ ] Create production instance
-- [ ] Configure same settings as development
-- [ ] Update Vercel env vars with `pk_live_` key
+**Supabase Auth**:
+- [ ] Configure providers + redirect URLs on the production project
+- [ ] Confirm `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` point at the prod project
 
 **Stripe**:
 - [ ] Complete business verification
-- [ ] Create all products/prices in live mode
+- [ ] Create all products/prices in live mode (Individual Pro + Site License bands)
 - [ ] Configure customer portal in live mode
 - [ ] Add production webhook endpoint
 - [ ] Update Vercel env vars with `pk_live_` key
-- [ ] Update Supabase secrets with `sk_live_` key
+- [ ] Update Supabase secrets with `sk_live_` key and live Price IDs
 
 **Supabase**:
 - [ ] Create production project
+- [ ] Configure Supabase Auth providers + redirect URLs
 - [ ] Run all migrations
 - [ ] Deploy all Edge Functions
-- [ ] Set production secrets
+- [ ] Set production secrets (Stripe live keys + Price IDs, license keys, `RESEND_API_KEY`)
 - [ ] Update Vercel env vars with production URL/keys
 
 **Vercel**:
@@ -582,8 +520,8 @@ LICENSE_PUBLIC_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 2. Verify domain is allowed in Stripe settings
 
 ### User not authenticated after redirect
-1. Check Clerk domain configuration
-2. Verify cookies are being set correctly
+1. Check Supabase Auth URL configuration (Site URL + Redirect URLs)
+2. Verify the session cookie/local storage is being set correctly
 3. Check browser console for CORS errors
 
 ### License validation failing

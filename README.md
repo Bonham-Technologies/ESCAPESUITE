@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml)
 
-Privacy-first, client-side media creation tools that run entirely in the browser. All video processing happens locally - no cloud uploads required.
+Privacy-first, client-side media creation tools that run entirely in the browser. All video processing happens locally on your hardware. The air-gapped Site License runs fully offline with no cloud uploads; the connected Individual Pro side door uses Supabase, Stripe, Resend, and Vercel for auth, billing, and email.
 
 **Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.**
 
@@ -32,7 +32,7 @@ Privacy-first, client-side media creation tools that run entirely in the browser
 - Export to WebM (VP9) or MP4 (H.264)
 
 ### ESCAPEPLAN - Hub
-- Clerk authentication
+- Supabase authentication
 - Stripe subscription management
 - Dashboard for launching tools
 
@@ -105,8 +105,9 @@ pnpm clean               # Remove node_modules and dist
 - **Framework**: React 19 + TypeScript
 - **Build**: Vite + Turborepo
 - **State**: Zustand
-- **Auth**: Clerk
+- **Auth**: Supabase Auth
 - **Payments**: Stripe
+- **Email**: Resend (transactional)
 - **Backend**: Supabase Edge Functions
 - **Storage**: IndexedDB (client-side)
 - **Video**: WebCodecs API, MediaRecorder
@@ -142,19 +143,18 @@ Create `.env.local` in each app or set in Vercel:
 
 ```env
 # All apps
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx
 
 # ESCAPEPLAN only
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
-VITE_STRIPE_PRICE_PRO_MONTHLY=price_xxx
-VITE_STRIPE_PRICE_PRO_ANNUAL=price_xxx
-VITE_STRIPE_PRICE_FOUNDING=price_xxx
 
 # Optional
 VITE_BUILD_MODE=saas
 ```
+
+> **Note:** Stripe Price IDs are configured server-side via Supabase Edge Functions; the
+> frontend uses only the publishable key for the embedded checkout UI.
 
 ## Browser Support
 
@@ -209,8 +209,8 @@ A changeset file is created in `.changeset/` - commit this with your PR.
 
 This software is proprietary. See [LICENSE](LICENSE) for details.
 
-- **SaaS**: Use via [escapesuite.io](https://escapesuite.io) with subscription
-- **Standalone**: Purchase license from Bonham Technologies, LLC
+- **Site License** (air-gapped/offline): Annual organization license from Bonham Technologies, LLC — Team $2,400/yr (~up to 25), Organization $9,600/yr (~up to 250), Enterprise/Site is "Contact us" via sales@escapesuite.io
+- **Individual Pro** (connected SaaS): Use via [escapesuite.io](https://www.escapesuite.io) at $9/month or $89/year (7-day free trial)
 
 ---
 

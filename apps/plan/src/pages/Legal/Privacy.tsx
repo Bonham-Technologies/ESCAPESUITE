@@ -5,15 +5,23 @@ export default function Privacy() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Privacy Policy</h1>
-        <p className={styles.lastUpdated}>Last updated: January 16, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: May 31, 2026</p>
       </header>
 
       <div className={styles.content}>
         <div className={styles.highlight}>
           <p>
             <strong>Our Commitment:</strong> ESCAPE Suite is built with privacy at its core. Your video
-            recordings and projects are processed entirely on your device and are never uploaded to our
-            servers unless you explicitly choose to share them.
+            recordings and editing projects are always processed entirely on your device and are never
+            uploaded to our servers.
+          </p>
+          <p>
+            The air-gapped <strong>Site License</strong> bundle runs fully offline and transmits no data
+            to us at all. Our connected services (the ESCAPEPLAN dashboard, account, and individual Pro
+            subscription) rely on a small set of providers — Supabase (authentication and database),
+            Stripe (payments), Resend (transactional email and license delivery), and Vercel
+            (hosting and privacy-friendly analytics) — and only the limited account, billing, and usage
+            data described below is shared with them. Even then, your recordings and projects stay local.
           </p>
         </div>
 
@@ -31,7 +39,7 @@ export default function Privacy() {
         <ul>
           <li>Email address</li>
           <li>Name (optional)</li>
-          <li>Authentication credentials (managed by our authentication provider, Clerk)</li>
+          <li>Authentication credentials (managed by our authentication provider, Supabase Auth)</li>
         </ul>
 
         <h3>2.2 Payment Information</h3>
@@ -93,9 +101,9 @@ export default function Privacy() {
         <h3>4.2 Cloud Storage (Our Servers)</h3>
         <p>Account and subscription data is stored securely using:</p>
         <ul>
-          <li><strong>Supabase</strong> - For subscription and organization data (PostgreSQL with encryption at rest)</li>
-          <li><strong>Clerk</strong> - For authentication and identity management</li>
+          <li><strong>Supabase</strong> - For authentication, identity management, and subscription/license data (PostgreSQL with encryption at rest)</li>
           <li><strong>Stripe</strong> - For payment processing (PCI DSS compliant)</li>
+          <li><strong>Resend</strong> - For transactional email and license delivery</li>
         </ul>
 
         <h2>5. Third-Party Services</h2>
@@ -111,9 +119,9 @@ export default function Privacy() {
           </thead>
           <tbody>
             <tr>
-              <td>Clerk</td>
-              <td>Authentication</td>
-              <td>Email, name, auth tokens</td>
+              <td>Supabase</td>
+              <td>Authentication &amp; Database</td>
+              <td>Email, name, auth tokens, account and subscription/license data</td>
             </tr>
             <tr>
               <td>Stripe</td>
@@ -121,13 +129,13 @@ export default function Privacy() {
               <td>Billing details, payment method</td>
             </tr>
             <tr>
-              <td>Supabase</td>
-              <td>Database</td>
-              <td>Account and subscription data</td>
+              <td>Resend</td>
+              <td>Transactional email &amp; license delivery</td>
+              <td>Email address</td>
             </tr>
             <tr>
               <td>Vercel</td>
-              <td>Hosting & Analytics</td>
+              <td>Hosting &amp; Analytics</td>
               <td>Usage events, page views</td>
             </tr>
           </tbody>
@@ -138,29 +146,36 @@ export default function Privacy() {
           We do not sell your data to third parties.
         </p>
 
-        <h2>6. Standalone Mode</h2>
+        <h2>6. Air-Gapped Site License Bundle</h2>
         <p>
-          ESCAPECRAFT and ESCAPEARTIST can run in standalone mode (offline desktop versions). In this mode:
+          The ESCAPE Suite Site License is delivered as a single, self-contained bundle (ESCAPECRAFT and
+          ESCAPEARTIST) that your organization hosts and runs on its own network, including isolated or
+          air-gapped environments. When you run this offline bundle:
         </p>
         <ul>
-          <li>No account is required</li>
+          <li>No account sign-in is required to run the hosted bundle</li>
           <li>No data is sent to our servers</li>
           <li>No analytics are collected</li>
-          <li>The application works entirely offline</li>
-          <li>Only your license key is stored locally for validation</li>
+          <li>The Software works entirely offline</li>
+          <li>Only the cryptographically signed license embedded in your bundle is used locally to validate the Term</li>
         </ul>
-
-        <h2>7. Team and Enterprise Features</h2>
         <p>
-          For team subscriptions, organization administrators can view:
+          The limited account, billing, and email data described elsewhere in this Policy is only
+          collected at purchase or renewal (through our connected services), not while you run the
+          offline bundle.
         </p>
-        <ul>
-          <li>Team member email addresses and roles</li>
-          <li>Membership status and join dates</li>
-          <li>Audit logs of administrative actions (Enterprise only)</li>
-        </ul>
+
+        <h2>7. Site License (Per-Organization)</h2>
         <p>
-          Administrators cannot access your recordings, projects, or personal usage data.
+          The Site License is granted per-organization, not per-member or per-seat. We do not create
+          individual member accounts, collect per-seat or per-user profile data, or maintain
+          administrator/audit-log records for the Site License. The signed bundle simply encodes your
+          purchased organization-size band and an expiration date.
+        </p>
+        <p>
+          The only personal data we process for a Site License is the email address and billing details
+          of the person who purchases or renews it, used to deliver the bundle and license and to manage
+          the order. We never access your recordings, projects, or usage data.
         </p>
 
         <h2>8. Data Retention</h2>
@@ -189,7 +204,7 @@ export default function Privacy() {
           We use minimal cookies, primarily for authentication:
         </p>
         <ul>
-          <li><strong>Authentication cookies</strong> - Required to keep you signed in (set by Clerk)</li>
+          <li><strong>Authentication cookies</strong> - Required to keep you signed in (set by Supabase Auth)</li>
           <li><strong>No tracking cookies</strong> - We don't use cookies for advertising or cross-site tracking</li>
         </ul>
 
