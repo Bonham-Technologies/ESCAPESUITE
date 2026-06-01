@@ -83,14 +83,16 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 async function verifySignatureAsync(payload: SignedLicensePayload): Promise<boolean> {
   if (!PUBLIC_KEY_HEX) {
     // No public key was baked into this build, so the signature CANNOT be
-    // verified. This is only safe for local dev and the E2E suite (mock keys).
-    // SECURITY (audit H4): production standalone builds MUST bake
-    // VITE_LICENSE_PUBLIC_KEY, otherwise every structurally-valid license is
-    // accepted. Flipping this to fail closed requires the standalone build
-    // pipeline to reliably inject the key first (see PR notes) — doing it before
-    // then would reject all licenses on the currently-shipped (keyless) builds.
-    console.warn('[license] No public key configured — signature verification SKIPPED (dev/test only).')
-    return true
+    // verified. Fail OPEN only in a local dev build (import.meta.env.DEV); fail
+    // CLOSED in any production build (audit H4). CI's build-standalone now injects
+    // VITE_LICENSE_PUBLIC_KEY, and the standalone E2E build bakes a disposable test
+    // key — so a keyless build only ever happens in local dev.
+    if (import.meta.env.DEV) {
+      console.warn('[license] No public key configured — signature verification SKIPPED (dev only).')
+      return true
+    }
+    console.error('[license] No license public key baked into this build — rejecting license (fail closed).')
+    return false
   }
 
   try {

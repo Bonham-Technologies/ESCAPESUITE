@@ -1,4 +1,5 @@
 import { Page } from '@playwright/test'
+import crypto from 'node:crypto'
 
 /**
  * Utilities for mocking license validation in E2E tests.
@@ -43,9 +44,33 @@ function generateLicenseId(): string {
   return `lic_mock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 }
 
+// Disposable Ed25519 test keypair. NOT a production key — it exists only to sign
+// mock licenses for the standalone E2E, whose build bakes the matching PUBLIC key
+// (ci.yml `test-standalone`). The fail-closed gate (audit H4) then verifies them.
+//   public key: 334ad57afb4246efec5cea53dd64a0f25828cb3d32da5a38d9661e245436daee
+const TEST_PRIVATE_KEY_HEX = '2db9865ba7d7590b8d2ae38be46bb1c6b0b01ea17ebde3b15adc27424c80e110'
+
+// PKCS8 DER prefix for a raw 32-byte Ed25519 seed.
+const PKCS8_ED25519_PREFIX = Buffer.from([
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+  0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+])
+
 /**
- * Generate a mock license key in the ESCAPE- format.
- * Note: The signature is a placeholder since we skip verification in tests.
+ * Sign a message with the disposable test Ed25519 key. Produces a real signature
+ * that verifies against the test public key via Web Crypto — the same path
+ * packages/shared/src/auth/license.ts uses. Returns base64.
+ */
+function signWithTestKey(message: string): string {
+  const der = Buffer.concat([PKCS8_ED25519_PREFIX, Buffer.from(TEST_PRIVATE_KEY_HEX, 'hex')])
+  const key = crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })
+  return crypto.sign(null, Buffer.from(message, 'utf8'), key).toString('base64')
+}
+
+/**
+ * Generate a mock license key in the ESCAPE- format, REALLY signed with the
+ * disposable test key so it passes the fail-closed signature gate in a build that
+ * bakes the matching test public key.
  */
 export function generateMockLicenseKey(options: MockLicenseOptions): string {
   const {
@@ -66,7 +91,10 @@ export function generateMockLicenseKey(options: MockLicenseOptions): string {
     expires = expiryDate.toISOString()
   }
 
-  const payload: LicensePayload = {
+  // Build the payload WITHOUT the signature and sign exactly that JSON, then
+  // append the signature LAST — matching how license.ts reconstructs the signed
+  // message ({ signature, ...rest } -> JSON.stringify(rest)).
+  const payloadWithoutSig = {
     id: generateLicenseId(),
     version: 1,
     customer: {
@@ -80,14 +108,12 @@ export function generateMockLicenseKey(options: MockLicenseOptions): string {
     issued,
     expires,
     features,
-    signature: 'mock_signature_for_testing',
   }
 
-  // Encode as base64
-  const jsonString = JSON.stringify(payload)
-  const base64 = btoa(jsonString)
+  const signature = signWithTestKey(JSON.stringify(payloadWithoutSig))
+  const payload: LicensePayload = { ...payloadWithoutSig, signature }
 
-  return `ESCAPE-${base64}`
+  return `ESCAPE-${btoa(JSON.stringify(payload))}`
 }
 
 /**
@@ -142,11 +168,6 @@ export async function mockLicenseValidation(page: Page) {
     })
   })
 
-  // Skip signature verification by injecting a mock verifier
-  await page.addInitScript(() => {
-    // Override the signature verification to always return true for mock licenses
-    ;(window as any).__ESCAPE_SKIP_LICENSE_VERIFICATION = true
-  })
 }
 
 /**

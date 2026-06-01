@@ -290,3 +290,48 @@ describe('license storage functions', () => {
     expect(loadLicense('artist')).toBe('ESCAPE-artistkey')
   })
 })
+
+describe('validateLicenseAsync — fail-closed gate (audit H4)', () => {
+  // Tests the no-public-key BEHAVIOR (fail closed in prod, open only in dev) — the
+  // actual H4 change, and environment-independent. The real Ed25519 accept/reject
+  // round-trip needs Web Crypto Ed25519 (browsers / Node 22+, NOT CI's jsdom+Node 20),
+  // so it's covered by the standalone E2E (built with a test key, fed test-signed mock
+  // licenses) plus the offline keypair proof — not this jsdom unit suite.
+
+  // Structurally valid; only the no-key path (which returns before signature
+  // verification) is exercised here, so a placeholder signature is fine.
+  const structurallyValidKey = `ESCAPE-${btoa(
+    JSON.stringify({
+      id: 'lic_async',
+      version: 1,
+      customer: { id: 'cus_async', email: 'async@example.com', name: 'Async User' },
+      product: 'craft',
+      tier: 'pro',
+      seats: 1,
+      issued: '2026-01-01T00:00:00Z',
+      features: ['recorder'],
+      signature: 'placeholder',
+    })
+  )}`
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('fails CLOSED in a production build that has no public key', async () => {
+    vi.stubEnv('VITE_LICENSE_PUBLIC_KEY', '')
+    vi.stubEnv('DEV', false)
+    vi.resetModules()
+    const { validateLicenseAsync } = await import('./license')
+    expect(await validateLicenseAsync(structurallyValidKey, 'craft')).toBeNull()
+  })
+
+  it('fails OPEN (dev convenience) only in a dev build with no public key', async () => {
+    vi.stubEnv('VITE_LICENSE_PUBLIC_KEY', '')
+    vi.stubEnv('DEV', true)
+    vi.resetModules()
+    const { validateLicenseAsync } = await import('./license')
+    expect(await validateLicenseAsync(structurallyValidKey, 'craft')).not.toBeNull()
+  })
+})
