@@ -57,8 +57,7 @@ serve(async (req) => {
         // Identity is carried in Stripe metadata as the Supabase auth.users UUID.
         const supabaseUserId = session.metadata?.supabase_user_id
         const priceId = session.metadata?.price_id
-        const checkoutType = session.metadata?.type // 'organization', 'license', or undefined (individual)
-        const organizationId = session.metadata?.organization_id
+        const checkoutType = session.metadata?.type // 'license' or undefined (individual)
 
         // Handle license purchase (standalone)
         if (checkoutType === 'license') {
@@ -231,75 +230,6 @@ serve(async (req) => {
           } catch (e) {
             console.error('Site license email failed (non-fatal):', e)
           }
-          break
-        }
-
-        // Handle organization checkout
-        if (checkoutType === 'organization' && organizationId) {
-          if (!supabaseUserId) {
-            console.error('No supabase_user_id in session metadata for organization checkout')
-            break
-          }
-          const orgPlan = session.metadata?.plan || 'team'
-          const seatCount = parseInt(session.metadata?.seat_count || '5', 10)
-
-          // Activate the organization owner's membership
-          await supabase
-            .from('organization_members')
-            .update({ joined_at: new Date().toISOString() })
-            .eq('organization_id', organizationId)
-            .eq('user_id', supabaseUserId)
-            .eq('role', 'owner')
-
-          // Get actual period dates from Stripe subscription
-          let periodStart = new Date().toISOString()
-          let periodEnd: string | null = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-
-          if (session.subscription) {
-            try {
-              const stripeSubscription = await stripe.subscriptions.retrieve(session.subscription as string)
-              periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString()
-              periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString()
-            } catch (subError) {
-              console.error('Failed to retrieve subscription details:', subError)
-              // Fall back to defaults
-            }
-          }
-
-          // Create subscription record linked to organization
-          await supabase.from('subscriptions').upsert({
-            auth_user_id: supabaseUserId,
-            stripe_customer_id: session.customer as string,
-            stripe_subscription_id: session.subscription as string || null,
-            status: 'active',
-            plan: orgPlan,
-            organization_id: organizationId,
-            seat_count: seatCount,
-            current_period_start: periodStart,
-            current_period_end: periodEnd,
-          }, {
-            onConflict: 'auth_user_id',
-          })
-
-          // Log the action (if audit logging enabled)
-          const { data: org } = await supabase
-            .from('organizations')
-            .select('settings')
-            .eq('id', organizationId)
-            .single()
-
-          if (org?.settings?.audit_logging) {
-            await supabase.from('audit_logs').insert({
-              organization_id: organizationId,
-              user_id: supabaseUserId,
-              action: 'subscription.created',
-              resource_type: 'subscription',
-              resource_id: session.subscription as string,
-              metadata: { plan: orgPlan, seatCount },
-            })
-          }
-
-          console.log(`Organization subscription created for ${organizationId}: ${orgPlan} with ${seatCount} seats`)
           break
         }
 

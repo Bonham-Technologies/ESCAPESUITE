@@ -182,26 +182,6 @@ serve(async (req) => {
       metadata: { product, type: 'pre-licensed' },
     })
 
-    // Log to audit if org has it enabled
-    if (license.organization_id) {
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('settings')
-        .eq('id', license.organization_id)
-        .single()
-
-      if (org?.settings?.audit_logging) {
-        await supabase.from('audit_logs').insert({
-          organization_id: license.organization_id,
-          user_id: user.id,
-          action: 'license.pre_licensed_download',
-          resource_type: 'license',
-          resource_id: licenseId,
-          metadata: { product },
-        })
-      }
-    }
-
     // Return the personalized HTML file
     const productName = product === 'craft' ? 'ESCAPECRAFT' : 'ESCAPEARTIST'
     const downloadFileName = `${productName}-licensed.html`

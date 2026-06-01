@@ -50,33 +50,3 @@ export async function requireUser(req: Request): Promise<User> {
   if (error || !data?.user) throw new AuthError('Invalid or expired session')
   return data.user
 }
-
-export type OrgRole = 'owner' | 'admin' | 'member'
-
-/**
- * Assert that `userId` holds one of `allowedRoles` in `orgId` (joined members
- * only). Returns the member row. Throws AuthError(403) otherwise. Uses the
- * service-role client (RLS-bypassing) because edge functions must authorize
- * explicitly.
- */
-export async function assertOrgRole(
-  supabase: SupabaseClient,
-  orgId: string,
-  userId: string,
-  allowedRoles: OrgRole[]
-): Promise<{ id: string; role: OrgRole; email: string }> {
-  const { data: member, error } = await supabase
-    .from('organization_members')
-    .select('id, role, email, joined_at')
-    .eq('organization_id', orgId)
-    .eq('user_id', userId)
-    .not('joined_at', 'is', null)
-    .maybeSingle()
-
-  if (error) throw new AuthError(error.message, 500)
-  if (!member) throw new AuthError('You are not a member of this organization', 403)
-  if (!allowedRoles.includes(member.role as OrgRole)) {
-    throw new AuthError('Insufficient permissions for this action', 403)
-  }
-  return member as { id: string; role: OrgRole; email: string }
-}
