@@ -340,10 +340,15 @@ jobs:
           retention-days: 7
 
   # Standalone build - builds auth-free single-file versions
+  # Skip for Dependabot: its runs carry no repo secrets, so the H4 fail-closed
+  # key check below (and the keyed build) can never pass. The standalone
+  # artifact is irrelevant to a dependency bump, and the ci-status gate exempts
+  # Dependabot here to match (same pattern as e2e/test-standalone/deploy).
   build-standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [lint-and-typecheck, test]
+    if: github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -628,8 +633,11 @@ jobs:
             exit 1
           fi
 
-          # Standalone build must pass
-          if [ "${{ needs.build-standalone.result }}" != "success" ]; then
+          # Standalone build must pass (skipped for Dependabot, which has no
+          # secrets to satisfy the H4 fail-closed key check — mirrors e2e/
+          # test-standalone below)
+          if [ "${{ github.actor }}" != "dependabot[bot]" ] && \
+             [ "${{ needs.build-standalone.result }}" != "success" ]; then
             echo "Standalone build failed"
             exit 1
           fi
