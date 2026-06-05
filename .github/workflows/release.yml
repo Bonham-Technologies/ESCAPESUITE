@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -39,7 +39,7 @@ jobs:
 
       - name: Create Release Pull Request or Tag
         id: changesets
-        uses: changesets/action@63a615b9cd06ba9a3e6d13796c7fbcb080a60a0b # v1
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1
         with:
           title: 'chore: version packages'
           commit: 'chore: version packages'
@@ -50,7 +50,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.changesets.outputs.published == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const publishedPackages = ${{ steps.changesets.outputs.publishedPackages }};
@@ -112,7 +112,7 @@ jobs:
 
       - name: Setup pnpm
         if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
 
       - name: Setup Node.js
         if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
@@ -206,7 +206,7 @@ jobs:
 
       - name: Attach builds to GitHub Release
         if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
