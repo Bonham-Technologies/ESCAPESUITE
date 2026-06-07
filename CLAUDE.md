@@ -92,12 +92,12 @@ dist/
 - **pnpm workspaces**: Efficient dependency management with shared packages
 - **Turborepo**: Cached builds, parallel execution, smart rebuilds
 - **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer
-- **Clerk Authentication**: All apps use the same Clerk instance for unified auth
+- **Supabase Auth**: All apps authenticate via the shared `@escapesuite/shared/auth` Supabase client; `apps/plan/src/lib/auth.tsx` is a thin Clerk-shaped adapter (`useUser`/`SignedIn`/`SignedOut`) over `supabase.auth`
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file
 
 ### ESCAPEPLAN (apps/plan)
 - React Router for client-side routing
-- Clerk (auth), Stripe (payments), Supabase (Edge Functions + PostgreSQL)
+- Supabase Auth (auth), Stripe (payments), Supabase (Edge Functions + PostgreSQL)
 - In production: serves CRAFT at `/craft/` and ARTIST at `/artist/`
 
 ### ESCAPECRAFT (apps/craft)
@@ -135,8 +135,7 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 Create `.env.local` files in each app directory, or set in Vercel dashboard:
 
 ```env
-# Required for all apps
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+# Required for all apps (Supabase also handles authentication)
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx
 
@@ -181,7 +180,7 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 | `lint-and-typecheck` | ESLint + TypeScript (combined) | All PRs |
 | `test` | Unit tests with coverage | All PRs |
 | `build` | Production builds, bundle size report | All PRs |
-| `build-standalone` | Standalone builds (no auth) | All PRs |
+| `build-standalone` | Standalone builds (no auth) | PRs (skipped for Dependabot) |
 | `e2e` | Fast E2E tests (excludes journeys) | PRs only |
 | `e2e-full` | Full E2E including journeys | Main branch or `run-full-e2e` label |
 | `test-standalone` | Standalone E2E tests | PRs only |
@@ -203,7 +202,7 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
 **Dependabot** (`.github/dependabot.yml`):
 - Weekly updates for all apps
-- Grouped PRs: React, Clerk, testing, linting
+- Grouped PRs: React, testing, linting
 - GitHub Actions version updates
 
 ## Vercel Analytics

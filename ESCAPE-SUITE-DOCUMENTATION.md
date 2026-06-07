@@ -31,7 +31,7 @@ The ESCAPE Suite is a collection of privacy-first, client-side media creation to
 - User authentication via Supabase Auth
 - Subscription management (7-day trial, Individual Pro monthly/annual)
 - Dashboard with tool launchers
-- Analytics (Vercel Analytics) and error tracking (Sentry)
+- Analytics (Vercel Analytics)
 
 **Test Coverage:** 120 unit tests (subscription API, analytics, routing, components)
 
@@ -108,7 +108,6 @@ Each app requires environment variables. Create `.env.local` files:
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
-VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 ```
 
 > Stripe Price IDs (Individual Pro + Site License bands) live server-side in Supabase Edge
@@ -119,7 +118,6 @@ VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 VITE_BUILD_MODE=saas
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx
-VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
 ```
 
 ### Starting Development Servers
@@ -249,7 +247,6 @@ For the Team and Organization bands, purchase via the Pricing page. For Enterpri
 |---------|---------------------------------|---------------------------|
 | Authentication | Supabase Auth (cloud) | License key |
 | Subscription check | Supabase API | License validation |
-| Error tracking | Sentry | Disabled |
 | Analytics | Vercel Analytics | Disabled |
 | Bundle size | Standard | Optimized (smaller) |
 | Internet required | Yes | No |

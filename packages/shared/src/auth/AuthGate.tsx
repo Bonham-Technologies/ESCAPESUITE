@@ -230,7 +230,7 @@ interface SaaSAuthGateProps {
   logo: ReactNode
 }
 
-// SaaS mode auth gate - uses Clerk user ID to check subscription
+// SaaS mode auth gate - uses the Supabase user ID to check subscription
 export function SaaSAuthGate({ children, userId, isLoaded, appName, logo }: SaaSAuthGateProps) {
   const [subscriptionState, setSubscriptionState] = useState<{
     checked: boolean
@@ -275,7 +275,7 @@ export function SaaSAuthGate({ children, userId, isLoaded, appName, logo }: SaaS
 
   // Derive auth state from props and subscription state
   const authState: AuthState = (() => {
-    // Still loading Clerk
+    // Still loading the auth session
     if (!isLoaded) {
       return { isAuthorized: false, isTrial: false, isLoading: true, error: null }
     }
