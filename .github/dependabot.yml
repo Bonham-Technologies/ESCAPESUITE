@@ -15,9 +15,6 @@ updates:
           - "react"
           - "react-dom"
           - "@types/react*"
-      clerk:
-        patterns:
-          - "@clerk/*"
       stripe:
         patterns:
           - "@stripe/*"
