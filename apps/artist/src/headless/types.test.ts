@@ -7,7 +7,7 @@ describe('headless render contract', () => {
     // Compile-time contract check executed as a trivial runtime assertion.
     const input: RenderInput = {
       project: { id: 'p', name: 'n', resolution: { width: 2, height: 2 },
-        timeline: { tracks: [], clips: [], textOverlays: [], shapeOverlays: [], duration: 0 } } as RenderInput['project'],
+        timeline: { tracks: [], clips: [], textOverlays: [], shapeOverlays: [], duration: 0 } } as unknown as RenderInput['project'],
       sourceVideos: [],
       sourceBlobs: {},
       options: { format: 'mp4' } as RenderInput['options'],

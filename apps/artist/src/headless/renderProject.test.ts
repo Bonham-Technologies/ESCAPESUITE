@@ -27,7 +27,7 @@ describe('renderProject', () => {
   it('routes mp4 to exportToMP4 with editor arg order and returns base64 + meta', async () => {
     const res = await renderProject(baseInput())
     expect(exportToMP4).toHaveBeenCalledTimes(1)
-    const args = exportToMP4.mock.calls[0]
+    const args = exportToMP4.mock.calls[0] as unknown[]
     expect(args[0]).toHaveLength(1)              // clips
     expect(args[1]).toHaveLength(1)              // sourceVideos
     expect(args[4]).toEqual([{ id: 't0' }])      // tracks
