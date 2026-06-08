@@ -257,7 +257,10 @@ export async function exportToMP4(
   // Start the output
   await output.start();
 
-  // H.264 codec profiles to try, in order of preference (quality -> compatibility)
+  // H.264 codec profiles to try, in order of preference (quality -> compatibility).
+  // We try two passes: prefer-hardware first (GPU acceleration), then no-preference
+  // (allows software encoding). The second pass ensures the headless / CI path works
+  // even without a GPU (e.g. Playwright Chromium, Docker).
   const h264Codecs = [
     'avc1.640028', // High Profile Level 4.0 - best quality
     'avc1.4d0028', // Main Profile Level 4.0 - good compatibility
@@ -266,26 +269,29 @@ export async function exportToMP4(
 
   // Find a supported H.264 codec configuration
   let videoConfig: VideoEncoderConfig | null = null;
-  for (const codec of h264Codecs) {
-    const config: VideoEncoderConfig = {
-      codec,
-      width,
-      height,
-      bitrate: videoBitrate,
-      framerate: frameRate,
-      latencyMode: 'quality',
-      hardwareAcceleration: 'prefer-hardware',
-    };
-    try {
-      const support = await VideoEncoder.isConfigSupported(config);
-      if (support.supported) {
-        videoConfig = support.config || config;
-        log('codec', `Selected H.264 codec: ${codec} (${width}x${height} @ ${videoBitrate}bps)`);
-        console.log(`[MP4 Export] Using H.264 codec: ${codec}`);
-        break;
+  const hwModes: VideoEncoderConfig['hardwareAcceleration'][] = ['prefer-hardware', 'no-preference'];
+  outer: for (const hwMode of hwModes) {
+    for (const codec of h264Codecs) {
+      const config: VideoEncoderConfig = {
+        codec,
+        width,
+        height,
+        bitrate: videoBitrate,
+        framerate: frameRate,
+        latencyMode: 'quality',
+        hardwareAcceleration: hwMode,
+      };
+      try {
+        const support = await VideoEncoder.isConfigSupported(config);
+        if (support.supported) {
+          videoConfig = support.config || config;
+          log('codec', `Selected H.264 codec: ${codec} hw=${hwMode} (${width}x${height} @ ${videoBitrate}bps)`);
+          console.log(`[MP4 Export] Using H.264 codec: ${codec} (${hwMode})`);
+          break outer;
+        }
+      } catch {
+        // This codec not supported, try next
       }
-    } catch {
-      // This codec not supported, try next
     }
   }
 
