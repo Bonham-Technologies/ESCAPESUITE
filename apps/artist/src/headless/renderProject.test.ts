@@ -50,10 +50,10 @@ describe('renderProject', () => {
     // The source trim bounds (startTime=0, endTime=3) must NOT be used — that
     // would give durationSec=3 instead of 8.
     const input = baseInput()
-    ;(input.project.timeline.clips[0] as Record<string, unknown>).timelinePosition = 5
-    ;(input.project.timeline.clips[0] as Record<string, unknown>).duration = 3
-    ;(input.project.timeline.clips[0] as Record<string, unknown>).startTime = 0
-    ;(input.project.timeline.clips[0] as Record<string, unknown>).endTime = 3
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 5
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 3
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).startTime = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).endTime = 3
     const res = await renderProject(input)
     expect(res.meta.durationSec).toBe(8) // timelinePosition(5) + duration(3)
   })
