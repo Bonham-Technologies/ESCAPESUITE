@@ -1,37 +1,44 @@
 # Headless ARTIST — Server-Side Render Service — Design
 
-Status: **Draft for review** · Date: 2026-06-07 · Owner: Bonham Technologies
+Status: **Draft v2 (for review)** · Date: 2026-06-07 · Owner: Bonham Technologies
+
+> v2 changes (post-review): input is now the customer's plug too — we provide a
+> transport-agnostic **local interface** ("the female end"); S3 and other transports
+> are optional reference adapters, not a dependency. Added an embedded, offline,
+> fail-closed **license gate** (genuine-software enforcement). Reinforced output
+> **verifiability** (golden tests both formats + a verification manifest).
 
 ## 1. Problem & goals
 
 A Site-License customer wants to host ESCAPEARTIST on their own secure/air-gapped
 network and let their users **kick off a server-side render** instead of rendering
-in the browser. The flow they want is fully decoupled: a user hands off their
-project + source media, the resources land in object storage (S3-compatible), a
-server process spins up, renders the video, and a customer-defined step pushes the
-finished file to an output location the user retrieves later. The user holds no
-live connection — they can leave for the day and collect the result when it's done.
+in the browser. The flow is fully decoupled: a user hands off their project + source
+media, a server process renders the video, and the finished file is delivered to a
+location the user retrieves later. The user holds no live connection.
 
-The customer attempted this themselves against the **minified** client bundle and
-hit a wall (the editor's render path is browser-API-based and can't simply run in
-Node). Because we own the source, we can wrap the **real** render engine cleanly
-and ship it as a deployable service.
+The customer attempted this against the **minified** client bundle and hit a wall (the
+editor's render path is browser-API-based and can't simply run in Node). Because we own
+the source, we wrap the **real** render engine and ship it as a deployable service.
 
 **Goals**
-- Render ARTIST projects **server-side**, producing output **pixel-identical** to the
-  in-browser editor (same engine, not a reimplementation).
+- Render ARTIST projects **server-side**, output **pixel-identical** to the in-browser
+  editor (same engine, not a reimplementation).
 - Run inside the customer's secure network as a **container**, air-gap friendly.
-- Be **stateless** and plug into **their** broker/orchestrator — we manage no
-  ingestion or queueing infrastructure.
-- Deliver output through a **pluggable sink** (default a mounted volume; also S3,
-  webhook, or a customer command).
-- Support both project hand-off formats and all of ARTIST's media formats.
+- Be **stateless** and **transport-agnostic**: we provide a clean local interface (the
+  "female end") that the customer plugs their orchestration and transport into.
+- Deliver output through a **pluggable sink** (default a local/mounted volume).
+- Enforce a **genuine-software license check** at runtime (offline, fail-closed).
+- Support both project hand-off packagings and all of ARTIST's media formats, with
+  **verifiable** output.
 
 **Non-goals**
 - We do **not** provide or operate a job queue, scheduler, broker, or job database.
+- We do **not** own resource **transport/handoff** — fetching inputs or pushing outputs
+  across the network is the customer's plug. (We ship optional reference adapters, e.g.
+  S3, but the core boundary is local files.)
 - We do **not** reimplement the render/encode pipeline in Node/ffmpeg.
-- The "Render on server" button inside the hosted ARTIST UI is an **optional
-  companion** (Section 13), not part of this core spec.
+- The "Render on server" button inside the hosted ARTIST UI is an **optional companion**
+  (Section 14), not part of this core spec.
 
 ## 2. Background: ARTIST's render architecture (relevant facts)
 
@@ -41,286 +48,304 @@ off-thread/background rendering in mind:
 - Public entry points (`apps/artist/src/core/exporter.ts` → `exportMP4.ts` /
   `exportWebM.ts`):
   `exportToMP4(clips, sourceVideos, options, onProgress?, tracks?, watermark?, signal?, projectResolution?) → Promise<Blob>`
-  (and `exportToWebM(...)`). No React, no component refs, no global store reads —
-  all inputs are plain data arguments.
-- Compositing (`core/canvasRenderer.ts`) is pure Canvas 2D over `(ctx, data)`; it
-  never reads the DOM/React tree.
-- Audio (`core/audioMixer.ts`, `workers/exportWorker.ts`) uses `OfflineAudioContext`
-  (non-realtime; works in workers/headless).
-- Source decode: MP4 → `WebCodecs VideoDecoder` + `mp4box` in `workers/decodeWorker.ts`
-  (the clean path); WebM → `HTMLVideoElement` seeking fallback (`core/frameSource.ts`).
-- Encode/mux: `WebCodecs VideoEncoder`/`AudioEncoder` + `mediabunny` (pure JS muxer).
+  (and `exportToWebM(...)`). No React, no component refs, no global store reads.
+- Compositing (`core/canvasRenderer.ts`) is pure Canvas 2D over `(ctx, data)`; never
+  reads the DOM/React tree.
+- Audio (`core/audioMixer.ts`, `workers/exportWorker.ts`) uses `OfflineAudioContext`.
+- Source decode: MP4 → `WebCodecs VideoDecoder` + `mp4box` (`workers/decodeWorker.ts`);
+  WebM → `HTMLVideoElement` seeking fallback (`core/frameSource.ts`).
+- Encode/mux: `WebCodecs VideoEncoder`/`AudioEncoder` + `mediabunny` (pure-JS muxer).
 - **The single browser-storage coupling in the export path:** sources are read via
-  `getVideoBlob(sourceId)` from IndexedDB (`video-editor-db`,
-  `packages/shared/src/storage`).
+  `getVideoBlob(sourceId)` from IndexedDB (`packages/shared/src/storage`,
+  `video-editor-db`).
 - Project model (`store/types.ts`): `Project { id, name, resolution, timeline{ tracks,
-  clips, textOverlays, shapeOverlays, duration } }`; each `Clip.sourceVideoId`
-  references a source by id. The `.veditor` file (`core/projectManager.ts`) is
-  `{ version, project, videos: [{ id, name, mimeType, data /*base64*/, thumbnail? }] }`.
-- Integration (`utils/integration.ts`): `LOAD_PROJECT` / `?project=base64` /
-  `?video=url` exist; the inbound `EXPORT` postMessage handler is **declared but not
-  implemented**, and `EXPORT_COMPLETE` (returning bytes) is documented but never sent.
-- The standalone build (`build:standalone`, `vite-plugin-singlefile`) already
-  produces a single self-contained HTML file with workers inlined.
+  clips, textOverlays, shapeOverlays, duration } }`; each `Clip.sourceVideoId` references
+  a source. The `.veditor` file (`core/projectManager.ts`) is `{ version, project,
+  videos: [{ id, name, mimeType, data /*base64*/, thumbnail? }] }`.
+- Standalone build (`build:standalone`, `vite-plugin-singlefile`) already produces a
+  single self-contained HTML file with workers inlined.
+- **Existing licensing** (`packages/shared/src/auth/license.ts`): offline **Ed25519**
+  signature verification of a signed license against an embedded public key, **fail-closed
+  in production** (audit H4). Licenses are signed by `LICENSE_PRIVATE_KEY` (server secret);
+  the public key (`LICENSE_PUBLIC_KEY`) is baked into builds; the air-gapped standalone
+  apps already validate licenses entirely offline. We reuse this exact scheme.
 
-**Implication:** every browser API the export path needs (WebCodecs, Canvas 2D,
-OffscreenCanvas, OfflineAudioContext, IndexedDB, Web Workers, `HTMLVideoElement`)
-exists in **headless Chromium**. So the engine runs as-is inside headless Chromium;
-the only adaptation is feeding sources in (instead of IndexedDB being populated by
-the editor) and getting bytes out (instead of a browser download).
+**Implication:** every browser API the export path needs exists in **headless Chromium**,
+so the engine runs as-is there. The only adaptations are feeding sources in (instead of
+the editor populating IndexedDB) and getting bytes out (instead of a browser download).
 
 ## 3. Requirements
 
 **Functional**
-- F1. Accept a render job describing: input (project + sources), render options
+- F1. Accept a render job describing: input location(s) (local), render options
   (format, quality, resolution), and output sink config.
 - F2. Render using the real ARTIST engine in headless Chromium → encoded video bytes.
-- F3. Accept input as **either** a `.veditor` bundle **or** a manifest + raw source
-  objects in S3.
-- F4. Support sources: MP4 (H.264) and WebM (VP9), images (PNG/JPEG), and audio;
-  output MP4 (H.264/AAC) and WebM (VP9/Opus) — all first-class.
-- F5. Deliver output via a pluggable sink: `volume` (default) | `s3` | `webhook` |
-  `command`.
+- F3. Read input from the **local filesystem** (mounted by the customer): either a
+  `.veditor` bundle file **or** a manifest + raw source files in a directory. Fetching
+  those from S3/other transports is the customer's plug; we ship an **optional** S3
+  reference adapter that fetches-to-local.
+- F4. Support sources: MP4 (H.264) and WebM (VP9), images (PNG/JPEG), and audio; output
+  MP4 (H.264/AAC) and WebM (VP9/Opus) — all first-class.
+- F5. Deliver output via a pluggable sink: `volume`/local (default) | `s3` | `webhook` |
+  `command` — again, network transports are optional reference adapters.
 - F6. Run as a **one-shot** container (render one job, exit) and, optionally, as a
   long-running HTTP service.
 - F7. Be **idempotent** by job id (safe for broker retries).
+- F8. **Verify a genuine license at runtime** before rendering — offline, fail-closed.
+- F9. Emit a **verification manifest** alongside output (hashes, duration, dimensions,
+  codec, engine + Chromium versions) so the result is independently verifiable.
 
 **Non-functional**
-- N1. Air-gap friendly: no outbound network except the configured object store/sink.
-- N2. Stateless: no queue/job-store owned by us; the customer's broker owns
-  scheduling, durability, and retries.
+- N1. Air-gap friendly: no outbound network required; optional adapters are the only
+  network users and are customer-configured.
+- N2. Stateless & transport-agnostic: no queue/job-store and no transport owned by us;
+  the customer's broker owns scheduling/durability/retries and resource handoff.
 - N3. Deterministic output: pinned Chromium; software encoding by default.
-- N4. Secure: non-root, least privilege, sink `command` opt-in and sandboxed.
+- N4. Secure: non-root, least privilege; sink `command` opt-in and sandboxed; license
+  fail-closed.
 - N5. Observable: structured per-job logs, progress, clear exit codes / status.
-- N6. Self-hostable: single `docker load`-able image, env-configured, shipped as
-  part of the air-gap Site License and versioned to the ARTIST engine.
+- N6. Self-hostable: single `docker load`-able image, env-configured, shipped as part of
+  the air-gap Site License and versioned to the ARTIST engine.
 
 ## 4. Architecture overview
 
 ```
-hosted ARTIST UI / their tooling ──upload project+sources──▶ Input object store (S3)
-        │                                                          │
-        └──(their broker schedules a job: spec → S3 refs)──┐       │
-                                                           ▼       │
-                              ┌──────────────────────────────────────────────┐
-                              │  headless-artist container (STATELESS)         │
-                              │  one-shot CLI  (or optional HTTP service)      │
-                              │                                                │
-                              │  Input Loader ─▶ {project, sources(bytes)}     │
-                              │        │                                       │
-                              │        ▼                                       │
-                              │  Render Runner ─▶ headless Chromium (Playwright)│
-                              │        loads the headless ARTIST bundle        │
-                              │        renderProject(project, sources, opts)   │
-                              │        (real exportToMP4 / exportToWebM)       │
-                              │        ▼                                       │
-                              │  Output Sink ─▶ Output S3 / volume / webhook / │
-                              │                  customer command              │
-                              └──────────────────────────────────────────────┘
-                                                           │
-                                          Output object store (S3) ──▶ user retrieves later
+customer broker + transport (THEIRS) ── fetch/mount resources ──▶ local input dir (mounted)
+        │                                                              │
+        └──(spawn job: spec → local paths)──┐                         │
+                                            ▼                         │
+                  ┌────────────────────────────────────────────────────────┐
+                  │  headless-artist container (STATELESS, license-gated)    │
+                  │  one-shot CLI  (or optional HTTP service)                 │
+                  │                                                          │
+                  │  License gate ──(fail-closed Ed25519)── proceed/abort    │
+                  │  Input Loader ─▶ {project, sources(bytes)}  (local files) │
+                  │        ▼                                                  │
+                  │  Render Runner ─▶ headless Chromium (Playwright)          │
+                  │        loads the headless ARTIST bundle                   │
+                  │        renderProject(project, sources, opts)             │
+                  │        (real exportToMP4 / exportToWebM)                  │
+                  │        ▼                                                  │
+                  │  Output Sink ─▶ local output dir (default) + manifest     │
+                  └────────────────────────────────────────────────────────┘
+                                            │
+              customer broker + transport (THEIRS) ── push output ──▶ wherever the user retrieves
 ```
 
-Three independently testable units:
-1. **Headless render bundle** (browser-side) — the engine, verbatim, with sources injected.
-2. **Render runner** (Node) — drives headless Chromium; CLI one-shot + optional HTTP.
-3. **Adapters** — Input Loaders (bundle / manifest) and Output Sinks.
+We provide everything inside the box. The customer provides the broker, the resource
+handoff, and the transport on both ends (with our optional S3/webhook/command adapters
+as conveniences). The container is a pure function: **local in → render → local out → exit.**
 
-The customer's broker is the producer and owns the job lifecycle; our container is a
-pure function: **job in → render → deliver → exit**.
+Three independently testable units: **(A)** headless render bundle, **(B)** render
+runner, **(C)** adapters (input loaders / output sinks) + the **license gate**.
 
 ## 5. Component A — Headless render bundle
 
 A new build target in `apps/artist` (e.g. `headless.html` + `src/headless/main.ts`),
-built single-file via the existing `vite-plugin-singlefile` setup (workers inlined),
-with **no editor UI** mounted. It exposes one async entry the runner can call (via
-Playwright `exposeBinding`/`page.evaluate`):
+built single-file via the existing `vite-plugin-singlefile` setup (workers inlined), with
+**no editor UI**. It exposes one entry the runner calls (Playwright `exposeBinding` /
+`page.evaluate`):
 
 ```ts
 renderProject(input: {
   project: Project,
   sources: Array<{ id: string, mimeType: string, bytes: ArrayBuffer }>,
-  options: ExportOptions,          // format, quality, resolution, etc.
+  options: ExportOptions,
   watermark?: WatermarkConfig,
 }, onProgress?: (p: number) => void): Promise<{ bytes: ArrayBuffer, meta: RenderMeta }>
 ```
 
-It imports the export engine **verbatim** (`exportToMP4`/`exportToWebM`,
-`canvasRenderer`, `audioMixer`, `decodeWorker`).
+It imports the export engine **verbatim** (`exportToMP4`/`exportToWebM`, `canvasRenderer`,
+`audioMixer`, `decodeWorker`).
 
 **Source injection (the one adaptation).** The export path reads sources via
-`getVideoBlob(sourceId)` (IndexedDB). To avoid touching the engine, the bundle
-**seeds `video-editor-db` with the injected source blobs** (via the existing shared
-storage API) before calling `exportTo*`, so `getVideoBlob` resolves unchanged. This
-keeps the engine 100% untouched. (Fallback if seeding large media proves slow: add a
-small pluggable source-resolver in the storage layer and pass the registry in — a
-contained change behind the same interface.)
+`getVideoBlob(sourceId)` (IndexedDB). To avoid touching the engine, the bundle **seeds
+`video-editor-db` with the injected source blobs** (via the existing shared storage API)
+before calling `exportTo*`, so `getVideoBlob` resolves unchanged — engine untouched.
+(Fallback if seeding large media is slow: a small pluggable source-resolver behind the
+same interface.)
 
-**Output.** `exportTo*` already returns a `Blob`; the bundle returns its bytes +
-metadata (duration, width/height, codec, byteLength) to the runner.
-
-Boundary check: given `{project, sources, options}`, produces bytes — no knowledge of
-S3, jobs, or the file system. Testable directly in headless Chromium.
+Boundary: given `{project, sources, options}`, returns bytes + metadata — no knowledge of
+S3, jobs, licensing, or the filesystem. Testable directly in headless Chromium.
 
 ## 6. Component B — Render runner (Node)
 
 Runs inside the container; orchestrates one render. Two modes, same core:
 
-- **One-shot CLI (primary):** `headless-artist render --job <file|-> ` — reads a job
-  spec, renders, delivers to the sink, exits `0` (success) / non-zero (failure). Ideal
-  for broker-spawned container-per-job (k8s Job, ECS task, Nomad batch, or a custom
-  consumer). No pool, no persistence — a pure function.
-- **HTTP service (optional):** long-running `POST /render` (+ `GET /healthz`) for
-  brokers that prefer calling an endpoint; adds a small bounded Chromium pool for
-  concurrency. Same render core and adapters.
+- **One-shot CLI (primary):** `headless-artist render --job <file|->` — reads a job spec
+  (local paths), renders, delivers to the sink, exits `0`/non-zero. Ideal for
+  broker-spawned container-per-job (k8s Job, ECS task, Nomad batch, custom consumer). No
+  pool, no persistence — a pure function.
+- **HTTP service (optional):** long-running `POST /render` (+ `GET /healthz`) for brokers
+  that prefer an endpoint; adds a small bounded Chromium pool. Same render core/adapters.
 
-Responsibilities: parse/validate the job spec → invoke the Input Loader → launch (or
-reuse) a headless Chromium page with bundle A (Playwright, pinned browser) → call
-`renderProject` and stream progress → receive bytes → invoke the Output Sink → emit
-structured status + exit code. Per-job timeout, Chromium crash/OOM detection, and temp
-cleanup live here.
+Flow: **run the license gate (abort if invalid)** → parse/validate job → Input Loader →
+launch/reuse a headless Chromium page with bundle A (Playwright, pinned browser) →
+`renderProject` + progress → bytes → Output Sink (+ verification manifest) → structured
+status + exit code. Per-job timeout, Chromium crash/OOM handling, temp cleanup here.
 
-## 7. Component C — Adapters
+## 7. Component C — Adapters + license gate
 
-**Input Loaders** (produce `{ project, sources }` in memory):
-- `bundle`: a `.veditor` object → decode base64 sources.
-- `manifest`: a small JSON (project + list of source object keys) → fetch each raw
-  source object from S3.
+**License gate** — runs before any render. Reuses `packages/shared` Ed25519 verification:
+the container embeds the public key; the operator supplies the signed license
+(`LICENSE_KEY` via env/file, from their team/org/enterprise bundle). The gate verifies the
+signature **offline**, checks product/tier covers server render and is **not expired**, and
+**fails closed** (refuses to render, non-zero exit) on any missing/invalid/unverifiable
+license. See Section 11.
+
+**Input Loaders** (produce `{ project, sources }` from **local** files):
+- `bundle`: a local `.veditor` file → decode base64 sources.
+- `manifest`: a local manifest JSON (project + source filenames) + raw source files in a
+  dir → read each.
 Both normalize to the same in-memory shape bundle A consumes.
 
-**Output Sinks** (`deliver(jobId, bytes, meta) → void`):
-- `volume` (default): write `<jobId>.<ext>` + `<jobId>.json` sidecar to a mounted dir.
-- `s3`: put object(s) to a configured output bucket/prefix.
-- `webhook`: POST the result (or a signed URL) + metadata to a configured endpoint.
-- `command` (opt-in): exec a customer command with the output path/metadata as args
-  (no shell interpolation of untrusted input; least privilege; documented as arbitrary
-  execution).
+**Input Source adapters** (optional, fetch-to-local before the loader runs):
+- `s3` (reference adapter for today's customer), and the pattern for others. Off by
+  default — the canonical interface is local files the customer mounts.
 
-Adapters are config-selected; new ones can be added without touching A or B.
+**Output Sinks** (`deliver(jobId, bytes, meta, manifest)`):
+- `volume`/local (default): write `<jobId>.<ext>` + `<jobId>.manifest.json` to a mounted dir.
+- `s3` | `webhook` | `command` (opt-in, sandboxed: argument-array exec, no shell, least
+  privilege) — optional reference adapters.
+
+Adapters and the gate are config-selected; new transports are added without touching A/B.
 
 ## 8. Job spec
 
-Passed via CLI flag/stdin or HTTP body. Illustrative shape:
+Passed via CLI flag/stdin or HTTP body; references **local paths** by default:
 
 ```jsonc
 {
-  "jobId": "string",                     // idempotency key
-  "input": {                             // exactly one of:
-    "bundle": { "s3": "s3://in/proj.veditor" },
-    "manifest": {
-      "project": { "s3": "s3://in/project.json" },
-      "sources": [ { "id": "uuid", "mimeType": "video/mp4", "s3": "s3://in/uuid.mp4" } ]
-    }
+  "jobId": "string",                       // idempotency key
+  "input": {                               // exactly one of:
+    "bundle": { "path": "/in/proj.veditor" },
+    "manifest": { "path": "/in/manifest.json" }   // manifest lists project + source files in /in
   },
   "options": { "format": "mp4", "quality": "high", "resolution": { "width": 1920, "height": 1080 } },
   "watermark": null,
-  "output": { "sink": "s3", "config": { "bucket": "out", "prefix": "renders/" } }
+  "output": { "sink": "volume", "config": { "dir": "/out" } }
 }
 ```
 
-The spec references object-store locations rather than embedding bytes, so large media
-never transits the broker. S3 endpoint/credentials come from container env, not the job.
+If a customer opts into a reference adapter, `input` may instead name an `s3` source and
+`output.sink` an `s3`/`webhook`/`command` target — but the default, and the contract we
+guarantee, is local in / local out. Credentials for optional adapters come from container
+env, never the job.
 
 ## 9. Data flow / job lifecycle
 
-1. User triggers a server render; their tooling uploads the project + sources to the
-   input store (as a `.veditor` bundle or manifest + raw objects).
-2. Their broker schedules a job, handing our container the job spec (CLI arg/stdin or
-   HTTP).
-3. Input Loader fetches project + source bytes from S3.
-4. Runner loads bundle A in headless Chromium, calls `renderProject` → bytes + meta.
-5. Output Sink delivers bytes (+ sidecar metadata) to the configured destination
-   (e.g., output S3).
-6. Container exits `0` (or the HTTP call returns success). The result waits in the
-   output store for the user to retrieve. On failure: non-zero exit / error response;
-   the broker retries (idempotent by `jobId`).
+1. User triggers a server render; the customer's tooling packages the project + sources
+   and (via their broker/transport) places them where the container can read them locally
+   (mounted dir), or uses an optional input adapter.
+2. The broker spawns/calls our container with the job spec (local paths).
+3. **License gate** verifies a genuine license — abort (non-zero) if invalid.
+4. Input Loader reads project + source bytes from local files.
+5. Runner loads bundle A in headless Chromium → `renderProject` → bytes + meta.
+6. Output Sink writes the result + **verification manifest** to the local output dir (or
+   an optional adapter target).
+7. Container exits `0` (or HTTP returns success). The customer's transport moves the
+   output to where the user retrieves it. Failure → non-zero / error; broker retries
+   (idempotent by `jobId`).
 
-## 10. Formats
+## 10. Formats & verifiability
 
-- Sources: MP4 (H.264) via the WebCodecs path; WebM (VP9) via the `HTMLVideoElement`
-  seek path; PNG/JPEG images; audio tracks.
-- Output: MP4 (H.264/AAC) and WebM (VP9/Opus).
-- The WebM source path is the flakier one headless (seek timing); it gets explicit
-  hardening + a golden test so it is genuinely first-class, not merely present.
+- Sources: MP4 (H.264, WebCodecs path); WebM (VP9, `HTMLVideoElement` seek path); PNG/JPEG
+  images; audio. Output: MP4 (H.264/AAC) and WebM (VP9/Opus).
+- The WebM source path (flakier headless) gets explicit hardening + a golden test so it is
+  genuinely first-class.
+- **Verifiability:** every render emits a manifest (SHA-256 of output, duration, width/
+  height, codec/container, frame count, engine + Chromium versions, job id). Golden-render
+  regression tests cover **both** MP4 and WebM (perceptual/byte-hash compare) so output is
+  provably correct and stable across engine/Chromium bumps.
 
-## 11. Determinism & fidelity
+## 11. Licensing / genuine-software enforcement
 
-Output is produced by the same engine the editor uses → fidelity by construction. The
-image **pins the exact Chromium version** (codec/encoder behavior fixed); software
-encoding by default (no GPU dependency in their environment), optional GPU accel if the
-host provides it. A **golden-render regression test** (fixed project → perceptual /
-byte hash compare) runs in CI to catch drift across engine or Chromium bumps.
+Goal: even if the image is exfiltrated, it should not render without a genuine license.
+
+- **Mechanism (reuse, not new):** the existing offline **Ed25519** scheme. The container
+  embeds `LICENSE_PUBLIC_KEY`; the operator provides the signed `LICENSE_KEY` (issued with
+  their team/org/enterprise purchase). The license gate verifies the signature against the
+  embedded public key, checks product/tier entitlement for server render and expiry, and
+  **fails closed** — no valid, unexpired, signature-verified license ⇒ no render, non-zero
+  exit, clear message. Fully offline (air-gap safe).
+- **Checks at:** startup, and (cheaply) per job, so a long-running HTTP instance can't
+  outlive license expiry.
+- **Honest limits:** client/JS code can't be made fully tamper-proof. This raises the bar
+  substantially (a thief can't run it without a key they can't forge) and matches the
+  product's existing posture; we do not claim unbreakable DRM. Optional hardening to weigh
+  during planning: bind license to org id, add a build/integrity hash to the manifest.
 
 ## 12. Error handling, security, packaging
 
-**Resilience:** per-job timeout (configurable) → non-zero exit so the broker retries;
-Chromium crash/OOM → fail the job cleanly (one-shot exits; HTTP mode recycles the
-page); corrupt/missing media → fail fast with a clear error in status; idempotent by
-`jobId`; temp files/pages disposed every job.
+**Resilience:** per-job timeout → non-zero exit so the broker retries; Chromium crash/OOM
+→ fail the job cleanly (one-shot exits; HTTP recycles the page); corrupt/missing media →
+fail fast with a clear error; idempotent by `jobId`; temp files/pages disposed each job.
 
-**Security (air-gap):** runs **non-root**, read-only FS except temp + output; **no
-outbound network** except the configured object store / sink endpoint (sources are
-injected locally, so Chromium needs no internet — launch with networking restricted);
-S3 creds via env/secrets, scoped input-read / output-write; the `command` sink is
-opt-in, least-privilege, argument-array exec (no shell), resource-limited.
+**Security (air-gap):** runs **non-root**, read-only FS except temp + the output dir; **no
+outbound network required** (inputs are local; Chromium launched with networking
+restricted); optional adapters are the only network users and are customer-configured with
+scoped creds via env/secrets; the `command` sink is opt-in, argument-array exec (no shell),
+resource-limited; license fail-closed.
 
 **Packaging:** one `docker load`-able image = Node runner + pinned headless Chromium
-(Playwright's) + bundle A baked in. Config via env (mode, concurrency, timeouts, input
-loader, output sink + config, S3 endpoint/creds, log level). Shipped as part of the
-air-gap **Site License** deliverable, **versioned to the ARTIST engine** so server
-output matches the editor version the customer runs. Includes a compose/k8s-Job sample
-+ deployment/config/security docs.
+(Playwright's) + bundle A baked in + embedded license public key. Config via env (mode,
+concurrency, timeouts, input loader, optional input adapter, output sink + config, license
+key, log level). Shipped as part of the air-gap **Site License** deliverable, **versioned
+to the ARTIST engine**. Includes a compose / k8s-Job sample + deployment/config/security
+docs.
 
-## 13. Scope & decomposition
+## 13. Testing strategy
 
-**This spec (core):** bundle A, runner B (CLI + optional HTTP), adapters C, job-spec
-schema, container image, tests, docs.
+- **Unit:** Input Loaders + Output Sinks (local fs / mock adapter); license gate
+  (valid / expired / tampered / missing → correct fail-closed); job-spec validation; runner
+  control flow + exit codes.
+- **Integration:** bundle A rendering a fixed fixture in **real headless Chromium**
+  (Playwright — reuses the e2e harness) → valid MP4 **and** WebM with expected
+  duration/resolution + perceptual-hash vs golden; manifest contents correct.
+- **End-to-end:** full one-shot job from local input dir → output file + manifest present
+  and correct; failure + retry path; license-denied path.
+- **Determinism/verifiability:** golden-render regression in CI for both formats; explicit
+  WebM-source case; manifest hash stability.
+
+## 14. Scope & decomposition
+
+**This spec (core):** license gate, bundle A, runner B (CLI + optional HTTP), adapters C
+(local loaders + optional reference adapters), job-spec schema, verification manifest,
+container image, tests, docs.
 
 **Optional companion (separate spec/PR, possibly the customer's own integration):** a
-"Render on server" action in the hosted ARTIST UI that packages the current project +
-sources, uploads them, and submits a job. Since the customer hosts ARTIST and runs
-their own broker, this may be their integration calling our entry point; we provide the
-contract + a reference example. Kept out of core to stay focused (YAGNI).
-
-## 14. Testing strategy
-
-- **Unit:** Input Loaders + Output Sinks (mock S3 / filesystem); job-spec
-  validation; runner control flow + exit codes.
-- **Integration:** bundle A rendering a fixed fixture project in **real headless
-  Chromium** (Playwright — reuses the e2e harness) → assert a valid MP4/WebM with
-  expected duration/resolution and a perceptual-hash match vs a golden render.
-- **End-to-end:** full one-shot job against a local **MinIO** (S3) → input fetched,
-  render produced, output object present and correct; failure + retry path.
-- **Determinism:** golden-render regression in CI; explicit WebM-source case.
+"Render on server" action in the hosted ARTIST UI that packages + hands off the current
+project. Kept out of core (YAGNI).
 
 ## 15. Repo / code changes
 
 - `apps/artist`: new headless entry (`headless.html` + `src/headless/*`) and a
   `build:headless` script; the source-injection seam (seed IndexedDB, or a guarded
-  source-resolver) — the editor path stays unchanged.
-- New service location: `services/headless-artist/` (Node runner + adapters +
-  `Dockerfile` + samples). Reuses `packages/shared` where sensible.
-- Docs: deployment guide, config reference, security notes, broker-integration example.
+  source-resolver) — the editor path unchanged.
+- New service location: `services/headless-artist/` (Node runner + license gate + adapters
+  + `Dockerfile` + samples). Add the `services/*` glob to `pnpm-workspace.yaml`. Reuses
+  `packages/shared` (licensing, types) where sensible.
+- Docs: deployment guide, config reference, security/licensing notes, broker-integration
+  example.
 
 ## 16. Risks & open questions
 
 - **WebM source decode headless:** `HTMLVideoElement` seek timing can be flaky for long
-  clips; mitigated by hardening + golden tests. If it proves unreliable, fall back to a
-  transcode-on-ingest step (out of scope unless needed).
-- **Large-media source injection into the page:** seeding IndexedDB with very large
-  blobs may be slow; the source-resolver fallback (Section 5) addresses it if measured
-  to matter.
+  clips; mitigated by hardening + golden tests; transcode-on-ingest fallback if it proves
+  unreliable (out of scope unless needed).
+- **Large-media source injection into the page:** seeding IndexedDB with very large blobs
+  may be slow; the source-resolver fallback (Section 5) addresses it if measured to matter.
 - **Memory/CPU per render:** high-res/long timelines are heavy; the broker controls
   concurrency by how many containers it runs (one-shot) — document host sizing guidance.
-- **Object-store flavor:** assumed S3-compatible (e.g., MinIO) on their network;
-  confirm their exact endpoint/auth model during planning.
-- **Licensing/entitlement:** this is a Site-License capability; confirm whether the
-  deployed service needs any license gate or is purely an entitlement of the
-  air-gap deliverable.
+- **License key provisioning:** confirm how the per-deployment `LICENSE_KEY` is issued and
+  delivered with the team/org/enterprise bundle, and whether to bind it to org id.
+- **Optional adapters:** S3 is the only reference adapter needed for today's customer;
+  others are additive and out of scope until a customer needs them.
 
 ## 17. Out of scope / future
 
-- Distributed render farm / autoscaling (their broker's concern).
+- Distributed render farm / autoscaling (the customer's broker's concern).
+- Resource transport/handoff in and out (the customer's plug).
 - Real-time/preview rendering on the server.
 - GPU-accelerated encode tuning (optional, host-dependent).
 - The hosted-ARTIST "Render on server" UI (companion spec).
