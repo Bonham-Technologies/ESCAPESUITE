@@ -17,13 +17,7 @@ test.describe('ESCAPEPLAN Accessibility', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  // FIXME(a11y): The Clerk→Supabase auth-harness port made the landing page
-  // render fully in e2e for the first time (previously the app failed to mount
-  // without Supabase env, so this audited an empty page and passed vacuously).
-  // It now catches real pre-existing serious axe violations on the marketing
-  // page. Fixing app a11y is out of scope for the auth-harness port — track in
-  // a dedicated a11y PR.
-  test.fixme('landing page passes axe-core audit', async ({ page }) => {
+  test('landing page passes axe-core audit', async ({ page }) => {
     const results = await runAxeCheck(page, {})
 
     // Allow minor/moderate issues but fail on serious/critical
@@ -212,10 +206,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 })
 
 test.describe('Color Contrast', () => {
-  // FIXME(a11y): real pre-existing color-contrast violations on the landing
-  // page, surfaced now that the page renders in e2e (see the axe-audit FIXME
-  // above). Out of scope for the auth-harness port — track in an a11y PR.
-  test.fixme('ESCAPEPLAN has adequate color contrast', async ({ page }) => {
+  test('ESCAPEPLAN has adequate color contrast', async ({ page }) => {
     await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')

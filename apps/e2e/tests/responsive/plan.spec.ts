@@ -61,11 +61,7 @@ test.describe('ESCAPEPLAN Mobile Layout', () => {
     }
   })
 
-  // FIXME(a11y): surfaced by the Clerk→Supabase auth-harness port (the mobile
-  // landing page now renders in e2e). A landing-page button is 36px tall vs the
-  // 40px asserted here (WCAG-AA minimum is 24px, so this is an aspirational bar,
-  // not a hard violation). Resolve in the dedicated a11y PR — out of scope here.
-  test.fixme('buttons are touch-friendly size', async ({ page }) => {
+  test('buttons are touch-friendly size', async ({ page }) => {
     const buttons = page.getByRole('button')
     const count = await buttons.count()
 
