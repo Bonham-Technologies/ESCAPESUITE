@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 
 test.describe('Email Validation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -64,7 +64,7 @@ test.describe('Email Validation', () => {
 
 test.describe('Required Fields', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -99,7 +99,7 @@ test.describe('Required Fields', () => {
 
 test.describe('License Key Validation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
   })
 
   test('rejects invalid license key format', async ({ page }) => {
@@ -153,7 +153,7 @@ test.describe('License Key Validation', () => {
 
 test.describe('URL Parameter Validation', () => {
   test('handles invalid video URL parameter', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175?video=not-a-valid-url')
     await page.waitForLoadState('networkidle')
 
@@ -163,7 +163,7 @@ test.describe('URL Parameter Validation', () => {
   })
 
   test('handles invalid project parameter', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175?project=invalid-base64!!!')
     await page.waitForLoadState('networkidle')
 
@@ -173,7 +173,7 @@ test.describe('URL Parameter Validation', () => {
   })
 
   test('handles missing loadVideo parameter', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175?loadVideo=')
     await page.waitForLoadState('networkidle')
 
@@ -183,7 +183,7 @@ test.describe('URL Parameter Validation', () => {
   })
 
   test('handles XSS attempt in URL parameters', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175?video=<script>alert(1)</script>')
     await page.waitForLoadState('networkidle')
 
@@ -196,7 +196,7 @@ test.describe('URL Parameter Validation', () => {
 
 test.describe('Form Validation Messages', () => {
   test('displays inline validation errors', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -221,7 +221,7 @@ test.describe('Form Validation Messages', () => {
   })
 
   test('clears validation errors on valid input', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 

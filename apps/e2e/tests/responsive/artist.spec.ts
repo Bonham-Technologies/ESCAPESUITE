@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 import { VIEWPORTS, BREAKPOINTS } from '../../utils/viewports'
 
 test.describe('ESCAPEARTIST Mobile Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -42,7 +42,7 @@ test.describe('ESCAPEARTIST Mobile Layout', () => {
 test.describe('ESCAPEARTIST Tablet Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -78,7 +78,7 @@ test.describe('ESCAPEARTIST Tablet Layout', () => {
 test.describe('ESCAPEARTIST Panel Auto-Collapse', () => {
   test('panels collapse at 900px breakpoint', async ({ page }) => {
     await page.setViewportSize({ width: 899, height: 768 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -91,7 +91,7 @@ test.describe('ESCAPEARTIST Panel Auto-Collapse', () => {
 
   test('panels visible above breakpoint', async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 800 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -106,7 +106,7 @@ test.describe('ESCAPEARTIST Panel Auto-Collapse', () => {
 test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
   test('inspector slides out on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -130,7 +130,7 @@ test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
 
   test('inspector full width on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -150,7 +150,7 @@ test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
 test.describe('ESCAPEARTIST Export Dialog Responsive', () => {
   test('export dialog fits mobile screen', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -176,7 +176,7 @@ test.describe('ESCAPEARTIST Export Dialog Responsive', () => {
 
   test('export options stack on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -199,7 +199,7 @@ test.describe('ESCAPEARTIST Export Dialog Responsive', () => {
 test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
   test('overlay tools accessible on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -211,7 +211,7 @@ test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
 
   test('overlay tool buttons are touch-friendly', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -235,7 +235,7 @@ test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
 test.describe('ESCAPEARTIST Timeline Responsive', () => {
   test('timeline scrollable on narrow viewports', async ({ page }) => {
     await page.setViewportSize({ width: 640, height: 480 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -254,7 +254,7 @@ test.describe('ESCAPEARTIST Timeline Responsive', () => {
 
   test('timeline controls visible on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -268,7 +268,7 @@ test.describe('ESCAPEARTIST Timeline Responsive', () => {
 test.describe('ESCAPEARTIST Landscape Mode', () => {
   test('editor works in landscape', async ({ page }) => {
     await page.setViewportSize({ width: 812, height: 375 }) // iPhone X landscape
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -278,7 +278,7 @@ test.describe('ESCAPEARTIST Landscape Mode', () => {
 
   test('preview visible in landscape', async ({ page }) => {
     await page.setViewportSize({ width: 812, height: 375 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 

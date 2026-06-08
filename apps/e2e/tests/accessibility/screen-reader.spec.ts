@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { checkAriaLiveRegions } from '../../utils/accessibility'
 
 test.describe('ARIA Live Regions', () => {
   test('ESCAPEPLAN has status announcements', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -20,7 +20,7 @@ test.describe('ARIA Live Regions', () => {
   })
 
   test('ESCAPECRAFT announces recording status', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -38,7 +38,7 @@ test.describe('ARIA Live Regions', () => {
   })
 
   test('ESCAPEARTIST announces export progress', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -54,7 +54,7 @@ test.describe('ARIA Live Regions', () => {
 
 test.describe('Dialog Announcements', () => {
   test('ESCAPEPLAN dialogs have proper roles', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -86,7 +86,7 @@ test.describe('Dialog Announcements', () => {
   })
 
   test('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -123,7 +123,7 @@ test.describe('Landmark Regions', () => {
   // rendering timing issues. The apps DO have proper landmarks (main, nav, header)
   // in their source code. Run locally to verify.
   test.skip('ESCAPEPLAN has proper landmarks', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -149,7 +149,7 @@ test.describe('Landmark Regions', () => {
   })
 
   test.skip('ESCAPECRAFT has proper landmarks', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -171,7 +171,7 @@ test.describe('Landmark Regions', () => {
   })
 
   test.skip('ESCAPEARTIST has proper landmarks', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -193,7 +193,7 @@ test.describe('Landmark Regions', () => {
 
 test.describe('Form Error Announcements', () => {
   test('form errors are announced', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -225,7 +225,7 @@ test.describe('Form Error Announcements', () => {
 
 test.describe('Progress Indicator Announcements', () => {
   test('loading states are announced', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -240,7 +240,7 @@ test.describe('Progress Indicator Announcements', () => {
   })
 
   test('progressbar has proper attributes', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -261,7 +261,7 @@ test.describe('Progress Indicator Announcements', () => {
 
 test.describe('Button and Control Announcements', () => {
   test('icon buttons have accessible names', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -287,7 +287,7 @@ test.describe('Button and Control Announcements', () => {
   })
 
   test('toggle buttons announce state', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -317,7 +317,7 @@ test.describe('Button and Control Announcements', () => {
 
 test.describe('Table and List Accessibility', () => {
   test('data tables have proper structure', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
 
@@ -349,7 +349,7 @@ test.describe('Table and List Accessibility', () => {
   })
 
   test('lists have proper structure', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')

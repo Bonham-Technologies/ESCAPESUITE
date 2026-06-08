@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 
 const BASE_URL = 'http://localhost:5173'
 
 test.describe('ESCAPEPLAN Pricing Page - Unauthenticated', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto(`${BASE_URL}/pricing`)
     await page.waitForLoadState('networkidle')
   })
@@ -65,7 +65,7 @@ test.describe('ESCAPEPLAN Pricing Page - Unauthenticated', () => {
 
 test.describe('ESCAPEPLAN Pricing Page - Tab Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto(`${BASE_URL}/pricing`)
     await page.waitForLoadState('networkidle')
   })
@@ -111,7 +111,7 @@ test.describe('ESCAPEPLAN Pricing Page - Tab Navigation', () => {
 
 test.describe('ESCAPEPLAN Pricing Page - Site License Pricing', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto(`${BASE_URL}/pricing?tab=site-license`)
     await page.waitForLoadState('networkidle')
   })
@@ -139,7 +139,7 @@ test.describe('ESCAPEPLAN Pricing Page - Site License Pricing', () => {
 
 test.describe('ESCAPEPLAN Pricing Page - Individual Pricing', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto(`${BASE_URL}/pricing?tab=individual`)
     await page.waitForLoadState('networkidle')
   })
@@ -170,7 +170,7 @@ test.describe('ESCAPEPLAN Pricing Page - Individual Pricing', () => {
 
 test.describe('ESCAPEPLAN Pricing Page - FAQ Section', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto(`${BASE_URL}/pricing`)
     await page.waitForLoadState('networkidle')
   })
@@ -190,7 +190,7 @@ test.describe('ESCAPEPLAN Pricing Page - FAQ Section', () => {
 
 test.describe('ESCAPEPLAN Pricing Page - Authenticated', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto(`${BASE_URL}/pricing`)
     await page.waitForLoadState('networkidle')
   })

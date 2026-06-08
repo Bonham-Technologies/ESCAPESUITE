@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, setupAuthForContext } from '../../utils/auth'
+import { mockSignedIn, setupAuthForContext } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/indexeddb'
 
@@ -11,7 +11,7 @@ import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/inde
 
 test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
   test('ESCAPEARTIST loads with URL parameters', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     // App should handle URL params gracefully
     await page.goto('http://localhost:5175?video=test')
     await page.waitForLoadState('networkidle')
@@ -23,7 +23,7 @@ test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
   })
 
   test('ESCAPEARTIST has postMessage support', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -36,7 +36,7 @@ test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
   })
 
   test('ESCAPEARTIST has integration API', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -79,7 +79,7 @@ test.describe('Cross-App Connectivity', () => {
   })
 
   test('ESCAPEPLAN can be queried for tool references', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -125,7 +125,7 @@ test.describe('Cross-App Connectivity', () => {
 
 test.describe('IndexedDB Data Sharing', () => {
   test('IndexedDB can be cleared between tests', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -143,7 +143,7 @@ test.describe('IndexedDB Data Sharing', () => {
   })
 
   test('can write and read from IndexedDB', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -195,7 +195,7 @@ test.describe('Full CRAFT to ARTIST Workflow', () => {
   })
 
   test('ARTIST can receive video ID via URL param', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
 
     // Navigate with a video ID parameter
     await page.goto('http://localhost:5175?loadVideo=test-video-123')
@@ -208,7 +208,7 @@ test.describe('Full CRAFT to ARTIST Workflow', () => {
   })
 
   test('ARTIST handles missing video gracefully', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
 
     // Navigate with an invalid video ID
     await page.goto('http://localhost:5175?loadVideo=nonexistent')

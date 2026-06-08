@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 import {
   mockNetworkFailure,
   mockNetworkTimeout,
@@ -14,7 +14,7 @@ import {
 
 test.describe('Subscription API Failures', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
   })
 
   test('shows error on subscription API failure', async ({ page }) => {
@@ -45,7 +45,7 @@ test.describe('Subscription API Failures', () => {
 
 test.describe('Stripe Checkout Errors', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
   })
 
   test('shows error on card declined', async ({ page }) => {
@@ -83,7 +83,7 @@ test.describe('Stripe Checkout Errors', () => {
 
 test.describe('License Validation Errors', () => {
   test('shows error for invalid license key', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockLicenseValidationError(page, 'invalid')
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
@@ -111,7 +111,7 @@ test.describe('License Validation Errors', () => {
   })
 
   test('shows error for expired license', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockLicenseValidationError(page, 'expired')
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
@@ -121,7 +121,7 @@ test.describe('License Validation Errors', () => {
   })
 
   test('handles license validation timeout', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockLicenseValidationError(page, 'network')
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
@@ -133,7 +133,7 @@ test.describe('License Validation Errors', () => {
 
 test.describe('Graceful Degradation', () => {
   test('app works partially when some APIs fail', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     // Mock only subscription API as failing
     await mockSupabaseError(page, 'get-subscription', 503, 'Service unavailable')
 
@@ -147,7 +147,7 @@ test.describe('Graceful Degradation', () => {
   })
 
   test('handles offline mode', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -163,7 +163,7 @@ test.describe('Graceful Degradation', () => {
   })
 
   test('handles slow network', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockSlowNetwork(page, 2000)
 
     // Should still load eventually
@@ -176,7 +176,7 @@ test.describe('Graceful Degradation', () => {
 
 test.describe('Retry Mechanisms', () => {
   test('can retry after network failure', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
 
     let failCount = 0
     await page.route('**/functions/v1/get-subscription', async (route) => {
@@ -203,7 +203,7 @@ test.describe('Retry Mechanisms', () => {
 
 test.describe('API Rate Limiting', () => {
   test('handles 429 rate limit response', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockAPIError(page, '**/functions/v1/**', 429, 'Too many requests')
 
     await page.goto('http://localhost:5173/dashboard')
@@ -221,7 +221,7 @@ test.describe('API Rate Limiting', () => {
 
 test.describe('401/403 Authentication Errors', () => {
   test('handles 401 unauthorized', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockAPIError(page, '**/functions/v1/get-subscription', 401, 'Unauthorized')
 
     await page.goto('http://localhost:5173/dashboard')
@@ -235,7 +235,7 @@ test.describe('401/403 Authentication Errors', () => {
   })
 
   test('handles 403 forbidden', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockAPIError(page, '**/functions/v1/get-subscription', 403, 'Forbidden')
 
     await page.goto('http://localhost:5173/dashboard')

@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 import { mockSubscription } from '../../utils/subscription-mocks'
+import { mockAllStripeEndpoints } from '../../utils/stripe-mocks'
 
 test.describe('Protected Routes', () => {
-  // Note: These tests verify Clerk authentication redirects but are skipped in CI
-  // due to Clerk mock timing issues. Run locally to verify protected route behavior.
+  // Note: These tests verify Supabase Auth protected-route redirects but are
+  // skipped in CI due to auth-mock timing. Run locally to verify behavior.
   test.skip('dashboard redirects unauthenticated users', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
 
@@ -23,7 +24,7 @@ test.describe('Protected Routes', () => {
 
 test.describe('Dashboard', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockSubscription(page, 'pro_monthly')
     await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
@@ -61,8 +62,9 @@ test.describe('Dashboard', () => {
 
 test.describe('Upgrade Button', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockSubscription(page, 'trial')
+    await mockAllStripeEndpoints(page)
     await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
   })
@@ -87,21 +89,24 @@ test.describe('Upgrade Button', () => {
 
     if (isVisible) {
       await upgradeButton.click()
-      await page.waitForTimeout(500)
 
-      // Should open checkout or pricing page
-      const url = page.url()
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
+      // "Upgrade to Pro" starts embedded Stripe checkout → renders CheckoutModal
+      // (close button is aria-labelled "Close checkout"). Some surfaces instead
+      // link to /pricing. Stripe.js is blocked, but the modal shell still renders.
+      const closeCheckout = page.getByRole('button', { name: /close checkout/i })
+      const openedCheckout = await closeCheckout
+        .waitFor({ state: 'visible', timeout: 5000 })
+        .then(() => true)
+        .catch(() => false)
 
-      expect(url.includes('pricing') || dialogVisible).toBe(true)
+      expect(openedCheckout || page.url().includes('pricing')).toBe(true)
     }
   })
 })
 
 test.describe('Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173/settings')
     await page.waitForLoadState('networkidle')
   })
@@ -135,7 +140,7 @@ test.describe('Error Pages', () => {
   // Note: This test verifies 404 handling but is skipped in CI due to
   // app loading issues. Run locally to verify 404 page behavior.
   test.skip('404 page displays for unknown routes', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173/nonexistent-page-12345')
     await page.waitForLoadState('networkidle')
 
@@ -152,7 +157,7 @@ test.describe('Error Pages', () => {
 
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -185,7 +190,7 @@ test.describe('Navigation', () => {
 
 test.describe('User Menu', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })

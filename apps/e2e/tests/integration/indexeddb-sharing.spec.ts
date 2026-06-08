@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, setupAuthForContext } from '../../utils/auth'
+import { mockSignedIn, setupAuthForContext } from '../../utils/auth'
 import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/indexeddb'
 
 const DB_NAME = 'video-editor-db'
@@ -165,7 +165,7 @@ test.describe('Thumbnails Shared Correctly', () => {
 test.describe('Video Data Integrity', () => {
   test('video blob stored and retrieved correctly', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'WebKit times out on IndexedDB blob operations in Playwright')
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -288,7 +288,7 @@ test.describe('Storage Cleanup Propagates', () => {
 test.describe('Large Video Handling', () => {
   test('large blobs can be stored', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'WebKit times out on IndexedDB blob operations in Playwright')
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -332,7 +332,7 @@ test.describe('Large Video Handling', () => {
 
 test.describe('Database Version Handling', () => {
   test('database upgrades handled correctly', async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
