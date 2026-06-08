@@ -21,9 +21,15 @@ editor's render path is browser-API-based and can't simply run in Node). Because
 the source, we wrap the **real** render engine and ship it as a deployable service.
 
 **Goals**
-- Render ARTIST projects **server-side**, output **pixel-identical** to the in-browser
-  editor (same engine, not a reimplementation).
-- Run inside the customer's secure network as a **container**, air-gap friendly.
+- Render ARTIST projects **server-side** using the **same engine** as the in-browser
+  editor (not a reimplementation): frame-for-frame identical compositing; output is
+  standard H.264/VP9 — byte-exact in software verification mode, perceptually identical
+  with GPU acceleration (see §10).
+- **Engine parity / no fork:** headless imports the *identical* `apps/artist` engine
+  source, so features and improvements added to base ARTIST flow into headless
+  automatically — headless is a thin adapter, never a divergent copy.
+- Run inside the customer's secure network as a **container**, air-gap friendly, with
+  **GPU acceleration** when the host provides it (this customer has GPUs).
 - Be **stateless** and **transport-agnostic**: we provide a clean local interface (the
   "female end") that the customer plugs their orchestration and transport into.
 - Deliver output through a **pluggable sink** (default a local/mounted volume).
@@ -100,7 +106,9 @@ the editor populating IndexedDB) and getting bytes out (instead of a browser dow
   network users and are customer-configured.
 - N2. Stateless & transport-agnostic: no queue/job-store and no transport owned by us;
   the customer's broker owns scheduling/durability/retries and resource handoff.
-- N3. Deterministic output: pinned Chromium; software encoding by default.
+- N3. Reproducible output: pinned Chromium; **GPU-accelerated encode/decode when the host
+  provides it** (this customer has GPUs), with a software fallback and a software
+  "verification mode" for byte-deterministic golden tests.
 - N4. Secure: non-root, least privilege; sink `command` opt-in and sandboxed; license
   fail-closed.
 - N5. Observable: structured per-job logs, progress, clear exit codes / status.
@@ -157,6 +165,13 @@ renderProject(input: {
 
 It imports the export engine **verbatim** (`exportToMP4`/`exportToWebM`, `canvasRenderer`,
 `audioMixer`, `decodeWorker`).
+
+**Engine parity (no fork).** The bundle is a thin entry over the *same* engine modules the
+editor uses — imported directly from `apps/artist/src`, never copied. The only
+headless-specific code is this entry (source injection + bytes out). As base ARTIST gains
+overlays/transitions/effects/codecs, headless inherits them automatically on the next
+build; the golden-render tests (§13) flag any accidental divergence. The source seam below,
+if ever needed, is shared by both editor and headless — not a headless-only fork.
 
 **Source injection (the one adaptation).** The export path reads sources via
 `getVideoBlob(sourceId)` (IndexedDB). To avoid touching the engine, the bundle **seeds
@@ -254,17 +269,25 @@ env, never the job.
 - The WebM source path (flakier headless) gets explicit hardening + a golden test so it is
   genuinely first-class.
 - **Verifiability:** every render emits a manifest (SHA-256 of output, duration, width/
-  height, codec/container, frame count, engine + Chromium versions, job id). Golden-render
-  regression tests cover **both** MP4 and WebM (perceptual/byte-hash compare) so output is
-  provably correct and stable across engine/Chromium bumps.
+  height, codec/container, frame count, engine + Chromium versions, GPU-vs-software encode,
+  job id). Golden-render regression tests cover **both** MP4 and WebM so output is provably
+  correct and stable across engine/Chromium bumps.
+- **GPU vs determinism:** when host GPUs are present, hardware encode/decode is used for
+  speed. Hardware and software encoders emit slightly different *bytes* (as they already do
+  across users' machines today), so production verification is **perceptual** (hash of
+  decoded frames within tolerance), while a pinned **software "verification mode"** gives
+  byte-exact golden regression in CI. The compositing — the frames themselves — is identical
+  either way; it's the same engine.
 
 ## 11. Licensing / genuine-software enforcement
 
 Goal: even if the image is exfiltrated, it should not render without a genuine license.
 
-- **Mechanism (reuse, not new):** the existing offline **Ed25519** scheme. The container
-  embeds `LICENSE_PUBLIC_KEY`; the operator provides the signed `LICENSE_KEY` (issued with
-  their team/org/enterprise purchase). The license gate verifies the signature against the
+- **Mechanism (identical to the main ARTIST deployment — reuse, not new):** the same
+  offline **Ed25519** scheme the shipped ARTIST builds already use — same `packages/shared`
+  licensing code, same embedded `LICENSE_PUBLIC_KEY`, same signed `LICENSE_KEY` (issued with
+  their team/org/enterprise purchase). Embedding it the same way keeps headless in lockstep
+  with base ARTIST's licensing. The license gate verifies the signature against the
   embedded public key, checks product/tier entitlement for server render and expiry, and
   **fails closed** — no valid, unexpired, signature-verified license ⇒ no render, non-zero
   exit, clear message. Fully offline (air-gap safe).
@@ -288,11 +311,13 @@ scoped creds via env/secrets; the `command` sink is opt-in, argument-array exec 
 resource-limited; license fail-closed.
 
 **Packaging:** one `docker load`-able image = Node runner + pinned headless Chromium
-(Playwright's) + bundle A baked in + embedded license public key. Config via env (mode,
+(Playwright's) + bundle A baked in + embedded license public key. Supports optional **GPU
+passthrough** (e.g. the NVIDIA container runtime / `--gpus all`) to enable hardware
+encode/decode, falling back to software when no GPU is present. Config via env (mode,
 concurrency, timeouts, input loader, optional input adapter, output sink + config, license
-key, log level). Shipped as part of the air-gap **Site License** deliverable, **versioned
-to the ARTIST engine**. Includes a compose / k8s-Job sample + deployment/config/security
-docs.
+key, GPU on/off, log level). Shipped as part of the air-gap **Site License** deliverable,
+**versioned to the ARTIST engine**. Includes compose / k8s-Job samples (CPU and GPU) +
+deployment/config/security docs.
 
 ## 13. Testing strategy
 
@@ -335,10 +360,16 @@ project. Kept out of core (YAGNI).
   unreliable (out of scope unless needed).
 - **Large-media source injection into the page:** seeding IndexedDB with very large blobs
   may be slow; the source-resolver fallback (Section 5) addresses it if measured to matter.
-- **Memory/CPU per render:** high-res/long timelines are heavy; the broker controls
-  concurrency by how many containers it runs (one-shot) — document host sizing guidance.
+- **Memory/CPU/GPU per render:** high-res/long timelines are heavy; host GPUs accelerate
+  encode/decode substantially. The broker controls concurrency by how many containers it
+  runs (one-shot) — document host + GPU sizing guidance.
+- **GPU encode availability/determinism:** Chromium's WebCodecs HW path depends on the
+  host GPU + drivers in-container (NVIDIA runtime). Confirm the GPU/driver stack during
+  planning; HW output isn't byte-identical to SW (handled by perceptual verification + the
+  SW verification mode, §10).
 - **License key provisioning:** confirm how the per-deployment `LICENSE_KEY` is issued and
-  delivered with the team/org/enterprise bundle, and whether to bind it to org id.
+  delivered with the team/org/enterprise bundle (same path as main ARTIST), and whether to
+  bind it to org id.
 - **Optional adapters:** S3 is the only reference adapter needed for today's customer;
   others are additive and out of scope until a customer needs them.
 
@@ -347,5 +378,4 @@ project. Kept out of core (YAGNI).
 - Distributed render farm / autoscaling (the customer's broker's concern).
 - Resource transport/handoff in and out (the customer's plug).
 - Real-time/preview rendering on the server.
-- GPU-accelerated encode tuning (optional, host-dependent).
 - The hosted-ARTIST "Render on server" UI (companion spec).
