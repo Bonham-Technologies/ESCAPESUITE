@@ -1,5 +1,6 @@
 // apps/artist/src/headless/renderProject.ts
 import { exportToMP4, exportToWebM } from '../core/exporter'
+import { calculateTimelineDuration } from '../core/exportTypes'
 import { seedSources } from './seedSources'
 import type { RenderInput, RenderResult } from './types'
 
@@ -36,7 +37,7 @@ export async function renderProject(
     ? await exportToWebM(clips, sourceVideos, options, progress, tracks, undefined, resolution)
     : await exportToMP4(clips, sourceVideos, options, progress, tracks, undefined, resolution)
 
-  const durationSec = clips.reduce((max, c) => Math.max(max, (c.startTime ?? 0) + ((c.endTime ?? 0) - (c.startTime ?? 0))), 0)
+  const durationSec = calculateTimelineDuration(clips)
 
   return {
     base64: await blobToBase64(blob),

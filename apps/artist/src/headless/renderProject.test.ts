@@ -44,4 +44,17 @@ describe('renderProject', () => {
     expect(exportToWebM).toHaveBeenCalledTimes(1)
     expect(res.meta.format).toBe('webm')
   })
+
+  it('computes durationSec from timelinePosition + duration, not from source trim bounds', async () => {
+    // A clip starting at timelinePosition=5 with duration=3 ends at second 8.
+    // The source trim bounds (startTime=0, endTime=3) must NOT be used — that
+    // would give durationSec=3 instead of 8.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as Record<string, unknown>).timelinePosition = 5
+    ;(input.project.timeline.clips[0] as Record<string, unknown>).duration = 3
+    ;(input.project.timeline.clips[0] as Record<string, unknown>).startTime = 0
+    ;(input.project.timeline.clips[0] as Record<string, unknown>).endTime = 3
+    const res = await renderProject(input)
+    expect(res.meta.durationSec).toBe(8) // timelinePosition(5) + duration(3)
+  })
 })
