@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { checkFocusOrder, checkFocusVisibility } from '../../utils/accessibility'
 
 test.describe('ESCAPEPLAN Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -119,7 +119,7 @@ test.describe('ESCAPEPLAN Keyboard Navigation', () => {
 
 test.describe('ESCAPECRAFT Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -250,7 +250,7 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
 
 test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -386,7 +386,7 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
 
 test.describe('VideoPlayer Keyboard Shortcuts', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')

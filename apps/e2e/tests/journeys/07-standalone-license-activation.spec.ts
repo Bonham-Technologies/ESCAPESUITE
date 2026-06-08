@@ -7,7 +7,7 @@ import {
   clearLicenses,
 } from '../../utils/license-mocks'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedOut } from '../../utils/auth'
 
 /**
  * Journey 7: Standalone → Manual license entry → Activation
@@ -27,7 +27,7 @@ const skipInCI = process.env.CI ? test.skip : test
 
 test.describe('Journey: Standalone License Activation', () => {
   skipInCI('standalone ESCAPECRAFT loads without authentication', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
 
     // For this test, we need to use the dev server which serves the SaaS version
     // In real standalone tests, we'd use port 5184
@@ -73,7 +73,7 @@ test.describe('Journey: Standalone License Activation', () => {
 
   test('license can be injected and retrieved from storage', async ({ page }) => {
     await mockLicenseValidation(page)
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
 
     // Inject license before navigation
     const licenseKey = await injectLicense(page, 'craft', {
@@ -96,7 +96,7 @@ test.describe('Journey: Standalone License Activation', () => {
 
   test('suite license activates both CRAFT and ARTIST', async ({ page }) => {
     await mockLicenseValidation(page)
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
 
     // Inject suite license
     await injectLicense(page, 'suite', {
@@ -123,7 +123,7 @@ test.describe('Journey: Standalone License Activation', () => {
 
   skipInCI('licensed standalone app provides full functionality', async ({ page }) => {
     await mockLicenseValidation(page)
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -150,7 +150,7 @@ test.describe('Journey: Standalone License Activation', () => {
 
   test('licenses can be cleared from storage', async ({ page }) => {
     await mockLicenseValidation(page)
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
 
     // Inject license first
     await injectLicense(page, 'craft', { tier: 'standard' })

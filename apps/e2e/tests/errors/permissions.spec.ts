@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 import {
   mockCameraPermissionDenied,
   mockMicrophonePermissionDenied,
@@ -11,7 +11,7 @@ import {
 
 test.describe('Camera Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockCameraPermissionDenied(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -60,7 +60,7 @@ test.describe('Camera Permission Denied', () => {
 
 test.describe('Microphone Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockMicrophonePermissionDenied(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -102,7 +102,7 @@ test.describe('Microphone Permission Denied', () => {
 
 test.describe('Screen Share Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockScreenShareDenied(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -152,7 +152,7 @@ test.describe('Screen Share Permission Denied', () => {
 
 test.describe('All Media Permissions Denied', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockAllMediaPermissionsDenied(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -185,7 +185,7 @@ test.describe('All Media Permissions Denied', () => {
 
 test.describe('Device Not Found', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockDeviceNotFound(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -215,7 +215,7 @@ test.describe('Device Not Found', () => {
 
 test.describe('Device In Use', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockDeviceInUse(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -245,7 +245,7 @@ test.describe('Device In Use', () => {
 
 test.describe('Permission Recovery', () => {
   test('can recover after granting permissions', async ({ page, context }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 

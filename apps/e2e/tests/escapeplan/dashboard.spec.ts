@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 
 test.describe('ESCAPEPLAN Dashboard', () => {
   test.beforeEach(async ({ page }) => {
     // Mock Clerk auth before navigating
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
   })
@@ -57,7 +57,7 @@ test.describe('ESCAPEPLAN Dashboard', () => {
 
 test.describe('ESCAPEPLAN Dashboard Tool Launchers', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
   })
@@ -83,7 +83,7 @@ test.describe('ESCAPEPLAN Dashboard Tool Launchers', () => {
 
 test.describe('ESCAPEPLAN Subscription Status', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173/dashboard')
     await page.waitForLoadState('networkidle')
   })

@@ -1,12 +1,31 @@
 import { Page, BrowserContext } from '@playwright/test'
 
 /**
- * Utilities for mocking Clerk authentication in Playwright tests.
+ * Utilities for mocking Supabase Auth in Playwright tests.
  *
- * These utilities inject fake Clerk state into the page before it loads,
- * allowing tests to run as if a user is authenticated without requiring
- * actual Clerk API calls.
+ * The app reads auth state via `supabase.auth.getSession()`, which loads a
+ * persisted session from localStorage under the key `sb-<ref>-auth-token`
+ * (ref = the subdomain of VITE_SUPABASE_URL). So to make the app think a user
+ * is signed in we (1) seed that localStorage key with a structurally-valid
+ * Supabase session before the page loads, and (2) intercept the GoTrue
+ * `/auth/v1/*` endpoints as a network backstop so the client never blocks on
+ * the (nonexistent) mock backend.
+ *
+ * The dev servers are started by playwright.config.ts with VITE_SUPABASE_URL =
+ * MOCK_SUPABASE_URL, so the client derives the same storage key we write to.
+ *
+ * NOTE: edge-function calls (get-subscription, validate-license, Stripe) are
+ * mocked separately in subscription-mocks.ts / license-mocks.ts / stripe-mocks.ts.
  */
+
+// Deterministic mock Supabase project used for E2E (no real network calls).
+// Keep these in sync with the webServer env in the playwright configs (they
+// import these constants, so they stay in sync automatically).
+export const MOCK_SUPABASE_URL = 'https://e2e-mock.supabase.co'
+// Fake anon key (never validated client-side; supabase-js only sends it as a
+// header to endpoints we intercept). Shaped like a JWT for realism.
+export const MOCK_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImUyZS1tb2NrIn0.e2e-mock-anon-signature'
 
 export interface MockUser {
   id: string
@@ -15,273 +34,182 @@ export interface MockUser {
   imageUrl?: string
 }
 
-export interface MockSession {
-  id: string
-  userId: string
-  status: 'active' | 'ended' | 'expired'
-}
-
 const DEFAULT_USER: MockUser = {
-  id: 'user_test_123',
+  id: '00000000-0000-4000-8000-000000000001',
   email: 'test@example.com',
   name: 'Test User',
-  imageUrl: 'https://via.placeholder.com/150',
 }
 
-const DEFAULT_SESSION: MockSession = {
-  id: 'sess_test_123',
-  userId: DEFAULT_USER.id,
-  status: 'active',
+/** localStorage key supabase-js uses to persist the session for our mock URL. */
+function authStorageKey(): string {
+  const ref = new URL(MOCK_SUPABASE_URL).hostname.split('.')[0]
+  return `sb-${ref}-auth-token`
+}
+
+function base64url(value: object): string {
+  return Buffer.from(JSON.stringify(value)).toString('base64url')
 }
 
 /**
- * Mock Clerk authentication state for a page.
- * Must be called BEFORE navigating to the page.
- *
- * This injects mock state that Clerk's React hooks will read,
- * making useUser(), useAuth(), etc. return authenticated state.
+ * A fake but structurally-valid JWT. supabase-js does NOT verify the signature
+ * client-side; getSession() only reads `expires_at` from the session object, so
+ * a far-future expiry means it returns the session without attempting a refresh.
  */
-export async function mockClerkAuth(
-  page: Page,
-  options?: {
-    user?: Partial<MockUser>
-    session?: Partial<MockSession>
+function fakeJwt(user: MockUser, expiresAt: number, issuedAt: number): string {
+  const header = base64url({ alg: 'HS256', typ: 'JWT' })
+  const payload = base64url({
+    sub: user.id,
+    email: user.email,
+    role: 'authenticated',
+    aud: 'authenticated',
+    iss: `${MOCK_SUPABASE_URL}/auth/v1`,
+    iat: issuedAt,
+    exp: expiresAt,
+    user_metadata: { full_name: user.name, name: user.name, email: user.email },
+    app_metadata: { provider: 'email', providers: ['email'] },
+  })
+  return `${header}.${payload}.e2e-mock-signature`
+}
+
+/** Build a Supabase session object matching the supabase-js persisted shape. */
+function buildSession(user: MockUser) {
+  const nowSec = Math.floor(Date.now() / 1000)
+  const expiresAt = nowSec + 60 * 60 * 24 * 365 // 1 year out → never refreshes mid-test
+  const nowIso = new Date().toISOString()
+  const supabaseUser = {
+    id: user.id,
+    aud: 'authenticated',
+    role: 'authenticated',
+    email: user.email,
+    email_confirmed_at: nowIso,
+    phone: '',
+    confirmed_at: nowIso,
+    last_sign_in_at: nowIso,
+    app_metadata: { provider: 'email', providers: ['email'] },
+    user_metadata: { full_name: user.name, name: user.name, email: user.email },
+    identities: [],
+    created_at: nowIso,
+    updated_at: nowIso,
   }
+  return {
+    access_token: fakeJwt(user, expiresAt, nowSec),
+    token_type: 'bearer',
+    expires_in: 60 * 60 * 24 * 365,
+    expires_at: expiresAt,
+    refresh_token: `e2e-mock-refresh-${user.id}`,
+    user: supabaseUser,
+  }
+}
+
+type SupabaseSession = ReturnType<typeof buildSession>
+
+/**
+ * Network backstop: answer the GoTrue endpoints so the client never hangs on
+ * the mock backend. getSession() is local (reads storage); these cover token
+ * refresh / getUser if anything triggers them.
+ */
+async function interceptSupabaseAuth(
+  target: Page | BrowserContext,
+  session: SupabaseSession
 ) {
-  const user = { ...DEFAULT_USER, ...options?.user }
-  const session = { ...DEFAULT_SESSION, ...options?.session, userId: user.id }
+  await target.route('**/auth/v1/token**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(session),
+    })
+  )
+  await target.route('**/auth/v1/user**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(session.user),
+    })
+  )
+  await target.route('**/auth/v1/logout**', (route) =>
+    route.fulfill({ status: 204, contentType: 'application/json', body: '{}' })
+  )
+}
+
+/**
+ * Make the app see an authenticated user. Must be called BEFORE navigating.
+ * Seeds the Supabase session in localStorage and backstops the auth endpoints.
+ */
+export async function mockSignedIn(
+  page: Page,
+  options?: { user?: Partial<MockUser> }
+) {
+  const user: MockUser = { ...DEFAULT_USER, ...options?.user }
+  const session = buildSession(user)
+  const key = authStorageKey()
 
   await page.addInitScript(
-    ({ user, session }) => {
-      // Mock Clerk's internal state
-      // These globals are checked by Clerk SDK
-      ;(window as any).__clerk_frontend_api = 'mock-frontend-api'
-      ;(window as any).__clerk_publishable_key = 'pk_test_mock'
-
-      // Mock the Clerk client object that the SDK looks for
-      ;(window as any).__clerk = {
-        loaded: true,
-        session: {
-          id: session.id,
-          userId: session.userId,
-          status: session.status,
-          user: {
-            id: user.id,
-            primaryEmailAddress: {
-              emailAddress: user.email,
-              id: 'email_1',
-            },
-            fullName: user.name,
-            firstName: user.name.split(' ')[0],
-            lastName: user.name.split(' ')[1] || '',
-            imageUrl: user.imageUrl,
-            hasImage: !!user.imageUrl,
-          },
-          getToken: async () => 'mock-session-token',
-        },
-        user: {
-          id: user.id,
-          primaryEmailAddress: {
-            emailAddress: user.email,
-            id: 'email_1',
-          },
-          fullName: user.name,
-          firstName: user.name.split(' ')[0],
-          lastName: user.name.split(' ')[1] || '',
-          imageUrl: user.imageUrl,
-          hasImage: !!user.imageUrl,
-        },
-        organization: null,
-        signOut: async () => {},
-        openSignIn: () => {},
-        openSignUp: () => {},
-        openUserProfile: () => {},
+    ({ key, session }) => {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(session))
+      } catch {
+        /* localStorage unavailable before navigation; ignored */
       }
-
-      // Store mock state in sessionStorage for persistence within test
-      sessionStorage.setItem(
-        '__clerk_mock_auth',
-        JSON.stringify({ user, session, isSignedIn: true })
-      )
     },
-    { user, session }
+    { key, session }
   )
 
-  // Also intercept Clerk API calls to prevent network errors
-  await interceptClerkAPI(page)
+  await interceptSupabaseAuth(page, session)
 }
 
 /**
- * Mock Clerk as signed out state.
- * Useful for testing sign-in flows or unauthenticated views.
+ * Make the app see a signed-out visitor. Clears any seeded session and answers
+ * the auth endpoints with unauthenticated responses.
  */
-export async function mockClerkSignedOut(page: Page) {
-  await page.addInitScript(() => {
-    ;(window as any).__clerk_frontend_api = 'mock-frontend-api'
-    ;(window as any).__clerk_publishable_key = 'pk_test_mock'
+export async function mockSignedOut(page: Page) {
+  const key = authStorageKey()
 
-    ;(window as any).__clerk = {
-      loaded: true,
-      session: null,
-      user: null,
-      organization: null,
-      signOut: async () => {},
-      openSignIn: () => {},
-      openSignUp: () => {},
-      openUserProfile: () => {},
+  await page.addInitScript((key) => {
+    try {
+      window.localStorage.removeItem(key)
+    } catch {
+      /* ignored */
     }
+  }, key)
 
-    sessionStorage.setItem(
-      '__clerk_mock_auth',
-      JSON.stringify({ user: null, session: null, isSignedIn: false })
-    )
-  })
-
-  await interceptClerkAPI(page)
+  await page.route('**/auth/v1/user**', (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'not authenticated' }),
+    })
+  )
+  await page.route('**/auth/v1/token**', (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'invalid_grant' }),
+    })
+  )
 }
 
 /**
- * Intercept Clerk API calls to prevent network errors and return mock data.
- * This prevents the actual Clerk SDK from making network requests.
- */
-export async function interceptClerkAPI(page: Page) {
-  // Intercept all Clerk API endpoints
-  await page.route('**/*.clerk.accounts.dev/**', async (route) => {
-    const url = route.request().url()
-
-    // Return mock responses for common endpoints
-    if (url.includes('/v1/client')) {
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          response: {
-            client: {
-              id: 'client_test',
-              sessions: [],
-              sign_in: null,
-              sign_up: null,
-              last_active_session_id: null,
-            },
-          },
-        }),
-      })
-    }
-
-    if (url.includes('/v1/environment')) {
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          auth_config: {
-            single_session_mode: false,
-          },
-          display_config: {
-            application_name: 'ESCAPE Suite Test',
-          },
-        }),
-      })
-    }
-
-    // For other endpoints, abort to prevent hanging
-    return route.abort()
-  })
-
-  // Also handle clerk.com domains
-  await page.route('**/*clerk.com/**', async (route) => {
-    return route.abort()
-  })
-}
-
-/**
- * Setup authentication for a browser context.
- * Applies auth mocking to all pages created in this context.
+ * Seed authentication for an entire browser context so every page created in it
+ * starts signed in. Used by cross-app integration/workflow tests.
  */
 export async function setupAuthForContext(
   context: BrowserContext,
-  options?: {
-    user?: Partial<MockUser>
-    session?: Partial<MockSession>
-  }
+  options?: { user?: Partial<MockUser> }
 ) {
-  const user = { ...DEFAULT_USER, ...options?.user }
-  const session = { ...DEFAULT_SESSION, ...options?.session, userId: user.id }
+  const user: MockUser = { ...DEFAULT_USER, ...options?.user }
+  const session = buildSession(user)
+  const key = authStorageKey()
 
-  // Add init script to context so all pages get it
   await context.addInitScript(
-    ({ user, session }) => {
-      ;(window as any).__clerk_frontend_api = 'mock-frontend-api'
-      ;(window as any).__clerk_publishable_key = 'pk_test_mock'
-      ;(window as any).__clerk = {
-        loaded: true,
-        session: {
-          id: session.id,
-          userId: session.userId,
-          status: session.status,
-          user: {
-            id: user.id,
-            primaryEmailAddress: { emailAddress: user.email, id: 'email_1' },
-            fullName: user.name,
-            firstName: user.name.split(' ')[0],
-            lastName: user.name.split(' ')[1] || '',
-            imageUrl: user.imageUrl,
-            hasImage: !!user.imageUrl,
-          },
-          getToken: async () => 'mock-session-token',
-        },
-        user: {
-          id: user.id,
-          primaryEmailAddress: { emailAddress: user.email, id: 'email_1' },
-          fullName: user.name,
-          firstName: user.name.split(' ')[0],
-          lastName: user.name.split(' ')[1] || '',
-          imageUrl: user.imageUrl,
-          hasImage: !!user.imageUrl,
-        },
-        organization: null,
-        signOut: async () => {},
-        openSignIn: () => {},
-        openSignUp: () => {},
-        openUserProfile: () => {},
+    ({ key, session }) => {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(session))
+      } catch {
+        /* ignored */
       }
-      sessionStorage.setItem(
-        '__clerk_mock_auth',
-        JSON.stringify({ user, session, isSignedIn: true })
-      )
     },
-    { user, session }
+    { key, session }
   )
 
-  // Route interception for context
-  await context.route('**/*.clerk.accounts.dev/**', async (route) => {
-    return route.abort()
-  })
-  await context.route('**/*clerk.com/**', async (route) => {
-    return route.abort()
-  })
-}
-
-/**
- * Check if the current page appears to be authenticated.
- * Useful for verifying auth mocking is working.
- */
-export async function isAuthenticated(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const clerk = (window as any).__clerk
-    return clerk?.session !== null && clerk?.user !== null
-  })
-}
-
-/**
- * Get the mocked user data from the page.
- */
-export async function getMockedUser(page: Page): Promise<MockUser | null> {
-  return page.evaluate(() => {
-    const stored = sessionStorage.getItem('__clerk_mock_auth')
-    if (stored) {
-      const data = JSON.parse(stored)
-      return data.user
-    }
-    return null
-  })
+  await interceptSupabaseAuth(context, session)
 }

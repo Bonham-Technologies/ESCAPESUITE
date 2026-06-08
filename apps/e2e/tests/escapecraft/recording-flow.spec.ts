@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 
 test.describe('ESCAPECRAFT Recording Interface', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -60,7 +60,7 @@ test.describe('ESCAPECRAFT Recording Interface', () => {
 
 test.describe('ESCAPECRAFT Recording Controls', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -104,7 +104,7 @@ test.describe('ESCAPECRAFT Recording Controls', () => {
 
 test.describe('ESCAPECRAFT Recording List', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
   })
@@ -136,7 +136,7 @@ test.describe('ESCAPECRAFT Recording List', () => {
 
 test.describe('ESCAPECRAFT User Interface', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
   })

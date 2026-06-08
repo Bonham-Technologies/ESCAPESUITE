@@ -1,5 +1,5 @@
 import { test as base, Page } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut, MockUser, MockSession } from '../utils/auth'
+import { mockSignedIn, mockSignedOut, MockUser } from '../utils/auth'
 import {
   mockSubscription,
   SubscriptionState,
@@ -47,7 +47,7 @@ export const test = base.extend<{
       name: 'Trial User',
     }
 
-    await mockClerkAuth(page, { user })
+    await mockSignedIn(page, { user })
     await mockSubscription(page, 'trial')
     await mockAllStripeEndpoints(page)
 
@@ -68,7 +68,7 @@ export const test = base.extend<{
       name: 'Pro User',
     }
 
-    await mockClerkAuth(page, { user })
+    await mockSignedIn(page, { user })
     await mockSubscription(page, 'pro_monthly')
     await mockAllStripeEndpoints(page)
 
@@ -89,7 +89,7 @@ export const test = base.extend<{
       name: 'Expired User',
     }
 
-    await mockClerkAuth(page, { user })
+    await mockSignedIn(page, { user })
     await mockSubscription(page, 'expired')
     await mockAllStripeEndpoints(page)
 
@@ -110,7 +110,7 @@ export const test = base.extend<{
       name: 'Canceled User',
     }
 
-    await mockClerkAuth(page, { user })
+    await mockSignedIn(page, { user })
     await mockSubscription(page, 'canceled')
     await mockAllStripeEndpoints(page)
 
@@ -134,7 +134,7 @@ export const test = base.extend<{
     const product: ProductType = 'suite'
     const tier: LicenseTier = 'pro'
 
-    await mockClerkAuth(page, { user })
+    await mockSignedIn(page, { user })
     await mockLicenseValidation(page)
     const licenseKey = await injectLicense(page, product, {
       tier,
@@ -156,7 +156,7 @@ export const test = base.extend<{
    * Signed out visitor (no authentication).
    */
   signedOutUser: async ({ page }, use) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await mockAllStripeEndpoints(page)
 
     await use(page)

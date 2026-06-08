@@ -167,7 +167,6 @@ jobs:
         run: pnpm build
         env:
           VITE_BUILD_MODE: saas
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
@@ -257,7 +256,6 @@ jobs:
         run: pnpm --filter=@escapesuite/e2e exec playwright test --ignore-snapshots --grep-invert "Journey"
         env:
           CI: true
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
 
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v7
@@ -321,7 +319,6 @@ jobs:
         run: pnpm test:e2e
         env:
           CI: true
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
 
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v7
@@ -544,7 +541,6 @@ jobs:
         run: vercel build ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--prod' || '' }} --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VITE_BUILD_MODE: saas
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 

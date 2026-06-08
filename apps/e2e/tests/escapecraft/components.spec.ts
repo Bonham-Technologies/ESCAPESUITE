@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 
 test.describe('VideoPlayer Component', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -99,7 +99,7 @@ test.describe('VideoPlayer Component', () => {
 
 test.describe('Download Menu', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -169,7 +169,7 @@ test.describe('Download Menu', () => {
 
 test.describe('Recording Controls', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -201,7 +201,7 @@ test.describe('Recording Controls', () => {
 
 test.describe('PiP Controls', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -250,7 +250,7 @@ test.describe('PiP Controls', () => {
 
 test.describe('Source Selection', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -291,7 +291,7 @@ test.describe('Source Selection', () => {
 
 test.describe('Audio Controls', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)

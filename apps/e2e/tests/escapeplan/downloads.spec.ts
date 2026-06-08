@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 
 const BASE_URL = 'http://localhost:5173'
 
@@ -11,7 +11,7 @@ const BASE_URL = 'http://localhost:5173'
 
 test.describe('ESCAPEPLAN Downloads Page - Authenticated', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto(`${BASE_URL}/dashboard?tab=downloads`)
     await page.waitForLoadState('networkidle')
   })
@@ -57,7 +57,7 @@ test.describe('ESCAPEPLAN Downloads Page - Authenticated', () => {
 
 test.describe('ESCAPEPLAN Downloads Page - License Display', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto(`${BASE_URL}/dashboard?tab=downloads`)
     await page.waitForLoadState('networkidle')
   })
@@ -89,7 +89,7 @@ test.describe('ESCAPEPLAN Downloads Page - License Display', () => {
 
 test.describe('ESCAPEPLAN Downloads Page - Product Cards', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto(`${BASE_URL}/dashboard?tab=downloads`)
     await page.waitForLoadState('networkidle')
   })
@@ -115,7 +115,7 @@ test.describe('ESCAPEPLAN Downloads Page - Product Cards', () => {
 
 test.describe('ESCAPEPLAN Downloads Page - Unauthenticated', () => {
   test('redirects to sign-in or shows auth required', async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto(`${BASE_URL}/dashboard?tab=downloads`)
     await page.waitForLoadState('networkidle')
 
@@ -133,7 +133,7 @@ test.describe('ESCAPEPLAN Downloads Page - Unauthenticated', () => {
 
 test.describe('ESCAPEPLAN Downloads Page - Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto(`${BASE_URL}/dashboard?tab=downloads`)
     await page.waitForLoadState('networkidle')
   })
@@ -157,7 +157,7 @@ test.describe('ESCAPEPLAN Downloads Page - Navigation', () => {
 
 test.describe('ESCAPEPLAN Downloads Page - License Key Display', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto(`${BASE_URL}/dashboard?tab=downloads`)
     await page.waitForLoadState('networkidle')
   })

@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth, mockClerkSignedOut } from '../../utils/auth'
+import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 
 test.describe('ESCAPEPLAN Landing Page', () => {
   test.beforeEach(async ({ page }) => {
     // Mock Clerk (signed out state for landing page)
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -67,7 +67,7 @@ test.describe('ESCAPEPLAN Landing Page', () => {
 
 test.describe('ESCAPEPLAN Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkSignedOut(page)
+    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -95,7 +95,7 @@ test.describe('ESCAPEPLAN Navigation', () => {
 test.describe('ESCAPEPLAN Authenticated Landing', () => {
   test('redirects to dashboard when authenticated', async ({ page }) => {
     // Mock auth before navigating
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 

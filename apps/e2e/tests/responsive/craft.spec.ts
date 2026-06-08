@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { VIEWPORTS } from '../../utils/viewports'
 
 test.describe('ESCAPECRAFT Mobile Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -59,7 +59,7 @@ test.describe('ESCAPECRAFT Mobile Layout', () => {
 test.describe('ESCAPECRAFT Tablet Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -93,7 +93,7 @@ test.describe('ESCAPECRAFT Tablet Layout', () => {
 test.describe('ESCAPECRAFT Settings Panel Responsive', () => {
   test('settings collapse on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -108,7 +108,7 @@ test.describe('ESCAPECRAFT Settings Panel Responsive', () => {
 
   test('settings toggle exists on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -127,7 +127,7 @@ test.describe('ESCAPECRAFT Settings Panel Responsive', () => {
 test.describe('ESCAPECRAFT Recording List Responsive', () => {
   test('recording list stacks on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -145,7 +145,7 @@ test.describe('ESCAPECRAFT Recording List Responsive', () => {
 
   test('recording thumbnails resize on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -167,7 +167,7 @@ test.describe('ESCAPECRAFT Recording List Responsive', () => {
 test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
   test('VideoPlayer fits mobile viewport', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -187,7 +187,7 @@ test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
 
   test('VideoPlayer controls accessible on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -213,7 +213,7 @@ test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
 test.describe('ESCAPECRAFT Landscape Mode', () => {
   test('works in landscape orientation', async ({ page }) => {
     await page.setViewportSize({ width: 667, height: 375 }) // Landscape mobile
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -225,7 +225,7 @@ test.describe('ESCAPECRAFT Landscape Mode', () => {
 
   test('preview uses available width in landscape', async ({ page }) => {
     await page.setViewportSize({ width: 667, height: 375 })
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')

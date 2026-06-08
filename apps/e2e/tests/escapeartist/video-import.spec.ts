@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { mockClerkAuth } from '../../utils/auth'
+import { mockSignedIn } from '../../utils/auth'
 
 test.describe('ESCAPEARTIST Video Import', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -57,7 +57,7 @@ test.describe('ESCAPEARTIST Video Import', () => {
 
 test.describe('ESCAPEARTIST Toolbar', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -105,7 +105,7 @@ test.describe('ESCAPEARTIST Toolbar', () => {
 
 test.describe('ESCAPEARTIST Export Options', () => {
   test.beforeEach(async ({ page }) => {
-    await mockClerkAuth(page)
+    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })

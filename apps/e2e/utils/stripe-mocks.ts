@@ -22,29 +22,28 @@ export interface LicenseCheckoutOptions {
 
 /**
  * Mock Stripe checkout session creation.
- * Intercepts the create-checkout Edge Function and returns a mock redirect URL.
+ * Intercepts the create-checkout Edge Function. The app uses EMBEDDED checkout:
+ * subscription.ts reads `data.clientSecret` and renders <CheckoutModal>. (Stripe.js
+ * itself is blocked in mockAllStripeEndpoints, so the modal shell renders but the
+ * embedded form doesn't load — sufficient to verify the flow is initiated.)
  */
 export async function mockStripeCheckout(page: Page, options: CheckoutOptions = {}) {
-  const { success = true, customerId = 'cus_mock_123', subscriptionId = 'sub_mock_123' } = options
+  const { success = true, subscriptionId = 'sub_mock_123' } = options
 
   await page.route('**/functions/v1/create-checkout**', async (route) => {
     if (success) {
-      // Return mock checkout URL that redirects to success
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          url: `${page.url().split('/').slice(0, 3).join('/')}/dashboard?success=true&customer=${customerId}&subscription=${subscriptionId}`,
+          clientSecret: `cs_test_e2e_${subscriptionId}_secret_mock`,
         }),
       })
     } else {
-      // Return cancel URL
       await route.fulfill({
-        status: 200,
+        status: 400,
         contentType: 'application/json',
-        body: JSON.stringify({
-          url: `${page.url().split('/').slice(0, 3).join('/')}/?canceled=true`,
-        }),
+        body: JSON.stringify({ error: 'checkout_canceled' }),
       })
     }
   })
