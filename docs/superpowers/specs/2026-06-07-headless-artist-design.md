@@ -28,8 +28,10 @@ the source, we wrap the **real** render engine and ship it as a deployable servi
 - **Engine parity / no fork:** headless imports the *identical* `apps/artist` engine
   source, so features and improvements added to base ARTIST flow into headless
   automatically — headless is a thin adapter, never a divergent copy.
-- Run inside the customer's secure network as a **container**, air-gap friendly, with
-  **GPU acceleration** when the host provides it (this customer has GPUs).
+- Ship as a **runtime-agnostic code kit** (Node runner + the built ARTIST bundle + docs),
+  air-gap friendly, with an **optional reference Dockerfile**. Headless Chromium is a
+  documented **host prerequisite** either way. **GPU acceleration** is used when the host
+  provides it (this customer has GPUs).
 - Be **stateless** and **transport-agnostic**: we provide a clean local interface (the
   "female end") that the customer plugs their orchestration and transport into.
 - Deliver output through a **pluggable sink** (default a local/mounted volume).
@@ -112,8 +114,11 @@ the editor populating IndexedDB) and getting bytes out (instead of a browser dow
 - N4. Secure: non-root, least privilege; sink `command` opt-in and sandboxed; license
   fail-closed.
 - N5. Observable: structured per-job logs, progress, clear exit codes / status.
-- N6. Self-hostable: single `docker load`-able image, env-configured, shipped as part of
-  the air-gap Site License and versioned to the ARTIST engine.
+- N6. Self-hostable: primary deliverable is a **code kit** (npm tarball: runner/CLI + built
+  bundle + docs) that drops into the customer's own runtime; an **optional reference
+  Dockerfile** is provided for turnkey use and as the canonical environment spec. Headless
+  Chromium (pinned version) is a documented host prerequisite. Env-configured, shipped with
+  the air-gap Site License, versioned to the ARTIST engine.
 
 ## 4. Architecture overview
 
@@ -123,7 +128,8 @@ customer broker + transport (THEIRS) ── fetch/mount resources ──▶ loca
         └──(spawn job: spec → local paths)──┐                         │
                                             ▼                         │
                   ┌────────────────────────────────────────────────────────┐
-                  │  headless-artist container (STATELESS, license-gated)    │
+                  │  headless-artist kit: Node + headless Chromium            │
+                  │  (STATELESS, license-gated; container optional)           │
                   │  one-shot CLI  (or optional HTTP service)                 │
                   │                                                          │
                   │  License gate ──(fail-closed Ed25519)── proceed/abort    │
@@ -310,14 +316,20 @@ restricted); optional adapters are the only network users and are customer-confi
 scoped creds via env/secrets; the `command` sink is opt-in, argument-array exec (no shell),
 resource-limited; license fail-closed.
 
-**Packaging:** one `docker load`-able image = Node runner + pinned headless Chromium
-(Playwright's) + bundle A baked in + embedded license public key. Supports optional **GPU
-passthrough** (e.g. the NVIDIA container runtime / `--gpus all`) to enable hardware
-encode/decode, falling back to software when no GPU is present. Config via env (mode,
-concurrency, timeouts, input loader, optional input adapter, output sink + config, license
-key, GPU on/off, log level). Shipped as part of the air-gap **Site License** deliverable,
-**versioned to the ARTIST engine**. Includes compose / k8s-Job samples (CPU and GPU) +
-deployment/config/security docs.
+**Packaging (kit-first, container optional).** Primary deliverable = a **code kit** (npm
+tarball / `npm pack` for offline install): the Node runner/CLI + license gate + adapters +
+the built ARTIST bundle + embedded license public key + docs. It drops into the customer's
+own runtime. **Headless Chromium is a host prerequisite** — the kit either points at a
+**system/provided Chromium** (`executablePath`, recommended for air-gap) or uses a
+**Playwright-managed pinned Chromium** (documented version; air-gap needs a browser mirror
+or pre-seeded cache). The docs list the required **OS deps** (libnss, fonts, …) and the
+pinned Chromium version. We also ship an **optional reference `Dockerfile`** (turnkey +
+canonical environment spec) and compose / k8s-Job samples (CPU and GPU). **GPU:** when the
+host exposes a GPU (e.g. NVIDIA runtime / `--gpus all`, or a host GPU on bare metal),
+hardware encode/decode is used; software fallback otherwise. Config via env (mode,
+concurrency, timeouts, Chromium path, input loader, optional input adapter, output sink +
+config, license key, GPU on/off, log level). Shipped with the air-gap **Site License**,
+**versioned to the ARTIST engine**.
 
 ## 13. Testing strategy
 
@@ -347,9 +359,11 @@ project. Kept out of core (YAGNI).
 - `apps/artist`: new headless entry (`headless.html` + `src/headless/*`) and a
   `build:headless` script; the source-injection seam (seed IndexedDB, or a guarded
   source-resolver) — the editor path unchanged.
-- New service location: `services/headless-artist/` (Node runner + license gate + adapters
-  + `Dockerfile` + samples). Add the `services/*` glob to `pnpm-workspace.yaml`. Reuses
-  `packages/shared` (licensing, types) where sensible.
+- New service location: `services/headless-artist/` (Node runner/CLI + license gate +
+  adapters; publishable as an npm tarball kit) + an **optional reference `Dockerfile`** and
+  CPU/GPU samples. Add the `services/*` glob to `pnpm-workspace.yaml`. Reuses
+  `packages/shared` (licensing, types) where sensible. The runner accepts a configurable
+  Chromium `executablePath` so customers can point at their own browser.
 - Docs: deployment guide, config reference, security/licensing notes, broker-integration
   example.
 
@@ -360,6 +374,12 @@ project. Kept out of core (YAGNI).
   unreliable (out of scope unless needed).
 - **Large-media source injection into the page:** seeding IndexedDB with very large blobs
   may be slow; the source-resolver fallback (Section 5) addresses it if measured to matter.
+- **Chromium provisioning (kit, air-gap):** since we ship a kit (not a baked image by
+  default), the host must supply a compatible **pinned headless Chromium** + its OS deps.
+  Air-gap means no Playwright auto-download — mitigate by supporting a system Chromium
+  (`executablePath`), documenting the exact version + `install-deps` list, and providing the
+  reference Dockerfile as the canonical environment. Version drift is caught by the manifest
+  (records Chromium version) + golden tests.
 - **Memory/CPU/GPU per render:** high-res/long timelines are heavy; host GPUs accelerate
   encode/decode substantially. The broker controls concurrency by how many containers it
   runs (one-shot) — document host + GPU sizing guidance.
