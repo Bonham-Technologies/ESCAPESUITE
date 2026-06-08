@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:standalone": "cross-env-shell VITE_BUILD_MODE=standalone \"tsc && vite build\"",
+    "build:headless": "cross-env VITE_HEADLESS=true vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
