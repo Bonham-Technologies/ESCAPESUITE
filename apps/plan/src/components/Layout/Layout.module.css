@@ -74,6 +74,12 @@
   color: var(--text-secondary);
 }
 
+/* Credit link sits inside a paragraph of body text — underline it so it's
+   distinguishable by more than color alone (WCAG 1.4.1 / use-of-color). */
+.footer p a {
+  text-decoration: underline;
+}
+
 .footerLinks {
   display: flex;
   justify-content: center;
