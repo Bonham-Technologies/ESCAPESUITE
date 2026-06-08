@@ -19,12 +19,13 @@ export default defineConfig({
   build: {
     target: 'esnext',
     assetsInlineLimit: 100000000, // Required for vite-plugin-singlefile
-    chunkSizeWarningLimit: 5000,  // 5MB - flag unexpected bloat
+    chunkSizeWarningLimit: 5000,
     cssCodeSplit: false,
+    // Headless render bundle: single-file headless.html in dist-headless/.
+    outDir: process.env.VITE_HEADLESS === 'true' ? 'dist-headless' : 'dist',
     rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-      },
+      input: process.env.VITE_HEADLESS === 'true' ? 'headless.html' : 'index.html',
+      output: { inlineDynamicImports: true },
     },
   },
   define: {
