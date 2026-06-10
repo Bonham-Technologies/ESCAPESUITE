@@ -2,10 +2,18 @@ import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ARTIST = resolve(__dirname, '../../../artist')
 const FIX = resolve(__dirname, '../../fixtures/headless')
+
+// Build the headless single-file bundle so the file:// loads below resolve.
+// CI runs the e2e suite without a separate headless build step, so build here
+// (fast: a no-UI Vite single-file build) to keep this spec self-contained.
+test.beforeAll(() => {
+  execSync('pnpm --filter=@escapesuite/artist run build:headless', { stdio: 'inherit' })
+})
 
 test('headless bundle renders a one-clip project to a valid MP4', async ({ page }) => {
   const bundleUrl = 'file://' + resolve(ARTIST, 'dist-headless/headless.html')
