@@ -35,14 +35,14 @@ jobs:
       startsWith(github.head_ref, 'changeset-release/')
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # For pull_request_target from trusted sources, checkout the PR HEAD
           # This is safe because we filter to only trusted actors/branches above
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -75,12 +75,12 @@ jobs:
     needs: validate
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -110,12 +110,12 @@ jobs:
     needs: validate
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -130,7 +130,7 @@ jobs:
         run: pnpm test:coverage
 
       - name: Upload coverage reports
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
         continue-on-error: true
         with:
@@ -147,12 +147,12 @@ jobs:
     needs: [lint-and-typecheck, test]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -220,12 +220,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -284,12 +284,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -348,12 +348,12 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -427,12 +427,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -518,12 +518,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
