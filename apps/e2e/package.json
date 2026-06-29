@@ -23,8 +23,8 @@
     "report:journeys": "playwright show-report playwright-report-journeys"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.11.3",
-    "@playwright/test": "^1.60.0",
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^25.2.2",
     "serve": "^14.2.6",
     "wait-on": "^9.0.10"
