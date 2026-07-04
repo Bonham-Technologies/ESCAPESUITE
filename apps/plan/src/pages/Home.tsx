@@ -2,9 +2,12 @@ import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { SignedIn, SignedOut } from '../lib/auth'
 import { analytics } from '../lib/analytics'
+import { useSeo, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from '../lib/seo'
 import styles from './Home.module.css'
 
 export default function Home() {
+  useSeo({ title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION, canonicalPath: '/' })
+
   // Track when pricing section comes into view
   const pricingRef = useRef<HTMLElement>(null)
   const pricingTracked = useRef(false)

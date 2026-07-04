@@ -6,6 +6,7 @@ import { getPlanDisplayName } from '../lib/subscription'
 import { analytics } from '../lib/analytics'
 import { CheckoutModal } from '../components/Checkout'
 import { supabase } from '../lib/supabase'
+import { useSeo } from '../lib/seo'
 import styles from './Dashboard.module.css'
 
 // Get Supabase URL from environment
@@ -50,6 +51,8 @@ function getStorageUrl(fileName: string): string {
 type DashboardTab = 'overview' | 'downloads'
 
 export default function Dashboard() {
+  useSeo({ title: 'Dashboard — ESCAPE Suite', canonicalPath: '/dashboard', noindex: true })
+
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { user, isLoaded } = useUser()

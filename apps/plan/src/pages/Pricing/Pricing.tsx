@@ -6,6 +6,7 @@ import type { CheckoutPlan } from '../../lib/subscription'
 import { analytics } from '../../lib/analytics'
 import { supabase } from '../../lib/supabase'
 import { CheckoutModal } from '../../components/Checkout'
+import { useSeo } from '../../lib/seo'
 import styles from './Pricing.module.css'
 
 type PricingTab = 'site' | 'individual'
@@ -15,6 +16,13 @@ type Band = 'team' | 'org'
 const CONTACT_EMAIL = 'sales@escapesuite.io'
 
 export default function Pricing() {
+  useSeo({
+    title: 'Pricing — ESCAPE Suite',
+    description:
+      'ESCAPE Suite pricing: air-gapped Site License for teams and organizations (annual, per-network), or Individual Pro from $9/month for the hosted in-browser recorder and editor.',
+    canonicalPath: '/pricing',
+  })
+
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const initialTab: PricingTab = searchParams.get('tab') === 'individual' ? 'individual' : 'site'

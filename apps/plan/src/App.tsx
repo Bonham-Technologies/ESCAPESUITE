@@ -7,6 +7,7 @@ import SignInPage from './pages/SignIn'
 import SignUpPage from './pages/SignUp'
 import { Pricing } from './pages/Pricing'
 import { Privacy, Terms } from './pages/Legal'
+import NotFound from './pages/NotFound'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn } = useUser()
@@ -42,8 +43,8 @@ function App() {
           }
         />
         <Route path="portal/downloads" element={<Navigate to="/dashboard?tab=downloads" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
