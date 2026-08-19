@@ -73,6 +73,15 @@ test.describe('Journey: Record, Edit, Export', () => {
       // Nothing gates the tool — it opens straight into the recorder
       await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
       expect(await page.getByRole('dialog').count()).toBe(0)
+
+      // Capability detection is async and the source toggles stay disabled until
+      // it finishes; starting a recording before then acquires no stream. The
+      // Screen row is the innermost element matching both the class and the text.
+      const screenSource = page
+        .locator('[class*="sourceToggle"]')
+        .filter({ hasText: 'Screen' })
+        .last()
+      await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
     })
 
     await test.step('record a few seconds of video', async () => {
