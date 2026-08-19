@@ -26,7 +26,7 @@
     "@escapesuite/shared": "workspace:*",
     "@vercel/analytics": "^2.0.1",
     "idb": "^8.0.3",
-    "mediabunny": "^1.34.3",
+    "mediabunny": "^1.55.1",
     "mp4box": "^2.4.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
