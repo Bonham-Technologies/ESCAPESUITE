@@ -620,8 +620,8 @@ function App() {
       <header className={styles.header}>
         <div className={styles.headerLeft}>
           {!isStandaloneMode() && (
-            <a href="/dashboard" className={styles.dashboardLink} title="Back to Dashboard">
-              ← Dashboard
+            <a href="/" className={styles.dashboardLink} title="Back to ESCAPE Suite">
+              ← ESCAPE Suite
             </a>
           )}
           <h1 className={styles.logo}>ESCAPECRAFT</h1>

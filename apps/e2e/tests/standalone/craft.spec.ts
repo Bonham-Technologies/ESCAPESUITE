@@ -29,6 +29,14 @@ test.describe('ESCAPECRAFT Standalone - App Loading', () => {
     expect(await page.getByRole('dialog').count()).toBe(0)
   })
 
+  test('does not show the ESCAPEPLAN hub link', async ({ page }) => {
+    await page.goto(CRAFT_URL)
+    await page.waitForLoadState('networkidle')
+
+    // The hub link only renders in hosted mode (isStandaloneMode() gates it)
+    expect(await page.getByRole('link', { name: '← ESCAPE Suite' }).count()).toBe(0)
+  })
+
   test('has page title', async ({ page }) => {
     await page.goto(CRAFT_URL)
     const title = await page.title()

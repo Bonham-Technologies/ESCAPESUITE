@@ -129,7 +129,7 @@ The `playwright.config.ts` configures:
 
 The `playwright.standalone.config.ts` serves the pre-built single-file bundles
 from `apps/craft/dist` and `apps/artist/dist` on ports 5184 / 5185, so run
-`pnpm build` before `pnpm test:e2e:standalone`.
+`pnpm build:standalone` before `pnpm test:e2e:standalone`.
 
 ## Writing Tests
 

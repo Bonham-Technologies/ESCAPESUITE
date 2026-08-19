@@ -166,7 +166,7 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 | `lint-and-typecheck` | ESLint + TypeScript (combined) | All PRs |
 | `test` | Unit tests with coverage | All PRs |
 | `build` | Production builds, bundle size report | All PRs |
-| `build-standalone` | Standalone builds (no auth) | PRs (skipped for Dependabot) |
+| `build-standalone` | Offline single-file builds | PRs (skipped for Dependabot) |
 | `e2e` | Fast E2E tests (excludes journeys) | PRs only |
 | `e2e-full` | Full E2E including journeys | Main branch or `run-full-e2e` label |
 | `test-standalone` | Standalone E2E tests | PRs only |
