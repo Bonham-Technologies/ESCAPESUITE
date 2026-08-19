@@ -43,9 +43,57 @@
   justify-content: center;
 }
 
-.heroCta button {
+.heroCta button,
+.heroCta .btnLink {
   font-size: 1.1rem;
   padding: 1rem 2rem;
+}
+
+/* An anchor that looks like a button. Used where the control navigates instead
+   of acting on the page — a <button> nested inside an <a> is invalid HTML and
+   gives assistive tech two conflicting roles for one control. Mirrors the
+   global `button` / `button.primary` rules in index.css. */
+.btnLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 0.75em 1.5em;
+  /* WCAG 2.5.8 touch target — matches the global button rule */
+  min-height: 44px;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btnLink:hover {
+  background-color: var(--bg-secondary);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.btnLink:focus,
+.btnLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btnLinkPrimary {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.btnLinkPrimary:hover {
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #ffffff;
 }
 
 .heroLinks {
@@ -54,8 +102,11 @@
   color: var(--text-secondary);
 }
 
+/* WCAG 1.4.1 — these links sit inside a paragraph of the same colour, so
+   colour alone cannot be the only thing marking them as links. */
 .heroLinks a {
   color: var(--text-secondary);
+  text-decoration: underline;
 }
 
 /* Section Styles */
@@ -191,7 +242,8 @@
   font-size: 1.125rem;
 }
 
-.cta button {
+.cta button,
+.cta .btnLink {
   font-size: 1.1rem;
   padding: 1rem 2.5rem;
 }
