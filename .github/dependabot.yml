@@ -18,7 +18,7 @@ updates:
       runtime:
         # Production runtime dependencies shared across the apps.
         # mediabunny is deliberately excluded — it gets its own solo PR
-        # (21 minors behind; needs export verification before bumping).
+        # so the real export pipeline can be verified before each bump.
         patterns:
           - "react*"
           - "react-router-dom"
@@ -67,6 +67,9 @@ updates:
       day: "monday"
     open-pull-requests-limit: 3
     rebase-strategy: "auto"
+    ignore:
+      # pinned to a CLI-v2-compatible build in release.yml — unignore when @changesets/cli moves to v3
+      - dependency-name: "changesets/action"
     groups:
       actions:
         patterns:
