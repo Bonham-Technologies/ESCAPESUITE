@@ -27,8 +27,8 @@
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
     "idb": "^8.0.3",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "peerDependencies": {
     "react": "^19.0.0",
@@ -38,19 +38,19 @@
     "@eslint/js": "^10.0.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
-    "@vitest/coverage-v8": "^4.1.9",
-    "eslint": "^10.6.0",
+    "@testing-library/user-event": "^14.6.5",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "@vitest/coverage-v8": "^4.1.11",
+    "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.3",
+    "eslint-plugin-react-refresh": "^0.5.4",
     "fake-indexeddb": "^6.2.5",
-    "globals": "^17.6.0",
+    "globals": "^17.11.0",
     "jsdom": "^29.1.1",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.62.1",
-    "vitest": "^4.1.9"
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
   }
 }
