@@ -1,7 +1,10 @@
 import { launchTool, GITHUB_URL, RELEASES_URL } from '../lib/launch'
+import { useSeo, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from '../lib/seo'
 import styles from './Home.module.css'
 
 export default function Home() {
+  useSeo({ title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION, canonicalPath: '/' })
+
   return (
     <div className={styles.home}>
       {/* Hero Section */}
@@ -144,11 +147,21 @@ export default function Home() {
           static build, or grab the offline single-file build for air-gapped networks.
         </p>
         <div className={styles.heroCta}>
-          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-            <button className="primary">View on GitHub</button>
+          <a
+            className={`${styles.btnLink} ${styles.btnLinkPrimary}`}
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View on GitHub
           </a>
-          <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-            <button>Download offline build</button>
+          <a
+            className={styles.btnLink}
+            href={RELEASES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Download offline build
           </a>
         </div>
       </section>

@@ -1,6 +1,14 @@
+import { useSeo } from '../../lib/seo'
 import styles from './Legal.module.css'
 
 export default function Privacy() {
+  useSeo({
+    title: 'Privacy Policy — ESCAPE Suite',
+    description:
+      'ESCAPE Suite privacy policy. Recordings and editing projects are processed entirely on your device and are never uploaded to our servers.',
+    canonicalPath: '/privacy',
+  })
+
   return (
     <div className={styles.legal}>
       <header className={styles.header}>

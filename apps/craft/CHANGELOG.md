@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.0.0
+
+### Major Changes
+
+- ESCAPECRAFT is now free and open source under the MIT license.
+
+  **Breaking changes:**
+
+  - Removed all licensing, subscription, and account gating. There is no sign-in,
+    no trial, no plan check — every feature is available to everyone.
+  - Removed export watermarks. Recordings and exports are unbranded regardless of
+    how the app is run.
+  - Removed the license-key entry flow from the offline build. The standalone
+    single-file build now runs with no key and no activation step.
+
+  **Distribution:**
+
+  - Offline single-file builds are attached directly to each GitHub Release,
+    replacing the gated download portal. Grab `ESCAPECRAFT-2.0.0.html` from the
+    latest release and open it on any machine — including air-gapped networks.
+
 ## 1.4.0
 
 ### Minor Changes

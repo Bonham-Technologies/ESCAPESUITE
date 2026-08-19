@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import Layout from './Layout'
 import Header from './Header'
@@ -65,6 +65,14 @@ describe('Header', () => {
     const githubLink = screen.getByRole('link', { name: /GitHub/i })
     expect(githubLink).toHaveAttribute('href', 'https://github.com/Bonham-Technologies/ESCAPESUITE')
   })
+
+  it('has no account or billing controls', () => {
+    renderHeader()
+    expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/pricing/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /sign in/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /pricing/i })).not.toBeInTheDocument()
+  })
 })
 
 describe('Layout', () => {
@@ -102,6 +110,28 @@ describe('Layout', () => {
   it('renders footer', () => {
     renderLayout()
     expect(screen.getByText(/Bonham Technologies/)).toBeInTheDocument()
+  })
+
+  it('links to the legal pages and the GitHub repository from the footer', () => {
+    const { container } = renderLayout()
+    const footer = container.querySelector('footer')
+    expect(footer).not.toBeNull()
+    const inFooter = within(footer as HTMLElement)
+
+    expect(inFooter.getByRole('link', { name: /privacy policy/i })).toHaveAttribute(
+      'href',
+      '/privacy'
+    )
+    expect(inFooter.getByRole('link', { name: /terms of service/i })).toHaveAttribute(
+      'href',
+      '/terms'
+    )
+
+    // The header renders its own GitHub link, so scope this to the footer.
+    const repoLink = inFooter.getByRole('link', { name: 'GitHub' })
+    expect(repoLink).toHaveAttribute('href', 'https://github.com/Bonham-Technologies/ESCAPESUITE')
+    expect(repoLink).toHaveAttribute('target', '_blank')
+    expect(repoLink).toHaveAttribute('rel', 'noopener noreferrer')
   })
 
   it('displays current year in footer', () => {

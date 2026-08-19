@@ -1,6 +1,14 @@
+import { useSeo } from '../../lib/seo'
 import styles from './Legal.module.css'
 
 export default function Terms() {
+  useSeo({
+    title: 'Terms of Service — ESCAPE Suite',
+    description:
+      'ESCAPE Suite terms of service. The software is MIT-licensed and free to use; you own everything you record and edit with it.',
+    canonicalPath: '/terms',
+  })
+
   return (
     <div className={styles.legal}>
       <header className={styles.header}>
