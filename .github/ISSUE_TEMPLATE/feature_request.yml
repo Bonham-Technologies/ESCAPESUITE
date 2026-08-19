@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation where you wanted this, not just the feature itself.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use today, or other shapes this could take.
+  - type: dropdown
+    id: app
+    attributes:
+      label: Which app?
+      options:
+        - ESCAPECRAFT (recorder)
+        - ESCAPEARTIST (editor)
+        - Landing page / site
+        - Offline builds / distribution
+        - Other / cross-cutting
