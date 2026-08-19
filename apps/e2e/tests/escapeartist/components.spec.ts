@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn } from '../../utils/auth'
 
 test.describe('Export Dialog', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -110,7 +108,6 @@ test.describe('Export Dialog', () => {
 
 test.describe('Keyframe Panel', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -157,7 +154,6 @@ test.describe('Keyframe Panel', () => {
 
 test.describe('Overlay Tools', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -210,7 +206,6 @@ test.describe('Overlay Tools', () => {
 
 test.describe('Timeline Controls', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -257,7 +252,6 @@ test.describe('Timeline Controls', () => {
 
 test.describe('Waveform Display', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -283,7 +277,6 @@ test.describe('Waveform Display', () => {
 
 test.describe('Project Session', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -313,7 +306,6 @@ test.describe('Project Session', () => {
 
 test.describe('Inspector Panel', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -340,7 +332,6 @@ test.describe('Inspector Panel', () => {
 
 test.describe('Toolbar', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })

@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn, setupAuthForContext } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { clearIndexedDB, databaseExists } from '../../utils/indexeddb'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {
   test('recording workflow to editor', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Start in ESCAPECRAFT
     const craftPage = await context.newPage()
@@ -42,7 +40,6 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
   })
 
   test('multiple recordings can be made', async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -62,7 +59,6 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
 
 test.describe('Export After Editing', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -106,7 +102,6 @@ test.describe('Export After Editing', () => {
 
 test.describe('Project Save and Reload', () => {
   test('project can be saved', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -120,7 +115,6 @@ test.describe('Project Save and Reload', () => {
   })
 
   test('project persists across page reload', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -162,7 +156,6 @@ test.describe('Project Save and Reload', () => {
 test.describe('Cross-Session State Persistence', () => {
   test('settings persist across sessions', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // First session
     const page1 = await context.newPage()
@@ -192,7 +185,6 @@ test.describe('Cross-Session State Persistence', () => {
   })
 
   test('undo history clears on new session', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -215,7 +207,6 @@ test.describe('Cross-Session State Persistence', () => {
 test.describe('App-to-App Navigation', () => {
   test('can navigate between all three apps', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     const page = await context.newPage()
 
@@ -236,32 +227,10 @@ test.describe('App-to-App Navigation', () => {
 
     await context.close()
   })
-
-  test('auth state persists across apps', async ({ browser }) => {
-    const context = await browser.newContext()
-    await setupAuthForContext(context)
-
-    const page = await context.newPage()
-
-    // Check auth in PLAN
-    await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
-    const planHtml = await page.content()
-    expect(planHtml).toContain('<div id="root">')
-
-    // Check auth in CRAFT
-    await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
-    const craftHtml = await page.content()
-    expect(craftHtml).toContain('<div id="root">')
-
-    await context.close()
-  })
 })
 
 test.describe('URL Parameter Handling', () => {
   test('loadVideo parameter handled', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175?loadVideo=test-123')
     await page.waitForLoadState('networkidle')
 
@@ -271,7 +240,6 @@ test.describe('URL Parameter Handling', () => {
   })
 
   test('project parameter handled', async ({ page }) => {
-    await mockSignedIn(page)
     // Base64 encoded project data
     const projectData = btoa(JSON.stringify({ name: 'Test Project' }))
     await page.goto(`http://localhost:5175?project=${projectData}`)
@@ -282,7 +250,6 @@ test.describe('URL Parameter Handling', () => {
   })
 
   test('video URL parameter handled', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175?video=https://example.com/test.mp4')
     await page.waitForLoadState('networkidle')
 

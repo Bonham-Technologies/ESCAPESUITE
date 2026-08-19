@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn, setupAuthForContext } from '../../utils/auth'
 import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/indexeddb'
 
 const DB_NAME = 'video-editor-db'
@@ -12,7 +11,6 @@ test.describe('IndexedDB Data Sharing', () => {
   // This test works in production but not in dev due to different origins
   test.skip('both apps see same database (requires same origin)', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Write data in CRAFT
     const craftPage = await context.newPage()
@@ -75,7 +73,6 @@ test.describe('IndexedDB Data Sharing', () => {
 
   test('recording visible in both apps', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Create recording in CRAFT
     const craftPage = await context.newPage()
@@ -101,7 +98,6 @@ test.describe('Thumbnails Shared Correctly', () => {
   // This test works in production but not in dev due to different origins
   test.skip('thumbnails accessible from both apps (requires same origin)', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Store thumbnail in CRAFT
     const craftPage = await context.newPage()
@@ -165,7 +161,6 @@ test.describe('Thumbnails Shared Correctly', () => {
 test.describe('Video Data Integrity', () => {
   test('video blob stored and retrieved correctly', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'WebKit times out on IndexedDB blob operations in Playwright')
-    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -216,7 +211,6 @@ test.describe('Storage Cleanup Propagates', () => {
   // This test works in production but not in dev due to different origins
   test.skip('deleted recordings removed from both apps (requires same origin)', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Create in CRAFT
     const craftPage = await context.newPage()
@@ -288,7 +282,6 @@ test.describe('Storage Cleanup Propagates', () => {
 test.describe('Large Video Handling', () => {
   test('large blobs can be stored', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'WebKit times out on IndexedDB blob operations in Playwright')
-    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -332,7 +325,6 @@ test.describe('Large Video Handling', () => {
 
 test.describe('Database Version Handling', () => {
   test('database upgrades handled correctly', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
@@ -365,7 +357,6 @@ test.describe('Database Version Handling', () => {
 test.describe('Concurrent Access', () => {
   test('both apps can access database simultaneously', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Open both apps
     const craftPage = await context.newPage()

@@ -1,6 +1,8 @@
 node_modules/
 test-results/
 playwright-report/
+playwright-report-standalone/
+playwright-report-journeys/
 playwright/.cache/
 .env
 .env.local

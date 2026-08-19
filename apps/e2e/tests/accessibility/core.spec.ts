@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import {
   runAxeCheck,
@@ -12,7 +11,6 @@ import {
 
 test.describe('ESCAPEPLAN Accessibility', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -58,7 +56,6 @@ test.describe('ESCAPEPLAN Accessibility', () => {
 
 test.describe('ESCAPECRAFT Accessibility', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -67,9 +64,7 @@ test.describe('ESCAPECRAFT Accessibility', () => {
   })
 
   test('recording UI passes axe-core audit', async ({ page }) => {
-    const results = await runAxeCheck(page, {
-      excludeSelector: '.clerk-component, [data-clerk]',
-    })
+    const results = await runAxeCheck(page)
 
     const seriousViolations = results.violations.filter(
       (v) => v.impact === 'serious' || v.impact === 'critical'
@@ -125,14 +120,12 @@ test.describe('ESCAPECRAFT Accessibility', () => {
 
 test.describe('ESCAPEARTIST Accessibility', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
 
   test('editor UI passes axe-core audit', async ({ page }) => {
     const results = await runAxeCheck(page, {
-      excludeSelector: '.clerk-component, [data-clerk]',
       // Disable color-contrast for canvas-based timeline
       disableRules: ['color-contrast'],
     })
@@ -207,7 +200,6 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 
 test.describe('Color Contrast', () => {
   test('ESCAPEPLAN has adequate color contrast', async ({ page }) => {
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -220,7 +212,6 @@ test.describe('Color Contrast', () => {
   })
 
   test('ESCAPECRAFT has adequate color contrast', async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -235,7 +226,6 @@ test.describe('Color Contrast', () => {
   })
 
   test('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 

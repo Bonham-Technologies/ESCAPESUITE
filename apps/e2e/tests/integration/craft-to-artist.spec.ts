@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn, setupAuthForContext } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/indexeddb'
 
@@ -11,19 +10,17 @@ import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/inde
 
 test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
   test('ESCAPEARTIST loads with URL parameters', async ({ page }) => {
-    await mockSignedIn(page)
     // App should handle URL params gracefully
     await page.goto('http://localhost:5175?video=test')
     await page.waitForLoadState('networkidle')
 
-    // App should still load (may show auth or error for invalid video)
+    // App should still load (an unusable video URL must not break it)
     const html = await page.content()
     expect(html).toContain('<!DOCTYPE html>')
     expect(html).toContain('<div id="root">')
   })
 
   test('ESCAPEARTIST has postMessage support', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -36,7 +33,6 @@ test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
   })
 
   test('ESCAPEARTIST has integration API', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -50,9 +46,8 @@ test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
 })
 
 test.describe('Cross-App Connectivity', () => {
-  test('all three apps load successfully with auth', async ({ browser }) => {
+  test('all three apps load successfully', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Test ESCAPEPLAN
     const planPage = await context.newPage()
@@ -79,7 +74,6 @@ test.describe('Cross-App Connectivity', () => {
   })
 
   test('ESCAPEPLAN can be queried for tool references', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -87,14 +81,13 @@ test.describe('Cross-App Connectivity', () => {
     const craftCount = await page.getByText(/craft|record|screen/i).count()
     const artistCount = await page.getByText(/artist|edit|video/i).count()
 
-    // Just verify we can query (may be 0 if not authenticated)
+    // Just verify we can query the landing copy
     expect(typeof craftCount).toBe('number')
     expect(typeof artistCount).toBe('number')
   })
 
   test('apps share the same IndexedDB database name', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Check ESCAPECRAFT
     const craftPage = await context.newPage()
@@ -125,7 +118,6 @@ test.describe('Cross-App Connectivity', () => {
 
 test.describe('IndexedDB Data Sharing', () => {
   test('IndexedDB can be cleared between tests', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -143,7 +135,6 @@ test.describe('IndexedDB Data Sharing', () => {
   })
 
   test('can write and read from IndexedDB', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -176,7 +167,6 @@ test.describe('IndexedDB Data Sharing', () => {
 test.describe('Full CRAFT to ARTIST Workflow', () => {
   test('can navigate from CRAFT to ARTIST', async ({ browser }) => {
     const context = await browser.newContext()
-    await setupAuthForContext(context)
 
     // Start in ESCAPECRAFT
     const craftPage = await context.newPage()
@@ -195,7 +185,6 @@ test.describe('Full CRAFT to ARTIST Workflow', () => {
   })
 
   test('ARTIST can receive video ID via URL param', async ({ page }) => {
-    await mockSignedIn(page)
 
     // Navigate with a video ID parameter
     await page.goto('http://localhost:5175?loadVideo=test-video-123')
@@ -208,7 +197,6 @@ test.describe('Full CRAFT to ARTIST Workflow', () => {
   })
 
   test('ARTIST handles missing video gracefully', async ({ page }) => {
-    await mockSignedIn(page)
 
     // Navigate with an invalid video ID
     await page.goto('http://localhost:5175?loadVideo=nonexistent')

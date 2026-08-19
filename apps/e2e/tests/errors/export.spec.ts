@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn } from '../../utils/auth'
 import {
   mockWebCodecsUnavailable,
   mockCodecNotSupported,
@@ -9,7 +8,6 @@ import {
 
 test.describe('Export With No Clips', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -63,7 +61,6 @@ test.describe('Export With No Clips', () => {
 
 test.describe('Export Cancellation', () => {
   test('can cancel export in progress', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -99,7 +96,6 @@ test.describe('Export Cancellation', () => {
 
 test.describe('WebCodecs Unavailable', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await mockWebCodecsUnavailable(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
@@ -154,7 +150,6 @@ test.describe('WebCodecs Unavailable', () => {
 
 test.describe('Codec Not Supported', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await mockCodecNotSupported(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
@@ -184,7 +179,6 @@ test.describe('Codec Not Supported', () => {
 
 test.describe('Export Failure Recovery', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await mockExportFailure(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
@@ -251,7 +245,6 @@ test.describe('Export Failure Recovery', () => {
 
 test.describe('Storage Quota Exceeded', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await mockStorageQuotaExceeded(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
@@ -279,7 +272,6 @@ test.describe('Storage Quota Exceeded', () => {
 
 test.describe('Background Tab Export', () => {
   test('export continues in background', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -293,7 +285,6 @@ test.describe('Background Tab Export', () => {
   })
 
   test('background tab support is indicated', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 

@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn } from '../../utils/auth'
 
 test.describe('ESCAPEARTIST Timeline Editing', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -78,7 +76,6 @@ test.describe('ESCAPEARTIST Timeline Editing', () => {
 
 test.describe('ESCAPEARTIST Overlay Tools', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -115,7 +112,6 @@ test.describe('ESCAPEARTIST Overlay Tools', () => {
 
 test.describe('ESCAPEARTIST Undo/Redo', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })

@@ -1,11 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { checkFocusOrder, checkFocusVisibility } from '../../utils/accessibility'
 
 test.describe('ESCAPEPLAN Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
@@ -53,33 +51,6 @@ test.describe('ESCAPEPLAN Keyboard Navigation', () => {
     }
   })
 
-  test('Escape closes modals', async ({ page }) => {
-    // Try to open a modal
-    const modalTrigger = page
-      .getByRole('button', { name: /sign in|sign up|get started/i })
-      .first()
-
-    const isVisible = await modalTrigger.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await modalTrigger.click()
-      await page.waitForTimeout(300)
-
-      // Check if modal opened
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        await page.keyboard.press('Escape')
-        await page.waitForTimeout(300)
-
-        // Modal should be closed
-        const dialogAfter = await page.getByRole('dialog').isVisible().catch(() => false)
-        expect(dialogAfter).toBe(false)
-      }
-    }
-  })
-
   test('skip link functionality', async ({ page }) => {
     // Check for skip link
     const skipLink = page.locator('a[href="#main"], a[href="#content"], .skip-link').first()
@@ -119,7 +90,6 @@ test.describe('ESCAPEPLAN Keyboard Navigation', () => {
 
 test.describe('ESCAPECRAFT Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -250,7 +220,6 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
 
 test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -386,7 +355,6 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
 
 test.describe('VideoPlayer Keyboard Shortcuts', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
