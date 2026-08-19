@@ -7,8 +7,9 @@ on:
     branches: [main, dev]
   # Trigger for changeset release PRs (created by GITHUB_TOKEN, so pull_request won't fire)
   # pull_request_target runs in the context of the base branch but triggers for bot PRs
-  # NOTE: Dependabot PRs trigger BOTH pull_request and pull_request_target, so we filter
-  # in the validate job to skip pull_request_target for Dependabot (pull_request handles it)
+  # NOTE: Dependabot PRs trigger BOTH pull_request and pull_request_target, so the two
+  # entry-point jobs (lint-and-typecheck, test) filter out pull_request_target for
+  # Dependabot (pull_request handles it). Everything else hangs off those two jobs.
   pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened]
@@ -23,12 +24,14 @@ env:
   NODE_VERSION: '20'
 
 jobs:
-  # Quick validation - runs on all PRs including Dependabot
-  validate:
+  # Entry point 1 — lint, type-check and the dependency audit.
+  # Combined into one runner (saves ~30s of setup overhead).
+  lint-and-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # For pull_request_target, only run for changeset bot (not Dependabot, which uses pull_request)
-    # This prevents duplicate workflow runs for Dependabot PRs
+    # This prevents duplicate workflow runs for Dependabot PRs. Every other job depends
+    # (directly or transitively) on this job or `test`, so the filter propagates.
     if: |
       github.event_name != 'pull_request_target' ||
       github.actor == 'github-actions[bot]' ||
@@ -68,29 +71,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Combined lint and type-check (saves one runner's setup overhead)
-  lint-and-typecheck:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: validate
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Lint
         run: pnpm lint
 
@@ -103,11 +83,15 @@ jobs:
       - name: TypeScript check (artist)
         run: pnpm --filter=@escapesuite/artist exec tsc --noEmit
 
-  # Unit tests with coverage
+  # Entry point 2 — unit tests with coverage. Runs in parallel with
+  # lint-and-typecheck, so it carries the same pull_request_target filter.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: validate
+    if: |
+      github.event_name != 'pull_request_target' ||
+      github.actor == 'github-actions[bot]' ||
+      startsWith(github.head_ref, 'changeset-release/')
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -206,143 +190,18 @@ jobs:
             apps/artist/dist
           retention-days: 7
 
-  # E2E tests - fast tests (excludes journey tests)
-  # Skip for Dependabot
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: build
-    if: |
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
-      github.actor != 'dependabot[bot]'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Cache Playwright browsers to save ~1 minute per run
-      - name: Cache Playwright browsers
-        uses: actions/cache@v6
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('apps/e2e/package.json') }}
-
-      - name: Install Playwright Browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
-
-      - name: Install Playwright deps (if cached)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium
-
-      - name: Run E2E tests (excluding journeys)
-        run: pnpm --filter=@escapesuite/e2e exec playwright test --ignore-snapshots --grep-invert "Journey"
-        env:
-          CI: true
-
-      - name: Upload Playwright Report
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: playwright-report
-          path: apps/e2e/playwright-report/
-          retention-days: 30
-
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: test-results
-          path: apps/e2e/test-results/
-          retention-days: 7
-
-  # Full E2E tests including journeys - only on main merge or with label
-  e2e-full:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: build
-    if: |
-      github.event_name == 'push' && github.ref == 'refs/heads/main' ||
-      contains(github.event.pull_request.labels.*.name, 'run-full-e2e')
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v6
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('apps/e2e/package.json') }}
-
-      - name: Install Playwright Browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
-
-      - name: Install Playwright deps (if cached)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium
-
-      - name: Run full E2E tests
-        run: pnpm test:e2e
-        env:
-          CI: true
-
-      - name: Upload Playwright Report
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: playwright-report-full
-          path: apps/e2e/playwright-report/
-          retention-days: 30
-
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: test-results-full
-          path: apps/e2e/test-results/
-          retention-days: 7
-
-  # Standalone build - builds the offline single-file versions
-  # Skip for Dependabot: the standalone artifact is irrelevant to a dependency
-  # bump, and the ci-status gate exempts Dependabot here to match (same pattern
-  # as e2e/test-standalone/deploy).
-  build-standalone:
+  # Standalone — builds the offline single-file bundles ONCE, publishes them as
+  # the `standalone-builds` artifact (standalone-release.yml downloads that
+  # artifact cross-run, so the name and paths are a contract), then runs the
+  # standalone E2E suite against those exact files.
+  #
+  # The build + upload half is unconditional: standalone-release consumes the
+  # artifact on main/dev pushes, and Dependabot PRs still need the build to be
+  # proven. Only the E2E half is skipped for Dependabot.
+  standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [lint-and-typecheck, test]
-    if: github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -391,6 +250,8 @@ jobs:
             echo "| ESCAPEARTIST | ${ARTIST_KB} KB | ${ARTIST_GZ_KB} KB |" >> $GITHUB_STEP_SUMMARY
           fi
 
+      # Uploaded BEFORE the E2E steps so a test failure never costs us the
+      # artifact that standalone-release.yml depends on.
       - name: Upload standalone artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -400,16 +261,78 @@ jobs:
             apps/artist/dist
           retention-days: 30
 
-  # Standalone E2E tests — verify offline single-file builds work correctly
-  test-standalone:
+      - name: Cache Playwright browsers
+        if: github.actor != 'dependabot[bot]'
+        uses: actions/cache@v6
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('apps/e2e/package.json') }}
+
+      # Browser download and apt system-deps are installed as two separate,
+      # individually timed steps. `playwright install --with-deps` shells out to
+      # apt, which stalled for 30 minutes on a runner; an 8-minute cap plus a
+      # single retry turns that hang into a fast, visible failure.
+      - name: Install Playwright browser (cache miss)
+        if: github.actor != 'dependabot[bot]' && steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install chromium; then
+              exit 0
+            fi
+            echo "::warning::playwright install chromium failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install chromium failed after 2 attempts"
+          exit 1
+
+      - name: Install Playwright system dependencies
+        if: github.actor != 'dependabot[bot]'
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::playwright install-deps chromium failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install-deps chromium failed after 2 attempts"
+          exit 1
+
+      - name: Run standalone E2E tests
+        if: github.actor != 'dependabot[bot]'
+        run: pnpm test:e2e:standalone
+        env:
+          CI: true
+
+      - name: Upload Standalone Test Report
+        uses: actions/upload-artifact@v7
+        if: always() && github.actor != 'dependabot[bot]'
+        with:
+          name: playwright-report-standalone
+          path: apps/e2e/playwright-report-standalone/
+          retention-days: 30
+
+      - name: Upload Standalone Test Results
+        uses: actions/upload-artifact@v7
+        if: failure() && github.actor != 'dependabot[bot]'
+        with:
+          name: test-results-standalone
+          path: apps/e2e/test-results/
+          retention-days: 7
+
+  # E2E — the full Playwright suite (journey included; it is chromium-only and
+  # adds ~2 min). Runs on PRs AND on pushes to main/dev: besides gating the
+  # production deploy, a main-branch run is what SAVES the browser cache, so PR
+  # branches can restore it (cache reads fall back to the base branch).
+  # Skipped for Dependabot.
+  e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Builds its OWN standalone bundle so the E2E run is independent of the
-    # build-standalone job's artifact.
-    needs: [lint-and-typecheck, test]
-    if: |
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
-      github.actor != 'dependabot[bot]'
+    needs: build
+    if: github.actor != 'dependabot[bot]'
 
     steps:
       - name: Checkout code
@@ -429,16 +352,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build standalone versions
-        run: pnpm build:standalone
-        env:
-          VITE_BUILD_MODE: standalone
-
-      - name: Verify standalone builds
-        run: |
-          echo "ESCAPECRAFT standalone: $(du -h apps/craft/dist/index.html)"
-          echo "ESCAPEARTIST standalone: $(du -h apps/artist/dist/index.html)"
-
       - name: Cache Playwright browsers
         uses: actions/cache@v6
         id: playwright-cache
@@ -446,48 +359,69 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('apps/e2e/package.json') }}
 
-      - name: Install Playwright Browsers
+      # See the standalone job for why the browser download and the apt
+      # system-deps install are separate, capped and retried.
+      - name: Install Playwright browser (cache miss)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install chromium --with-deps
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install chromium; then
+              exit 0
+            fi
+            echo "::warning::playwright install chromium failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install chromium failed after 2 attempts"
+          exit 1
 
-      - name: Install Playwright deps (if cached)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium
+      - name: Install Playwright system dependencies
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::playwright install-deps chromium failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install-deps chromium failed after 2 attempts"
+          exit 1
 
-      - name: Run standalone E2E tests
-        run: pnpm test:e2e:standalone
+      - name: Run E2E tests
+        run: pnpm --filter=@escapesuite/e2e exec playwright test --ignore-snapshots
         env:
           CI: true
 
-      - name: Upload Standalone Test Report
+      - name: Upload Playwright Report
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: playwright-report-standalone
-          path: apps/e2e/playwright-report-standalone/
+          name: playwright-report
+          path: apps/e2e/playwright-report/
           retention-days: 30
 
-      - name: Upload Standalone Test Results
+      - name: Upload Test Results
         uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: test-results-standalone
+          name: test-results
           path: apps/e2e/test-results/
           retention-days: 7
 
-  # Deploy to Vercel - reuse build artifacts instead of rebuilding
+  # Deploy to Vercel — PR previews and production (push to main).
+  # E2E now runs for pushes too, so it gates every deploy.
+  # Skipped for Dependabot PRs.
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [lint-and-typecheck, test, build, e2e]
-    # Deploy on: push to main, or PR (after e2e passes)
-    # Skip for Dependabot PRs
     if: |
       always() &&
-      needs.build.result == 'success' &&
       needs.lint-and-typecheck.result == 'success' &&
       needs.test.result == 'success' &&
-      (github.event_name == 'push' || needs.e2e.result == 'success') &&
+      needs.build.result == 'success' &&
+      needs.e2e.result == 'success' &&
       github.actor != 'dependabot[bot]'
 
     permissions:
@@ -570,11 +504,11 @@ jobs:
               });
             }
 
-  # Summary job that reports overall status
+  # Summary job that reports overall status — the single required check.
   ci-status:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [validate, lint-and-typecheck, test, build, build-standalone, e2e, e2e-full, test-standalone, deploy]
+    needs: [lint-and-typecheck, test, build, standalone, e2e, deploy]
     # Always run, but skip for pull_request_target from Dependabot and regular users
     # (Dependabot PRs use pull_request workflow, not pull_request_target)
     if: |
@@ -601,42 +535,25 @@ jobs:
           fi
 
           # Core jobs must pass
-          if [ "${{ needs.validate.result }}" != "success" ] || \
-             [ "${{ needs.lint-and-typecheck.result }}" != "success" ] || \
+          if [ "${{ needs.lint-and-typecheck.result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ]; then
             echo "One or more CI jobs failed"
             exit 1
           fi
 
-          # Standalone build must pass (skipped for Dependabot, whose dependency
-          # bumps don't need the offline artifact — mirrors e2e/test-standalone
-          # below)
+          # Standalone builds the offline bundles for every event (including
+          # Dependabot PRs) and runs the standalone E2E suite for everyone else,
+          # so it must succeed unconditionally.
+          if [ "${{ needs.standalone.result }}" != "success" ]; then
+            echo "Standalone build/E2E failed"
+            exit 1
+          fi
+
+          # E2E runs on PRs and on pushes to main/dev (skipped for Dependabot)
           if [ "${{ github.actor }}" != "dependabot[bot]" ] && \
-             [ "${{ needs.build-standalone.result }}" != "success" ]; then
-            echo "Standalone build failed"
-            exit 1
-          fi
-
-          # E2E (smoke) must pass on PRs (skipped for Dependabot and push to main)
-          if ( [ "${{ github.event_name }}" == "pull_request" ] || [ "${{ github.event_name }}" == "pull_request_target" ] ) && \
-             [ "${{ github.actor }}" != "dependabot[bot]" ] && \
              [ "${{ needs.e2e.result }}" != "success" ]; then
-            echo "E2E smoke tests failed"
-            exit 1
-          fi
-
-          # Full E2E is optional - only fails if it ran and failed
-          if [ "${{ needs.e2e-full.result }}" == "failure" ]; then
-            echo "Full E2E tests failed"
-            exit 1
-          fi
-
-          # Standalone E2E must pass on PRs (skipped for Dependabot and push to main)
-          if ( [ "${{ github.event_name }}" == "pull_request" ] || [ "${{ github.event_name }}" == "pull_request_target" ] ) && \
-             [ "${{ github.actor }}" != "dependabot[bot]" ] && \
-             [ "${{ needs.test-standalone.result }}" != "success" ]; then
-            echo "Standalone E2E tests failed"
+            echo "E2E tests failed"
             exit 1
           fi
 

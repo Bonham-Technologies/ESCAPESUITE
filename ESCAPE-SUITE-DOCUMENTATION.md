@@ -144,8 +144,8 @@ pnpm report                  # View test report
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR. It installs
 dependencies, lints and type-checks, runs unit tests with coverage, builds all apps (and the
-offline standalone builds), and runs the Playwright E2E suite (fast tests on every PR; the full
-suite including the journey test on `main` or with the `run-full-e2e` label).
+offline standalone builds), and runs the Playwright E2E suite — the whole suite, journey test
+included, on every PR and on every push to `main`/`dev`.
 
 A separate workflow (`.github/workflows/standalone-release.yml`) runs after CI succeeds on
 `main`: it builds the offline single-file builds for ESCAPECRAFT and ESCAPEARTIST and attaches
