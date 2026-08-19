@@ -132,8 +132,11 @@ test.describe('ESCAPEPLAN Desktop Layout', () => {
       .getByRole('button', { name: 'Use ESCAPEARTIST' })
       .boundingBox()
 
-    if (craftBox && artistBox) {
-      expect(artistBox.x).toBeGreaterThan(craftBox.x)
-    }
+    expect(craftBox).not.toBeNull()
+    expect(artistBox).not.toBeNull()
+
+    // Side by side: the second card sits to the right of the first, on one row
+    expect(artistBox!.x).toBeGreaterThan(craftBox!.x)
+    expect(artistBox!.y).toBe(craftBox!.y)
   })
 })

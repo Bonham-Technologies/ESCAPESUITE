@@ -54,22 +54,19 @@ test.describe('Dialog Announcements', () => {
     await page.waitForLoadState('networkidle')
 
     const trigger = page.getByRole('button', { name: /help - recording tips/i })
-    const isVisible = await trigger.isVisible().catch(() => false)
+    await expect(trigger).toBeVisible()
+    await trigger.click()
 
-    if (isVisible) {
-      await trigger.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
 
-      const dialog = page.getByRole('dialog')
-      await expect(dialog).toBeVisible()
+    // Dialog should have aria-modal
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
 
-      // Dialog should have aria-modal
-      await expect(dialog).toHaveAttribute('aria-modal', 'true')
-
-      // Dialog should have a title
-      const labelledBy = await dialog.getAttribute('aria-labelledby')
-      const label = await dialog.getAttribute('aria-label')
-      expect(labelledBy || label).toBeTruthy()
-    }
+    // Dialog should have a title
+    const labelledBy = await dialog.getAttribute('aria-labelledby')
+    const label = await dialog.getAttribute('aria-label')
+    expect(labelledBy || label).toBeTruthy()
   })
 
   test('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
