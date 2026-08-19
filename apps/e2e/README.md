@@ -97,16 +97,14 @@ See also: [Standalone Test Battery](../../docs/STANDALONE-TEST-BATTERY.md) for m
 
 The CI workflow is optimized to balance thoroughness with speed:
 
-### Default PR Behavior
-- **Fast E2E tests** run on every PR (excludes journey tests)
-- Journey tests are excluded using `--grep-invert "Journey"`
+### Default Behavior
+- The **full suite runs on every PR and on every push to `main`/`dev`** — one
+  `e2e` job, journey test included (it is chromium-only and adds ~2 min)
+- The standalone suite runs in the `standalone` job, against the same offline
+  bundles that job builds and publishes
 - Playwright browsers are cached to speed up runs
 - Concurrent runs are cancelled when new commits are pushed
-
-### Full E2E (Including Journeys)
-To run the complete test suite including the journey:
-1. Add the `run-full-e2e` label to your PR, OR
-2. Merge to `main` branch (full tests run automatically)
+- E2E is skipped for Dependabot PRs
 
 ### CI Optimizations
 | Optimization | Benefit |
@@ -114,7 +112,13 @@ To run the complete test suite including the journey:
 | Concurrency control | Cancels duplicate runs on new pushes |
 | Combined lint + type-check | Saves ~30s runner setup |
 | Playwright browser caching | Saves ~1min per E2E job |
-| Journey tests excluded by default | Saves ~3-5min per PR |
+| E2E runs on `main` too | Warms the browser cache PR branches restore from |
+| Standalone build + E2E in one job | One build serves the artifact and the tests |
+
+### Playwright Install Resilience
+The browser download and the apt system-dependency install are separate steps,
+each capped at `timeout-minutes: 8` with a single plain-bash retry. A stalled
+apt run fails fast and visibly instead of burning the whole job timeout.
 
 ### Test Configuration
 - Tests run against development servers started by Playwright

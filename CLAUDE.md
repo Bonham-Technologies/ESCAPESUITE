@@ -143,7 +143,7 @@ VITE_BUILD_MODE=standalone   # produces the offline single-file build
 ## Testing
 
 - **Unit tests**: Vitest with Testing Library, fake-indexeddb for storage mocking
-- **E2E tests**: Playwright with Chromium (fast tests exclude the journey test)
+- **E2E tests**: Playwright with Chromium; CI runs the whole suite on every PR and push
 - **Journey test**: one end-to-end journey covering record → edit → export across ESCAPECRAFT and ESCAPEARTIST
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
@@ -160,24 +160,30 @@ Test counts change frequently as coverage grows; run `pnpm test` for the current
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
+Seven jobs, with `ci-status` as the single required check:
+
 | Job | Purpose | Runs On |
 |-----|---------|---------|
-| `validate` | Install deps, security audit | All PRs |
-| `lint-and-typecheck` | ESLint + TypeScript (combined) | All PRs |
-| `test` | Unit tests with coverage | All PRs |
-| `build` | Production builds, bundle size report | All PRs |
-| `build-standalone` | Offline single-file builds | PRs (skipped for Dependabot) |
-| `e2e` | Fast E2E tests (excludes journeys) | PRs only |
-| `e2e-full` | Full E2E including journeys | Main branch or `run-full-e2e` label |
-| `test-standalone` | Standalone E2E tests | PRs only |
-| `deploy` | Vercel deployment | After E2E passes |
+| `lint-and-typecheck` | Security audit + ESLint + TypeScript (combined) | PRs and pushes |
+| `test` | Unit tests with coverage | PRs and pushes |
+| `build` | Production builds, bundle size report | PRs and pushes |
+| `standalone` | Offline single-file builds + standalone E2E | PRs and pushes (E2E half skipped for Dependabot) |
+| `e2e` | Full Playwright suite, journey included | PRs and pushes (skipped for Dependabot) |
+| `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
 | `ci-status` | Summary/gate job | All PRs |
 
 **CI Optimizations:**
 - Concurrency control cancels in-progress runs when new commits are pushed
-- Combined lint + type-check saves ~30s of runner setup overhead
-- Playwright browsers are cached across runs (~1min savings)
-- Journey tests excluded by default (add `run-full-e2e` label to include)
+- Combined lint + type-check + audit saves ~30s of runner setup overhead
+- `standalone` builds the offline bundles once, uploads the `standalone-builds`
+  artifact (consumed cross-run by `standalone-release.yml`), then tests that
+  same build
+- Playwright browsers are cached across runs (~1min savings); `e2e` also runs on
+  pushes to `main`, so the cache is written from the base branch and fresh PR
+  branches can restore it
+- Playwright browser download and apt system-deps are separate steps, each with
+  `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
+  instead of hanging the job
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)
