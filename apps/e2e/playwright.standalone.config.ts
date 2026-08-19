@@ -5,7 +5,7 @@ const isCI = !!process.env.CI
 /**
  * Playwright configuration for testing standalone builds.
  *
- * Standalone builds are single-file HTML apps that don't require auth.
+ * The offline build is a single self-contained HTML file with no backend.
  * This config serves the pre-built dist files and runs smoke tests.
  */
 export default defineConfig({
