@@ -17,7 +17,7 @@ import { saveSessionState, getSessionState, clearSessionState, getVideo, getThum
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
-import { isStandaloneMode } from './auth';
+import { isStandaloneMode } from '@escapesuite/shared/config';
 import { formatTime } from './utils/timeUtils';
 import styles from './App.module.css';
 

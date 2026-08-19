@@ -378,8 +378,8 @@ describe('ExportDialog', () => {
   it('passes AbortSignal to export function when exporting', async () => {
     let capturedSignal: AbortSignal | undefined
     mockExportToWebM.mockImplementation((...args: unknown[]) => {
-      // The signal is the 7th argument (index 6)
-      capturedSignal = args[6] as AbortSignal | undefined
+      // The signal is the 6th argument (index 5)
+      capturedSignal = args[5] as AbortSignal | undefined
       return Promise.resolve(new Blob())
     })
 

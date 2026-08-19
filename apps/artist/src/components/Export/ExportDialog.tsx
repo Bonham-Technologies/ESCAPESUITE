@@ -3,8 +3,6 @@ import { useEditorStore } from '../../store/projectStore';
 import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError, ExportError } from '../../core/exporter';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
-import { useAuth } from '../../auth';
-import { defaultWatermarkConfig } from '../../utils/watermark';
 import type { ExportOptions, ExportProgress } from '../../store/types';
 import { formatTime } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
@@ -29,7 +27,6 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const projectResolution = useEditorStore((state) => state.project.resolution);
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
-  const { isTrial } = useAuth();
 
   // Use prop timeRange if provided, otherwise derive from in/out points
   const timeRange = timeRangeProp ?? (inPoint !== null && outPoint !== null
@@ -106,14 +103,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       let blob: Blob;
       let extension: string;
 
-      // Add watermark for trial users
-      const watermark = isTrial ? defaultWatermarkConfig : null;
-
       if (format === 'mp4') {
-        blob = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, watermark, abortController.signal, projectResolution);
+        blob = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'mp4';
       } else {
-        blob = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, watermark, abortController.signal, projectResolution);
+        blob = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'webm';
       }
 
@@ -172,7 +166,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // Clear the abort controller reference
       abortControllerRef.current = null;
     }
-  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, isTrial, timeRange]);
+  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, timeRange]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
