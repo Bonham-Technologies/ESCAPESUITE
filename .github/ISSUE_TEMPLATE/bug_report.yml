@@ -1,0 +1,56 @@
+name: Bug report
+description: Something broken in ESCAPECRAFT, ESCAPEARTIST, or the site
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: app
+    attributes:
+      label: App
+      options:
+        - ESCAPECRAFT (recorder)
+        - ESCAPEARTIST (editor)
+        - Landing page / site
+        - Offline single-file build
+        - Build tooling / CI
+    validations:
+      required: true
+  - type: dropdown
+    id: flavor
+    attributes:
+      label: Where were you running it?
+      options:
+        - Hosted (escapesuite.io)
+        - Offline build (downloaded HTML file)
+        - Local dev (pnpm dev)
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser + version
+      placeholder: "e.g. Chrome 149 on macOS 15"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the editor
+        2. Import a clip
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors (if any)
+      description: DevTools → Console. Paste anything red.
+      render: text
