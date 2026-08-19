@@ -1,5 +1,17 @@
+// Install real fake-indexeddb BEFORE any other setup, so storage modules that
+// open IndexedDB on import resolve against the working in-memory implementation
+// rather than a non-functional stub. Must be a static import so it is hoisted
+// before any vi.stubGlobal calls below.
+import 'fake-indexeddb/auto'
+import { Blob as NodeBlob } from 'node:buffer'
 import '@escapesuite/shared/test/setup'
 import { vi } from 'vitest'
+
+// jsdom's Blob is not structured-clone-serialisable in the way Node.js's
+// structuredClone expects (size/type are lost on round-trip through
+// fake-indexeddb). Replace with Node.js's native Blob so IndexedDB storage
+// tests that assert blob.size / blob.type work correctly.
+vi.stubGlobal('Blob', NodeBlob)
 
 // Mock localStorage (jsdom provides one but it can be overwritten by other mocks)
 const localStorageStore: Record<string, string> = {}
@@ -11,13 +23,6 @@ vi.stubGlobal('localStorage', {
   get length() { return Object.keys(localStorageStore).length },
   key: vi.fn((index: number) => Object.keys(localStorageStore)[index] ?? null),
 })
-
-// Mock IndexedDB for storage tests
-const indexedDB = {
-  open: vi.fn(),
-  deleteDatabase: vi.fn(),
-}
-vi.stubGlobal('indexedDB', indexedDB)
 
 // Mock URL.createObjectURL and revokeObjectURL
 // Keep URL constructor functional but mock the static methods

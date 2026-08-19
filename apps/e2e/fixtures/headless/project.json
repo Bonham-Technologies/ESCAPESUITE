@@ -1,0 +1,62 @@
+{
+  "project": {
+    "id": "fixture",
+    "name": "fixture",
+    "created": 0,
+    "modified": 0,
+    "resolution": { "width": 64, "height": 48 },
+    "timeline": {
+      "tracks": [
+        {
+          "id": "track-0",
+          "name": "V1",
+          "index": 0,
+          "visible": true,
+          "locked": false,
+          "muted": false,
+          "volume": 1,
+          "height": 64
+        }
+      ],
+      "clips": [
+        {
+          "id": "clip-0",
+          "sourceVideoId": "src-0",
+          "name": "source.mp4",
+          "startTime": 0,
+          "endTime": 1,
+          "duration": 1,
+          "trackId": "track-0",
+          "timelinePosition": 0,
+          "blendMode": "normal",
+          "transform": {
+            "x": 0.5,
+            "y": 0.5,
+            "scaleX": 1,
+            "scaleY": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "scaleLocked": true
+          },
+          "effects": { "blur": 0 },
+          "transition": { "type": "none", "duration": 0.5 }
+        }
+      ],
+      "textOverlays": [],
+      "shapeOverlays": [],
+      "duration": 1
+    }
+  },
+  "sourceVideos": [
+    {
+      "id": "src-0",
+      "name": "source.mp4",
+      "mimeType": "video/mp4",
+      "duration": 1,
+      "width": 64,
+      "height": 48,
+      "frameRate": 25,
+      "size": 2243
+    }
+  ]
+}
