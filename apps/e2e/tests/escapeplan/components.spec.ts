@@ -70,6 +70,45 @@ test.describe('Footer', () => {
     await expect(page.getByRole('link', { name: /privacy policy/i })).toBeVisible()
     await expect(page.getByRole('link', { name: /terms of service/i })).toBeVisible()
   })
+
+  test('links to the GitHub repository', async ({ page }) => {
+    const repoLink = page
+      .getByRole('contentinfo')
+      .getByRole('link', { name: 'GitHub' })
+    await expect(repoLink).toHaveAttribute('href', GITHUB_URL)
+    await expect(repoLink).toHaveAttribute('target', '_blank')
+    await expect(repoLink).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+})
+
+test.describe('Per-route SEO', () => {
+  const CANONICAL_ORIGIN = 'https://www.escapesuite.io'
+
+  // index.html is served for every SPA route, so without per-route tags each
+  // route would claim to be the homepage.
+  const routes = [
+    { path: '/', canonical: `${CANONICAL_ORIGIN}/`, title: /free, open-source/i },
+    { path: '/privacy', canonical: `${CANONICAL_ORIGIN}/privacy`, title: /privacy policy/i },
+    { path: '/terms', canonical: `${CANONICAL_ORIGIN}/terms`, title: /terms of service/i },
+  ]
+
+  for (const route of routes) {
+    test(`${route.path} sets its own title and canonical`, async ({ page }) => {
+      await page.goto(`http://localhost:5173${route.path}`)
+      await page.waitForLoadState('networkidle')
+
+      await expect(page).toHaveTitle(route.title)
+
+      // Exactly one canonical must exist, pointing at this route.
+      const canonicals = page.locator('link[rel="canonical"]')
+      await expect(canonicals).toHaveCount(1)
+      await expect(canonicals).toHaveAttribute('href', route.canonical)
+
+      const description = page.locator('meta[name="description"]')
+      await expect(description).toHaveCount(1)
+      expect((await description.getAttribute('content'))?.length ?? 0).toBeGreaterThan(50)
+    })
+  }
 })
 
 test.describe('Routes', () => {

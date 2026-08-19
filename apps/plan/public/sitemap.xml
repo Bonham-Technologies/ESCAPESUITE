@@ -2,14 +2,14 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://www.escapesuite.io/</loc>
-  </url>
-  <url>
-    <loc>https://www.escapesuite.io/pricing</loc>
+    <priority>1.0</priority>
   </url>
   <url>
     <loc>https://www.escapesuite.io/privacy</loc>
+    <priority>0.3</priority>
   </url>
   <url>
     <loc>https://www.escapesuite.io/terms</loc>
+    <priority>0.3</priority>
   </url>
 </urlset>
