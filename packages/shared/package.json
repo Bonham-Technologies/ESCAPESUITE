@@ -12,6 +12,7 @@
     "./storage": "./src/storage/index.ts",
     "./utils": "./src/utils/index.ts",
     "./watermark": "./src/watermark/index.ts",
+    "./config": "./src/config/index.ts",
     "./bootstrap": "./src/bootstrap/index.tsx",
     "./test/setup": "./src/test/setup.ts"
   },
