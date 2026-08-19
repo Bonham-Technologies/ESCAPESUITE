@@ -2,10 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Post-retool note (2026-08):** licensing was removed from the repo when
-> ESCAPESUITE went MIT open source, so the "license gate" referenced below as part
-> of Plan 2 no longer has an implementation to reuse. Plan 1 (this plan) is
-> unaffected — it never touched licensing.
+> **Amended 2026-08-19 (decision by Matt Bonham).** The 2026-08 open-source retool
+> removed licensing product-wide; the authorization gate Plan 2 originally placed in
+> front of the renderer is gone from the design. Plan 1 (this plan) is unaffected — it
+> never touched licensing.
 
 **Goal:** Add a no-UI "headless" build of ESCAPEARTIST that exposes `window.__renderProject(input)` and runs the *real* export engine inside headless Chromium, producing video bytes from a project + injected sources.
 
@@ -17,7 +17,7 @@
 
 ## Scope
 
-This is **Plan 1 of 2** (see `docs/superpowers/specs/2026-06-07-headless-artist-design.md`). It covers Component A (the headless render bundle) only. Plan 2 (`services/headless-artist`: CLI, license gate, loaders, sinks, kit/Dockerfile) builds on the `window.__renderProject` contract this plan establishes.
+This is **Plan 1 of 2** (see `docs/superpowers/specs/2026-06-07-headless-artist-design.md`). It covers Component A (the headless render bundle) only. Plan 2 (`services/headless-artist`: CLI, loaders, sinks, kit/Dockerfile) builds on the `window.__renderProject` contract this plan establishes.
 
 ## File structure
 
@@ -617,4 +617,4 @@ git commit -m "chore(artist): headless bundle typecheck/lint clean" || echo "not
 - The editor build (`index.html`) is unchanged; the engine source is shared (no fork).
 - Unit + Playwright tests green; typecheck + lint clean.
 
-**Next:** Plan 2 — `services/headless-artist` (Node one-shot CLI driving this bundle in Chromium via Playwright, license gate, input loaders, output sinks, verification manifest, kit + reference Dockerfile, MinIO e2e).
+**Next:** Plan 2 — `services/headless-artist` (Node one-shot CLI driving this bundle in Chromium via Playwright, input loaders, output sinks, verification manifest, kit + reference Dockerfile, MinIO e2e).

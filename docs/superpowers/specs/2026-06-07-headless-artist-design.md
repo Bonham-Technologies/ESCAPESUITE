@@ -1,23 +1,23 @@
 # Headless ARTIST — Server-Side Render Service — Design
 
-Status: **Draft v2 (for review)** · Date: 2026-06-07 · Owner: Bonham Technologies
+Status: **Draft v3 (for review)** · Date: 2026-06-07 · Amended: 2026-08-19 · Owner: Bonham Technologies
 
 > v2 changes (post-review): input is now the customer's plug too — we provide a
 > transport-agnostic **local interface** ("the female end"); S3 and other transports
-> are optional reference adapters, not a dependency. Added an embedded, offline,
-> fail-closed **license gate** (genuine-software enforcement). Reinforced output
+> are optional reference adapters, not a dependency. Reinforced output
 > **verifiability** (golden tests both formats + a verification manifest).
 
-> **Post-retool note (2026-08):** ESCAPESUITE went MIT open source — accounts,
-> Supabase, licensing (`packages/shared/src/auth/*`), and watermarking were removed
-> from the repo. Every **license gate / genuine-software enforcement** element below
-> is therefore obsolete as written and needs a product decision before Plan 2 is
-> implemented; the rest of the design (bundle, runner, adapters, verification
-> manifest) still stands.
+> **v3 amendment — decision by Matt Bonham, 2026-08-19.** The 2026-08 open-source
+> retool made ESCAPESUITE MIT-licensed and removed accounts, Supabase, licensing, and
+> watermarking product-wide. The authorization gate v2 placed in front of the renderer
+> is **removed from this design**: the headless bundle and kit are free and ungated —
+> no signature verification, no key injection, no entitlement or seat tracking, no
+> fail-closed authorization step. The renderer simply renders. The rest of the design
+> (bundle, runner, adapters, verification manifest) carries over unchanged.
 
 ## 1. Problem & goals
 
-A Site-License customer wants to host ESCAPEARTIST on their own secure/air-gapped
+A customer wants to host ESCAPEARTIST on their own secure/air-gapped
 network and let their users **kick off a server-side render** instead of rendering
 in the browser. The flow is fully decoupled: a user hands off their project + source
 media, a server process renders the video, and the finished file is delivered to a
@@ -42,7 +42,6 @@ the source, we wrap the **real** render engine and ship it as a deployable servi
 - Be **stateless** and **transport-agnostic**: we provide a clean local interface (the
   "female end") that the customer plugs their orchestration and transport into.
 - Deliver output through a **pluggable sink** (default a local/mounted volume).
-- Enforce a **genuine-software license check** at runtime (offline, fail-closed).
 - Support both project hand-off packagings and all of ARTIST's media formats, with
   **verifiable** output.
 
@@ -53,7 +52,7 @@ the source, we wrap the **real** render engine and ship it as a deployable servi
   S3, but the core boundary is local files.)
 - We do **not** reimplement the render/encode pipeline in Node/ffmpeg.
 - The "Render on server" button inside the hosted ARTIST UI is an **optional companion**
-  (Section 14), not part of this core spec.
+  (Section 13), not part of this core spec.
 
 ## 2. Background: ARTIST's render architecture (relevant facts)
 
@@ -62,7 +61,7 @@ off-thread/background rendering in mind:
 
 - Public entry points (`apps/artist/src/core/exporter.ts` → `exportMP4.ts` /
   `exportWebM.ts`):
-  `exportToMP4(clips, sourceVideos, options, onProgress?, tracks?, watermark?, signal?, projectResolution?) → Promise<Blob>`
+  `exportToMP4(clips, sourceVideos, options, onProgress?, tracks?, signal?, projectResolution?) → Promise<Blob>`
   (and `exportToWebM(...)`). No React, no component refs, no global store reads.
 - Compositing (`core/canvasRenderer.ts`) is pure Canvas 2D over `(ctx, data)`; never
   reads the DOM/React tree.
@@ -79,11 +78,6 @@ off-thread/background rendering in mind:
   videos: [{ id, name, mimeType, data /*base64*/, thumbnail? }] }`.
 - Standalone build (`build:standalone`, `vite-plugin-singlefile`) already produces a
   single self-contained HTML file with workers inlined.
-- **Existing licensing** (`packages/shared/src/auth/license.ts`): offline **Ed25519**
-  signature verification of a signed license against an embedded public key, **fail-closed
-  in production** (audit H4). Licenses are signed by `LICENSE_PRIVATE_KEY` (server secret);
-  the public key (`LICENSE_PUBLIC_KEY`) is baked into builds; the air-gapped standalone
-  apps already validate licenses entirely offline. We reuse this exact scheme.
 
 **Implication:** every browser API the export path needs exists in **headless Chromium**,
 so the engine runs as-is there. The only adaptations are feeding sources in (instead of
@@ -106,8 +100,7 @@ the editor populating IndexedDB) and getting bytes out (instead of a browser dow
 - F6. Run as a **one-shot** container (render one job, exit) and, optionally, as a
   long-running HTTP service.
 - F7. Be **idempotent** by job id (safe for broker retries).
-- F8. **Verify a genuine license at runtime** before rendering — offline, fail-closed.
-- F9. Emit a **verification manifest** alongside output (hashes, duration, dimensions,
+- F8. Emit a **verification manifest** alongside output (hashes, duration, dimensions,
   codec, engine + Chromium versions) so the result is independently verifiable.
 
 **Non-functional**
@@ -118,14 +111,14 @@ the editor populating IndexedDB) and getting bytes out (instead of a browser dow
 - N3. Reproducible output: pinned Chromium; **GPU-accelerated encode/decode when the host
   provides it** (this customer has GPUs), with a software fallback and a software
   "verification mode" for byte-deterministic golden tests.
-- N4. Secure: non-root, least privilege; sink `command` opt-in and sandboxed; license
-  fail-closed.
+- N4. Secure: non-root, least privilege; sink `command` opt-in and sandboxed. The kit
+  embeds no secrets of ours, so a copied kit exposes nothing.
 - N5. Observable: structured per-job logs, progress, clear exit codes / status.
 - N6. Self-hostable: primary deliverable is a **code kit** (npm tarball: runner/CLI + built
   bundle + docs) that drops into the customer's own runtime; an **optional reference
   Dockerfile** is provided for turnkey use and as the canonical environment spec. Headless
-  Chromium (pinned version) is a documented host prerequisite. Env-configured, shipped with
-  the air-gap Site License, versioned to the ARTIST engine.
+  Chromium (pinned version) is a documented host prerequisite. Env-configured and
+  versioned to the ARTIST engine.
 
 ## 4. Architecture overview
 
@@ -136,10 +129,9 @@ customer broker + transport (THEIRS) ── fetch/mount resources ──▶ loca
                                             ▼                         │
                   ┌────────────────────────────────────────────────────────┐
                   │  headless-artist kit: Node + headless Chromium            │
-                  │  (STATELESS, license-gated; container optional)           │
+                  │  (STATELESS, ungated; container optional)                 │
                   │  one-shot CLI  (or optional HTTP service)                 │
                   │                                                          │
-                  │  License gate ──(fail-closed Ed25519)── proceed/abort    │
                   │  Input Loader ─▶ {project, sources(bytes)}  (local files) │
                   │        ▼                                                  │
                   │  Render Runner ─▶ headless Chromium (Playwright)          │
@@ -158,7 +150,7 @@ handoff, and the transport on both ends (with our optional S3/webhook/command ad
 as conveniences). The container is a pure function: **local in → render → local out → exit.**
 
 Three independently testable units: **(A)** headless render bundle, **(B)** render
-runner, **(C)** adapters (input loaders / output sinks) + the **license gate**.
+runner, **(C)** adapters (input loaders / output sinks).
 
 ## 5. Component A — Headless render bundle
 
@@ -172,7 +164,6 @@ renderProject(input: {
   project: Project,
   sources: Array<{ id: string, mimeType: string, bytes: ArrayBuffer }>,
   options: ExportOptions,
-  watermark?: WatermarkConfig,
 }, onProgress?: (p: number) => void): Promise<{ bytes: ArrayBuffer, meta: RenderMeta }>
 ```
 
@@ -183,7 +174,7 @@ It imports the export engine **verbatim** (`exportToMP4`/`exportToWebM`, `canvas
 editor uses — imported directly from `apps/artist/src`, never copied. The only
 headless-specific code is this entry (source injection + bytes out). As base ARTIST gains
 overlays/transitions/effects/codecs, headless inherits them automatically on the next
-build; the golden-render tests (§13) flag any accidental divergence. The source seam below,
+build; the golden-render tests (§12) flag any accidental divergence. The source seam below,
 if ever needed, is shared by both editor and headless — not a headless-only fork.
 
 **Source injection (the one adaptation).** The export path reads sources via
@@ -194,7 +185,8 @@ before calling `exportTo*`, so `getVideoBlob` resolves unchanged — engine unto
 same interface.)
 
 Boundary: given `{project, sources, options}`, returns bytes + metadata — no knowledge of
-S3, jobs, licensing, or the filesystem. Testable directly in headless Chromium.
+S3, jobs, or the filesystem, and no authorization step of any kind. Testable directly in
+headless Chromium.
 
 ## 6. Component B — Render runner (Node)
 
@@ -207,19 +199,11 @@ Runs inside the container; orchestrates one render. Two modes, same core:
 - **HTTP service (optional):** long-running `POST /render` (+ `GET /healthz`) for brokers
   that prefer an endpoint; adds a small bounded Chromium pool. Same render core/adapters.
 
-Flow: **run the license gate (abort if invalid)** → parse/validate job → Input Loader →
-launch/reuse a headless Chromium page with bundle A (Playwright, pinned browser) →
+Flow: parse/validate job → Input Loader → launch/reuse a headless Chromium page with bundle A (Playwright, pinned browser) →
 `renderProject` + progress → bytes → Output Sink (+ verification manifest) → structured
 status + exit code. Per-job timeout, Chromium crash/OOM handling, temp cleanup here.
 
-## 7. Component C — Adapters + license gate
-
-**License gate** — runs before any render. Reuses `packages/shared` Ed25519 verification:
-the container embeds the public key; the operator supplies the signed license
-(`LICENSE_KEY` via env/file, from their team/org/enterprise bundle). The gate verifies the
-signature **offline**, checks product/tier covers server render and is **not expired**, and
-**fails closed** (refuses to render, non-zero exit) on any missing/invalid/unverifiable
-license. See Section 11.
+## 7. Component C — Adapters
 
 **Input Loaders** (produce `{ project, sources }` from **local** files):
 - `bundle`: a local `.veditor` file → decode base64 sources.
@@ -236,7 +220,7 @@ Both normalize to the same in-memory shape bundle A consumes.
 - `s3` | `webhook` | `command` (opt-in, sandboxed: argument-array exec, no shell, least
   privilege) — optional reference adapters.
 
-Adapters and the gate are config-selected; new transports are added without touching A/B.
+Adapters are config-selected; new transports are added without touching A/B.
 
 ## 8. Job spec
 
@@ -250,7 +234,6 @@ Passed via CLI flag/stdin or HTTP body; references **local paths** by default:
     "manifest": { "path": "/in/manifest.json" }   // manifest lists project + source files in /in
   },
   "options": { "format": "mp4", "quality": "high", "resolution": { "width": 1920, "height": 1080 } },
-  "watermark": null,
   "output": { "sink": "volume", "config": { "dir": "/out" } }
 }
 ```
@@ -266,12 +249,11 @@ env, never the job.
    and (via their broker/transport) places them where the container can read them locally
    (mounted dir), or uses an optional input adapter.
 2. The broker spawns/calls our container with the job spec (local paths).
-3. **License gate** verifies a genuine license — abort (non-zero) if invalid.
-4. Input Loader reads project + source bytes from local files.
-5. Runner loads bundle A in headless Chromium → `renderProject` → bytes + meta.
-6. Output Sink writes the result + **verification manifest** to the local output dir (or
+3. Input Loader reads project + source bytes from local files.
+4. Runner loads bundle A in headless Chromium → `renderProject` → bytes + meta.
+5. Output Sink writes the result + **verification manifest** to the local output dir (or
    an optional adapter target).
-7. Container exits `0` (or HTTP returns success). The customer's transport moves the
+6. Container exits `0` (or HTTP returns success). The customer's transport moves the
    output to where the user retrieves it. Failure → non-zero / error; broker retries
    (idempotent by `jobId`).
 
@@ -292,26 +274,7 @@ env, never the job.
   byte-exact golden regression in CI. The compositing — the frames themselves — is identical
   either way; it's the same engine.
 
-## 11. Licensing / genuine-software enforcement
-
-Goal: even if the image is exfiltrated, it should not render without a genuine license.
-
-- **Mechanism (identical to the main ARTIST deployment — reuse, not new):** the same
-  offline **Ed25519** scheme the shipped ARTIST builds already use — same `packages/shared`
-  licensing code, same embedded `LICENSE_PUBLIC_KEY`, same signed `LICENSE_KEY` (issued with
-  their team/org/enterprise purchase). Embedding it the same way keeps headless in lockstep
-  with base ARTIST's licensing. The license gate verifies the signature against the
-  embedded public key, checks product/tier entitlement for server render and expiry, and
-  **fails closed** — no valid, unexpired, signature-verified license ⇒ no render, non-zero
-  exit, clear message. Fully offline (air-gap safe).
-- **Checks at:** startup, and (cheaply) per job, so a long-running HTTP instance can't
-  outlive license expiry.
-- **Honest limits:** client/JS code can't be made fully tamper-proof. This raises the bar
-  substantially (a thief can't run it without a key they can't forge) and matches the
-  product's existing posture; we do not claim unbreakable DRM. Optional hardening to weigh
-  during planning: bind license to org id, add a build/integrity hash to the manifest.
-
-## 12. Error handling, security, packaging
+## 11. Error handling, security, packaging
 
 **Resilience:** per-job timeout → non-zero exit so the broker retries; Chromium crash/OOM
 → fail the job cleanly (one-shot exits; HTTP recycles the page); corrupt/missing media →
@@ -321,12 +284,14 @@ fail fast with a clear error; idempotent by `jobId`; temp files/pages disposed e
 outbound network required** (inputs are local; Chromium launched with networking
 restricted); optional adapters are the only network users and are customer-configured with
 scoped creds via env/secrets; the `command` sink is opt-in, argument-array exec (no shell),
-resource-limited; license fail-closed.
+resource-limited. The kit is a **free artifact**: it carries no keys, secrets, or
+credentials of ours, so a copied or exfiltrated kit leaks nothing and needs no
+authorization to run. The only credentials in play are the customer's own, for the
+optional network adapters they choose to enable.
 
 **Packaging (kit-first, container optional).** Primary deliverable = a **code kit** (npm
-tarball / `npm pack` for offline install): the Node runner/CLI + license gate + adapters +
-the built ARTIST bundle + embedded license public key + docs. It drops into the customer's
-own runtime. **Headless Chromium is a host prerequisite** — the kit either points at a
+tarball / `npm pack` for offline install): the Node runner/CLI + adapters + the built
+ARTIST bundle + docs. It drops into the customer's own runtime. **Headless Chromium is a host prerequisite** — the kit either points at a
 **system/provided Chromium** (`executablePath`, recommended for air-gap) or uses a
 **Playwright-managed pinned Chromium** (documented version; air-gap needs a browser mirror
 or pre-seeded cache). The docs list the required **OS deps** (libnss, fonts, …) and the
@@ -335,25 +300,23 @@ canonical environment spec) and compose / k8s-Job samples (CPU and GPU). **GPU:*
 host exposes a GPU (e.g. NVIDIA runtime / `--gpus all`, or a host GPU on bare metal),
 hardware encode/decode is used; software fallback otherwise. Config via env (mode,
 concurrency, timeouts, Chromium path, input loader, optional input adapter, output sink +
-config, license key, GPU on/off, log level). Shipped with the air-gap **Site License**,
-**versioned to the ARTIST engine**.
+config, GPU on/off, log level). **Versioned to the ARTIST engine.**
 
-## 13. Testing strategy
+## 12. Testing strategy
 
-- **Unit:** Input Loaders + Output Sinks (local fs / mock adapter); license gate
-  (valid / expired / tampered / missing → correct fail-closed); job-spec validation; runner
-  control flow + exit codes.
+- **Unit:** Input Loaders + Output Sinks (local fs / mock adapter); job-spec validation;
+  runner control flow + exit codes.
 - **Integration:** bundle A rendering a fixed fixture in **real headless Chromium**
   (Playwright — reuses the e2e harness) → valid MP4 **and** WebM with expected
   duration/resolution + perceptual-hash vs golden; manifest contents correct.
 - **End-to-end:** full one-shot job from local input dir → output file + manifest present
-  and correct; failure + retry path; license-denied path.
+  and correct; failure + retry path.
 - **Determinism/verifiability:** golden-render regression in CI for both formats; explicit
   WebM-source case; manifest hash stability.
 
-## 14. Scope & decomposition
+## 13. Scope & decomposition
 
-**This spec (core):** license gate, bundle A, runner B (CLI + optional HTTP), adapters C
+**This spec (core):** bundle A, runner B (CLI + optional HTTP), adapters C
 (local loaders + optional reference adapters), job-spec schema, verification manifest,
 container image, tests, docs.
 
@@ -361,20 +324,19 @@ container image, tests, docs.
 "Render on server" action in the hosted ARTIST UI that packages + hands off the current
 project. Kept out of core (YAGNI).
 
-## 15. Repo / code changes
+## 14. Repo / code changes
 
 - `apps/artist`: new headless entry (`headless.html` + `src/headless/*`) and a
   `build:headless` script; the source-injection seam (seed IndexedDB, or a guarded
   source-resolver) — the editor path unchanged.
-- New service location: `services/headless-artist/` (Node runner/CLI + license gate +
-  adapters; publishable as an npm tarball kit) + an **optional reference `Dockerfile`** and
+- New service location: `services/headless-artist/` (Node runner/CLI + adapters;
+  publishable as an npm tarball kit) + an **optional reference `Dockerfile`** and
   CPU/GPU samples. Add the `services/*` glob to `pnpm-workspace.yaml`. Reuses
-  `packages/shared` (licensing, types) where sensible. The runner accepts a configurable
+  `packages/shared` (storage, types) where sensible. The runner accepts a configurable
   Chromium `executablePath` so customers can point at their own browser.
-- Docs: deployment guide, config reference, security/licensing notes, broker-integration
-  example.
+- Docs: deployment guide, config reference, security notes, broker-integration example.
 
-## 16. Risks & open questions
+## 15. Risks & open questions
 
 - **WebM source decode headless:** `HTMLVideoElement` seek timing can be flaky for long
   clips; mitigated by hardening + golden tests; transcode-on-ingest fallback if it proves
@@ -394,13 +356,10 @@ project. Kept out of core (YAGNI).
   host GPU + drivers in-container (NVIDIA runtime). Confirm the GPU/driver stack during
   planning; HW output isn't byte-identical to SW (handled by perceptual verification + the
   SW verification mode, §10).
-- **License key provisioning:** confirm how the per-deployment `LICENSE_KEY` is issued and
-  delivered with the team/org/enterprise bundle (same path as main ARTIST), and whether to
-  bind it to org id.
 - **Optional adapters:** S3 is the only reference adapter needed for today's customer;
   others are additive and out of scope until a customer needs them.
 
-## 17. Out of scope / future
+## 16. Out of scope / future
 
 - Distributed render farm / autoscaling (the customer's broker's concern).
 - Resource transport/handoff in and out (the customer's plug).

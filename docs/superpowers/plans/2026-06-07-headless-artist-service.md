@@ -2,18 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Post-retool note (2026-08):** ESCAPESUITE went MIT open source — accounts,
-> Supabase, licensing (`packages/shared/src/auth/*`), and watermarking were removed
-> from the repo. Every **license gate / genuine-software enforcement** element below
-> is therefore obsolete as written and needs a product decision before Plan 2 is
-> implemented; the rest of the design (bundle, runner, adapters, verification
-> manifest) still stands.
+> **Amended 2026-08-19 (decision by Matt Bonham).** The 2026-08 open-source retool
+> removed licensing product-wide, so the authorization gate this plan originally put in
+> front of the renderer is **gone from the design**: the kit is free and ungated. The
+> former Task 1 (shared Ed25519 verifier) and Task 3 (Node license gate) were dropped
+> and the remaining tasks renumbered 1–8.
 
-**Goal:** Build `services/headless-artist` — a stateless Node one-shot CLI that license-gates, loads a project + sources from local files, drives the Plan‑1 headless bundle in real headless Chromium, and delivers the rendered video + a verification manifest through a pluggable output sink — shipped as a code kit (npm tarball) with an optional reference Dockerfile.
+**Goal:** Build `services/headless-artist` — a stateless Node one-shot CLI that loads a project + sources from local files, drives the Plan‑1 headless bundle in real headless Chromium, and delivers the rendered video + a verification manifest through a pluggable output sink — shipped as a code kit (npm tarball) with an optional reference Dockerfile.
 
-**Architecture:** The CLI is a pure function: `job spec → (license gate) → (input loader) → (Chromium render via Plan‑1 `window.__renderProject`) → (output sink) → exit`. No queue/state — the customer's broker spawns it per job. License verification reuses ONE shared Ed25519 implementation (refactored to be env-agnostic so browser + Node share it — no fork). Inputs/outputs are local by default; S3/webhook/command are optional reference adapters.
+**Architecture:** The CLI is a pure function: `job spec → (input loader) → (Chromium render via Plan‑1 `window.__renderProject`) → (output sink) → exit`. No queue/state — the customer's broker spawns it per job, and there is no authorization step of any kind: the kit renders whatever job it is handed. Inputs/outputs are local by default; S3/webhook/command are optional reference adapters.
 
-**Tech Stack:** TypeScript, Node 20+ (`globalThis.crypto.subtle` Ed25519), Playwright (real headless Chromium), `tsx` (run TS), `esbuild` (bundle the kit), Vitest, optional `@aws-sdk/client-s3`. Reuses `@escapesuite/shared` (license) + the Plan‑1 `dist-headless/headless.html` bundle.
+**Tech Stack:** TypeScript, Node 20+, Playwright (real headless Chromium), `tsx` (run TS), `esbuild` (bundle the kit), Vitest, optional `@aws-sdk/client-s3`. Reuses `@escapesuite/shared` (storage, types) + the Plan‑1 `dist-headless/headless.html` bundle.
 
 ---
 
@@ -23,191 +22,22 @@
 
 ## File structure
 
-- `packages/shared/src/auth/license.ts` — **modify.** Extract a pure, env-agnostic `verifyLicenseSignature(payload, publicKeyHex)` + `parseLicenseKey(key)` + `payloadToLicense(payload)`; the existing browser `verifySignatureAsync`/`validateLicenseAsync` delegate to them (behavior unchanged). One implementation, shared.
 - `services/headless-artist/package.json` — **create.** Node service package (type module).
 - `services/headless-artist/tsconfig.json` — **create.**
 - `services/headless-artist/src/types.ts` — **create.** `JobSpec`, `RenderOutcome`.
-- `services/headless-artist/src/licenseGate.ts` — **create.** Node fail-closed gate over the shared verifier.
 - `services/headless-artist/src/loaders.ts` — **create.** `loadBundle(path)` / `loadManifest(path)` → `RenderInput`.
 - `services/headless-artist/src/renderDriver.ts` — **create.** Playwright launch + drive `__renderProject`.
 - `services/headless-artist/src/sinks.ts` — **create.** `OutputSink` + `volume`/`command`/`webhook` (+ optional `s3`).
 - `services/headless-artist/src/manifest.ts` — **create.** Verification manifest builder.
 - `services/headless-artist/src/cli.ts` — **create.** One-shot entrypoint.
-- `services/headless-artist/src/test-helpers/signLicense.ts` — **create.** Test-only Ed25519 license signer.
 - `services/headless-artist/Dockerfile` — **create.** Optional reference image.
 - `services/headless-artist/README.md` — **create.** Config + deploy + Chromium prereq docs.
 - `pnpm-workspace.yaml` — **modify.** Add `services/*`.
-- `apps/artist/src/headless/types.ts` — **modify (tiny).** Re-export from the service via a shared path, OR the service imports it directly (see Task 2).
+- `apps/artist/src/headless/types.ts` — **modify (tiny).** Re-export from the service via a shared path, OR the service imports it directly (see Task 1).
 
 ---
 
-## Task 1: Extract a portable, shared license verifier (no fork)
-
-**Files:**
-- Modify: `packages/shared/src/auth/license.ts`
-- Test: `packages/shared/src/auth/license.verify.test.ts`
-
-Goal: one Ed25519 verification implementation usable from both the Vite browser build and plain Node. The browser keeps its exact fail-open-in-DEV behavior; the pure function takes the public key explicitly.
-
-- [ ] **Step 1: Write the failing test (pure verifier + parser, no import.meta.env)**
-
-```ts
-// packages/shared/src/auth/license.verify.test.ts
-import { describe, it, expect } from 'vitest'
-import { parseLicenseKey, verifyLicenseSignature, payloadToLicense } from './license'
-
-// A deterministic Ed25519 keypair + a signed payload generated once with Node crypto.
-// (Replace the three constants below by running scripts/gen in Step 4 if they drift.)
-import { TEST_PUBLIC_KEY_HEX, TEST_LICENSE_KEY, TEST_TAMPERED_KEY } from './license.testfixtures'
-
-describe('portable license verifier', () => {
-  it('parses an ESCAPE- key into a payload', () => {
-    const p = parseLicenseKey(TEST_LICENSE_KEY)
-    expect(p).not.toBeNull()
-    expect(p!.product).toBeDefined()
-    expect(p!.signature).toBeTypeOf('string')
-  })
-
-  it('verifies a genuine signature against the matching public key', async () => {
-    const p = parseLicenseKey(TEST_LICENSE_KEY)!
-    expect(await verifyLicenseSignature(p, TEST_PUBLIC_KEY_HEX)).toBe(true)
-  })
-
-  it('rejects a tampered payload', async () => {
-    const p = parseLicenseKey(TEST_TAMPERED_KEY)!
-    expect(await verifyLicenseSignature(p, TEST_PUBLIC_KEY_HEX)).toBe(false)
-  })
-
-  it('rejects when no public key is supplied (fail closed)', async () => {
-    const p = parseLicenseKey(TEST_LICENSE_KEY)!
-    expect(await verifyLicenseSignature(p, '')).toBe(false)
-  })
-
-  it('maps a payload to a License', () => {
-    const p = parseLicenseKey(TEST_LICENSE_KEY)!
-    const lic = payloadToLicense(p)
-    expect(lic.customer).toBeDefined()
-    expect(lic.product).toBe(p.product)
-  })
-})
-```
-
-- [ ] **Step 2: Generate the test fixtures (one-time, committed)**
-
-Create `packages/shared/src/auth/gen-license-testfixtures.mjs`:
-
-```js
-// Run once: node packages/shared/src/auth/gen-license-testfixtures.mjs > packages/shared/src/auth/license.testfixtures.ts
-import { generateKeyPairSync, sign } from 'node:crypto'
-const { publicKey, privateKey } = generateKeyPairSync('ed25519')
-const jwk = publicKey.export({ format: 'jwk' })
-const pubBytes = Buffer.from(jwk.x, 'base64url')
-const pubHex = pubBytes.toString('hex')
-const payload = {
-  id: 'lic-test', version: 1, customer: { id: 'org-1', email: 'qa@example.com', name: 'QA' },
-  product: 'suite', tier: 'pro', seats: 100, issued: '2026-01-01', expires: '2999-01-01', features: ['render'],
-}
-const msg = Buffer.from(JSON.stringify(payload))
-const sig = sign(null, msg, privateKey).toString('base64')
-const signed = { ...payload, signature: sig }
-const key = 'ESCAPE-' + Buffer.from(JSON.stringify(signed)).toString('base64')
-const tampered = { ...signed, seats: 999999 }
-const tamperedKey = 'ESCAPE-' + Buffer.from(JSON.stringify(tampered)).toString('base64')
-process.stdout.write(
-  `// AUTO-GENERATED test fixtures (gen-license-testfixtures.mjs). Do not hand-edit.\n` +
-  `export const TEST_PUBLIC_KEY_HEX = ${JSON.stringify(pubHex)}\n` +
-  `export const TEST_LICENSE_KEY = ${JSON.stringify(key)}\n` +
-  `export const TEST_TAMPERED_KEY = ${JSON.stringify(tamperedKey)}\n`
-)
-```
-
-Run: `node packages/shared/src/auth/gen-license-testfixtures.mjs > packages/shared/src/auth/license.testfixtures.ts`
-Expected: creates `license.testfixtures.ts` with three exported constants.
-
-- [ ] **Step 3: Run test to verify it fails**
-
-Run: `pnpm --filter=@escapesuite/shared exec vitest run src/auth/license.verify.test.ts`
-Expected: FAIL — `parseLicenseKey`/`verifyLicenseSignature`/`payloadToLicense` not exported.
-
-- [ ] **Step 4: Refactor `license.ts` to expose the pure core**
-
-In `packages/shared/src/auth/license.ts`, add these exports (reusing the existing `hexToBytes`, `base64ToBytes`, `toArrayBuffer`, `SignedLicensePayload`, and the rename of `parseNewFormat`):
-
-```ts
-// Rename parseNewFormat → parseLicenseKey and EXPORT it (same body):
-export function parseLicenseKey(licenseKey: string): SignedLicensePayload | null {
-  try {
-    if (!licenseKey.startsWith('ESCAPE-')) return null
-    const encoded = licenseKey.substring(7)
-    const json = new TextDecoder().decode(base64ToBytes(encoded))
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
-}
-
-/** Pure Ed25519 verify — public key passed in explicitly (no env coupling). */
-export async function verifyLicenseSignature(
-  payload: SignedLicensePayload,
-  publicKeyHex: string,
-): Promise<boolean> {
-  if (!publicKeyHex) return false // fail closed when no key supplied
-  try {
-    const publicKey = await crypto.subtle.importKey(
-      'raw', toArrayBuffer(hexToBytes(publicKeyHex)), { name: 'Ed25519' }, false, ['verify'],
-    )
-    const { signature, ...payloadWithoutSig } = payload
-    const messageBytes = new TextEncoder().encode(JSON.stringify(payloadWithoutSig))
-    return await crypto.subtle.verify('Ed25519', publicKey, toArrayBuffer(base64ToBytes(signature)), messageBytes)
-  } catch {
-    return false
-  }
-}
-
-export function payloadToLicense(p: SignedLicensePayload): License {
-  return {
-    id: p.id, customer: p.customer?.name ?? p.customer?.id ?? '', email: p.customer?.email,
-    product: p.product, tier: p.tier, seats: p.seats, issued: p.issued,
-    expires: p.expires ?? null, features: p.features ?? [],
-  }
-}
-```
-
-Then make the existing browser path delegate (preserving DEV fail-open + prod fail-closed):
-
-```ts
-// Replace the body of the existing verifySignatureAsync with:
-async function verifySignatureAsync(payload: SignedLicensePayload): Promise<boolean> {
-  if (!PUBLIC_KEY_HEX) {
-    if (import.meta.env.DEV) {
-      console.warn('[license] No public key configured — signature verification SKIPPED (dev only).')
-      return true
-    }
-    console.error('[license] No license public key baked into this build — rejecting license (fail closed).')
-    return false
-  }
-  return verifyLicenseSignature(payload, PUBLIC_KEY_HEX)
-}
-```
-
-Update the internal call site that used `parseNewFormat(...)` to `parseLicenseKey(...)`.
-
-- [ ] **Step 5: Run the new test AND the existing license tests**
-
-Run: `pnpm --filter=@escapesuite/shared exec vitest run src/auth/`
-Expected: PASS — the new `license.verify.test.ts` AND all pre-existing license tests (browser behavior unchanged).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add packages/shared/src/auth/license.ts packages/shared/src/auth/license.verify.test.ts \
-  packages/shared/src/auth/license.testfixtures.ts packages/shared/src/auth/gen-license-testfixtures.mjs
-git commit -m "refactor(shared): extract portable Ed25519 license verifier (browser+node share one impl)"
-```
-
----
-
-## Task 2: Scaffold the `services/headless-artist` package
+## Task 1: Scaffold the `services/headless-artist` package
 
 **Files:**
 - Modify: `pnpm-workspace.yaml`
@@ -283,7 +113,6 @@ export interface JobSpec {
     | { bundle: { path: string } }
     | { manifest: { path: string } }
   options: RenderInput['options']
-  watermark?: RenderInput['watermark']
   output: { sink: 'volume' | 's3' | 'webhook' | 'command'; config: Record<string, unknown> }
 }
 
@@ -308,107 +137,7 @@ git commit -m "chore(headless-artist): scaffold service package"
 
 ---
 
-## Task 3: Node license gate (fail-closed)
-
-**Files:**
-- Create: `services/headless-artist/src/licenseGate.ts`
-- Create: `services/headless-artist/src/licenseGate.test.ts`
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// services/headless-artist/src/licenseGate.test.ts
-import { describe, it, expect } from 'vitest'
-import { assertLicensed } from './licenseGate'
-import { TEST_PUBLIC_KEY_HEX, TEST_LICENSE_KEY, TEST_TAMPERED_KEY } from '../../../packages/shared/src/auth/license.testfixtures'
-
-const ok = { LICENSE_PUBLIC_KEY: TEST_PUBLIC_KEY_HEX, LICENSE_KEY: TEST_LICENSE_KEY }
-
-describe('assertLicensed', () => {
-  it('resolves to a License for a genuine, unexpired, entitled key', async () => {
-    const lic = await assertLicensed(ok, 'artist')
-    expect(lic.product === 'suite' || lic.product === 'artist').toBe(true)
-  })
-  it('throws when the key is missing', async () => {
-    await expect(assertLicensed({ LICENSE_PUBLIC_KEY: TEST_PUBLIC_KEY_HEX }, 'artist')).rejects.toThrow(/license/i)
-  })
-  it('throws when the signature is tampered', async () => {
-    await expect(assertLicensed({ ...ok, LICENSE_KEY: TEST_TAMPERED_KEY }, 'artist')).rejects.toThrow(/signature|invalid/i)
-  })
-  it('throws when no public key is configured (fail closed)', async () => {
-    await expect(assertLicensed({ LICENSE_KEY: TEST_LICENSE_KEY }, 'artist')).rejects.toThrow()
-  })
-  it('throws when expired', async () => {
-    const lic = await assertLicensed(ok, 'artist', new Date('3000-01-01'))
-    // expires 2999 → now 3000 ⇒ expired
-    .then(() => 'no-throw').catch((e) => e.message)
-    expect(String(lic)).toMatch(/expired/i)
-  })
-})
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pnpm --filter=@escapesuite/headless-artist exec vitest run src/licenseGate.test.ts`
-Expected: FAIL — `Cannot find module './licenseGate'`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-```ts
-// services/headless-artist/src/licenseGate.ts
-import { parseLicenseKey, verifyLicenseSignature, payloadToLicense } from '@escapesuite/shared/auth'
-import type { License } from '@escapesuite/shared/auth'
-
-export class LicenseError extends Error {}
-
-/**
- * Fail-closed license gate. Verifies a genuine ESCAPE- license (offline Ed25519),
- * entitled for server render of `product`, not expired. Throws LicenseError otherwise.
- */
-export async function assertLicensed(
-  env: { LICENSE_KEY?: string; LICENSE_PUBLIC_KEY?: string },
-  product: 'artist',
-  now: Date = new Date(),
-): Promise<License> {
-  const key = env.LICENSE_KEY
-  const pub = env.LICENSE_PUBLIC_KEY
-  if (!key) throw new LicenseError('No LICENSE_KEY provided — refusing to render (fail closed).')
-  if (!pub) throw new LicenseError('No LICENSE_PUBLIC_KEY configured — refusing to render (fail closed).')
-
-  const payload = parseLicenseKey(key)
-  if (!payload) throw new LicenseError('Malformed license key.')
-
-  if (!(await verifyLicenseSignature(payload, pub))) {
-    throw new LicenseError('Invalid license signature.')
-  }
-
-  const lic = payloadToLicense(payload)
-  // 'suite' covers all apps; 'artist' covers artist. (craft-only does not entitle artist render.)
-  if (!(lic.product === 'suite' || lic.product === product)) {
-    throw new LicenseError(`License product "${lic.product}" does not entitle ${product} render.`)
-  }
-  if (lic.expires && new Date(lic.expires) < now) {
-    throw new LicenseError(`License expired on ${lic.expires}.`)
-  }
-  return lic
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pnpm --filter=@escapesuite/headless-artist exec vitest run src/licenseGate.test.ts`
-Expected: PASS (all five cases).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add services/headless-artist/src/licenseGate.ts services/headless-artist/src/licenseGate.test.ts
-git commit -m "feat(headless-artist): fail-closed Node license gate over shared verifier"
-```
-
----
-
-## Task 4: Input loaders (bundle + manifest → RenderInput)
+## Task 2: Input loaders (bundle + manifest → RenderInput)
 
 **Files:**
 - Create: `services/headless-artist/src/loaders.ts`
@@ -537,7 +266,7 @@ git commit -m "feat(headless-artist): bundle + manifest input loaders"
 
 ---
 
-## Task 5: Chromium render driver (Playwright drives the Plan‑1 bundle)
+## Task 3: Chromium render driver (Playwright drives the Plan‑1 bundle)
 
 **Files:**
 - Create: `services/headless-artist/src/renderDriver.ts`
@@ -629,10 +358,10 @@ export async function renderInChromium(
         blobs[id] = arr.buffer
       }
       const input = { project: payload.project, sourceVideos: payload.sourceVideos,
-        sourceBlobs: blobs, options: payload.options, watermark: payload.watermark ?? null }
+        sourceBlobs: blobs, options: payload.options }
       // @ts-expect-error injected global
       return await window.__renderProject(input)
-    }, { project: input.project, sourceVideos: input.sourceVideos, options: input.options, watermark: input.watermark, sourcesB64 })
+    }, { project: input.project, sourceVideos: input.sourceVideos, options: input.options, sourcesB64 })
 
     const bin = Buffer.from(result.base64, 'base64')
     const meta = { ...result.meta, gpu: !!opts.gpu }
@@ -657,7 +386,7 @@ git commit -m "feat(headless-artist): Playwright Chromium render driver"
 
 ---
 
-## Task 6: Verification manifest + output sinks
+## Task 4: Verification manifest + output sinks
 
 **Files:**
 - Create: `services/headless-artist/src/manifest.ts`, `services/headless-artist/src/manifest.test.ts`
@@ -809,7 +538,7 @@ function webhookSink(config: { url: string; headers?: Record<string, string> }):
   }
 }
 
-// async so the optional 's3' case can dynamically import the AWS SDK (Task 8)
+// async so the optional 's3' case can dynamically import the AWS SDK (Task 6)
 // without making @aws-sdk a hard dependency of the kit.
 export async function getSink(kind: string, config: Record<string, unknown>): Promise<OutputSink> {
   switch (kind) {
@@ -817,7 +546,7 @@ export async function getSink(kind: string, config: Record<string, unknown>): Pr
     case 'command': return commandSink(config as { command: string; args?: string[]; writeTmp?: boolean })
     case 'webhook': return webhookSink(config as { url: string; headers?: Record<string, string> })
     case 's3': {
-      const { s3Sink } = await import('./s3') // optional @aws-sdk/client-s3 — provided in Task 8
+      const { s3Sink } = await import('./s3') // optional @aws-sdk/client-s3 — provided in Task 6
       return s3Sink(config as { prefix: string; endpoint?: string; region?: string })
     }
     default: throw new Error(`Unknown output sink: ${kind}`)
@@ -839,7 +568,7 @@ git commit -m "feat(headless-artist): verification manifest + volume/command/web
 
 ---
 
-## Task 7: One-shot CLI (gate → load → render → sink → exit)
+## Task 5: One-shot CLI (load → render → sink → exit)
 
 **Files:**
 - Create: `services/headless-artist/src/cli.ts`
@@ -855,10 +584,8 @@ import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { runJob } from './run'
-import { TEST_PUBLIC_KEY_HEX, TEST_LICENSE_KEY } from '../../../packages/shared/src/auth/license.testfixtures'
 
 const BUNDLE = resolve(__dirname, '../../../apps/artist/dist-headless/headless.html')
-const env = { LICENSE_PUBLIC_KEY: TEST_PUBLIC_KEY_HEX, LICENSE_KEY: TEST_LICENSE_KEY }
 
 describe('runJob', () => {
   it('renders a bundle job to the volume sink + manifest', async () => {
@@ -869,19 +596,19 @@ describe('runJob', () => {
       options: { format: 'mp4', quality: 'high' },
       output: { sink: 'volume', config: { dir: out } },
     }
-    const outcome = await runJob(spec as Parameters<typeof runJob>[0], { env, bundlePath: BUNDLE, gpu: false })
+    const outcome = await runJob(spec as Parameters<typeof runJob>[0], { bundlePath: BUNDLE, gpu: false })
     expect(outcome.ok).toBe(true)
     expect(existsSync(resolve(out, 'job-42.mp4'))).toBe(true)
     expect(JSON.parse(readFileSync(resolve(out, 'job-42.manifest.json'), 'utf8')).jobId).toBe('job-42')
   }, 180_000)
 
-  it('fails closed without a license', async () => {
+  it('reports a failed job instead of throwing when the input path is missing', async () => {
     const outcome = await runJob(
-      { jobId: 'j', input: { bundle: { path: 'x' } }, options: { format: 'mp4' }, output: { sink: 'volume', config: { dir: '.' } } } as Parameters<typeof runJob>[0],
-      { env: {}, bundlePath: BUNDLE, gpu: false },
+      { jobId: 'j', input: { bundle: { path: '/nope/missing.veditor' } }, options: { format: 'mp4' }, output: { sink: 'volume', config: { dir: '.' } } } as Parameters<typeof runJob>[0],
+      { bundlePath: BUNDLE, gpu: false },
     )
     expect(outcome.ok).toBe(false)
-    expect(outcome.error).toMatch(/license/i)
+    expect(outcome.error).toBeTruthy()
   })
 })
 ```
@@ -896,7 +623,6 @@ Expected: FAIL — `Cannot find module './run'`.
 ```ts
 // services/headless-artist/src/run.ts
 import { chromium } from 'playwright'
-import { assertLicensed } from './licenseGate'
 import { loadBundle, loadManifest } from './loaders'
 import { renderInChromium } from './renderDriver'
 import { buildManifest } from './manifest'
@@ -904,7 +630,6 @@ import { getSink } from './sinks'
 import type { JobSpec, RenderOutcome } from './types'
 
 export interface RunDeps {
-  env: { LICENSE_KEY?: string; LICENSE_PUBLIC_KEY?: string }
   bundlePath: string
   gpu?: boolean
   chromiumPath?: string
@@ -915,13 +640,10 @@ const ENGINE_VERSION = process.env.ARTIST_ENGINE_VERSION || 'unknown'
 
 export async function runJob(spec: JobSpec, deps: RunDeps): Promise<RenderOutcome> {
   try {
-    await assertLicensed(deps.env, 'artist')
-
     const input = 'bundle' in spec.input
       ? await loadBundle(spec.input.bundle.path)
       : await loadManifest(spec.input.manifest.path)
     input.options = spec.options
-    input.watermark = spec.watermark ?? null
 
     const { bytes, meta } = await renderInChromium(deps.bundlePath, input, {
       gpu: deps.gpu, chromiumPath: deps.chromiumPath, timeoutMs: deps.timeoutMs,
@@ -944,7 +666,7 @@ export async function runJob(spec: JobSpec, deps: RunDeps): Promise<RenderOutcom
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter=@escapesuite/artist run build:headless && pnpm --filter=@escapesuite/headless-artist exec vitest run src/run.test.ts`
-Expected: PASS (render + license-denied).
+Expected: PASS (render + failed-job path).
 
 - [ ] **Step 5: Implement the CLI wrapper**
 
@@ -972,7 +694,6 @@ async function main() {
   const bundlePath = process.env.HEADLESS_BUNDLE_PATH || resolve(here, 'headless.html')
 
   const outcome = await runJob(spec, {
-    env: process.env,
     bundlePath,
     gpu: process.env.HEADLESS_GPU === 'true',
     chromiumPath: process.env.HEADLESS_CHROMIUM_PATH,
@@ -990,12 +711,12 @@ main()
 
 ```bash
 git add services/headless-artist/src/run.ts services/headless-artist/src/run.test.ts services/headless-artist/src/cli.ts
-git commit -m "feat(headless-artist): one-shot CLI (gate → load → render → sink → exit codes)"
+git commit -m "feat(headless-artist): one-shot CLI (load → render → sink → exit codes)"
 ```
 
 ---
 
-## Task 8: Optional S3 reference adapters (input + output)
+## Task 6: Optional S3 reference adapters (input + output)
 
 **Files:**
 - Create: `services/headless-artist/src/s3.ts`
@@ -1049,7 +770,7 @@ export function s3Sink(config: { prefix: string; endpoint?: string; region?: str
 
 - [ ] **Step 2: (no `getSink` change needed)**
 
-The `s3` case and the async `getSink` signature were already defined in Task 6 (Task 6 dynamic-imports `./s3`). This task only supplies the `./s3` module the case imports. Optionally, wire `fetchS3ToLocal` into the loaders for jobs whose input is an `s3://` ref — but the canonical, guaranteed path stays local files the customer mounts (per the spec), so this is additive.
+The `s3` case and the async `getSink` signature were already defined in Task 4 (Task 4 dynamic-imports `./s3`). This task only supplies the `./s3` module the case imports. Optionally, wire `fetchS3ToLocal` into the loaders for jobs whose input is an `s3://` ref — but the canonical, guaranteed path stays local files the customer mounts (per the spec), so this is additive.
 
 - [ ] **Step 3: Conditional test (only runs against a real/MinIO endpoint)**
 
@@ -1080,7 +801,7 @@ git commit -m "feat(headless-artist): optional S3 reference adapters (input fetc
 
 ---
 
-## Task 9: Packaging — kit + bundled headless HTML + reference Dockerfile
+## Task 7: Packaging — kit + bundled headless HTML + reference Dockerfile
 
 **Files:**
 - Create: `services/headless-artist/scripts/assemble-kit.mjs`
@@ -1125,14 +846,15 @@ WORKDIR /app
 COPY dist/ ./dist/
 COPY package.json ./
 ENV HEADLESS_BUNDLE_PATH=/app/dist/headless.html
-# License + sink config supplied at run time via env. Runs as non-root 'pwuser'.
+# Sink config supplied at run time via env. No credentials of ours are baked in.
+# Runs as non-root 'pwuser'.
 USER pwuser
 ENTRYPOINT ["node", "dist/cli.js", "render"]
 ```
 
 - [ ] **Step 4: README — config + Chromium prerequisite + run examples**
 
-Create `services/headless-artist/README.md` documenting: required env (`LICENSE_KEY`, `LICENSE_PUBLIC_KEY`, `HEADLESS_BUNDLE_PATH`, `HEADLESS_GPU`, `HEADLESS_CHROMIUM_PATH`, `HEADLESS_TIMEOUT_MS`), the **pinned Chromium version** + `playwright install chromium` / system-Chromium (`HEADLESS_CHROMIUM_PATH`) options + the OS-dep note (`playwright install-deps`), the job-spec schema, a bare-host run example (`cat job.json | node dist/cli.js render -`), and the container run example (`docker run --gpus all -e LICENSE_KEY=... -v /in:/in -v /out:/out image render --job /in/job.json`).
+Create `services/headless-artist/README.md` documenting: env (`HEADLESS_BUNDLE_PATH`, `HEADLESS_GPU`, `HEADLESS_CHROMIUM_PATH`, `HEADLESS_TIMEOUT_MS` — the kit needs no keys or credentials to run), the **pinned Chromium version** + `playwright install chromium` / system-Chromium (`HEADLESS_CHROMIUM_PATH`) options + the OS-dep note (`playwright install-deps`), the job-spec schema, a bare-host run example (`cat job.json | node dist/cli.js render -`), and the container run example (`docker run --gpus all -v /in:/in -v /out:/out image render --job /in/job.json`).
 
 - [ ] **Step 5: Commit**
 
@@ -1145,7 +867,7 @@ git commit -m "build(headless-artist): assemble kit (cli + bundle), reference Do
 
 ---
 
-## Task 10: End-to-end one-shot job + license-denied + typecheck/lint
+## Task 8: End-to-end one-shot job + typecheck/lint
 
 **Files:**
 - Create: `services/headless-artist/src/e2e.test.ts`
@@ -1159,7 +881,6 @@ import { execFileSync, execSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { TEST_PUBLIC_KEY_HEX, TEST_LICENSE_KEY } from '../../../packages/shared/src/auth/license.testfixtures'
 
 const root = resolve(__dirname, '..')
 beforeAll(() => {
@@ -1178,7 +899,7 @@ describe('headless-artist CLI e2e', () => {
       output: { sink: 'volume', config: { dir: out } },
     }))
     const stdout = execFileSync('node', [resolve(root, 'dist/cli.js'), 'render', '--job', job], {
-      env: { ...process.env, LICENSE_PUBLIC_KEY: TEST_PUBLIC_KEY_HEX, LICENSE_KEY: TEST_LICENSE_KEY, HEADLESS_BUNDLE_PATH: resolve(root, 'dist/headless.html') },
+      env: { ...process.env, HEADLESS_BUNDLE_PATH: resolve(root, 'dist/headless.html') },
     }).toString()
     const outcome = JSON.parse(stdout)
     expect(outcome.ok).toBe(true)
@@ -1186,13 +907,13 @@ describe('headless-artist CLI e2e', () => {
     expect(JSON.parse(readFileSync(resolve(out, 'e2e-1.manifest.json'), 'utf8')).sha256).toMatch(/^[0-9a-f]{64}$/)
   }, 240_000)
 
-  it('exits non-zero without a license', () => {
-    const out = mkdtempSync(resolve(tmpdir(), 'e2e-deny-'))
+  it('exits non-zero on an unrenderable job', () => {
+    const out = mkdtempSync(resolve(tmpdir(), 'e2e-fail-'))
     const job = resolve(out, 'job.json')
-    writeFileSync(job, JSON.stringify({ jobId: 'd', input: { bundle: { path: resolve(root, 'test/fixtures/project.veditor') } }, options: { format: 'mp4' }, output: { sink: 'volume', config: { dir: out } } }))
+    writeFileSync(job, JSON.stringify({ jobId: 'd', input: { bundle: { path: resolve(out, 'does-not-exist.veditor') } }, options: { format: 'mp4' }, output: { sink: 'volume', config: { dir: out } } }))
     let code = 0
     try {
-      execFileSync('node', [resolve(root, 'dist/cli.js'), 'render', '--job', job], { env: { ...process.env, LICENSE_KEY: '', LICENSE_PUBLIC_KEY: '', HEADLESS_BUNDLE_PATH: resolve(root, 'dist/headless.html') } })
+      execFileSync('node', [resolve(root, 'dist/cli.js'), 'render', '--job', job], { env: { ...process.env, HEADLESS_BUNDLE_PATH: resolve(root, 'dist/headless.html') } })
     } catch (e) { code = (e as { status: number }).status }
     expect(code).toBe(1)
   })
@@ -1202,7 +923,7 @@ describe('headless-artist CLI e2e', () => {
 - [ ] **Step 2: Run e2e**
 
 Run: `pnpm --filter=@escapesuite/headless-artist exec vitest run src/e2e.test.ts`
-Expected: PASS — render exits 0 with output + manifest; license-denied exits 1.
+Expected: PASS — render exits 0 with output + manifest; an unrenderable job exits 1.
 
 - [ ] **Step 3: Typecheck + lint + full service test run**
 
@@ -1215,7 +936,7 @@ Expected: all green.
 
 ```bash
 git add services/headless-artist/src/e2e.test.ts
-git commit -m "test(headless-artist): one-shot CLI e2e (render + license-denied)"
+git commit -m "test(headless-artist): one-shot CLI e2e (render + failure path)"
 ```
 
 ---
@@ -1223,11 +944,10 @@ git commit -m "test(headless-artist): one-shot CLI e2e (render + license-denied)
 ## Done criteria (Plan 2)
 
 - `pnpm --filter=@escapesuite/headless-artist run build` produces `dist/cli.js` + `dist/headless.html` (the kit); `npm pack` yields a tarball shipping only `dist` + README.
-- `node dist/cli.js render --job <spec>` with a valid `LICENSE_KEY`/`LICENSE_PUBLIC_KEY` renders a bundle/manifest job to the configured sink (volume/command/webhook, optional s3), writes a verification manifest, and exits 0; an invalid/missing license exits 1 (fail closed).
-- One Ed25519 license implementation shared by browser + Node (no fork); existing browser license tests still pass.
+- `node dist/cli.js render --job <spec>` renders a bundle/manifest job to the configured sink (volume/command/webhook, optional s3), writes a verification manifest, and exits 0 — no key, credential, or authorization step required; an unrenderable job exits 1 with a clear error.
 - Chromium is a documented host prerequisite; the runner accepts `HEADLESS_CHROMIUM_PATH` (system Chromium) and GPU via `HEADLESS_GPU`.
 - Unit + integration + e2e tests green; typecheck + lint clean.
 
 **Deferred (optional follow-on, per spec §6):** the long-running **HTTP service mode** (`POST /render` + a bounded Chromium pool) — the one-shot CLI is the primary, broker-spawned path, and HTTP can be added later reusing `runJob` unchanged. Also deferred: the hosted-ARTIST "Render on server" UI (companion spec).
 
-**Together with Plan 1**, this delivers the full headless ARTIST: the same engine, license-gated, GPU-capable, transport-agnostic, shipped as an easy-to-transfer kit (container optional).
+**Together with Plan 1**, this delivers the full headless ARTIST: the same engine, free and ungated, GPU-capable, transport-agnostic, shipped as an easy-to-transfer kit (container optional).
