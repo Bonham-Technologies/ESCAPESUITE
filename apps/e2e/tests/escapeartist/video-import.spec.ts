@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { seedTextClip, openExportDialog } from '../../utils/artist'
 
 test.describe('ESCAPEARTIST Video Import', () => {
   test.beforeEach(async ({ page }) => {
@@ -107,25 +108,11 @@ test.describe('ESCAPEARTIST Export Options', () => {
   })
 
   test('export dialog can be triggered', async ({ page }) => {
-    // Look for export button
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    // Export is disabled until the timeline holds a clip
+    await seedTextClip(page)
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-    if (isVisible) {
-      await exportButton.click()
-      // Check if export dialog/modal appears
-      await page.waitForTimeout(500)
-      const dialog = page
-        .locator('[role="dialog"]')
-        .or(page.locator('.modal'))
-        .or(page.getByText(/export settings|format/i))
-
-      const dialogVisible = await dialog.first().isVisible().catch(() => false)
-      expect(typeof dialogVisible).toBe('boolean')
-    }
+    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeEnabled()
   })
 
   test('has format selection options', async ({ page }) => {

@@ -5,6 +5,7 @@ import {
   mockExportFailure,
   mockStorageQuotaExceeded,
 } from '../../utils/error-mocks'
+import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 
 test.describe('Export With No Clips', () => {
   test.beforeEach(async ({ page }) => {
@@ -12,33 +13,18 @@ test.describe('Export With No Clips', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  test('shows error when exporting empty project', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+  test('export stays unavailable until the timeline has a clip', async ({ page }) => {
+    const exportButton = page.getByRole('button', { name: 'Export video' })
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    // An empty project has nothing to encode, so the app refuses the export up
+    // front rather than opening a dialog that could not do anything.
+    await expect(exportButton).toBeDisabled()
+    await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(500)
-
-      // Should show warning about no clips
-      const noClipsMessage = page.getByText(/no clips|empty|add|import/i).first()
-      const hasMessage = await noClipsMessage.isVisible().catch(() => false)
-
-      // Or export button should be disabled
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        const startExport = dialog.getByRole('button', { name: /start|export/i }).first()
-        const isDisabled = await startExport.isDisabled().catch(() => false)
-
-        expect(hasMessage || isDisabled).toBe(true)
-      }
-    }
+    // The same button becomes usable the moment a clip exists — the disabled
+    // state above is the empty timeline, not a permanently dead control.
+    await seedTextClip(page)
+    await expect(exportButton).toBeEnabled()
   })
 
   test('export button disabled for empty timeline', async ({ page }) => {
@@ -64,33 +50,18 @@ test.describe('Export Cancellation', () => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    await seedTextClip(page)
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    await page.getByRole('button', { name: 'Download WebM' }).first().click()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
+    // Encoding reports live progress; cancelling mid-encode has to tear the
+    // export down and hand the editor back.
+    await expect(page.getByText(/Encoding frame \d+\/\d+/)).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
-      // Look for cancel button
-      const cancelButton = page
-        .getByRole('button', { name: /cancel/i })
-        .first()
-
-      const cancelVisible = await cancelButton.isVisible().catch(() => false)
-
-      if (cancelVisible) {
-        await cancelButton.click()
-        await page.waitForTimeout(300)
-
-        // Export should be cancelled
-        const html = await page.content()
-        expect(html).toContain('<div id="root">')
-      }
-    }
+    await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeEnabled()
   })
 })
 
@@ -102,49 +73,21 @@ test.describe('WebCodecs Unavailable', () => {
   })
 
   test('shows fallback when WebCodecs unavailable', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    await seedTextClip(page)
+    await openExportDialog(page)
+    await openExportAdvancedOptions(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(500)
-
-      // Should show browser compatibility message or limited options
-      const compatMessage = page.getByText(/not supported|chrome|edge|browser/i).first()
-      const hasMessage = await compatMessage.isVisible().catch(() => false)
-
-      // Or MP4 option should be disabled
-      const mp4Option = page.getByText(/mp4/i).first()
-      const mp4Visible = await mp4Option.isVisible().catch(() => false)
-
-      // App should still work
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    // MP4 needs the WebCodecs H.264 encoder, so the dialog says so instead of
+    // offering an export that would fail, and leaves WebM selected.
+    await expect(page.getByText('Not supported in this browser')).toBeVisible()
+    await expect(page.getByRole('radio', { name: /WebM/ })).toBeChecked()
   })
 
   test('WebM export still available', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    await seedTextClip(page)
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
-
-      // WebM should still be available
-      const webmOption = page.getByText(/webm/i).first()
-      const webmVisible = await webmOption.isVisible().catch(() => false)
-
-      expect(typeof webmVisible).toBe('boolean')
-    }
+    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeEnabled()
   })
 })
 
@@ -156,24 +99,15 @@ test.describe('Codec Not Supported', () => {
   })
 
   test('handles unsupported codec gracefully', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    await seedTextClip(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    // The dialog still opens and still offers a usable export path when the
+    // browser reports every encoder config as unsupported.
+    await openExportDialog(page)
+    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeEnabled()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(500)
-
-      // Should indicate codec issue or offer alternatives
-      const codecMessage = page.getByText(/not supported|codec|format/i).first()
-      const hasMessage = await codecMessage.isVisible().catch(() => false)
-
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    await openExportAdvancedOptions(page)
+    await expect(page.getByRole('radio', { name: /WebM/ })).toBeChecked()
   })
 })
 
@@ -184,62 +118,38 @@ test.describe('Export Failure Recovery', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  test('shows error message on export failure', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // A failed encode is only reported to the console ("Export failed:
+  // EncodingError: Flush failed"); the dialog silently drops back to its idle
+  // controls with no visible message and nothing announced to assistive tech.
+  test.fixme('shows error message on export failure', async ({ page }) => {
+    await seedTextClip(page)
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    await page.getByRole('button', { name: 'Download WebM' }).first().click()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(500)
-
-      // Start export
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        const startButton = dialog.getByRole('button', { name: /start|export/i }).first()
-        const startVisible = await startButton.isVisible().catch(() => false)
-
-        if (startVisible) {
-          await startButton.click()
-          await page.waitForTimeout(1000)
-
-          // Should show error
-          const errorMessage = page.getByText(/error|failed|try again/i).first()
-          const hasError = await errorMessage.isVisible().catch(() => false)
-
-          expect(typeof hasError).toBe('boolean')
-        }
-      }
-    }
+    const alert = page.getByRole('alert')
+    await expect(alert).toBeVisible({ timeout: 30_000 })
+    await expect(alert).toContainText(/fail|error/i)
   })
 
   test('can retry after export failure', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .first()
+    await seedTextClip(page)
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    const startExport = page.getByRole('button', { name: 'Download WebM' }).first()
+    await startExport.click()
 
-    if (isVisible) {
-      // First attempt
-      await exportButton.click()
-      await page.waitForTimeout(300)
+    // The failed encode leaves the dialog on its idle controls rather than a
+    // dead progress bar...
+    await expect(startExport).toBeVisible({ timeout: 30_000 })
 
-      // Should be able to try again
-      const retryButton = page.getByRole('button', { name: /retry|try again/i }).first()
-      const retryVisible = await retryButton.isVisible().catch(() => false)
+    // ...and the project survives it: dismiss, reopen, export is offered again.
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
 
-      // Or close and reopen
-      const closeButton = page.getByRole('button', { name: /close|cancel/i }).first()
-      const closeVisible = await closeButton.isVisible().catch(() => false)
-
-      expect(retryVisible || closeVisible).toBe(true)
-    }
+    await openExportDialog(page)
+    await expect(startExport).toBeEnabled()
   })
 })
 
@@ -284,26 +194,19 @@ test.describe('Background Tab Export', () => {
     expect(hasWorker).toBe(true)
   })
 
-  test('background tab support is indicated', async ({ page }) => {
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // MP4 export keeps encoding in a background tab (a Web Worker does the
+  // decode), but the export dialog never says so — nothing in the UI tells the
+  // user it is safe to switch away while an export runs.
+  test.fixme('background tab support is indicated', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .first()
+    await seedTextClip(page)
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
-
-      // Look for background export indicator
-      const backgroundIndicator = page.getByText(/background|continue|tab/i).first()
-      const hasIndicator = await backgroundIndicator.isVisible().catch(() => false)
-
-      // Feature may be mentioned in UI
-      expect(typeof hasIndicator).toBe('boolean')
-    }
+    await expect(
+      page.getByText(/background|keeps? (running|encoding)|switch tabs/i)
+    ).toBeVisible()
   })
 })

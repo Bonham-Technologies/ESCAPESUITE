@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { clearIndexedDB, databaseExists } from '../../utils/indexeddb'
+import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {
   test('recording workflow to editor', async ({ browser }) => {
@@ -74,29 +75,13 @@ test.describe('Export After Editing', () => {
   })
 
   test('export dialog shows format options', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .first()
+    // Export is disabled until the timeline holds a clip
+    await seedTextClip(page)
+    await openExportDialog(page)
+    await openExportAdvancedOptions(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
-
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        const mp4 = page.getByText(/mp4/i).first()
-        const webm = page.getByText(/webm/i).first()
-
-        const hasMp4 = await mp4.isVisible().catch(() => false)
-        const hasWebm = await webm.isVisible().catch(() => false)
-
-        expect(hasMp4 || hasWebm).toBe(true)
-      }
-    }
+    await expect(page.getByRole('radio', { name: /WebM/ })).toBeVisible()
+    await expect(page.getByRole('radio', { name: /MP4/ })).toBeVisible()
   })
 })
 
