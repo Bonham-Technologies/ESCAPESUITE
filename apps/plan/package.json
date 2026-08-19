@@ -4,7 +4,7 @@
   "version": "1.2.0",
   "description": "ESCAPE Suite hub & landing page",
   "author": "Bonham Technologies, LLC",
-  "license": "SEE LICENSE IN ../../LICENSE",
+  "license": "MIT",
   "type": "module",
   "homepage": "https://www.escapesuite.io",
   "scripts": {

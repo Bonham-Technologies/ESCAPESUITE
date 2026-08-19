@@ -24,7 +24,7 @@ Or from this directory:
 ```bash
 pnpm dev                 # Start development server
 pnpm build               # TypeScript check + Vite build
-pnpm build:standalone    # Single HTML file, no auth
+pnpm build:standalone    # Offline single-file build
 pnpm test:run            # Run tests
 pnpm lint                # Run ESLint
 ```
@@ -42,7 +42,6 @@ pnpm lint                # Run ESLint
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction
-- `watermark.ts`: Watermark rendering for trial/free users
 - `converter.ts`: Video format conversion using WebCodecs + Mediabunny
 
 ### VideoPlayer Component (`src/components/VideoPlayer/`)
@@ -78,7 +77,7 @@ Enhanced capability detection with detailed unavailability reasons:
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
 - Target: ESNext, no code splitting
-- `build:standalone` creates an auth-free version for offline use
+- `build:standalone` produces an offline single-file build for air-gapped use
 
 ### Download Formats
 Three download options with different speed/compatibility trade-offs:
@@ -99,11 +98,6 @@ Three download options with different speed/compatibility trade-offs:
 - Metadata extraction has fallbacks for problematic WebM files
 - Compatible WebM option re-encodes with VP9 + Opus via Mediabunny
 - Playback viewer fixes metadata before playback for proper scrubbing
-
-### Trial User Watermarking
-- Watermarks are applied at **export time only**, not during recording
-- This ensures raw recording stream works properly (browser optimizations can break watermarked streams)
-- Trial users see watermark on exported files but not during live preview/recording
 
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`

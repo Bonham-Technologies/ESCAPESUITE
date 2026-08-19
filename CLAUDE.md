@@ -8,7 +8,7 @@ ESCAPE Suite is a **Turborepo monorepo** containing privacy-first, client-side m
 
 | App | Package | Purpose | Dev Port |
 |-----|---------|---------|----------|
-| ESCAPEPLAN | `@escapesuite/plan` | Hub/landing page, auth, subscriptions | 5173 |
+| ESCAPEPLAN | `@escapesuite/plan` | Landing page & hub | 5173 |
 | ESCAPECRAFT | `@escapesuite/craft` | Screen & webcam recorder | 5174 |
 | ESCAPEARTIST | `@escapesuite/artist` | Video editor with timeline & effects | 5175 |
 | E2E Tests | `@escapesuite/e2e` | End-to-end test suite | N/A |
@@ -18,7 +18,7 @@ ESCAPE Suite is a **Turborepo monorepo** containing privacy-first, client-side m
 ```
 escapesuite/
 ├── apps/
-│   ├── plan/           # ESCAPEPLAN - hub & auth
+│   ├── plan/           # ESCAPEPLAN - landing page & hub
 │   ├── craft/          # ESCAPECRAFT - recorder
 │   ├── artist/         # ESCAPEARTIST - video editor
 │   └── e2e/            # End-to-end tests (Playwright)
@@ -92,17 +92,16 @@ dist/
 - **pnpm workspaces**: Efficient dependency management with shared packages
 - **Turborepo**: Cached builds, parallel execution, smart rebuilds
 - **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer
-- **Supabase Auth**: All apps authenticate via the shared `@escapesuite/shared/auth` Supabase client; `apps/plan/src/lib/auth.tsx` is a thin Clerk-shaped adapter (`useUser`/`SignedIn`/`SignedOut`) over `supabase.auth`
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file
 
 ### ESCAPEPLAN (apps/plan)
 - React Router for client-side routing
-- Supabase Auth (auth), Stripe (payments), Supabase (Edge Functions + PostgreSQL)
+- Landing page & legal pages only — no accounts, no backend
 - In production: serves CRAFT at `/craft/` and ARTIST at `/artist/`
 
 ### ESCAPECRAFT (apps/craft)
 - Zustand store in `src/store/recorderStore.ts`
-- Core modules in `src/core/`: `recorder.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `watermark.ts`, `converter.ts`
+- Core modules in `src/core/`: `recorder.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
 - Outputs WebM (requires `webm-duration-fix` for proper seek metadata)
 - Export to MP4 (H.264+AAC) or WebM (VP9+Opus) via WebCodecs + Mediabunny
@@ -132,35 +131,23 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 
 ## Environment Variables
 
-Create `.env.local` files in each app directory, or set in Vercel dashboard:
+No environment variables are required to build or run any app in this repo.
+
+The only optional variable is `VITE_BUILD_MODE`, which selects the build target for ESCAPECRAFT and ESCAPEARTIST:
 
 ```env
-# Required for all apps (Supabase also handles authentication)
-VITE_SUPABASE_URL=https://xxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJxxx
-
-# ESCAPEPLAN only (for embedded checkout UI)
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
-
-# Optional
-VITE_BUILD_MODE=saas              # or 'standalone' for air-gapped builds
+# Optional — defaults to a normal web build if unset
+VITE_BUILD_MODE=standalone   # produces the offline single-file build
 ```
-
-> **Note:** Stripe Price IDs are configured server-side in Supabase Edge Function secrets.
-> See `apps/plan/CLAUDE.md` for the complete list.
 
 ## Testing
 
 - **Unit tests**: Vitest with Testing Library, fake-indexeddb for storage mocking
-- **E2E tests**: Playwright with Chromium (fast tests exclude journey tests)
-- **Journey tests**: 69 comprehensive user flow tests covering trial, subscription, team, and license workflows
+- **E2E tests**: Playwright with Chromium (fast tests exclude the journey test)
+- **Journey test**: one end-to-end journey covering record → edit → export across ESCAPECRAFT and ESCAPEARTIST
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
-Test counts:
-- ESCAPEPLAN: 120 tests
-- ESCAPECRAFT: 165 tests
-- ESCAPEARTIST: 572 tests
-- E2E: 62 structural tests + 69 journey tests
+Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.
 
 ## Key Constraints
 
@@ -168,7 +155,6 @@ Test counts:
 - MediaRecorder produces WebM without proper seek metadata (requires post-processing)
 - AudioContext needs `resume()` call due to Chrome autoplay policy
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
-- Edge Functions use Deno runtime (not Node.js)
 
 ## CI/CD Pipeline
 
@@ -194,11 +180,10 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 - Journey tests excluded by default (add `run-full-e2e` label to include)
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
-- Triggers on merge to `main` branch
+- Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)
 - Builds ESCAPECRAFT and ESCAPEARTIST in standalone mode (`VITE_BUILD_MODE=standalone`)
-- Uploads single-file HTML builds to Supabase Storage (`downloads` bucket)
-- Files available at: `escapecraft-standalone.html`, `escapeartist-standalone.html`
-- Pre-licensed downloads inject license keys at download time via `get-licensed-download` Edge Function
+- On `main`, creates a GitHub Release and attaches the single-file HTML builds directly to it
+- No cloud storage step and no license injection — the downloads are plain HTML files, ready to run
 
 **Dependabot** (`.github/dependabot.yml`):
 - Weekly updates for all apps
@@ -222,4 +207,4 @@ Issues and work items are tracked in Jira:
 Each app has its own CLAUDE.md with detailed architecture:
 - `apps/artist/CLAUDE.md`: Overlay system, keyframe animation, transform controls
 - `apps/craft/CLAUDE.md`: Recording modes, PiP compositing, keyboard shortcuts
-- `apps/plan/CLAUDE.md`: Subscription tiers, routing, Supabase functions
+- `apps/plan/CLAUDE.md`: Routes, page structure, theme support

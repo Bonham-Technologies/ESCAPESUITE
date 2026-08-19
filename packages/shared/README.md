@@ -44,43 +44,23 @@ initializeTheme(themeStorage)
 
 ---
 
-### Auth (`@escapesuite/shared/auth`)
+### Config (`@escapesuite/shared/config`)
 
-Authentication utilities for SaaS and standalone modes.
+Build-time mode detection. `saas` (default) is the hosted build at escapesuite.io with Vercel
+Analytics enabled; `standalone` is the offline single-file build with no analytics and no
+network requests.
 
-```tsx
-import {
-  isSaaSMode,
-  isStandaloneMode,
-  validateLicense,
-  AuthContext,
-  useAuth,
-  StandaloneAuthGate,
-  SaaSAuthGate,
-} from '@escapesuite/shared/auth'
+```ts
+import { BUILD_MODE, isSaaSMode, isStandaloneMode } from '@escapesuite/shared/config'
 
-// Check build mode
-if (isSaaSMode()) {
-  // Use Clerk authentication
+if (isStandaloneMode()) {
+  // running as an offline single-file build
 }
-
-// Validate standalone license
-const license = validateLicense(licenseKey, 'craft')
-
-// Use auth context
-const { isAuthorized, isTrial, customerName } = useAuth()
 ```
 
 **Exports:**
+- `BUILD_MODE` - `'saas' | 'standalone'`, read from `VITE_BUILD_MODE`
 - `isSaaSMode()` / `isStandaloneMode()` - Build mode detection
-- `validateLicense(key, product)` - Validate license key
-- `getLicenseInfo(license)` - Format license info string
-- `getSubscription(userId)` - Fetch subscription status
-- `isPaidUser(sub)` / `isTrialUser(sub)` - Subscription helpers
-- `AuthContext` / `useAuth()` - React context for auth state
-- `StandaloneAuthGate` - License-based auth wrapper
-- `SaaSAuthGate` - Subscription-based auth wrapper
-- `ErrorScreen` / `LoadingScreen` - Auth UI components
 
 ---
 
@@ -192,52 +172,19 @@ formatFileSize(1024*1024) // "1.0 MB"
 
 ---
 
-### Watermark (`@escapesuite/shared/watermark`)
-
-Trial watermark utilities for video exports.
-
-```ts
-import {
-  drawWatermark,
-  StreamWatermarker,
-  defaultWatermarkConfig,
-} from '@escapesuite/shared/watermark'
-
-// Draw watermark on canvas
-drawWatermark(ctx, width, height, config)
-
-// Process video stream with watermark
-const watermarker = new StreamWatermarker(1920, 1080)
-watermarker.setStream(inputStream)
-const outputStream = watermarker.start(30)
-```
-
-**Exports:**
-- `drawWatermark(ctx, w, h, config?)` - Draw watermark on canvas
-- `StreamWatermarker` - Class for real-time stream watermarking
-- `defaultWatermarkConfig` - Default watermark settings
-- `type WatermarkConfig` - Watermark configuration
-
----
-
 ### Bootstrap (`@escapesuite/shared/bootstrap`)
 
-App initialization helper for consistent startup.
+App initialization helper for consistent startup. Mounts the app into the root element and
+enables Vercel Analytics only in `saas` builds (standalone builds must make no network requests).
 
 ```tsx
 import { bootstrapApp } from '@escapesuite/shared/bootstrap'
 
-bootstrapApp({
-  App,
-  isSaaSMode,
-  StandaloneAuthGate,
-  importSaaSAuthGate: () => import('./auth'),
-  importClerkKey: () => import('./auth/config'),
-})
+bootstrapApp({ App })
 ```
 
 **Exports:**
-- `bootstrapApp(config)` - Initialize and render app with auth
+- `bootstrapApp(config)` - Initialize and render the app (`{ App, rootId? }`)
 
 ---
 
@@ -258,9 +205,5 @@ pnpm lint
 ```
 
 ## Test Coverage
-
-The package includes tests for:
-- Time utilities (24 tests)
-- License validation (16 tests)
 
 Run `pnpm test:coverage` to generate a coverage report.

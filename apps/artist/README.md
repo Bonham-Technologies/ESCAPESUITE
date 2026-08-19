@@ -7,8 +7,6 @@ A powerful, client-side video editor built entirely for the browser. No server r
 
 **Part of the [ESCAPESUITE monorepo](../../README.md)**
 
-**Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.**
-
 <!--
 ## Demo
 
@@ -107,8 +105,8 @@ pnpm dev
 pnpm build:artist
 
 # Or from this directory
-pnpm build               # Standard build (with auth)
-pnpm build:standalone    # Single HTML file (no auth, offline-ready)
+pnpm build               # Standard web build
+pnpm build:standalone    # Offline single-file build
 ```
 
 The standalone build outputs a single `index.html` file containing all code, styles, and assets inlined.
@@ -254,8 +252,7 @@ Typical storage quota: 50GB+ (Chrome), 10GB+ (Firefox)
 
 ## License
 
-This software is proprietary. See the root [LICENSE](../../LICENSE) for details.
-Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.
+MIT — see the root [LICENSE](../../LICENSE) for details.
 
 ## Acknowledgments
 

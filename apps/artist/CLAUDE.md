@@ -24,7 +24,7 @@ Or from this directory:
 ```bash
 pnpm dev                 # Start development server
 pnpm build               # TypeScript check + Vite build
-pnpm build:standalone    # Single HTML file, no auth
+pnpm build:standalone    # Offline single-file build
 pnpm test:run            # Run tests
 pnpm lint                # Run ESLint
 ```
@@ -68,7 +68,7 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT` (inbound); `R
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
 - Target: ESNext, no code splitting
-- `build:standalone` creates an auth-free version for offline use
+- `build:standalone` produces an offline single-file build for air-gapped use
 
 ### Overlay System
 - **ShapeType**: `'rectangle' | 'ellipse' | 'line' | 'arrow' | 'blur'`
