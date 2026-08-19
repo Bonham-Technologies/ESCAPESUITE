@@ -129,7 +129,7 @@ export default function Terms() {
         <p>
           Our services are provided free of charge. To the maximum extent permitted by law, our total
           liability for any claims arising from these Terms or your use of our services shall not
-          exceed one hundred U.S. dollars (US$100).
+          exceed fifty U.S. dollars (US$50).
         </p>
 
         <h2>8. Indemnification</h2>
