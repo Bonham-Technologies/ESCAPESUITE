@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Post-retool note (2026-08):** ESCAPESUITE went MIT open source — accounts,
+> Supabase, licensing (`packages/shared/src/auth/*`), and watermarking were removed
+> from the repo. Every **license gate / genuine-software enforcement** element below
+> is therefore obsolete as written and needs a product decision before Plan 2 is
+> implemented; the rest of the design (bundle, runner, adapters, verification
+> manifest) still stands.
+
 **Goal:** Build `services/headless-artist` — a stateless Node one-shot CLI that license-gates, loads a project + sources from local files, drives the Plan‑1 headless bundle in real headless Chromium, and delivers the rendered video + a verification manifest through a pluggable output sink — shipped as a code kit (npm tarball) with an optional reference Dockerfile.
 
 **Architecture:** The CLI is a pure function: `job spec → (license gate) → (input loader) → (Chromium render via Plan‑1 `window.__renderProject`) → (output sink) → exit`. No queue/state — the customer's broker spawns it per job. License verification reuses ONE shared Ed25519 implementation (refactored to be env-agnostic so browser + Node share it — no fork). Inputs/outputs are local by default; S3/webhook/command are optional reference adapters.

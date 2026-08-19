@@ -8,6 +8,13 @@ Status: **Draft v2 (for review)** · Date: 2026-06-07 · Owner: Bonham Technolog
 > fail-closed **license gate** (genuine-software enforcement). Reinforced output
 > **verifiability** (golden tests both formats + a verification manifest).
 
+> **Post-retool note (2026-08):** ESCAPESUITE went MIT open source — accounts,
+> Supabase, licensing (`packages/shared/src/auth/*`), and watermarking were removed
+> from the repo. Every **license gate / genuine-software enforcement** element below
+> is therefore obsolete as written and needs a product decision before Plan 2 is
+> implemented; the rest of the design (bundle, runner, adapters, verification
+> manifest) still stands.
+
 ## 1. Problem & goals
 
 A Site-License customer wants to host ESCAPEARTIST on their own secure/air-gapped

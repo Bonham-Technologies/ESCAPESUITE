@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Post-retool note (2026-08):** licensing was removed from the repo when
+> ESCAPESUITE went MIT open source, so the "license gate" referenced below as part
+> of Plan 2 no longer has an implementation to reuse. Plan 1 (this plan) is
+> unaffected — it never touched licensing.
+
 **Goal:** Add a no-UI "headless" build of ESCAPEARTIST that exposes `window.__renderProject(input)` and runs the *real* export engine inside headless Chromium, producing video bytes from a project + injected sources.
 
 **Architecture:** A new single-file Vite entry (`headless.html` → `src/headless/main.ts`) reuses the existing export engine **verbatim** (`exportToMP4`/`exportToWebM`). The one adaptation is *source injection*: the runner hands in source bytes, the bundle seeds them into IndexedDB via the existing `storeVideo()` so the engine's `getVideoBlob()` resolves unchanged. No React/editor UI is mounted. Validation runs the built single-file in real headless Chromium via Playwright. This plan delivers a working, testable headless renderer; Plan 2 wraps it in the Node CLI/kit.
@@ -66,7 +71,7 @@ Expected: FAIL — `Cannot find module './types'`.
 
 ```ts
 // apps/artist/src/headless/types.ts
-import type { Project, SourceVideo, ExportOptions, WatermarkConfig } from '../store/types'
+import type { Project, SourceVideo, ExportOptions } from '../store/types'
 
 /** Everything the headless renderer needs to produce a video, with no browser storage preloaded. */
 export interface RenderInput {
@@ -76,7 +81,6 @@ export interface RenderInput {
   /** Raw bytes for each source, keyed by SourceVideo.id. Seeded into IndexedDB before render. */
   sourceBlobs: Record<string, ArrayBuffer>
   options: ExportOptions
-  watermark?: WatermarkConfig | null
 }
 
 /** Returned alongside the encoded bytes for the verification manifest (Plan 2). */
@@ -191,7 +195,7 @@ git commit -m "feat(artist): headless source injection (seed IndexedDB)"
 - Test: `apps/artist/src/headless/renderProject.test.ts`
 
 `renderProject` mirrors the editor's exact engine call
-(`ExportDialog.tsx`: `exportToMP4(clips, sourceVideos, options, onProgress, tracks, watermark, signal, projectResolution)`).
+(`ExportDialog.tsx`: `exportToMP4(clips, sourceVideos, options, onProgress, tracks, signal, projectResolution)`).
 
 - [ ] **Step 1: Write the failing test (engine mapping, with the engine mocked)**
 
@@ -274,7 +278,7 @@ export async function renderProject(
   input: RenderInput,
   onProgress?: (p: number) => void,
 ): Promise<RenderResult> {
-  const { project, sourceVideos, sourceBlobs, options, watermark = null } = input
+  const { project, sourceVideos, sourceBlobs, options } = input
   await seedSources(sourceVideos, sourceBlobs)
 
   const clips = project.timeline.clips
@@ -284,8 +288,8 @@ export async function renderProject(
 
   const format = options.format === 'webm' ? 'webm' : 'mp4'
   const blob = format === 'webm'
-    ? await exportToWebM(clips, sourceVideos, options, progress, tracks, watermark, undefined, resolution)
-    : await exportToMP4(clips, sourceVideos, options, progress, tracks, watermark, undefined, resolution)
+    ? await exportToWebM(clips, sourceVideos, options, progress, tracks, undefined, resolution)
+    : await exportToMP4(clips, sourceVideos, options, progress, tracks, undefined, resolution)
 
   const durationSec = clips.reduce((max, c) => Math.max(max, (c.startTime ?? 0) + ((c.endTime ?? 0) - (c.startTime ?? 0))), 0)
 
