@@ -21,6 +21,7 @@ export default defineConfig({
     cssCodeSplit: false,
   },
   define: {
+    // Build mode: 'saas' (default) or 'standalone'
     'import.meta.env.VITE_BUILD_MODE': JSON.stringify(process.env.VITE_BUILD_MODE || 'saas'),
   },
   test: {
