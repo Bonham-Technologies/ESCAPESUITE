@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { checkFocusOrder, checkFocusVisibility } from '../../utils/accessibility'
+import { seedTextClip } from '../../utils/artist'
 
 test.describe('ESCAPEPLAN Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
@@ -288,58 +289,43 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
     expect(html).toContain('<!DOCTYPE html>')
   })
 
-  test('Escape closes panels and modals', async ({ page }) => {
-    // Try opening export dialog
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // Escape does not dismiss the export modal; only the × and Cancel buttons do,
+  // so keyboard users have no way to back out of it.
+  test.fixme('Escape closes panels and modals', async ({ page }) => {
+    // Export is disabled until the timeline holds a clip
+    await seedTextClip(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    const heading = page.getByRole('heading', { name: 'Export Video' })
+    await page.getByRole('button', { name: 'Export video' }).click()
+    await expect(heading).toBeVisible()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
+    await page.keyboard.press('Escape')
 
-      await page.keyboard.press('Escape')
-      await page.waitForTimeout(300)
-
-      // Dialog should be closed
-      const dialog = await page.getByRole('dialog').isVisible().catch(() => false)
-      expect(dialog).toBe(false)
-    }
+    await expect(heading).toBeHidden()
   })
 
-  test('Tab traps focus in modals', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // The export modal has no focus trap (and no role="dialog" to scope one to),
+  // so Tab walks straight out of it into the editor behind.
+  test.fixme('Tab traps focus in modals', async ({ page }) => {
+    await seedTextClip(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    await page.getByRole('button', { name: 'Export video' }).click()
+    await expect(page.getByRole('heading', { name: 'Export Video' })).toBeVisible()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
-
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        // Tab multiple times
-        for (let i = 0; i < 10; i++) {
-          await page.keyboard.press('Tab')
-        }
-
-        // Focus should still be within the dialog
-        const focusInDialog = await page.evaluate(() => {
-          const dialog = document.querySelector('[role="dialog"]')
-          return dialog?.contains(document.activeElement)
-        })
-
-        expect(focusInDialog).toBe(true)
-      }
+    // Tab multiple times
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press('Tab')
     }
+
+    // Focus should still be within the dialog
+    const focusInDialog = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]')
+      return !!dialog && dialog.contains(document.activeElement)
+    })
+
+    expect(focusInDialog).toBe(true)
   })
 
   test('timeline keyboard shortcuts', async ({ page }) => {

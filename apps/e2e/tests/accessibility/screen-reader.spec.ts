@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { checkAriaLiveRegions } from '../../utils/accessibility'
+import { seedTextClip } from '../../utils/artist'
 
 test.describe('ARIA Live Regions', () => {
   test('ESCAPEPLAN has status announcements', async ({ page }) => {
@@ -69,35 +70,22 @@ test.describe('Dialog Announcements', () => {
     expect(labelledBy || label).toBeTruthy()
   })
 
-  test('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // The export modal is a plain <div>: screen readers get no dialog role, no
+  // aria-modal and no accessible name when it opens.
+  test.fixme('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    // Export is disabled until the timeline holds a clip
+    await seedTextClip(page)
+    await page.getByRole('button', { name: 'Export video' }).click()
+    await expect(page.getByRole('heading', { name: 'Export Video' })).toBeVisible()
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(500)
-
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        // Check for proper dialog semantics
-        const modal = await dialog.getAttribute('aria-modal')
-        expect(modal).toBe('true')
-
-        // Check for heading
-        const heading = dialog.locator('h1, h2, h3, [role="heading"]').first()
-        const hasHeading = await heading.isVisible().catch(() => false)
-        expect(hasHeading).toBe(true)
-      }
-    }
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
+    await expect(dialog.locator('h1, h2, h3, [role="heading"]').first()).toBeVisible()
   })
 })
 
@@ -262,7 +250,10 @@ test.describe('Button and Control Announcements', () => {
     }
   })
 
-  test('toggle buttons announce state', async ({ page }) => {
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // ESCAPECRAFT's source toggles carry no aria-pressed, aria-checked or
+  // role="switch", so their on/off state is never announced.
+  test.fixme('toggle buttons announce state', async ({ page }) => {
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
