@@ -1,116 +1,74 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn } from '../../utils/auth'
+import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 
 test.describe('Export Dialog', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
+    // "Export video" is disabled while the timeline is empty, so the dialog
+    // cannot be reached without a clip on it.
+    await seedTextClip(page)
   })
 
   test('export dialog opens', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
-
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      expect(dialogVisible).toBe(true)
-    }
+    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeVisible()
   })
 
   test('export format selection works', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .first()
+    await openExportDialog(page)
+    await openExportAdvancedOptions(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    await expect(page.getByRole('radio', { name: /WebM/ })).toBeChecked()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
+    const mp4 = page.getByRole('radio', { name: /MP4/ })
+    await mp4.check()
+    await expect(mp4).toBeChecked()
 
-      // Look for format options
-      const mp4Option = page.getByText(/mp4/i).first()
-      const webmOption = page.getByText(/webm/i).first()
-
-      const mp4Visible = await mp4Option.isVisible().catch(() => false)
-      const webmVisible = await webmOption.isVisible().catch(() => false)
-
-      expect(mp4Visible || webmVisible).toBe(true)
-    }
+    // Choosing a format retargets the download button
+    await expect(page.getByRole('button', { name: 'Download MP4' }).first()).toBeVisible()
   })
 
   test('export quality selection available', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .first()
+    await openExportDialog(page)
+    await openExportAdvancedOptions(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    const quality = page.locator('select').filter({ has: page.locator('option[value="high"]') })
+    await expect(quality).toHaveCount(1)
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
-
-      const qualityOption = page.getByText(/quality|high|medium|low/i).first()
-      const qualityVisible = await qualityOption.isVisible().catch(() => false)
-
-      expect(typeof qualityVisible).toBe('boolean')
-    }
+    await quality.selectOption('high')
+    await expect(quality).toHaveValue('high')
   })
 
   test('export resolution selection available', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .first()
+    await openExportDialog(page)
+    await openExportAdvancedOptions(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    // 480p is offered only by the export dialog's resolution picker, not by the
+    // media library's project-resolution one.
+    const resolution = page.locator('select').filter({ has: page.locator('option[value="480p"]') })
+    await expect(resolution).toHaveCount(1)
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
-
-      const resolutionOption = page.getByText(/1080|720|resolution|4k/i).first()
-      const resolutionVisible = await resolutionOption.isVisible().catch(() => false)
-
-      expect(typeof resolutionVisible).toBe('boolean')
-    }
+    await resolution.selectOption('720p')
+    await expect(resolution).toHaveValue('720p')
   })
 
   test('export progress display exists', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .first()
+    await openExportDialog(page)
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
+    await page.getByRole('button', { name: 'Download WebM' }).first().click()
 
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(300)
+    // Encoding reports which frame it is on, so the user can tell it is moving
+    await expect(page.getByText(/Encoding frame \d+\/\d+/)).toBeVisible({ timeout: 30_000 })
 
-      // Progress bar should exist (may not be visible until export starts)
-      const progressBar = page
-        .locator('[role="progressbar"]')
-        .or(page.locator('[class*="progress"]'))
-        .first()
-
-      const exists = (await progressBar.count()) > 0
-      expect(typeof exists).toBe('boolean')
-    }
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
   })
 })
 
 test.describe('Keyframe Panel', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -157,7 +115,6 @@ test.describe('Keyframe Panel', () => {
 
 test.describe('Overlay Tools', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -210,7 +167,6 @@ test.describe('Overlay Tools', () => {
 
 test.describe('Timeline Controls', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -257,7 +213,6 @@ test.describe('Timeline Controls', () => {
 
 test.describe('Waveform Display', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -283,7 +238,6 @@ test.describe('Waveform Display', () => {
 
 test.describe('Project Session', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -313,7 +267,6 @@ test.describe('Project Session', () => {
 
 test.describe('Inspector Panel', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })
@@ -340,7 +293,6 @@ test.describe('Inspector Panel', () => {
 
 test.describe('Toolbar', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
   })

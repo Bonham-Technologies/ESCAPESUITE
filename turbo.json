@@ -6,13 +6,7 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"],
       "env": [
-        "VITE_BUILD_MODE",
-        "VITE_STRIPE_PUBLISHABLE_KEY",
-        "VITE_SUPABASE_URL",
-        "VITE_SUPABASE_ANON_KEY",
-        "VITE_STRIPE_PRICE_PRO_MONTHLY",
-        "VITE_STRIPE_PRICE_PRO_ANNUAL",
-        "VITE_STRIPE_PRICE_FOUNDING"
+        "VITE_BUILD_MODE"
       ]
     },
     "dev": {

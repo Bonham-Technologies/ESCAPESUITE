@@ -8,8 +8,8 @@ on:
     types: [completed]
     branches: [main, dev]
 
-# Serialize deploys per branch so overlapping CI completions don't race on
-# Supabase uploads / release creation. Never cancel an in-flight deploy.
+# Serialize runs per branch so overlapping CI completions don't race on
+# release creation. Never cancel an in-flight run.
 concurrency:
   group: standalone-release-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
@@ -108,27 +108,6 @@ jobs:
           echo "ESCAPECRAFT size: ${CRAFT_SIZE}"
           echo "ESCAPEARTIST size: ${ARTIST_SIZE}"
 
-      - name: Generate version.json
-        run: |
-          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          cat > dist/version.json <<EOF
-          {
-            "craft": {
-              "version": "${{ steps.version.outputs.version }}",
-              "fileSize": "${{ steps.sizes.outputs.craft }}",
-              "buildDate": "${BUILD_DATE}",
-              "commit": "${{ github.event.workflow_run.head_sha }}"
-            },
-            "artist": {
-              "version": "${{ steps.version.outputs.version }}",
-              "fileSize": "${{ steps.sizes.outputs.artist }}",
-              "buildDate": "${BUILD_DATE}",
-              "commit": "${{ github.event.workflow_run.head_sha }}"
-            }
-          }
-          EOF
-          cat dist/version.json
-
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -136,55 +115,16 @@ jobs:
           path: dist/
           retention-days: 30
 
-  deploy-dev:
-    name: Deploy to Dev Storage
+  comment-pr:
+    name: PR Build Comment
     needs: prepare
     if: needs.prepare.outputs.is_pr == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: development
+    timeout-minutes: 10
     permissions:
       pull-requests: write
-    # Dev Supabase credentials scoped to this job only (kept out of `prepare`,
-    # which checks out code and downloads artifacts).
-    env:
-      SUPABASE_URL_DEV: ${{ secrets.SUPABASE_URL_DEV }}
-      SUPABASE_SERVICE_KEY_DEV: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
 
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: standalone-release
-          path: ./dist
-
-      - name: Upload to Supabase Storage (Dev)
-        run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-
-          # Upload versioned files
-          for file in dist/craft/ESCAPECRAFT-*.html dist/artist/ESCAPEARTIST-*.html; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename to dev storage..."
-              curl -X POST \
-                "${SUPABASE_URL_DEV}/storage/v1/object/downloads/${filename}" \
-                -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_DEV}" \
-                -H "Content-Type: text/html" \
-                -H "x-upsert: true" \
-                --data-binary "@$file"
-            fi
-          done
-
-          # Upload version.json
-          echo "Uploading version.json..."
-          curl -X POST \
-            "${SUPABASE_URL_DEV}/storage/v1/object/downloads/version.json" \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_DEV}" \
-            -H "Content-Type: application/json" \
-            -H "x-upsert: true" \
-            --data-binary "@dist/version.json"
-
       - name: Comment on PR
         uses: actions/github-script@v9
         with:
@@ -193,19 +133,20 @@ jobs:
             const craftSize = '${{ needs.prepare.outputs.craft_size }}';
             const artistSize = '${{ needs.prepare.outputs.artist_size }}';
             const prNumber = '${{ needs.prepare.outputs.pr_number }}';
-            const devUrl = process.env.SUPABASE_URL_DEV;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const body = [
-              '## 🚀 Standalone Preview Builds Ready',
+              '### 📦 Standalone builds ready',
               '',
-              '| App | Version | Size | Preview |',
-              '|-----|---------|------|---------|',
-              `| ESCAPECRAFT | \`${version}\` | ${craftSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |`,
-              `| ESCAPEARTIST | \`${version}\` | ${artistSize} | [Download](${devUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |`,
+              'Offline single-file builds for this PR are attached as the',
+              `\`standalone-release\` artifact on [this workflow run](${runUrl}).`,
               '',
-              '> These are dev preview builds. They will be promoted to production when the PR is merged.',
+              '| App | Version | Size |',
+              '|-----|---------|------|',
+              `| ESCAPECRAFT | \`${version}\` | ${craftSize} |`,
+              `| ESCAPEARTIST | \`${version}\` | ${artistSize} |`,
               '',
-              '_✅ Deployed after CI passed_'
+              '_✅ Built after CI passed_'
             ].join('\n');
 
             github.rest.issues.createComment({
@@ -215,21 +156,15 @@ jobs:
               body: body
             });
 
-  deploy-prod:
-    name: Deploy to Production Storage
+  release:
+    name: Create GitHub Release
     needs: prepare
-    # Deploy to prod when CI passes for a push to main (not a PR)
+    # Release only for a push to main (never for PR builds or dev pushes)
     if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production
     permissions:
       contents: write
-    # Prod Supabase credentials scoped to this job only (kept out of `prepare`,
-    # which checks out code and downloads artifacts).
-    env:
-      SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_KEY_PROD: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
     steps:
       - name: Download artifacts
@@ -238,90 +173,22 @@ jobs:
           name: standalone-release
           path: ./dist
 
-      - name: Upload to Supabase Storage (Production)
+      - name: Create release with attached builds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
+          if gh release view "v${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists, skipping."
+            exit 0
+          fi
 
-          # Upload versioned files (for release history)
-          for file in dist/craft/ESCAPECRAFT-*.html dist/artist/ESCAPEARTIST-*.html; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename to production storage..."
-              curl -X POST \
-                "${SUPABASE_URL_PROD}/storage/v1/object/downloads/${filename}" \
-                -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_PROD}" \
-                -H "Content-Type: text/html" \
-                -H "x-upsert: true" \
-                --data-binary "@$file"
-            fi
-          done
-
-          # Upload version.json
-          echo "Uploading version.json..."
-          curl -X POST \
-            "${SUPABASE_URL_PROD}/storage/v1/object/downloads/version.json" \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY_PROD}" \
-            -H "Content-Type: application/json" \
-            -H "x-upsert: true" \
-            --data-binary "@dist/version.json"
-
-      - name: Create GitHub Release
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const version = '${{ needs.prepare.outputs.version }}';
-            const craftSize = '${{ needs.prepare.outputs.craft_size }}';
-            const artistSize = '${{ needs.prepare.outputs.artist_size }}';
-            const headSha = '${{ github.event.workflow_run.head_sha }}';
-            const prodUrl = process.env.SUPABASE_URL_PROD;
-
-            // Check if release already exists
-            try {
-              await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag: `v${version}`
-              });
-              console.log(`Release v${version} already exists, skipping...`);
-              return;
-            } catch (e) {
-              if (e.status !== 404) throw e;
-            }
-
-            // Create tag
-            await github.rest.git.createRef({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: `refs/tags/v${version}`,
-              sha: headSha
-            });
-
-            // Create release body
-            const releaseBody = [
-              '## Standalone Downloads',
-              '',
-              '| App | Size | Download |',
-              '|-----|------|----------|',
-              `| ESCAPECRAFT | ${craftSize} | [ESCAPECRAFT-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-${version}.html) |`,
-              `| ESCAPEARTIST | ${artistSize} | [ESCAPEARTIST-${version}.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-${version}.html) |`,
-              '',
-              '### Latest (always up-to-date)',
-              `- [ESCAPECRAFT-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPECRAFT-latest.html)`,
-              `- [ESCAPEARTIST-latest.html](${prodUrl}/storage/v1/object/public/downloads/ESCAPEARTIST-latest.html)`,
-              '',
-              '### Changelog',
-              'See commit history for changes in this release.',
-              '',
-              '_✅ Released after CI passed_'
-            ].join('\n');
-
-            // Create release
-            await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: `v${version}`,
-              name: `ESCAPE Suite v${version}`,
-              body: releaseBody,
-              draft: false,
-              prerelease: false
-            });
+          gh release create "v${VERSION}" \
+            "dist/craft/ESCAPECRAFT-${VERSION}.html" \
+            "dist/artist/ESCAPEARTIST-${VERSION}.html" \
+            --repo "${REPO}" \
+            --target "${COMMIT}" \
+            --title "ESCAPE Suite v${VERSION}" \
+            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet."

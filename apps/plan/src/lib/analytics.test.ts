@@ -25,41 +25,6 @@ describe('analytics', () => {
     })
   })
 
-  describe('analytics.pricingViewed', () => {
-    it('tracks Pricing Viewed event', () => {
-      analytics.pricingViewed()
-      expect(track).toHaveBeenCalledWith('Pricing Viewed', undefined)
-    })
-  })
-
-  describe('analytics.checkoutStarted', () => {
-    it('tracks Checkout Started event with plan', () => {
-      analytics.checkoutStarted('pro_monthly')
-      expect(track).toHaveBeenCalledWith('Checkout Started', { plan: 'pro_monthly' })
-    })
-  })
-
-  describe('analytics.signUpCompleted', () => {
-    it('tracks Sign Up Completed event', () => {
-      analytics.signUpCompleted()
-      expect(track).toHaveBeenCalledWith('Sign Up Completed', undefined)
-    })
-  })
-
-  describe('analytics.trialActivated', () => {
-    it('tracks Trial Activated event', () => {
-      analytics.trialActivated()
-      expect(track).toHaveBeenCalledWith('Trial Activated', undefined)
-    })
-  })
-
-  describe('analytics.subscriptionActivated', () => {
-    it('tracks Subscription Activated event with plan', () => {
-      analytics.subscriptionActivated('pro_annual')
-      expect(track).toHaveBeenCalledWith('Subscription Activated', { plan: 'pro_annual' })
-    })
-  })
-
   describe('analytics.toolLaunched', () => {
     it('tracks Tool Launched event for craft', () => {
       analytics.toolLaunched('craft')

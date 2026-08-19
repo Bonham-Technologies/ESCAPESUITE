@@ -830,7 +830,7 @@ describe('exporter - abort signal handling', () => {
     const options = createTestOptions('webm')
 
     await expect(
-      exportToWebM(clips, sourceVideos, options, vi.fn(), undefined, undefined, controller.signal)
+      exportToWebM(clips, sourceVideos, options, vi.fn(), undefined, controller.signal)
     ).rejects.toThrow(ExportAbortedError)
   })
 
@@ -843,7 +843,7 @@ describe('exporter - abort signal handling', () => {
     const options = createTestOptions('mp4')
 
     await expect(
-      exportToMP4(clips, sourceVideos, options, vi.fn(), undefined, undefined, controller.signal)
+      exportToMP4(clips, sourceVideos, options, vi.fn(), undefined, controller.signal)
     ).rejects.toThrow(ExportAbortedError)
   })
 
@@ -856,7 +856,7 @@ describe('exporter - abort signal handling', () => {
     const options = createTestOptions('webm')
 
     try {
-      await exportToWebM(clips, sourceVideos, options, vi.fn(), undefined, undefined, controller.signal)
+      await exportToWebM(clips, sourceVideos, options, vi.fn(), undefined, controller.signal)
       expect.fail('Should have thrown')
     } catch (e) {
       expect(e).toBeInstanceOf(ExportAbortedError)

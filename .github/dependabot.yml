@@ -15,12 +15,6 @@ updates:
           - "react"
           - "react-dom"
           - "@types/react*"
-      stripe:
-        patterns:
-          - "@stripe/*"
-      supabase:
-        patterns:
-          - "@supabase/*"
       testing:
         patterns:
           - "vitest"

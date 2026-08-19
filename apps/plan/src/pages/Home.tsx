@@ -1,32 +1,7 @@
-import { useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
-import { SignedIn, SignedOut } from '../lib/auth'
-import { analytics } from '../lib/analytics'
+import { launchTool, GITHUB_URL, RELEASES_URL } from '../lib/launch'
 import styles from './Home.module.css'
 
 export default function Home() {
-  // Track when pricing section comes into view
-  const pricingRef = useRef<HTMLElement>(null)
-  const pricingTracked = useRef(false)
-
-  useEffect(() => {
-    const pricingSection = pricingRef.current
-    if (!pricingSection) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !pricingTracked.current) {
-          pricingTracked.current = true
-          analytics.pricingViewed()
-        }
-      },
-      { threshold: 0.5 }
-    )
-
-    observer.observe(pricingSection)
-    return () => observer.disconnect()
-  }, [])
-
   return (
     <div className={styles.home}>
       {/* Hero Section */}
@@ -37,26 +12,24 @@ export default function Home() {
             <span className={styles.gradient}>the cloud can't reach.</span>
           </h1>
           <p className={styles.heroSubtitle}>
-            ESCAPE Suite records and edits screencasts entirely in the browser. Host one copy on your
-            air-gapped or regulated network and your whole team can capture a walkthrough, trim the
-            mistakes, blur anything sensitive, and share it with shift workers and remote sites —
-            without a single byte leaving the building.
+            ESCAPE Suite records and edits screencasts entirely in the browser — free and
+            open source. Capture a walkthrough, trim the mistakes, blur anything sensitive,
+            and share it with shift workers and remote sites — without a single byte
+            leaving the building.
           </p>
           <div className={styles.heroCta}>
-            <Link to="/pricing?tab=site">
-              <button className="primary">See Site Licensing</button>
-            </Link>
-            <SignedOut>
-              <Link to="/sign-up">
-                <button>Try the hosted apps free</button>
-              </Link>
-            </SignedOut>
-            <SignedIn>
-              <Link to="/dashboard">
-                <button>Go to Dashboard</button>
-              </Link>
-            </SignedIn>
+            <button className="primary" onClick={() => launchTool('craft')}>
+              Start recording
+            </button>
+            <button onClick={() => launchTool('artist')}>Open the editor</button>
           </div>
+          <p className={styles.heroLinks}>
+            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">View on GitHub</a>
+            {' · '}
+            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
+              Download the offline build
+            </a>
+          </p>
         </div>
       </section>
 
@@ -82,6 +55,9 @@ export default function Home() {
               <li>Picture-in-Picture mode</li>
               <li>Saves locally, instantly</li>
             </ul>
+            <button className="primary" onClick={() => launchTool('craft')}>
+              Use ESCAPECRAFT
+            </button>
           </div>
 
           <div className={styles.toolCard}>
@@ -102,6 +78,9 @@ export default function Home() {
               <li>Keyframe animations</li>
               <li>MP4 &amp; WebM export</li>
             </ul>
+            <button className="primary" onClick={() => launchTool('artist')}>
+              Use ESCAPEARTIST
+            </button>
           </div>
         </div>
       </section>
@@ -118,7 +97,7 @@ export default function Home() {
               </svg>
             </div>
             <h3>Runs air-gapped</h3>
-            <p>The Site License build is 100% in-browser and fully offline. Drop the signed bundle onto your isolated network — no internet, ever.</p>
+            <p>The offline build is 100% in-browser and fully offline. Drop the single HTML file onto your isolated network — no internet, ever.</p>
           </div>
 
           <div className={styles.feature}>
@@ -131,7 +110,7 @@ export default function Home() {
               </svg>
             </div>
             <h3>One copy, whole org</h3>
-            <p>Host a single signed file internally; everyone on your network just opens it and works.</p>
+            <p>Host a single file internally; everyone on your network just opens it and works.</p>
           </div>
 
           <div className={styles.feature}>
@@ -142,7 +121,7 @@ export default function Home() {
               </svg>
             </div>
             <h3>Nothing leaves the building</h3>
-            <p>On the air-gapped Site License build, there are no uploads, no accounts for your users, and no telemetry — your footage stays on the device. (The hosted apps at escapesuite.io use accounts and standard web services.)</p>
+            <p>No uploads, no accounts, no telemetry in the offline build — your footage stays on the device.</p>
           </div>
 
           <div className={styles.feature}>
@@ -157,91 +136,20 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Pricing Section */}
-      <section className={styles.pricing} ref={pricingRef}>
-        <h2 className={styles.sectionTitle}>One license covers your whole network</h2>
-        <p className={styles.pricingSubtitle}>
-          Buy a Site License for your organization — or grab the hosted apps if you're flying solo.
-        </p>
-
-        <div className={styles.pricingOptions}>
-          <div className={`${styles.pricingOption} ${styles.featured}`}>
-            <div className={styles.badge}>For organizations</div>
-            <div className={styles.optionIcon}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <path d="M9 9h6v6H9z" />
-              </svg>
-            </div>
-            <h3>Site License</h3>
-            <p>Host once, license your whole air-gapped network</p>
-            <div className={styles.optionPricing}>
-              <span className={styles.startingAt}>Starting at</span>
-              <span className={styles.optionPrice}>$2,400<span>/yr</span></span>
-            </div>
-            <ul className={styles.optionFeatures}>
-              <li>Both apps, full features, no watermark</li>
-              <li>Signed offline bundle, license embedded</li>
-              <li>One copy serves everyone</li>
-            </ul>
-          </div>
-
-          <div className={styles.pricingOption}>
-            <div className={styles.optionIcon}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-            </div>
-            <h3>Individual</h3>
-            <p>Hosted apps for solo creators</p>
-            <div className={styles.optionPricing}>
-              <span className={styles.startingAt}>Starting at</span>
-              <span className={styles.optionPrice}>$9<span>/mo</span></span>
-            </div>
-            <ul className={styles.optionFeatures}>
-              <li>7-day free trial</li>
-              <li>No watermark on Pro</li>
-              <li>Use it at escapesuite.io</li>
-            </ul>
-          </div>
-        </div>
-
-        <div className={styles.pricingCta}>
-          <Link to="/pricing?tab=site">
-            <button className="primary">View Site Licensing</button>
-          </Link>
-          <SignedOut>
-            <Link to="/sign-up">
-              <button>Try the hosted apps free</button>
-            </Link>
-          </SignedOut>
-          <SignedIn>
-            <Link to="/dashboard">
-              <button>Go to Dashboard</button>
-            </Link>
-          </SignedIn>
-        </div>
-      </section>
-
-      {/* CTA Section */}
+      {/* Open Source Section */}
       <section className={styles.cta}>
-        <h2>Run it on your network</h2>
-        <p>License ESCAPE Suite for your network, or try the hosted apps free for 7 days.</p>
+        <h2>Free &amp; open source</h2>
+        <p>
+          ESCAPE Suite is MIT-licensed. Use the hosted apps right here, self-host the
+          static build, or grab the offline single-file build for air-gapped networks.
+        </p>
         <div className={styles.heroCta}>
-          <Link to="/pricing?tab=site">
-            <button className="primary">See Site Licensing</button>
-          </Link>
-          <SignedOut>
-            <Link to="/sign-up">
-              <button>Start Free Trial</button>
-            </Link>
-          </SignedOut>
-          <SignedIn>
-            <Link to="/dashboard">
-              <button>Go to Dashboard</button>
-            </Link>
-          </SignedIn>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+            <button className="primary">View on GitHub</button>
+          </a>
+          <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
+            <button>Download offline build</button>
+          </a>
         </div>
       </section>
     </div>

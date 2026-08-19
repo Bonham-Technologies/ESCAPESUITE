@@ -2,14 +2,12 @@
 // Combines screen capture with webcam overlay
 
 import type { WebcamPosition, WebcamShape } from '../store/types';
-import { drawWatermark, type WatermarkConfig } from './watermark';
 
 export interface CompositorConfig {
   webcamPosition: WebcamPosition;
   webcamSize: number; // 0.1 to 0.4 (percentage of screen width)
   webcamShape: WebcamShape;
   padding: number; // Padding from edges in pixels
-  watermark?: WatermarkConfig | null; // Optional watermark config
 }
 
 export class Compositor {
@@ -48,7 +46,6 @@ export class Compositor {
       webcamSize: config.webcamSize || 0.2,
       webcamShape: config.webcamShape || 'circle',
       padding: config.padding || 20,
-      watermark: config.watermark || null,
     };
   }
 
@@ -182,11 +179,6 @@ export class Compositor {
     // Draw webcam overlay
     if (this.webcamVideo && this.webcamVideo.readyState >= 2) {
       this.drawWebcamOverlay();
-    }
-
-    // Draw watermark if configured
-    if (this.config.watermark) {
-      drawWatermark(this.ctx, width, height, this.config.watermark);
     }
   }
 

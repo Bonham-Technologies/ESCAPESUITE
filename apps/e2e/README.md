@@ -29,43 +29,41 @@ pnpm test:journeys:headed # Journey tests with visible browser
 ```
 tests/
 ├── escapeplan/              # ESCAPEPLAN tests
-│   ├── landing.spec.ts      # Landing page and navigation
-│   ├── dashboard.spec.ts    # Dashboard functionality
-│   ├── pricing.spec.ts      # Pricing page and tiers
-│   └── downloads.spec.ts    # License downloads (Dashboard ?tab=downloads)
+│   ├── landing.spec.ts      # Landing page, tool launches, GitHub links
+│   └── components.spec.ts   # Header, theme toggle, footer, legal routes
 ├── escapecraft/             # ESCAPECRAFT tests
-│   └── recording-flow.spec.ts # Recording features
+│   ├── recording-flow.spec.ts # Recording features
+│   └── components.spec.ts   # Recorder UI
 ├── escapeartist/            # ESCAPEARTIST tests
 │   ├── video-import.spec.ts # Video import functionality
-│   └── timeline-editing.spec.ts # Timeline operations
+│   ├── timeline-editing.spec.ts # Timeline operations
+│   └── components.spec.ts   # Editor panels and dialogs
+├── accessibility/           # axe-core audits, keyboard, screen reader
+├── errors/                  # Permission, export, network, input failures
+├── responsive/              # Mobile / tablet / desktop layouts
 ├── integration/             # Cross-app integration tests
-│   └── craft-to-artist.spec.ts # CRAFT → ARTIST workflow
-├── standalone/              # Standalone build tests
-│   ├── craft.spec.ts        # ESCAPECRAFT standalone
-│   └── artist.spec.ts       # ESCAPEARTIST standalone
+│   ├── craft-to-artist.spec.ts # CRAFT → ARTIST workflow
+│   ├── indexeddb-sharing.spec.ts
+│   └── workflows.spec.ts
+├── standalone/              # Offline single-file build tests
+│   ├── craft.spec.ts        # ESCAPECRAFT offline build
+│   └── artist.spec.ts       # ESCAPEARTIST offline build
 └── journeys/                # User journey tests
-    ├── 01-visitor-to-trial.spec.ts
-    ├── 02-trial-record-edit-export.spec.ts
-    ├── 03-trial-to-pro-upgrade.spec.ts
-    ├── 04-pro-cancellation-flow.spec.ts
-    ├── 05-standalone-purchase-download.spec.ts
-    └── 07-standalone-license-activation.spec.ts
+    └── 01-record-edit-export.spec.ts
 ```
 
 ## User Journey Tests
 
-The `journeys/` directory contains comprehensive E2E tests covering critical user paths:
+The `journeys/` directory contains the full-product path, start to finish:
 
-### Individual User Journeys
+| Journey | Description |
+|---------|-------------|
+| 01 | Record (CRAFT) → hand off → Edit (ARTIST) → Export a downloaded file |
 
-| Journey | Description | Tests |
-|---------|-------------|-------|
-| 01 | Visitor → Browse → Pricing → Trial | 3 |
-| 02 | Trial → Record (CRAFT) → Edit (ARTIST) → Export | 4 |
-| 03 | Trial → Upgrade to Pro | 4 |
-| 04 | Pro → Cancel → Access until period end → Expired | 4 |
-| 05 | User → Purchase standalone license → Download | 5 |
-| 07 | Standalone → Manual license entry → Activation | 6 |
+The journey drives the real pipelines: synthetic camera/screen media feeds the
+actual recorder, the recorded bytes are imported into the editor, and the export
+is a real WebCodecs encode that ends in a browser download. It runs on Chromium
+only, because export needs WebCodecs.
 
 ### Running Journey Tests
 
@@ -84,36 +82,14 @@ The `utils/` directory provides reusable testing utilities:
 
 | Utility | Purpose |
 |---------|---------|
-| `auth.ts` | Mock Clerk authentication |
+| `accessibility.ts` | axe-core runner, focus order and visibility checks |
+| `error-mocks.ts` | Permission denial, offline/slow network, codec failures |
 | `indexeddb.ts` | IndexedDB management |
-| `media-mocks.ts` | Mock getUserMedia and MediaRecorder |
-| `stripe-mocks.ts` | Mock Stripe checkout and portal |
-| `subscription-mocks.ts` | Mock subscription states |
-| `license-mocks.ts` | Mock license validation |
-| `watermark-verification.ts` | Verify watermark presence |
+| `media-mocks.ts` | Inert media stubs plus `mockSyntheticMedia` (real canvas/audio streams) |
+| `viewports.ts` | Shared viewport sizes |
 
-### Test Fixtures
-
-The `fixtures/auth-fixtures.ts` provides pre-configured user fixtures:
-
-```typescript
-import { test, expect } from '../../fixtures/auth-fixtures'
-
-// Available fixtures:
-// - trialUser: Trial user with 14 days remaining
-// - proUser: Pro Monthly subscriber
-// - foundingUser: Founding Member (lifetime)
-// - expiredUser: Expired subscription
-// - canceledUser: Canceled but access until period end
-// - licensedUser: Valid standalone license
-// - signedOutUser: Visitor (no auth)
-
-test('trial user sees upgrade prompt', async ({ trialUser }) => {
-  const { page } = trialUser
-  await page.goto('http://localhost:5173/dashboard')
-  // Test with pre-mocked trial subscription state
-})
-```
+There are no auth, billing or licensing utilities: the apps have no accounts,
+no subscriptions and no gates, so tests just navigate and use them.
 
 See also: [Standalone Test Battery](../../docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists.
 
@@ -128,7 +104,7 @@ The CI workflow is optimized to balance thoroughness with speed:
 - Concurrent runs are cancelled when new commits are pushed
 
 ### Full E2E (Including Journeys)
-To run the complete test suite including all 69 journey tests:
+To run the complete test suite including the journey:
 1. Add the `run-full-e2e` label to your PR, OR
 2. Merge to `main` branch (full tests run automatically)
 
@@ -142,15 +118,18 @@ To run the complete test suite including all 69 journey tests:
 
 ### Test Configuration
 - Tests run against development servers started by Playwright
-- Mock Clerk key is used when `VITE_CLERK_PUBLISHABLE_KEY` is not set
-- Route mocking intercepts all external API calls (Clerk, Stripe, Supabase)
+- No environment variables are required: the apps have no backend
 
 ## Configuration
 
 The `playwright.config.ts` configures:
-- **Browser**: Chromium only (WebCodecs requirement)
+- **Browsers**: Chromium in CI; Chromium + Firefox + WebKit locally
 - **Base URLs**: localhost:5173, 5174, 5175 for each app
 - **Web Servers**: Auto-starts all three dev servers
+
+The `playwright.standalone.config.ts` serves the pre-built single-file bundles
+from `apps/craft/dist` and `apps/artist/dist` on ports 5184 / 5185, so run
+`pnpm build:standalone` before `pnpm test:e2e:standalone`.
 
 ## Writing Tests
 

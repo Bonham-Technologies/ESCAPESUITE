@@ -24,7 +24,7 @@ export default function Layout() {
           <span className={styles.footerDivider}>|</span>
           <Link to="/terms">Terms of Service</Link>
         </div>
-        <p>&copy; {new Date().getFullYear()} <a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a>. All rights reserved.</p>
+        <p>&copy; {new Date().getFullYear()} <a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a> &middot; <a href="https://github.com/Bonham-Technologies/ESCAPESUITE/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a></p>
       </footer>
     </div>
   )

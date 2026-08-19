@@ -2,32 +2,39 @@ import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 
 /**
- * Smoke tests for ESCAPECRAFT standalone build.
+ * Smoke tests for the ESCAPECRAFT offline build.
  *
- * These tests verify that the standalone build:
- * 1. Loads without auth requirements
+ * These tests verify that the single-file build:
+ * 1. Opens straight into the recorder — no gate, no modal, no sign-in
  * 2. Renders the main UI components
- * 3. Has functional recording interface
+ * 3. Has a functional recording interface
+ * 4. Talks to nothing outside itself
  */
 
 const CRAFT_URL = 'http://localhost:5184'
 
 test.describe('ESCAPECRAFT Standalone - App Loading', () => {
-  test('loads without authentication', async ({ page }) => {
+  test('opens straight into the recorder', async ({ page }) => {
     await page.goto(CRAFT_URL)
     await page.waitForLoadState('networkidle')
 
-    // Should load the app without auth gate
     const html = await page.content()
     expect(html).toContain('<!DOCTYPE html>')
     expect(html).toContain('<div id="root">')
 
-    // Wait for React to mount
-    await page.waitForTimeout(1000)
+    // The recorder itself is on screen — nothing gates it
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
 
-    // Root should have content (app loaded)
-    const rootChildren = await page.locator('#root').evaluate((el) => el.children.length)
-    expect(rootChildren).toBeGreaterThan(0)
+    // No blocking modal (activation / sign-in / upgrade prompts are all gone)
+    expect(await page.getByRole('dialog').count()).toBe(0)
+  })
+
+  test('does not show the ESCAPEPLAN hub link', async ({ page }) => {
+    await page.goto(CRAFT_URL)
+    await page.waitForLoadState('networkidle')
+
+    // The hub link only renders in hosted mode (isStandaloneMode() gates it)
+    expect(await page.getByRole('link', { name: '← ESCAPE Suite' }).count()).toBe(0)
   })
 
   test('has page title', async ({ page }) => {
@@ -137,13 +144,13 @@ test.describe('ESCAPECRAFT Standalone - Theme Support', () => {
 })
 
 test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
-  test('does not make Clerk API calls', async ({ page }) => {
-    const clerkCalls: string[] = []
+  test('makes no requests off the local origin', async ({ page }) => {
+    const externalCalls: string[] = []
 
     page.on('request', (request) => {
       const url = request.url()
-      if (url.includes('clerk')) {
-        clerkCalls.push(url)
+      if (!url.startsWith('data:') && !url.startsWith('blob:') && !url.includes('localhost:5184')) {
+        externalCalls.push(url)
       }
     })
 
@@ -151,8 +158,8 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     await page.waitForLoadState('networkidle')
     await page.waitForTimeout(2000)
 
-    // Standalone should not call Clerk
-    expect(clerkCalls).toHaveLength(0)
+    // The offline build is air-gapped: no auth, no analytics, no phoning home
+    expect(externalCalls).toHaveLength(0)
   })
 
   test('single HTML file contains all assets', async ({ page }) => {

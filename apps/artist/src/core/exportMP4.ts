@@ -14,7 +14,6 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValuesCached, clearAnimationCache } from '../utils/animation';
-import { drawWatermark, type WatermarkConfig } from '../utils/watermark';
 import { isWebCodecsAvailable } from './frameSource';
 import type { DrawableMediaSource, ProgressCallback } from './exportTypes';
 import {
@@ -79,7 +78,6 @@ export async function exportToMP4(
   options: ExportOptions,
   onProgress: ProgressCallback,
   tracks?: Track[],
-  watermark?: WatermarkConfig | null,
   signal?: AbortSignal,
   projectResolution?: { width: number; height: number }
 ): Promise<Blob> {
@@ -521,11 +519,6 @@ export async function exportToMP4(
         } else if (clip.overlayType === 'text' && clip.textData) {
           drawTextOverlayToCanvasAnimated(ctx, clip.textData, width, height, animated);
         }
-      }
-
-      // Draw watermark if enabled (for trial users)
-      if (watermark) {
-        drawWatermark(ctx, width, height, watermark);
       }
 
       // Create VideoFrame from canvas — timestamp relative to export start (not timeline)

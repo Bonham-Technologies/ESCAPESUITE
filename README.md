@@ -2,17 +2,19 @@
 
 [![CI](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml)
 
-Privacy-first, client-side media creation tools that run entirely in the browser. All video processing happens locally on your hardware. The air-gapped Site License runs fully offline with no cloud uploads; the connected Individual Pro side door uses Supabase, Stripe, Resend, and Vercel for auth, billing, and email.
+Free, open-source (MIT), privacy-first media creation tools that run entirely in the browser. Nothing you record or edit ever leaves your machine.
 
-**Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.**
+## Use it now
 
-## Apps
+Hosted free at [escapesuite.io](https://escapesuite.io) — no account, no sign-up.
 
-| App | Description | Production |
-|-----|-------------|------------|
-| **ESCAPEPLAN** | Hub, authentication & subscriptions | [escapesuite.io](https://escapesuite.io) |
+| App | Description | Try it |
+|-----|-------------|--------|
+| **ESCAPEPLAN** | Landing page & hub | [escapesuite.io](https://escapesuite.io) |
 | **ESCAPECRAFT** | Screen & webcam recorder | [escapesuite.io/craft](https://escapesuite.io/craft) |
 | **ESCAPEARTIST** | Video editor with timeline & effects | [escapesuite.io/artist](https://escapesuite.io/artist) |
+
+Or download the offline build from [Releases](https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest) — a single HTML file that runs air-gapped, no internet required.
 
 ## Features
 
@@ -31,16 +33,16 @@ Privacy-first, client-side media creation tools that run entirely in the browser
 - Blur effect for privacy/focus
 - Export to WebM (VP9) or MP4 (H.264)
 
-### ESCAPEPLAN - Hub
-- Supabase authentication
-- Stripe subscription management
-- Dashboard for launching tools
+### ESCAPEPLAN - Landing page & hub
+- Landing page with links to ESCAPECRAFT and ESCAPEARTIST
+- Privacy and terms pages
+- No accounts, no sign-in, no tracking of personal data
 
-## Quick Start
+## Quick start (development)
 
 ```bash
 # Clone the repository
-git clone https://github.com/bonham-technologies/ESCAPESUITE.git
+git clone https://github.com/Bonham-Technologies/ESCAPESUITE.git
 cd ESCAPESUITE
 
 # Install dependencies
@@ -48,172 +50,53 @@ pnpm install
 
 # Start all apps in development
 pnpm dev
-
-# Or start individual apps
-pnpm dev:plan    # http://localhost:5173
-pnpm dev:craft   # http://localhost:5174
-pnpm dev:artist  # http://localhost:5175
 ```
 
-## Monorepo Structure
+| App | Dev URL |
+|-----|---------|
+| ESCAPEPLAN | http://localhost:5173 |
+| ESCAPECRAFT | http://localhost:5174 |
+| ESCAPEARTIST | http://localhost:5175 |
 
-```
-escapesuite/
-├── apps/
-│   ├── plan/           # ESCAPEPLAN - hub & auth
-│   ├── craft/          # ESCAPECRAFT - recorder
-│   ├── artist/         # ESCAPEARTIST - video editor
-│   └── e2e/            # End-to-end tests (Playwright)
-├── packages/
-│   └── shared/         # Shared types and utilities
-├── scripts/
-│   └── build-all.mjs   # Combined build for Vercel
-├── turbo.json          # Turborepo configuration
-├── pnpm-workspace.yaml # pnpm workspace definition
-└── vercel.json         # Vercel deployment config
-```
-
-## Development Commands
-
-All commands run from the monorepo root:
+Or start individual apps: `pnpm dev:plan`, `pnpm dev:craft`, `pnpm dev:artist`.
 
 ```bash
-# Development
-pnpm dev                 # All apps in parallel
-pnpm dev:plan            # Just ESCAPEPLAN
-pnpm dev:craft           # Just ESCAPECRAFT
-pnpm dev:artist          # Just ESCAPEARTIST
-
-# Building
+# Production builds
 pnpm build               # Build all apps (Turbo cached)
-pnpm build:deploy        # Combined build for Vercel
-
-# Testing
-pnpm test                # Unit tests for all apps
-pnpm test:coverage       # With coverage reports
-pnpm test:e2e            # Playwright E2E tests
-
-# Code Quality
-pnpm lint                # ESLint for all apps
-
-# Cleanup
-pnpm clean               # Remove node_modules and dist
+pnpm build:standalone    # Offline single-file builds (ESCAPECRAFT + ESCAPEARTIST)
 ```
 
-## Tech Stack
+No environment variables are required to build or run anything in this repo.
 
-- **Framework**: React 19 + TypeScript
-- **Build**: Vite + Turborepo
-- **State**: Zustand
-- **Auth**: Supabase Auth
-- **Payments**: Stripe
-- **Email**: Resend (transactional)
-- **Backend**: Supabase Edge Functions
-- **Storage**: IndexedDB (client-side)
-- **Video**: WebCodecs API, MediaRecorder
-- **Testing**: Vitest + Playwright
-- **Deployment**: Vercel
-
-## CI/CD Pipeline
-
-The repository includes comprehensive CI/CD:
-
-| Job | Description |
-|-----|-------------|
-| **validate** | Dependency install & security audit |
-| **lint** | ESLint across all apps |
-| **type-check** | TypeScript validation |
-| **test** | Unit tests with coverage |
-| **build** | Production builds with bundle size reporting |
-| **e2e** | Playwright tests (main branch only) |
-
-**Automated Updates**: Dependabot monitors dependencies weekly with grouped PRs.
-
-## Deployment
-
-| Branch | Domain | Purpose |
-|--------|--------|---------|
-| `main` | escapesuite.io | Production |
-| `dev` | escapesuite.dev | Staging |
-| PRs | `*.vercel.app` | Preview |
-
-## Environment Variables
-
-Create `.env.local` in each app or set in Vercel:
-
-```env
-# All apps
-VITE_SUPABASE_URL=https://xxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJxxx
-
-# ESCAPEPLAN only
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
-
-# Optional
-VITE_BUILD_MODE=saas
-```
-
-> **Note:** Stripe Price IDs are configured server-side via Supabase Edge Functions; the
-> frontend uses only the publishable key for the embedded checkout UI.
-
-## Browser Support
-
-| Browser | Recording | Editing | WebM Export | MP4 Export |
-|---------|-----------|---------|-------------|------------|
-| Chrome 94+ | Full | Full | Full | Full |
-| Edge 94+ | Full | Full | Full | Full |
-| Firefox 100+ | Full | Full | Full | Not supported |
-| Safari 16+ | Limited | Limited | Limited | Not supported |
-
-## Releases
-
-This monorepo uses [Changesets](https://github.com/changesets/changesets) for version management.
-
-### Creating a Changeset
-
-When making changes that should be released:
+## Self-hosting
 
 ```bash
-pnpm changeset
+pnpm build:deploy        # Combined build for deployment, outputs to /dist
 ```
 
-This will prompt you to:
-1. Select which packages changed
-2. Choose the bump type (major/minor/patch)
-3. Write a summary of changes
+`pnpm build:deploy` produces a static `dist/` directory (ESCAPEPLAN at the root, ESCAPECRAFT at `/craft/`, ESCAPEARTIST at `/artist/`) that you can deploy to any static host — Vercel, Netlify, GitHub Pages, S3, or a plain web server.
 
-A changeset file is created in `.changeset/` - commit this with your PR.
+The offline build (`pnpm build:standalone`) needs no host at all — it's a single self-contained HTML file per app that you can open directly from disk (`file://`) or hand to someone else.
 
-### Release Process
+## Browser support
 
-1. Changesets accumulate on `main` as PRs are merged
-2. The Release workflow automatically creates a "Version Packages" PR
-3. Merging that PR bumps versions, updates CHANGELOGs, and creates git tags
-4. GitHub Releases are automatically created for each package
+Recording works in all modern browsers (Chrome, Edge, Firefox, Safari). Exporting video (WebM/MP4) requires the WebCodecs API, which is currently only available in **Chrome and Edge**.
 
-### Versioning
+## Testing
 
-- All main apps (`plan`, `craft`, `artist`) are **linked** - they version together
-- E2E tests are excluded from versioning
+```bash
+pnpm test                # Unit tests for all apps
+pnpm test:e2e             # Playwright E2E tests (Chromium)
+```
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make changes and test (`pnpm test && pnpm lint`)
-4. **Add a changeset** if your changes should be released (`pnpm changeset`)
-5. Commit and push
-6. Open a Pull Request
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR guidelines.
 
 ## License
 
-This software is proprietary. See [LICENSE](LICENSE) for details.
-
-- **Site License** (air-gapped/offline): Annual organization license from Bonham Technologies, LLC — Team $2,400/yr (~up to 25), Organization $9,600/yr (~up to 250), Enterprise/Site is "Contact us" via sales@escapesuite.io
-- **Individual Pro** (connected SaaS): Use via [escapesuite.io](https://www.escapesuite.io) at $9/month or $89/year (7-day free trial)
+MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
 **ESCAPE Suite** - Professional media creation in your browser.
-
-Copyright (c) 2025 Bonham Technologies, LLC. All Rights Reserved.

@@ -1,11 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn, mockSignedOut } from '../../utils/auth'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { checkAriaLiveRegions } from '../../utils/accessibility'
+import { seedTextClip } from '../../utils/artist'
 
 test.describe('ARIA Live Regions', () => {
   test('ESCAPEPLAN has status announcements', async ({ page }) => {
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -20,7 +19,6 @@ test.describe('ARIA Live Regions', () => {
   })
 
   test('ESCAPECRAFT announces recording status', async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -38,7 +36,6 @@ test.describe('ARIA Live Regions', () => {
   })
 
   test('ESCAPEARTIST announces export progress', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -53,68 +50,42 @@ test.describe('ARIA Live Regions', () => {
 })
 
 test.describe('Dialog Announcements', () => {
-  test('ESCAPEPLAN dialogs have proper roles', async ({ page }) => {
-    await mockSignedOut(page)
-    await page.goto('http://localhost:5173')
+  test('ESCAPECRAFT help dialog is accessible', async ({ page }) => {
+    await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
 
-    // Try to open a modal
-    const trigger = page
-      .getByRole('button', { name: /sign in|sign up|get started/i })
-      .first()
+    const trigger = page.getByRole('button', { name: /help - recording tips/i })
+    await expect(trigger).toBeVisible()
+    await trigger.click()
 
-    const isVisible = await trigger.isVisible().catch(() => false)
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
 
-    if (isVisible) {
-      await trigger.click()
-      await page.waitForTimeout(500)
+    // Dialog should have aria-modal
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
 
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        // Dialog should have aria-modal
-        const modal = await dialog.getAttribute('aria-modal')
-        expect(modal).toBe('true')
-
-        // Dialog should have a title
-        const labelledBy = await dialog.getAttribute('aria-labelledby')
-        const label = await dialog.getAttribute('aria-label')
-        expect(labelledBy || label).toBeTruthy()
-      }
-    }
+    // Dialog should have a title
+    const labelledBy = await dialog.getAttribute('aria-labelledby')
+    const label = await dialog.getAttribute('aria-label')
+    expect(labelledBy || label).toBeTruthy()
   })
 
-  test('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
-    await mockSignedIn(page)
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // The export modal is a plain <div>: screen readers get no dialog role, no
+  // aria-modal and no accessible name when it opens.
+  test.fixme('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    // Export is disabled until the timeline holds a clip
+    await seedTextClip(page)
+    await page.getByRole('button', { name: 'Export video' }).click()
+    await expect(page.getByRole('heading', { name: 'Export Video' })).toBeVisible()
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await exportButton.click()
-      await page.waitForTimeout(500)
-
-      const dialog = page.getByRole('dialog')
-      const dialogVisible = await dialog.isVisible().catch(() => false)
-
-      if (dialogVisible) {
-        // Check for proper dialog semantics
-        const modal = await dialog.getAttribute('aria-modal')
-        expect(modal).toBe('true')
-
-        // Check for heading
-        const heading = dialog.locator('h1, h2, h3, [role="heading"]').first()
-        const hasHeading = await heading.isVisible().catch(() => false)
-        expect(hasHeading).toBe(true)
-      }
-    }
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
+    await expect(dialog.locator('h1, h2, h3, [role="heading"]').first()).toBeVisible()
   })
 })
 
@@ -123,7 +94,6 @@ test.describe('Landmark Regions', () => {
   // rendering timing issues. The apps DO have proper landmarks (main, nav, header)
   // in their source code. Run locally to verify.
   test.skip('ESCAPEPLAN has proper landmarks', async ({ page }) => {
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -149,7 +119,6 @@ test.describe('Landmark Regions', () => {
   })
 
   test.skip('ESCAPECRAFT has proper landmarks', async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -171,7 +140,6 @@ test.describe('Landmark Regions', () => {
   })
 
   test.skip('ESCAPEARTIST has proper landmarks', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -193,7 +161,6 @@ test.describe('Landmark Regions', () => {
 
 test.describe('Form Error Announcements', () => {
   test('form errors are announced', async ({ page }) => {
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
 
@@ -225,7 +192,6 @@ test.describe('Form Error Announcements', () => {
 
 test.describe('Progress Indicator Announcements', () => {
   test('loading states are announced', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -240,7 +206,6 @@ test.describe('Progress Indicator Announcements', () => {
   })
 
   test('progressbar has proper attributes', async ({ page }) => {
-    await mockSignedIn(page)
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
@@ -261,7 +226,6 @@ test.describe('Progress Indicator Announcements', () => {
 
 test.describe('Button and Control Announcements', () => {
   test('icon buttons have accessible names', async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -286,8 +250,10 @@ test.describe('Button and Control Announcements', () => {
     }
   })
 
-  test('toggle buttons announce state', async ({ page }) => {
-    await mockSignedIn(page)
+  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
+  // ESCAPECRAFT's source toggles carry no aria-pressed, aria-checked or
+  // role="switch", so their on/off state is never announced.
+  test.fixme('toggle buttons announce state', async ({ page }) => {
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
@@ -316,40 +282,7 @@ test.describe('Button and Control Announcements', () => {
 })
 
 test.describe('Table and List Accessibility', () => {
-  test('data tables have proper structure', async ({ page }) => {
-    await mockSignedIn(page)
-    await page.goto('http://localhost:5173/dashboard')
-    await page.waitForLoadState('networkidle')
-
-    const tables = page.locator('table')
-    const count = await tables.count()
-
-    for (let i = 0; i < count; i++) {
-      const table = tables.nth(i)
-      const isVisible = await table.isVisible().catch(() => false)
-
-      if (isVisible) {
-        // Check for headers
-        const headers = table.locator('th')
-        const headerCount = await headers.count()
-
-        // Tables should have headers
-        expect(headerCount).toBeGreaterThan(0)
-
-        // Check for caption or aria-label
-        const caption = table.locator('caption')
-        const hasCaption = (await caption.count()) > 0
-        const ariaLabel = await table.getAttribute('aria-label')
-        const ariaLabelledBy = await table.getAttribute('aria-labelledby')
-
-        // Table should be labeled
-        expect(hasCaption || ariaLabel || ariaLabelledBy).toBeTruthy()
-      }
-    }
-  })
-
   test('lists have proper structure', async ({ page }) => {
-    await mockSignedIn(page)
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')

@@ -1,18 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
-import { MOCK_SUPABASE_URL, MOCK_SUPABASE_ANON_KEY } from './utils/auth'
 
 const isCI = !!process.env.CI
-
-// Force the deterministic mock Supabase project for all dev servers so the
-// supabase-js client derives the same localStorage key the auth mock seeds
-// (see utils/auth.ts). E2E never hits a real Supabase — all calls are mocked.
-const devEnv = {
-  VITE_SUPABASE_URL: MOCK_SUPABASE_URL,
-  VITE_SUPABASE_ANON_KEY: MOCK_SUPABASE_ANON_KEY,
-  // Dummy Stripe key so @stripe/stripe-js doesn't throw on init; checkout is
-  // mocked in stripe-mocks.ts and js.stripe.com is aborted there.
-  VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_e2e_mock',
-}
 
 const crossBrowserProjects = [
   {
@@ -106,7 +94,6 @@ export default defineConfig({
       port: 5173,
       reuseExistingServer: true,
       timeout: 120000,
-      env: devEnv,
     },
     {
       command: 'pnpm run dev',
@@ -114,7 +101,6 @@ export default defineConfig({
       port: 5174,
       reuseExistingServer: true,
       timeout: 120000,
-      env: devEnv,
     },
     {
       command: 'pnpm run dev',
@@ -122,7 +108,6 @@ export default defineConfig({
       port: 5175,
       reuseExistingServer: true,
       timeout: 120000,
-      env: devEnv,
     },
   ],
 })

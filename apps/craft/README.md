@@ -39,10 +39,10 @@ pnpm dev
 # From monorepo root
 pnpm build:craft
 
-# Standard build (with auth)
+# Standard web build
 pnpm build
 
-# Standalone build (single HTML, no auth)
+# Offline single-file build
 pnpm build:standalone
 ```
 
@@ -60,7 +60,7 @@ The standalone build outputs a single `index.html` file that can be used offline
 
 | App | Port | Description |
 |-----|------|-------------|
-| ESCAPEPLAN | 5173 | Hub & auth |
+| ESCAPEPLAN | 5173 | Landing page & hub |
 | ESCAPECRAFT | 5174 | This app - recorder |
 | ESCAPEARTIST | 5175 | Video editor |
 

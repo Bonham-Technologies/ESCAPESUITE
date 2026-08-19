@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Privacy-first, client-side media creation tools",
   "author": "Bonham Technologies, LLC",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "turbo dev",

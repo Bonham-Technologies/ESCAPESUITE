@@ -167,8 +167,6 @@ jobs:
         run: pnpm build
         env:
           VITE_BUILD_MODE: saas
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Report bundle sizes
         run: |
@@ -336,11 +334,10 @@ jobs:
           path: apps/e2e/test-results/
           retention-days: 7
 
-  # Standalone build - builds auth-free single-file versions
-  # Skip for Dependabot: its runs carry no repo secrets, so the H4 fail-closed
-  # key check below (and the keyed build) can never pass. The standalone
-  # artifact is irrelevant to a dependency bump, and the ci-status gate exempts
-  # Dependabot here to match (same pattern as e2e/test-standalone/deploy).
+  # Standalone build - builds the offline single-file versions
+  # Skip for Dependabot: the standalone artifact is irrelevant to a dependency
+  # bump, and the ci-status gate exempts Dependabot here to match (same pattern
+  # as e2e/test-standalone/deploy).
   build-standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -364,20 +361,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify license public key is available
-        run: |
-          if [ -z "${{ secrets.LICENSE_PUBLIC_KEY }}" ]; then
-            echo "::error::LICENSE_PUBLIC_KEY secret is empty. Standalone builds fail closed (audit H4), so a keyless shipped build would reject ALL licenses. Set the secret before merging."
-            exit 1
-          fi
-
       - name: Build standalone versions
         run: pnpm build:standalone
         env:
           VITE_BUILD_MODE: standalone
-          # Baked into the shipped single-file builds so they can verify license
-          # signatures (audit H4). It's a PUBLIC key — safe to embed in client builds.
-          VITE_LICENSE_PUBLIC_KEY: ${{ secrets.LICENSE_PUBLIC_KEY }}
 
       - name: Report standalone bundle sizes
         run: |
@@ -413,13 +400,12 @@ jobs:
             apps/artist/dist
           retention-days: 30
 
-  # Standalone E2E tests - verify auth-free builds work correctly
+  # Standalone E2E tests — verify offline single-file builds work correctly
   test-standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Builds its OWN standalone bundle with a disposable test key so the
-    # fail-closed gate (audit H4) can verify the E2E's test-signed mock licenses.
-    # Does not consume the real-key build-standalone artifact.
+    # Builds its OWN standalone bundle so the E2E run is independent of the
+    # build-standalone job's artifact.
     needs: [lint-and-typecheck, test]
     if: |
       (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
@@ -443,14 +429,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build standalone versions (disposable E2E test key)
+      - name: Build standalone versions
         run: pnpm build:standalone
         env:
           VITE_BUILD_MODE: standalone
-          # Disposable test PUBLIC key — matches the signing key in
-          # apps/e2e/utils/license-mocks.ts. NOT a production key. Lets the
-          # fail-closed gate (audit H4) verify the E2E's test-signed mock licenses.
-          VITE_LICENSE_PUBLIC_KEY: 334ad57afb4246efec5cea53dd64a0f25828cb3d32da5a38d9661e245436daee
 
       - name: Verify standalone builds
         run: |
@@ -541,8 +523,6 @@ jobs:
         run: vercel build ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--prod' || '' }} --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VITE_BUILD_MODE: saas
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Deploy to Vercel
         id: deploy
@@ -629,9 +609,9 @@ jobs:
             exit 1
           fi
 
-          # Standalone build must pass (skipped for Dependabot, which has no
-          # secrets to satisfy the H4 fail-closed key check — mirrors e2e/
-          # test-standalone below)
+          # Standalone build must pass (skipped for Dependabot, whose dependency
+          # bumps don't need the offline artifact — mirrors e2e/test-standalone
+          # below)
           if [ "${{ github.actor }}" != "dependabot[bot]" ] && \
              [ "${{ needs.build-standalone.result }}" != "success" ]; then
             echo "Standalone build failed"

@@ -17,7 +17,7 @@ import { saveSessionState, getSessionState, clearSessionState, getVideo, getThum
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
-import { isStandaloneMode } from './auth';
+import { isStandaloneMode } from '@escapesuite/shared/config';
 import { formatTime } from './utils/timeUtils';
 import styles from './App.module.css';
 
@@ -680,8 +680,8 @@ function App() {
       <header className={styles.header}>
         <div className={styles.headerLeft}>
           {!isStandaloneMode() && (
-            <a href="/dashboard" className={styles.dashboardLink} title="Back to Dashboard">
-              ← Dashboard
+            <a href="/" className={styles.dashboardLink} title="Back to ESCAPE Suite">
+              ← ESCAPE Suite
             </a>
           )}
           <h1 className={styles.logo}>ESCAPEARTIST</h1>

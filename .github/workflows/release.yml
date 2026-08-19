@@ -72,9 +72,9 @@ jobs:
               }
             }
 
-  # Upload standalone builds to Supabase Storage when craft or artist is released
+  # Attach standalone builds to the GitHub Release when craft or artist is released
   upload-standalone:
-    name: Upload Standalone Builds
+    name: Attach Standalone Builds
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: release
@@ -130,7 +130,6 @@ jobs:
         run: pnpm build:standalone
         env:
           VITE_BUILD_MODE: standalone
-          VITE_LICENSE_PUBLIC_KEY: ${{ secrets.LICENSE_PUBLIC_KEY }}
 
       - name: Prepare versioned builds
         if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
@@ -141,8 +140,7 @@ jobs:
           if [ "${{ steps.check-apps.outputs.craft_released }}" == "true" ]; then
             VERSION="${{ steps.check-apps.outputs.craft_version }}"
             cp apps/craft/dist/index.html "uploads/ESCAPECRAFT-${VERSION}.html"
-            cp apps/craft/dist/index.html "uploads/ESCAPECRAFT-latest.html"
-            echo "Created ESCAPECRAFT builds for version $VERSION"
+            echo "Created ESCAPECRAFT build for version $VERSION"
             ls -la uploads/ESCAPECRAFT*
           fi
 
@@ -150,59 +148,9 @@ jobs:
           if [ "${{ steps.check-apps.outputs.artist_released }}" == "true" ]; then
             VERSION="${{ steps.check-apps.outputs.artist_version }}"
             cp apps/artist/dist/index.html "uploads/ESCAPEARTIST-${VERSION}.html"
-            cp apps/artist/dist/index.html "uploads/ESCAPEARTIST-latest.html"
-            echo "Created ESCAPEARTIST builds for version $VERSION"
+            echo "Created ESCAPEARTIST build for version $VERSION"
             ls -la uploads/ESCAPEARTIST*
           fi
-
-      - name: Create version manifest
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
-        run: |
-          # Build version.json with current versions
-          cat > uploads/version.json << EOF
-          {
-            "generated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "products": {
-              "craft": {
-                "version": "${{ steps.check-apps.outputs.craft_version || 'null' }}",
-                "file": "ESCAPECRAFT-${{ steps.check-apps.outputs.craft_version || 'latest' }}.html",
-                "latestFile": "ESCAPECRAFT-latest.html"
-              },
-              "artist": {
-                "version": "${{ steps.check-apps.outputs.artist_version || 'null' }}",
-                "file": "ESCAPEARTIST-${{ steps.check-apps.outputs.artist_version || 'latest' }}.html",
-                "latestFile": "ESCAPEARTIST-latest.html"
-              }
-            }
-          }
-          EOF
-
-          echo "Version manifest:"
-          cat uploads/version.json
-
-      - name: Upload to Supabase Storage
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
-        env:
-          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          # Upload each file to Supabase Storage
-          for file in uploads/*; do
-            FILENAME=$(basename "$file")
-            echo "Uploading $FILENAME..."
-
-            curl -X POST \
-              "${SUPABASE_URL}/storage/v1/object/downloads/${FILENAME}" \
-              -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
-              -H "Content-Type: text/html" \
-              -H "x-upsert: true" \
-              --data-binary @"$file" \
-              --fail --silent --show-error
-
-            echo "Uploaded $FILENAME"
-          done
-
-          echo "All files uploaded to Supabase Storage"
 
       - name: Attach builds to GitHub Release
         if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'

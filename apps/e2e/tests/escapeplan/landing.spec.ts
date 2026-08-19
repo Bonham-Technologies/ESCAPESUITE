@@ -1,112 +1,82 @@
 import { test, expect } from '@playwright/test'
-import { mockSignedIn, mockSignedOut } from '../../utils/auth'
+
+const GITHUB_URL = 'https://github.com/Bonham-Technologies/ESCAPESUITE'
 
 test.describe('ESCAPEPLAN Landing Page', () => {
   test.beforeEach(async ({ page }) => {
-    // Mock Clerk (signed out state for landing page)
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
 
   test('app loads without errors', async ({ page }) => {
-    // Verify the server is responding and page has HTML structure
     const html = await page.content()
     expect(html).toContain('<!DOCTYPE html>')
     expect(html).toContain('<div id="root">')
   })
 
-  test('displays hero section with main headline', async ({ page }) => {
-    // Look for any h1 heading
-    const heading = page.locator('h1').first()
-    const isVisible = await heading.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+  test('renders the hero headline', async ({ page }) => {
+    const heading = page.getByRole('heading', { level: 1 })
+    await expect(heading).toBeVisible()
+    await expect(heading).toContainText(/how-to videos/i)
   })
 
-  test('shows navigation', async ({ page }) => {
-    // Look for nav or header element
-    const nav = page.locator('nav').or(page.locator('header'))
-    const isVisible = await nav.first().isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+  test('hero offers both tools', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open the editor' })).toBeVisible()
   })
 
-  test('has some page sections', async ({ page }) => {
-    // Check for any section elements
-    const sections = page.locator('section')
-    const count = await sections.count()
-    // May have 0 sections if app doesn't render
-    expect(count).toBeGreaterThanOrEqual(0)
+  test('tool cards launch ESCAPECRAFT and ESCAPEARTIST', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Use ESCAPECRAFT' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Use ESCAPEARTIST' })).toBeVisible()
   })
 
-  test('shows pricing information', async ({ page }) => {
-    // Look for pricing text anywhere on page
-    const pricing = page.getByText(/pricing|plans|\$|month|year/i).first()
-    const isVisible = await pricing.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+  test('links to the public GitHub repository', async ({ page }) => {
+    const repoLinks = page.locator(`a[href="${GITHUB_URL}"]`)
+    expect(await repoLinks.count()).toBeGreaterThan(0)
+    await expect(repoLinks.first()).toHaveAttribute('target', '_blank')
   })
 
-  test('has call-to-action buttons', async ({ page }) => {
-    // Check for any buttons
-    const buttons = page.getByRole('button')
-    const count = await buttons.count()
-    // May have 0 buttons if app doesn't render
-    expect(count).toBeGreaterThanOrEqual(0)
+  test('offers the offline build download', async ({ page }) => {
+    const releaseLink = page.locator(`a[href="${GITHUB_URL}/releases/latest"]`).first()
+    await expect(releaseLink).toBeVisible()
   })
 
-  test('has sign-in/sign-up options', async ({ page }) => {
-    // Look for auth-related buttons or links
-    const authElements = page
-      .getByRole('button', { name: /sign in|sign up|get started|login/i })
-      .or(page.getByRole('link', { name: /sign in|sign up|get started|login/i }))
-
-    const count = await authElements.count()
-    // May have 0 auth elements if app doesn't render
-    expect(count).toBeGreaterThanOrEqual(0)
+  test('has no auth or billing surface', async ({ page }) => {
+    const body = page.locator('body')
+    await expect(body).not.toContainText(/sign in/i)
+    await expect(body).not.toContainText(/sign up/i)
+    await expect(body).not.toContainText(/pricing/i)
+    await expect(body).not.toContainText(/free trial/i)
   })
 })
 
 test.describe('ESCAPEPLAN Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await mockSignedOut(page)
     await page.goto('http://localhost:5173')
     await page.waitForLoadState('networkidle')
   })
 
   test('page has working scroll', async ({ page }) => {
-    // Just verify the page scrolls without error
     await page.evaluate(() => window.scrollTo(0, 500))
     await page.waitForTimeout(300)
 
     const scrollY = await page.evaluate(() => window.scrollY)
-    // Scroll may not work if page doesn't have enough content
-    expect(scrollY).toBeGreaterThanOrEqual(0)
+    expect(scrollY).toBeGreaterThan(0)
   })
 
-  test('navigation links work', async ({ page }) => {
-    // Find any anchor links in nav
-    const navLinks = page.locator('nav a, header a')
-    const count = await navLinks.count()
+  test('legal pages are reachable from the footer', async ({ page }) => {
+    await page.getByRole('link', { name: /privacy policy/i }).click()
+    await expect(page).toHaveURL(/\/privacy$/)
 
-    // Just verify we can count nav links
-    expect(typeof count).toBe('number')
+    await page.getByRole('link', { name: /terms of service/i }).click()
+    await expect(page).toHaveURL(/\/terms$/)
   })
-})
 
-test.describe('ESCAPEPLAN Authenticated Landing', () => {
-  test('redirects to dashboard when authenticated', async ({ page }) => {
-    // Mock auth before navigating
-    await mockSignedIn(page)
-    await page.goto('http://localhost:5173')
+  test('unknown routes fall back to the landing page', async ({ page }) => {
+    await page.goto('http://localhost:5173/nonexistent-page-12345')
     await page.waitForLoadState('networkidle')
 
-    // Page might redirect to dashboard or show authenticated state
-    // Verify the server is responding and page has HTML structure
-    const html = await page.content()
-    expect(html).toContain('<!DOCTYPE html>')
-    expect(html).toContain('<div id="root">')
-
-    // Check current URL - may have been redirected to dashboard
-    const url = page.url()
-    expect(url).toContain('localhost:5173')
+    await expect(page).toHaveURL('http://localhost:5173/')
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   })
 })

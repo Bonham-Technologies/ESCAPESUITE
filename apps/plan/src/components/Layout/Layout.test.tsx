@@ -4,14 +4,6 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import Layout from './Layout'
 import Header from './Header'
 
-// Mock the auth adapter as signed-out so the Header shows Sign In / Get Started
-vi.mock('../../lib/auth', () => ({
-  SignedIn: (_props: { children: React.ReactNode }) => null,
-  SignedOut: ({ children }: { children: React.ReactNode }) => children,
-  useUser: () => ({ user: null, isLoaded: true, isSignedIn: false }),
-  signOut: vi.fn(),
-}))
-
 // Mock shared theme
 vi.mock('@escapesuite/shared/theme', () => ({
   ThemeToggle: () => <button data-testid="theme-toggle">Theme</button>,
@@ -53,13 +45,7 @@ describe('Header', () => {
 
   it('shows navigation links', () => {
     renderHeader()
-    expect(screen.getByText('Pricing')).toBeInTheDocument()
-  })
-
-  it('shows sign in/up for unauthenticated users', () => {
-    renderHeader()
-    expect(screen.getByText('Sign In')).toBeInTheDocument()
-    expect(screen.getByText('Get Started')).toBeInTheDocument()
+    expect(screen.getByText('GitHub')).toBeInTheDocument()
   })
 
   it('includes theme toggle', () => {
@@ -74,10 +60,10 @@ describe('Header', () => {
     expect(logoLink).toHaveAttribute('href', '/')
   })
 
-  it('has link to pricing', () => {
+  it('has link to GitHub', () => {
     renderHeader()
-    const pricingLink = screen.getByRole('link', { name: /Pricing/i })
-    expect(pricingLink).toHaveAttribute('href', '/pricing')
+    const githubLink = screen.getByRole('link', { name: /GitHub/i })
+    expect(githubLink).toHaveAttribute('href', 'https://github.com/Bonham-Technologies/ESCAPESUITE')
   })
 })
 

@@ -5,23 +5,20 @@ export default function Privacy() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Privacy Policy</h1>
-        <p className={styles.lastUpdated}>Last updated: May 31, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: August 18, 2026</p>
       </header>
 
       <div className={styles.content}>
         <div className={styles.highlight}>
           <p>
-            <strong>Our Commitment:</strong> ESCAPE Suite is built with privacy at its core. Your video
-            recordings and editing projects are always processed entirely on your device and are never
-            uploaded to our servers.
+            <strong>Our Commitment:</strong> ESCAPE Suite is free, open source, and built with privacy
+            at its core. Your video recordings and editing projects are always processed entirely on
+            your device and are never uploaded to our servers.
           </p>
           <p>
-            The air-gapped <strong>Site License</strong> bundle runs fully offline and transmits no data
-            to us at all. Our connected services (the ESCAPEPLAN dashboard, account, and individual Pro
-            subscription) rely on a small set of providers — Supabase (authentication and database),
-            Stripe (payments), Resend (transactional email and license delivery), and Vercel
-            (hosting and privacy-friendly analytics) — and only the limited account, billing, and usage
-            data described below is shared with them. Even then, your recordings and projects stay local.
+            The hosted service at escapesuite.io requires no account and no sign-in. The only data we
+            collect is anonymous usage analytics via Vercel, described below. The downloadable offline
+            build makes no network requests at all and transmits nothing to us.
           </p>
         </div>
 
@@ -33,26 +30,15 @@ export default function Privacy() {
         </p>
 
         <h2>2. Information We Collect</h2>
-
-        <h3>2.1 Account Information</h3>
-        <p>When you create an account, we collect:</p>
-        <ul>
-          <li>Email address</li>
-          <li>Name (optional)</li>
-          <li>Authentication credentials (managed by our authentication provider, Supabase Auth)</li>
-        </ul>
-
-        <h3>2.2 Payment Information</h3>
-        <p>When you subscribe or purchase a license, we collect:</p>
-        <ul>
-          <li>Billing name and email</li>
-          <li>Payment method details (processed securely by Stripe; we never see your full card number)</li>
-          <li>Transaction history</li>
-        </ul>
-
-        <h3>2.3 Usage Analytics</h3>
         <p>
-          We use Vercel Analytics to understand how our applications are used. This includes:
+          ESCAPE Suite requires no account, sign-in, or personal registration. We do not collect names,
+          email addresses, or payment information.
+        </p>
+
+        <h3>2.1 Usage Analytics (Hosted Site Only)</h3>
+        <p>
+          The hosted site at escapesuite.io uses Vercel Analytics to understand how our applications
+          are used. This includes:
         </p>
         <ul>
           <li>Feature usage events (e.g., "recording started," "export completed")</li>
@@ -61,27 +47,27 @@ export default function Privacy() {
         </ul>
         <p>
           Vercel Analytics does not use cookies and is designed to be privacy-friendly. We do not
-          track your IP address or create detailed user profiles.
+          track your IP address or create detailed user profiles, and events are not tied to any
+          account or identity, since none exist.
         </p>
 
-        <h3>2.4 Information We Do NOT Collect</h3>
+        <h3>2.2 Information We Do NOT Collect</h3>
         <p>We want to be clear about what we don't collect:</p>
         <ul>
           <li><strong>Video recordings</strong> - Your screen recordings and webcam footage stay on your device</li>
-          <li><strong>Project files</strong> - Your video editing projects are stored locally in your browser</li>
+          <li><strong>Project files</strong> - Your video editing projects are stored locally in your browser's IndexedDB</li>
           <li><strong>Camera/microphone streams</strong> - Media streams are processed locally, never transmitted</li>
+          <li><strong>Account or payment information</strong> - There is no account to create, so we never collect names, emails, or payment details</li>
           <li><strong>Detailed location data</strong> - We don't track your geographic location</li>
           <li><strong>Browsing history</strong> - We don't track your activity outside our applications</li>
         </ul>
 
         <h2>3. How We Use Your Information</h2>
-        <p>We use collected information to:</p>
+        <p>We use the limited information described above to:</p>
         <ul>
-          <li>Provide and maintain our services</li>
-          <li>Process payments and manage subscriptions</li>
-          <li>Send important service updates and notifications</li>
-          <li>Improve our applications based on aggregated usage patterns</li>
-          <li>Provide customer support</li>
+          <li>Operate and maintain the hosted service</li>
+          <li>Understand aggregate, anonymous usage patterns to improve our applications</li>
+          <li>Respond to support inquiries you send us</li>
           <li>Comply with legal obligations</li>
         </ul>
 
@@ -98,16 +84,15 @@ export default function Privacy() {
           <li>Is not accessible to us or any third party</li>
         </ul>
 
-        <h3>4.2 Cloud Storage (Our Servers)</h3>
-        <p>Account and subscription data is stored securely using:</p>
-        <ul>
-          <li><strong>Supabase</strong> - For authentication, identity management, and subscription/license data (PostgreSQL with encryption at rest)</li>
-          <li><strong>Stripe</strong> - For payment processing (PCI DSS compliant)</li>
-          <li><strong>Resend</strong> - For transactional email and license delivery</li>
-        </ul>
+        <h3>4.2 Our Servers</h3>
+        <p>
+          We do not operate any account or media storage systems. The only data that reaches our
+          infrastructure is the anonymous usage analytics described in Section 2, collected on our
+          behalf by Vercel.
+        </p>
 
         <h2>5. Third-Party Services</h2>
-        <p>We use the following third-party services:</p>
+        <p>We use one third-party service:</p>
 
         <table className={styles.table}>
           <thead>
@@ -119,79 +104,44 @@ export default function Privacy() {
           </thead>
           <tbody>
             <tr>
-              <td>Supabase</td>
-              <td>Authentication &amp; Database</td>
-              <td>Email, name, auth tokens, account and subscription/license data</td>
-            </tr>
-            <tr>
-              <td>Stripe</td>
-              <td>Payments</td>
-              <td>Billing details, payment method</td>
-            </tr>
-            <tr>
-              <td>Resend</td>
-              <td>Transactional email &amp; license delivery</td>
-              <td>Email address</td>
-            </tr>
-            <tr>
               <td>Vercel</td>
               <td>Hosting &amp; Analytics</td>
-              <td>Usage events, page views</td>
+              <td>Anonymous usage events, page views</td>
             </tr>
           </tbody>
         </table>
 
         <p>
-          Each service has their own privacy policy, and we encourage you to review them.
-          We do not sell your data to third parties.
+          Vercel has its own privacy policy, which we encourage you to review. We do not sell your
+          data to third parties.
         </p>
 
-        <h2>6. Air-Gapped Site License Bundle</h2>
+        <h2>6. Offline Build</h2>
         <p>
-          The ESCAPE Suite Site License is delivered as a single, self-contained bundle (ESCAPECRAFT and
-          ESCAPEARTIST) that your organization hosts and runs on its own network, including isolated or
-          air-gapped environments. When you run this offline bundle:
+          ESCAPE Suite is also available as a downloadable, single-file offline build (attached to our
+          GitHub Releases) that you can run entirely on your own device or network, including fully
+          air-gapped environments. When you run the offline build:
         </p>
         <ul>
-          <li>No account sign-in is required to run the hosted bundle</li>
+          <li>No account or sign-in is required</li>
           <li>No data is sent to our servers</li>
           <li>No analytics are collected</li>
-          <li>The Software works entirely offline</li>
-          <li>Only the cryptographically signed license embedded in your bundle is used locally to validate the Term</li>
+          <li>The build makes no network requests at all — no telemetry of any kind</li>
+          <li>The software works entirely offline</li>
         </ul>
-        <p>
-          The limited account, billing, and email data described elsewhere in this Policy is only
-          collected at purchase or renewal (through our connected services), not while you run the
-          offline bundle.
-        </p>
 
-        <h2>7. Site License (Per-Organization)</h2>
-        <p>
-          The Site License is granted per-organization, not per-member or per-seat. We do not create
-          individual member accounts, collect per-seat or per-user profile data, or maintain
-          administrator/audit-log records for the Site License. The signed bundle simply encodes your
-          purchased organization-size band and an expiration date.
-        </p>
-        <p>
-          The only personal data we process for a Site License is the email address and billing details
-          of the person who purchases or renews it, used to deliver the bundle and license and to manage
-          the order. We never access your recordings, projects, or usage data.
-        </p>
-
-        <h2>8. Data Retention</h2>
+        <h2>7. Data Retention</h2>
         <ul>
-          <li><strong>Account data:</strong> Retained while your account is active, deleted upon request</li>
-          <li><strong>Subscription history:</strong> Retained for 7 years for tax/legal compliance</li>
           <li><strong>Analytics data:</strong> Retained for 90 days, then deleted</li>
-          <li><strong>Local data:</strong> Controlled entirely by you; delete anytime via browser settings</li>
+          <li><strong>Local data:</strong> Controlled entirely by you; delete anytime via your browser settings</li>
         </ul>
 
-        <h2>9. Your Rights</h2>
+        <h2>8. Your Rights</h2>
         <p>You have the right to:</p>
         <ul>
-          <li><strong>Access</strong> - Request a copy of your personal data</li>
+          <li><strong>Access</strong> - Ask what data we hold about you</li>
           <li><strong>Correction</strong> - Update or correct your information</li>
-          <li><strong>Deletion</strong> - Request deletion of your account and data</li>
+          <li><strong>Deletion</strong> - Request deletion of any data we hold about you</li>
           <li><strong>Portability</strong> - Export your data in a standard format</li>
           <li><strong>Objection</strong> - Opt out of certain data processing</li>
         </ul>
@@ -199,36 +149,33 @@ export default function Privacy() {
           To exercise these rights, contact us at privacy@escapesuite.io.
         </p>
 
-        <h2>10. Cookies</h2>
+        <h2>9. Cookies</h2>
         <p>
-          We use minimal cookies, primarily for authentication:
+          ESCAPE Suite does not use cookies. There is no sign-in, so there are no authentication
+          cookies, and we don't use cookies for advertising or cross-site tracking.
         </p>
-        <ul>
-          <li><strong>Authentication cookies</strong> - Required to keep you signed in (set by Supabase Auth)</li>
-          <li><strong>No tracking cookies</strong> - We don't use cookies for advertising or cross-site tracking</li>
-        </ul>
 
-        <h2>11. Children's Privacy</h2>
+        <h2>10. Children's Privacy</h2>
         <p>
           Our services are not directed to children under 13. We do not knowingly collect personal
           information from children. If you believe we have collected information from a child,
           please contact us immediately.
         </p>
 
-        <h2>12. International Data Transfers</h2>
+        <h2>11. International Data Transfers</h2>
         <p>
           Your data may be processed in the United States and other countries where our service
           providers operate. We ensure appropriate safeguards are in place for international transfers.
         </p>
 
-        <h2>13. Changes to This Policy</h2>
+        <h2>12. Changes to This Policy</h2>
         <p>
           We may update this Privacy Policy from time to time. We will notify you of significant
-          changes by email or through our applications. Your continued use after changes constitutes
-          acceptance of the updated policy.
+          changes by posting the updated policy on this site. Your continued use after changes
+          constitutes acceptance of the updated policy.
         </p>
 
-        <h2>14. Contact Us</h2>
+        <h2>13. Contact Us</h2>
         <div className={styles.contactInfo}>
           <h3><a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
           <p>Email: privacy@escapesuite.io</p>
