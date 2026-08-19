@@ -6,6 +6,9 @@
   "author": "Bonham Technologies, LLC",
   "license": "MIT",
   "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "turbo dev",
     "dev:plan": "turbo dev --filter=@escapesuite/plan",
@@ -32,8 +35,8 @@
     "release": "changeset version && changeset tag"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.8",
-    "turbo": "^2.9.14"
+    "@changesets/cli": "^2.31.1",
+    "turbo": "^2.10.11"
   },
   "pnpm": {
     "overrides": {

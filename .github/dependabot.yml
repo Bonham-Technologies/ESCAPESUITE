@@ -6,7 +6,7 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 8
     rebase-strategy: "auto"
     groups:
       # Group related packages to reduce PR noise
@@ -15,6 +15,21 @@ updates:
           - "react"
           - "react-dom"
           - "@types/react*"
+      runtime:
+        # Production runtime dependencies shared across the apps.
+        # mediabunny is deliberately excluded — it gets its own solo PR
+        # (21 minors behind; needs export verification before bumping).
+        patterns:
+          - "react*"
+          - "react-router-dom"
+          - "zustand"
+          - "uuid"
+          - "mp4box"
+          - "idb"
+          - "webm-duration-fix"
+          - "@vercel/analytics"
+        exclude-patterns:
+          - "mediabunny"
       testing:
         patterns:
           - "vitest"
