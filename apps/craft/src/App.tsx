@@ -16,7 +16,7 @@ import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
 import { fixWebMMetadata } from './core/converter';
-import { isStandaloneMode } from './auth';
+import { isStandaloneMode } from '@escapesuite/shared/config';
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
@@ -386,11 +386,9 @@ function App() {
       setStreams(screen, webcam);
 
       // Set up preview
-      // Note: Watermarks are NOT applied during recording - they are added at export time
       // This avoids canvas.captureStream() issues with hidden video elements
 
       if (config.screenEnabled && config.webcamEnabled && screen && webcam) {
-        // PiP mode - use compositor (no watermark during recording, applied at export)
         const videoTrack = screen.getVideoTracks()[0];
         const settings = videoTrack.getSettings();
         compositorRef.current = new Compositor(
@@ -400,7 +398,6 @@ function App() {
             webcamPosition: config.webcamPosition,
             webcamSize: config.webcamSize,
             webcamShape: config.webcamShape,
-            // No watermark during recording - applied at export for trial users
           }
         );
         compositorRef.current.setScreenStream(screen);
@@ -409,7 +406,6 @@ function App() {
         setPreviewStream(composedStream);
         setIsPiPActive(true);
       } else if (screen) {
-        // Screen only - use raw stream (watermark applied at export for trial users)
         setPreviewStream(screen);
       } else if (webcam) {
         setPreviewStream(webcam);
@@ -458,7 +454,6 @@ function App() {
       }, isPiP);
       recorderTypeRef.current = getRecorderType(isPiP);
 
-      // Use raw streams for recording - watermarks are applied at export time
       // This avoids canvas.captureStream() issues with hidden video elements
       let recordingScreen: MediaStream | null = screen;
 
@@ -474,7 +469,6 @@ function App() {
         }
       }
       // For single-source recordings (screen-only or webcam-only), use raw stream
-      // Watermark will be applied during export for trial users
 
       await recorderRef.current.initialize(recordingScreen, webcam, mic, config);
 
