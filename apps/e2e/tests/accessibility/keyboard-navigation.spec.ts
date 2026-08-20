@@ -292,7 +292,7 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // Escape does not dismiss the export modal; only the × and Cancel buttons do,
   // so keyboard users have no way to back out of it.
-  test.fixme('Escape closes panels and modals', async ({ page }) => {
+  test('Escape closes panels and modals', async ({ page }) => {
     // Export is disabled until the timeline holds a clip
     await seedTextClip(page)
 
@@ -308,7 +308,7 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // The export modal has no focus trap (and no role="dialog" to scope one to),
   // so Tab walks straight out of it into the editor behind.
-  test.fixme('Tab traps focus in modals', async ({ page }) => {
+  test('Tab traps focus in modals', async ({ page }) => {
     await seedTextClip(page)
 
     await page.getByRole('button', { name: 'Export video' }).click()

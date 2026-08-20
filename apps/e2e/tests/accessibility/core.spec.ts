@@ -179,7 +179,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // The export modal renders as a plain <div class="_overlay_…"><div
   // class="_dialog_…">: no role="dialog", no aria-modal, no accessible name.
-  test.fixme('modals have proper dialog role', async ({ page }) => {
+  test('modals have proper dialog role', async ({ page }) => {
     // Export is disabled until the timeline holds a clip
     await seedTextClip(page)
     await page.getByRole('button', { name: 'Export video' }).click()

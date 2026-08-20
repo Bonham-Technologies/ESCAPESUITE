@@ -46,6 +46,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // AbortController for cancelling exports
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Dialog element, plus a stable handle on the current cancel handler so the
+  // focus-trap effect only ever runs on open/close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<() => void>(() => {});
+
   const mp4Supported = isMP4ExportSupported();
 
   // Load last export settings on dialog open
@@ -184,14 +189,84 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     handleExport('webm', true);
   }, [handleExport]);
 
+  cancelRef.current = handleCancel;
+
+  // Modal keyboard behaviour: focus starts inside the dialog, Tab cycles within
+  // it, and Escape leaves through the same cancel path as the × and Cancel
+  // buttons (aborting an in-progress export exactly as they do). Focus returns
+  // to whatever opened the dialog when it closes.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    const getFocusable = () =>
+      Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetParent !== null);
+
+    getFocusable()[0]?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // The dialog owns Escape while it is open; editor shortcuts must not
+        // also fire.
+        e.preventDefault();
+        e.stopPropagation();
+        cancelRef.current();
+        return;
+      }
+
+      if (e.key !== 'Tab') return;
+
+      const focusable = getFocusable();
+      if (focusable.length === 0) {
+        e.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (e.shiftKey) {
+        if (active === first || !active || !dialog.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !active || !dialog.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
     <div className={styles.overlay} onClick={handleCancel}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={styles.dialog}
+        onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-dialog-title"
+      >
         <div className={styles.header}>
-          <h2 className={styles.title}>Export Video</h2>
-          <button className={styles.closeButton} onClick={handleCancel}>
+          <h2 className={styles.title} id="export-dialog-title">Export Video</h2>
+          <button className={styles.closeButton} onClick={handleCancel} title="Close">
             &times;
           </button>
         </div>

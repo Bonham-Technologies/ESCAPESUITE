@@ -73,7 +73,7 @@ test.describe('Dialog Announcements', () => {
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // The export modal is a plain <div>: screen readers get no dialog role, no
   // aria-modal and no accessible name when it opens.
-  test.fixme('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
+  test('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
