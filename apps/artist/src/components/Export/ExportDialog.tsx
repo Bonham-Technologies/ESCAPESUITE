@@ -302,6 +302,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             </div>
           ) : (
             <>
+              {error && (
+                <div className={styles.error} role="alert">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="15" y1="9" x2="9" y2="15" />
+                    <line x1="9" y1="9" x2="15" y2="15" />
+                  </svg>
+                  Export failed: {error}
+                </div>
+              )}
+
               <div className={styles.primarySection}>
                 {timeRange ? (
                   <>
@@ -330,6 +341,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     Download WebM
                   </button>
                 )}
+              </div>
+
+              <div className={styles.summary}>
+                Exports keep running in a background tab — you can switch tabs while one encodes.
               </div>
 
               <div className={styles.advancedSection}>
@@ -411,17 +426,6 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                         <option value="480p">480p</option>
                       </select>
                     </div>
-
-                    {error && (
-                      <div className={styles.error}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="12" r="10" />
-                          <line x1="15" y1="9" x2="9" y2="15" />
-                          <line x1="9" y1="9" x2="15" y2="15" />
-                        </svg>
-                        {error}
-                      </div>
-                    )}
 
                     <button
                       className={styles.advancedExportButton}

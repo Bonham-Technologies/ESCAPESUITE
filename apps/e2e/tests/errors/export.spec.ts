@@ -122,7 +122,7 @@ test.describe('Export Failure Recovery', () => {
   // A failed encode is only reported to the console ("Export failed:
   // EncodingError: Flush failed"); the dialog silently drops back to its idle
   // controls with no visible message and nothing announced to assistive tech.
-  test.fixme('shows error message on export failure', async ({ page }) => {
+  test('shows error message on export failure', async ({ page }) => {
     await seedTextClip(page)
     await openExportDialog(page)
 
@@ -198,7 +198,7 @@ test.describe('Background Tab Export', () => {
   // MP4 export keeps encoding in a background tab (a Web Worker does the
   // decode), but the export dialog never says so — nothing in the UI tells the
   // user it is safe to switch away while an export runs.
-  test.fixme('background tab support is indicated', async ({ page }) => {
+  test('background tab support is indicated', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
