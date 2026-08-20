@@ -7,9 +7,13 @@ import {
   mockDeviceNotFound,
   mockDeviceInUse,
 } from '../../utils/error-mocks'
+import { mockMediaDevices } from '../../utils/media-mocks'
 
 test.describe('Camera Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
+    // The toggles these tests click are disabled unless a device is enumerated,
+    // and CI runners have no camera or microphone attached.
+    await mockMediaDevices(page)
     await mockCameraPermissionDenied(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -62,6 +66,7 @@ test.describe('Camera Permission Denied', () => {
 
 test.describe('Microphone Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
+    await mockMediaDevices(page)
     await mockMicrophonePermissionDenied(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -189,6 +194,9 @@ test.describe('All Media Permissions Denied', () => {
 
 test.describe('Device Not Found', () => {
   test.beforeEach(async ({ page }) => {
+    // The camera is listed but cannot be opened — without the device stub the
+    // toggle is disabled and never reaches the getUserMedia rejection.
+    await mockMediaDevices(page)
     await mockDeviceNotFound(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')
@@ -218,6 +226,8 @@ test.describe('Device Not Found', () => {
 
 test.describe('Device In Use', () => {
   test.beforeEach(async ({ page }) => {
+    // Listed, but held by another application — same reasoning as above.
+    await mockMediaDevices(page)
     await mockDeviceInUse(page)
     await page.goto('http://localhost:5174')
     await page.waitForLoadState('networkidle')

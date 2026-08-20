@@ -5,9 +5,41 @@ import { Page } from '@playwright/test'
  */
 
 /**
+ * Report a camera and a microphone from `enumerateDevices`.
+ *
+ * ESCAPECRAFT's capability detection (`apps/craft/src/core/permissions.ts`)
+ * marks the webcam and microphone unavailable when no matching input device is
+ * enumerated, which renders their source toggles `disabled`. A CI runner has no
+ * camera or microphone attached, so those toggles are dead there while they are
+ * live on a developer laptop — any test that clicks one passes locally and
+ * times out in CI. Stubbing the device list makes the toggles behave the same
+ * either way.
+ *
+ * This only says the devices *exist*. Whether they can be opened is
+ * `getUserMedia`'s business, so a test that mocks it to reject still exercises
+ * exactly the failure it was written for.
+ *
+ * Must be called BEFORE navigating.
+ */
+export async function mockMediaDevices(page: Page) {
+  await page.addInitScript(() => {
+    navigator.mediaDevices.enumerateDevices = async () =>
+      [
+        { deviceId: 'mock-camera', kind: 'videoinput', label: 'Mock Camera', groupId: 'mock' },
+        { deviceId: 'mock-mic', kind: 'audioinput', label: 'Mock Microphone', groupId: 'mock' },
+        { deviceId: 'mock-speaker', kind: 'audiooutput', label: 'Mock Speaker', groupId: 'mock' },
+      ].map((device) => ({ ...device, toJSON: () => device })) as MediaDeviceInfo[]
+  })
+}
+
+/**
  * Mock getUserMedia to return a fake video stream
  */
 export async function mockGetUserMedia(page: Page) {
+  // A stream the app can open implies devices it can enumerate; without this
+  // the source toggles stay disabled on hardware-less runners.
+  await mockMediaDevices(page)
+
   await page.addInitScript(() => {
     // Create a mock MediaStream
     const mockStream = {
@@ -89,6 +121,10 @@ export async function mockSyntheticMedia(
   page: Page,
   options: { width?: number; height?: number } = {}
 ) {
+  // Same reason as mockGetUserMedia: capture that works implies devices that
+  // enumerate, and hardware-less runners enumerate none.
+  await mockMediaDevices(page)
+
   const width = options.width ?? 640
   const height = options.height ?? 360
 
