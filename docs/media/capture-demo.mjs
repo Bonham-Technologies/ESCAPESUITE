@@ -193,13 +193,19 @@ async function main() {
   // blank pre-paint frames can be trimmed off the front of the clip.
   const craftBootSeconds = (Date.now() - craftOpenedAt) / 1000
   phase('craft boot')
-  await beat(1000) // let the reader take in the UI
+  await beat(800) // let the reader take in the UI
 
   await craft.click('button[aria-label="Start recording"]')
   // 3-2-1 countdown runs first; only then does the header flip to "Recording"
   await craft.waitForSelector('button[aria-label="Pause recording"]', { timeout: 20_000 })
   phase('craft countdown')
-  await beat(2200) // live preview + running timer
+  await beat(1500) // live preview + running timer
+
+  // Mid-capture is the shot worth keeping: live preview, running timer, mic meter.
+  await craft.screenshot({ path: join(mediaDir, 'escapecraft.png') })
+  phase('craft screenshot')
+
+  await beat(700)
   await craft.click('button[aria-label="Stop recording"]')
   const stoppedAt = Date.now()
 
@@ -209,13 +215,10 @@ async function main() {
   await openInEditor.waitFor({ timeout: 20_000 })
   const savedAt = Date.now()
   phase('craft save')
-  await beat(1200)
+  await beat(900)
   // Nothing after this point changes what CRAFT shows, but its video keeps
   // rolling until the ARTIST window has booted — note the cut point.
   const craftEndSeconds = (Date.now() - craftOpenedAt) / 1000 + 0.4
-
-  await craft.screenshot({ path: join(mediaDir, 'escapecraft.png') })
-  phase('craft screenshot')
 
   // ── Handoff: CRAFT opens ARTIST via window.open('/artist/?loadVideo=<id>') ──
   const artistOpenedAt = Date.now()
@@ -242,7 +245,7 @@ async function main() {
   await artist.locator('button[title="Play (Space)"]').click()
   await waitForPreviewFrame(artist, 6000)
   phase('artist first frame')
-  await beat(900)
+  await beat(700)
   const pauseButton = artist.locator('button[title="Pause (Space)"]')
   if (await pauseButton.count()) await pauseButton.click()
   await beat(500)
@@ -261,7 +264,7 @@ async function main() {
   await textArea.waitFor()
   await textArea.fill('')
   await textArea.pressSequentially('100% local. No uploads.', { delay: 45 })
-  await beat(1100)
+  await beat(900)
 
   await artist.screenshot({ path: join(mediaDir, 'escapeartist.png') })
   phase('artist screenshot')
@@ -271,7 +274,7 @@ async function main() {
   phase('artist export dialog')
   await beat(700)
   await artist.getByRole('button', { name: 'Advanced options' }).click()
-  await beat(1600) // hold on the export options — the closing frame
+  await beat(1300) // hold on the export options — the closing frame
 
   const artistVideo = artist.video()
   await artist.close()

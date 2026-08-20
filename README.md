@@ -1,6 +1,6 @@
 # ESCAPE Suite
 
-[![CI](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml)
+[![CI](https://github.com/Bonham-Technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/Bonham-Technologies/ESCAPESUITE/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/Bonham-Technologies/ESCAPESUITE)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/Bonham-Technologies/ESCAPESUITE)](https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest)
 
@@ -26,7 +26,7 @@ Or download the offline build from [Releases](https://github.com/Bonham-Technolo
 
 ### ESCAPECRAFT - Recorder
 
-<img src="docs/media/escapecraft.png" alt="ESCAPECRAFT armed and ready to record, with source toggles and the recordings library" width="820">
+<img src="docs/media/escapecraft.png" alt="ESCAPECRAFT mid-recording: live preview, running timer, and microphone level meter" width="820">
 
 - Screen, window, or tab capture
 - Webcam recording with Picture-in-Picture overlay
