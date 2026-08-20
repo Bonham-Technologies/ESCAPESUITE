@@ -253,7 +253,7 @@ test.describe('Button and Control Announcements', () => {
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // ESCAPECRAFT's source toggles carry no aria-pressed, aria-checked or
   // role="switch", so their on/off state is never announced.
-  test.fixme('toggle buttons announce state', async ({ page }) => {
+  test('toggle buttons announce state', async ({ page }) => {
     await mockGetUserMedia(page)
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)

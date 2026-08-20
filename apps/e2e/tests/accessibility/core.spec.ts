@@ -81,7 +81,7 @@ test.describe('ESCAPECRAFT Accessibility', () => {
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // The four source toggle switches have no accessible name at all:
   // <button class="_toggle_…"><span class="_toggleKnob_…"></span></button>.
-  test.fixme('recording controls have accessible names', async ({ page }) => {
+  test('recording controls have accessible names', async ({ page }) => {
     // Check that buttons have accessible names
     const buttons = page.getByRole('button')
     const count = await buttons.count()
@@ -103,7 +103,7 @@ test.describe('ESCAPECRAFT Accessibility', () => {
 
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // Headings jump h1 ("ESCAPECRAFT") straight to h3 ("Sources", "Recordings").
-  test.fixme('recording UI has valid heading hierarchy', async ({ page }) => {
+  test('recording UI has valid heading hierarchy', async ({ page }) => {
     const { valid } = await checkHeadingHierarchy(page)
     expect(valid).toBe(true)
   })

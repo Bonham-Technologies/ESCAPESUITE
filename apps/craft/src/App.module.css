@@ -144,6 +144,8 @@
   font-weight: 600;
   text-transform: uppercase;
   color: var(--text-secondary);
+  /* Pinned so the heading level can change without moving the title. */
+  margin-top: 1em;
   margin-bottom: 0.75rem;
 }
 
@@ -600,6 +602,14 @@
 
 .toggle.active .toggleKnob {
   transform: translateX(20px);
+}
+
+.sourceError {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  /* Lighter than --error so the message clears WCAG AA on the sidebar. */
+  color: #f87171;
 }
 
 /* Audio meters */

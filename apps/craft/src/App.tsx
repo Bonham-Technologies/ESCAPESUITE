@@ -60,6 +60,7 @@ function App() {
   const [playbackName, setPlaybackName] = useState<string>('');
   const [playbackDuration, setPlaybackDuration] = useState<number>(0);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
   // Capture thumbnail from preview (video element or compositor canvas)
   const capturePreviewThumbnail = useCallback((): Promise<Blob | null> => {
@@ -594,17 +595,74 @@ function App() {
     revokeBlobUrl(url);
   };
 
+  const deviceAccessMessage = (source: 'webcam' | 'microphone') =>
+    source === 'webcam'
+      ? 'Camera access was denied. Check your browser site permissions and try again.'
+      : 'Microphone access was denied. Check your browser site permissions and try again.';
+
+  // Turning on a device-backed source checks that the device can actually be
+  // opened. Access can be refused long after the capability sweep at load, and
+  // that refusal used to surface only at record time, in the console.
+  const enableDeviceSource = useCallback(
+    async (source: 'webcam' | 'microphone') => {
+      try {
+        const stream = source === 'webcam' ? await requestWebcam() : await requestMicrophone();
+        stopStream(stream);
+      } catch {
+        setSourceError(deviceAccessMessage(source));
+        return;
+      }
+      setSourceError(null);
+      setConfig(source === 'webcam' ? { webcamEnabled: true } : { microphoneEnabled: true });
+    },
+    [setConfig]
+  );
+
+  // Sources that are already on when ESCAPECRAFT opens (the microphone is, by
+  // default) have never been opened, so a refusal would surface only once the
+  // user hits record. Confirm them the first time the source controls are used
+  // — deferring to a gesture keeps merely opening the app prompt-free.
+  const devicesConfirmedRef = useRef(false);
+  const confirmEnabledDevices = useCallback(async () => {
+    if (devicesConfirmedRef.current) return;
+    devicesConfirmedRef.current = true;
+
+    const enabled: ('webcam' | 'microphone')[] = [];
+    if (config.webcamEnabled) enabled.push('webcam');
+    if (config.microphoneEnabled) enabled.push('microphone');
+
+    for (const source of enabled) {
+      try {
+        const stream = source === 'webcam' ? await requestWebcam() : await requestMicrophone();
+        stopStream(stream);
+      } catch {
+        setSourceError(deviceAccessMessage(source));
+        setConfig(source === 'webcam' ? { webcamEnabled: false } : { microphoneEnabled: false });
+      }
+    }
+  }, [config.webcamEnabled, config.microphoneEnabled, setConfig]);
+
   // Toggle source
   const toggleSource = (source: 'screen' | 'webcam' | 'microphone' | 'systemAudio') => {
+    void confirmEnabledDevices();
+
     switch (source) {
       case 'screen':
         setConfig({ screenEnabled: !config.screenEnabled });
         break;
       case 'webcam':
-        setConfig({ webcamEnabled: !config.webcamEnabled });
+        if (config.webcamEnabled) {
+          setConfig({ webcamEnabled: false });
+        } else {
+          void enableDeviceSource('webcam');
+        }
         break;
       case 'microphone':
-        setConfig({ microphoneEnabled: !config.microphoneEnabled });
+        if (config.microphoneEnabled) {
+          setConfig({ microphoneEnabled: false });
+        } else {
+          void enableDeviceSource('microphone');
+        }
         break;
       case 'systemAudio':
         setConfig({ systemAudioEnabled: !config.systemAudioEnabled });
@@ -678,7 +736,7 @@ function App() {
         <aside className={styles.sidebar}>
           {/* Sources */}
           <section className={styles.sidebarSection}>
-            <h3 className={styles.sidebarTitle}>Sources</h3>
+            <h2 className={styles.sidebarTitle}>Sources</h2>
             <div className={styles.sourceToggles}>
               <div
                 className={`${styles.sourceToggle} ${!detailedCapabilities.screenCapture.available ? styles.sourceUnavailable : ''}`}
@@ -695,6 +753,8 @@ function App() {
                   className={`${styles.toggle} ${config.screenEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('screen')}
                   disabled={!capabilities.screenCapture || isRecordingActive}
+                  aria-pressed={config.screenEnabled}
+                  aria-label="Screen"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
@@ -715,6 +775,8 @@ function App() {
                   className={`${styles.toggle} ${config.webcamEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('webcam')}
                   disabled={!capabilities.webcam || isRecordingActive}
+                  aria-pressed={config.webcamEnabled}
+                  aria-label="Webcam"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
@@ -735,6 +797,8 @@ function App() {
                   className={`${styles.toggle} ${config.microphoneEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('microphone')}
                   disabled={!capabilities.microphone || isRecordingActive}
+                  aria-pressed={config.microphoneEnabled}
+                  aria-label="Microphone"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
@@ -755,11 +819,19 @@ function App() {
                   className={`${styles.toggle} ${config.systemAudioEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('systemAudio')}
                   disabled={!capabilities.systemAudio || isRecordingActive}
+                  aria-pressed={config.systemAudioEnabled}
+                  aria-label="System Audio"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
               </div>
             </div>
+
+            {sourceError && (
+              <div className={styles.sourceError} role="alert">
+                {sourceError}
+              </div>
+            )}
 
             {/* Audio meters */}
             {(config.microphoneEnabled || config.systemAudioEnabled) && isRecordingActive && (
@@ -793,7 +865,7 @@ function App() {
           {/* Webcam overlay settings */}
           {config.screenEnabled && config.webcamEnabled && (
             <section className={styles.sidebarSection}>
-              <h3 className={styles.sidebarTitle}>Webcam Overlay</h3>
+              <h2 className={styles.sidebarTitle}>Webcam Overlay</h2>
               <div className={styles.webcamControls}>
                 <div className={styles.positionGrid}>
                   {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as WebcamPosition[]).map(
@@ -848,7 +920,7 @@ function App() {
 
           {/* Recordings list */}
           <section className={styles.sidebarSection} style={{ flex: 1, overflow: 'hidden' }}>
-            <h3 className={styles.sidebarTitle}>Recordings</h3>
+            <h2 className={styles.sidebarTitle}>Recordings</h2>
             <div className={styles.recordingsList}>
               {recordings.length === 0 ? (
                 <div className={styles.emptyState}>
