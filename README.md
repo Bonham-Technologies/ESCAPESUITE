@@ -1,8 +1,14 @@
 # ESCAPE Suite
 
-[![CI](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/bonham-technologies/ESCAPESUITE/actions/workflows/ci.yml)
+[![CI](https://github.com/Bonham-Technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/Bonham-Technologies/ESCAPESUITE/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Bonham-Technologies/ESCAPESUITE)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Bonham-Technologies/ESCAPESUITE)](https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest)
 
 Free, open-source (MIT), privacy-first media creation tools that run entirely in the browser. Nothing you record or edit ever leaves your machine.
+
+![ESCAPE Suite demo](docs/media/demo.gif)
+
+*Record in ESCAPECRAFT, hand it to ESCAPEARTIST in one click, add a text overlay, export — every frame processed locally.*
 
 ## Use it now
 
@@ -19,6 +25,9 @@ Or download the offline build from [Releases](https://github.com/Bonham-Technolo
 ## Features
 
 ### ESCAPECRAFT - Recorder
+
+<img src="docs/media/escapecraft.png" alt="ESCAPECRAFT mid-recording: live preview, running timer, and microphone level meter" width="820">
+
 - Screen, window, or tab capture
 - Webcam recording with Picture-in-Picture overlay
 - Microphone and system audio capture
@@ -26,6 +35,9 @@ Or download the offline build from [Releases](https://github.com/Bonham-Technolo
 - Send recordings directly to ESCAPEARTIST
 
 ### ESCAPEARTIST - Editor
+
+<img src="docs/media/escapeartist.png" alt="ESCAPEARTIST with a recorded clip and a text overlay on the timeline" width="820">
+
 - Multi-track timeline with drag-and-drop
 - Text and shape overlays with animations
 - Keyframe animation system with 10 easing curves
