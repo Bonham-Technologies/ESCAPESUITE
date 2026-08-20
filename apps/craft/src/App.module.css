@@ -83,7 +83,9 @@
 }
 
 .editorButton:hover:not(:disabled) {
-  background: var(--accent-hover);
+  /* --accent-hover is lighter than the base accent, which would drop the white
+     label to 2.75:1; darken on hover instead. */
+  background: var(--accent-strong-hover);
 }
 
 /* Recording status indicators */
@@ -530,7 +532,6 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 0;
-  transition: opacity 0.2s ease;
 }
 
 .sourceToggle.sourceUnavailable {
@@ -985,6 +986,8 @@
     background-color: transparent;
   }
 
+  /* index.css gives every button a hover background; on the enlarged hit area
+     that would paint a slab behind the switch instead of tinting the track. */
   .toggle:hover:not(:disabled) {
     background-color: transparent;
   }

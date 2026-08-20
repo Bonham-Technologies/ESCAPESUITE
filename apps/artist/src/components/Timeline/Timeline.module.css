@@ -233,7 +233,7 @@
 
 .trackControlBtn.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .trackDeleteBtn:hover:not(:disabled) {
