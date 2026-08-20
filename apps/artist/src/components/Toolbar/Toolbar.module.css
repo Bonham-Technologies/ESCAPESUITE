@@ -58,7 +58,7 @@
 
 .toolButton.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .toggleButton {
@@ -70,7 +70,7 @@
 
 .toggleButton.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .divider {
@@ -142,4 +142,27 @@
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--border-light);
+}
+
+/* Small screens: the 28px tool buttons are below the WCAG 2.5.8 target size,
+   so the toolbar wraps and its controls grow instead. */
+@media (max-width: 640px) {
+  .toolbar {
+    height: auto;
+    min-height: 40px;
+    flex-wrap: wrap;
+    row-gap: var(--spacing-xs);
+    padding-top: var(--spacing-xs);
+    padding-bottom: var(--spacing-xs);
+  }
+
+  .toolButton {
+    width: 40px;
+    height: 40px;
+  }
+
+  .toggleButton {
+    width: auto;
+    min-width: 40px;
+  }
 }

@@ -77,13 +77,15 @@
 }
 
 .editorButton {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
   color: white;
 }
 
 .editorButton:hover:not(:disabled) {
-  background: var(--accent-hover);
+  /* --accent-hover is lighter than the base accent, which would drop the white
+     label to 2.75:1; darken on hover instead. */
+  background: var(--accent-strong-hover);
 }
 
 /* Recording status indicators */
@@ -144,6 +146,8 @@
   font-weight: 600;
   text-transform: uppercase;
   color: var(--text-secondary);
+  /* Pinned so the heading level can change without moving the title. */
+  margin-top: 1em;
   margin-bottom: 0.75rem;
 }
 
@@ -528,11 +532,11 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 0;
-  transition: opacity 0.2s ease;
 }
 
 .sourceToggle.sourceUnavailable {
-  opacity: 0.5;
+  /* Dimmed via the muted label/icon colours rather than opacity, which would
+     drag the label below the WCAG AA contrast ratio. */
   cursor: not-allowed;
 }
 
@@ -954,4 +958,54 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text-primary);
+}
+
+/* Small screens: the sidebar stacks above the recorder instead of squeezing
+   into a 280px column, and the controls grow to a touch-friendly size
+   (WCAG 2.5.8 target size). */
+@media (max-width: 640px) {
+  .main {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .headerButton {
+    min-height: 40px;
+  }
+
+  /* The 44x24 switch keeps its size but sits inside a 44x40 hit area. */
+  .toggle,
+  .toggle.active {
+    height: 40px;
+    background-color: transparent;
+  }
+
+  /* index.css gives every button a hover background; on the enlarged hit area
+     that would paint a slab behind the switch instead of tinting the track. */
+  .toggle:hover:not(:disabled) {
+    background-color: transparent;
+  }
+
+  .toggle::before {
+    content: '';
+    position: absolute;
+    inset: 8px 0;
+    border-radius: 12px;
+    background-color: var(--bg-tertiary);
+    transition: background-color 0.2s ease;
+  }
+
+  .toggle.active::before {
+    background-color: var(--accent);
+  }
+
+  .toggleKnob {
+    top: 10px;
+  }
 }

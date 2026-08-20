@@ -72,7 +72,7 @@
   transition: all var(--transition-fast);
   background: var(--accent-primary);
   border: none;
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .primaryExportButton:hover:not(:disabled) {
@@ -139,7 +139,7 @@
 
 .advancedExportButton:hover:not(:disabled) {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .advancedExportButton:disabled {
@@ -319,7 +319,7 @@
 .exportButton {
   background: var(--accent-primary);
   border: none;
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .exportButton:hover:not(:disabled) {

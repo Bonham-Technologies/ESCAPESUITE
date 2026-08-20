@@ -9,9 +9,13 @@
 
   --text-primary: #e8e8e8;
   --text-secondary: #a0a0a0;
-  --text-muted: #6a6a7a;
+  --text-muted: #8f8fa2;
 
   --accent-primary: #4a9eff;
+  /* Ink for text/icons on an --accent-primary fill — white only reaches 2.75:1
+     there. Applied to the toolbar, export and track controls so far; the
+     remaining accent-filled buttons still use white (see #275 follow-ups). */
+  --accent-on-fill: #0b1220;
   --accent-secondary: #7c4dff;
   --accent-success: #4caf50;
   --accent-warning: #ff9800;

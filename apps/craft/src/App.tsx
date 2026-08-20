@@ -678,7 +678,7 @@ function App() {
         <aside className={styles.sidebar}>
           {/* Sources */}
           <section className={styles.sidebarSection}>
-            <h3 className={styles.sidebarTitle}>Sources</h3>
+            <h2 className={styles.sidebarTitle}>Sources</h2>
             <div className={styles.sourceToggles}>
               <div
                 className={`${styles.sourceToggle} ${!detailedCapabilities.screenCapture.available ? styles.sourceUnavailable : ''}`}
@@ -695,6 +695,8 @@ function App() {
                   className={`${styles.toggle} ${config.screenEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('screen')}
                   disabled={!capabilities.screenCapture || isRecordingActive}
+                  aria-pressed={config.screenEnabled}
+                  aria-label="Screen"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
@@ -715,6 +717,8 @@ function App() {
                   className={`${styles.toggle} ${config.webcamEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('webcam')}
                   disabled={!capabilities.webcam || isRecordingActive}
+                  aria-pressed={config.webcamEnabled}
+                  aria-label="Webcam"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
@@ -735,6 +739,8 @@ function App() {
                   className={`${styles.toggle} ${config.microphoneEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('microphone')}
                   disabled={!capabilities.microphone || isRecordingActive}
+                  aria-pressed={config.microphoneEnabled}
+                  aria-label="Microphone"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
@@ -755,6 +761,8 @@ function App() {
                   className={`${styles.toggle} ${config.systemAudioEnabled ? styles.active : ''}`}
                   onClick={() => toggleSource('systemAudio')}
                   disabled={!capabilities.systemAudio || isRecordingActive}
+                  aria-pressed={config.systemAudioEnabled}
+                  aria-label="System Audio"
                 >
                   <span className={styles.toggleKnob} />
                 </button>
@@ -793,7 +801,7 @@ function App() {
           {/* Webcam overlay settings */}
           {config.screenEnabled && config.webcamEnabled && (
             <section className={styles.sidebarSection}>
-              <h3 className={styles.sidebarTitle}>Webcam Overlay</h3>
+              <h2 className={styles.sidebarTitle}>Webcam Overlay</h2>
               <div className={styles.webcamControls}>
                 <div className={styles.positionGrid}>
                   {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as WebcamPosition[]).map(
@@ -848,7 +856,7 @@ function App() {
 
           {/* Recordings list */}
           <section className={styles.sidebarSection} style={{ flex: 1, overflow: 'hidden' }}>
-            <h3 className={styles.sidebarTitle}>Recordings</h3>
+            <h2 className={styles.sidebarTitle}>Recordings</h2>
             <div className={styles.recordingsList}>
               {recordings.length === 0 ? (
                 <div className={styles.emptyState}>
