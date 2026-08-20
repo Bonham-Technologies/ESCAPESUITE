@@ -35,9 +35,6 @@ test.describe('ESCAPECRAFT Mobile Layout', () => {
     expect(count).toBeGreaterThanOrEqual(0)
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // ESCAPECRAFT's controls are 26px tall at a 375px viewport — below the 40px
-  // this test asks for and well below the 44px WCAG 2.2 target size.
   test('controls have touch-friendly size', async ({ page }) => {
     const buttons = page.getByRole('button')
     const count = await buttons.count()
@@ -123,9 +120,6 @@ test.describe('ESCAPECRAFT Settings Panel Responsive', () => {
 })
 
 test.describe('ESCAPECRAFT Recording List Responsive', () => {
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // The recordings list is 251px wide inside a 375px viewport instead of
-  // filling it, so the panel neither stacks nor uses the available width.
   test('recording list stacks on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5174')

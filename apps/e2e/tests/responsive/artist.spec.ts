@@ -207,10 +207,6 @@ test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
     expect(typeof isVisible).toBe('boolean')
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // The overlay tool buttons (Add Text, Rectangle, Ellipse, Arrow, Blur) are
-  // 28px tall at a 375px viewport — below the 40px this test asks for and well
-  // below the 44px WCAG 2.2 target size.
   test('overlay tool buttons are touch-friendly', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')

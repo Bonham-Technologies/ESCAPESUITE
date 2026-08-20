@@ -64,10 +64,6 @@ test.describe('ESCAPECRAFT Accessibility', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // 2 violations: button-name (critical, 4 nodes — the source toggle switches
-  // render as an empty <button> with no text, aria-label or title) and
-  // color-contrast (serious, 1 node).
   test('recording UI passes axe-core audit', async ({ page }) => {
     const results = await runAxeCheck(page)
 
@@ -78,9 +74,6 @@ test.describe('ESCAPECRAFT Accessibility', () => {
     expect(seriousViolations).toHaveLength(0)
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // The four source toggle switches have no accessible name at all:
-  // <button class="_toggle_…"><span class="_toggleKnob_…"></span></button>.
   test('recording controls have accessible names', async ({ page }) => {
     // Check that buttons have accessible names
     const buttons = page.getByRole('button')
@@ -101,8 +94,6 @@ test.describe('ESCAPECRAFT Accessibility', () => {
     }
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // Headings jump h1 ("ESCAPECRAFT") straight to h3 ("Sources", "Recordings").
   test('recording UI has valid heading hierarchy', async ({ page }) => {
     const { valid } = await checkHeadingHierarchy(page)
     expect(valid).toBe(true)
@@ -134,10 +125,6 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // 2 serious violations: label-title-only (the per-track volume
-  // <input type="range"> is labelled only by its title attribute) and
-  // scrollable-region-focusable (a scrollable region is not keyboard reachable).
   test('editor UI passes axe-core audit', async ({ page }) => {
     const results = await runAxeCheck(page, {
       // Disable color-contrast for canvas-based timeline
@@ -176,9 +163,6 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(valid).toBe(true)
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // The export modal renders as a plain <div class="_overlay_…"><div
-  // class="_dialog_…">: no role="dialog", no aria-modal, no accessible name.
   test('modals have proper dialog role', async ({ page }) => {
     // Export is disabled until the timeline holds a clip
     await seedTextClip(page)
@@ -194,9 +178,6 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(labelledBy || label).toBeTruthy()
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // 2 unlabelled inputs: the media library <input type="file"> and the
-  // per-track volume <input type="range">.
   test('form inputs have associated labels', async ({ page }) => {
     const { unlabeled } = await checkFormLabels(page)
     expect(unlabeled).toHaveLength(0)
@@ -216,8 +197,6 @@ test.describe('Color Contrast', () => {
     expect(contrastViolations).toHaveLength(0)
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // 5 nodes fall below the WCAG 2 AA contrast ratio.
   test('ESCAPECRAFT has adequate color contrast', async ({ page }) => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
@@ -232,8 +211,6 @@ test.describe('Color Contrast', () => {
     expect(contrastViolations).toHaveLength(0)
   })
 
-  // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
-  // 19 nodes fall below the WCAG 2 AA contrast ratio (canvas already excluded).
   test('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
