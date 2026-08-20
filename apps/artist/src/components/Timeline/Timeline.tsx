@@ -847,7 +847,14 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       {/* Ruler */}
       <div className={styles.rulerRow}>
         <div className={styles.trackHeaderSpacer} />
-        <div className={styles.ruler} ref={rulerRef} onClick={handleRulerClick}>
+        <div
+          className={styles.ruler}
+          ref={rulerRef}
+          onClick={handleRulerClick}
+          tabIndex={0}
+          role="group"
+          aria-label="Timeline ruler"
+        >
           <div className={styles.rulerContent} style={{ width: timelineWidth }}>
             {renderRuler()}
             {renderMarkers()}
@@ -919,6 +926,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
                       }
                     }}
                     title={`Volume: ${Math.round((track.volume ?? 1) * 100)}%`}
+                    aria-label={`${track.name} volume`}
                   />
                   <button
                     className={`${styles.trackMuteBtn} ${track.muted ? styles.active : ''}`}

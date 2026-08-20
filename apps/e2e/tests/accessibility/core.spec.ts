@@ -138,7 +138,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   // 2 serious violations: label-title-only (the per-track volume
   // <input type="range"> is labelled only by its title attribute) and
   // scrollable-region-focusable (a scrollable region is not keyboard reachable).
-  test.fixme('editor UI passes axe-core audit', async ({ page }) => {
+  test('editor UI passes axe-core audit', async ({ page }) => {
     const results = await runAxeCheck(page, {
       // Disable color-contrast for canvas-based timeline
       disableRules: ['color-contrast'],
@@ -197,7 +197,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // 2 unlabelled inputs: the media library <input type="file"> and the
   // per-track volume <input type="range">.
-  test.fixme('form inputs have associated labels', async ({ page }) => {
+  test('form inputs have associated labels', async ({ page }) => {
     const { unlabeled } = await checkFormLabels(page)
     expect(unlabeled).toHaveLength(0)
   })

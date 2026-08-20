@@ -337,6 +337,7 @@ export function VideoUploader() {
           multiple
           onChange={handleFileChange}
           className={styles.fileInput}
+          aria-label="Add media files"
         />
       </div>
 
