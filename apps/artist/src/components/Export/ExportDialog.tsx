@@ -181,6 +181,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     }
     setProgress(null);
     setMp4FailedError(null);
+    // The dialog stays mounted, so a stale alert would be re-announced the next
+    // time it opens.
+    setError(null);
     onClose();
   }, [onClose]);
 
@@ -274,7 +277,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         <div className={styles.body}>
           {mp4FailedError ? (
             <div className={styles.section}>
-              <div className={styles.error}>
+              <div className={styles.error} role="alert">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
                   <line x1="15" y1="9" x2="9" y2="15" />
@@ -343,9 +346,14 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                 )}
               </div>
 
-              <div className={styles.summary}>
-                Exports keep running in a background tab — you can switch tabs while one encodes.
-              </div>
+              {/* Only MP4 decodes through WebCodecs (in a worker); WebM drives an
+                  HTMLVideoElement from rAF, which the browser throttles once the
+                  tab is hidden. */}
+              {mp4Supported && (
+                <div className={styles.summary}>
+                  MP4 exports keep encoding in a background tab. WebM needs this tab visible.
+                </div>
+              )}
 
               <div className={styles.advancedSection}>
                 <button
