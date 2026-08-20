@@ -211,7 +211,7 @@ test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
   // The overlay tool buttons (Add Text, Rectangle, Ellipse, Arrow, Blur) are
   // 28px tall at a 375px viewport — below the 40px this test asks for and well
   // below the 44px WCAG 2.2 target size.
-  test.fixme('overlay tool buttons are touch-friendly', async ({ page }) => {
+  test('overlay tool buttons are touch-friendly', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')

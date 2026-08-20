@@ -966,3 +966,51 @@
   border-radius: 4px;
   color: var(--text-primary);
 }
+
+/* Small screens: the sidebar stacks above the recorder instead of squeezing
+   into a 280px column, and the controls grow to a touch-friendly size
+   (WCAG 2.5.8 target size). */
+@media (max-width: 640px) {
+  .main {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .headerButton {
+    min-height: 40px;
+  }
+
+  /* The 44x24 switch keeps its size but sits inside a 44x40 hit area. */
+  .toggle,
+  .toggle.active {
+    height: 40px;
+    background-color: transparent;
+  }
+
+  .toggle:hover:not(:disabled) {
+    background-color: transparent;
+  }
+
+  .toggle::before {
+    content: '';
+    position: absolute;
+    inset: 8px 0;
+    border-radius: 12px;
+    background-color: var(--bg-tertiary);
+    transition: background-color 0.2s ease;
+  }
+
+  .toggle.active::before {
+    background-color: var(--accent);
+  }
+
+  .toggleKnob {
+    top: 10px;
+  }
+}
