@@ -77,8 +77,8 @@
 }
 
 .editorButton {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
   color: white;
 }
 
@@ -534,7 +534,8 @@
 }
 
 .sourceToggle.sourceUnavailable {
-  opacity: 0.5;
+  /* Dimmed via the muted label/icon colours rather than opacity, which would
+     drag the label below the WCAG AA contrast ratio. */
   cursor: not-allowed;
 }
 

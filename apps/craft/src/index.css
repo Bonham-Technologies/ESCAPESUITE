@@ -7,11 +7,13 @@
 
   --text-primary: #e8e8e8;
   --text-secondary: #a0a0a0;
-  --text-muted: #6a6a7a;
+  --text-muted: #8f8fa2;
 
   /* ESCAPECRAFT accent: red/pink (differentiates from ESCAPEARTIST's blue) */
   --accent: #e94560;
   --accent-hover: #ff6b6b;
+  /* Darker accent for surfaces that carry white text (WCAG AA 4.5:1) */
+  --accent-strong: #d13a54;
   --accent-primary: #e94560;
   --accent-secondary: #ff6b6b;
   --accent-success: #4caf50;
@@ -84,6 +86,7 @@
   /* Keep ESCAPECRAFT's red/pink accent in light mode */
   --accent: #e94560;
   --accent-hover: #d63850;
+  --accent-strong: #d13a54;
   --accent-primary: #e94560;
   --accent-secondary: #d63850;
   --accent-success: #22c55e;

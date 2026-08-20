@@ -58,7 +58,7 @@
 
 .toolButton.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .toggleButton {
@@ -70,7 +70,7 @@
 
 .toggleButton.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .divider {

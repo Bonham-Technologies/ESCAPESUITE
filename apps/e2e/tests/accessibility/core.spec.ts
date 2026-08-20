@@ -68,7 +68,7 @@ test.describe('ESCAPECRAFT Accessibility', () => {
   // 2 violations: button-name (critical, 4 nodes — the source toggle switches
   // render as an empty <button> with no text, aria-label or title) and
   // color-contrast (serious, 1 node).
-  test.fixme('recording UI passes axe-core audit', async ({ page }) => {
+  test('recording UI passes axe-core audit', async ({ page }) => {
     const results = await runAxeCheck(page)
 
     const seriousViolations = results.violations.filter(
@@ -218,7 +218,7 @@ test.describe('Color Contrast', () => {
 
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // 5 nodes fall below the WCAG 2 AA contrast ratio.
-  test.fixme('ESCAPECRAFT has adequate color contrast', async ({ page }) => {
+  test('ESCAPECRAFT has adequate color contrast', async ({ page }) => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
@@ -234,7 +234,7 @@ test.describe('Color Contrast', () => {
 
   // FIXME(a11y): real app defect — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/275
   // 19 nodes fall below the WCAG 2 AA contrast ratio (canvas already excluded).
-  test.fixme('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
+  test('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await page.waitForLoadState('networkidle')
 
