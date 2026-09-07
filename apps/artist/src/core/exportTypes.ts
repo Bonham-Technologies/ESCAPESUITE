@@ -1,6 +1,6 @@
 // Shared types, constants, and utility functions for the export pipeline
 
-import type { Clip, Track, ExportOptions, ExportProgress, BlendMode } from '../store/types';
+import type { Clip, Track, ExportOptions, ExportProgress, BlendMode, SourceVideo } from '../store/types';
 
 /**
  * A drawable media source that can be used with canvas drawImage.
@@ -151,6 +151,30 @@ export function getQualitySettings(quality: ExportOptions['quality']) {
     case 'high':
       return { videoBitrate: 10_000_000, audioBitrate: 256_000 };
   }
+}
+
+/**
+ * Base (pre-scaling) dimensions for an export: the source dimensions of the
+ * bottom-most media clip (lowest track index). Overlay clips are skipped.
+ * Falls back to 1080p for overlay-only timelines. Shared by the MP4 and WebM
+ * exporters and by the headless renderer's output metadata.
+ */
+export function getBaseDimensions(
+  clips: Clip[],
+  tracks: Track[],
+  sourceVideos: SourceVideo[]
+): { width: number; height: number } {
+  const sourceMap = new Map(sourceVideos.map((v) => [v.id, v]));
+  const trackIndex = (trackId: string) => tracks.find(t => t.id === trackId)?.index ?? 0;
+  const sortedClips = [...clips].sort((a, b) => trackIndex(a.trackId) - trackIndex(b.trackId));
+  for (const clip of sortedClips) {
+    if (clip.overlayType) continue;
+    const source = sourceMap.get(clip.sourceVideoId);
+    if (source && source.width && source.height) {
+      return { width: source.width, height: source.height };
+    }
+  }
+  return { width: 1920, height: 1080 };
 }
 
 /**

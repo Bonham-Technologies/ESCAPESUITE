@@ -16,7 +16,7 @@ const baseInput = (): RenderInput => ({
     id: 'p', name: 'n', resolution: { width: 64, height: 48 },
     timeline: { tracks: [{ id: 't0' }], clips: [{ id: 'c0', sourceVideoId: 's0' }], textOverlays: [], shapeOverlays: [], duration: 1 },
   } as unknown as RenderInput['project'],
-  sourceVideos: [{ id: 's0', name: 's.mp4', mimeType: 'video/mp4' } as RenderInput['sourceVideos'][number]],
+  sourceVideos: [{ id: 's0', name: 's.mp4', mimeType: 'video/mp4', width: 1920, height: 1080 } as RenderInput['sourceVideos'][number]],
   sourceBlobs: { s0: new Uint8Array([1]).buffer },
   options: { format: 'mp4' } as RenderInput['options'],
 })
@@ -56,5 +56,42 @@ describe('renderProject', () => {
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).endTime = 3
     const res = await renderProject(input)
     expect(res.meta.durationSec).toBe(8) // timelinePosition(5) + duration(3)
+  })
+
+  it('defaults options.resolution to project when the caller omits it', async () => {
+    await renderProject(baseInput())
+    const options = (exportToMP4.mock.calls[0] as unknown[])[2] as { resolution: string; format: string }
+    expect(options).toMatchObject({ format: 'mp4', resolution: 'project' })
+  })
+
+  it('reports the OUTPUT size and duration when a resolution preset and timeRange are given', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 10
+    input.options = { format: 'mp4', quality: 'high', resolution: '720p', timeRange: { start: 2, end: 5 } }
+    const res = await renderProject(input)
+    expect(res.meta).toMatchObject({ width: 1280, height: 720, durationSec: 3 })
+    // and the engine received the same options untouched
+    expect(((exportToMP4.mock.calls[0] as unknown[])[2] as { timeRange: unknown }).timeRange).toEqual({ start: 2, end: 5 })
+  })
+
+  it('rejects a clip whose sourceVideoId is not in sourceVideos instead of rendering black', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).sourceVideoId = 'ghost'
+    await expect(renderProject(input)).rejects.toThrow(/unknown source "ghost"/)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
+  it('rejects a referenced source that has no bytes in sourceBlobs', async () => {
+    const input = baseInput()
+    input.sourceBlobs = {}
+    await expect(renderProject(input)).rejects.toThrow(/no bytes in sourceBlobs/)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
+  it('ignores overlay clips during validation', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({ id: 'txt', sourceVideoId: '', overlayType: 'text', timelinePosition: 0, duration: 1 })
+    await expect(renderProject(input)).resolves.toBeTruthy()
   })
 })

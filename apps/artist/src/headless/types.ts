@@ -8,14 +8,17 @@ export interface RenderInput {
   sourceVideos: SourceVideo[]
   /** Raw bytes for each source, keyed by SourceVideo.id. Seeded into IndexedDB before render. */
   sourceBlobs: Record<string, ArrayBuffer>
-  options: ExportOptions
+  /** Export options. `resolution` defaults to 'project' when omitted. */
+  options: Omit<ExportOptions, 'resolution'> & { resolution?: ExportOptions['resolution'] }
 }
 
-/** Returned alongside the encoded bytes for the verification manifest (Plan 2). */
+/** Describes the encoded OUTPUT (after resolution/timeRange options), for the verification manifest (Plan 2). */
 export interface RenderMeta {
   format: 'mp4' | 'webm'
   byteLength: number
+  /** Encoded duration in seconds — the timeRange length when one is given, else the full timeline. */
   durationSec: number
+  /** Encoded frame size — honours options.resolution, not simply project.resolution. */
   width: number
   height: number
   gpu: boolean
