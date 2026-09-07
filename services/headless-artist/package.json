@@ -17,7 +17,7 @@
     "test": "vitest",
     "test:run": "vitest run --exclude '**/*.chromium.test.ts'",
     "test:coverage": "vitest run --coverage --exclude '**/*.chromium.test.ts'",
-    "test:e2e": "vitest run src/**/*.chromium.test.ts"
+    "test:e2e": "vitest run 'src/**/*.chromium.test.ts'"
   },
   "dependencies": { "playwright": "^1.62.1" },
   "devDependencies": {
