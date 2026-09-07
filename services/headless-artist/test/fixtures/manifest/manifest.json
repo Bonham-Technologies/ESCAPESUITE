@@ -1,0 +1,14 @@
+{
+  "project": { "$ref": "./project.json" },
+  "sources": [
+    {
+      "id": "src-0",
+      "file": "src-0.mp4",
+      "mimeType": "video/mp4",
+      "name": "clip.mp4",
+      "width": 64,
+      "height": 48,
+      "duration": 1
+    }
+  ]
+}
