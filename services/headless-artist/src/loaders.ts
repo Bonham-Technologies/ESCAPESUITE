@@ -1,6 +1,8 @@
 import { createWriteStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import type { RenderFileInput } from './types'
 
 export interface LoadedJob {
@@ -51,8 +53,23 @@ const MIME_TO_EXTENSION: Record<string, string> = {
 // Base64 chars decoded per chunk. Must be a multiple of 4 so each slice decodes cleanly on its own.
 const BASE64_CHUNK_CHARS = 4 * 1024 * 1024
 
+// Safe as a file-name component: no path separators, no leading/trailing traversal.
+const SAFE_FILE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Guards against a source id becoming an unsafe or path-traversing file name. */
+function assertSafeFileId(id: unknown, context: string): asserts id is string {
+  if (
+    typeof id !== 'string' ||
+    id === '.' ||
+    id === '..' ||
+    !SAFE_FILE_ID_RE.test(id)
+  ) {
+    throw new Error(`${context} id "${String(id)}" is not a safe file name`)
+  }
 }
 
 function extensionOf(name: string | undefined): string | undefined {
@@ -64,30 +81,37 @@ function extensionOf(name: string | undefined): string | undefined {
 /** Fails fast (before Chromium) when a media clip references a source id that isn't loaded. */
 function validateClipReferences(project: Project, sourceIds: Set<string>): void {
   for (const clip of project.timeline.clips) {
-    if (clip.overlayType) continue // overlay clips carry no source reference
+    // Overlay clips (and any clip with no source, defensively) carry no source reference.
+    if (clip.overlayType || !clip.sourceVideoId) continue
     if (!sourceIds.has(clip.sourceVideoId)) {
       throw new Error(`clip "${clip.id}" references unknown source "${clip.sourceVideoId}"`)
     }
   }
 }
 
-async function writeBase64ToFile(base64: string, destPath: string): Promise<void> {
-  const stream = createWriteStream(destPath)
-  try {
-    for (let offset = 0; offset < base64.length; offset += BASE64_CHUNK_CHARS) {
-      const slice = base64.slice(offset, offset + BASE64_CHUNK_CHARS)
-      const buffer = Buffer.from(slice, 'base64')
-      await new Promise<void>((resolve, reject) => {
-        stream.write(buffer, (err) => (err ? reject(err) : resolve()))
-      })
-    }
-    await new Promise<void>((resolve, reject) => {
-      stream.end((err?: Error | null) => (err ? reject(err) : resolve()))
-    })
-  } catch (err) {
-    stream.destroy()
-    throw err
+/**
+ * Decodes a base64 string to `destPath` in chunks (never as one giant `Buffer.from(wholeString)`),
+ * streaming each decoded chunk to disk via `pipeline` so a write failure (ENOSPC, EIO, an
+ * unwritable destination, ...) rejects this promise instead of crashing the process.
+ * `chunkChars` must stay a multiple of 4 so each slice decodes as a complete, independent base64
+ * group.
+ */
+export async function writeBase64ToFile(
+  base64: string,
+  destPath: string,
+  chunkChars: number = BASE64_CHUNK_CHARS,
+): Promise<void> {
+  if (!Number.isInteger(chunkChars) || chunkChars <= 0 || chunkChars % 4 !== 0) {
+    throw new Error('chunkChars must be a positive multiple of 4')
   }
+
+  async function* chunks(): AsyncGenerator<Buffer> {
+    for (let offset = 0; offset < base64.length; offset += chunkChars) {
+      yield Buffer.from(base64.slice(offset, offset + chunkChars), 'base64')
+    }
+  }
+
+  await pipeline(Readable.from(chunks()), createWriteStream(destPath))
 }
 
 interface VeditorVideo {
@@ -148,7 +172,11 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
     throw new Error(`bundle "${bundlePath}" is missing "videos"`)
   }
 
-  const sourceIds = new Set(videos.map((video) => video.id))
+  const sourceIds = new Set<string>()
+  for (const video of videos) {
+    assertSafeFileId(video.id, 'bundle video')
+    sourceIds.add(video.id)
+  }
   validateClipReferences(project, sourceIds)
 
   const dir = await fs.mkdtemp(path.join(tmpRoot, 'headless-artist-'))
@@ -156,12 +184,20 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
   const sourceFiles: Record<string, string> = {}
   const sourceVideos: SourceVideoInput[] = []
 
-  for (const video of videos) {
-    const ext = MIME_TO_EXTENSION[video.mimeType] ?? extensionOf(video.name) ?? 'bin'
-    const destPath = path.join(dir, `${video.id}.${ext}`)
-    await writeBase64ToFile(video.data, destPath)
-    sourceFiles[video.id] = destPath
-    sourceVideos.push({ id: video.id, name: video.name, mimeType: video.mimeType })
+  try {
+    for (const video of videos) {
+      if (typeof video.data !== 'string') {
+        throw new Error(`bundle video "${video.id}" is missing base64 "data"`)
+      }
+      const ext = MIME_TO_EXTENSION[video.mimeType] ?? extensionOf(video.name) ?? 'bin'
+      const destPath = path.join(dir, `${video.id}.${ext}`)
+      await writeBase64ToFile(video.data, destPath)
+      sourceFiles[video.id] = destPath
+      sourceVideos.push({ id: video.id, name: video.name, mimeType: video.mimeType })
+    }
+  } catch (err) {
+    await fs.rm(dir, { recursive: true, force: true })
+    throw err
   }
 
   let cleaned = false

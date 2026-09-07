@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { loadBundle, loadManifest } from './loaders'
+import { loadBundle, loadManifest, writeBase64ToFile } from './loaders'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const fixturesDir = path.join(here, '..', 'test', 'fixtures')
@@ -157,6 +157,77 @@ describe('loadManifest', () => {
       /clip-0.*does-not-exist|does-not-exist.*clip-0/,
     )
   })
+
+  it('does not validate a non-overlay clip that has an empty sourceVideoId', async () => {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    const projectRef = JSON.parse(await fs.readFile(path.join(manifestFixtureDir, 'project.json'), 'utf8'))
+    const project = projectRef.project
+    // Not an overlay (no overlayType) but also not pointing at any source -- must be skipped,
+    // not treated as an unresolved reference.
+    project.timeline.clips.push({
+      ...project.timeline.clips[0],
+      id: 'clip-empty',
+      sourceVideoId: '',
+    })
+    await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify(project))
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        project: { $ref: './project.json' },
+        sources: [{ id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4' }],
+      }),
+    )
+
+    const job = await loadManifest(path.join(dir, 'manifest.json'))
+    expect(job.project.timeline.clips.some((clip) => clip.id === 'clip-empty')).toBe(true)
+    await job.cleanup()
+  })
+})
+
+describe('writeBase64ToFile', () => {
+  it('rejects rather than crashing when the destination cannot be written', async () => {
+    const dir = await makeTempDir()
+    const destPath = path.join(dir, 'no-such-parent-dir', 'out.bin')
+    await expect(writeBase64ToFile('AAAA', destPath)).rejects.toThrow()
+  })
+
+  it('rejects a chunkChars that is not a positive multiple of 4', async () => {
+    const dir = await makeTempDir()
+    const destPath = path.join(dir, 'out.bin')
+    await expect(writeBase64ToFile('AAAA', destPath, 6)).rejects.toThrow(/multiple of 4/)
+    await expect(writeBase64ToFile('AAAA', destPath, 0)).rejects.toThrow(/multiple of 4/)
+    await expect(writeBase64ToFile('AAAA', destPath, -4)).rejects.toThrow(/multiple of 4/)
+  })
+
+  it('decodes correctly across several chunks, including a partial final chunk with padding', async () => {
+    const dir = await makeTempDir()
+    // 56 bytes -> not a multiple of 3, so the base64 form ends in "=" padding.
+    const original = Buffer.from(Array.from({ length: 56 }, (_, i) => i % 256))
+    const base64 = original.toString('base64')
+    expect(base64.endsWith('=')).toBe(true)
+
+    const destPath = path.join(dir, 'padded.bin')
+    // 12 base64 chars per chunk does not evenly divide the payload, forcing a shorter final chunk.
+    await writeBase64ToFile(base64, destPath, 12)
+
+    const written = await fs.readFile(destPath)
+    expect(written.equals(original)).toBe(true)
+  })
+
+  it('decodes correctly when the payload divides evenly into several full chunks', async () => {
+    const dir = await makeTempDir()
+    // 9 bytes -> a multiple of 3, so the base64 form has no padding.
+    const original = Buffer.from('123456789', 'utf8')
+    const base64 = original.toString('base64')
+    expect(base64.endsWith('=')).toBe(false)
+
+    const destPath = path.join(dir, 'unpadded.bin')
+    await writeBase64ToFile(base64, destPath, 4) // 3 chunks of exactly 4 chars each
+
+    const written = await fs.readFile(destPath)
+    expect(written.equals(original)).toBe(true)
+  })
 })
 
 describe('loadBundle', () => {
@@ -209,5 +280,32 @@ describe('loadBundle', () => {
     await expect(loadBundle(badPath, dir)).rejects.toThrow(
       /clip-0.*does-not-exist|does-not-exist.*clip-0/,
     )
+  })
+
+  it('rejects a video id that would escape the temp directory', async () => {
+    const dir = await makeTempDir()
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    veditor.videos[0].id = '../../evil'
+    const badPath = path.join(dir, 'bad.veditor')
+    await fs.writeFile(badPath, JSON.stringify(veditor))
+
+    await expect(loadBundle(badPath, dir)).rejects.toThrow(/not a safe file name/)
+
+    // No temp dir should have been created at all -- validation runs before mkdtemp.
+    const entries = await fs.readdir(dir)
+    expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
+  })
+
+  it('removes the temp dir it created when a video fails to decode', async () => {
+    const tmpRoot = await makeTempDir()
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    delete veditor.videos[0].data
+    const badPath = path.join(tmpRoot, 'bad.veditor')
+    await fs.writeFile(badPath, JSON.stringify(veditor))
+
+    await expect(loadBundle(badPath, tmpRoot)).rejects.toThrow(/data/)
+
+    const entries = await fs.readdir(tmpRoot)
+    expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
   })
 })
