@@ -6,7 +6,7 @@ to obtain.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 20+ LTS
+- [Node.js](https://nodejs.org/) 22.22+ (24 LTS recommended, matches CI)
 - [pnpm](https://pnpm.io/) (see `packageManager` in the root `package.json` for the pinned version)
 
 ## Local Development
