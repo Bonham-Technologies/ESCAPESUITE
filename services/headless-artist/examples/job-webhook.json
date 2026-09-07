@@ -1,0 +1,12 @@
+{
+  "jobId": "example-webhook",
+  "input": { "manifest": { "path": "examples/manifest.json" } },
+  "options": { "format": "mp4", "quality": "high" },
+  "output": {
+    "sink": "webhook",
+    "config": {
+      "url": "https://intake.internal.example/renders",
+      "headers": { "Authorization": "Bearer REPLACE_ME" }
+    }
+  }
+}

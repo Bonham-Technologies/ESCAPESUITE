@@ -5,9 +5,22 @@
   "description": "Render ESCAPEARTIST projects server-side in headless Chromium — one-shot CLI + kit",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bonham-Technologies/ESCAPESUITE.git",
+    "directory": "services/headless-artist"
+  },
+  "homepage": "https://github.com/Bonham-Technologies/ESCAPESUITE",
   "engines": { "node": ">=22.22.0" },
   "bin": { "headless-artist": "./dist/cli.js" },
-  "files": ["dist", "README.md", "Dockerfile", "examples"],
+  "files": [
+    "dist/cli.js",
+    "dist/headless.html",
+    "dist/kit.json",
+    "README.md",
+    "Dockerfile",
+    "examples"
+  ],
   "scripts": {
     "build": "node scripts/assemble-kit.mjs",
     "pack:kit": "node scripts/assemble-kit.mjs && npm pack --pack-destination dist",
@@ -19,7 +32,7 @@
     "test:coverage": "vitest run --coverage --exclude '**/*.chromium.test.ts'",
     "test:e2e": "vitest run chromium.test"
   },
-  "dependencies": { "playwright": "^1.62.1" },
+  "dependencies": { "playwright": "1.62.1" },
   "devDependencies": {
     "@escapesuite/shared": "workspace:*",
     "@eslint/js": "^10.0.1",

@@ -389,7 +389,7 @@ importers:
   services/headless-artist:
     dependencies:
       playwright:
-        specifier: ^1.62.1
+        specifier: 1.62.1
         version: 1.62.1
     optionalDependencies:
       '@aws-sdk/client-s3':

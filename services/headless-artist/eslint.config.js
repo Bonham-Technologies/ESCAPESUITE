@@ -13,4 +13,14 @@ export default defineConfig([
       globals: globals.node,
     },
   },
+  {
+    // Build tooling (scripts/assemble-kit.mjs): plain Node ESM, no TypeScript rules.
+    files: ['**/*.mjs'],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: globals.node,
+    },
+  },
 ])

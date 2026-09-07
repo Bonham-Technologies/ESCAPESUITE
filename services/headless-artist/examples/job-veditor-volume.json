@@ -1,0 +1,14 @@
+{
+  "jobId": "example-veditor-volume",
+  "input": { "bundle": { "path": "examples/project.veditor" } },
+  "options": {
+    "format": "webm",
+    "quality": "medium",
+    "resolution": "1080p",
+    "timeRange": { "start": 0, "end": 10 }
+  },
+  "output": {
+    "sink": "volume",
+    "config": { "dir": "out" }
+  }
+}

@@ -1,9 +1,512 @@
-Headless ARTIST render kit — see the plan; full README lands in Task 7.
+# ESCAPEARTIST headless render kit
 
-## Input loading
+A one-shot command-line renderer for ESCAPEARTIST projects. You hand it a job spec, it renders
+the project in a headless Chromium it launches itself, delivers the finished video to the sink
+you named, prints one line of JSON, and exits. There is no server, no queue, no daemon, and no
+state carried between runs — scheduling, retries and concurrency stay in whatever broker you
+already have. The kit is the same code the browser editor exports with: `dist/headless.html`
+is the ARTIST render engine built as a single inlined page, driven from Node through
+Playwright. A file that renders in the editor renders identically here.
 
-Jobs are loaded from either a `.veditor` bundle (`loadBundle`, in `src/loaders.ts`) or a manifest
-referencing local files on disk (`loadManifest`). `loadBundle` parses the whole `.veditor` JSON
-file into memory and decodes each video's base64 payload in chunks to a temp file — for large
-media this is more memory-hungry than necessary, so **prefer the manifest format for large
-inputs**: it references source files on disk directly and never base64-encodes them.
+Nothing leaves the machine. The driver aborts every `http:` and `https:` request the page makes
+(the bundle is fully inline and needs none), so a render touches only the files you pointed it
+at and the ones it writes. Install it on a box with more cores or a GPU than a laptop has, on a
+network segment with no egress at all, and it behaves the same. Free and MIT-licensed, like the
+rest of ESCAPE Suite — see <https://github.com/Bonham-Technologies/ESCAPESUITE>.
+
+## Quick start
+
+On a bare host with Node 22.22+ and network access to fetch Chromium once:
+
+```bash
+npm install ./escapesuite-headless-artist-0.1.0.tgz
+npx playwright install --with-deps chromium
+cp -r node_modules/@escapesuite/headless-artist/examples .
+node_modules/.bin/headless-artist render --job examples/job-manifest-volume.json
+ls out/            # example-manifest-volume.mp4  example-manifest-volume.manifest.json
+```
+
+The fourth command prints one JSON line to stdout describing what it produced; progress and
+diagnostics go to stderr. That is the whole interface.
+
+## Install
+
+The kit ships as an npm tarball. It has exactly one runtime dependency — `playwright`, pinned
+to an exact version rather than a range, so the browser revision you download always matches
+the one the kit was built and tested against — plus an optional one (`@aws-sdk/client-s3`) that
+only the S3 sink needs.
+
+```bash
+npm install ./escapesuite-headless-artist-<version>.tgz     # adds node_modules/.bin/headless-artist
+npm install ./escapesuite-headless-artist-<version>.tgz --omit=optional   # skip the AWS SDK
+```
+
+**Node 22.22.0 or newer** is required.
+
+### Chromium
+
+The kit does not bundle a browser. Give it one of these two:
+
+1. **Playwright-managed** (recommended). `npx playwright install chromium` downloads the exact
+   build this kit is pinned against into `~/.cache/ms-playwright`, and
+   `npx playwright install-deps chromium` installs the OS libraries it links against (Debian
+   and Ubuntu; needs root). `npx playwright install --with-deps chromium` does both.
+2. **A system Chromium.** Point `HEADLESS_CHROMIUM_PATH` at the binary and Playwright will
+   launch that instead. Anything recent enough for WebCodecs works; an older build will fail at
+   encode time rather than at launch.
+
+The pinned version is **Playwright 1.62.1**. `headless-artist --version` prints it, along with
+the kit and engine versions and the commit the kit was built from:
+
+```console
+$ headless-artist --version
+{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"5496954","playwrightVersion":"1.62.1","builtAt":"2026-09-07T22:26:33.296Z"}
+```
+
+### Air-gapped hosts
+
+No network is used **at render time** — the driver aborts every http(s) request the page makes.
+The only thing that ever wants a network is the one-time Chromium download, and there are two
+ways around it:
+
+- **Pre-seed the browser cache.** Run `npx playwright install chromium` on a machine with
+  egress and copy `~/.cache/ms-playwright` (`~/Library/Caches/ms-playwright` on macOS) to the
+  air-gapped host. Same Playwright version, same OS/arch. Set `PLAYWRIGHT_BROWSERS_PATH` if you
+  want it somewhere else.
+- **Use a system Chromium** from your distribution's packages and set
+  `HEADLESS_CHROMIUM_PATH`. Nothing is downloaded at all.
+
+The container image in [`Dockerfile`](Dockerfile) needs neither: its base image already carries
+the matching browser. Building that image still needs a registry (for the base image and the
+one `npm install`), so build it where you have egress and ship the image, not the Dockerfile.
+
+## Job spec
+
+One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (`render -`).
+
+```json
+{
+  "jobId": "acme-2026-09-07-0001",
+  "input": { "manifest": { "path": "/in/manifest.json" } },
+  "options": {
+    "format": "mp4",
+    "quality": "high",
+    "resolution": "1080p",
+    "timeRange": { "start": 3.5, "end": 42 }
+  },
+  "output": {
+    "sink": "volume",
+    "config": { "dir": "/out" }
+  }
+}
+```
+
+| Field | Required | Value |
+| --- | --- | --- |
+| `jobId` | yes | Matches `/^[A-Za-z0-9._-]{1,128}$/`, and may not be `.` or `..`. It names the output files and a scratch directory, so it must be a safe single path segment. |
+| `input` | yes | Exactly one of `bundle` or `manifest`. Both take a single `path`. |
+| `input.bundle.path` | — | A `.veditor` file exported from the editor. |
+| `input.manifest.path` | — | A manifest JSON file (see [Inputs](#inputs)). |
+| `options.format` | yes | `mp4` (H.264 + AAC) or `webm` (VP9 + Opus). |
+| `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. |
+| `options.resolution` | no | `project` (default) uses the project's own resolution; `original` uses the bottom-most media clip's native size; `1080p`, `720p` and `480p` scale to that height, keeping the source aspect ratio. Odd dimensions are rounded up to even. |
+| `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both numbers, `start` strictly less than `end`. Omit to render the whole timeline. |
+| `output.sink` | yes | `volume`, `command`, `webhook` or `s3`. |
+| `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)). |
+
+Anything the spec gets wrong — an unknown format, a missing field, a `jobId` with a slash in it
+— is caught before Chromium launches and exits **2**.
+
+## Inputs
+
+### Manifest (recommended)
+
+A manifest is a small JSON file that names the project and points at source media already on
+disk. Nothing is copied and nothing is base64-encoded, so a 40 GB job costs the same as a
+40 MB one. `examples/manifest.json` is a complete, runnable one.
+
+```json
+{
+  "project": { "$ref": "./project.json" },
+  "sources": [
+    { "id": "src-0", "file": "media/interview.mp4", "width": 3840, "height": 2160, "duration": 612.4 },
+    { "id": "src-1", "file": "media/logo.png" },
+    { "id": "src-2", "file": "media/vo.wav", "mimeType": "audio/wav", "name": "voiceover.wav" }
+  ]
+}
+```
+
+- **`project`** — either the project object inline, or `{ "$ref": "./relative/path.json" }`.
+  A `$ref` is resolved relative to the manifest's own directory. If the referenced file is
+  itself wrapped as `{ "project": { … } }` — which is exactly what the editor's project export
+  looks like — the wrapper is unwrapped for you, so you can point `$ref` straight at a file
+  saved from ARTIST without editing it. (The unwrap applies only to a `$ref`'d file; an inline
+  `project` is used as given.)
+- **`sources[].id`** — matches `clip.sourceVideoId` in the project. Any string; the files stay
+  where they are, so it is never used as a file name.
+- **`sources[].file`** — path to the media, resolved relative to the manifest's directory
+  (absolute paths work too). The file must exist; a missing one fails the job immediately.
+- **`sources[].mimeType`** — optional. Inferred from the extension when omitted:
+  `mp4`, `webm`, `mov`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `mp3`, `wav`, `ogg`, `m4a`, `aac`.
+  Any other extension needs an explicit `mimeType`.
+- **`sources[].name`** — optional display name; defaults to the file's basename.
+- **`sources[].width`, `height`, `duration`** — optional. Probed from the bytes when omitted;
+  supplying them saves a probe.
+
+Two rules are enforced up front, before Chromium starts, because both produce baffling failures
+later otherwise:
+
+- **Source file basenames must be unique** across the manifest. The page matches its file list
+  by name, so `a/clip.mp4` and `b/clip.mp4` in one job is rejected.
+- **Every media clip's `sourceVideoId` must exist in `sources`.** A mismatch fails with
+  `clip "<id>" references unknown source "<id>"` — it means the project and the manifest have
+  drifted apart, not that a file is missing.
+
+### `.veditor` bundle
+
+The editor's own export format: one JSON document holding the project and every source video
+base64-encoded inline.
+
+```json
+{ "version": 1, "project": { … }, "videos": [ { "id": "src-0", "name": "clip.mp4", "mimeType": "video/mp4", "data": "<base64>" } ] }
+```
+
+Only `"version": 1` is accepted, and each `videos[].id` must be a safe file-name token
+(`/^[A-Za-z0-9._-]{1,128}$/`, not `.` or `..`) because it becomes one. The loader decodes each
+video to a temp file in chunks and deletes them when the job ends, but **the JSON document
+itself is parsed whole into memory** — a 4 GB bundle needs more than 4 GB of heap. It is fine
+for small projects and for round-tripping something straight out of the editor; for anything
+large, use a manifest.
+
+## Sinks
+
+Every sink produces two artifacts: the video and a JSON [verification
+manifest](#output-and-verification).
+
+### `volume` — write to a directory
+
+```json
+{ "sink": "volume", "config": { "dir": "/out" } }
+```
+
+Writes `<dir>/<jobId>.<mp4|webm>` and `<dir>/<jobId>.manifest.json`. The directory is created
+if missing. The video is moved into place with a rename (falling back to a copy across
+filesystems), and both files **overwrite** anything already at those names — which is what
+makes re-running a job id idempotent rather than duplicative. `outputLocation` and
+`manifestLocation` in the outcome are absolute paths.
+
+### `command` — hand off to your own program
+
+```json
+{
+  "sink": "command",
+  "config": {
+    "command": "/usr/local/bin/deliver.sh",
+    "args": ["--tenant", "acme"],
+    "env": { "DELIVERY_TARGET": "archive" }
+  }
+}
+```
+
+Runs `command` **without a shell** (no globbing, no word splitting, no injection surface) with
+the output path and the manifest path appended as the last two arguments:
+
+```
+/usr/local/bin/deliver.sh --tenant acme /work/<jobId>/render.mp4 /work/<jobId>/<jobId>.manifest.json
+```
+
+The same two paths are also exported as `HEADLESS_OUTPUT_PATH` and `HEADLESS_MANIFEST_PATH`,
+alongside `config.env` merged over the runner's own environment. A non-zero exit fails the job;
+the last ~20 lines of the command's stderr come back in the outcome's `error`.
+
+**The command sink deliberately reports no `manifestLocation`.** Both files live in the
+runner's scratch directory, which is deleted as soon as your command returns — they are
+transport, not storage. If you want the manifest, copy it somewhere durable while you have it.
+
+### `webhook` — POST to an endpoint
+
+```json
+{
+  "sink": "webhook",
+  "config": {
+    "url": "https://intake.internal.example/renders",
+    "headers": { "Authorization": "Bearer …" }
+  }
+}
+```
+
+A single `multipart/form-data` POST with two fields: `manifest` (the verification manifest as a
+JSON string) and `file` (the video, filename `<jobId>.<ext>`, content type `video/mp4` or
+`video/webm`). Any non-2xx response fails the job. `outputLocation` is the URL.
+
+This sink and `s3` are the only two that touch the network, and they do so *after* the render —
+the render itself is still fully offline.
+
+### `s3` — upload to S3 or an S3-compatible store
+
+```json
+{
+  "sink": "s3",
+  "config": {
+    "prefix": "s3://my-renders/outgoing",
+    "region": "us-east-1",
+    "endpoint": "https://s3.us-east-1.amazonaws.com"
+  }
+}
+```
+
+Requires the optional dependency `@aws-sdk/client-s3`; without it the job fails with
+`s3 sink requires the optional dependency @aws-sdk/client-s3`.
+
+`prefix` accepts `s3://bucket/key-prefix` or a bare `bucket/key-prefix` (a trailing slash is
+harmless), and a bucket with no prefix at all. Objects are written as
+`<key-prefix>/<jobId>.<ext>` and `<key-prefix>/<jobId>.manifest.json`; the video is streamed
+from disk rather than buffered. `endpoint` and `region` are both optional — set `endpoint` for
+MinIO, Ceph, R2 and friends.
+
+**Credentials come from the environment**, via the AWS SDK's standard chain:
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`), `AWS_PROFILE`,
+`AWS_REGION`, an instance/pod role, and so on. The job spec never carries secrets.
+
+## Environment reference
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HEADLESS_BUNDLE_PATH` | `headless.html` next to the CLI | The render bundle to load. Only override it if you moved the file. |
+| `HEADLESS_WORK_DIR` | the system temp dir | Root for scratch space. Each job gets `<work dir>/<jobId>`, removed when it finishes either way. Point this at fast local disk. |
+| `HEADLESS_GPU` | unset | `true` launches Chromium with GPU acceleration instead of `--disable-gpu`. See [GPU](#gpu). |
+| `HEADLESS_CHROMIUM_PATH` | Playwright's browser | Path to a Chromium binary to launch instead. |
+| `HEADLESS_NO_SANDBOX` | unset | `true` adds `--no-sandbox`. Needed when running as root — e.g. in a container with no `USER`. Prefer running as a non-root user and leaving this off. |
+| `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-render budget, launch included. Must be a positive integer; anything else exits 2. |
+| `HEADLESS_LOG` | `text` | `json` emits one JSON object per stderr line (`{ts, level, msg}`, level `error` or `info`). |
+
+`PLAYWRIGHT_BROWSERS_PATH` and the AWS credential variables are read by their own libraries and
+behave as documented there.
+
+## GPU
+
+By default Chromium launches with `--disable-gpu`: encoding runs in software, which is
+predictable and works on any host. Setting `HEADLESS_GPU=true` launches with
+`--use-gl=angle --ignore-gpu-blocklist --enable-features=Vulkan` instead and lets Chromium pick
+a hardware encoder when it finds a usable one.
+
+- **In a container** you also need the device: `docker run --gpus all …` with the NVIDIA
+  container toolkit installed, or the equivalent device plugin on Kubernetes (see the commented
+  variant in `examples/k8s-job.yaml`). The env var alone does nothing without a GPU attached,
+  and an attached GPU does nothing without the env var.
+- **`"gpu": true` in the verification manifest means "this render was launched with GPU
+  acceleration enabled"** — the driver records how it launched Chromium. It is not a promise
+  that a hardware encoder was actually selected for every frame; Chromium falls back to
+  software silently when the codec, resolution or driver isn't supported. Check the stderr line
+  `[headless] chromium <version> gpu=true` for the launch, and your GPU's own utilisation
+  counters for the truth.
+- **Hardware and software encoders produce different bytes.** Same picture, different rate
+  control, different sizes, different `sha256`. Do not compare hashes across a hardware/software
+  boundary — that comparison is only meaningful between two renders on the same encoder. See
+  [Output and verification](#output-and-verification).
+
+Whether a GPU is worth it depends on the job: it helps most at high resolutions and long
+durations, and barely at all on short 480p clips where launch and decode dominate.
+
+## Output and verification
+
+Every successful render is accompanied by `<jobId>.manifest.json`:
+
+```json
+{
+  "jobId": "acme-2026-09-07-0001",
+  "format": "mp4",
+  "byteLength": 41235904,
+  "durationSec": 38.5,
+  "width": 1920,
+  "height": 1080,
+  "gpu": false,
+  "sha256": "9f2c1d7a4be0355ec8f1a6d3b71e0c95d4a2f8e60b3c7d19a5e4f0c26b8d3a71",
+  "chromiumVersion": "151.0.7922.34",
+  "engineVersion": "2.0.0",
+  "kitVersion": "0.1.0",
+  "createdAt": "2026-09-07T22:26:33.296Z"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `jobId` | The job that produced it. |
+| `format` | `mp4` or `webm`, as requested. |
+| `byteLength` | Size of the delivered file, re-read from disk after encoding. |
+| `durationSec` | Encoded duration — the `timeRange` length when one was given, else the whole timeline. |
+| `width`, `height` | Encoded frame size after `options.resolution` is applied (not necessarily the project's own resolution). |
+| `gpu` | Whether Chromium was launched with GPU acceleration. |
+| `sha256` | SHA-256 of the delivered file, streamed while hashing. |
+| `chromiumVersion` | The browser that rendered it. |
+| `engineVersion` | ARTIST version the bundle was built from. |
+| `kitVersion` | This kit's version. |
+| `createdAt` | ISO 8601, when the manifest was built. |
+
+To verify a file you received matches the manifest that came with it:
+
+```bash
+sha256sum out/acme-2026-09-07-0001.mp4
+# compare against .sha256 in out/acme-2026-09-07-0001.manifest.json
+```
+
+or, scripted:
+
+```bash
+jq -r '.sha256 + "  " + .jobId + "." + .format' out/acme-2026-09-07-0001.manifest.json \
+  | (cd out && sha256sum -c -)
+```
+
+`sha256` verifies **transport**: that the bytes you hold are the bytes that were produced. It is
+not a reproducibility claim — re-rendering the same project will not generally produce the same
+bytes, and a hardware encoder certainly won't match a software one. For cross-encoder checks
+compare `width`, `height`, `durationSec` and the picture itself.
+
+## Exit codes and the stdout/stderr contract
+
+| Exit | Meaning | stdout |
+| --- | --- | --- |
+| `0` | Rendered and delivered. | One JSON `RenderOutcome` line with `"ok": true`. |
+| `1` | The job ran and failed (bad input file, encoder error, sink refused it, timeout). | One JSON `RenderOutcome` line with `"ok": false` and an `error` string. |
+| `2` | Usage or job-spec error — the job never started. Retrying identically will fail identically. | Empty. |
+
+**stdout carries exactly one line and nothing else, ever.** Logs, progress and warnings all go
+to stderr, so `outcome=$(headless-artist render --job job.json)` is always safe.
+
+```json
+{"jobId":"acme-…","ok":true,"meta":{"format":"mp4","byteLength":41235904,"durationSec":38.5,"width":1920,"height":1080,"gpu":false},"outputLocation":"/out/acme-….mp4","manifestLocation":"/out/acme-….manifest.json","durationMs":128411}
+```
+
+`manifestLocation` is present for the sinks that store one durably (`volume`, `s3`) and absent
+for `command` and `webhook`. `--version` also prints a single JSON line to stdout; `--help`
+prints usage to stderr and exits 0.
+
+On stderr you get the launch line, one line per whole percent of progress, any page-level
+console errors, and, on failure, the error:
+
+```
+[headless] chromium 151.0.7922.34 gpu=false
+[headless] progress 0%
+[headless] progress 1%
+…
+[headless] render complete: 41235904 bytes in 128203 ms
+```
+
+## Running in a container
+
+[`Dockerfile`](Dockerfile) is a working reference build on the official Playwright image, which
+already carries the matching Chromium, its OS dependencies, and the fonts text overlays need.
+
+```bash
+docker build -t headless-artist .
+docker run --rm \
+  -v "$PWD/in:/in:ro" \
+  -v "$PWD/out:/out" \
+  headless-artist --job /in/job.json
+```
+
+The image's entrypoint is `node dist/cli.js render`, so the arguments you pass are the CLI's
+arguments. With no arguments it reads the job spec from stdin:
+
+```bash
+cat job.json | docker run --rm -i -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headless-artist
+```
+
+Two things worth knowing:
+
+- It runs as `pwuser`, not root, which keeps Chromium's own sandbox usable — so
+  `HEADLESS_NO_SANDBOX` is *not* set. If you change the image to run as root you must set
+  `HEADLESS_NO_SANDBOX=true`, or Chromium refuses to start. Make sure the mounted output
+  directory is writable by uid 1000.
+- Scratch space defaults to the container's `/tmp`. For long renders, mount real storage and
+  set `HEADLESS_WORK_DIR` to it.
+
+`examples/k8s-job.yaml` is the same thing as a one-shot Kubernetes `Job` — `restartPolicy:
+Never`, `backoffLimit: 0`, input and output volumes, an `emptyDir` for scratch, and a commented
+GPU variant using `nvidia.com/gpu`.
+
+## Broker integration
+
+The CLI is designed to be spawned per job by something you already run. `examples/broker-example.sh`
+is a working loop; the contract it relies on is small:
+
+- **One process per job.** No warm-up to amortise, no shared state to corrupt, so you can run
+  as many in parallel as the box has cores and memory for.
+- **Idempotent by `jobId`.** The `volume` and `s3` sinks write `<jobId>.<ext>` and
+  `<jobId>.manifest.json`, overwriting. Re-running a job that died halfway leaves one correct
+  output rather than a duplicate. On the `volume` sink the video is *renamed* into place, so on
+  one filesystem it appears atomically; across filesystems it falls back to a copy, which does
+  not.
+- **Retry on exit 1, never on exit 2.** Exit 1 is a failure that may be transient (a busy disk,
+  a webhook that was down, a timeout). Exit 2 means the spec is wrong and always will be; route
+  those to a dead-letter queue instead of a retry loop.
+- **Read `outputLocation` from the outcome**, don't reconstruct it — it differs per sink.
+- **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page can't hold a worker slot
+  indefinitely; the job then fails with `render timed out after <n> ms` and exit 1.
+
+Scratch is cleaned up on every path, success or failure, so a crashed broker doesn't leave the
+work directory filling up. The exception is a hard kill of the CLI process itself (`SIGKILL`,
+or an unhandled `SIGTERM`), which leaves one `<work dir>/<jobId>` behind — worth a periodic
+sweep if you kill jobs routinely.
+
+## Sizing and throughput
+
+Measured on a laptop with software encoding, as a floor rather than a target:
+
+| Job | Throughput |
+| --- | --- |
+| 1080p, software | ~0.3× realtime — roughly 3 minutes of wall clock per minute of video |
+| 4K, software | 2 seconds of output in ~6 seconds |
+
+Rules of thumb:
+
+- **Encoding is CPU-bound** and scales with cores. A server with 8–16 cores does far better
+  than the numbers above; a GPU does better still at high resolutions.
+- **Memory scales with resolution**, not with duration — frames are streamed, not accumulated.
+  4 GB is comfortable for 1080p; budget 8 GB or more for 4K. A `.veditor` input is the
+  exception: it also needs headroom for the whole JSON document.
+- **Disk**: the scratch directory holds one complete output for the duration of the job, plus
+  decoded temp files for a `.veditor` input.
+- **Fixed overhead** per job is a Chromium launch — a second or two. It is not worth batching
+  around, but it does mean very short clips are dominated by it.
+
+## Troubleshooting
+
+**`No H.264 encoder available` / MP4 export fails, WebM works.** The Chromium you're launching
+was built without H.264 (some Linux distribution packages strip it). Use Playwright's own
+Chromium rather than a system one, or export `webm`. If you're on a GPU host, try toggling
+`HEADLESS_GPU` — a broken hardware encoder path can fail where software succeeds, and vice
+versa.
+
+**`Failed to launch` / sandbox errors, usually in a container.** Chromium's sandbox can't
+initialise as root. Either run as a non-root user (what the reference `Dockerfile` does) or set
+`HEADLESS_NO_SANDBOX=true`. Under Docker's default seccomp profile a non-root user is enough.
+
+**Text overlays render in the wrong font, or as boxes.** Overlays use system fonts; a minimal
+container or a stripped host has none. Install `fonts-liberation` and `fonts-noto-core`
+(Debian/Ubuntu) — the Playwright base image already has both.
+
+**`render timed out after <n> ms`.** The whole render, launch included, outran
+`HEADLESS_TIMEOUT_MS` (30 minutes by default). Long or high-resolution jobs legitimately need
+more; raise it. If a job that used to finish suddenly doesn't, check stderr for the last
+`[headless] progress` line — progress that stopped early points at a bad source file, one that
+never started points at the launch.
+
+**`clip "<id>" references unknown source "<id>"`.** The project and the manifest disagree: the
+timeline references a source the manifest doesn't list. This is caught before Chromium starts,
+so it costs nothing but it will never resolve itself — regenerate the manifest from the same
+project you're rendering.
+
+**`could not infer a MIME type for "<file>"`.** The extension isn't in the inference table. Add
+`"mimeType"` to that source's entry.
+
+**`manifest has duplicate source file name "<name>"`.** Two sources in one job resolve to the
+same basename. Rename one, or copy them to distinct names — the page matches its file list by
+name and cannot tell them apart.
+
+**`headless bundle not found at <path>`.** `dist/headless.html` isn't where the CLI expects it.
+It ships next to `dist/cli.js`; set `HEADLESS_BUNDLE_PATH` if you relocated it.
+
+**`s3 sink requires the optional dependency @aws-sdk/client-s3`.** Installed with
+`--omit=optional` (or with the reference `Dockerfile`, which does). Reinstall including
+optional dependencies.

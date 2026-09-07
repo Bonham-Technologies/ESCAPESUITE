@@ -28,12 +28,9 @@ interface CliResult {
 let tmpRoot: string
 
 beforeAll(async () => {
-  execSync('pnpm --filter=@escapesuite/artist run build:headless', { cwd: REPO_ROOT, stdio: 'inherit' })
-  // Exactly the command the kit assembler uses to produce the shipped binary.
-  execSync(
-    'pnpm --filter @escapesuite/headless-artist exec esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js',
-    { cwd: REPO_ROOT, stdio: 'inherit' },
-  )
+  // The kit assembler itself, so these tests exercise the artifact customers actually get:
+  // it builds the headless bundle, bundles the CLI, and writes dist/kit.json.
+  execSync('pnpm --filter=@escapesuite/headless-artist run build', { cwd: REPO_ROOT, stdio: 'inherit' })
   tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-artist-cli-test-'))
 }, BUILD_TIMEOUT_MS)
 
@@ -221,6 +218,12 @@ describe('headless-artist CLI', () => {
     expect(result.code).toBe(0)
     const kit = JSON.parse(result.stdout)
     expect(typeof kit.kitVersion).toBe('string')
+    // Everything the assembler stamps in, so a kit can always be traced back to its build.
+    expect(typeof kit.engineVersion).toBe('string')
+    expect(typeof kit.playwrightVersion).toBe('string')
+    expect(typeof kit.commit).toBe('string')
+    expect(typeof kit.builtAt).toBe('string')
+    expect(kit.kitVersion).not.toBe('unknown')
   })
 
   it('still runs when invoked through a symlink, as the bin entry is', async () => {
