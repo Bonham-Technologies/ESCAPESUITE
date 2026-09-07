@@ -1,0 +1,13 @@
+{
+  "jobId": "example-s3",
+  "input": { "manifest": { "path": "examples/manifest.json" } },
+  "options": { "format": "mp4", "quality": "high" },
+  "output": {
+    "sink": "s3",
+    "config": {
+      "prefix": "s3://my-renders/outgoing",
+      "region": "us-east-1",
+      "endpoint": "https://s3.us-east-1.amazonaws.com"
+    }
+  }
+}

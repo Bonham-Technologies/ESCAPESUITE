@@ -29,6 +29,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       craft_size: ${{ steps.sizes.outputs.craft }}
       artist_size: ${{ steps.sizes.outputs.artist }}
+      kit_size: ${{ steps.sizes.outputs.kit }}
       is_pr: ${{ steps.check.outputs.is_pr }}
       pr_number: ${{ steps.check.outputs.pr_number }}
 
@@ -58,6 +59,15 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download headless-artist kit from CI
+        uses: actions/download-artifact@v8
+        continue-on-error: false
+        with:
+          name: headless-artist-kit
+          path: ./artifacts/kit
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Determine version
         id: version
         run: |
@@ -74,11 +84,12 @@ jobs:
         id: sizes
         run: |
           # Move artifacts to expected structure
-          mkdir -p dist/craft dist/artist
+          mkdir -p dist/craft dist/artist dist/kit
 
           # Find the standalone HTML files from CI artifacts
           CRAFT_HTML=$(find ./artifacts -name "index.html" -path "*/craft/*" | head -1)
           ARTIST_HTML=$(find ./artifacts -name "index.html" -path "*/artist/*" | head -1)
+          KIT_TGZ=$(find ./artifacts/kit -name "*.tgz" | head -1)
 
           if [ -z "$CRAFT_HTML" ]; then
             echo "Error: Could not find ESCAPECRAFT standalone build"
@@ -88,12 +99,17 @@ jobs:
             echo "Error: Could not find ESCAPEARTIST standalone build"
             exit 1
           fi
+          if [ -z "$KIT_TGZ" ]; then
+            echo "Error: Could not find headless-artist kit tarball"
+            exit 1
+          fi
 
           VERSION="${{ steps.version.outputs.version }}"
 
           # Copy to versioned names
           cp "$CRAFT_HTML" "dist/craft/ESCAPECRAFT-${VERSION}.html"
           cp "$ARTIST_HTML" "dist/artist/ESCAPEARTIST-${VERSION}.html"
+          cp "$KIT_TGZ" "dist/kit/escapesuite-headless-artist-${VERSION}.tgz"
 
           # Copy to latest names
           cp "$CRAFT_HTML" "dist/craft/ESCAPECRAFT-latest.html"
@@ -102,11 +118,14 @@ jobs:
           # Get sizes
           CRAFT_SIZE=$(du -h "dist/craft/ESCAPECRAFT-${VERSION}.html" | cut -f1)
           ARTIST_SIZE=$(du -h "dist/artist/ESCAPEARTIST-${VERSION}.html" | cut -f1)
+          KIT_SIZE=$(du -h "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" | cut -f1)
           echo "craft=~${CRAFT_SIZE}" >> $GITHUB_OUTPUT
           echo "artist=~${ARTIST_SIZE}" >> $GITHUB_OUTPUT
+          echo "kit=~${KIT_SIZE}" >> $GITHUB_OUTPUT
 
           echo "ESCAPECRAFT size: ${CRAFT_SIZE}"
           echo "ESCAPEARTIST size: ${ARTIST_SIZE}"
+          echo "Headless-artist kit size: ${KIT_SIZE}"
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
@@ -132,6 +151,7 @@ jobs:
             const version = '${{ needs.prepare.outputs.version }}';
             const craftSize = '${{ needs.prepare.outputs.craft_size }}';
             const artistSize = '${{ needs.prepare.outputs.artist_size }}';
+            const kitSize = '${{ needs.prepare.outputs.kit_size }}';
             const prNumber = '${{ needs.prepare.outputs.pr_number }}';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
@@ -145,6 +165,7 @@ jobs:
               '|-----|---------|------|',
               `| ESCAPECRAFT | \`${version}\` | ${craftSize} |`,
               `| ESCAPEARTIST | \`${version}\` | ${artistSize} |`,
+              `| Headless render kit | \`${version}\` | ${kitSize} |`,
               '',
               '_✅ Built after CI passed_'
             ].join('\n');
@@ -188,7 +209,8 @@ jobs:
           gh release create "v${VERSION}" \
             "dist/craft/ESCAPECRAFT-${VERSION}.html" \
             "dist/artist/ESCAPEARTIST-${VERSION}.html" \
+            "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" \
             --repo "${REPO}" \
             --target "${COMMIT}" \
             --title "ESCAPE Suite v${VERSION}" \
-            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet."
+            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports."

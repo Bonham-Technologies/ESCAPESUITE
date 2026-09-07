@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { readFileSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { readFileSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execSync } from 'node:child_process'
 
@@ -114,4 +115,94 @@ test('headless bundle rejects a clip whose source was not supplied', async ({ pa
   }, { project })
 
   expect(error).toMatch(/no bytes in sourceBlobs/)
+})
+
+test('headless bundle streams sources in from the file input and the result out as a download', async ({ page }) => {
+  const bundleUrl = 'file://' + resolve(ARTIST, 'dist-headless/headless.html')
+  await page.goto(bundleUrl)
+  await page.waitForFunction(() => (window as unknown as { __headlessReady?: boolean }).__headlessReady === true)
+
+  const project = JSON.parse(readFileSync(resolve(FIX, 'project.json'), 'utf8'))
+  // The runner supplies identity only — width/height/duration are probed from the bytes.
+  for (const source of project.sourceVideos) {
+    delete source.width
+    delete source.height
+    delete source.duration
+  }
+
+  await page.setInputFiles('#__sources', [resolve(FIX, 'source.mp4')])
+
+  const [download, meta] = await Promise.all([
+    page.waitForEvent('download'),
+    page.evaluate(async ({ project }) => {
+      const input = {
+        project: project.project,
+        sourceVideos: project.sourceVideos,
+        sourceFiles: { 'src-0': 'source.mp4' },
+        options: { format: 'mp4', quality: 'high' },
+        outputName: 'job-1',
+      }
+      // @ts-expect-error injected global
+      return await window.__renderProjectToFile(input)
+    }, { project }),
+  ])
+
+  expect(meta).toMatchObject({ format: 'mp4', width: 64, height: 48 })
+  expect(meta.byteLength).toBeGreaterThan(0)
+  expect(download.suggestedFilename()).toBe('job-1.mp4')
+
+  const out = resolve(mkdtempSync(join(tmpdir(), 'headless-download-')), 'job-1.mp4')
+  await download.saveAs(out)
+  const bytes = readFileSync(out)
+  expect(bytes.length).toBe(meta.byteLength)
+  expect(bytes.subarray(0, 12).includes(Buffer.from('ftyp'))).toBe(true)
+})
+
+test('headless bundle reports a missing streamed file instead of rendering', async ({ page }) => {
+  const bundleUrl = 'file://' + resolve(ARTIST, 'dist-headless/headless.html')
+  await page.goto(bundleUrl)
+  await page.waitForFunction(() => (window as unknown as { __headlessReady?: boolean }).__headlessReady === true)
+
+  const project = JSON.parse(readFileSync(resolve(FIX, 'project.json'), 'utf8'))
+  await page.setInputFiles('#__sources', [resolve(FIX, 'source.mp4')])
+
+  const error = await page.evaluate(async ({ project }) => {
+    const input = {
+      project: project.project, sourceVideos: project.sourceVideos,
+      sourceFiles: { 'src-0': 'absent.mp4' },
+      options: { format: 'mp4', quality: 'high' }, outputName: 'job-2',
+    }
+    // @ts-expect-error injected global
+    return await window.__renderProjectToFile(input).then(() => null, (e: Error) => e.message)
+  }, { project })
+
+  expect(error).toMatch(/no file named "absent\.mp4"/)
+})
+
+test('headless bundle probes an identity-only source for the dimensions sizing depends on', async ({ page }) => {
+  const bundleUrl = 'file://' + resolve(ARTIST, 'dist-headless/headless.html')
+  await page.goto(bundleUrl)
+  await page.waitForFunction(() => (window as unknown as { __headlessReady?: boolean }).__headlessReady === true)
+
+  const project = JSON.parse(readFileSync(resolve(FIX, 'project.json'), 'utf8'))
+  project.sourceVideos = [{ id: 'src-0', name: 'source.mp4', mimeType: 'video/mp4' }]
+  await page.setInputFiles('#__sources', [resolve(FIX, 'source.mp4')])
+
+  const [, meta] = await Promise.all([
+    page.waitForEvent('download'),
+    page.evaluate(async ({ project }) => {
+      const input = {
+        project: project.project, sourceVideos: project.sourceVideos,
+        sourceFiles: { 'src-0': 'source.mp4' },
+        // 'original' sizes the output from the SOURCE, so this only works if the
+        // bytes were probed for width/height.
+        options: { format: 'mp4', quality: 'high', resolution: 'original' },
+        outputName: 'job-3',
+      }
+      // @ts-expect-error injected global
+      return await window.__renderProjectToFile(input)
+    }, { project }),
+  ])
+
+  expect(meta).toMatchObject({ width: 64, height: 48 })
 })

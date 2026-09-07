@@ -1,0 +1,101 @@
+# One render, one Pod, then done — the shape a broker should create per job.
+#
+# The CLI is a one-shot process: it renders, prints one JSON outcome line to stdout, and
+# exits. There is no server to keep warm and no state to carry between jobs, so a Kubernetes
+# Job with `restartPolicy: Never` and `backoffLimit: 0` maps onto it exactly. Retries belong
+# to your broker, which can tell exit 1 (job failed, retryable) from exit 2 (bad spec, never
+# retryable); `backoffLimit` cannot.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: render-example-manifest-volume
+spec:
+  backoffLimit: 0
+  # Reap the Pod an hour after it finishes; drop this if you collect logs some other way.
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: headless-artist
+          image: headless-artist:latest
+          # The image's ENTRYPOINT is already `node dist/cli.js render`.
+          args: ["--job", "/in/job.json"]
+          env:
+            # Structured stderr, so a log pipeline can read it.
+            - name: HEADLESS_LOG
+              value: "json"
+            # Scratch space for the render; see the emptyDir below.
+            - name: HEADLESS_WORK_DIR
+              value: "/work"
+            # Give up rather than hold a node for a wedged page. 30 min is the default.
+            - name: HEADLESS_TIMEOUT_MS
+              value: "1800000"
+          volumeMounts:
+            - name: input
+              mountPath: /in
+              readOnly: true
+            - name: output
+              mountPath: /out
+            - name: work
+              mountPath: /work
+          resources:
+            requests:
+              # Software encoding is CPU-bound and scales with cores.
+              cpu: "4"
+              memory: "4Gi"
+            limits:
+              cpu: "8"
+              memory: "8Gi"
+          securityContext:
+            # The image runs as pwuser (uid 1000), which keeps Chromium's own sandbox
+            # usable. If you must run as root, set HEADLESS_NO_SANDBOX=true.
+            # runAsUser must be spelled out: `runAsNonRoot: true` alone makes the kubelet
+            # check the image's USER, and it cannot prove a *name* ("pwuser") is non-root —
+            # the Pod fails with CreateContainerConfigError before it ever starts.
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+      # fsGroup makes the kubelet chown the mounted volumes to this gid, without which
+      # uid 1000 cannot write the render into the /out PVC.
+      securityContext:
+        fsGroup: 1000
+      volumes:
+        - name: input
+          persistentVolumeClaim:
+            claimName: render-inputs
+        - name: output
+          persistentVolumeClaim:
+            claimName: render-outputs
+        - name: work
+          emptyDir:
+            # Chromium and the encoder want real scratch space; size it for your outputs.
+            sizeLimit: 16Gi
+# ---------------------------------------------------------------------------
+# GPU variant
+# ---------------------------------------------------------------------------
+# Hardware encoding needs three things together: a GPU allocated to the Pod, a runtime that
+# exposes it (the NVIDIA device plugin), and HEADLESS_GPU=true so the driver launches Chromium
+# with `--use-gl=angle --ignore-gpu-blocklist --enable-features=Vulkan` instead of
+# `--disable-gpu`. Setting only the env var changes nothing; setting only the resource wastes
+# the card. Replace the pieces above with:
+#
+#         - name: headless-artist
+#           image: headless-artist:latest
+#           args: ["--job", "/in/job.json"]
+#           env:
+#             - name: HEADLESS_GPU
+#               value: "true"
+#           resources:
+#             requests:
+#               cpu: "2"
+#               memory: "4Gi"
+#             limits:
+#               nvidia.com/gpu: 1
+#               cpu: "4"
+#               memory: "8Gi"
+#       nodeSelector:
+#         nvidia.com/gpu.present: "true"
+#
+# A GPU render's bytes will not match a CPU render's byte for byte — different encoder, same
+# picture. Compare the manifest's width/height/durationSec, and the video itself, not sha256.

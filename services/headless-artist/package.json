@@ -1,0 +1,51 @@
+{
+  "name": "@escapesuite/headless-artist",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Render ESCAPEARTIST projects server-side in headless Chromium — one-shot CLI + kit",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bonham-Technologies/ESCAPESUITE.git",
+    "directory": "services/headless-artist"
+  },
+  "homepage": "https://github.com/Bonham-Technologies/ESCAPESUITE",
+  "engines": { "node": ">=22.22.0" },
+  "bin": { "headless-artist": "./dist/cli.js" },
+  "files": [
+    "dist/cli.js",
+    "dist/headless.html",
+    "dist/kit.json",
+    "README.md",
+    "LICENSE",
+    "Dockerfile",
+    "examples"
+  ],
+  "scripts": {
+    "build": "node scripts/assemble-kit.mjs",
+    "pack:kit": "node scripts/assemble-kit.mjs && npm pack --pack-destination dist",
+    "render": "tsx src/cli.ts render",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run --exclude '**/*.chromium.test.ts'",
+    "test:coverage": "vitest run --coverage --exclude '**/*.chromium.test.ts'",
+    "test:e2e": "cross-env HEADLESS_BUILD=1 vitest run chromium.test"
+  },
+  "dependencies": { "playwright": "1.62.1" },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "cross-env": "^10.1.0",
+    "eslint": "^10.9.1",
+    "globals": "^17.11.0",
+    "typescript-eslint": "^8.68.0",
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^5.0.0",
+    "esbuild": "^0.27.2",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.0"
+  },
+  "optionalDependencies": { "@aws-sdk/client-s3": "^3.700.0" }
+}

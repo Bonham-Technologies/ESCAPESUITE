@@ -170,6 +170,12 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
 
 - Entry: `src/headless/main.ts`; contract types in `src/headless/types.ts`
   (`RenderInput` → `RenderResult` with base64 bytes + output `RenderMeta`).
+- Streaming variant `window.__renderProjectToFile(input, onProgress?)`
+  (`RenderFileInput` → `RenderMeta`): sources arrive as `File`s in the hidden
+  `<input type="file" id="__sources">` (Playwright `setInputFiles`) and the result
+  leaves as a browser download named `<outputName>.<mp4|webm>`, so large media
+  never crosses the `evaluate()` boundary. `sourceVideos` entries may carry only
+  `id`/`name`/`mimeType`; `seedSources` probes the rest from the bytes.
 - `renderProject.ts` validates the input (every media clip must have a source and
   bytes — it fails instead of rendering black), seeds sources into IndexedDB via
   `seedSources.ts`, then calls the **same** `exportToMP4`/`exportToWebM` the editor
@@ -181,3 +187,9 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
   (builds the bundle itself in `beforeAll`).
 - Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.
+- `services/headless-artist` is the packaged CLI + kit that drives this bundle outside the
+  browser — one-shot Node process, Playwright-launched Chromium, job JSON in, rendered file
+  out. It builds this same `dist-headless/headless.html` (via `pnpm --filter=@escapesuite/artist
+  run build:headless`) and calls `__renderProjectToFile` through the file input, never
+  `__renderProject`'s base64 path — see `services/headless-artist/README.md` for the job spec,
+  sinks, and how to build/pack the kit.

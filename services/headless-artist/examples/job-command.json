@@ -1,0 +1,13 @@
+{
+  "jobId": "example-command",
+  "input": { "manifest": { "path": "examples/manifest.json" } },
+  "options": { "format": "mp4", "quality": "high" },
+  "output": {
+    "sink": "command",
+    "config": {
+      "command": "/usr/local/bin/deliver.sh",
+      "args": ["--tenant", "acme"],
+      "env": { "DELIVERY_TARGET": "archive" }
+    }
+  }
+}

@@ -180,7 +180,7 @@ export async function loadProject(
 /**
  * Extract metadata from a blob (handles video, image, and audio)
  */
-async function extractMetadataFromBlob(
+export async function extractMetadataFromBlob(
   blob: Blob,
   savedData: { id: string; name: string; mimeType: string }
 ): Promise<SourceVideo> {

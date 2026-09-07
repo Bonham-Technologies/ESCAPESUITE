@@ -1,0 +1,13 @@
+{
+  "jobId": "example-manifest-volume",
+  "input": { "manifest": { "path": "examples/manifest.json" } },
+  "options": {
+    "format": "mp4",
+    "quality": "high",
+    "resolution": "project"
+  },
+  "output": {
+    "sink": "volume",
+    "config": { "dir": "out" }
+  }
+}
