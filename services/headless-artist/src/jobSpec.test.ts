@@ -63,6 +63,20 @@ describe('parseJobSpec', () => {
     expect(() => parseJobSpec(validSpec({ jobId: 'job with space' }))).toThrow(/jobId/)
   })
 
+  it('rejects "." and ".." as a jobId, which the character rule alone allows', () => {
+    expect(() => parseJobSpec(validSpec({ jobId: '.' }))).toThrow(
+      'jobId must not be "." or ".."; it is used as a directory name',
+    )
+    expect(() => parseJobSpec(validSpec({ jobId: '..' }))).toThrow(
+      'jobId must not be "." or ".."; it is used as a directory name',
+    )
+  })
+
+  it('accepts a jobId that merely contains dots', () => {
+    expect(parseJobSpec(validSpec({ jobId: 'v1.2.3' })).jobId).toBe('v1.2.3')
+    expect(parseJobSpec(validSpec({ jobId: '...' })).jobId).toBe('...')
+  })
+
   it('rejects a jobId over 128 characters', () => {
     expect(() => parseJobSpec(validSpec({ jobId: 'a'.repeat(129) }))).toThrow(/jobId/)
   })

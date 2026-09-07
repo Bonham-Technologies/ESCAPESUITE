@@ -144,7 +144,10 @@ function createCommandSink(config: CommandConfig): OutputSink {
         )
       })
 
-      return { outputLocation: `command:${config.command}`, manifestLocation: manifestPath }
+      // No manifestLocation: the sidecar is a transport artifact living beside the render in
+      // the runner's scratch dir, which is torn down as soon as the command returns. Where the
+      // command actually put it is the command's business, so only durable sinks report one.
+      return { outputLocation: `command:${config.command}` }
     },
   }
 }

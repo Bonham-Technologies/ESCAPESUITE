@@ -58,8 +58,17 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
   const workDir = deps.workDir ?? os.tmpdir()
   const jobWorkDir = path.join(workDir, spec.jobId)
   let job: LoadedJob | undefined
+  // The finally below removes jobWorkDir recursively, so it may only ever remove a directory
+  // this call actually created.
+  let createdJobDir = false
 
   try {
+    // Belt and braces with parseJobSpec's own jobId rule: a job id that escaped its work dir
+    // (".", "..", anything that resolves elsewhere) must never reach an rm -rf.
+    if (path.dirname(path.resolve(jobWorkDir)) !== path.resolve(workDir)) {
+      throw new Error(`jobId "${spec.jobId}" does not name a directory inside the work dir`)
+    }
+
     if ('bundle' in spec.input) {
       // loadBundle mkdtemps inside workDir, so the root has to exist first.
       await fs.mkdir(workDir, { recursive: true })
@@ -69,6 +78,7 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
     }
 
     await fs.mkdir(jobWorkDir, { recursive: true })
+    createdJobDir = true
     const outputPath = path.join(jobWorkDir, `render.${spec.options.format}`)
 
     const { meta, chromiumVersion } = await renderInChromium(
@@ -109,9 +119,11 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
     log(`error: ${error}`)
     return { jobId: spec.jobId, ok: false, error, durationMs: Date.now() - startedAt }
   } finally {
-    await tryCleanup('the job work directory', log, () =>
-      fs.rm(jobWorkDir, { recursive: true, force: true }),
-    )
+    if (createdJobDir) {
+      await tryCleanup('the job work directory', log, () =>
+        fs.rm(jobWorkDir, { recursive: true, force: true }),
+      )
+    }
     await tryCleanup('the loader temp files', log, async () => {
       await job?.cleanup()
     })

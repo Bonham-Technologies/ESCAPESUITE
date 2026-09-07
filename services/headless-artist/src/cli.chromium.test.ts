@@ -222,4 +222,28 @@ describe('headless-artist CLI', () => {
     const kit = JSON.parse(result.stdout)
     expect(typeof kit.kitVersion).toBe('string')
   })
+
+  it('still runs when invoked through a symlink, as the bin entry is', async () => {
+    // node_modules/.bin/headless-artist is a symlink; argv[1] is then the link path while
+    // import.meta.url is the real one, which a lexical comparison would miss entirely.
+    const linkDir = path.join(tmpRoot, 'bin')
+    await fs.mkdir(linkDir, { recursive: true })
+    const link = path.join(linkDir, 'headless-artist')
+    await fs.symlink(CLI, link)
+
+    const result = await new Promise<CliResult>((resolve) => {
+      const child = execFile(
+        process.execPath,
+        [link, '--version'],
+        { cwd: SERVICE_ROOT, env: { ...process.env } },
+        (error, stdout, stderr) => {
+          resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr })
+        },
+      )
+      child.stdin?.end('')
+    })
+
+    expect(result.code).toBe(0)
+    expect(typeof JSON.parse(result.stdout).kitVersion).toBe('string')
+  })
 })

@@ -276,17 +276,58 @@ describe('runJob', () => {
 
   it('defaults the work dir to the system temp dir', async () => {
     const outDir = await makeTempDir()
+    // A unique id, so this never renders into — or cleans up — a path another run may share.
+    const jobId = `headless-artist-run-default-${process.pid}-${Date.now()}`
     mockRenderWriting('hello')
 
     const outcome = await runJob(
-      makeSpec({ output: { sink: 'volume', config: { dir: outDir } } }),
+      makeSpec({ jobId, output: { sink: 'volume', config: { dir: outDir } } }),
       { bundlePath: '/bundle/headless.html', versions: VERSIONS, log },
     )
 
     expect(outcome.ok).toBe(true)
     expect(vi.mocked(renderInChromium).mock.calls[0][3]).toBe(
-      path.join(os.tmpdir(), 'job-1', 'render.mp4'),
+      path.join(os.tmpdir(), jobId, 'render.mp4'),
     )
-    await expect(fs.access(path.join(os.tmpdir(), 'job-1'))).rejects.toThrow()
+    await expect(fs.access(path.join(os.tmpdir(), jobId))).rejects.toThrow()
+  })
+
+  it('refuses a jobId that would put the work dir outside the work root', async () => {
+    const workDir = await makeTempDir()
+    const sibling = path.join(workDir, 'keep-me')
+    await fs.mkdir(sibling)
+    mockRenderWriting('hello')
+
+    for (const jobId of ['.', '..']) {
+      const outcome = await runJob(makeSpec({ jobId }), {
+        bundlePath: '/bundle/headless.html',
+        workDir,
+        versions: VERSIONS,
+        log,
+      })
+
+      expect(outcome.ok).toBe(false)
+      expect(outcome.error).toBe(`jobId "${jobId}" does not name a directory inside the work dir`)
+    }
+
+    // Neither the work dir nor its parent was touched.
+    expect(vi.mocked(renderInChromium)).not.toHaveBeenCalled()
+    expect(await fs.readdir(workDir)).toEqual(['keep-me'])
+    await expect(fs.access(workDir)).resolves.toBeUndefined()
+  })
+
+  it('leaves a pre-existing job directory alone when the run fails before it creates one', async () => {
+    const workDir = await makeTempDir()
+    const jobDir = path.join(workDir, 'job-1')
+    await fs.mkdir(jobDir)
+    await fs.writeFile(path.join(jobDir, 'not-ours.txt'), 'precious')
+
+    const outcome = await runJob(
+      makeSpec({ input: { manifest: { path: path.join(workDir, 'nope.json') } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome.ok).toBe(false)
+    expect(await fs.readFile(path.join(jobDir, 'not-ours.txt'), 'utf8')).toBe('precious')
   })
 })

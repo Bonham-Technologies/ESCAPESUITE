@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { promises as fs } from 'node:fs'
+import { promises as fs, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseJobSpec } from './jobSpec'
@@ -190,10 +190,21 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
   }
 }
 
-/** True when this file was executed, false when a test imported it. */
+/**
+ * True when this file was executed, false when a test imported it.
+ *
+ * `import.meta.url` is already realpath'd, so argv[1] has to be too — otherwise every
+ * symlinked entry point (`node_modules/.bin/headless-artist`, most notably) would compare
+ * unequal and the CLI would exit 0 having done nothing at all.
+ */
 function isDirectRun(): boolean {
   const entry = process.argv[1]
-  return entry !== undefined && path.resolve(entry) === fileURLToPath(import.meta.url)
+  if (entry === undefined) return false
+  try {
+    return realpathSync(path.resolve(entry)) === fileURLToPath(import.meta.url)
+  } catch {
+    return false
+  }
 }
 
 if (isDirectRun()) {

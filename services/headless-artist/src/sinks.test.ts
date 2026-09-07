@@ -190,7 +190,9 @@ describe('command sink', () => {
     expect(marker.HEADLESS_MANIFEST_PATH).toBe(expectedManifestPath)
 
     expect(result.outputLocation).toBe(`command:${process.execPath}`)
-    expect(result.manifestLocation).toBe(expectedManifestPath)
+    // The sidecar is scratch handed to the command, not a durable location the caller can
+    // report — the runner deletes it with the rest of the job's work dir.
+    expect(result.manifestLocation).toBeUndefined()
 
     // manifest sidecar must actually exist before the command runs
     const writtenManifest = JSON.parse(await fs.readFile(expectedManifestPath, 'utf8'))

@@ -110,6 +110,11 @@ export function parseJobSpec(json: unknown): JobSpec {
   if (typeof jobId !== 'string' || !JOB_ID_RE.test(jobId)) {
     throw new Error('jobId must be a non-empty string matching /^[A-Za-z0-9._-]{1,128}$/')
   }
+  // The regex allows dots, so these two slip through — and the job id becomes a directory
+  // name, where "." and ".." would point the runner at its own work dir or the parent of it.
+  if (jobId === '.' || jobId === '..') {
+    throw new Error('jobId must not be "." or ".."; it is used as a directory name')
+  }
 
   return {
     jobId,
