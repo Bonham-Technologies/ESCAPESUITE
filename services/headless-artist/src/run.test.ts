@@ -98,7 +98,7 @@ describe('runJob', () => {
     expect(manifest.kitVersion).toBe('kit-4.5.6')
   })
 
-  it('renders into <workDir>/<jobId>/render.<ext> and passes the driver its launch options', async () => {
+  it('renders into a fresh dir under the work dir and passes the driver its launch options', async () => {
     const workDir = await makeTempDir()
     const outDir = await makeTempDir()
     mockRenderWriting('hello')
@@ -117,7 +117,11 @@ describe('runJob', () => {
     const call = vi.mocked(renderInChromium).mock.calls[0]
     expect(call[0]).toBe('/bundle/headless.html')
     expect(call[2]).toEqual({ format: 'mp4', quality: 'high' })
-    expect(call[3]).toBe(path.join(workDir, 'job-1', 'render.mp4'))
+    // A mkdtemp'd dir named for the job, directly under the work dir, holding `render.<ext>`.
+    expect(path.basename(call[3])).toBe('render.mp4')
+    const jobDir = path.dirname(call[3])
+    expect(path.dirname(jobDir)).toBe(workDir)
+    expect(path.basename(jobDir)).toMatch(/^headless-artist-job-1-.+/)
     expect(call[4]).toMatchObject({
       gpu: true,
       chromiumPath: '/usr/bin/chromium',
@@ -140,9 +144,9 @@ describe('runJob', () => {
       { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
     )
 
-    expect(vi.mocked(renderInChromium).mock.calls[0][3]).toBe(
-      path.join(workDir, 'job-1', 'render.webm'),
-    )
+    const outputPath = vi.mocked(renderInChromium).mock.calls[0][3]
+    expect(path.basename(outputPath)).toBe('render.webm')
+    expect(path.dirname(path.dirname(outputPath))).toBe(workDir)
   })
 
   it('returns ok:false without launching Chromium when the input file is missing', async () => {
@@ -286,10 +290,12 @@ describe('runJob', () => {
     )
 
     expect(outcome.ok).toBe(true)
-    expect(vi.mocked(renderInChromium).mock.calls[0][3]).toBe(
-      path.join(os.tmpdir(), jobId, 'render.mp4'),
-    )
-    await expect(fs.access(path.join(os.tmpdir(), jobId))).rejects.toThrow()
+    const outputPath = vi.mocked(renderInChromium).mock.calls[0][3]
+    const jobDir = path.dirname(outputPath)
+    expect(path.basename(outputPath)).toBe('render.mp4')
+    expect(path.dirname(jobDir)).toBe(os.tmpdir())
+    expect(path.basename(jobDir)).toMatch(new RegExp(`^headless-artist-${jobId}-`))
+    await expect(fs.access(jobDir)).rejects.toThrow()
   })
 
   it('refuses a jobId that would put the work dir outside the work root', async () => {
@@ -314,6 +320,27 @@ describe('runJob', () => {
     expect(vi.mocked(renderInChromium)).not.toHaveBeenCalled()
     expect(await fs.readdir(workDir)).toEqual(['keep-me'])
     await expect(fs.access(workDir)).resolves.toBeUndefined()
+  })
+
+  it('leaves a pre-existing <workDir>/<jobId> directory alone after a successful run', async () => {
+    const workDir = await makeTempDir()
+    const outDir = await makeTempDir()
+    // Someone else's directory that happens to share this job's name — a real risk when the
+    // work dir defaults to the system temp dir, which every process on the box writes into.
+    const squatted = path.join(workDir, 'job-1')
+    await fs.mkdir(squatted)
+    await fs.writeFile(path.join(squatted, 'not-ours.txt'), 'precious')
+    mockRenderWriting('hello')
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: outDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome.ok).toBe(true)
+    expect(await fs.readFile(path.join(squatted, 'not-ours.txt'), 'utf8')).toBe('precious')
+    // …and the run still cleaned up after itself: only the squatted dir is left.
+    expect(await fs.readdir(workDir)).toEqual(['job-1'])
   })
 
   it('leaves a pre-existing job directory alone when the run fails before it creates one', async () => {

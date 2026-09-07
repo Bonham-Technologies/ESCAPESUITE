@@ -9,6 +9,21 @@
         "VITE_BUILD_MODE"
       ]
     },
+    // The kit assembler shells out to the artist's own build:headless, so the two must never
+    // run concurrently, and an artist source change has to invalidate the kit. The service
+    // deliberately has NO `workspace:` dependency on @escapesuite/artist — that would ship an
+    // uninstallable package.json inside the kit tarball — so the edge and the extra hash
+    // inputs are declared here instead of inferred from the dependency graph.
+    "@escapesuite/headless-artist#build": {
+      "dependsOn": ["@escapesuite/artist#build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "../../apps/artist/src/**",
+        "../../apps/artist/headless.html",
+        "../../apps/artist/vite.config.ts"
+      ],
+      "outputs": ["dist/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

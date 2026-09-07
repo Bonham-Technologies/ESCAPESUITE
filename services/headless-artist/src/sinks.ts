@@ -1,6 +1,6 @@
 import { openAsBlob, promises as fs } from 'node:fs'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import type { VerificationManifest } from './manifest'
 
 export interface OutputSink {
@@ -109,6 +109,10 @@ function tailLines(text: string, count: number): string {
   return lines.slice(Math.max(0, lines.length - count)).join('\n').trim()
 }
 
+const STDERR_TAIL_LINES = 20
+/** Hard cap on the stderr we hold, so a command that fails *noisily* can't exhaust memory. */
+const STDERR_TAIL_CHARS = 64 * 1024
+
 function createCommandSink(config: CommandConfig): OutputSink {
   return {
     async deliver(jobId, outputPath, manifest) {
@@ -118,30 +122,44 @@ function createCommandSink(config: CommandConfig): OutputSink {
       const fullArgs = [...config.args, outputPath, manifestPath]
 
       await new Promise<void>((resolve, reject) => {
-        execFile(
-          config.command,
-          fullArgs,
-          {
-            env: {
-              ...process.env,
-              ...config.env,
-              HEADLESS_OUTPUT_PATH: outputPath,
-              HEADLESS_MANIFEST_PATH: manifestPath,
-            },
+        // spawn, not execFile: execFile buffers both streams and kills the child once either
+        // passes `maxBuffer` (1 MiB by default) — so a chatty delivery command was killed
+        // *after* it had already delivered, and the job was reported as failed. stdout is
+        // discarded outright and stderr is kept only as a bounded tail for the error message.
+        const child = spawn(config.command, fullArgs, {
+          stdio: ['ignore', 'ignore', 'pipe'],
+          env: {
+            ...process.env,
+            ...config.env,
+            HEADLESS_OUTPUT_PATH: outputPath,
+            HEADLESS_MANIFEST_PATH: manifestPath,
           },
-          (error, _stdout, stderr) => {
-            if (error) {
-              const code = error.code
-              reject(
-                new Error(
-                  `command sink "${config.command}" exited with code ${code}: ${tailLines(String(stderr ?? ''), 20)}`,
-                ),
-              )
-              return
-            }
+        })
+
+        let stderr = ''
+        child.stderr.setEncoding('utf8')
+        child.stderr.on('data', (chunk: string) => {
+          stderr = (stderr + chunk).slice(-STDERR_TAIL_CHARS)
+        })
+
+        child.on('error', (err) => {
+          const why =
+            (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'command not found' : err.message
+          reject(new Error(`command sink "${config.command}" could not be run: ${why}`, { cause: err }))
+        })
+
+        child.on('close', (code, signal) => {
+          if (code === 0) {
             resolve()
-          },
-        )
+            return
+          }
+          // A spawn failure already rejected above; `close` still fires, and a second reject
+          // on a settled promise is a no-op.
+          const how = signal !== null ? `was killed by ${signal}` : `exited with code ${code}`
+          reject(
+            new Error(`command sink "${config.command}" ${how}: ${tailLines(stderr, STDERR_TAIL_LINES)}`),
+          )
+        })
       })
 
       // No manifestLocation: the sidecar is a transport artifact living beside the render in
@@ -159,6 +177,22 @@ function createCommandSink(config: CommandConfig): OutputSink {
 interface WebhookConfig {
   url: string
   headers?: Record<string, string>
+  timeoutMs: number
+}
+
+/**
+ * A whole delivery — connect, upload the video, read the response — with no ceiling of its own:
+ * `HEADLESS_TIMEOUT_MS` only bounds the render phase, so without this a server that accepts the
+ * POST and never answers holds the worker forever.
+ */
+const DEFAULT_WEBHOOK_TIMEOUT_MS = 10 * 60_000
+
+/**
+ * `fetch` generates the multipart boundary itself and puts it in Content-Type; a caller-supplied
+ * one would replace it and leave the server unable to parse the body. Every other header stands.
+ */
+function withoutContentType(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'))
 }
 
 function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
@@ -172,7 +206,28 @@ function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
     throw new Error('webhook sink requires config.headers (object) when provided')
   }
 
-  return { url, headers: rawHeaders as Record<string, string> | undefined }
+  const rawTimeout = config.timeoutMs
+  if (
+    rawTimeout !== undefined &&
+    (typeof rawTimeout !== 'number' || !Number.isInteger(rawTimeout) || rawTimeout <= 0)
+  ) {
+    throw new Error('webhook sink requires config.timeoutMs (positive integer) when provided')
+  }
+
+  return {
+    url,
+    headers: rawHeaders === undefined ? undefined : withoutContentType(rawHeaders as Record<string, string>),
+    timeoutMs: (rawTimeout as number | undefined) ?? DEFAULT_WEBHOOK_TIMEOUT_MS,
+  }
+}
+
+/** `AbortSignal.timeout`'s reason reaches us as the cause of fetch's own TypeError. */
+function isTimeoutError(err: unknown): boolean {
+  for (let cursor: unknown = err, hops = 0; cursor instanceof Error && hops < 8; hops++) {
+    if (cursor.name === 'TimeoutError') return true
+    cursor = (cursor as { cause?: unknown }).cause
+  }
+  return false
 }
 
 function createWebhookSink(config: WebhookConfig): OutputSink {
@@ -186,11 +241,20 @@ function createWebhookSink(config: WebhookConfig): OutputSink {
       const blob = await openAsBlob(outputPath, { type: mime })
       form.set('file', blob, `${jobId}.${ext}`)
 
-      const response = await fetch(config.url, {
-        method: 'POST',
-        headers: config.headers,
-        body: form,
-      })
+      let response: Response
+      try {
+        response = await fetch(config.url, {
+          method: 'POST',
+          headers: config.headers,
+          body: form,
+          signal: AbortSignal.timeout(config.timeoutMs),
+        })
+      } catch (err) {
+        if (isTimeoutError(err)) {
+          throw new Error(`webhook sink timed out after ${config.timeoutMs} ms`, { cause: err })
+        }
+        throw err
+      }
 
       if (!response.ok) {
         throw new Error(`webhook sink failed: ${response.status} ${response.statusText}`)

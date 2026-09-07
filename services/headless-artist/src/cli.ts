@@ -6,6 +6,14 @@ import { parseJobSpec } from './jobSpec'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 
+/**
+ * Re-exported so brokers can reach it from the packaged kit (`dist/cli.js` is the only JS the
+ * tarball ships): downloading a job's inputs from S3 is the caller's job — the job spec only
+ * ever names local paths — and this is the helper for it. Costs nothing at CLI startup; `s3.ts`
+ * imports node built-ins only and loads the AWS SDK lazily, inside the call.
+ */
+export { fetchS3ToLocal } from './s3'
+
 const EXIT_OK = 0
 const EXIT_JOB_FAILED = 1
 const EXIT_USAGE = 2

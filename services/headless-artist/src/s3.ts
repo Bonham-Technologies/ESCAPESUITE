@@ -1,5 +1,6 @@
 import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { OutputSink } from './sinks'
 import type { VerificationManifest } from './manifest'
@@ -17,6 +18,11 @@ export interface S3SinkConfig {
 const FORMAT_TO_EXTENSION: Record<VerificationManifest['format'], string> = {
   mp4: 'mp4',
   webm: 'webm',
+}
+
+const FORMAT_TO_MIME: Record<VerificationManifest['format'], string> = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
 }
 
 /**
@@ -103,6 +109,9 @@ export async function s3Sink(config: S3SinkConfig): Promise<OutputSink> {
           // than buffering the whole file in memory.
           Body: createReadStream(outputPath),
           ContentLength: stat.size,
+          // Without this the SDK defaults to application/octet-stream, so anything serving the
+          // object straight from the bucket (a signed URL, a CDN) downloads it instead of playing it.
+          ContentType: FORMAT_TO_MIME[manifest.format],
         }),
       )
 
@@ -142,13 +151,19 @@ export async function fetchS3ToLocal(uri: string, destDir: string, cfg: Omit<S3S
   const { GetObjectCommand, S3Client } = await loadS3ClientModule()
   const { bucket, key } = parseS3Uri(uri)
 
+  // A key ending in "/" is a prefix (or a console-created "folder" marker), not an object:
+  // path.basename would strip the slash and happily write the parent segment as a file name.
+  if (key.endsWith('/')) {
+    throw new Error(`s3 uri "${uri}" names a key prefix, not an object (its key ends in "/")`)
+  }
+
   const client = new S3Client({
     ...(cfg.region ? { region: cfg.region } : {}),
     ...(cfg.endpoint ? { endpoint: cfg.endpoint } : {}),
   })
 
   const response = (await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))) as {
-    Body?: { transformToByteArray?: () => Promise<Uint8Array> } | NodeJS.ReadableStream
+    Body?: unknown
   }
 
   await fs.mkdir(destDir, { recursive: true })
@@ -159,11 +174,16 @@ export async function fetchS3ToLocal(uri: string, destDir: string, cfg: Omit<S3S
     throw new Error(`s3 object "${uri}" returned an empty body`)
   }
 
-  if (typeof (body as { transformToByteArray?: unknown }).transformToByteArray === 'function') {
+  // Order matters: in Node the SDK's Body is a `Readable` that ALSO carries
+  // `transformToByteArray`, so testing for that method first would pull every object fully
+  // into memory (renders are gigabytes) and leave the streaming path unreachable.
+  if (body instanceof Readable) {
+    await pipeline(body, createWriteStream(destPath))
+  } else if (typeof (body as { transformToByteArray?: unknown }).transformToByteArray === 'function') {
     const bytes = await (body as { transformToByteArray: () => Promise<Uint8Array> }).transformToByteArray()
     await fs.writeFile(destPath, bytes)
   } else {
-    await pipeline(body as NodeJS.ReadableStream, createWriteStream(destPath))
+    throw new Error(`s3 object "${uri}" returned a body this runtime cannot read`)
   }
 
   return destPath

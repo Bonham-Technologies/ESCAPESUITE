@@ -80,6 +80,11 @@ The container image in [`Dockerfile`](Dockerfile) needs neither: its base image 
 the matching browser. Building that image still needs a registry (for the base image and the
 one `npm install`), so build it where you have egress and ship the image, not the Dockerfile.
 
+**Installing the kit still needs a registry.** The tarball vendors no dependencies: `npm install`
+on it resolves `playwright@1.62.1` (plus `@aws-sdk/client-s3`, unless you pass `--omit=optional`)
+the usual way. On a host with no egress, point npm at an internal mirror or copy in a
+`node_modules` populated on a machine that had one — same Node major, same OS/arch.
+
 ## Job spec
 
 One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (`render -`).
@@ -217,12 +222,13 @@ Runs `command` **without a shell** (no globbing, no word splitting, no injection
 the output path and the manifest path appended as the last two arguments:
 
 ```
-/usr/local/bin/deliver.sh --tenant acme /work/<jobId>/render.mp4 /work/<jobId>/<jobId>.manifest.json
+/usr/local/bin/deliver.sh --tenant acme /work/headless-artist-<jobId>-a1b2c3/render.mp4 /work/headless-artist-<jobId>-a1b2c3/<jobId>.manifest.json
 ```
 
 The same two paths are also exported as `HEADLESS_OUTPUT_PATH` and `HEADLESS_MANIFEST_PATH`,
 alongside `config.env` merged over the runner's own environment. A non-zero exit fails the job;
-the last ~20 lines of the command's stderr come back in the outcome's `error`.
+the last ~20 lines of the command's stderr come back in the outcome's `error`. Its **stdout is
+discarded** — log as much as you like, there is no output buffer to overflow.
 
 **The command sink deliberately reports no `manifestLocation`.** Both files live in the
 runner's scratch directory, which is deleted as soon as your command returns — they are
@@ -235,7 +241,8 @@ transport, not storage. If you want the manifest, copy it somewhere durable whil
   "sink": "webhook",
   "config": {
     "url": "https://intake.internal.example/renders",
-    "headers": { "Authorization": "Bearer …" }
+    "headers": { "Authorization": "Bearer …" },
+    "timeoutMs": 600000
   }
 }
 ```
@@ -243,6 +250,16 @@ transport, not storage. If you want the manifest, copy it somewhere durable whil
 A single `multipart/form-data` POST with two fields: `manifest` (the verification manifest as a
 JSON string) and `file` (the video, filename `<jobId>.<ext>`, content type `video/mp4` or
 `video/webm`). Any non-2xx response fails the job. `outputLocation` is the URL.
+
+`timeoutMs` (a positive integer, default **10 minutes**) bounds the whole POST — connect,
+upload, and the server's response. `HEADLESS_TIMEOUT_MS` does not cover delivery, so without
+this an endpoint that accepts the body and never answers would hold the worker forever; the job
+then fails with `webhook sink timed out after <n> ms`. Raise it if you push large files over a
+slow link.
+
+`headers` are sent as given with one exception: a `Content-Type` you set is **ignored**. The
+boundary is generated per request and lives in that header — overriding it would leave the
+server unable to parse the body.
 
 This sink and `s3` are the only two that touch the network, and they do so *after* the render —
 the render itself is still fully offline.
@@ -266,23 +283,42 @@ Requires the optional dependency `@aws-sdk/client-s3`; without it the job fails 
 `prefix` accepts `s3://bucket/key-prefix` or a bare `bucket/key-prefix` (a trailing slash is
 harmless), and a bucket with no prefix at all. Objects are written as
 `<key-prefix>/<jobId>.<ext>` and `<key-prefix>/<jobId>.manifest.json`; the video is streamed
-from disk rather than buffered. `endpoint` and `region` are both optional — set `endpoint` for
-MinIO, Ceph, R2 and friends.
+from disk rather than buffered, and tagged `video/mp4` / `video/webm` (the manifest
+`application/json`) so a signed URL plays instead of downloading. `endpoint` and `region` are
+both optional — set `endpoint` for MinIO, Ceph, R2 and friends.
 
 **Credentials come from the environment**, via the AWS SDK's standard chain:
 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`), `AWS_PROFILE`,
 `AWS_REGION`, an instance/pod role, and so on. The job spec never carries secrets.
+
+**Fetching inputs from S3.** The CLI itself only ever reads local paths, so if your job inputs
+live in a bucket, download them before you spawn it. The kit exports a helper for exactly that,
+for brokers written in Node:
+
+```js
+import { fetchS3ToLocal } from '@escapesuite/headless-artist/dist/cli.js'
+
+// s3://bucket/key → <destDir>/<basename of key>, streamed to disk, returns the local path.
+const manifestPath = await fetchS3ToLocal('s3://my-inputs/job-1/manifest.json', '/work/job-1', {
+  region: 'us-east-1',
+  endpoint: 'https://s3.us-east-1.amazonaws.com',
+})
+```
+
+Same optional `@aws-sdk/client-s3` dependency and the same credential chain as the sink. It is
+a library helper, not a job-spec feature — nothing in the job spec resolves `s3://` input
+paths.
 
 ## Environment reference
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `HEADLESS_BUNDLE_PATH` | `headless.html` next to the CLI | The render bundle to load. Only override it if you moved the file. |
-| `HEADLESS_WORK_DIR` | the system temp dir | Root for scratch space. Each job gets `<work dir>/<jobId>`, removed when it finishes either way. Point this at fast local disk. |
+| `HEADLESS_WORK_DIR` | the system temp dir | Root for scratch space. Each job gets a freshly created `<work dir>/headless-artist-<jobId>-<random>` directory, removed when it finishes either way. Point this at fast local disk. |
 | `HEADLESS_GPU` | unset | `true` launches Chromium with GPU acceleration instead of `--disable-gpu`. See [GPU](#gpu). |
 | `HEADLESS_CHROMIUM_PATH` | Playwright's browser | Path to a Chromium binary to launch instead. |
 | `HEADLESS_NO_SANDBOX` | unset | `true` adds `--no-sandbox`. Needed when running as root — e.g. in a container with no `USER`. Prefer running as a non-root user and leaving this off. |
-| `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-render budget, launch included. Must be a positive integer; anything else exits 2. |
+| `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-**render** budget, launch included — it does not cover delivery (the `webhook` sink has its own `timeoutMs`). Must be a positive integer; anything else exits 2. |
 | `HEADLESS_LOG` | `text` | `json` emits one JSON object per stderr line (`{ts, level, msg}`, level `error` or `info`). |
 
 `PLAYWRIGHT_BROWSERS_PATH` and the AWS credential variables are read by their own libraries and
@@ -456,8 +492,10 @@ is a working loop; the contract it relies on is small:
 
 Scratch is cleaned up on every path, success or failure, so a crashed broker doesn't leave the
 work directory filling up. The exception is a hard kill of the CLI process itself (`SIGKILL`,
-or an unhandled `SIGTERM`), which leaves one `<work dir>/<jobId>` behind — worth a periodic
-sweep if you kill jobs routinely.
+or an unhandled `SIGTERM`), which leaves one `<work dir>/headless-artist-<jobId>-<random>`
+directory behind — worth a periodic sweep if you kill jobs routinely. The random suffix means a
+job only ever deletes the directory it created itself, so nothing else in a shared work dir (the
+system temp dir, by default) is ever at risk.
 
 ## Sizing and throughput
 

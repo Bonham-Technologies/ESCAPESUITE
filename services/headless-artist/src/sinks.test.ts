@@ -199,6 +199,38 @@ describe('command sink', () => {
     expect(writtenManifest.jobId).toBe('job-cmd')
   })
 
+  it('succeeds even when the command writes megabytes to stdout', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('chatty bytes'))
+    const manifest = fakeManifest({ jobId: 'job-chatty' })
+
+    // A delivery script that logs a lot: execFile's 1 MiB maxBuffer used to kill it *after*
+    // it had already delivered, reporting a failed job.
+    const script = `
+      const chunk = 'x'.repeat(64 * 1024)
+      for (let i = 0; i < 48; i++) process.stdout.write(chunk)
+    `
+
+    const sink = await getSink('command', { command: process.execPath, args: ['-e', script] })
+
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).resolves.toEqual({
+      outputLocation: `command:${process.execPath}`,
+    })
+  })
+
+  it('throws a clear error when the command does not exist', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-missing' })
+    const missing = path.join(srcDir, 'no-such-delivery-command')
+
+    const sink = await getSink('command', { command: missing })
+
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      `command sink "${missing}" could not be run: command not found`,
+    )
+  })
+
   it('throws with the exit code and stderr tail when the command fails', async () => {
     const srcDir = await makeTempDir()
     const outputPath = await makeOutputFile(srcDir, Buffer.from('fail bytes'))
@@ -256,6 +288,68 @@ describe('webhook sink', () => {
     expect(receivedContentType).toMatch(/multipart\/form-data/)
     expect(receivedBody.includes(Buffer.from('"jobId":"job-hook"'))).toBe(true)
     expect(receivedBody.includes(fileBytes)).toBe(true)
+  })
+
+  it('ignores a caller-supplied Content-Type so the multipart boundary survives', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('boundary bytes'))
+    const manifest = fakeManifest({ jobId: 'job-ct' })
+
+    let receivedContentType = ''
+    let receivedAuth = ''
+    const server = http.createServer((req, res) => {
+      receivedContentType = req.headers['content-type'] ?? ''
+      receivedAuth = (req.headers['authorization'] as string) ?? ''
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200)
+        res.end('ok')
+      })
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', {
+      url: `http://127.0.0.1:${port}/upload`,
+      headers: { 'content-type': 'application/json', Authorization: 'Bearer t' },
+    })
+    await sink.deliver(manifest.jobId, outputPath, manifest)
+
+    expect(receivedContentType).toMatch(/^multipart\/form-data; boundary=/)
+    // Every other header still goes through.
+    expect(receivedAuth).toBe('Bearer t')
+  })
+
+  it('validates config.timeoutMs is a positive integer when provided', async () => {
+    await expect(getSink('webhook', { url: 'http://x/', timeoutMs: 0 })).rejects.toThrow(
+      /webhook sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+    await expect(getSink('webhook', { url: 'http://x/', timeoutMs: 1.5 })).rejects.toThrow(
+      /webhook sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+    await expect(getSink('webhook', { url: 'http://x/', timeoutMs: '10' })).rejects.toThrow(
+      /webhook sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+  })
+
+  it('gives up on a server that accepts the request and never responds', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('hanging bytes'))
+    const manifest = fakeManifest({ jobId: 'job-hang' })
+
+    const server = http.createServer((req) => {
+      // Read the body and then simply never reply.
+      req.on('data', () => {})
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/upload`, timeoutMs: 250 })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      'webhook sink timed out after 250 ms',
+    )
   })
 
   it('throws when the webhook responds with a non-2xx status', async () => {

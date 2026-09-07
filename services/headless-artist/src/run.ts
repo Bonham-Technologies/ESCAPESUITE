@@ -56,29 +56,33 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
   const startedAt = Date.now()
   const log = deps.log ?? defaultLog
   const workDir = deps.workDir ?? os.tmpdir()
-  const jobWorkDir = path.join(workDir, spec.jobId)
   let job: LoadedJob | undefined
-  // The finally below removes jobWorkDir recursively, so it may only ever remove a directory
-  // this call actually created.
-  let createdJobDir = false
+  // The finally below removes this recursively, so it is only ever set to a directory this
+  // call created itself (mkdtemp, so the name cannot collide with anything already there).
+  let jobWorkDir: string | undefined
 
   try {
     // Belt and braces with parseJobSpec's own jobId rule: a job id that escaped its work dir
-    // (".", "..", anything that resolves elsewhere) must never reach an rm -rf.
-    if (path.dirname(path.resolve(jobWorkDir)) !== path.resolve(workDir)) {
+    // (".", "..", anything that resolves elsewhere) must never reach an rm -rf — not even as
+    // part of the mkdtemp prefix below.
+    if (path.dirname(path.resolve(path.join(workDir, spec.jobId))) !== path.resolve(workDir)) {
       throw new Error(`jobId "${spec.jobId}" does not name a directory inside the work dir`)
     }
 
+    // Both loadBundle's own mkdtemp and this job's scratch dir live inside workDir.
+    await fs.mkdir(workDir, { recursive: true })
+
     if ('bundle' in spec.input) {
-      // loadBundle mkdtemps inside workDir, so the root has to exist first.
-      await fs.mkdir(workDir, { recursive: true })
       job = await loadBundle(spec.input.bundle.path, workDir)
     } else {
       job = await loadManifest(spec.input.manifest.path)
     }
 
-    await fs.mkdir(jobWorkDir, { recursive: true })
-    createdJobDir = true
+    // mkdtemp rather than `mkdir(<workDir>/<jobId>)`: the default work dir is the system temp
+    // dir, which every other process on the box writes into, and mkdir({recursive:true})
+    // succeeds on a directory somebody else already owns — which the finally would then delete.
+    // The render file keeps its fixed `render.<ext>` name inside this dir.
+    jobWorkDir = await fs.mkdtemp(path.join(workDir, `headless-artist-${spec.jobId}-`))
     const outputPath = path.join(jobWorkDir, `render.${spec.options.format}`)
 
     const { meta, chromiumVersion } = await renderInChromium(
@@ -119,9 +123,10 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
     log(`error: ${error}`)
     return { jobId: spec.jobId, ok: false, error, durationMs: Date.now() - startedAt }
   } finally {
-    if (createdJobDir) {
+    if (jobWorkDir !== undefined) {
+      const dir = jobWorkDir
       await tryCleanup('the job work directory', log, () =>
-        fs.rm(jobWorkDir, { recursive: true, force: true }),
+        fs.rm(dir, { recursive: true, force: true }),
       )
     }
     await tryCleanup('the loader temp files', log, async () => {
