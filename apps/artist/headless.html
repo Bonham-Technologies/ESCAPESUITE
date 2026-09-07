@@ -2,6 +2,8 @@
 <html lang="en">
   <head><meta charset="UTF-8" /><title>ESCAPEARTIST headless render</title></head>
   <body>
+    <!-- Sources are streamed in here (Playwright setInputFiles), never through evaluate(). -->
+    <input type="file" id="__sources" multiple hidden />
     <script type="module" src="/src/headless/main.ts"></script>
   </body>
 </html>

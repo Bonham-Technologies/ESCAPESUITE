@@ -2,8 +2,14 @@
 import { exportToMP4, exportToWebM } from '../core/exporter'
 import { calculateTimelineDuration, getBaseDimensions, getResolution } from '../core/exportTypes'
 import { seedSources } from './seedSources'
-import type { RenderInput, RenderResult } from './types'
-import type { ExportOptions } from '../store/types'
+import type { RenderFileInput, RenderInput, RenderMeta, RenderResult, SourceVideoInput } from './types'
+import type { ExportOptions, Project } from '../store/types'
+
+/** The id of the hidden file input the runner streams sources through. */
+const SOURCE_INPUT_ID = '__sources'
+
+/** How long the download's object URL is kept alive after the click. */
+const REVOKE_DELAY_MS = 60_000
 
 async function blobToBase64(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer())
@@ -15,13 +21,21 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary)
 }
 
+/** The shape both entry points reduce to before rendering. */
+interface RenderRequest {
+  project: Project
+  sourceVideos: SourceVideoInput[]
+  sourceBlobs: Record<string, ArrayBuffer | Blob>
+  options: RenderInput['options']
+}
+
 /**
  * Fail loudly on inconsistent input. The export engine silently skips clips
  * whose source is unknown (rendering black), which is acceptable interactively
  * but not for an unattended render — a missing source must be an error.
  */
-function validateInput(input: RenderInput): void {
-  const { project, sourceVideos, sourceBlobs } = input
+function validateInput(request: RenderRequest): void {
+  const { project, sourceVideos, sourceBlobs } = request
   const known = new Set(sourceVideos.map((s) => s.id))
   for (const clip of project.timeline.clips) {
     if (clip.overlayType || !clip.sourceVideoId) continue
@@ -35,20 +49,23 @@ function validateInput(input: RenderInput): void {
 }
 
 /**
- * Headless render entry. Seeds sources, then calls the SAME engine the editor
- * uses (identical arg order to ExportDialog), and returns base64 bytes + meta.
+ * The one render path: validate, seed, run the SAME engine the editor uses
+ * (identical arg order to ExportDialog), and describe the encoded output.
+ * Both entry points differ only in how bytes arrive and how they leave.
  *
- * `options.resolution` defaults to 'project' — a RenderInput always carries the
- * project resolution, so that is the natural target when the caller is silent.
+ * `options.resolution` defaults to 'project' — a render request always carries
+ * the project resolution, so that is the natural target when the caller is silent.
  */
-export async function renderProject(
-  input: RenderInput,
+async function render(
+  request: RenderRequest,
   onProgress?: (p: number) => void,
-): Promise<RenderResult> {
-  validateInput(input)
-  const { project, sourceVideos, sourceBlobs } = input
-  const options: ExportOptions = { resolution: 'project', ...input.options }
-  await seedSources(sourceVideos, sourceBlobs)
+): Promise<{ blob: Blob; meta: RenderMeta }> {
+  validateInput(request)
+  const { project } = request
+  const options: ExportOptions = { resolution: 'project', ...request.options }
+  // The seeded list is the completed one (probed width/height/duration); the
+  // engine and the meta below both need those fields.
+  const sourceVideos = await seedSources(request.sourceVideos, request.sourceBlobs)
 
   const clips = project.timeline.clips
   const tracks = project.timeline.tracks
@@ -72,7 +89,7 @@ export async function renderProject(
   const durationSec = rangeEnd - rangeStart
 
   return {
-    base64: await blobToBase64(blob),
+    blob,
     meta: {
       format,
       byteLength: blob.size,
@@ -82,4 +99,74 @@ export async function renderProject(
       gpu: false, // set by the runner based on launch flags (Plan 2)
     },
   }
+}
+
+/**
+ * Headless render entry for small jobs: returns the encoded bytes as base64,
+ * transferred back across the Chromium boundary.
+ */
+export async function renderProject(
+  input: RenderInput,
+  onProgress?: (p: number) => void,
+): Promise<RenderResult> {
+  const { blob, meta } = await render(input, onProgress)
+  return { base64: await blobToBase64(blob), meta }
+}
+
+/** Pick each source's File out of the hidden input's FileList, by exact name. */
+function resolveSourceFiles(sourceFiles: Record<string, string>): Record<string, Blob> {
+  const element = document.getElementById(SOURCE_INPUT_ID)
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error(`No file input "#${SOURCE_INPUT_ID}" on the page — sources cannot be streamed in`)
+  }
+  const files = Array.from(element.files ?? [])
+  const resolved: Record<string, Blob> = {}
+  for (const [id, name] of Object.entries(sourceFiles)) {
+    const matches = files.filter((file) => file.name === name)
+    if (matches.length === 0) {
+      const available = files.map((f) => f.name).join(', ') || '(none)'
+      throw new Error(`Source "${id}": no file named "${name}" in #${SOURCE_INPUT_ID} — has ${available}`)
+    }
+    if (matches.length > 1) {
+      throw new Error(`Source "${id}": more than one file named "${name}" in #${SOURCE_INPUT_ID} — names must be unique`)
+    }
+    resolved[id] = matches[0]
+  }
+  return resolved
+}
+
+/** Hand the bytes to the browser's download machinery, where Playwright collects them. */
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  // Chromium reads the Blob for as long as the download runs, so revoking on the
+  // next tick would truncate a large file. Long after the click is safe.
+  setTimeout(() => {
+    URL.revokeObjectURL(url)
+    anchor.remove()
+  }, REVOKE_DELAY_MS)
+}
+
+/**
+ * Streaming render entry: sources arrive as Files in the hidden input (set by
+ * the runner) and the result leaves as a browser download, so neither the bytes
+ * in nor the bytes out cross the Chromium evaluate boundary.
+ *
+ * Resolves with the output meta once the download has been triggered.
+ */
+export async function renderProjectToFile(
+  input: RenderFileInput,
+  onProgress?: (p: number) => void,
+): Promise<RenderMeta> {
+  const sourceBlobs = resolveSourceFiles(input.sourceFiles)
+  const { blob, meta } = await render(
+    { project: input.project, sourceVideos: input.sourceVideos, sourceBlobs, options: input.options },
+    onProgress,
+  )
+  downloadBlob(blob, `${input.outputName}.${meta.format}`)
+  return meta
 }

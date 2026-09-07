@@ -170,6 +170,12 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
 
 - Entry: `src/headless/main.ts`; contract types in `src/headless/types.ts`
   (`RenderInput` → `RenderResult` with base64 bytes + output `RenderMeta`).
+- Streaming variant `window.__renderProjectToFile(input, onProgress?)`
+  (`RenderFileInput` → `RenderMeta`): sources arrive as `File`s in the hidden
+  `<input type="file" id="__sources">` (Playwright `setInputFiles`) and the result
+  leaves as a browser download named `<outputName>.<mp4|webm>`, so large media
+  never crosses the `evaluate()` boundary. `sourceVideos` entries may carry only
+  `id`/`name`/`mimeType`; `seedSources` probes the rest from the bytes.
 - `renderProject.ts` validates the input (every media clip must have a source and
   bytes — it fails instead of rendering black), seeds sources into IndexedDB via
   `seedSources.ts`, then calls the **same** `exportToMP4`/`exportToWebM` the editor
