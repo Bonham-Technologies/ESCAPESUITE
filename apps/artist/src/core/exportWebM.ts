@@ -19,7 +19,7 @@ import {
   checkAborted,
   isWebMExportSupported,
   getQualitySettings,
-  getResolution,
+  getResolution, getBaseDimensions,
   loadVideoElement,
   loadImageElement,
   clearSeekPositions,
@@ -68,29 +68,9 @@ export async function exportToWebM(
 
   onProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
-  // Use the bottom-most track's source dimensions as the base
-  // Lower track index = base layer, typically the main video content
   const sourceMap = new Map(sourceVideos.map((v) => [v.id, v]));
-  let baseWidth = 1920; // Default resolution for overlay-only exports
-  let baseHeight = 1080;
-
-  // Sort clips by track index (lower = base/bottom) and find the bottom-most media clip with dimensions
-  const sortedClips = [...clips].sort((a, b) => {
-    const trackA = exportTracks.find(t => t.id === a.trackId);
-    const trackB = exportTracks.find(t => t.id === b.trackId);
-    return (trackA?.index ?? 0) - (trackB?.index ?? 0); // Lower index first
-  });
-
-  for (const clip of sortedClips) {
-    if (clip.overlayType) continue; // Skip overlay clips
-    const source = sourceMap.get(clip.sourceVideoId);
-    if (source && source.width && source.height) {
-      baseWidth = source.width;
-      baseHeight = source.height;
-      break; // Use bottom-most source with dimensions
-    }
-  }
-
+  // Use the bottom-most track's source dimensions as the base
+  const { width: baseWidth, height: baseHeight } = getBaseDimensions(clips, exportTracks, sourceVideos);
   const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;

@@ -161,3 +161,23 @@ Waveform visualization adapts to clip selection state:
 - Video blobs stored in IndexedDB; large files may hit storage limits
 - MP4 decoding uses Web Worker with WebCodecs for background-capable export; WebM falls back to HTMLVideoElement on main thread
 - WebCodecs background export only works for MP4 source files; WebM sources use HTMLVideoElement seeking
+
+## Headless Render Bundle
+
+`pnpm --filter @escapesuite/artist build:headless` (env `VITE_HEADLESS=true`) builds
+`dist-headless/headless.html`: a no-UI single file that loads from `file://` in
+headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
+
+- Entry: `src/headless/main.ts`; contract types in `src/headless/types.ts`
+  (`RenderInput` → `RenderResult` with base64 bytes + output `RenderMeta`).
+- `renderProject.ts` validates the input (every media clip must have a source and
+  bytes — it fails instead of rendering black), seeds sources into IndexedDB via
+  `seedSources.ts`, then calls the **same** `exportToMP4`/`exportToWebM` the editor
+  uses. No engine fork.
+- `vite.config.ts` headless plugins emit workers as classic scripts and inline them
+  as blob URLs, because `file://` pages cannot load module or file workers.
+- `options.resolution` defaults to `'project'`; `meta` describes the encoded output
+  (honours `resolution` and `timeRange`).
+- Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
+  (builds the bundle itself in `beforeAll`).
+- Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.

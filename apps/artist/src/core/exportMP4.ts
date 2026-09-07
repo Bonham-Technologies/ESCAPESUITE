@@ -20,7 +20,7 @@ import {
   checkAborted,
   isMP4ExportSupported,
   getQualitySettings,
-  getResolution,
+  getResolution, getBaseDimensions,
   loadImageElement,
   clearSeekPositions,
   yieldToMain,
@@ -108,29 +108,9 @@ export async function exportToMP4(
 
   onProgress({ phase: 'preparing', progress: 0, message: 'Preparing MP4 export...' });
 
-  // Use the bottom-most track's source dimensions as the base
-  // Lower track index = base layer, typically the main video content
   const sourceMap = new Map(sourceVideos.map((v) => [v.id, v]));
-  let baseWidth = 1920; // Default resolution for overlay-only exports
-  let baseHeight = 1080;
-
-  // Sort clips by track index (lower = base/bottom) and find the bottom-most media clip with dimensions
-  const sortedClips = [...clips].sort((a, b) => {
-    const trackA = exportTracks.find(t => t.id === a.trackId);
-    const trackB = exportTracks.find(t => t.id === b.trackId);
-    return (trackA?.index ?? 0) - (trackB?.index ?? 0); // Lower index first
-  });
-
-  for (const clip of sortedClips) {
-    if (clip.overlayType) continue; // Skip overlay clips
-    const source = sourceMap.get(clip.sourceVideoId);
-    if (source && source.width && source.height) {
-      baseWidth = source.width;
-      baseHeight = source.height;
-      break; // Use bottom-most source with dimensions
-    }
-  }
-
+  // Use the bottom-most track's source dimensions as the base
+  const { width: baseWidth, height: baseHeight } = getBaseDimensions(clips, exportTracks, sourceVideos);
   const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
@@ -257,35 +237,45 @@ export async function exportToMP4(
   // Start the output
   await output.start();
 
-  // H.264 codec profiles to try, in order of preference (quality -> compatibility)
+  // H.264 codec profiles to try, in order of preference (quality -> compatibility).
+  // We try two passes: prefer-hardware first (GPU acceleration), then no-preference
+  // (allows software encoding). The second pass ensures the headless / CI path works
+  // even without a GPU (e.g. Playwright Chromium, Docker).
   const h264Codecs = [
-    'avc1.640028', // High Profile Level 4.0 - best quality
+    'avc1.640028', // High Profile Level 4.0 - best quality (up to 1080p30)
     'avc1.4d0028', // Main Profile Level 4.0 - good compatibility
     'avc1.42001f', // Baseline Profile Level 3.1 - maximum compatibility
+    // Level 4.0 caps at 1920x1080; isConfigSupported rejects it for larger frames.
+    // Level 5.1 covers 1440p and 4K. Listed last so 1080p keeps the more compatible level.
+    'avc1.640033', // High Profile Level 5.1
+    'avc1.4d0033', // Main Profile Level 5.1
   ];
 
   // Find a supported H.264 codec configuration
   let videoConfig: VideoEncoderConfig | null = null;
-  for (const codec of h264Codecs) {
-    const config: VideoEncoderConfig = {
-      codec,
-      width,
-      height,
-      bitrate: videoBitrate,
-      framerate: frameRate,
-      latencyMode: 'quality',
-      hardwareAcceleration: 'prefer-hardware',
-    };
-    try {
-      const support = await VideoEncoder.isConfigSupported(config);
-      if (support.supported) {
-        videoConfig = support.config || config;
-        log('codec', `Selected H.264 codec: ${codec} (${width}x${height} @ ${videoBitrate}bps)`);
-        console.log(`[MP4 Export] Using H.264 codec: ${codec}`);
-        break;
+  const hwModes: VideoEncoderConfig['hardwareAcceleration'][] = ['prefer-hardware', 'no-preference'];
+  outer: for (const hwMode of hwModes) {
+    for (const codec of h264Codecs) {
+      const config: VideoEncoderConfig = {
+        codec,
+        width,
+        height,
+        bitrate: videoBitrate,
+        framerate: frameRate,
+        latencyMode: 'quality',
+        hardwareAcceleration: hwMode,
+      };
+      try {
+        const support = await VideoEncoder.isConfigSupported(config);
+        if (support.supported) {
+          videoConfig = support.config || config;
+          log('codec', `Selected H.264 codec: ${codec} hw=${hwMode} (${width}x${height} @ ${videoBitrate}bps)`);
+          console.log(`[MP4 Export] Using H.264 codec: ${codec} (${hwMode})`);
+          break outer;
+        }
+      } catch {
+        // This codec not supported, try next
       }
-    } catch {
-      // This codec not supported, try next
     }
   }
 
