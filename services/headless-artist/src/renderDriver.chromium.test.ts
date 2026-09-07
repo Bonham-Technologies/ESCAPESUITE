@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -23,11 +22,11 @@ const quiet = () => {}
 let job: LoadedJob
 let outDir: string
 
+// The headless bundle is built once for the whole chromium suite by test/globalSetup.ts.
 beforeAll(async () => {
-  execSync('pnpm --filter=@escapesuite/artist run build:headless', { cwd: REPO_ROOT, stdio: 'inherit' })
   job = await loadManifest(MANIFEST)
   outDir = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-driver-test-'))
-}, RENDER_TIMEOUT_MS)
+})
 
 afterAll(async () => {
   await job?.cleanup()

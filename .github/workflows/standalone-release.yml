@@ -213,4 +213,4 @@ jobs:
             --repo "${REPO}" \
             --target "${COMMIT}" \
             --title "ESCAPE Suite v${VERSION}" \
-            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside."
+            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports."

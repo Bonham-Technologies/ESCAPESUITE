@@ -98,8 +98,8 @@ Need to render ESCAPEARTIST projects outside a browser — on a server, in a bat
 # Download the tarball from Releases: https://github.com/Bonham-Technologies/ESCAPESUITE/releases
 npm install ./escapesuite-headless-artist-<version>.tgz
 npx playwright install --with-deps chromium
-# Write a job spec, then render it
-npx headless-artist render --job job.json
+cp -r node_modules/@escapesuite/headless-artist/examples .
+node_modules/.bin/headless-artist render --job examples/job-manifest-volume.json
 ```
 
 See [`services/headless-artist/README.md`](services/headless-artist/README.md) for the full job spec, input formats, and output sinks.

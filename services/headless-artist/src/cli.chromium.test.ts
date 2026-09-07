@@ -1,4 +1,4 @@
-import { execFile, execSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,9 +16,6 @@ const CLI = path.join(SERVICE_ROOT, 'dist/cli.js')
 /** Long enough for a Chromium launch plus a real (tiny) encode on a cold machine. */
 const RENDER_TIMEOUT_MS = 180_000
 
-/** Building the headless bundle and the CLI from cold is the slow part of this suite. */
-const BUILD_TIMEOUT_MS = 300_000
-
 interface CliResult {
   code: number
   stdout: string
@@ -28,11 +25,11 @@ interface CliResult {
 let tmpRoot: string
 
 beforeAll(async () => {
-  // The kit assembler itself, so these tests exercise the artifact customers actually get:
-  // it builds the headless bundle, bundles the CLI, and writes dist/kit.json.
-  execSync('pnpm --filter=@escapesuite/headless-artist run build', { cwd: REPO_ROOT, stdio: 'inherit' })
+  // The kit assembler (dist/cli.js, dist/headless.html, dist/kit.json) is built once for the
+  // whole chromium suite by test/globalSetup.ts, so these tests exercise the artifact
+  // customers actually get without paying for the build in every file's beforeAll.
   tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-artist-cli-test-'))
-}, BUILD_TIMEOUT_MS)
+})
 
 afterAll(async () => {
   if (tmpRoot) await fs.rm(tmpRoot, { recursive: true, force: true })

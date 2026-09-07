@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -25,13 +24,13 @@ let tmpRoot: string
 let workDir: string
 let outDir: string
 
+// The headless bundle is built once for the whole chromium suite by test/globalSetup.ts.
 beforeAll(async () => {
-  execSync('pnpm --filter=@escapesuite/artist run build:headless', { cwd: REPO_ROOT, stdio: 'inherit' })
   tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-artist-run-e2e-'))
   workDir = path.join(tmpRoot, 'work')
   outDir = path.join(tmpRoot, 'out')
   await fs.mkdir(workDir, { recursive: true })
-}, RENDER_TIMEOUT_MS)
+})
 
 afterAll(async () => {
   if (tmpRoot) await fs.rm(tmpRoot, { recursive: true, force: true })
