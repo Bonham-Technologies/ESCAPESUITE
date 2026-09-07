@@ -5,10 +5,21 @@ import type { SourceVideoInput } from './types'
 import type { SourceVideo } from '../store/types'
 
 /** Fields the export engine needs but a streaming caller may not know up front. */
-const PROBED_FIELDS = ['width', 'height', 'duration', 'mediaType'] as const
+const PROBED_FIELDS = ['width', 'height', 'duration'] as const
+
+/**
+ * mediaType the mime type already settles, so it costs no probe. Only `video/*` qualifies:
+ * `extractMetadataFromBlob` is the only thing that tells an image apart from an audio file
+ * with cover art, and it never sets mediaType for video at all — which is why treating
+ * mediaType as a probed field made EVERY video source pay for a probe it did not need.
+ */
+function impliedMediaType(mimeType: string): SourceVideo['mediaType'] | undefined {
+  return mimeType.startsWith('video/') ? 'video' : undefined
+}
 
 function needsProbe(meta: SourceVideoInput): boolean {
-  return PROBED_FIELDS.some((field) => meta[field] == null)
+  if (PROBED_FIELDS.some((field) => meta[field] == null)) return true
+  return meta.mediaType == null && impliedMediaType(meta.mimeType) == null
 }
 
 /** Drop undefined-valued keys so a partial caller value never overwrites a probed one. */
@@ -42,7 +53,7 @@ export async function seedSources(
           ...await extractMetadataFromBlob(blob, { id: meta.id, name: meta.name, mimeType: meta.mimeType }),
           ...definedFields(meta),
         }
-      : meta as SourceVideo
+      : { mediaType: impliedMediaType(meta.mimeType), ...definedFields(meta) } as SourceVideo
 
     await storeVideo(meta.id, blob, full)
     completed.push(full)

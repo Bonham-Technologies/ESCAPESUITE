@@ -74,6 +74,31 @@ describe('seedSources', () => {
     expect(record!.metadata.width).toBe(320)
   })
 
+  it('does not probe a video source that supplied width/height/duration but no mediaType', async () => {
+    // The README's promise: supplying the dimensions and duration saves the probe. A video/*
+    // mime type already says mediaType is 'video', so nothing is left to look up — and probing
+    // here would fail outright on a source <video> refuses but WebCodecs can decode.
+    const meta: SourceVideoInput = {
+      id: 'src-3', name: 'c.mp4', mimeType: 'video/mp4',
+      width: 1920, height: 1080, duration: 12, frameRate: 30, size: 9,
+    }
+    const result = await seedSources([meta], { 'src-3': new Uint8Array([1, 2, 3, 4]).buffer })
+
+    expect(extractMetadataFromBlob).not.toHaveBeenCalled()
+    expect(result[0]).toEqual({ ...meta, mediaType: 'video' })
+    const record = await getVideo('src-3')
+    expect(record!.metadata.mediaType).toBe('video')
+  })
+
+  it('probes a source whose mime type does not imply its media type', async () => {
+    const meta: SourceVideoInput = {
+      id: 'src-img', name: 'c.png', mimeType: 'image/png', width: 800, height: 600, duration: 0,
+    }
+    await seedSources([meta], { 'src-img': new Uint8Array([1]).buffer })
+
+    expect(extractMetadataFromBlob).toHaveBeenCalledTimes(1)
+  })
+
   it('probes only the incomplete sources in a mixed batch', async () => {
     await seedSources(
       [complete({ id: 'ok' }), { id: 'partial', name: 'p.mp4', mimeType: 'video/mp4' }],

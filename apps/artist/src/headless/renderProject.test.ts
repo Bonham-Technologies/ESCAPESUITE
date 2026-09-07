@@ -176,15 +176,16 @@ describe('renderProjectToFile', () => {
     expect(clicks[0].download).toBe('job-1.webm')
   })
 
-  it('keeps the object URL alive well past the click, then revokes it', async () => {
+  it('never revokes the download object URL, on a timer or otherwise', async () => {
     vi.useFakeTimers()
     try {
       fileInput(['source.mp4'])
       await renderProjectToFile(fileInputBase())
-      expect(URL.revokeObjectURL).not.toHaveBeenCalled() // Chromium is still reading the Blob
-      vi.advanceTimersByTime(60_000)
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-      expect(document.querySelector('a')).toBeNull()
+      // Chromium reads the Blob for as long as the download runs; a render can outlast any
+      // timer, and revoking early truncates the file. The context teardown frees it instead.
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(60 * 60_000)
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

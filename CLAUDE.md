@@ -140,9 +140,10 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 - Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);
   `pack:kit` assembles and `npm pack`s it into `dist/escapesuite-headless-artist-<version>.tgz`;
   `test:run` runs unit tests only (no browser); `test:e2e` runs the Chromium tests.
-- Convention: tests named `*.chromium.test.ts` launch real headless Chromium and build the
-  ARTIST headless bundle themselves in `beforeAll` — they are excluded from `test:run`/CI's
-  `test` job and run separately.
+- Convention: tests named `*.chromium.test.ts` launch real headless Chromium against the
+  ARTIST headless bundle, which `test/globalSetup.ts` builds ONCE per vitest run (gated by
+  `HEADLESS_BUILD=1`, which only `test:e2e` sets — every other invocation is a no-op). They
+  are excluded from `test:run`/CI's `test` job and run separately.
 - CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.62.1 as
   `apps/e2e`, sharing its browser cache) and packs + uploads the kit as the
   `headless-artist-kit` artifact in the `build` job; `standalone-release.yml` attaches the

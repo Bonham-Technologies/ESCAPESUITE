@@ -8,9 +8,6 @@ import type { ExportOptions, Project } from '../store/types'
 /** The id of the hidden file input the runner streams sources through. */
 const SOURCE_INPUT_ID = '__sources'
 
-/** How long the download's object URL is kept alive after the click. */
-const REVOKE_DELAY_MS = 60_000
-
 async function blobToBase64(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer())
   let binary = ''
@@ -143,12 +140,10 @@ function downloadBlob(blob: Blob, fileName: string): void {
   anchor.download = fileName
   document.body.appendChild(anchor)
   anchor.click()
-  // Chromium reads the Blob for as long as the download runs, so revoking on the
-  // next tick would truncate a large file. Long after the click is safe.
-  setTimeout(() => {
-    URL.revokeObjectURL(url)
-    anchor.remove()
-  }, REVOKE_DELAY_MS)
+  // Deliberately never revoked: Chromium reads the Blob for as long as the download
+  // runs, and a render can outlast any timer we would pick — revoking early truncates
+  // the file. One page renders one job and the runner closes the browser context
+  // straight after, which frees the Blob with the whole document.
 }
 
 /**
