@@ -83,6 +83,9 @@ jobs:
       - name: TypeScript check (artist)
         run: pnpm --filter=@escapesuite/artist exec tsc --noEmit
 
+      - name: TypeScript check (headless-artist)
+        run: pnpm --filter=@escapesuite/headless-artist run typecheck
+
   # Entry point 2 — unit tests with coverage. Runs in parallel with
   # lint-and-typecheck, so it carries the same pull_request_target filter.
   test:
@@ -151,6 +154,20 @@ jobs:
         run: pnpm build
         env:
           VITE_BUILD_MODE: saas
+
+      # `pnpm build` already ran the kit assembler (services/headless-artist's own
+      # `build` script, picked up by turbo); `pack:kit` re-runs the assembler
+      # (idempotent, fast) and then `npm pack`s the result into a tarball.
+      - name: Pack headless-artist kit
+        run: pnpm --filter=@escapesuite/headless-artist run pack:kit
+
+      - name: Upload headless-artist kit
+        uses: actions/upload-artifact@v7
+        with:
+          name: headless-artist-kit
+          path: services/headless-artist/dist/*.tgz
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Report bundle sizes
         run: |
@@ -387,6 +404,13 @@ jobs:
           done
           echo "::error::playwright install-deps chromium failed after 2 attempts"
           exit 1
+
+      # services/headless-artist pins the same Playwright version (1.62.1) as
+      # apps/e2e, so the browser cache above covers it too and it needs no
+      # separate install step. If the two ever drift, this step will download
+      # a second Chromium build on every run — keep the versions in step.
+      - name: Run headless-artist Chromium tests
+        run: pnpm --filter=@escapesuite/headless-artist run test:e2e
 
       - name: Run E2E tests
         run: pnpm --filter=@escapesuite/e2e exec playwright test --ignore-snapshots

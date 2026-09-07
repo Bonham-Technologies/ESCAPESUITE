@@ -12,6 +12,7 @@ ESCAPE Suite is a **Turborepo monorepo** containing privacy-first, client-side m
 | ESCAPECRAFT | `@escapesuite/craft` | Screen & webcam recorder | 5174 |
 | ESCAPEARTIST | `@escapesuite/artist` | Video editor with timeline & effects | 5175 |
 | E2E Tests | `@escapesuite/e2e` | End-to-end test suite | N/A |
+| Headless ARTIST kit | `@escapesuite/headless-artist` | Server-side render CLI + kit | N/A |
 
 ## Monorepo Structure
 
@@ -24,6 +25,8 @@ escapesuite/
 │   └── e2e/            # End-to-end tests (Playwright)
 ├── packages/
 │   └── shared/         # Shared types and utilities
+├── services/
+│   └── headless-artist/ # Server-side ARTIST render CLI + kit
 ├── scripts/
 │   └── build-all.mjs   # Combined build for Vercel
 ├── package.json        # Root workspace config
@@ -129,6 +132,22 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 - URL params: `?video=url` to preload, `?project=base64` for state
 - "Send to Editor" from CRAFT uses `?loadVideo=<id>`
 
+### Headless render service (services/headless-artist)
+- `@escapesuite/headless-artist`: a one-shot CLI that renders ESCAPEARTIST projects in headless
+  Chromium (via Playwright) outside the browser — for servers or GPU boxes, no UI involved.
+- Drives the same `dist-headless/headless.html` bundle ESCAPEARTIST builds for the browser
+  (`window.__renderProject` / `window.__renderProjectToFile` — see `apps/artist/CLAUDE.md`).
+- Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);
+  `pack:kit` assembles and `npm pack`s it into `dist/escapesuite-headless-artist-<version>.tgz`;
+  `test:run` runs unit tests only (no browser); `test:e2e` runs the Chromium tests.
+- Convention: tests named `*.chromium.test.ts` launch real headless Chromium and build the
+  ARTIST headless bundle themselves in `beforeAll` — they are excluded from `test:run`/CI's
+  `test` job and run separately.
+- CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.62.1 as
+  `apps/e2e`, sharing its browser cache) and packs + uploads the kit as the
+  `headless-artist-kit` artifact in the `build` job; `standalone-release.yml` attaches the
+  tarball to GitHub Releases alongside the standalone HTML builds.
+
 ## Environment Variables
 
 No environment variables are required to build or run any app in this repo.
@@ -164,11 +183,11 @@ Seven jobs, with `ci-status` as the single required check:
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
-| `lint-and-typecheck` | Security audit + ESLint + TypeScript (combined) | PRs and pushes |
+| `lint-and-typecheck` | Security audit + ESLint + TypeScript (plan, craft, artist, headless-artist) | PRs and pushes |
 | `test` | Unit tests with coverage | PRs and pushes |
-| `build` | Production builds, bundle size report | PRs and pushes |
+| `build` | Production builds, bundle size report, packs + uploads the headless-artist kit | PRs and pushes |
 | `standalone` | Offline single-file builds + standalone E2E | PRs and pushes (E2E half skipped for Dependabot) |
-| `e2e` | Full Playwright suite, journey included | PRs and pushes (skipped for Dependabot) |
+| `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
 | `ci-status` | Summary/gate job | All PRs |
 
@@ -178,9 +197,13 @@ Seven jobs, with `ci-status` as the single required check:
 - `standalone` builds the offline bundles once, uploads the `standalone-builds`
   artifact (consumed cross-run by `standalone-release.yml`), then tests that
   same build
+- `build` also runs `pnpm --filter=@escapesuite/headless-artist run pack:kit` and
+  uploads the tarball as the `headless-artist-kit` artifact (consumed cross-run
+  by `standalone-release.yml`, same pattern as `standalone-builds`)
 - Playwright browsers are cached across runs (~1min savings); `e2e` also runs on
   pushes to `main`, so the cache is written from the base branch and fresh PR
-  branches can restore it
+  branches can restore it. `services/headless-artist` pins the same Playwright
+  version (1.62.1) as `apps/e2e`, so its Chromium tests share that cache
 - Playwright browser download and apt system-deps are separate steps, each with
   `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
   instead of hanging the job
@@ -188,8 +211,13 @@ Seven jobs, with `ci-status` as the single required check:
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)
 - Builds ESCAPECRAFT and ESCAPEARTIST in standalone mode (`VITE_BUILD_MODE=standalone`)
-- On `main`, creates a GitHub Release and attaches the single-file HTML builds directly to it
-- No cloud storage step and no license injection — the downloads are plain HTML files, ready to run
+- Also downloads the `headless-artist-kit` artifact from the same CI run and renames the
+  tarball to `escapesuite-headless-artist-<VERSION>.tgz` (VERSION here is the release's own
+  version — ESCAPECRAFT's — not the kit package's independent `0.1.0`)
+- On `main`, creates a GitHub Release and attaches the single-file HTML builds and the
+  headless-artist kit tarball directly to it
+- No cloud storage step and no license injection — the downloads are plain HTML files (and one
+  npm tarball), ready to run
 
 **Dependabot** (`.github/dependabot.yml`):
 - Weekly updates for all apps

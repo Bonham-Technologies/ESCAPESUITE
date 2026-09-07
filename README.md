@@ -90,6 +90,20 @@ pnpm build:deploy        # Combined build for deployment, outputs to /dist
 
 The offline build (`pnpm build:standalone`) needs no host at all — it's a single self-contained HTML file per app that you can open directly from disk (`file://`) or hand to someone else.
 
+## Render on a server (headless kit)
+
+Need to render ESCAPEARTIST projects outside a browser — on a server, in a batch job, on a GPU box? `@escapesuite/headless-artist` is a one-shot CLI that drives the same render engine in headless Chromium, no UI involved.
+
+```bash
+# Download the tarball from Releases: https://github.com/Bonham-Technologies/ESCAPESUITE/releases
+npm install ./escapesuite-headless-artist-<version>.tgz
+npx playwright install --with-deps chromium
+# Write a job spec, then render it
+npx headless-artist render --job job.json
+```
+
+See [`services/headless-artist/README.md`](services/headless-artist/README.md) for the full job spec, input formats, and output sinks.
+
 ## Browser support
 
 Recording works in all modern browsers (Chrome, Edge, Firefox, Safari). Exporting video (WebM/MP4) requires the WebCodecs API, which is currently only available in **Chrome and Edge**.

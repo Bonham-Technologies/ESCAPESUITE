@@ -187,3 +187,9 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
   (builds the bundle itself in `beforeAll`).
 - Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.
+- `services/headless-artist` is the packaged CLI + kit that drives this bundle outside the
+  browser — one-shot Node process, Playwright-launched Chromium, job JSON in, rendered file
+  out. It builds this same `dist-headless/headless.html` (via `pnpm --filter=@escapesuite/artist
+  run build:headless`) and calls `__renderProjectToFile` through the file input, never
+  `__renderProject`'s base64 path — see `services/headless-artist/README.md` for the job spec,
+  sinks, and how to build/pack the kit.
