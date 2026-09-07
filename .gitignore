@@ -46,6 +46,7 @@ pnpm-debug.log*
 # Claude Code
 tmpclaude-*
 .claude/settings.local.json
+.claude/worktrees/
 
 # Git worktrees
 .worktrees/
