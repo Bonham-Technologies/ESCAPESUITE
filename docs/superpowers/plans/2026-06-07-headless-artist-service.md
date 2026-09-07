@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded 2026-09-07** by `2026-09-07-headless-artist-service-v2.md` — Plan 1 merged (PR #250) and the base64 transfer this plan assumed was replaced by streaming (setInputFiles in, download out). Kept for history.
+
 > **Amended 2026-08-19 (decision by Matt Bonham).** The 2026-08 open-source retool
 > removed licensing product-wide, so the authorization gate this plan originally put in
 > front of the renderer is **gone from the design**: the kit is free and ungated. The
