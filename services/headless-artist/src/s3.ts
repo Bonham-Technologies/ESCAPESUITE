@@ -5,7 +5,10 @@ import type { OutputSink } from './sinks'
 import type { VerificationManifest } from './manifest'
 
 export interface S3SinkConfig {
-  /** `<bucket>` or `<bucket>/<key-prefix>` — objects are written under this prefix. */
+  /**
+   * `<bucket>`, `<bucket>/<key-prefix>`, or the same with an `s3://` scheme — objects are
+   * written under this prefix. A trailing slash on the key prefix is ignored.
+   */
   prefix: string
   endpoint?: string
   region?: string
@@ -48,13 +51,25 @@ async function loadS3ClientModule(): Promise<S3ClientModule> {
   }
 }
 
-function splitPrefix(prefix: string): { bucket: string; keyPrefix: string } {
-  const slash = prefix.indexOf('/')
-  if (slash === -1) return { bucket: prefix, keyPrefix: '' }
-  return { bucket: prefix.slice(0, slash), keyPrefix: prefix.slice(slash + 1) }
+/**
+ * Splits a `prefix` config value into a bucket and an (optional) key prefix. Accepts both
+ * `s3://bucket/key-prefix` and a bare `bucket/key-prefix` (the leading `s3://` scheme, if
+ * present, is stripped before splitting). Leading/trailing slashes on the key prefix are
+ * trimmed so a trailing slash in config (`bucket/renders/`) can't produce a doubled slash
+ * when joined with a file name.
+ */
+export function splitPrefix(prefix: string): { bucket: string; keyPrefix: string } {
+  const withoutScheme = prefix.startsWith('s3://') ? prefix.slice('s3://'.length) : prefix
+  const slash = withoutScheme.indexOf('/')
+  if (slash === -1) return { bucket: withoutScheme, keyPrefix: '' }
+  return {
+    bucket: withoutScheme.slice(0, slash),
+    keyPrefix: withoutScheme.slice(slash + 1).replace(/^\/+|\/+$/g, ''),
+  }
 }
 
-function keyFor(keyPrefix: string, fileName: string): string {
+/** Joins a (possibly empty) key prefix with a file name into a full S3 object key. */
+export function keyFor(keyPrefix: string, fileName: string): string {
   return keyPrefix ? `${keyPrefix}/${fileName}` : fileName
 }
 

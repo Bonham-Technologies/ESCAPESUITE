@@ -47,12 +47,15 @@ function validateVolumeConfig(config: Record<string, unknown>): VolumeConfig {
 }
 
 function createVolumeSink(config: VolumeConfig): OutputSink {
+  // Resolved once at construction so the returned locations are always absolute, regardless
+  // of the process's current working directory at delivery time (or later).
+  const dir = path.resolve(config.dir)
   return {
     async deliver(jobId, outputPath, manifest) {
-      await fs.mkdir(config.dir, { recursive: true })
+      await fs.mkdir(dir, { recursive: true })
       const ext = FORMAT_TO_EXTENSION[manifest.format]
-      const destOutputPath = path.join(config.dir, `${jobId}.${ext}`)
-      const destManifestPath = path.join(config.dir, `${jobId}.manifest.json`)
+      const destOutputPath = path.join(dir, `${jobId}.${ext}`)
+      const destManifestPath = path.join(dir, `${jobId}.manifest.json`)
 
       try {
         await fs.rename(outputPath, destOutputPath)
@@ -128,7 +131,7 @@ function createCommandSink(config: CommandConfig): OutputSink {
           },
           (error, _stdout, stderr) => {
             if (error) {
-              const code = typeof error.code === 'number' ? error.code : (error as { code?: number }).code
+              const code = error.code
               reject(
                 new Error(
                   `command sink "${config.command}" exited with code ${code}: ${tailLines(String(stderr ?? ''), 20)}`,

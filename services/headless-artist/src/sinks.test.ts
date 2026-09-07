@@ -128,6 +128,30 @@ describe('volume sink', () => {
 
     expect(result.outputLocation).toBe(path.join(destDir, 'job-webm.webm'))
   })
+
+  it('resolves a relative dir to an absolute path', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('relative dir bytes'))
+    const manifest = fakeManifest({ jobId: 'job-relative' })
+
+    const cwdParent = await makeTempDir()
+    const originalCwd = process.cwd()
+    process.chdir(cwdParent)
+    try {
+      const sink = await getSink('volume', { dir: 'relative-out' })
+      const result = await sink.deliver(manifest.jobId, outputPath, manifest)
+
+      // process.chdir()/process.cwd() resolve symlinks (e.g. macOS's /tmp -> /private/tmp),
+      // so compare against the realpath of the temp dir rather than its original string form.
+      const expectedDir = path.join(await fs.realpath(cwdParent), 'relative-out')
+      expect(path.isAbsolute(result.outputLocation)).toBe(true)
+      expect(result.outputLocation).toBe(path.join(expectedDir, 'job-relative.mp4'))
+      expect(path.isAbsolute(result.manifestLocation!)).toBe(true)
+      expect(result.manifestLocation).toBe(path.join(expectedDir, 'job-relative.manifest.json'))
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
 })
 
 describe('command sink', () => {
