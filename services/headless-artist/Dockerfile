@@ -5,7 +5,17 @@
 # render time. The kit assembler fails the build if this tag ever drifts from the pinned
 # Playwright version.
 #
+# `dist/` must exist before you build: it is git-ignored, so in a repo checkout assemble it
+# first. From an unpacked kit tarball there is nothing to assemble — `dist/` is already there
+# and the build context is the kit directory itself.
+#
+#   # from a repo checkout:
+#   pnpm --filter @escapesuite/headless-artist run build
 #   docker build -t headless-artist services/headless-artist
+#
+#   # from an unpacked kit:
+#   docker build -t headless-artist .
+#
 #   docker run --rm -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headless-artist --job /in/job.json
 #
 FROM mcr.microsoft.com/playwright:v1.62.1-noble

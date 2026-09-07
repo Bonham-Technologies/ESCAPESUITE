@@ -67,42 +67,55 @@ function assertDockerfileMatches(playwrightVersion) {
   }
 }
 
-const kitVersion = readJson(path.join(SERVICE_ROOT, 'package.json')).version
-const engineVersion = readJson(path.join(REPO_ROOT, 'apps/artist/package.json')).version
-const playwrightVersion = readJson(require.resolve('playwright/package.json')).version
+function assemble() {
+  const kitVersion = readJson(path.join(SERVICE_ROOT, 'package.json')).version
+  const engineVersion = readJson(path.join(REPO_ROOT, 'apps/artist/package.json')).version
+  const playwrightVersion = readJson(require.resolve('playwright/package.json')).version
 
-// Cheap and fatal, so check it before the two slow builds.
-assertDockerfileMatches(playwrightVersion)
+  // Cheap and fatal, so check it before the two slow builds.
+  assertDockerfileMatches(playwrightVersion)
 
-run('pnpm', ['--filter=@escapesuite/artist', 'run', 'build:headless'], REPO_ROOT)
-run(
-  'pnpm',
-  [
-    'exec',
-    'esbuild',
-    'src/cli.ts',
-    '--bundle',
-    '--platform=node',
-    '--format=esm',
-    '--packages=external',
-    '--outfile=dist/cli.js',
-  ],
-  SERVICE_ROOT,
-)
+  // esbuild creates its own output directory, but the chmod and the copy below assume one, so
+  // make it unconditionally first rather than depending on which step happens to run.
+  mkdirSync(DIST, { recursive: true })
 
-// esbuild carries the entry point's own hashbang through, but not the executable bit.
-chmodSync(path.join(DIST, 'cli.js'), 0o755)
+  run('pnpm', ['--filter=@escapesuite/artist', 'run', 'build:headless'], REPO_ROOT)
+  run(
+    'pnpm',
+    [
+      'exec',
+      'esbuild',
+      'src/cli.ts',
+      '--bundle',
+      '--platform=node',
+      '--format=esm',
+      '--packages=external',
+      '--outfile=dist/cli.js',
+    ],
+    SERVICE_ROOT,
+  )
 
-mkdirSync(DIST, { recursive: true })
-copyFileSync(HEADLESS_HTML, path.join(DIST, 'headless.html'))
+  // esbuild carries the entry point's own hashbang through, but not the executable bit.
+  chmodSync(path.join(DIST, 'cli.js'), 0o755)
+  copyFileSync(HEADLESS_HTML, path.join(DIST, 'headless.html'))
 
-const kit = {
-  kitVersion,
-  engineVersion,
-  commit: gitCommit(),
-  playwrightVersion,
-  builtAt: new Date().toISOString(),
+  const kit = {
+    kitVersion,
+    engineVersion,
+    commit: gitCommit(),
+    playwrightVersion,
+    builtAt: new Date().toISOString(),
+  }
+  writeFileSync(path.join(DIST, 'kit.json'), JSON.stringify(kit, null, 2) + '\n')
+
+  console.log(`[kit] assembled ${DIST}: ${JSON.stringify(kit)}`)
 }
-writeFileSync(path.join(DIST, 'kit.json'), JSON.stringify(kit, null, 2) + '\n')
 
-console.log(`[kit] assembled ${DIST}: ${JSON.stringify(kit)}`)
+try {
+  assemble()
+} catch (err) {
+  // A build failure is a message for a human, not a stack trace through Node's ESM loader.
+  // The child processes already printed their own output on the way past.
+  console.error(`[kit] ${err instanceof Error ? err.message : String(err)}`)
+  process.exit(1)
+}

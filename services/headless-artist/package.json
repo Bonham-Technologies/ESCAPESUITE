@@ -18,6 +18,7 @@
     "dist/headless.html",
     "dist/kit.json",
     "README.md",
+    "LICENSE",
     "Dockerfile",
     "examples"
   ],
@@ -34,7 +35,6 @@
   },
   "dependencies": { "playwright": "1.62.1" },
   "devDependencies": {
-    "@escapesuite/shared": "workspace:*",
     "@eslint/js": "^10.0.1",
     "eslint": "^10.9.1",
     "globals": "^17.11.0",

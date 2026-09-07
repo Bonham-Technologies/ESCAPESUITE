@@ -178,6 +178,11 @@ itself is parsed whole into memory** — a 4 GB bundle needs more than 4 GB of h
 for small projects and for round-tripping something straight out of the editor; for anything
 large, use a manifest.
 
+`examples/job-veditor-volume.json` shows the job shape but points at
+`examples/project.veditor`, which the kit does **not** ship — a `.veditor` carries its own media
+and would bloat the tarball. Produce one from ESCAPEARTIST itself — **File → Save Project**
+(Ctrl+S) downloads `<project name>.veditor` — and point `input.bundle.path` at that.
+
 ## Sinks
 
 Every sink produces two artifacts: the video and a JSON [verification
@@ -397,8 +402,13 @@ console errors, and, on failure, the error:
 [`Dockerfile`](Dockerfile) is a working reference build on the official Playwright image, which
 already carries the matching Chromium, its OS dependencies, and the fonts text overlays need.
 
+The build context must contain `dist/`. From an unpacked kit tarball it already does, and `.` is
+the kit directory. In a repo checkout `dist/` is git-ignored, so assemble it first with
+`pnpm --filter @escapesuite/headless-artist run build` and use `services/headless-artist` as the
+context.
+
 ```bash
-docker build -t headless-artist .
+docker build -t headless-artist .        # from an unpacked kit
 docker run --rm \
   -v "$PWD/in:/in:ro" \
   -v "$PWD/out:/out" \

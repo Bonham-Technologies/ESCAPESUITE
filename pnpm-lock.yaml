@@ -396,9 +396,6 @@ importers:
         specifier: ^3.700.0
         version: 3.1127.0
     devDependencies:
-      '@escapesuite/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.9.1)
