@@ -274,7 +274,9 @@ async function serve(args: string[], env: NodeJS.ProcessEnv, log: Log): Promise<
       host,
       concurrency,
       maxQueue,
-      deps,
+      // The drain below owns shutdown, so Playwright must not race it by killing the browser
+      // (and, on SIGINT, the process) the moment the first signal lands.
+      deps: { ...deps, handleSignals: false },
       versions: kit ?? versionsOf(kit),
       log,
     })

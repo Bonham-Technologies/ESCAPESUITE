@@ -642,6 +642,13 @@ Nothing is enqueued for a 429, so the job is entirely safe to resend — after `
 seconds, or immediately to a less busy instance. A job that can *start* is never refused,
 however full the queue was a moment before.
 
+The queue cannot be turned off: `maxQueue` must be at least `1`. The two numbers bound different
+things and you want both — `HEADLESS_CONCURRENCY` bounds the work in flight, `HEADLESS_MAX_QUEUE`
+bounds the work waiting. For "run one job and refuse everything else", set
+`HEADLESS_CONCURRENCY=1 HEADLESS_MAX_QUEUE=1`, which leaves room for exactly one job to be
+waiting as the current one finishes — the difference between a busy server and an idle one
+between jobs.
+
 The bound exists because every waiting job is a client connection parked for an unknown length
 of time: unbounded, a burst becomes thousands of open sockets and renders that complete long
 after anyone still cares. Watch `queued` against `maxQueue` on `/healthz` — a queue that sits
@@ -701,15 +708,12 @@ Node does with an unhandled `SIGINT` — so pressing Ctrl-C twice does what you 
 abandons the renders that were running and leaves their scratch directories behind, which is
 the trade you are making by asking twice.
 
-> **Known limitation — signals land on Chromium too.** Playwright installs its own `SIGINT` and
-> `SIGTERM` handlers for the browser it launches, and they fire on the *first* signal, so step 3
-> only holds while no render is in flight. Signal the server mid-render and the browser is torn
-> down under it: on `SIGTERM` the client still gets its response, but an `ok: false` one for a
-> render that was killed rather than finished; on `SIGINT` the process is gone with exit `130`
-> before the response is written and the client sees a dropped connection. Until this is fixed,
-> **drain before you signal** — stop routing new jobs, wait for `inFlight` on `/healthz` to reach
-> `0`, and only then send the signal. A queue-only shutdown (nothing running) is unaffected and
-> behaves exactly as described above.
+`serve` launches Chromium with Playwright's own signal handling switched off
+(`handleSIGINT`/`handleSIGTERM`/`handleSIGHUP`), so nothing but the drain reacts to a signal —
+otherwise Playwright would tear the browser down on the first one and kill the very render the
+drain promised to finish. The one-shot `render` command keeps Playwright's defaults, where
+Ctrl-C closing the browser is exactly what you want. Either way no Chromium is left behind: the
+browser is also killed from a `process.on('exit')` hook, which runs on the force-quit path too.
 
 ## Sizing and throughput
 

@@ -19,6 +19,11 @@ export interface RunJobDeps {
   noSandbox?: boolean
   /** Overall render budget, passed straight to the driver. */
   timeoutMs?: number
+  /**
+   * Passed straight to the driver: whether Playwright may handle process signals itself.
+   * Leave unset for a one-shot render; `serve` sets it false so its drain owns shutdown.
+   */
+  handleSignals?: boolean
   /** Where scratch files live. Defaults to the system temp dir. */
   workDir?: string
   versions: { engineVersion: string; kitVersion: string }
@@ -95,6 +100,7 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
         chromiumPath: deps.chromiumPath,
         noSandbox: deps.noSandbox,
         timeoutMs: deps.timeoutMs,
+        handleSignals: deps.handleSignals,
         onProgress: deps.onProgress,
         log,
       },

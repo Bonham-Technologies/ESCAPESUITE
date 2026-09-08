@@ -258,6 +258,20 @@ describe('serve', () => {
     expect(stderrText()).toContain('listening on http://127.0.0.1:45678')
   })
 
+  it('takes signal handling away from Playwright so the drain owns shutdown', async () => {
+    expect(await main(['serve'], {})).toBe(0)
+
+    expect(serveOptions().deps).toMatchObject({ handleSignals: false })
+  })
+
+  it('leaves signal handling to Playwright for a one-shot render', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(0)
+
+    expect(vi.mocked(runJob).mock.calls[0][1].handleSignals).toBeUndefined()
+  })
+
   it('passes the run deps through, same as render', async () => {
     expect(await main(['serve'], { HEADLESS_BUNDLE_PATH: '/opt/headless.html', HEADLESS_NO_SANDBOX: 'true' })).toBe(0)
 

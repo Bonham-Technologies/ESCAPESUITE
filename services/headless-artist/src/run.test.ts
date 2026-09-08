@@ -131,6 +131,23 @@ describe('runJob', () => {
     })
   })
 
+  it('forwards handleSignals to the driver, and leaves it undefined when unset', async () => {
+    const workDir = await makeTempDir()
+    const outDir = await makeTempDir()
+    const spec = makeSpec({ output: { sink: 'volume', config: { dir: outDir } } })
+
+    mockRenderWriting('hello')
+    await runJob(spec, { bundlePath: '/b.html', workDir, versions: VERSIONS, log, handleSignals: false })
+    expect(vi.mocked(renderInChromium).mock.calls[0][4]).toMatchObject({ handleSignals: false })
+
+    // Unset must stay unset, so the driver's own default (Playwright handles signals, which is
+    // what a Ctrl-C on the one-shot CLI should do) is what applies.
+    vi.mocked(renderInChromium).mockReset()
+    mockRenderWriting('hello')
+    await runJob(spec, { bundlePath: '/b.html', workDir, versions: VERSIONS, log })
+    expect(vi.mocked(renderInChromium).mock.calls[0][4]?.handleSignals).toBeUndefined()
+  })
+
   it('names the render after the requested format', async () => {
     const workDir = await makeTempDir()
     const outDir = await makeTempDir()
