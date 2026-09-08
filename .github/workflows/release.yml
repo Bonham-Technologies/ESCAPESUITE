@@ -50,8 +50,9 @@ jobs:
           version-script: pnpm changeset:version
           publish-script: pnpm changeset:publish
           create-github-releases: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # No `env: GITHUB_TOKEN` here on purpose: the `github-token` input already
+        # defaults to ${{ github.token }}, and the action throws if a GITHUB_TOKEN
+        # env var is set to anything other than that input's value.
 
   # Attach standalone builds and the headless-artist kit to the GitHub Release
   # when craft, artist, or headless-artist is released
