@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseJobSpec } from './jobSpec'
+import { collectUnknownKeys, parseJobSpec } from './jobSpec'
 
 function validSpec(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -157,5 +157,42 @@ describe('parseJobSpec', () => {
     expect(() => parseJobSpec(validSpec({ output: { sink: 'volume', config: 'nope' } }))).toThrow(
       /output\.config/,
     )
+  })
+})
+
+describe('collectUnknownKeys', () => {
+  it('returns nothing for a spec using only known fields', () => {
+    expect(collectUnknownKeys(validSpec())).toEqual([])
+    expect(
+      collectUnknownKeys(
+        validSpec({ options: { format: 'mp4', quality: 'low', resolution: '720p', timeRange: { start: 0, end: 1 } } }),
+      ),
+    ).toEqual([])
+  })
+
+  it('names a misspelled top-level key', () => {
+    expect(collectUnknownKeys(validSpec({ qualitiy: 'high' }))).toEqual(['qualitiy'])
+  })
+
+  it('names a misspelled options key with a dotted path', () => {
+    expect(collectUnknownKeys(validSpec({ options: { format: 'mp4', resoluton: '720p' } }))).toEqual([
+      'options.resoluton',
+    ])
+  })
+
+  it('reports top-level and options keys together, top level first', () => {
+    expect(
+      collectUnknownKeys(validSpec({ extra: 1, options: { format: 'mp4', bitrate: 900 } })),
+    ).toEqual(['extra', 'options.bitrate'])
+  })
+
+  it('returns nothing for input that is not an object at all', () => {
+    expect(collectUnknownKeys(null)).toEqual([])
+    expect(collectUnknownKeys('nope')).toEqual([])
+    expect(collectUnknownKeys([1, 2])).toEqual([])
+  })
+
+  it('ignores a non-object options field rather than throwing', () => {
+    expect(collectUnknownKeys(validSpec({ options: 'nope' }))).toEqual([])
   })
 })

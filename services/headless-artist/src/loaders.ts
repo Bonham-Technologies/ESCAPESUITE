@@ -72,6 +72,36 @@ function assertSafeFileId(id: unknown, context: string): asserts id is string {
   }
 }
 
+/** The four fields a bundle video must carry as strings before anything is written to disk. */
+const VEDITOR_VIDEO_FIELDS = ['id', 'name', 'mimeType', 'data'] as const
+
+/**
+ * Validates one `videos[i]` entry. Without this a malformed bundle reaches the write loop as
+ * `undefined`s — a `null` entry crashes on the property read, and a missing `mimeType` or
+ * `name` quietly produces a `.bin` temp file the editor cannot decode.
+ */
+function assertVeditorVideo(value: unknown, index: number): asserts value is VeditorVideo {
+  if (!isRecord(value)) {
+    throw new Error(`bundle video #${index} must be an object`)
+  }
+  for (const field of VEDITOR_VIDEO_FIELDS) {
+    if (value[field] === undefined) {
+      throw new Error(`bundle video #${index} is missing "${field}"`)
+    }
+    if (typeof value[field] !== 'string') {
+      throw new Error(`bundle video #${index} field "${field}" must be a string`)
+    }
+  }
+}
+
+/** Two sources under one id means one silently shadows the other — always a mistake. */
+function assertUniqueSourceId(id: string, seen: Set<string>): void {
+  if (seen.has(id)) {
+    throw new Error(`duplicate source id "${id}"`)
+  }
+  seen.add(id)
+}
+
 function extensionOf(name: string | undefined): string | undefined {
   if (!name) return undefined
   const ext = path.extname(name).slice(1).toLowerCase()
@@ -173,10 +203,11 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
   }
 
   const sourceIds = new Set<string>()
-  for (const video of videos) {
+  videos.forEach((video: unknown, index: number) => {
+    assertVeditorVideo(video, index)
     assertSafeFileId(video.id, 'bundle video')
-    sourceIds.add(video.id)
-  }
+    assertUniqueSourceId(video.id, sourceIds)
+  })
   validateClipReferences(project, sourceIds)
 
   const dir = await fs.mkdtemp(path.join(tmpRoot, 'headless-artist-'))
@@ -186,9 +217,7 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
 
   try {
     for (const video of videos) {
-      if (typeof video.data !== 'string') {
-        throw new Error(`bundle video "${video.id}" is missing base64 "data"`)
-      }
+      // Every field was validated above, before mkdtemp — nothing here can be undefined.
       const ext = MIME_TO_EXTENSION[video.mimeType] ?? extensionOf(video.name) ?? 'bin'
       const destPath = path.join(dir, `${video.id}.${ext}`)
       await writeBase64ToFile(video.data, destPath)
@@ -304,11 +333,19 @@ export async function loadManifest(manifestPath: string): Promise<LoadedJob> {
     }
     const source = entry as unknown as ManifestSource
 
+    assertUniqueSourceId(source.id, sourceIds)
+
     const absolutePath = path.resolve(manifestDir, source.file)
+    // stat, not access: a directory (or a fifo, or a socket) is readable but is not something
+    // setInputFiles can stream, and the failure it produces later says nothing useful.
+    let stats
     try {
-      await fs.access(absolutePath)
+      stats = await fs.stat(absolutePath)
     } catch {
       throw new Error(`manifest source "${source.id}" references missing file "${absolutePath}"`)
+    }
+    if (!stats.isFile()) {
+      throw new Error(`source file "${absolutePath}" is not a regular file`)
     }
 
     const basename = path.basename(absolutePath)
@@ -328,7 +365,6 @@ export async function loadManifest(manifestPath: string): Promise<LoadedJob> {
       }
     }
 
-    sourceIds.add(source.id)
     sourceFiles[source.id] = absolutePath
 
     const sourceVideo: SourceVideoInput = {

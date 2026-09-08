@@ -61,7 +61,16 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
         await fs.rename(outputPath, destOutputPath)
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
-          await fs.copyFile(outputPath, destOutputPath)
+          try {
+            await fs.copyFile(outputPath, destOutputPath)
+          } catch (copyErr) {
+            // A failed copy (ENOSPC, most likely) leaves a truncated file at the destination,
+            // which a consumer watching the directory would happily pick up as a finished
+            // render. Take it away before the failure propagates — and never let a cleanup
+            // failure mask the copy failure that caused it.
+            await fs.rm(destOutputPath, { force: true }).catch(() => undefined)
+            throw copyErr
+          }
           await fs.rm(outputPath, { force: true })
         } else {
           throw err
@@ -98,9 +107,14 @@ function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
   if (rawEnv !== undefined && (typeof rawEnv !== 'object' || rawEnv === null || Array.isArray(rawEnv))) {
     throw new Error('command sink requires config.env (object) when provided')
   }
-  const env = (rawEnv as Record<string, string> | undefined) ?? {}
+  const env = (rawEnv as Record<string, unknown> | undefined) ?? {}
+  // spawn's env must be strings; a number or null here reaches the child as "8080"/"null" at
+  // best and throws at worst, so say so while the config is still in view.
+  if (!Object.values(env).every((value) => typeof value === 'string')) {
+    throw new Error('command sink config.env values must be strings')
+  }
 
-  return { command, args, env }
+  return { command, args, env: env as Record<string, string> }
 }
 
 /** Last ~20 lines of stderr, for a useful failure message without dumping megabytes. */

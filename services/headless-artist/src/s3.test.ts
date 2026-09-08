@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { Readable } from 'node:stream'
 import { getSink } from './sinks'
 import { splitPrefix, keyFor } from './s3'
 import type { VerificationManifest } from './manifest'
@@ -92,17 +93,88 @@ describe('keyFor', () => {
   })
 })
 
-describe('s3Sink outputLocation format', () => {
-  it('matches s3://<bucket>/<key> given a bucket/prefix config', () => {
-    const { bucket, keyPrefix } = splitPrefix('bucket/renders')
-    const outputKey = keyFor(keyPrefix, 'job-1.mp4')
-    expect(`s3://${bucket}/${outputKey}`).toBe('s3://bucket/renders/job-1.mp4')
+/**
+ * A stand-in for the AWS client that records what `deliver` asks it to send. Injecting it
+ * exercises the real upload path -- keys, metadata and returned locations -- without the SDK
+ * and without a live endpoint, neither of which CI has.
+ */
+interface RecordedCommand {
+  name: string
+  input: Record<string, unknown>
+}
+
+function stubClient(): { commands: RecordedCommand[]; send(command: unknown): Promise<unknown> } {
+  const commands: RecordedCommand[] = []
+  return {
+    commands,
+    async send(command: unknown) {
+      commands.push(command as RecordedCommand)
+      return {}
+    },
+  }
+}
+
+describe('s3Sink deliver (injected client)', () => {
+  it('puts the render then the manifest under the key prefix, and reports both locations', async () => {
+    const { s3Sink } = await import('./s3')
+    const dir = await makeTempDir()
+    const outputPath = path.join(dir, 'render-output.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+    const client = stubClient()
+
+    const sink = await s3Sink({ prefix: 'bucket/renders' }, client)
+    const result = await sink.deliver('job-1', outputPath, fakeManifest({ jobId: 'job-1' }))
+
+    expect(client.commands).toHaveLength(2)
+
+    const [video, manifest] = client.commands
+    expect(video.name).toBe('PutObject')
+    expect(video.input).toMatchObject({
+      Bucket: 'bucket',
+      Key: 'renders/job-1.mp4',
+      ContentType: 'video/mp4',
+      ContentLength: 9,
+    })
+    // Streamed off disk rather than buffered: a render is far too big to hold in memory.
+    expect(video.input.Body).toBeInstanceOf(Readable)
+
+    expect(manifest.name).toBe('PutObject')
+    expect(manifest.input).toMatchObject({
+      Bucket: 'bucket',
+      Key: 'renders/job-1.manifest.json',
+      ContentType: 'application/json',
+    })
+    const manifestBody = manifest.input.Body as Buffer
+    expect(manifest.input.ContentLength).toBe(manifestBody.byteLength)
+    expect(JSON.parse(manifestBody.toString())).toMatchObject({ jobId: 'job-1', format: 'mp4' })
+
+    expect(result).toEqual({
+      outputLocation: 's3://bucket/renders/job-1.mp4',
+      manifestLocation: 's3://bucket/renders/job-1.manifest.json',
+    })
   })
 
-  it('matches s3://<bucket>/<key> given a bucket-only config', () => {
-    const { bucket, keyPrefix } = splitPrefix('bucket')
-    const outputKey = keyFor(keyPrefix, 'job-1.webm')
-    expect(`s3://${bucket}/${outputKey}`).toBe('s3://bucket/job-1.webm')
+  it('writes at the bucket root, with webm metadata, for a bucket-only prefix', async () => {
+    const { s3Sink } = await import('./s3')
+    const dir = await makeTempDir()
+    const outputPath = path.join(dir, 'render-output.webm')
+    await fs.writeFile(outputPath, Buffer.from('webm'))
+    const client = stubClient()
+
+    const sink = await s3Sink({ prefix: 's3://bucket/' }, client)
+    const result = await sink.deliver('job-1', outputPath, fakeManifest({ jobId: 'job-1', format: 'webm' }))
+
+    expect(client.commands[0].input).toMatchObject({
+      Bucket: 'bucket',
+      Key: 'job-1.webm',
+      ContentType: 'video/webm',
+      ContentLength: 4,
+    })
+    expect(client.commands[1].input).toMatchObject({ Key: 'job-1.manifest.json' })
+    expect(result).toEqual({
+      outputLocation: 's3://bucket/job-1.webm',
+      manifestLocation: 's3://bucket/job-1.manifest.json',
+    })
   })
 })
 

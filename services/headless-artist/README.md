@@ -122,6 +122,11 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 Anything the spec gets wrong — an unknown format, a missing field, a `jobId` with a slash in it
 — is caught before Chromium launches and exits **2**.
 
+A field this table does not list is ignored rather than rejected, but the CLI says so on
+stderr — `warning: unknown field "options.resoluton"` — so a typo in an optional field does not
+quietly render something other than what you asked for. Keys under `output.config` belong to
+the sink and are not checked here.
+
 ## Inputs
 
 ### Manifest (recommended)

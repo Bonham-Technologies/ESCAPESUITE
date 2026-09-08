@@ -30,8 +30,18 @@ const FORMAT_TO_MIME: Record<VerificationManifest['format'], string> = {
  * package's typecheck never depends on the SDK's own (optional-dependency) types being
  * installed.
  */
-interface MinimalS3Client {
+export interface MinimalS3Client {
   send(command: unknown): Promise<unknown>
+}
+
+/**
+ * Stands in for `PutObjectCommand` on the injected-client path, where the SDK is deliberately
+ * never loaded. Same shape the SDK's own commands expose — a `name` and the request `input` —
+ * so a recording double reads the request off it exactly as it would a real command.
+ */
+class PutObjectRequest {
+  readonly name = 'PutObject'
+  constructor(readonly input: Record<string, unknown>) {}
 }
 
 interface S3ClientModule {
@@ -80,18 +90,32 @@ export function keyFor(keyPrefix: string, fileName: string): string {
 }
 
 /**
- * Builds an S3 output sink. The AWS SDK is loaded lazily (see `loadS3ClientModule`), so
- * `getSink('s3', …)` fails fast with a clear error when the optional dependency isn't
- * installed, before anything else about the config is touched.
+ * Builds an S3 output sink. With no `client`, the AWS SDK is loaded lazily (see
+ * `loadS3ClientModule`), so `getSink('s3', …)` fails fast with a clear error when the optional
+ * dependency isn't installed, before anything else about the config is touched.
+ *
+ * Passing a `client` takes that path out entirely — nothing is imported and `config.region` /
+ * `config.endpoint` are the caller's business, since they built the client. That is how the
+ * upload path is tested (keys, metadata, returned locations) without an SDK or a live bucket,
+ * and how an embedder can hand in an already-configured, credentialled client.
  */
-export async function s3Sink(config: S3SinkConfig): Promise<OutputSink> {
-  const { S3Client, PutObjectCommand } = await loadS3ClientModule()
+export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Promise<OutputSink> {
   const { bucket, keyPrefix } = splitPrefix(config.prefix)
 
-  const client = new S3Client({
-    ...(config.region ? { region: config.region } : {}),
-    ...(config.endpoint ? { endpoint: config.endpoint } : {}),
-  })
+  let s3: MinimalS3Client
+  let putObject: (input: Record<string, unknown>) => unknown
+
+  if (client) {
+    s3 = client
+    putObject = (input) => new PutObjectRequest(input)
+  } else {
+    const { S3Client, PutObjectCommand } = await loadS3ClientModule()
+    s3 = new S3Client({
+      ...(config.region ? { region: config.region } : {}),
+      ...(config.endpoint ? { endpoint: config.endpoint } : {}),
+    })
+    putObject = (input) => new PutObjectCommand(input)
+  }
 
   return {
     async deliver(jobId, outputPath, manifest) {
@@ -101,8 +125,8 @@ export async function s3Sink(config: S3SinkConfig): Promise<OutputSink> {
       const outputKey = keyFor(keyPrefix, `${jobId}.${ext}`)
       const manifestKey = keyFor(keyPrefix, `${jobId}.manifest.json`)
 
-      await client.send(
-        new PutObjectCommand({
+      await s3.send(
+        putObject({
           Bucket: bucket,
           Key: outputKey,
           // The SDK needs a length up front for a stream body — read it from disk rather
@@ -116,8 +140,8 @@ export async function s3Sink(config: S3SinkConfig): Promise<OutputSink> {
       )
 
       const manifestBody = Buffer.from(JSON.stringify(manifest, null, 2) + '\n')
-      await client.send(
-        new PutObjectCommand({
+      await s3.send(
+        putObject({
           Bucket: bucket,
           Key: manifestKey,
           Body: manifestBody,

@@ -2,7 +2,7 @@
 import { promises as fs, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseJobSpec } from './jobSpec'
+import { collectUnknownKeys, parseJobSpec } from './jobSpec'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 
@@ -70,19 +70,37 @@ function createLogger(mode: string | undefined): Log {
 function parseJobSource(args: string[]): string {
   let source: string | undefined
 
+  // Two sources means one of them is being silently ignored — a typo'd invocation that would
+  // otherwise render the wrong job, or the right one twice over across a fleet.
+  const assign = (value: string, arg: string): void => {
+    if (source !== undefined) {
+      throw new UsageError(
+        arg === '--job' || arg.startsWith('--job=')
+          ? '--job was given more than once'
+          : `unexpected extra argument "${arg}"`,
+      )
+    }
+    source = value
+  }
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === '--job') {
       const next = args[i + 1]
       if (next === undefined) throw new UsageError('--job needs a file path (or "-" for stdin)')
-      source = next
+      // `--job --gpu` means the path was forgotten, not that a file called "--gpu" is wanted;
+      // consuming the flag would leave the CLI reporting a baffling "could not be read".
+      if (next.startsWith('-') && next !== '-') {
+        throw new UsageError(`--job needs a file path (or "-" for stdin), not the flag "${next}"`)
+      }
+      assign(next, arg)
       i++
     } else if (arg.startsWith('--job=')) {
-      source = arg.slice('--job='.length)
+      assign(arg.slice('--job='.length), arg)
     } else if (arg.startsWith('-') && arg !== '-') {
       throw new UsageError(`unknown option "${arg}"`)
     } else {
-      source = arg
+      assign(arg, arg)
     }
   }
 
@@ -100,6 +118,12 @@ async function readStdin(): Promise<string> {
 
 async function readJobJson(source: string): Promise<unknown> {
   const label = source === '-' ? 'stdin' : `"${source}"`
+
+  // Nothing is being piped in, so reading stdin would block on the keyboard forever and look
+  // like a hung render — most often a `--job` whose path was left off.
+  if (source === '-' && process.stdin.isTTY) {
+    throw new UsageError('no job spec on stdin (pass a file path or pipe JSON)')
+  }
 
   let raw: string
   try {
@@ -184,7 +208,20 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
     if (command === undefined) throw new UsageError('no command given')
     if (command !== 'render') throw new UsageError(`unknown command "${command}"`)
 
-    const spec = parseJobSpec(await readJobJson(parseJobSource(rest)))
+    // Asking for help is not an error, wherever it appears: usage, exit 0.
+    if (rest.includes('--help') || rest.includes('-h')) {
+      log(USAGE)
+      return EXIT_OK
+    }
+
+    const json = await readJobJson(parseJobSource(rest))
+    const spec = parseJobSpec(json)
+    // A misspelled optional field parses fine and is then ignored, so the render silently
+    // does something other than what was asked. Warn, but never refuse the job over it.
+    for (const field of collectUnknownKeys(json)) {
+      log(`warning: unknown field "${field}"`)
+    }
+
     const deps = depsFromEnv(env, versionsOf(await readKitJson()), log)
 
     const outcome = await runJob(spec, deps)
@@ -203,15 +240,19 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
  *
  * `import.meta.url` is already realpath'd, so argv[1] has to be too — otherwise every
  * symlinked entry point (`node_modules/.bin/headless-artist`, most notably) would compare
- * unequal and the CLI would exit 0 having done nothing at all.
+ * unequal and the CLI would exit 0 having done nothing at all. When realpath itself fails
+ * (an unreadable parent directory, a container mount that refuses it) the lexical comparison
+ * is still right for the unsymlinked case, and a wrong `false` here is the worst outcome
+ * available: a CLI that exits 0 having rendered nothing.
  */
-function isDirectRun(): boolean {
-  const entry = process.argv[1]
+export function isDirectRun(entry: string | undefined = process.argv[1]): boolean {
   if (entry === undefined) return false
+  const modulePath = fileURLToPath(import.meta.url)
+  const resolved = path.resolve(entry)
   try {
-    return realpathSync(path.resolve(entry)) === fileURLToPath(import.meta.url)
+    return realpathSync(resolved) === modulePath
   } catch {
-    return false
+    return resolved === modulePath
   }
 }
 
