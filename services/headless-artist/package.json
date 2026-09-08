@@ -33,7 +33,7 @@
     "test:coverage": "vitest run --coverage --exclude '**/*.chromium.test.ts'",
     "test:e2e": "cross-env HEADLESS_BUILD=1 vitest run chromium.test"
   },
-  "dependencies": { "playwright": "1.62.1" },
+  "dependencies": { "playwright": "1.63.0" },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "cross-env": "^10.1.0",
