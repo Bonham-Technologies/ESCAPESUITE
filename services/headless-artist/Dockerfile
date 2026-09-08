@@ -19,6 +19,11 @@
 #   docker run --rm -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headless-artist render --job /in/job.json
 #   docker run --rm headless-artist --version
 #
+# The HTTP service mode is the same image with a different command. It has no authentication,
+# so publish the port only on an interface you trust:
+#
+#   docker run --rm -p 127.0.0.1:8787:8787 -v "$PWD/out:/out" headless-artist serve --host 0.0.0.0
+#
 FROM mcr.microsoft.com/playwright:v1.62.1-noble
 
 WORKDIR /app

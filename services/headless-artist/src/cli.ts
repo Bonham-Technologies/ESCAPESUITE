@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { collectUnknownKeys, parseJobSpec } from './jobSpec'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
+import { startServer } from './serve'
 
 /**
  * Re-exported so brokers can reach it from the packaged kit (`dist/cli.js` is the only JS the
@@ -26,10 +27,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 const USAGE = `Usage: headless-artist render --job <file>   render one job spec
        headless-artist render -               read the job spec from stdin
+       headless-artist serve [--port N] [--host H]   serve renders over HTTP
        headless-artist --version              print the kit versions
 
-Prints one JSON RenderOutcome line to stdout; all logs go to stderr.
+render prints one JSON RenderOutcome line to stdout; all logs go to stderr.
 Exit codes: 0 rendered, 1 job failed, 2 usage or job-spec error.
+
+serve exposes GET /healthz and POST /render (one job spec per request) and runs
+until SIGTERM or SIGINT. It has no authentication: keep it on loopback or put
+your own proxy in front of it.
 
 Environment:
   HEADLESS_BUNDLE_PATH   headless.html to render with (default: next to this CLI)
@@ -38,7 +44,10 @@ Environment:
   HEADLESS_CHROMIUM_PATH Chromium binary to use instead of the bundled one
   HEADLESS_NO_SANDBOX=true  add --no-sandbox (needed in most containers)
   HEADLESS_TIMEOUT_MS    overall render budget, a positive integer
-  HEADLESS_LOG=json|text stderr log format (default: text)`
+  HEADLESS_LOG=json|text stderr log format (default: text)
+  HEADLESS_PORT          serve: port to bind (default: 8787)
+  HEADLESS_HOST          serve: interface to bind (default: 127.0.0.1)
+  HEADLESS_CONCURRENCY   serve: renders allowed at once (default: 1)`
 
 /** An argument or job-spec problem: the caller is holding it wrong, so exit 2. */
 class UsageError extends Error {}
@@ -165,6 +174,111 @@ function parseTimeoutMs(raw: string | undefined): number | undefined {
   return Number(raw)
 }
 
+const DEFAULT_PORT = 8787
+const DEFAULT_HOST = '127.0.0.1'
+const DEFAULT_CONCURRENCY = 1
+
+interface ServeArgs {
+  port?: number
+  host?: string
+}
+
+function parsePort(raw: string, label: string): number {
+  // 0 is legal and useful (let the OS pick, read it back off the listening line); 65535 is the
+  // top of the range. Anything else is a typo that would otherwise surface as an EADDRINUSE or
+  // an ERR_SOCKET_BAD_PORT stack trace.
+  if (!/^\d+$/.test(raw) || Number(raw) > 65535) {
+    throw new UsageError(`${label} must be an integer between 0 and 65535, got "${raw}"`)
+  }
+  return Number(raw)
+}
+
+function parseConcurrency(raw: string | undefined): number {
+  if (raw === undefined || raw.length === 0) return DEFAULT_CONCURRENCY
+  if (!/^\d+$/.test(raw) || Number(raw) === 0) {
+    throw new UsageError(`HEADLESS_CONCURRENCY must be a positive integer, got "${raw}"`)
+  }
+  return Number(raw)
+}
+
+/** `serve` takes two optional flags, each at most once, in either `--flag v` or `--flag=v` form. */
+function parseServeArgs(args: string[]): ServeArgs {
+  const seen = new Set<string>()
+  const values: Record<string, string> = {}
+
+  const assign = (flag: string, value: string): void => {
+    if (seen.has(flag)) throw new UsageError(`${flag} was given more than once`)
+    if (value.length === 0) throw new UsageError(`${flag} needs a value`)
+    seen.add(flag)
+    values[flag] = value
+  }
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    const flag = arg === '--port' || arg === '--host' ? arg : undefined
+    if (flag) {
+      const next = args[i + 1]
+      if (next === undefined) throw new UsageError(`${flag} needs a value`)
+      assign(flag, next)
+      i++
+    } else if (arg.startsWith('--port=')) {
+      assign('--port', arg.slice('--port='.length))
+    } else if (arg.startsWith('--host=')) {
+      assign('--host', arg.slice('--host='.length))
+    } else if (arg.startsWith('-')) {
+      throw new UsageError(`unknown option "${arg}"`)
+    } else {
+      throw new UsageError(`unexpected extra argument "${arg}"`)
+    }
+  }
+
+  return {
+    ...(values['--port'] !== undefined ? { port: parsePort(values['--port'], '--port') } : {}),
+    ...(values['--host'] !== undefined ? { host: values['--host'] } : {}),
+  }
+}
+
+/**
+ * Runs the HTTP service until SIGTERM or SIGINT, then shuts it down gracefully and returns.
+ *
+ * Flags beat environment variables; both are validated before anything binds, so a typo exits 2
+ * instead of leaving a half-configured server listening.
+ */
+async function serve(args: string[], env: NodeJS.ProcessEnv, log: Log): Promise<number> {
+  const flags = parseServeArgs(args)
+  const port = flags.port ?? (env.HEADLESS_PORT ? parsePort(env.HEADLESS_PORT, 'HEADLESS_PORT') : DEFAULT_PORT)
+  const host = flags.host ?? (env.HEADLESS_HOST || DEFAULT_HOST)
+  const concurrency = parseConcurrency(env.HEADLESS_CONCURRENCY)
+
+  const kit = await readKitJson()
+  const deps = depsFromEnv(env, versionsOf(kit), log)
+
+  const server = await startServer({
+    port,
+    host,
+    concurrency,
+    deps,
+    versions: kit ?? versionsOf(kit),
+    log,
+  })
+
+  // The bound port, not the requested one, so `--port 0` is usable.
+  log(`listening on http://${host}:${server.port} (concurrency ${concurrency})`)
+
+  await new Promise<void>((resolve) => {
+    const stop = (signal: NodeJS.Signals): void => {
+      process.removeListener('SIGTERM', stop)
+      process.removeListener('SIGINT', stop)
+      log(`${signal} received, finishing in-flight renders`)
+      void server.close().then(resolve)
+    }
+    process.on('SIGTERM', stop)
+    process.on('SIGINT', stop)
+  })
+
+  return EXIT_OK
+}
+
 function depsFromEnv(
   env: NodeJS.ProcessEnv,
   versions: RunJobDeps['versions'],
@@ -206,13 +320,17 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
     }
 
     if (command === undefined) throw new UsageError('no command given')
-    if (command !== 'render') throw new UsageError(`unknown command "${command}"`)
+    if (command !== 'render' && command !== 'serve') {
+      throw new UsageError(`unknown command "${command}"`)
+    }
 
     // Asking for help is not an error, wherever it appears: usage, exit 0.
     if (rest.includes('--help') || rest.includes('-h')) {
       log(USAGE)
       return EXIT_OK
     }
+
+    if (command === 'serve') return await serve(rest, env, log)
 
     const json = await readJobJson(parseJobSource(rest))
     const spec = parseJobSpec(json)
@@ -228,7 +346,8 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
     process.stdout.write(JSON.stringify(outcome) + '\n')
     return outcome.ok ? EXIT_OK : EXIT_JOB_FAILED
   } catch (err) {
-    // runJob never throws, so anything landing here is a usage or job-spec problem.
+    // runJob never throws and the server catches its own handler errors, so anything
+    // landing here is a usage, job-spec or bind problem.
     log(`${ERROR_PREFIX}${messageOf(err)}`)
     if (err instanceof UsageError) log(USAGE)
     return EXIT_USAGE

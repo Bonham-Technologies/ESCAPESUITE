@@ -2,9 +2,10 @@
 
 A one-shot command-line renderer for ESCAPEARTIST projects. You hand it a job spec, it renders
 the project in a headless Chromium it launches itself, delivers the finished video to the sink
-you named, prints one line of JSON, and exits. There is no server, no queue, no daemon, and no
-state carried between runs — scheduling, retries and concurrency stay in whatever broker you
-already have. The kit is the same code the browser editor exports with: `dist/headless.html`
+you named, prints one line of JSON, and exits. Nothing is carried between runs — scheduling,
+retries and concurrency stay in whatever broker you already have. (If a process per job is the
+awkward part, `headless-artist serve` puts the same renderer behind a two-route HTTP API — see
+[HTTP service mode](#http-service-mode).) The kit is the same code the browser editor exports with: `dist/headless.html`
 is the ARTIST render engine built as a single inlined page, driven from Node through
 Playwright. A file that renders in the editor renders identically here.
 
@@ -325,6 +326,9 @@ paths.
 | `HEADLESS_NO_SANDBOX` | unset | `true` adds `--no-sandbox`. Needed when running as root — e.g. in a container with no `USER`. Prefer running as a non-root user and leaving this off. |
 | `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-**render** budget, launch included — it does not cover delivery (the `webhook` sink has its own `timeoutMs`). Must be a positive integer; anything else exits 2. |
 | `HEADLESS_LOG` | `text` | `json` emits one JSON object per stderr line (`{ts, level, msg}`, level `error` or `info`). |
+| `HEADLESS_PORT` | `8787` | `serve` only: port to bind. `0` picks a free one and prints it. |
+| `HEADLESS_HOST` | `127.0.0.1` | `serve` only: interface to bind. There is no auth — see [HTTP service mode](#http-service-mode) before changing it. |
+| `HEADLESS_CONCURRENCY` | `1` | `serve` only: renders allowed to run at once. Everything past it queues. |
 
 `PLAYWRIGHT_BROWSERS_PATH` and the AWS credential variables are read by their own libraries and
 behave as documented there.
@@ -510,12 +514,153 @@ is a working loop; the contract it relies on is small:
 - **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page can't hold a worker slot
   indefinitely; the job then fails with `render timed out after <n> ms` and exit 1.
 
+If spawning a process per job is the part that doesn't fit, [HTTP service mode](#http-service-mode)
+keeps every one of those properties except the first, and swaps exit codes for status codes.
+
 Scratch is cleaned up on every path, success or failure, so a crashed broker doesn't leave the
 work directory filling up. The exception is a hard kill of the CLI process itself (`SIGKILL`,
 or an unhandled `SIGTERM`), which leaves one `<work dir>/headless-artist-<jobId>-<random>`
 directory behind — worth a periodic sweep if you kill jobs routinely. The random suffix means a
 job only ever deletes the directory it created itself, so nothing else in a shared work dir (the
 system temp dir, by default) is ever at risk.
+
+## HTTP service mode
+
+`headless-artist serve` is the same renderer behind a small HTTP API instead of a process per
+job. It exists for the case where spawning a process per job is the awkward part — a broker in
+a language with no good subprocess story, a sidecar next to an app that just wants to POST some
+JSON, a laptop trying things out with `curl`.
+
+Everything else is identical: the same job spec, the same sinks, the same `RenderOutcome`, the
+same `runJob` underneath. Every job still launches and tears down its own Chromium — there is no
+browser pool, so a wedged render cannot poison the next one, at the cost of the same second or
+two of launch overhead the one-shot CLI pays. **Prefer the one-shot CLI when you have the
+choice** — one process per job means a crashed render cannot take another job with it, and your
+existing scheduler already knows how to retry a process.
+
+```bash
+headless-artist serve                          # 127.0.0.1:8787, one render at a time
+headless-artist serve --port 9000 --host 0.0.0.0
+```
+
+It prints one line to stderr when it is listening and then runs until `SIGTERM` or `SIGINT`.
+stdout stays empty — the outcome of a job goes back in its HTTP response, not to a stream.
+
+```
+listening on http://127.0.0.1:8787 (concurrency 1)
+GET /healthz 200 1ms
+POST /render 200 128411ms
+```
+
+### `GET /healthz`
+
+```bash
+curl -s http://127.0.0.1:8787/healthz
+```
+
+```json
+{"ok":true,"versions":{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"0cb140b","playwrightVersion":"1.62.1"},"inFlight":1,"queued":3}
+```
+
+`inFlight` is the number of renders running, `queued` the number waiting for a slot. Together
+they are the depth of the one queue this server has — useful as a readiness signal and as the
+input to whatever decides to start another instance. It answers while renders are running (the
+render happens off the event loop, in Chromium), so it is a real liveness probe.
+
+### `POST /render`
+
+One job spec per request, `content-type: application/json`, at most 1 MiB. The response is the
+same `RenderOutcome` the CLI prints, and the connection stays open for the whole render.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/render \
+  -H 'content-type: application/json' \
+  --data @job.json
+```
+
+```json
+{"jobId":"acme-…","ok":true,"meta":{"format":"mp4","byteLength":41235904,"durationSec":38.5,"width":1920,"height":1080,"gpu":false},"outputLocation":"/out/acme-….mp4","manifestLocation":"/out/acme-….manifest.json","durationMs":128411}
+```
+
+Paths in the spec are resolved **by the server**, on the server's filesystem — `input.manifest.path`
+and a `volume` sink's `dir` have to exist where the process runs, not where the client does. The
+API moves job specs, never media.
+
+| Status | When | Body |
+| --- | --- | --- |
+| `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
+| `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\" or \"webm\""}` |
+| `413` | The body is over 1 MiB. A job spec names paths, never payloads; it has no business being that big. | `{"error": "…"}` |
+| `415` | `content-type` was not `application/json`. | `{"error": "…"}` |
+| `503` | The server is shutting down and the job was still queued. Retry it elsewhere. | `{"error": "server shutting down"}` |
+| `500` | A bug in the server. Worth reporting. | `{"error": "…"}` |
+
+**A failed render is a 200 on purpose.** The HTTP request succeeded — it was received, parsed,
+queued, run, and answered; the *job* is what failed, and the outcome says so. A 5xx would tell
+every well-behaved client to retry the HTTP call, which is exactly wrong for a job that will
+fail identically the second time. Branch on `ok`, not on the status code — the same rule as the
+CLI's exit 1.
+
+Unknown job-spec fields (`qualitiy`, `options.resoluton`) come back as a `warnings` array — the
+same warnings the CLI writes to stderr. They never refuse a job on their own, so they ride along
+with the 200; a spec that was *also* invalid gets them beside the 400's `error`, since a typo is
+usually the reason the spec is wrong in the first place.
+
+Every response is `application/json`, including the errors and the 404 for an unknown path.
+
+### Concurrency
+
+`HEADLESS_CONCURRENCY` (default `1`) is how many renders run at once. Requests past it queue in
+arrival order and wait — there is no rejection and no timeout on the queue, so a client that
+POSTs is going to hold the connection until its job runs. Encoding is CPU-bound and a single
+render will happily use every core, so raise this only when you have measured that it helps;
+running two instances on two boxes beats over-subscribing one. `HEADLESS_TIMEOUT_MS` still caps
+each individual render.
+
+### There is no authentication
+
+None. No API key, no TLS, no rate limit, no allow-list. Anyone who can reach the port can make
+the process read any file it can read and write anywhere it can write.
+
+That is a deliberate omission, not an oversight: authentication that is worth having belongs to
+whatever you already use for it. So:
+
+- The default bind address is `127.0.0.1`, and it takes an explicit `--host 0.0.0.0` (or
+  `HEADLESS_HOST`) to change that. Leave it on loopback unless you meant it.
+- To expose it, put your own reverse proxy in front — the one that already terminates TLS and
+  checks credentials for everything else you run.
+- On Kubernetes, a `ClusterIP` Service and a NetworkPolicy that admits only your broker.
+- Never put it on the public internet directly.
+
+### In a container
+
+```bash
+docker run --rm -p 8787:8787 -v /out:/out headless-artist serve --host 0.0.0.0
+```
+
+`--host 0.0.0.0` is required here and only here: bound to loopback the server would only be
+reachable from inside the container, so the published port would answer nothing. The container
+boundary is not a security boundary — `-p 8787:8787` publishes on every interface of the host,
+so bind it to one you trust (`-p 127.0.0.1:8787:8787`) or keep it on a private Docker network.
+
+The image's entrypoint is `node dist/cli.js`, so `serve` and its flags are passed exactly as
+they are outside a container. Everything the [container section](#running-in-a-container) says
+about `pwuser`, volume permissions and `HEADLESS_WORK_DIR` applies unchanged.
+
+### Shutdown
+
+`SIGTERM` and `SIGINT` shut down gracefully:
+
+1. The listener stops accepting new connections.
+2. Jobs still queued are answered `503 {"error":"server shutting down"}` immediately — they
+   never started, so they are safe to retry elsewhere.
+3. Renders already running are allowed to finish and their clients get the real outcome.
+4. The process exits 0.
+
+Step 3 is bounded by `HEADLESS_TIMEOUT_MS`, not by the signal, so a 30-minute render means up to
+a 30-minute drain. Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent)
+accordingly, or a `SIGKILL` will land in the middle of an encode and leave the scratch directory
+behind.
 
 ## Sizing and throughput
 

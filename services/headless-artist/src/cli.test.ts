@@ -3,8 +3,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { isDirectRun, main } from './cli'
 import { runJob } from './run'
+import { startServer } from './serve'
 import type { RenderOutcome } from './types'
 
 /** Flipped by the one test that needs `realpathSync` to fail; false everywhere else. */
@@ -24,6 +26,8 @@ vi.mock('node:fs', async (importOriginal) => {
 
 // Chromium is out of scope here: these tests are about argv, stderr and exit codes.
 vi.mock('./run')
+// Ditto sockets: serve.test.ts drives the real server; here only the wiring is under test.
+vi.mock('./serve')
 
 const MODULE_PATH = fileURLToPath(new URL('./cli.ts', import.meta.url))
 
@@ -37,10 +41,12 @@ const OUTCOME: RenderOutcome = {
 const tempDirs: string[] = []
 let stderr: string[]
 let stdout: string[]
+let closeSpy: Mock<() => Promise<void>>
 
 beforeEach(() => {
   stderr = []
   stdout = []
+  closeSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
   vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
     stderr.push(String(chunk))
     return true
@@ -51,6 +57,13 @@ beforeEach(() => {
   })
   vi.mocked(runJob).mockReset()
   vi.mocked(runJob).mockResolvedValue(OUTCOME)
+  vi.mocked(startServer).mockReset()
+  vi.mocked(startServer).mockImplementation(async ({ port }) => {
+    // main() blocks until a signal arrives; fire one as soon as it is listening. A timer,
+    // not a microtask, so the signal handlers are registered by the time it lands.
+    setTimeout(() => process.emit('SIGINT', 'SIGINT'), 0)
+    return { port: port === 0 ? 45678 : port, close: closeSpy }
+  })
 })
 
 afterEach(async () => {
@@ -173,6 +186,134 @@ describe('unknown job-spec fields', () => {
 
     const entry = JSON.parse(stderr.map((line) => line.trim()).find((line) => line.includes('unknown field')) as string)
     expect(entry).toMatchObject({ level: 'info', msg: 'warning: unknown field "extra"' })
+  })
+})
+
+describe('serve', () => {
+  const serveOptions = () => vi.mocked(startServer).mock.calls[0][0]
+
+  it('binds loopback on 8787 with concurrency 1 by default', async () => {
+    expect(await main(['serve'], {})).toBe(0)
+
+    expect(startServer).toHaveBeenCalledTimes(1)
+    expect(serveOptions()).toMatchObject({ port: 8787, host: '127.0.0.1', concurrency: 1 })
+    // stdout stays clean even for the long-running command.
+    expect(stdout).toEqual([])
+    expect(stderrText()).toContain('listening on http://127.0.0.1:8787 (concurrency 1)')
+  })
+
+  it('reads port, host and concurrency from the environment', async () => {
+    expect(
+      await main(['serve'], {
+        HEADLESS_PORT: '9000',
+        HEADLESS_HOST: '0.0.0.0',
+        HEADLESS_CONCURRENCY: '4',
+      }),
+    ).toBe(0)
+
+    expect(serveOptions()).toMatchObject({ port: 9000, host: '0.0.0.0', concurrency: 4 })
+    expect(stderrText()).toContain('listening on http://0.0.0.0:9000 (concurrency 4)')
+  })
+
+  it('lets flags win over the environment', async () => {
+    expect(
+      await main(['serve', '--port', '1234', '--host', '::1'], {
+        HEADLESS_PORT: '9000',
+        HEADLESS_HOST: '0.0.0.0',
+      }),
+    ).toBe(0)
+
+    expect(serveOptions()).toMatchObject({ port: 1234, host: '::1' })
+  })
+
+  it('accepts --port=N form', async () => {
+    expect(await main(['serve', '--port=1234'], {})).toBe(0)
+    expect(serveOptions()).toMatchObject({ port: 1234 })
+  })
+
+  it('reports the port the OS chose for --port 0', async () => {
+    expect(await main(['serve', '--port', '0'], {})).toBe(0)
+
+    expect(serveOptions()).toMatchObject({ port: 0 })
+    expect(stderrText()).toContain('listening on http://127.0.0.1:45678')
+  })
+
+  it('passes the run deps through, same as render', async () => {
+    expect(await main(['serve'], { HEADLESS_BUNDLE_PATH: '/opt/headless.html', HEADLESS_NO_SANDBOX: 'true' })).toBe(0)
+
+    expect(serveOptions().deps).toMatchObject({ bundlePath: '/opt/headless.html', noSandbox: true })
+  })
+
+  it('closes the server on SIGINT before returning', async () => {
+    expect(await main(['serve'], {})).toBe(0)
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the server on SIGTERM too', async () => {
+    vi.mocked(startServer).mockImplementation(async ({ port }) => {
+      setTimeout(() => process.emit('SIGTERM', 'SIGTERM'), 0)
+      return { port, close: closeSpy }
+    })
+
+    expect(await main(['serve'], {})).toBe(0)
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves no signal listeners behind once it has stopped', async () => {
+    const before = process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')
+
+    expect(await main(['serve'], {})).toBe(0)
+
+    expect(process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')).toBe(before)
+  })
+
+  it('exits 2 for a non-numeric port', async () => {
+    expect(await main(['serve', '--port', 'http'], {})).toBe(2)
+    expect(stderrText()).toContain('--port must be an integer between 0 and 65535')
+    expect(startServer).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 for a port outside the valid range', async () => {
+    expect(await main(['serve', '--port', '70000'], {})).toBe(2)
+    expect(startServer).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 for a bad HEADLESS_PORT', async () => {
+    expect(await main(['serve'], { HEADLESS_PORT: 'nope' })).toBe(2)
+    expect(stderrText()).toContain('HEADLESS_PORT must be an integer between 0 and 65535')
+  })
+
+  it('exits 2 for a non-positive HEADLESS_CONCURRENCY', async () => {
+    expect(await main(['serve'], { HEADLESS_CONCURRENCY: '0' })).toBe(2)
+    expect(stderrText()).toContain('HEADLESS_CONCURRENCY must be a positive integer')
+    expect(startServer).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 for an empty --host', async () => {
+    expect(await main(['serve', '--host', ''], {})).toBe(2)
+    expect(stderrText()).toContain('--host needs a value')
+  })
+
+  it('exits 2 for an unknown option', async () => {
+    expect(await main(['serve', '--workers', '4'], {})).toBe(2)
+    expect(stderrText()).toContain('unknown option "--workers"')
+  })
+
+  it('exits 2 for a bare argument', async () => {
+    expect(await main(['serve', 'job.json'], {})).toBe(2)
+    expect(stderrText()).toContain('unexpected extra argument "job.json"')
+  })
+
+  it('exits 2 when --port is given twice', async () => {
+    expect(await main(['serve', '--port', '1', '--port', '2'], {})).toBe(2)
+    expect(stderrText()).toContain('--port was given more than once')
+  })
+
+  it('prints usage and exits 0 for "serve --help"', async () => {
+    expect(await main(['serve', '--help'], {})).toBe(0)
+    expect(stdout).toEqual([])
+    expect(stderrText()).toContain('headless-artist serve')
+    expect(startServer).not.toHaveBeenCalled()
   })
 })
 
