@@ -56,12 +56,12 @@ The kit does not bundle a browser. Give it one of these two:
    launch that instead. Anything recent enough for WebCodecs works; an older build will fail at
    encode time rather than at launch.
 
-The pinned version is **Playwright 1.62.1**. `headless-artist --version` prints it, along with
+The pinned version is **Playwright 1.63.0**. `headless-artist --version` prints it, along with
 the kit and engine versions and the commit the kit was built from:
 
 ```console
 $ headless-artist --version
-{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"5496954","playwrightVersion":"1.62.1","builtAt":"2026-09-07T22:26:33.296Z"}
+{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"5496954","playwrightVersion":"1.63.0","builtAt":"2026-09-07T22:26:33.296Z"}
 ```
 
 ### Air-gapped hosts
@@ -82,7 +82,7 @@ the matching browser. Building that image still needs a registry (for the base i
 one `npm install`), so build it where you have egress and ship the image, not the Dockerfile.
 
 **Installing the kit still needs a registry.** The tarball vendors no dependencies: `npm install`
-on it resolves `playwright@1.62.1` (plus `@aws-sdk/client-s3`, unless you pass `--omit=optional`)
+on it resolves `playwright@1.63.0` (plus `@aws-sdk/client-s3`, unless you pass `--omit=optional`)
 the usual way. On a host with no egress, point npm at an internal mirror or copy in a
 `node_modules` populated on a machine that had one — same Node major, same OS/arch.
 
@@ -574,7 +574,7 @@ curl -s http://127.0.0.1:8787/healthz
 ```
 
 ```json
-{"ok":true,"versions":{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"0cb140b","playwrightVersion":"1.62.1"},"inFlight":1,"queued":3,"maxQueue":64,"allowedSinks":["volume","webhook","s3"]}
+{"ok":true,"versions":{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"0cb140b","playwrightVersion":"1.63.0"},"inFlight":1,"queued":3,"maxQueue":64,"allowedSinks":["volume","webhook","s3"]}
 ```
 
 `inFlight` is the number of renders running, `queued` the number waiting for a slot, `maxQueue`

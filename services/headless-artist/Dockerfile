@@ -1,6 +1,6 @@
 # Reference image for the headless ARTIST render kit.
 #
-# The base image already carries the exact Chromium build Playwright 1.62.1 expects, plus the
+# The base image already carries the exact Chromium build Playwright 1.63.0 expects, plus the
 # OS libraries and the fonts text overlays render with — so nothing is downloaded at build or
 # render time. The kit assembler fails the build if this tag ever drifts from the pinned
 # Playwright version.
@@ -24,7 +24,7 @@
 #
 #   docker run --rm -p 127.0.0.1:8787:8787 -v "$PWD/out:/out" headless-artist serve --host 0.0.0.0
 #
-FROM mcr.microsoft.com/playwright:v1.62.1-noble
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
 
 WORKDIR /app
 
