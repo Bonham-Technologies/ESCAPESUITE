@@ -236,6 +236,11 @@ alongside `config.env` merged over the runner's own environment. A non-zero exit
 the last ~20 lines of the command's stderr come back in the outcome's `error`. Its **stdout is
 discarded** — log as much as you like, there is no output buffer to overflow.
 
+**In `serve` this sink is off by default.** A `POST /render` body chooses its own sink, so
+over HTTP this one is "run the program I name, as you" — see
+[the sink allow-list](#the-sink-allow-list). The one-shot `render` command always honours it:
+there the operator wrote the job spec.
+
 **The command sink deliberately reports no `manifestLocation`.** Both files live in the
 runner's scratch directory, which is deleted as soon as your command returns — they are
 transport, not storage. If you want the manifest, copy it somewhere durable while you have it.
@@ -330,6 +335,7 @@ paths.
 | `HEADLESS_HOST` | `127.0.0.1` | `serve` only: interface to bind. There is no auth — see [HTTP service mode](#http-service-mode) before changing it. |
 | `HEADLESS_CONCURRENCY` | `1` | `serve` only: renders allowed to run at once. Everything past it queues. |
 | `HEADLESS_MAX_QUEUE` | `64` | `serve` only: jobs allowed to wait for a slot before `/render` answers 429. Must be a positive integer. |
+| `HEADLESS_SINKS` | `volume,webhook,s3` | `serve` only: which `output.sink` values `POST /render` will accept, comma-separated from `volume`, `command`, `webhook`, `s3`. **`command` is off by default** — see [the sink allow-list](#the-sink-allow-list). An unknown name exits 2. `--sinks` overrides it. |
 
 `PLAYWRIGHT_BROWSERS_PATH` and the AWS credential variables are read by their own libraries and
 behave as documented there.
@@ -549,6 +555,7 @@ existing scheduler already knows how to retry a process.
 ```bash
 headless-artist serve                          # 127.0.0.1:8787, one render at a time
 headless-artist serve --port 9000 --host 0.0.0.0 --max-queue 16
+headless-artist serve --sinks volume           # refuse every sink but the volume one
 ```
 
 It prints one line to stderr when it is listening and then runs until `SIGTERM` or `SIGINT`.
@@ -567,14 +574,25 @@ curl -s http://127.0.0.1:8787/healthz
 ```
 
 ```json
-{"ok":true,"versions":{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"0cb140b","playwrightVersion":"1.62.1"},"inFlight":1,"queued":3,"maxQueue":64}
+{"ok":true,"versions":{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"0cb140b","playwrightVersion":"1.62.1"},"inFlight":1,"queued":3,"maxQueue":64,"allowedSinks":["volume","webhook","s3"]}
 ```
 
 `inFlight` is the number of renders running, `queued` the number waiting for a slot, `maxQueue`
 the point at which waiting jobs start being refused. Together they are the depth of the one
 queue this server has — useful as a readiness signal and as the
 input to whatever decides to start another instance. It answers while renders are running (the
-render happens off the event loop, in Chromium), so it is a real liveness probe.
+render happens off the event loop, in Chromium), so it is a real liveness probe. `allowedSinks`
+is [the sink allow-list](#the-sink-allow-list) this process was started with — check it here
+rather than guessing at the deployment's environment.
+
+`GET` and `HEAD` both work; anything else is a `405` with `Allow: GET, HEAD`.
+
+**Once shutdown has begun, `/healthz` stops answering.** The first thing the drain does is stop
+accepting connections, so a probe that arrives after `SIGTERM` gets a refused connection, not an
+`ok` — which is the readiness signal you want, since the process is on its way out and must not
+be sent more work. (A request that lands on a connection that was already open gets
+`503 {"error":"server shutting down"}`.) A liveness probe should treat this as "not ready"
+rather than "restart me": the drain is deliberate and bounded by the render still finishing.
 
 ### `POST /render`
 
@@ -599,6 +617,7 @@ API moves job specs, never media.
 | --- | --- | --- |
 | `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
 | `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\" or \"webm\""}` |
+| `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
 | `413` | The body is over 1 MiB. A job spec names paths, never payloads; it has no business being that big. | `{"error": "…"}` |
@@ -654,13 +673,42 @@ of time: unbounded, a burst becomes thousands of open sockets and renders that c
 after anyone still cares. Watch `queued` against `maxQueue` on `/healthz` — a queue that sits
 near its bound is the signal to add an instance, not to raise the number.
 
+**A client that hangs up while its job is still queued takes the job with it.** The render could
+only ever have finished into a socket nobody was reading, so the job is dropped from the queue,
+`queued` goes back down, and the slot goes to a caller still listening:
+
+```
+POST /render aborted by client
+POST /render 499 34ms
+```
+
+Once a render has **started** it is left to finish even if its client is gone — a half-written
+output is worse than a wasted one, and re-POSTing the same `jobId` overwrites it cleanly. So a
+client timeout shorter than the render is a way to waste a slot, not a way to cancel a job:
+size it against `HEADLESS_TIMEOUT_MS`.
+
 ### There is no authentication
 
-None. No API key, no TLS, no rate limit, no allow-list. Anyone who can reach the port can make
-the process read any file it can read and write anywhere it can write.
+None. No API key, no TLS, no rate limit, no caller identity of any kind.
+
+Be clear about what that means, because it is worse than "an open API". **The caller chooses the
+output sink**, and the sinks are how a render leaves the process. So anyone who can reach the
+port can:
+
+- **Run arbitrary commands as the service user** — the `command` sink takes a program and its
+  arguments and executes them. This is remote code execution, plainly. It is why `command` is
+  **off by default** in `serve`; see [the sink allow-list](#the-sink-allow-list) below.
+- **Make the process issue outbound HTTP requests from inside your network** — the `webhook`
+  sink POSTs to any URL it is given, from wherever this container sits. That is an SSRF probe
+  against everything the pod can reach, including cloud metadata endpoints.
+- **Push to any S3 endpoint using the process's own credentials** — the `s3` sink takes the
+  bucket, the key and the endpoint from the request, and signs with whatever the process has.
+- **Read any file the process can read and write anywhere it can write** — job specs name
+  server-side paths, and a `volume` sink writes where it is told.
 
 That is a deliberate omission, not an oversight: authentication that is worth having belongs to
-whatever you already use for it. So:
+whatever you already use for it. Treat reaching this port as equivalent to a shell on the host,
+and gate it accordingly:
 
 - The default bind address is `127.0.0.1`, and it takes an explicit `--host 0.0.0.0` (or
   `HEADLESS_HOST`) to change that. Leave it on loopback unless you meant it.
@@ -673,16 +721,55 @@ whatever you already use for it. So:
 - On Kubernetes, a `ClusterIP` Service and a NetworkPolicy that admits only your broker.
 - Never put it on the public internet directly.
 
+### The sink allow-list
+
+`HEADLESS_SINKS` (or `--sinks`) is the list of `output.sink` values `POST /render` will accept.
+Anything else is refused before it is queued:
+
+```
+HTTP/1.1 403 Forbidden
+
+{"error":"sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}
+```
+
+The default is `volume,webhook,s3` — **`command` is off unless you turn it on**, because on a
+server "run this program with these arguments" is a request anyone who can reach the port may
+make. Turning it on is a decision about who can reach the port, and it should be made once,
+deliberately, by whoever runs the process:
+
+```bash
+headless-artist serve --sinks volume,command      # you meant it
+HEADLESS_SINKS=volume headless-artist serve       # volume only: nothing leaves the box
+```
+
+An unknown name (`--sinks volume,ftp`) exits `2` before anything binds, so a typo is a failed
+start rather than a server quietly refusing every job. `/healthz` reports the live list as
+`allowedSinks`.
+
+`--sinks` beats `HEADLESS_SINKS`, the same way every other `serve` flag does. This applies to
+`serve` only: the one-shot `render` command runs whatever sink its job spec names, because there
+the operator wrote the job spec.
+
 ### In a container
 
 ```bash
-docker run --rm -p 8787:8787 -v /out:/out headless-artist serve --host 0.0.0.0
+docker run --rm -p 127.0.0.1:8787:8787 -v /out:/out headless-artist serve --host 0.0.0.0
 ```
 
-`--host 0.0.0.0` is required here and only here: bound to loopback the server would only be
-reachable from inside the container, so the published port would answer nothing. The container
-boundary is not a security boundary — `-p 8787:8787` publishes on every interface of the host,
-so bind it to one you trust (`-p 127.0.0.1:8787:8787`) or keep it on a private Docker network.
+`--host 0.0.0.0` is required here and only here: bound to loopback *inside the container* the
+server would be reachable from nowhere, so the published port would answer nothing. That flag is
+about the container's own interfaces; `-p 127.0.0.1:8787:8787` is what decides who on the host
+can reach it, and it is the form to use unless you have a reason not to.
+
+The container boundary is not a security boundary. The wide form —
+
+```bash
+docker run --rm -p 8787:8787 -v /out:/out headless-artist serve --host 0.0.0.0   # opt in
+```
+
+— publishes on **every** interface of the host, which given
+[there is no authentication](#there-is-no-authentication) means every machine that can route to
+it. Use it only behind a private Docker network or a proxy you control.
 
 The image's entrypoint is `node dist/cli.js`, so `serve` and its flags are passed exactly as
 they are outside a container. Everything the [container section](#running-in-a-container) says
@@ -690,20 +777,22 @@ about `pwuser`, volume permissions and `HEADLESS_WORK_DIR` applies unchanged.
 
 ### Shutdown
 
-`SIGTERM` and `SIGINT` shut down gracefully:
+`SIGTERM`, `SIGINT` and `SIGHUP` all shut down gracefully — a closed terminal is not a reason to
+drop a render that is half encoded:
 
 1. The listener stops accepting new connections.
 2. Jobs still queued are answered `503 {"error":"server shutting down"}` immediately — they
    never started, so they are safe to retry elsewhere.
 3. Renders already running are allowed to finish and their clients get the real outcome.
-4. The process exits 0.
+4. The process exits 0 — or `1`, with `error: shutdown failed: …` on stderr, if the drain
+   itself failed and the state of the in-flight renders is therefore unknown.
 
 Step 3 is bounded by `HEADLESS_TIMEOUT_MS`, not by the signal, so a 30-minute render means up to
 a 30-minute drain. Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent)
 accordingly, or a `SIGKILL` will land in the middle of an encode and leave the scratch directory
 behind.
 
-A **second** `SIGTERM` or `SIGINT` during the drain exits immediately with `130`, matching what
+A **second** stop signal during the drain exits immediately with `130`, matching what
 Node does with an unhandled `SIGINT` — so pressing Ctrl-C twice does what you expect. It
 abandons the renders that were running and leaves their scratch directories behind, which is
 the trade you are making by asking twice.

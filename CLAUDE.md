@@ -180,13 +180,14 @@ Test counts change frequently as coverage grows; run `pnpm test` for the current
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
-Seven jobs, with `ci-status` as the single required check:
+Eight jobs, with `ci-status` as the single required check:
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
 | `lint-and-typecheck` | Security audit + ESLint + TypeScript (plan, craft, artist, headless-artist) | PRs and pushes |
 | `test` | Unit tests with coverage | PRs and pushes |
 | `build` | Production builds, bundle size report, packs + uploads the headless-artist kit | PRs and pushes |
+| `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
 | `standalone` | Offline single-file builds + standalone E2E | PRs and pushes (E2E half skipped for Dependabot) |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
