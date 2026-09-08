@@ -8,12 +8,6 @@ updates:
       day: "monday"
     open-pull-requests-limit: 8
     rebase-strategy: "auto"
-    ignore:
-      # release.yml pins changesets/action to a v1 build that parses the CLI v2 `changeset tag`
-      # output ("New tag: …"). CLI v3 changed that output and the action then reports nothing
-      # published, so no per-package releases are created. Migrate action + CLI together.
-      - dependency-name: "@changesets/cli"
-        update-types: ["version-update:semver-major"]
     groups:
       # Group related packages to reduce PR noise
       react:
@@ -73,9 +67,6 @@ updates:
       day: "monday"
     open-pull-requests-limit: 3
     rebase-strategy: "auto"
-    ignore:
-      # pinned to a CLI-v2-compatible build in release.yml — unignore when @changesets/cli moves to v3
-      - dependency-name: "changesets/action"
     groups:
       actions:
         patterns:
