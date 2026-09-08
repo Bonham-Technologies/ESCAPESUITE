@@ -196,7 +196,7 @@ describe('serve', () => {
     expect(await main(['serve'], {})).toBe(0)
 
     expect(startServer).toHaveBeenCalledTimes(1)
-    expect(serveOptions()).toMatchObject({ port: 8787, host: '127.0.0.1', concurrency: 1 })
+    expect(serveOptions()).toMatchObject({ port: 8787, host: '127.0.0.1', concurrency: 1, maxQueue: 64 })
     // stdout stays clean even for the long-running command.
     expect(stdout).toEqual([])
     expect(stderrText()).toContain('listening on http://127.0.0.1:8787 (concurrency 1)')
@@ -213,6 +213,26 @@ describe('serve', () => {
 
     expect(serveOptions()).toMatchObject({ port: 9000, host: '0.0.0.0', concurrency: 4 })
     expect(stderrText()).toContain('listening on http://0.0.0.0:9000 (concurrency 4)')
+  })
+
+  it('reads the queue bound from the environment and lets --max-queue win', async () => {
+    expect(await main(['serve'], { HEADLESS_MAX_QUEUE: '32' })).toBe(0)
+    expect(serveOptions()).toMatchObject({ maxQueue: 32 })
+
+    vi.mocked(startServer).mockClear()
+    expect(await main(['serve', '--max-queue', '8'], { HEADLESS_MAX_QUEUE: '32' })).toBe(0)
+    expect(serveOptions()).toMatchObject({ maxQueue: 8 })
+  })
+
+  it('exits 2 for a non-positive --max-queue', async () => {
+    expect(await main(['serve', '--max-queue', '0'], {})).toBe(2)
+    expect(stderrText()).toContain('--max-queue must be a positive integer')
+    expect(startServer).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 for a bad HEADLESS_MAX_QUEUE', async () => {
+    expect(await main(['serve'], { HEADLESS_MAX_QUEUE: 'lots' })).toBe(2)
+    expect(stderrText()).toContain('HEADLESS_MAX_QUEUE must be a positive integer')
   })
 
   it('lets flags win over the environment', async () => {
@@ -259,12 +279,60 @@ describe('serve', () => {
     expect(closeSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('force-quits with 130 when a second signal arrives during the drain', async () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    let releaseClose: () => void = () => {}
+    closeSpy.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseClose = resolve
+        }),
+    )
+    vi.mocked(startServer).mockImplementation(async ({ port }) => {
+      setTimeout(() => {
+        process.emit('SIGINT', 'SIGINT')
+        // Still draining: an operator who signals again means "stop waiting".
+        process.emit('SIGINT', 'SIGINT')
+        releaseClose()
+      }, 0)
+      return { port, close: closeSpy }
+    })
+
+    expect(await main(['serve'], {})).toBe(0)
+
+    expect(exit).toHaveBeenCalledWith(130)
+    // The drain was started exactly once; the second signal did not restart it.
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('leaves no signal listeners behind once it has stopped', async () => {
     const before = process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')
 
     expect(await main(['serve'], {})).toBe(0)
 
     expect(process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')).toBe(before)
+  })
+
+  it('exits 1 when the port cannot be bound — not 2, which means "your arguments are wrong"', async () => {
+    vi.mocked(startServer).mockRejectedValue(
+      Object.assign(new Error('listen EADDRINUSE: address already in use 127.0.0.1:8787'), {
+        code: 'EADDRINUSE',
+      }),
+    )
+
+    expect(await main(['serve'], {})).toBe(1)
+
+    expect(stdout).toEqual([])
+    expect(stderrText()).toContain('error: cannot listen on 127.0.0.1:8787: listen EADDRINUSE')
+    // Not a usage problem, so no usage dump.
+    expect(stderrText()).not.toContain('Usage: headless-artist render')
+  })
+
+  it('exits 1 when the port is privileged', async () => {
+    vi.mocked(startServer).mockRejectedValue(new Error('listen EACCES: permission denied 0.0.0.0:80'))
+
+    expect(await main(['serve', '--port', '80', '--host', '0.0.0.0'], {})).toBe(1)
+    expect(stderrText()).toContain('error: cannot listen on 0.0.0.0:80: listen EACCES')
   })
 
   it('exits 2 for a non-numeric port', async () => {

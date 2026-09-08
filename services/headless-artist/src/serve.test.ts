@@ -128,7 +128,7 @@ describe('GET /healthz', () => {
 
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/json')
-    expect(await res.json()).toEqual({ ok: true, versions: VERSIONS, inFlight: 0, queued: 0 })
+    expect(await res.json()).toEqual({ ok: true, versions: VERSIONS, inFlight: 0, queued: 0, maxQueue: 64 })
   })
 
   it('counts the jobs that are running and waiting', async () => {
@@ -147,6 +147,12 @@ describe('GET /healthz', () => {
 
     gate.resolve(outcomeFor('job-a'))
     await Promise.all([first, second])
+  })
+
+  it('reports the configured queue bound', async () => {
+    await start({ maxQueue: 5 })
+
+    expect(await (await fetch(`${base}/healthz`)).json()).toMatchObject({ maxQueue: 5 })
   })
 
   it('rejects a non-GET with 405', async () => {
@@ -228,6 +234,17 @@ describe('POST /render', () => {
     expect(runJob).not.toHaveBeenCalled()
   })
 
+  it('accepts a content-type with a charset parameter', async () => {
+    await start()
+
+    const res = await post(JSON.stringify(validSpec('job-1')), {
+      'content-type': 'application/json; charset=utf-8',
+    })
+
+    expect(res.status).toBe(200)
+    expect(runJob).toHaveBeenCalledTimes(1)
+  })
+
   it('returns 415 when the body is not declared as JSON', async () => {
     await start()
 
@@ -285,7 +302,9 @@ describe('concurrency', () => {
     await waitFor(() => expect(started).toEqual(['job-a']))
 
     const second = postSpec(validSpec('job-b'))
-    await settle()
+    // Wait for job-b to be *known* to the server before asserting it has not started, so the
+    // assertion can never pass merely because the request had not arrived yet.
+    await waitForHealth({ inFlight: 1, queued: 1 })
     expect(started).toEqual(['job-a'])
 
     gates.get('job-a')?.resolve(outcomeFor('job-a'))
@@ -316,6 +335,59 @@ describe('concurrency', () => {
     gates.get('job-b')?.resolve(outcomeFor('job-b'))
     expect((await first).status).toBe(200)
     expect((await second).status).toBe(200)
+  })
+})
+
+describe('the queue bound', () => {
+  it('turns a job away with 429 once the queue is full, and recovers afterwards', async () => {
+    const gates = new Map<string, Deferred<RenderOutcome>>()
+    const started: string[] = []
+    vi.mocked(runJob).mockImplementation(async (spec) => {
+      started.push(spec.jobId)
+      const gate = deferred<RenderOutcome>()
+      gates.set(spec.jobId, gate)
+      return gate.promise
+    })
+    await start({ concurrency: 1, maxQueue: 1 })
+
+    const first = postSpec(validSpec('job-a'))
+    await waitFor(() => expect(started).toEqual(['job-a']))
+    const second = postSpec(validSpec('job-b'))
+    await waitForHealth({ inFlight: 1, queued: 1, maxQueue: 1 })
+
+    // One running, one queued, no room for a third.
+    const third = await postSpec(validSpec('job-c'))
+    expect(third.status).toBe(429)
+    expect(third.headers.get('retry-after')).toBe('5')
+    expect(await third.json()).toEqual({ error: 'render queue is full (1 queued)' })
+    expect(started).toEqual(['job-a'])
+
+    gates.get('job-a')?.resolve(outcomeFor('job-a'))
+    await waitFor(() => expect(started).toEqual(['job-a', 'job-b']))
+    gates.get('job-b')?.resolve(outcomeFor('job-b'))
+    expect((await first).status).toBe(200)
+    expect((await second).status).toBe(200)
+
+    // The refused job left no residue in the counters.
+    await waitForHealth({ inFlight: 0, queued: 0 })
+    expect(runJob).toHaveBeenCalledTimes(2)
+  })
+
+  it('never refuses a job it could have run', async () => {
+    const gate = deferred<RenderOutcome>()
+    const started: string[] = []
+    vi.mocked(runJob).mockImplementation(async (spec) => {
+      started.push(spec.jobId)
+      return gate.promise
+    })
+    await start({ concurrency: 2, maxQueue: 1 })
+
+    // Two slots plus one queue place: three jobs fit.
+    const posts = [postSpec(validSpec('job-a')), postSpec(validSpec('job-b')), postSpec(validSpec('job-c'))]
+    await waitForHealth({ inFlight: 2, queued: 1 })
+
+    gate.resolve(outcomeFor('shared'))
+    for (const res of await Promise.all(posts)) expect(res.status).toBe(200)
   })
 })
 

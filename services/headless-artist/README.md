@@ -329,6 +329,7 @@ paths.
 | `HEADLESS_PORT` | `8787` | `serve` only: port to bind. `0` picks a free one and prints it. |
 | `HEADLESS_HOST` | `127.0.0.1` | `serve` only: interface to bind. There is no auth — see [HTTP service mode](#http-service-mode) before changing it. |
 | `HEADLESS_CONCURRENCY` | `1` | `serve` only: renders allowed to run at once. Everything past it queues. |
+| `HEADLESS_MAX_QUEUE` | `64` | `serve` only: jobs allowed to wait for a slot before `/render` answers 429. Must be a positive integer. |
 
 `PLAYWRIGHT_BROWSERS_PATH` and the AWS credential variables are read by their own libraries and
 behave as documented there.
@@ -429,6 +430,13 @@ need `ffmpeg` and `ffprobe` on `PATH` and skip themselves (loudly) when the bina
 | `0` | Rendered and delivered. | One JSON `RenderOutcome` line with `"ok": true`. |
 | `1` | The job ran and failed (bad input file, encoder error, sink refused it, timeout). | One JSON `RenderOutcome` line with `"ok": false` and an `error` string. |
 | `2` | Usage or job-spec error — the job never started. Retrying identically will fail identically. | Empty. |
+
+`serve` uses the same three, one step removed: `0` when it shut down cleanly on a signal, `2`
+for a bad flag or environment variable (checked before anything binds), and `1` when it could
+not listen at all — `EADDRINUSE`, `EACCES` on a privileged port — which, unlike a `2`, may well
+succeed on a retry or another host. A render that fails inside `serve` is not an exit code at
+all: it is an `ok: false` in that request's response, and the server carries on. A second signal
+during the drain exits `130`; see [Shutdown](#shutdown).
 
 **stdout carries exactly one line and nothing else, ever.** Logs, progress and warnings all go
 to stderr, so `outcome=$(headless-artist render --job job.json)` is always safe.
@@ -540,7 +548,7 @@ existing scheduler already knows how to retry a process.
 
 ```bash
 headless-artist serve                          # 127.0.0.1:8787, one render at a time
-headless-artist serve --port 9000 --host 0.0.0.0
+headless-artist serve --port 9000 --host 0.0.0.0 --max-queue 16
 ```
 
 It prints one line to stderr when it is listening and then runs until `SIGTERM` or `SIGINT`.
@@ -559,11 +567,12 @@ curl -s http://127.0.0.1:8787/healthz
 ```
 
 ```json
-{"ok":true,"versions":{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"0cb140b","playwrightVersion":"1.62.1"},"inFlight":1,"queued":3}
+{"ok":true,"versions":{"kitVersion":"0.1.0","engineVersion":"2.0.0","commit":"0cb140b","playwrightVersion":"1.62.1"},"inFlight":1,"queued":3,"maxQueue":64}
 ```
 
-`inFlight` is the number of renders running, `queued` the number waiting for a slot. Together
-they are the depth of the one queue this server has — useful as a readiness signal and as the
+`inFlight` is the number of renders running, `queued` the number waiting for a slot, `maxQueue`
+the point at which waiting jobs start being refused. Together they are the depth of the one
+queue this server has — useful as a readiness signal and as the
 input to whatever decides to start another instance. It answers while renders are running (the
 render happens off the event loop, in Chromium), so it is a real liveness probe.
 
@@ -590,8 +599,11 @@ API moves job specs, never media.
 | --- | --- | --- |
 | `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
 | `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\" or \"webm\""}` |
+| `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
+| `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
 | `413` | The body is over 1 MiB. A job spec names paths, never payloads; it has no business being that big. | `{"error": "…"}` |
 | `415` | `content-type` was not `application/json`. | `{"error": "…"}` |
+| `429` | The queue is full. Carries `Retry-After: 5`. Nothing was queued — resend it, or send it somewhere less busy. | `{"error": "render queue is full (64 queued)"}` |
 | `503` | The server is shutting down and the job was still queued. Retry it elsewhere. | `{"error": "server shutting down"}` |
 | `500` | A bug in the server. Worth reporting. | `{"error": "…"}` |
 
@@ -611,11 +623,29 @@ Every response is `application/json`, including the errors and the 404 for an un
 ### Concurrency
 
 `HEADLESS_CONCURRENCY` (default `1`) is how many renders run at once. Requests past it queue in
-arrival order and wait — there is no rejection and no timeout on the queue, so a client that
-POSTs is going to hold the connection until its job runs. Encoding is CPU-bound and a single
-render will happily use every core, so raise this only when you have measured that it helps;
-running two instances on two boxes beats over-subscribing one. `HEADLESS_TIMEOUT_MS` still caps
-each individual render.
+arrival order and wait, holding their connection open until their job runs. Encoding is CPU-bound
+and a single render will happily use every core, so raise this only when you have measured that
+it helps; running two instances on two boxes beats over-subscribing one. `HEADLESS_TIMEOUT_MS`
+still caps each individual render.
+
+`HEADLESS_MAX_QUEUE` / `--max-queue` (default `64`) bounds that queue. Once it is full,
+`POST /render` answers straight away rather than accepting work it has no prospect of getting to:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 5
+
+{"error":"render queue is full (64 queued)"}
+```
+
+Nothing is enqueued for a 429, so the job is entirely safe to resend — after `Retry-After`
+seconds, or immediately to a less busy instance. A job that can *start* is never refused,
+however full the queue was a moment before.
+
+The bound exists because every waiting job is a client connection parked for an unknown length
+of time: unbounded, a burst becomes thousands of open sockets and renders that complete long
+after anyone still cares. Watch `queued` against `maxQueue` on `/healthz` — a queue that sits
+near its bound is the signal to add an instance, not to raise the number.
 
 ### There is no authentication
 
@@ -628,7 +658,11 @@ whatever you already use for it. So:
 - The default bind address is `127.0.0.1`, and it takes an explicit `--host 0.0.0.0` (or
   `HEADLESS_HOST`) to change that. Leave it on loopback unless you meant it.
 - To expose it, put your own reverse proxy in front — the one that already terminates TLS and
-  checks credentials for everything else you run.
+  checks credentials for everything else you run. Raise its read timeout while you are there:
+  a `POST /render` holds the connection open for the whole render (128 s in the sample log
+  above, and `HEADLESS_TIMEOUT_MS` permits 30 minutes), so nginx's 60-second default
+  `proxy_read_timeout` — and your client's own timeout — must be at least `HEADLESS_TIMEOUT_MS`
+  or the render will finish into a connection that was cut long ago.
 - On Kubernetes, a `ClusterIP` Service and a NetworkPolicy that admits only your broker.
 - Never put it on the public internet directly.
 
@@ -661,6 +695,21 @@ Step 3 is bounded by `HEADLESS_TIMEOUT_MS`, not by the signal, so a 30-minute re
 a 30-minute drain. Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent)
 accordingly, or a `SIGKILL` will land in the middle of an encode and leave the scratch directory
 behind.
+
+A **second** `SIGTERM` or `SIGINT` during the drain exits immediately with `130`, matching what
+Node does with an unhandled `SIGINT` — so pressing Ctrl-C twice does what you expect. It
+abandons the renders that were running and leaves their scratch directories behind, which is
+the trade you are making by asking twice.
+
+> **Known limitation — signals land on Chromium too.** Playwright installs its own `SIGINT` and
+> `SIGTERM` handlers for the browser it launches, and they fire on the *first* signal, so step 3
+> only holds while no render is in flight. Signal the server mid-render and the browser is torn
+> down under it: on `SIGTERM` the client still gets its response, but an `ok: false` one for a
+> render that was killed rather than finished; on `SIGINT` the process is gone with exit `130`
+> before the response is written and the client sees a dropped connection. Until this is fixed,
+> **drain before you signal** — stop routing new jobs, wait for `inFlight` on `/healthz` to reach
+> `0`, and only then send the signal. A queue-only shutdown (nothing running) is unaffected and
+> behaves exactly as described above.
 
 ## Sizing and throughput
 

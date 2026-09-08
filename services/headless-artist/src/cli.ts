@@ -6,6 +6,7 @@ import { collectUnknownKeys, parseJobSpec } from './jobSpec'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 import { startServer } from './serve'
+import type { ServeHandle } from './serve'
 
 /**
  * Re-exported so brokers can reach it from the packaged kit (`dist/cli.js` is the only JS the
@@ -27,7 +28,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 const USAGE = `Usage: headless-artist render --job <file>   render one job spec
        headless-artist render -               read the job spec from stdin
-       headless-artist serve [--port N] [--host H]   serve renders over HTTP
+       headless-artist serve [--port N] [--host H] [--max-queue N]
+                                              serve renders over HTTP
        headless-artist --version              print the kit versions
 
 render prints one JSON RenderOutcome line to stdout; all logs go to stderr.
@@ -47,7 +49,8 @@ Environment:
   HEADLESS_LOG=json|text stderr log format (default: text)
   HEADLESS_PORT          serve: port to bind (default: 8787)
   HEADLESS_HOST          serve: interface to bind (default: 127.0.0.1)
-  HEADLESS_CONCURRENCY   serve: renders allowed at once (default: 1)`
+  HEADLESS_CONCURRENCY   serve: renders allowed at once (default: 1)
+  HEADLESS_MAX_QUEUE     serve: jobs allowed to wait before 429 (default: 64)`
 
 /** An argument or job-spec problem: the caller is holding it wrong, so exit 2. */
 class UsageError extends Error {}
@@ -177,10 +180,15 @@ function parseTimeoutMs(raw: string | undefined): number | undefined {
 const DEFAULT_PORT = 8787
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_CONCURRENCY = 1
+const DEFAULT_MAX_QUEUE = 64
+
+/** Exit status a process gets from an unhandled SIGINT; used for the force-quit path. */
+const EXIT_SIGINT = 130
 
 interface ServeArgs {
   port?: number
   host?: string
+  maxQueue?: number
 }
 
 function parsePort(raw: string, label: string): number {
@@ -193,16 +201,16 @@ function parsePort(raw: string, label: string): number {
   return Number(raw)
 }
 
-function parseConcurrency(raw: string | undefined): number {
-  if (raw === undefined || raw.length === 0) return DEFAULT_CONCURRENCY
+function parsePositiveInt(raw: string, label: string): number {
   if (!/^\d+$/.test(raw) || Number(raw) === 0) {
-    throw new UsageError(`HEADLESS_CONCURRENCY must be a positive integer, got "${raw}"`)
+    throw new UsageError(`${label} must be a positive integer, got "${raw}"`)
   }
   return Number(raw)
 }
 
-/** `serve` takes two optional flags, each at most once, in either `--flag v` or `--flag=v` form. */
+/** `serve` takes three optional flags, each at most once, in either `--flag v` or `--flag=v` form. */
 function parseServeArgs(args: string[]): ServeArgs {
+  const FLAGS = ['--port', '--host', '--max-queue']
   const seen = new Set<string>()
   const values: Record<string, string> = {}
 
@@ -215,16 +223,14 @@ function parseServeArgs(args: string[]): ServeArgs {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
-    const flag = arg === '--port' || arg === '--host' ? arg : undefined
-    if (flag) {
+    const inline = FLAGS.find((flag) => arg.startsWith(`${flag}=`))
+    if (FLAGS.includes(arg)) {
       const next = args[i + 1]
-      if (next === undefined) throw new UsageError(`${flag} needs a value`)
-      assign(flag, next)
+      if (next === undefined) throw new UsageError(`${arg} needs a value`)
+      assign(arg, next)
       i++
-    } else if (arg.startsWith('--port=')) {
-      assign('--port', arg.slice('--port='.length))
-    } else if (arg.startsWith('--host=')) {
-      assign('--host', arg.slice('--host='.length))
+    } else if (inline) {
+      assign(inline, arg.slice(inline.length + 1))
     } else if (arg.startsWith('-')) {
       throw new UsageError(`unknown option "${arg}"`)
     } else {
@@ -235,6 +241,9 @@ function parseServeArgs(args: string[]): ServeArgs {
   return {
     ...(values['--port'] !== undefined ? { port: parsePort(values['--port'], '--port') } : {}),
     ...(values['--host'] !== undefined ? { host: values['--host'] } : {}),
+    ...(values['--max-queue'] !== undefined
+      ? { maxQueue: parsePositiveInt(values['--max-queue'], '--max-queue') }
+      : {}),
   }
 }
 
@@ -248,29 +257,56 @@ async function serve(args: string[], env: NodeJS.ProcessEnv, log: Log): Promise<
   const flags = parseServeArgs(args)
   const port = flags.port ?? (env.HEADLESS_PORT ? parsePort(env.HEADLESS_PORT, 'HEADLESS_PORT') : DEFAULT_PORT)
   const host = flags.host ?? (env.HEADLESS_HOST || DEFAULT_HOST)
-  const concurrency = parseConcurrency(env.HEADLESS_CONCURRENCY)
+  const concurrency = env.HEADLESS_CONCURRENCY
+    ? parsePositiveInt(env.HEADLESS_CONCURRENCY, 'HEADLESS_CONCURRENCY')
+    : DEFAULT_CONCURRENCY
+  const maxQueue =
+    flags.maxQueue ??
+    (env.HEADLESS_MAX_QUEUE ? parsePositiveInt(env.HEADLESS_MAX_QUEUE, 'HEADLESS_MAX_QUEUE') : DEFAULT_MAX_QUEUE)
 
   const kit = await readKitJson()
   const deps = depsFromEnv(env, versionsOf(kit), log)
 
-  const server = await startServer({
-    port,
-    host,
-    concurrency,
-    deps,
-    versions: kit ?? versionsOf(kit),
-    log,
-  })
+  let server: ServeHandle
+  try {
+    server = await startServer({
+      port,
+      host,
+      concurrency,
+      maxQueue,
+      deps,
+      versions: kit ?? versionsOf(kit),
+      log,
+    })
+  } catch (err) {
+    // A port already taken or one this user may not bind is an environment problem, not a
+    // malformed invocation: exit 1 (the same "it failed, try again elsewhere" a failed render
+    // gets), so a supervisor can retry it. Exit 2 would tell it never to bother.
+    log(`${ERROR_PREFIX}cannot listen on ${host}:${port}: ${messageOf(err)}`)
+    return EXIT_JOB_FAILED
+  }
 
   // The bound port, not the requested one, so `--port 0` is usable.
   log(`listening on http://${host}:${server.port} (concurrency ${concurrency})`)
 
   await new Promise<void>((resolve) => {
+    let draining = false
     const stop = (signal: NodeJS.Signals): void => {
-      process.removeListener('SIGTERM', stop)
-      process.removeListener('SIGINT', stop)
-      log(`${signal} received, finishing in-flight renders`)
-      void server.close().then(resolve)
+      if (draining) {
+        // Signalling twice is an operator saying "stop waiting for that 30-minute render".
+        // Node's own default for an unhandled SIGINT is exit 130; match it, and say so first,
+        // because this abandons in-flight jobs and leaves their scratch directories behind.
+        log(`${ERROR_PREFIX}${signal} received again, abandoning in-flight renders`)
+        process.exit(EXIT_SIGINT)
+      } else {
+        draining = true
+        log(`${signal} received, finishing in-flight renders`)
+        void server.close().then(() => {
+          process.removeListener('SIGTERM', stop)
+          process.removeListener('SIGINT', stop)
+          resolve()
+        })
+      }
     }
     process.on('SIGTERM', stop)
     process.on('SIGINT', stop)

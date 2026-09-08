@@ -20,6 +20,17 @@ const DRAIN_FACTOR = 8
 
 const JSON_HEADERS = { 'content-type': 'application/json' } as const
 
+/**
+ * How many jobs may wait for a slot before the server starts refusing them. Every waiting job
+ * is a client holding a connection open for an unknown length of time, so an unbounded queue
+ * quietly turns into thousands of parked sockets and renders that finish long after whoever
+ * asked for them gave up. Refusing early, loudly, with a Retry-After is the honest answer.
+ */
+const DEFAULT_MAX_QUEUE = 64
+
+/** How long a client is told to wait before re-POSTing a job the queue had no room for. */
+const RETRY_AFTER_SECONDS = 5
+
 export interface ServeOptions {
   /** TCP port to bind. `0` picks a free one; read the real port back off the handle. */
   port: number
@@ -27,6 +38,8 @@ export interface ServeOptions {
   host?: string
   /** How many renders may run at once. Everything past it queues, FIFO. Default 1. */
   concurrency?: number
+  /** How many jobs may wait for a slot before `/render` answers 429. Default 64. */
+  maxQueue?: number
   /** Passed straight through to `runJob`, unchanged, for every job. */
   deps: RunJobDeps
   /** Reported by `/healthz`; the kit.json contents when the CLI has one. */
@@ -52,12 +65,22 @@ class ShuttingDownError extends Error {
   }
 }
 
+/** Rejection for a job that arrived with the queue already full. Nothing is enqueued. */
+class QueueFullError extends Error {
+  constructor(queued: number) {
+    super(`render queue is full (${queued} queued)`)
+  }
+}
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
 interface Limiter {
-  /** Runs `task` when a slot frees up. Rejects with `ShuttingDownError` if shutdown got there first. */
+  /**
+   * Runs `task` when a slot frees up. Rejects with `QueueFullError` when there is no room to
+   * wait, or `ShuttingDownError` if shutdown got there first — neither enqueues anything.
+   */
   run<T>(task: () => Promise<T>): Promise<T>
   readonly inFlight: number
   readonly queued: number
@@ -69,7 +92,7 @@ interface Limiter {
  * FIFO concurrency gate. Deliberately tiny and local: the whole contract is "at most N of these
  * at once, in the order they arrived", and a queue of pending promises is the entirety of it.
  */
-function createLimiter(concurrency: number): Limiter {
+function createLimiter(concurrency: number, maxQueue: number): Limiter {
   interface Waiting {
     start: () => void
     reject: (err: unknown) => void
@@ -98,6 +121,12 @@ function createLimiter(concurrency: number): Limiter {
       return new Promise<T>((resolve, reject) => {
         if (closed) {
           reject(new ShuttingDownError())
+          return
+        }
+        // Only *waiting* counts against the bound: a job that can start right now is never
+        // refused, however full the queue was a moment ago.
+        if (active >= concurrency && queue.length >= maxQueue) {
+          reject(new QueueFullError(queue.length))
           return
         }
         queue.push({
@@ -174,8 +203,9 @@ function isJsonRequest(req: http.IncomingMessage): boolean {
 export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
   const host = opts.host ?? '127.0.0.1'
   const concurrency = opts.concurrency ?? 1
+  const maxQueue = opts.maxQueue ?? DEFAULT_MAX_QUEUE
   const log = opts.log ?? ((line: string) => void process.stderr.write(line + '\n'))
-  const limiter = createLimiter(concurrency)
+  const limiter = createLimiter(concurrency, maxQueue)
 
   let closing = false
   let closePromise: Promise<void> | undefined
@@ -248,6 +278,11 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
         send(res, 503, { error: err.message })
         return 503
       }
+      if (err instanceof QueueFullError) {
+        res.setHeader('retry-after', String(RETRY_AFTER_SECONDS))
+        send(res, 429, { error: err.message })
+        return 429
+      }
       throw err
     }
   }
@@ -274,6 +309,7 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
         versions: opts.versions,
         inFlight: limiter.inFlight,
         queued: limiter.queued,
+        maxQueue,
       })
       return 200
     }

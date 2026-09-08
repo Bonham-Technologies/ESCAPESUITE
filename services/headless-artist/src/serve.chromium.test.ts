@@ -52,7 +52,13 @@ describe('startServer (real Chromium)', () => {
     const res = await fetch(`${base}/healthz`)
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, versions: VERSIONS, inFlight: 0, queued: 0 })
+    expect(await res.json()).toEqual({
+      ok: true,
+      versions: VERSIONS,
+      inFlight: 0,
+      queued: 0,
+      maxQueue: 64,
+    })
   })
 
   it('renders a manifest job posted to /render and writes it to the volume sink', async () => {
