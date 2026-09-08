@@ -66,8 +66,11 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
           } catch (copyErr) {
             // A failed copy (ENOSPC, most likely) leaves a truncated file at the destination,
             // which a consumer watching the directory would happily pick up as a finished
-            // render. Take it away before the failure propagates — and never let a cleanup
-            // failure mask the copy failure that caused it.
+            // render. Removing it unconditionally is safe: the path is `<dir>/<jobId>.<ext>`,
+            // so the most this can delete is an earlier render of the same jobId — which this
+            // delivery was overwriting anyway.
+            // Take it away before the failure propagates, and never let a cleanup failure
+            // mask the copy failure that caused it.
             await fs.rm(destOutputPath, { force: true }).catch(() => undefined)
             throw copyErr
           }

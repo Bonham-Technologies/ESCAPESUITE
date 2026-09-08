@@ -95,9 +95,16 @@ export function keyFor(keyPrefix: string, fileName: string): string {
  * dependency isn't installed, before anything else about the config is touched.
  *
  * Passing a `client` takes that path out entirely — nothing is imported and `config.region` /
- * `config.endpoint` are the caller's business, since they built the client. That is how the
- * upload path is tested (keys, metadata, returned locations) without an SDK or a live bucket,
- * and how an embedder can hand in an already-configured, credentialled client.
+ * `config.endpoint` are ignored, since whoever built the client already configured them. It is
+ * how the upload path is tested (keys, metadata, returned locations) without an SDK or a live
+ * bucket.
+ *
+ * Note what a `client` must be: with the SDK unloaded there are no SDK command classes either,
+ * so `send()` receives the local `PutObjectRequest` above — a plain `{ name, input }` object. A
+ * real `S3Client` cannot consume that (it looks for a command's `resolveMiddleware`), so this
+ * parameter is for test doubles and for embedders whose own `send()` reads `{ name, input }`
+ * directly. Production callers go through `getSink('s3', …)`, which passes no client and uses
+ * the SDK.
  */
 export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Promise<OutputSink> {
   const { bucket, keyPrefix } = splitPrefix(config.prefix)
