@@ -207,6 +207,90 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+  # Builds the reference headless-artist Docker image and smoke-tests it: a real render
+  # through `docker run` plus `--version`. Does NOT need `build` (it assembles the kit
+  # itself via the headless-artist package's own `build` script), so it starts alongside
+  # `build` rather than waiting on it. Skipped for Dependabot, same as `e2e`.
+  kit-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint-and-typecheck, test]
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Assemble headless-artist kit
+        run: pnpm --filter=@escapesuite/headless-artist run build
+
+      - name: Build Docker image
+        run: docker build -t headless-artist:ci services/headless-artist
+
+      - name: Prepare smoke-test job
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/in" "$RUNNER_TEMP/out"
+          # pwuser inside the container is uid 1000; chmod so it can write the render.
+          chmod 777 "$RUNNER_TEMP/out"
+          cp services/headless-artist/examples/manifest.json "$RUNNER_TEMP/in/manifest.json"
+          cp services/headless-artist/examples/clip.mp4 "$RUNNER_TEMP/in/clip.mp4"
+          cat > "$RUNNER_TEMP/in/job.json" <<'EOF'
+          {
+            "jobId": "ci-smoke",
+            "input": { "manifest": { "path": "/in/manifest.json" } },
+            "options": { "format": "mp4", "quality": "high", "resolution": "project" },
+            "output": { "sink": "volume", "config": { "dir": "/out" } }
+          }
+          EOF
+
+      - name: Smoke test - render a job through the container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$RUNNER_TEMP/in:/in:ro" \
+            -v "$RUNNER_TEMP/out:/out" \
+            headless-artist:ci render --job /in/job.json > outcome.json
+
+          echo "--- outcome ---"
+          cat outcome.json
+          jq -e '.ok == true' outcome.json
+
+          mp4="$RUNNER_TEMP/out/ci-smoke.mp4"
+          manifest="$RUNNER_TEMP/out/ci-smoke.manifest.json"
+          test -f "$mp4"
+          test -f "$manifest"
+
+          echo "--- manifest ---"
+          cat "$manifest"
+
+          actual_sha=$(sha256sum "$mp4" | cut -d' ' -f1)
+          expected_sha=$(jq -r '.sha256' "$manifest")
+          if [ "$actual_sha" != "$expected_sha" ]; then
+            echo "::error::sha256 mismatch: mp4=$actual_sha manifest=$expected_sha"
+            exit 1
+          fi
+          echo "sha256 verified: $actual_sha"
+
+      - name: Smoke test - --version
+        run: |
+          set -euo pipefail
+          docker run --rm headless-artist:ci --version | tee version.json
+          jq -e '.kitVersion' version.json
+
   # Standalone — builds the offline single-file bundles ONCE, publishes them as
   # the `standalone-builds` artifact (standalone-release.yml downloads that
   # artifact cross-run, so the name and paths are a contract), then runs the
@@ -537,7 +621,7 @@ jobs:
   ci-status:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [lint-and-typecheck, test, build, standalone, e2e, deploy]
+    needs: [lint-and-typecheck, test, build, standalone, e2e, kit-docker, deploy]
     # Always run, but skip for pull_request_target from Dependabot and regular users
     # (Dependabot PRs use pull_request workflow, not pull_request_target)
     if: |
@@ -583,6 +667,14 @@ jobs:
           if [ "${{ github.actor }}" != "dependabot[bot]" ] && \
              [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
+            exit 1
+          fi
+
+          # kit-docker builds and smoke-tests the headless-artist Docker image
+          # (skipped for Dependabot, same as e2e)
+          if [ "${{ github.actor }}" != "dependabot[bot]" ] && \
+             [ "${{ needs.kit-docker.result }}" != "success" ]; then
+            echo "headless-artist Docker image build/smoke test failed"
             exit 1
           fi
 

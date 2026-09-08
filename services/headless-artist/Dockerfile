@@ -16,7 +16,8 @@
 #   # from an unpacked kit:
 #   docker build -t headless-artist .
 #
-#   docker run --rm -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headless-artist --job /in/job.json
+#   docker run --rm -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headless-artist render --job /in/job.json
+#   docker run --rm headless-artist --version
 #
 FROM mcr.microsoft.com/playwright:v1.62.1-noble
 
@@ -40,5 +41,8 @@ ENV HEADLESS_BUNDLE_PATH=/app/dist/headless.html
 # stays off. If you override this with USER root, set HEADLESS_NO_SANDBOX=true as well.
 USER pwuser
 
-ENTRYPOINT ["node", "dist/cli.js", "render"]
-CMD ["-"]
+# ENTRYPOINT does not bake in the "render" command, so any CLI command works, not just
+# rendering: `docker run … headless-artist --version`, `docker run … headless-artist render …`.
+# CMD supplies the default when no arguments are given at all — read a job spec from stdin.
+ENTRYPOINT ["node", "dist/cli.js"]
+CMD ["render", "-"]

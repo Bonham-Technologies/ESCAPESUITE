@@ -448,15 +448,20 @@ docker build -t headless-artist .        # from an unpacked kit
 docker run --rm \
   -v "$PWD/in:/in:ro" \
   -v "$PWD/out:/out" \
-  headless-artist --job /in/job.json
+  headless-artist render --job /in/job.json
+docker run --rm headless-artist --version
 ```
 
-The image's entrypoint is `node dist/cli.js render`, so the arguments you pass are the CLI's
-arguments. With no arguments it reads the job spec from stdin:
+The image's entrypoint is `node dist/cli.js`, so the arguments you pass are the CLI's own —
+`render --job …` or `--version`, same as running the CLI outside a container. With no arguments
+at all it falls back to the default command, which reads the job spec from stdin:
 
 ```bash
 cat job.json | docker run --rm -i -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headless-artist
 ```
+
+This image is built from `services/headless-artist` and smoke-tested (`render` and `--version`)
+in CI on every non-Dependabot pull request (the `kit-docker` job).
 
 Two things worth knowing:
 
