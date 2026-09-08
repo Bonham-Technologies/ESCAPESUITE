@@ -40,6 +40,14 @@ const EXPECTED_DURATION_SEC = 1.0
 const DURATION_TOLERANCE_SEC = 0.1
 /** Two clips, the second offset by 0.5 s, so the timeline is 1.5 s → 45 frames at 30 fps. */
 const EXPECTED_TWO_CLIP_FRAMES = 45
+/**
+ * t ≈ 1.25 s on the two-clip timeline: clip one has ended, so the only thing on screen is the
+ * half-opacity clip composited over black. Red at 0.5 alpha lands near 128, but the exact value
+ * depends on the encoder's colour conversion, so the band is wide enough to survive that and
+ * still fail both regressions it is here for — a clip drawn opaque (r ≈ 255) and one not drawn
+ * at all (r ≈ 0).
+ */
+const TWO_CLIP_ALPHA_FRAME = 37
 
 const FFMPEG = hasFfmpeg()
 if (!FFMPEG) {
@@ -232,6 +240,14 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
     // would produce 30 here.
     expect(frameCount(probed)).toBeGreaterThanOrEqual(EXPECTED_TWO_CLIP_FRAMES - 1)
     expect(frameCount(probed)).toBeLessThanOrEqual(EXPECTED_TWO_CLIP_FRAMES + 1)
+
+    // Frame count alone cannot tell a real composite from a black tail spliced on the end.
+    // This frame is the 0.5-opacity clip over black: still red, at roughly half strength.
+    const [r, g, b] = await frameMeanRGB(outputPath, TWO_CLIP_ALPHA_FRAME)
+    expect(r).toBeGreaterThan(90)
+    expect(r).toBeLessThan(170)
+    expect(g).toBeLessThan(40)
+    expect(b).toBeLessThan(40)
   }, RENDER_TIMEOUT_MS)
 
   it('reads red from the red fixture and not from a blue control clip', async () => {
