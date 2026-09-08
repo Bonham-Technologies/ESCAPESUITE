@@ -1,5 +1,11 @@
 # @escapesuite/headless-artist
 
+## 0.2.1
+
+### Patch Changes
+
+- d5fa993: Release tooling migrated to changesets/action v2 and @changesets/cli v3. No functional change to the kit.
+
 ## 0.2.0
 
 ### Minor Changes

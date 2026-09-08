@@ -1,7 +1,7 @@
 {
   "name": "@escapesuite/headless-artist",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Render ESCAPEARTIST projects server-side in headless Chromium — one-shot CLI + kit",
   "type": "module",
   "license": "MIT",
