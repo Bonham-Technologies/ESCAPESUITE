@@ -144,7 +144,7 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
   ARTIST headless bundle, which `test/globalSetup.ts` builds ONCE per vitest run (gated by
   `HEADLESS_BUILD=1`, which only `test:e2e` sets — every other invocation is a no-op). They
   are excluded from `test:run`/CI's `test` job and run separately.
-- CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.62.1 as
+- CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.63.0 as
   `apps/e2e`, sharing its browser cache) and packs + uploads the kit as the
   `headless-artist-kit` artifact in the `build` job; `standalone-release.yml` attaches the
   tarball to GitHub Releases alongside the standalone HTML builds.
@@ -205,7 +205,7 @@ Eight jobs, with `ci-status` as the single required check:
 - Playwright browsers are cached across runs (~1min savings); `e2e` also runs on
   pushes to `main`, so the cache is written from the base branch and fresh PR
   branches can restore it. `services/headless-artist` pins the same Playwright
-  version (1.62.1) as `apps/e2e`, so its Chromium tests share that cache
+  version (1.63.0) as `apps/e2e`, so its Chromium tests share that cache
 - Playwright browser download and apt system-deps are separate steps, each with
   `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
   instead of hanging the job
