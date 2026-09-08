@@ -209,6 +209,10 @@ Seven jobs, with `ci-status` as the single required check:
   `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
   instead of hanging the job
 
+**Release** (`.github/workflows/release.yml`):
+- A release is cut by adding a changeset and merging it to `main`, then merging the "Version Packages" PR that `changesets/action` opens in response — that merge tags each changed package and creates a per-package GitHub Release, with the craft/artist standalone HTML and the headless-artist kit tarball attached to their respective releases.
+- `standalone-release.yml` additionally creates a `v<craft version>` release carrying the same standalone HTML and kit tarball assets.
+
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)
 - Builds ESCAPECRAFT and ESCAPEARTIST in standalone mode (`VITE_BUILD_MODE=standalone`)
