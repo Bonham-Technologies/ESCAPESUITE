@@ -211,7 +211,8 @@ Eight jobs, with `ci-status` as the single required check:
   instead of hanging the job
 
 **Release** (`.github/workflows/release.yml`):
-- A release is cut by adding a changeset and merging it to `main`, then merging the "Version Packages" PR that `changesets/action` opens in response — that merge tags each changed package and creates a per-package GitHub Release, with the craft/artist standalone HTML and the headless-artist kit tarball attached to their respective releases.
+- A release is cut by adding a changeset and merging it to `main`. `changesets/action` then pushes a `changeset-release/main` branch with the version bump; the Bonham-Technologies org policy does not let Actions open pull requests, so open the "Version Packages" PR by hand (`gh pr create --base main --head changeset-release/main --title "chore: version packages"`). Merging it tags each changed package and creates a per-package GitHub Release, with the craft/artist standalone HTML and the headless-artist kit tarball attached to their respective releases.
+- `@changesets/cli` is held at v2 (Dependabot ignores its majors) because the pinned `changesets/action` v1 build parses CLI v2's `changeset tag` output; CLI v3 changed that output and silently produced no per-package releases (2026-09-08). Upgrade the action to v2 and the CLI to v3 together.
 - `standalone-release.yml` additionally creates a `v<craft version>` release carrying the same standalone HTML and kit tarball assets.
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):

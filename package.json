@@ -32,7 +32,7 @@
     "release": "changeset version && changeset tag"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.2",
+    "@changesets/cli": "^2.31.1",
     "turbo": "^2.10.12"
   },
   "engines": {
