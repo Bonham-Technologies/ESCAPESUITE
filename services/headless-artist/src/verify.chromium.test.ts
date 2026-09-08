@@ -36,6 +36,8 @@ const EXPECTED_WIDTH = 64
 const EXPECTED_HEIGHT = 48
 const EXPECTED_FRAMES = 30
 const EXPECTED_DURATION_SEC = 1.0
+/** Container durations round; the assertion is "the right length", not "to the microsecond". */
+const DURATION_TOLERANCE_SEC = 0.1
 /** Two clips, the second offset by 0.5 s, so the timeline is 1.5 s → 45 frames at 30 fps. */
 const EXPECTED_TWO_CLIP_FRAMES = 45
 
@@ -186,7 +188,8 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
     expect(video.height).toBe(EXPECTED_HEIGHT)
     expect(frameCount(probed)).toBeGreaterThanOrEqual(EXPECTED_FRAMES - 1)
     expect(frameCount(probed)).toBeLessThanOrEqual(EXPECTED_FRAMES + 1)
-    expect(Number(probed.format.duration)).toBeCloseTo(EXPECTED_DURATION_SEC, 1)
+    expect(Number(probed.format.duration)).toBeGreaterThan(EXPECTED_DURATION_SEC - DURATION_TOLERANCE_SEC)
+    expect(Number(probed.format.duration)).toBeLessThan(EXPECTED_DURATION_SEC + DURATION_TOLERANCE_SEC)
 
     // Golden frame: the middle of a solid red source must still be red after the round trip.
     const [r, g, b] = await frameMeanRGB(outputPath, Math.floor(EXPECTED_FRAMES / 2))
@@ -207,7 +210,8 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
     expect(video.height).toBe(EXPECTED_HEIGHT)
     expect(frameCount(probed)).toBeGreaterThanOrEqual(EXPECTED_FRAMES - 1)
     expect(frameCount(probed)).toBeLessThanOrEqual(EXPECTED_FRAMES + 1)
-    expect(Number(probed.format.duration)).toBeCloseTo(EXPECTED_DURATION_SEC, 1)
+    expect(Number(probed.format.duration)).toBeGreaterThan(EXPECTED_DURATION_SEC - DURATION_TOLERANCE_SEC)
+    expect(Number(probed.format.duration)).toBeLessThan(EXPECTED_DURATION_SEC + DURATION_TOLERANCE_SEC)
 
     const [r, g, b] = await frameMeanRGB(outputPath, Math.floor(EXPECTED_FRAMES / 2))
     expect(r).toBeGreaterThan(200)
