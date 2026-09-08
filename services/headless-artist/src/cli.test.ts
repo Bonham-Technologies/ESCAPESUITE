@@ -189,6 +189,31 @@ describe('unknown job-spec fields', () => {
   })
 })
 
+describe('the text logger', () => {
+  /** A key carrying a newline, an ANSI escape and a NUL — the three shapes of log forgery. */
+  const NASTY_KEY = 'ev\nil\u001b[31m\u0000'
+
+  it('strips control characters, so a job spec cannot forge a log line or paint the terminal', async () => {
+    const jobFile = await writeJobSpec(validSpec({ [NASTY_KEY]: 1 }))
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(0)
+
+    const line = stderr.find((written) => written.includes('unknown field'))
+    expect(line).toBe('warning: unknown field "ev il [31m "\n')
+  })
+
+  it('leaves the json logger alone — JSON.stringify already escapes them', async () => {
+    const jobFile = await writeJobSpec(validSpec({ [NASTY_KEY]: 1 }))
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_LOG: 'json' })).toBe(0)
+
+    const written = stderr.find((entry) => entry.includes('unknown field')) as string
+    // One line out, whatever the field contained; the control characters survive, escaped.
+    expect(written.split('\n').filter(Boolean)).toHaveLength(1)
+    expect((JSON.parse(written) as { msg: string }).msg).toBe(`warning: unknown field "${NASTY_KEY}"`)
+  })
+})
+
 describe('serve', () => {
   const serveOptions = () => vi.mocked(startServer).mock.calls[0][0]
 
@@ -196,7 +221,14 @@ describe('serve', () => {
     expect(await main(['serve'], {})).toBe(0)
 
     expect(startServer).toHaveBeenCalledTimes(1)
-    expect(serveOptions()).toMatchObject({ port: 8787, host: '127.0.0.1', concurrency: 1, maxQueue: 64 })
+    expect(serveOptions()).toMatchObject({
+      port: 8787,
+      host: '127.0.0.1',
+      concurrency: 1,
+      maxQueue: 64,
+      // The command sink runs arbitrary programs, so serve leaves it off unless asked.
+      allowedSinks: ['volume', 'webhook', 's3'],
+    })
     // stdout stays clean even for the long-running command.
     expect(stdout).toEqual([])
     expect(stderrText()).toContain('listening on http://127.0.0.1:8787 (concurrency 1)')
@@ -258,18 +290,40 @@ describe('serve', () => {
     expect(stderrText()).toContain('listening on http://127.0.0.1:45678')
   })
 
-  it('takes signal handling away from Playwright so the drain owns shutdown', async () => {
-    expect(await main(['serve'], {})).toBe(0)
-
-    expect(serveOptions().deps).toMatchObject({ handleSignals: false })
-  })
-
   it('leaves signal handling to Playwright for a one-shot render', async () => {
     const jobFile = await writeJobSpec(validSpec())
 
     expect(await main(['render', '--job', jobFile], {})).toBe(0)
 
     expect(vi.mocked(runJob).mock.calls[0][1].handleSignals).toBeUndefined()
+  })
+
+  it('reads the sink allow-list from the environment', async () => {
+    expect(await main(['serve'], { HEADLESS_SINKS: 'volume,command' })).toBe(0)
+    expect(serveOptions()).toMatchObject({ allowedSinks: ['volume', 'command'] })
+  })
+
+  it('lets --sinks win over HEADLESS_SINKS', async () => {
+    expect(await main(['serve', '--sinks', 'volume'], { HEADLESS_SINKS: 'volume,command' })).toBe(0)
+    expect(serveOptions()).toMatchObject({ allowedSinks: ['volume'] })
+  })
+
+  it('accepts --sinks=N form and trims the names', async () => {
+    expect(await main(['serve', '--sinks=volume, s3'], {})).toBe(0)
+    expect(serveOptions()).toMatchObject({ allowedSinks: ['volume', 's3'] })
+  })
+
+  it('exits 2 for a sink name that does not exist', async () => {
+    expect(await main(['serve', '--sinks', 'volume,ftp'], {})).toBe(2)
+    expect(stderrText()).toContain('--sinks must be a comma-separated subset of')
+    expect(stderrText()).toContain('"ftp"')
+    expect(startServer).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 for a bad HEADLESS_SINKS', async () => {
+    expect(await main(['serve'], { HEADLESS_SINKS: 'volume,,s3' })).toBe(2)
+    expect(stderrText()).toContain('HEADLESS_SINKS must be a comma-separated subset of')
+    expect(startServer).not.toHaveBeenCalled()
   })
 
   it('passes the run deps through, same as render', async () => {
@@ -291,6 +345,25 @@ describe('serve', () => {
 
     expect(await main(['serve'], {})).toBe(0)
     expect(closeSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the server on SIGHUP too — a closed terminal is not a reason to drop a render', async () => {
+    vi.mocked(startServer).mockImplementation(async ({ port }) => {
+      setTimeout(() => process.emit('SIGHUP', 'SIGHUP'), 0)
+      return { port, close: closeSpy }
+    })
+
+    expect(await main(['serve'], {})).toBe(0)
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('exits 1 when the drain itself fails', async () => {
+    closeSpy.mockRejectedValue(new Error('socket stuck'))
+
+    expect(await main(['serve'], {})).toBe(1)
+
+    expect(stdout).toEqual([])
+    expect(stderrText()).toContain('error: shutdown failed: socket stuck')
   })
 
   it('force-quits with 130 when a second signal arrives during the drain', async () => {
@@ -320,11 +393,13 @@ describe('serve', () => {
   })
 
   it('leaves no signal listeners behind once it has stopped', async () => {
-    const before = process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')
+    const count = (): number =>
+      process.listenerCount('SIGINT') + process.listenerCount('SIGTERM') + process.listenerCount('SIGHUP')
+    const before = count()
 
     expect(await main(['serve'], {})).toBe(0)
 
-    expect(process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')).toBe(before)
+    expect(count()).toBe(before)
   })
 
   it('exits 1 when the port cannot be bound — not 2, which means "your arguments are wrong"', async () => {

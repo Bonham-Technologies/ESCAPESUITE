@@ -18,6 +18,9 @@ const RENDER_TIMEOUT_MS = 180_000
 
 const VERSIONS = { engineVersion: 'engine-test', kitVersion: 'kit-test' }
 
+/** What the CLI hands the server by default: everything except the command sink. */
+const ALLOWED_SINKS = ['volume', 'webhook', 's3']
+
 let tmpRoot: string
 let workDir: string
 let outDir: string
@@ -36,6 +39,7 @@ beforeAll(async () => {
     host: '127.0.0.1',
     concurrency: 1,
     deps: { bundlePath: BUNDLE, workDir, versions: VERSIONS, log: () => {} },
+    allowedSinks: ALLOWED_SINKS,
     versions: VERSIONS,
     log: () => {},
   })
@@ -58,6 +62,7 @@ describe('startServer (real Chromium)', () => {
       inFlight: 0,
       queued: 0,
       maxQueue: 64,
+      allowedSinks: ALLOWED_SINKS,
     })
   })
 
@@ -89,6 +94,24 @@ describe('startServer (real Chromium)', () => {
     // The scratch dir the job rendered into is gone, exactly as for the one-shot CLI.
     expect(await fs.readdir(workDir)).toEqual([])
   }, RENDER_TIMEOUT_MS)
+
+  it('refuses a command-sink job, because serve does not enable that sink by default', async () => {
+    const res = await fetch(`${base}/render`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jobId: 'serve-e2e-command',
+        input: { manifest: { path: MANIFEST } },
+        options: { format: 'mp4' },
+        output: { sink: 'command', config: { command: '/usr/bin/true' } },
+      }),
+    })
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: 'sink "command" is not enabled on this server (HEADLESS_SINKS)',
+    })
+  })
 
   it('is back to idle afterwards', async () => {
     const health = (await (await fetch(`${base}/healthz`)).json()) as Record<string, number>

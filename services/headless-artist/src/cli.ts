@@ -28,7 +28,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 const USAGE = `Usage: headless-artist render --job <file>   render one job spec
        headless-artist render -               read the job spec from stdin
-       headless-artist serve [--port N] [--host H] [--max-queue N]
+       headless-artist serve [--port N] [--host H] [--max-queue N] [--sinks LIST]
                                               serve renders over HTTP
        headless-artist --version              print the kit versions
 
@@ -36,8 +36,9 @@ render prints one JSON RenderOutcome line to stdout; all logs go to stderr.
 Exit codes: 0 rendered, 1 job failed, 2 usage or job-spec error.
 
 serve exposes GET /healthz and POST /render (one job spec per request) and runs
-until SIGTERM or SIGINT. It has no authentication: keep it on loopback or put
-your own proxy in front of it.
+until SIGTERM, SIGINT or SIGHUP. It has no authentication: anyone who can reach
+the port chooses the output sink, so keep it on loopback or put your own proxy
+in front of it.
 
 Environment:
   HEADLESS_BUNDLE_PATH   headless.html to render with (default: next to this CLI)
@@ -50,7 +51,9 @@ Environment:
   HEADLESS_PORT          serve: port to bind (default: 8787)
   HEADLESS_HOST          serve: interface to bind (default: 127.0.0.1)
   HEADLESS_CONCURRENCY   serve: renders allowed at once (default: 1)
-  HEADLESS_MAX_QUEUE     serve: jobs allowed to wait before 429 (default: 64)`
+  HEADLESS_MAX_QUEUE     serve: jobs allowed to wait before 429 (default: 64)
+  HEADLESS_SINKS         serve: output sinks POST /render accepts, comma-separated
+                         (default: volume,webhook,s3 — "command" is opt-in)`
 
 /** An argument or job-spec problem: the caller is holding it wrong, so exit 2. */
 class UsageError extends Error {}
@@ -61,10 +64,20 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/**
+ * Anything that reaches a log line can come from a job spec a stranger POSTed — a field name,
+ * a sink error, a path. A newline in one of those forges a whole log entry; an ANSI escape
+ * repaints the operator's terminal. In text mode there is no escaping to hide behind, so every
+ * C0 control character and DEL becomes a space. JSON mode needs none of this: `JSON.stringify`
+ * escapes them, and one entry stays one line.
+ */
+// eslint-disable-next-line no-control-regex -- matching control characters is the entire point
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g
+
 function createLogger(mode: string | undefined): Log {
   if (mode !== 'json') {
     return (line) => {
-      process.stderr.write(line + '\n')
+      process.stderr.write(line.replace(CONTROL_CHARS, ' ') + '\n')
     }
   }
   return (line) => {
@@ -76,6 +89,15 @@ function createLogger(mode: string | undefined): Log {
     }
     process.stderr.write(JSON.stringify(entry) + '\n')
   }
+}
+
+/**
+ * Writes the usage block one line at a time. The text logger turns every control character
+ * into a space (see CONTROL_CHARS), newlines included, so handing it the whole block at once
+ * would arrive as a single unreadable paragraph.
+ */
+function printUsage(log: Log): void {
+  for (const line of USAGE.split('\n')) log(line)
 }
 
 /** Where the job spec comes from: a file path, or `-` for stdin. */
@@ -182,6 +204,22 @@ const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_CONCURRENCY = 1
 const DEFAULT_MAX_QUEUE = 64
 
+/** Every sink the kit implements. `--sinks`/`HEADLESS_SINKS` name a subset of these. */
+const SINK_NAMES = ['volume', 'command', 'webhook', 's3']
+
+/**
+ * What `serve` accepts unless told otherwise: everything but `command`.
+ *
+ * A `POST /render` body chooses its own sink, so on a server the `command` sink is "run this
+ * program, with these arguments, as me" exposed to whoever can reach the port. Spec §11 calls
+ * the command sink opt-in; this is what opt-in means for the HTTP mode. The one-shot `render`
+ * command is unaffected — there the operator wrote the job spec.
+ */
+const DEFAULT_SINKS = ['volume', 'webhook', 's3']
+
+/** The signals that mean "stop": all three drain, none of them kills a running render. */
+const STOP_SIGNALS: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP']
+
 /** Exit status a process gets from an unhandled SIGINT; used for the force-quit path. */
 const EXIT_SIGINT = 130
 
@@ -189,6 +227,7 @@ interface ServeArgs {
   port?: number
   host?: string
   maxQueue?: number
+  sinks?: string[]
 }
 
 function parsePort(raw: string, label: string): number {
@@ -208,9 +247,25 @@ function parsePositiveInt(raw: string, label: string): number {
   return Number(raw)
 }
 
-/** `serve` takes three optional flags, each at most once, in either `--flag v` or `--flag=v` form. */
+/**
+ * A comma-separated subset of SINK_NAMES. Unknown names are a typo that would otherwise turn
+ * into a 403 at render time — or, worse, a `command` the operator thought they had enabled.
+ */
+function parseSinks(raw: string, label: string): string[] {
+  const names = raw.split(',').map((name) => name.trim())
+  for (const name of names) {
+    if (!SINK_NAMES.includes(name)) {
+      throw new UsageError(
+        `${label} must be a comma-separated subset of ${SINK_NAMES.join(', ')}, got "${name}"`,
+      )
+    }
+  }
+  return names
+}
+
+/** `serve` takes four optional flags, each at most once, in either `--flag v` or `--flag=v` form. */
 function parseServeArgs(args: string[]): ServeArgs {
-  const FLAGS = ['--port', '--host', '--max-queue']
+  const FLAGS = ['--port', '--host', '--max-queue', '--sinks']
   const seen = new Set<string>()
   const values: Record<string, string> = {}
 
@@ -244,6 +299,7 @@ function parseServeArgs(args: string[]): ServeArgs {
     ...(values['--max-queue'] !== undefined
       ? { maxQueue: parsePositiveInt(values['--max-queue'], '--max-queue') }
       : {}),
+    ...(values['--sinks'] !== undefined ? { sinks: parseSinks(values['--sinks'], '--sinks') } : {}),
   }
 }
 
@@ -263,6 +319,8 @@ async function serve(args: string[], env: NodeJS.ProcessEnv, log: Log): Promise<
   const maxQueue =
     flags.maxQueue ??
     (env.HEADLESS_MAX_QUEUE ? parsePositiveInt(env.HEADLESS_MAX_QUEUE, 'HEADLESS_MAX_QUEUE') : DEFAULT_MAX_QUEUE)
+  const allowedSinks =
+    flags.sinks ?? (env.HEADLESS_SINKS ? parseSinks(env.HEADLESS_SINKS, 'HEADLESS_SINKS') : DEFAULT_SINKS)
 
   const kit = await readKitJson()
   const deps = depsFromEnv(env, versionsOf(kit), log)
@@ -274,9 +332,8 @@ async function serve(args: string[], env: NodeJS.ProcessEnv, log: Log): Promise<
       host,
       concurrency,
       maxQueue,
-      // The drain below owns shutdown, so Playwright must not race it by killing the browser
-      // (and, on SIGINT, the process) the moment the first signal lands.
-      deps: { ...deps, handleSignals: false },
+      allowedSinks,
+      deps,
       versions: kit ?? versionsOf(kit),
       log,
     })
@@ -291,7 +348,7 @@ async function serve(args: string[], env: NodeJS.ProcessEnv, log: Log): Promise<
   // The bound port, not the requested one, so `--port 0` is usable.
   log(`listening on http://${host}:${server.port} (concurrency ${concurrency})`)
 
-  await new Promise<void>((resolve) => {
+  return await new Promise<number>((resolve) => {
     let draining = false
     const stop = (signal: NodeJS.Signals): void => {
       if (draining) {
@@ -303,18 +360,24 @@ async function serve(args: string[], env: NodeJS.ProcessEnv, log: Log): Promise<
       } else {
         draining = true
         log(`${signal} received, finishing in-flight renders`)
-        void server.close().then(() => {
-          process.removeListener('SIGTERM', stop)
-          process.removeListener('SIGINT', stop)
-          resolve()
-        })
+        const done = (code: number): void => {
+          for (const name of STOP_SIGNALS) process.removeListener(name, stop)
+          resolve(code)
+        }
+        void server.close().then(
+          () => done(EXIT_OK),
+          (err: unknown) => {
+            // close() is not supposed to reject; if it does, the listener is in an unknown
+            // state and in-flight renders may have been dropped. Exiting 0 would tell a
+            // supervisor everything drained cleanly, which is the one thing we do not know.
+            log(`${ERROR_PREFIX}shutdown failed: ${messageOf(err)}`)
+            done(EXIT_JOB_FAILED)
+          },
+        )
       }
     }
-    process.on('SIGTERM', stop)
-    process.on('SIGINT', stop)
+    for (const name of STOP_SIGNALS) process.on(name, stop)
   })
-
-  return EXIT_OK
 }
 
 function depsFromEnv(
@@ -353,7 +416,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
     }
 
     if (command === '--help' || command === '-h') {
-      log(USAGE)
+      printUsage(log)
       return EXIT_OK
     }
 
@@ -364,7 +427,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
 
     // Asking for help is not an error, wherever it appears: usage, exit 0.
     if (rest.includes('--help') || rest.includes('-h')) {
-      log(USAGE)
+      printUsage(log)
       return EXIT_OK
     }
 
@@ -387,7 +450,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
     // runJob never throws and the server catches its own handler errors, so anything
     // landing here is a usage, job-spec or bind problem.
     log(`${ERROR_PREFIX}${messageOf(err)}`)
-    if (err instanceof UsageError) log(USAGE)
+    if (err instanceof UsageError) printUsage(log)
     return EXIT_USAGE
   }
 }

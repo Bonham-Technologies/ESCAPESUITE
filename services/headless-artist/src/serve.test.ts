@@ -1,3 +1,4 @@
+import http from 'node:http'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startServer } from './serve'
 import type { ServeOptions, ServeHandle } from './serve'
@@ -9,6 +10,9 @@ import type { RenderOutcome } from './types'
 vi.mock('./run')
 
 const VERSIONS = { kitVersion: 'kit-test', engineVersion: 'engine-test' }
+
+/** What the CLI hands the server by default: everything except the command sink. */
+const ALLOWED_SINKS = ['volume', 'webhook', 's3']
 
 const DEPS: RunJobDeps = {
   bundlePath: '/nowhere/headless.html',
@@ -51,6 +55,7 @@ async function start(overrides: Partial<ServeOptions> = {}): Promise<ServeHandle
     port: 0,
     host: '127.0.0.1',
     deps: DEPS,
+    allowedSinks: ALLOWED_SINKS,
     versions: VERSIONS,
     log: (line) => logs.push(line),
     ...overrides,
@@ -70,6 +75,39 @@ function post(body: string, headers: Record<string, string> = {}): Promise<Respo
 
 function postSpec(spec: Record<string, unknown>): Promise<Response> {
   return post(JSON.stringify(spec))
+}
+
+interface RawRequest {
+  /** The response status, or `0` when the socket died before one arrived. */
+  status: Promise<number>
+  /** Hangs up the way a client that gave up does — a reset, not a graceful close. */
+  destroy(): void
+}
+
+/**
+ * A `POST /render` over `node:http` rather than `fetch`, because these tests need to destroy
+ * the socket at a chosen moment and read the server's reaction to it.
+ */
+function postRaw(spec: Record<string, unknown>): RawRequest {
+  const body = JSON.stringify(spec)
+  const req = http.request({
+    host: '127.0.0.1',
+    port: Number(new URL(base).port),
+    path: '/render',
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+  })
+  const status = new Promise<number>((resolve) => {
+    req.on('response', (res) => {
+      res.resume()
+      res.on('end', () => resolve(res.statusCode ?? 0))
+    })
+    // A destroyed request rejects with ECONNRESET; that is the expected outcome here, not a
+    // failure, so it resolves to 0 rather than becoming an unhandled rejection.
+    req.on('error', () => resolve(0))
+  })
+  req.end(body)
+  return { status, destroy: () => req.destroy() }
 }
 
 /** Polls until `check` stops throwing, so tests never depend on a fixed number of ticks. */
@@ -128,7 +166,14 @@ describe('GET /healthz', () => {
 
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/json')
-    expect(await res.json()).toEqual({ ok: true, versions: VERSIONS, inFlight: 0, queued: 0, maxQueue: 64 })
+    expect(await res.json()).toEqual({
+      ok: true,
+      versions: VERSIONS,
+      inFlight: 0,
+      queued: 0,
+      maxQueue: 64,
+      allowedSinks: ALLOWED_SINKS,
+    })
   })
 
   it('counts the jobs that are running and waiting', async () => {
@@ -161,7 +206,63 @@ describe('GET /healthz', () => {
     const res = await fetch(`${base}/healthz`, { method: 'POST' })
 
     expect(res.status).toBe(405)
+    // HEAD is served too, so an Allow that named only GET would be a lie.
+    expect(res.headers.get('allow')).toBe('GET, HEAD')
     expect(await res.json()).toMatchObject({ error: expect.stringContaining('method') })
+  })
+
+  it('reports the sinks this server will accept', async () => {
+    await start({ allowedSinks: ['volume', 'command'] })
+
+    expect(await (await fetch(`${base}/healthz`)).json()).toMatchObject({
+      allowedSinks: ['volume', 'command'],
+    })
+  })
+})
+
+describe('the sink allow-list', () => {
+  it('refuses a sink this server does not enable, before the job is queued', async () => {
+    await start({ allowedSinks: ['volume', 'webhook', 's3'] })
+
+    const res = await postSpec(
+      validSpec('job-1', { output: { sink: 'command', config: { command: '/usr/bin/true' } } }),
+    )
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: 'sink "command" is not enabled on this server (HEADLESS_SINKS)',
+    })
+    expect(runJob).not.toHaveBeenCalled()
+    // Nothing was enqueued, so the refusal left no residue in the counters.
+    await waitForHealth({ inFlight: 0, queued: 0 })
+  })
+
+  it('accepts the same sink once it is enabled', async () => {
+    await start({ allowedSinks: ['volume', 'command'] })
+
+    const res = await postSpec(
+      validSpec('job-1', { output: { sink: 'command', config: { command: '/usr/bin/true' } } }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(runJob).toHaveBeenCalledTimes(1)
+  })
+
+  it('still refuses an invalid spec before it looks at the sink', async () => {
+    await start({ allowedSinks: ['volume'] })
+
+    const res = await postSpec(validSpec('job-1', { options: { format: 'gif' } }))
+
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('run deps', () => {
+  it('takes signal handling away from Playwright so the drain owns shutdown', async () => {
+    await start()
+
+    expect((await postSpec(validSpec('job-1'))).status).toBe(200)
+    expect(vi.mocked(runJob).mock.calls[0][1].handleSignals).toBe(false)
   })
 })
 
@@ -174,7 +275,7 @@ describe('POST /render', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual(outcomeFor('job-1'))
     expect(vi.mocked(runJob).mock.calls[0][0].jobId).toBe('job-1')
-    expect(vi.mocked(runJob).mock.calls[0][1]).toBe(DEPS)
+    expect(vi.mocked(runJob).mock.calls[0][1]).toMatchObject(DEPS)
   })
 
   it('still returns 200 when the job itself failed — the request succeeded, the job did not', async () => {
@@ -427,6 +528,28 @@ describe('close()', () => {
     expect(closed).toBe(true)
   })
 
+  it('stops answering /healthz once the drain has begun', async () => {
+    const gate = deferred<RenderOutcome>()
+    const started: string[] = []
+    vi.mocked(runJob).mockImplementation(async (spec) => {
+      started.push(spec.jobId)
+      return gate.promise
+    })
+    const server = await start({ concurrency: 1 })
+
+    const first = postSpec(validSpec('job-a'))
+    await waitFor(() => expect(started).toEqual(['job-a']))
+    const closing = server.close()
+
+    // A draining server has stopped accepting connections, so a readiness probe cannot even
+    // connect — which is the signal. It never answers "ok" while it is on the way out.
+    await expect(fetch(`${base}/healthz`)).rejects.toThrow()
+
+    gate.resolve(outcomeFor('job-a'))
+    expect((await first).status).toBe(200)
+    await closing
+  })
+
   it('is safe to call twice', async () => {
     const server = await start()
 
@@ -448,5 +571,61 @@ describe('handler failures', () => {
 
     // The process is still up and the server still answers.
     expect((await fetch(`${base}/healthz`)).status).toBe(200)
+  })
+})
+
+describe('a client that hangs up', () => {
+  it('drops its job from the queue and never starts it', async () => {
+    const gates = new Map<string, Deferred<RenderOutcome>>()
+    const started: string[] = []
+    vi.mocked(runJob).mockImplementation(async (spec) => {
+      started.push(spec.jobId)
+      const gate = deferred<RenderOutcome>()
+      gates.set(spec.jobId, gate)
+      return gate.promise
+    })
+    await start({ concurrency: 1 })
+
+    const first = postSpec(validSpec('job-a'))
+    await waitFor(() => expect(started).toEqual(['job-a']))
+    const second = postRaw(validSpec('job-b'))
+    await waitForHealth({ inFlight: 1, queued: 1 })
+
+    second.destroy()
+    expect(await second.status).toBe(0)
+    await waitForHealth({ inFlight: 1, queued: 0 })
+    await waitFor(() => expect(logs).toContain('POST /render aborted by client'))
+
+    gates.get('job-a')?.resolve(outcomeFor('job-a'))
+    expect((await first).status).toBe(200)
+    await settle()
+
+    // The slot job-a freed went to nobody: job-b was gone before it could claim it.
+    expect(started).toEqual(['job-a'])
+    expect(runJob).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets a job that already started finish, because half a render is worse than a wasted one', async () => {
+    const gates = new Map<string, Deferred<RenderOutcome>>()
+    const started: string[] = []
+    vi.mocked(runJob).mockImplementation(async (spec) => {
+      started.push(spec.jobId)
+      const gate = deferred<RenderOutcome>()
+      gates.set(spec.jobId, gate)
+      return gate.promise
+    })
+    await start({ concurrency: 1 })
+
+    const only = postRaw(validSpec('job-a'))
+    await waitFor(() => expect(started).toEqual(['job-a']))
+
+    only.destroy()
+    expect(await only.status).toBe(0)
+    await settle()
+
+    gates.get('job-a')?.resolve(outcomeFor('job-a'))
+    await waitForHealth({ inFlight: 0, queued: 0 })
+    expect(runJob).toHaveBeenCalledTimes(1)
+    expect(logs).not.toContain('POST /render aborted by client')
   })
 })

@@ -40,8 +40,17 @@ export interface ServeOptions {
   concurrency?: number
   /** How many jobs may wait for a slot before `/render` answers 429. Default 64. */
   maxQueue?: number
-  /** Passed straight through to `runJob`, unchanged, for every job. */
+  /**
+   * Passed through to `runJob` for every job — except `handleSignals`, which the server forces
+   * to `false` whatever this says, because its own drain owns shutdown.
+   */
   deps: RunJobDeps
+  /**
+   * Which `output.sink` values `POST /render` will accept; anything else is 403 before it is
+   * queued. A remote caller picks the sink, so this is the difference between "renders video"
+   * and "runs whatever program you name" — see the CLI's `HEADLESS_SINKS`.
+   */
+  allowedSinks: string[]
   /** Reported by `/healthz`; the kit.json contents when the CLI has one. */
   versions: Record<string, unknown>
   /** Diagnostics sink; defaults to stderr, because stdout belongs to the one-shot CLI. */
@@ -72,8 +81,25 @@ class QueueFullError extends Error {
   }
 }
 
+/** Rejection for a queued job whose client hung up before the job ever started. */
+class ClientGoneError extends Error {
+  constructor() {
+    super('client disconnected before the job started')
+  }
+}
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+interface Limited<T> {
+  /** Settles with the task, or rejects with `ClientGoneError` if `cancel` got there first. */
+  promise: Promise<T>
+  /**
+   * Takes the task back out of the queue if it has not started. True when it did — false once
+   * the task is running, because work in flight is finished, not abandoned.
+   */
+  cancel(): boolean
 }
 
 interface Limiter {
@@ -81,7 +107,7 @@ interface Limiter {
    * Runs `task` when a slot frees up. Rejects with `QueueFullError` when there is no room to
    * wait, or `ShuttingDownError` if shutdown got there first — neither enqueues anything.
    */
-  run<T>(task: () => Promise<T>): Promise<T>
+  run<T>(task: () => Promise<T>): Limited<T>
   readonly inFlight: number
   readonly queued: number
   /** Rejects everything still waiting; running tasks are left alone to finish. */
@@ -117,8 +143,12 @@ function createLimiter(concurrency: number, maxQueue: number): Limiter {
     get queued() {
       return queue.length
     },
-    run<T>(task: () => Promise<T>): Promise<T> {
-      return new Promise<T>((resolve, reject) => {
+    run<T>(task: () => Promise<T>): Limited<T> {
+      // Set only for a task that actually made it into the queue; a refused one has nothing
+      // to cancel. The executor runs synchronously, so it is assigned before `run` returns.
+      let entry: Waiting | undefined
+
+      const promise = new Promise<T>((resolve, reject) => {
         if (closed) {
           reject(new ShuttingDownError())
           return
@@ -129,7 +159,7 @@ function createLimiter(concurrency: number, maxQueue: number): Limiter {
           reject(new QueueFullError(queue.length))
           return
         }
-        queue.push({
+        entry = {
           reject,
           start: () => {
             // A task that throws synchronously must free its slot like any other, so it is
@@ -145,9 +175,24 @@ function createLimiter(concurrency: number, maxQueue: number): Limiter {
               pump()
             })
           },
-        })
+        }
+        queue.push(entry)
         pump()
       })
+
+      return {
+        promise,
+        cancel: () => {
+          if (entry === undefined) return false
+          // A started task has already been shifted off the queue, so this is also the test
+          // for "too late": indexOf is -1 and the task is left alone to finish.
+          const index = queue.indexOf(entry)
+          if (index === -1) return false
+          queue.splice(index, 1)
+          entry.reject(new ClientGoneError())
+          return true
+        },
+      }
     },
     shutdown() {
       closed = true
@@ -198,7 +243,8 @@ function isJsonRequest(req: http.IncomingMessage): boolean {
 /**
  * Starts the HTTP service: the same `runJob` the one-shot CLI drives, behind two routes and a
  * concurrency gate. There is no authentication and none is planned — bind it to loopback or
- * put it behind your own proxy.
+ * put it behind your own proxy. `allowedSinks` is the one thing standing between a reachable
+ * port and arbitrary command execution, so it is required rather than defaulted.
  */
 export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
   const host = opts.host ?? '127.0.0.1'
@@ -206,6 +252,11 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
   const maxQueue = opts.maxQueue ?? DEFAULT_MAX_QUEUE
   const log = opts.log ?? ((line: string) => void process.stderr.write(line + '\n'))
   const limiter = createLimiter(concurrency, maxQueue)
+  const allowedSinks = [...opts.allowedSinks]
+  // The drain below owns shutdown, so Playwright must not race it by killing the browser (and,
+  // on SIGINT, the process) the moment the first signal lands. Forced here rather than left to
+  // the caller: close()'s promise to finish in-flight renders is only true if this holds.
+  const runDeps: RunJobDeps = { ...opts.deps, handleSignals: false }
 
   let closing = false
   let closePromise: Promise<void> | undefined
@@ -221,7 +272,7 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
   }
 
   const send = (res: http.ServerResponse, status: number, body: unknown): void => {
-    if (res.writableEnded || res.headersSent) return
+    if (res.writableEnded || res.headersSent || res.destroyed) return
     const headers: Record<string, string> = { ...JSON_HEADERS }
     // Once shutdown has begun, no socket may be kept alive: an idle keep-alive connection
     // would hold the server open and `close()` would never resolve.
@@ -263,17 +314,48 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
       return 400
     }
 
+    // Decided before anything is queued: a sink this server does not enable is a refusal, not
+    // a job that fails later. The caller picks the sink, so this is the whole security boundary
+    // between "renders video" and "runs the program you named".
+    if (!allowedSinks.includes(spec.output.sink)) {
+      send(res, 403, withWarnings({
+        error: `sink "${spec.output.sink}" is not enabled on this server (HEADLESS_SINKS)`,
+      }))
+      return 403
+    }
+
+    // The response is written inside the limiter slot so that "the job finished" and "the
+    // client has its answer" are the same moment — which is what close() waits on.
+    const limited = limiter.run(async () => {
+      const outcome = await runJob(spec, runDeps)
+      // ok:false is still 200: the *request* succeeded, the job did not, and the outcome
+      // says which. A 5xx here would tell a caller to retry the HTTP call, which is wrong.
+      send(res, 200, withWarnings({ ...outcome }))
+    })
+
+    // A client that gives up while its job is still waiting has it taken back out of the queue:
+    // the render could only ever finish into a socket nobody is reading, and the slot is better
+    // spent on a caller still listening. Once it has *started* it is left to finish — the job is
+    // idempotent by jobId, and a half-written output is worse than a wasted one.
+    //
+    // `res` rather than `req`: `req` emits 'close' the moment its body has been read, on every
+    // request, so it says nothing about whether the client is still there. `res` emits 'close'
+    // exactly once either way, and `writableEnded` is what separates "answered" from "gone".
+    // ('aborted' on `req` cannot fire here — the body was fully read to get this far.)
+    let abandoned = false
+    const onClientGone = (): void => {
+      if (res.writableEnded || !limited.cancel()) return
+      abandoned = true
+      log('POST /render aborted by client')
+    }
+    res.on('close', onClientGone)
+
     try {
-      // The response is written inside the limiter slot so that "the job finished" and "the
-      // client has its answer" are the same moment — which is what close() waits on.
-      await limiter.run(async () => {
-        const outcome = await runJob(spec, opts.deps)
-        // ok:false is still 200: the *request* succeeded, the job did not, and the outcome
-        // says which. A 5xx here would tell a caller to retry the HTTP call, which is wrong.
-        send(res, 200, withWarnings({ ...outcome }))
-      })
+      await limited.promise
       return 200
     } catch (err) {
+      // 499, nginx's "client closed request": nobody will read it, it is for the access log.
+      if (abandoned) return 499
       if (err instanceof ShuttingDownError) {
         send(res, 503, { error: err.message })
         return 503
@@ -284,6 +366,8 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
         return 429
       }
       throw err
+    } finally {
+      res.off('close', onClientGone)
     }
   }
 
@@ -300,7 +384,7 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
 
     if (pathname === '/healthz') {
       if (method !== 'GET' && method !== 'HEAD') {
-        res.setHeader('allow', 'GET')
+        res.setHeader('allow', 'GET, HEAD')
         send(res, 405, { error: `method ${method} not allowed on /healthz` })
         return 405
       }
@@ -310,6 +394,7 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
         inFlight: limiter.inFlight,
         queued: limiter.queued,
         maxQueue,
+        allowedSinks,
       })
       return 200
     }
