@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -154,9 +154,60 @@ describe('volume sink', () => {
   })
 })
 
+describe('volume sink cross-device fallback', () => {
+  it('removes the partial destination when the copy fails, rather than leaving a truncated file', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
+    const manifest = fakeManifest({ jobId: 'job-exdev' })
+    const destOutput = path.join(destDir, 'job-exdev.mp4')
+
+    const renameSpy = vi
+      .spyOn(fs, 'rename')
+      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
+    const copySpy = vi.spyOn(fs, 'copyFile').mockImplementation(async () => {
+      // What a real interrupted copy leaves behind: a destination with only some of the bytes.
+      await fs.writeFile(destOutput, Buffer.from('hel'))
+      throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
+    })
+
+    try {
+      const sink = await getSink('volume', { dir: destDir })
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        'no space left on device',
+      )
+    } finally {
+      renameSpy.mockRestore()
+      copySpy.mockRestore()
+    }
+
+    // A half-written render must never be left where a consumer would pick it up as finished.
+    await expect(fs.access(destOutput)).rejects.toThrow()
+  })
+})
+
 describe('command sink', () => {
   it('validates config.command is required', async () => {
     await expect(getSink('command', {})).rejects.toThrow(/command sink requires config\.command \(string\)/)
+  })
+
+  it('rejects a non-object config.env', async () => {
+    await expect(getSink('command', { command: 'echo', env: ['PORT=1'] })).rejects.toThrow(
+      /command sink requires config\.env \(object\) when provided/,
+    )
+  })
+
+  it('rejects config.env values that are not strings', async () => {
+    await expect(getSink('command', { command: 'echo', env: { PORT: 8080 } })).rejects.toThrow(
+      'command sink config.env values must be strings',
+    )
+    await expect(getSink('command', { command: 'echo', env: { FLAG: null } })).rejects.toThrow(
+      'command sink config.env values must be strings',
+    )
+  })
+
+  it('accepts a string-valued config.env', async () => {
+    await expect(getSink('command', { command: 'echo', env: { TOKEN: 'abc' } })).resolves.toBeTruthy()
   })
 
   it('invokes the command with output/manifest paths appended and the env vars set', async () => {

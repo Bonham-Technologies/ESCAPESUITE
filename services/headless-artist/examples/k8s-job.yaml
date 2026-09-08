@@ -19,8 +19,9 @@ spec:
       containers:
         - name: headless-artist
           image: headless-artist:latest
-          # The image's ENTRYPOINT is already `node dist/cli.js render`.
-          args: ["--job", "/in/job.json"]
+          # The image's ENTRYPOINT is `node dist/cli.js`; args are the CLI's own, so the
+          # command name comes first.
+          args: ["render", "--job", "/in/job.json"]
           env:
             # Structured stderr, so a log pipeline can read it.
             - name: HEADLESS_LOG
@@ -82,7 +83,7 @@ spec:
 #
 #         - name: headless-artist
 #           image: headless-artist:latest
-#           args: ["--job", "/in/job.json"]
+#           args: ["render", "--job", "/in/job.json"]
 #           env:
 #             - name: HEADLESS_GPU
 #               value: "true"

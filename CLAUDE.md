@@ -180,13 +180,14 @@ Test counts change frequently as coverage grows; run `pnpm test` for the current
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
-Seven jobs, with `ci-status` as the single required check:
+Eight jobs, with `ci-status` as the single required check:
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
 | `lint-and-typecheck` | Security audit + ESLint + TypeScript (plan, craft, artist, headless-artist) | PRs and pushes |
 | `test` | Unit tests with coverage | PRs and pushes |
 | `build` | Production builds, bundle size report, packs + uploads the headless-artist kit | PRs and pushes |
+| `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
 | `standalone` | Offline single-file builds + standalone E2E | PRs and pushes (E2E half skipped for Dependabot) |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
@@ -208,6 +209,10 @@ Seven jobs, with `ci-status` as the single required check:
 - Playwright browser download and apt system-deps are separate steps, each with
   `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
   instead of hanging the job
+
+**Release** (`.github/workflows/release.yml`):
+- A release is cut by adding a changeset and merging it to `main`, then merging the "Version Packages" PR that `changesets/action` opens in response — that merge tags each changed package and creates a per-package GitHub Release, with the craft/artist standalone HTML and the headless-artist kit tarball attached to their respective releases.
+- `standalone-release.yml` additionally creates a `v<craft version>` release carrying the same standalone HTML and kit tarball assets.
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)

@@ -296,7 +296,7 @@ describe('loadBundle', () => {
     expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
   })
 
-  it('removes the temp dir it created when a video fails to decode', async () => {
+  it('rejects a video with no base64 data, before any temp dir is created', async () => {
     const tmpRoot = await makeTempDir()
     const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
     delete veditor.videos[0].data
@@ -307,5 +307,111 @@ describe('loadBundle', () => {
 
     const entries = await fs.readdir(tmpRoot)
     expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
+  })
+})
+
+describe('loadManifest source validation', () => {
+  /** A manifest dir with the fixture project and its one source file already copied in. */
+  async function makeManifestDir(): Promise<string> {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'project.json'), path.join(dir, 'project.json'))
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    return dir
+  }
+
+  async function writeManifest(dir: string, sources: unknown[]): Promise<string> {
+    const manifestPath = path.join(dir, 'manifest.json')
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify({ project: { $ref: './project.json' }, sources }),
+    )
+    return manifestPath
+  }
+
+  it('rejects a source whose file is a directory, not a regular file', async () => {
+    const dir = await makeManifestDir()
+    await fs.mkdir(path.join(dir, 'a-directory.mp4'))
+    const manifestPath = await writeManifest(dir, [
+      { id: 'src-0', file: 'a-directory.mp4', mimeType: 'video/mp4' },
+    ])
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(/is not a regular file/)
+  })
+
+  it('rejects two sources sharing one id', async () => {
+    const dir = await makeManifestDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'other.mp4'))
+    const manifestPath = await writeManifest(dir, [
+      { id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4' },
+      { id: 'src-0', file: 'other.mp4', mimeType: 'video/mp4' },
+    ])
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow('duplicate source id "src-0"')
+  })
+})
+
+describe('loadBundle video validation', () => {
+  async function writeBundle(dir: string, videos: unknown[]): Promise<string> {
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    veditor.videos = videos
+    const bundlePath = path.join(dir, 'bad.veditor')
+    await fs.writeFile(bundlePath, JSON.stringify(veditor))
+    return bundlePath
+  }
+
+  /** The fixture's first video, as a plain object we can break one field of at a time. */
+  async function fixtureVideo(): Promise<Record<string, unknown>> {
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    return veditor.videos[0]
+  }
+
+  it('rejects a videos entry that is not an object, naming its index', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeBundle(dir, ['src-0'])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow('bundle video #0 must be an object')
+  })
+
+  it('rejects a null videos entry without crashing on a property read', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeBundle(dir, [null])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow('bundle video #0 must be an object')
+  })
+
+  it.each(['id', 'name', 'mimeType', 'data'])('rejects a video missing "%s"', async (field) => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    delete video[field]
+    const bundlePath = await writeBundle(dir, [video])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`bundle video #0 is missing "${field}"`)
+  })
+
+  it('names the offending index when a later video is the broken one', async () => {
+    const dir = await makeTempDir()
+    const good = await fixtureVideo()
+    const broken = await fixtureVideo()
+    delete broken.data
+    const bundlePath = await writeBundle(dir, [good, { ...good, id: 'src-1' }, { ...broken, id: 'src-2' }])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow('bundle video #2 is missing "data"')
+  })
+
+  it('rejects a non-string field that is present', async () => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.mimeType = 42
+    const bundlePath = await writeBundle(dir, [video])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow('bundle video #0 field "mimeType" must be a string')
+  })
+
+  it('rejects two videos sharing one id', async () => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    const bundlePath = await writeBundle(dir, [video, { ...video }])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`duplicate source id "${video.id}"`)
   })
 })

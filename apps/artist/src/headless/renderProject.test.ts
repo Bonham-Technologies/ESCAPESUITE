@@ -168,6 +168,17 @@ describe('renderProjectToFile', () => {
     expect(meta.byteLength).toBe(3)
   })
 
+  it('takes the anchor back out of the document once it has been clicked', async () => {
+    fileInput(['source.mp4'])
+    await renderProjectToFile(fileInputBase())
+
+    // The click has already handed the Blob to the download machinery, so the element has
+    // no further job; leaving it behind would only litter a page the runner may reuse.
+    expect(document.querySelectorAll('a[download]')).toHaveLength(0)
+    // It was still attached at click time -- a detached anchor's click does nothing.
+    expect(clicks[0].inBody).toBe(true)
+  })
+
   it('uses the webm extension for a webm render', async () => {
     fileInput(['source.mp4'])
     const input = fileInputBase()

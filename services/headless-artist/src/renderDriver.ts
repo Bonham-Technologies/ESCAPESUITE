@@ -24,6 +24,18 @@ export interface RenderDriverOptions {
   noSandbox?: boolean
   /** Overall budget for the whole render, launch included. Default 30 minutes. */
   timeoutMs?: number
+  /**
+   * Whether Playwright may install its own SIGINT/SIGTERM/SIGHUP handlers for the browser it
+   * launches. Default `true`, which is right for the one-shot CLI: Ctrl-C during a render
+   * should close Chromium and stop, which is exactly what Playwright's handlers do.
+   *
+   * `serve` sets it to `false`, because there its handlers are actively wrong. They fire on the
+   * *first* signal and tear the browser down (SIGINT then exits the process with 130 outright),
+   * so a server that is supposed to drain — finish the render in flight, answer its client, then
+   * exit — instead kills the job it promised to finish. With this off, the only thing that reacts
+   * to a signal is the CLI's own handler, and the drain owns shutdown.
+   */
+  handleSignals?: boolean
   onProgress?: (percent: number) => void
   /** Diagnostics sink; defaults to stderr so stdout stays clean for the CLI's own output. */
   log?: (line: string) => void
@@ -183,6 +195,11 @@ export async function renderInChromium(
     const browser = await chromium.launch({
       headless: true,
       args: launchArgs(opts),
+      // Explicit rather than left to Playwright's defaults: see `handleSignals`. Whoever owns
+      // the process's shutdown has to be the only one reacting to a signal.
+      handleSIGINT: opts.handleSignals !== false,
+      handleSIGTERM: opts.handleSignals !== false,
+      handleSIGHUP: opts.handleSignals !== false,
       ...(opts.chromiumPath ? { executablePath: opts.chromiumPath } : {}),
     })
 

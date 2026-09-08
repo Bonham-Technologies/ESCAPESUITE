@@ -140,7 +140,10 @@ function downloadBlob(blob: Blob, fileName: string): void {
   anchor.download = fileName
   document.body.appendChild(anchor)
   anchor.click()
-  // Deliberately never revoked: Chromium reads the Blob for as long as the download
+  // The click has handed the URL to the download machinery, which no longer needs the
+  // element; taking it straight back out keeps the page as we found it.
+  anchor.remove()
+  // The object URL is deliberately never revoked: Chromium reads the Blob for as long as the download
   // runs, and a render can outlast any timer we would pick — revoking early truncates
   // the file. One page renders one job and the runner closes the browser context
   // straight after, which frees the Blob with the whole document.

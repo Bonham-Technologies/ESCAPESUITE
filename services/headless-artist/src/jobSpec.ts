@@ -6,6 +6,10 @@ const QUALITIES = ['low', 'medium', 'high']
 const RESOLUTIONS = ['project', 'original', '1080p', '720p', '480p']
 const SINKS = ['volume', 's3', 'webhook', 'command']
 
+/** Every key `parseJobSpec` reads; anything else is a typo worth warning about. */
+const TOP_LEVEL_KEYS = ['jobId', 'input', 'options', 'output']
+const OPTIONS_KEYS = ['format', 'quality', 'resolution', 'timeRange']
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -99,6 +103,28 @@ function parseOutput(value: unknown): JobSpec['output'] {
   }
 
   return { sink: sink as JobSpec['output']['sink'], config }
+}
+
+/**
+ * Dotted paths of fields this parser does not read — `qualitiy`, `options.resoluton` and
+ * friends. A misspelled optional field is otherwise invisible: the job renders happily,
+ * silently ignoring what the caller asked for. Kept separate from `parseJobSpec` so it stays
+ * a warning (never a rejection) and so every entry point — the CLI today, HTTP later — can
+ * surface it in whatever way suits it. Only the two levels the parser itself understands are
+ * walked; `output.config` is the sink's own vocabulary, not this parser's.
+ */
+export function collectUnknownKeys(json: unknown): string[] {
+  if (!isRecord(json)) return []
+
+  const unknown = Object.keys(json).filter((key) => !TOP_LEVEL_KEYS.includes(key))
+
+  if (isRecord(json.options)) {
+    for (const key of Object.keys(json.options)) {
+      if (!OPTIONS_KEYS.includes(key)) unknown.push(`options.${key}`)
+    }
+  }
+
+  return unknown
 }
 
 export function parseJobSpec(json: unknown): JobSpec {

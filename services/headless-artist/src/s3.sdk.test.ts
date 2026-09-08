@@ -105,6 +105,27 @@ describe('s3Sink object metadata', () => {
     expect(manifest.input).toMatchObject({ ContentType: 'application/json' })
   })
 
+  it('never constructs an SDK client when a client is injected', async () => {
+    const { s3Sink } = await import('./s3')
+    const srcDir = await makeTempDir()
+    const outputPath = path.join(srcDir, 'render.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+
+    const sent: unknown[] = []
+    const sink = await s3Sink({ prefix: 'bucket/renders' }, {
+      async send(command: unknown) {
+        sent.push(command)
+        return {}
+      },
+    })
+    await sink.deliver('job-s3', outputPath, fakeManifest())
+
+    expect(sent).toHaveLength(2)
+    // The injected client is the whole transport: the optional dependency is never reached.
+    expect(sdk.state.clientConfigs).toEqual([])
+    expect(sdk.state.commands).toEqual([])
+  })
+
   it('sets video/webm for a webm render', async () => {
     const { s3Sink } = await import('./s3')
     const srcDir = await makeTempDir()

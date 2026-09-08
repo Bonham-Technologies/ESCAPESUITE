@@ -73,7 +73,8 @@ jobs:
               }
             }
 
-  # Attach standalone builds to the GitHub Release when craft or artist is released
+  # Attach standalone builds and the headless-artist kit to the GitHub Release
+  # when craft, artist, or headless-artist is released
   upload-standalone:
     name: Attach Standalone Builds
     runs-on: ubuntu-latest
@@ -81,7 +82,7 @@ jobs:
     needs: release
     if: needs.release.outputs.published == 'true'
     steps:
-      - name: Check if craft or artist was released
+      - name: Check if craft, artist, or headless-artist was released
         id: check-apps
         run: |
           PACKAGES='${{ needs.release.outputs.publishedPackages }}'
@@ -107,23 +108,33 @@ jobs:
             echo "artist_released=false" >> $GITHUB_OUTPUT
           fi
 
+          # Check for headless-artist
+          if echo "$PACKAGES" | grep -q '"name":"@escapesuite/headless-artist"'; then
+            HEADLESS_VERSION=$(echo "$PACKAGES" | jq -r '.[] | select(.name == "@escapesuite/headless-artist") | .version')
+            echo "headless_released=true" >> $GITHUB_OUTPUT
+            echo "headless_version=$HEADLESS_VERSION" >> $GITHUB_OUTPUT
+            echo "headless-artist version: $HEADLESS_VERSION"
+          else
+            echo "headless_released=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         uses: actions/checkout@v7
 
       - name: Setup pnpm
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       - name: Setup Node.js
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: 'pnpm'
 
       - name: Install dependencies
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build standalone versions
@@ -132,8 +143,12 @@ jobs:
         env:
           VITE_BUILD_MODE: standalone
 
+      - name: Build headless-artist kit
+        if: steps.check-apps.outputs.headless_released == 'true'
+        run: pnpm --filter=@escapesuite/headless-artist run pack:kit
+
       - name: Prepare versioned builds
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         run: |
           mkdir -p uploads
 
@@ -153,8 +168,16 @@ jobs:
             ls -la uploads/ESCAPEARTIST*
           fi
 
+          # headless-artist kit
+          if [ "${{ steps.check-apps.outputs.headless_released }}" == "true" ]; then
+            VERSION="${{ steps.check-apps.outputs.headless_version }}"
+            cp "services/headless-artist/dist/escapesuite-headless-artist-${VERSION}.tgz" "uploads/escapesuite-headless-artist-${VERSION}.tgz"
+            echo "Created headless-artist kit for version $VERSION"
+            ls -la uploads/escapesuite-headless-artist*
+          fi
+
       - name: Attach builds to GitHub Release
-        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true'
+        if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         uses: actions/github-script@v9
         with:
           script: |
@@ -207,5 +230,29 @@ jobs:
                   data: content
                 });
                 console.log(`Attached ESCAPEARTIST-${version}.html to release`);
+              }
+            }
+
+            // Upload headless-artist kit if released
+            if ('${{ steps.check-apps.outputs.headless_released }}' === 'true') {
+              const version = '${{ steps.check-apps.outputs.headless_version }}';
+              const tagName = `@escapesuite/headless-artist@${version}`;
+              const release = releases.find(r => r.tag_name === tagName);
+
+              if (release) {
+                const filePath = `uploads/escapesuite-headless-artist-${version}.tgz`;
+                const content = fs.readFileSync(filePath);
+
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  name: `escapesuite-headless-artist-${version}.tgz`,
+                  data: content,
+                  headers: {
+                    'content-type': 'application/gzip'
+                  }
+                });
+                console.log(`Attached escapesuite-headless-artist-${version}.tgz to release`);
               }
             }

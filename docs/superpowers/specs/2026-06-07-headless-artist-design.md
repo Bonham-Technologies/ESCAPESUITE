@@ -1,6 +1,6 @@
 # Headless ARTIST — Server-Side Render Service — Design
 
-Status: **Draft v3 (for review)** · Date: 2026-06-07 · Amended: 2026-08-19 · Owner: Bonham Technologies
+Status: **Draft v3 (for review)** · Date: 2026-06-07 · Amended: 2026-08-19, 2026-09-08 · Owner: Bonham Technologies
 
 > v2 changes (post-review): input is now the customer's plug too — we provide a
 > transport-agnostic **local interface** ("the female end"); S3 and other transports
@@ -198,6 +198,15 @@ Runs inside the container; orchestrates one render. Two modes, same core:
   pool, no persistence — a pure function.
 - **HTTP service (optional):** long-running `POST /render` (+ `GET /healthz`) for brokers
   that prefer an endpoint; adds a small bounded Chromium pool. Same render core/adapters.
+
+> **§6 amendment — 2026-09-08, as built.** The HTTP mode ships with **no Chromium pool**. Every
+> job launches its own browser and tears it down again, exactly as the one-shot CLI does. The
+> pool was traded away for isolation: a wedged or memory-bloated Chromium cannot leak into the
+> next job, and a crash takes one render rather than the queue. The cost is the same ~2 s launch
+> per job that the one-shot path already pays, which is noise against any render worth sending
+> to a server. Concurrency is bounded by a FIFO limiter (`HEADLESS_CONCURRENCY`) with a bounded
+> wait queue (`HEADLESS_MAX_QUEUE`), not by a pool of pages. If per-job launch cost ever
+> dominates — many very short clips — a pool is the thing to revisit, behind a measurement.
 
 Flow: parse/validate job → Input Loader → launch/reuse a headless Chromium page with bundle A (Playwright, pinned browser) →
 `renderProject` + progress → bytes → Output Sink (+ verification manifest) → structured
