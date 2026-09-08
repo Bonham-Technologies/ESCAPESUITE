@@ -28,11 +28,11 @@
     "clean": "turbo clean && rm -rf node_modules && rm -rf dist",
     "changeset": "changeset",
     "changeset:version": "changeset version",
-    "changeset:publish": "changeset tag",
-    "release": "changeset version && changeset tag"
+    "changeset:publish": "changeset git-tag",
+    "release": "changeset version && changeset git-tag"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.1",
+    "@changesets/cli": "^3.0.2",
     "turbo": "^2.10.12"
   },
   "engines": {
