@@ -408,6 +408,16 @@ not a reproducibility claim — re-rendering the same project will not generally
 bytes, and a hardware encoder certainly won't match a software one. For cross-encoder checks
 compare `width`, `height`, `durationSec` and the picture itself.
 
+To verify the *content* rather than the transport, probe the file you received and compare it
+against the manifest — `ffprobe -v error -show_streams -show_format out/acme-2026-09-07-0001.mp4`
+reports the codec (`h264` for MP4, `vp9` for WebM), the frame size, and the duration, which
+should match `width`, `height` and `durationSec`. This kit's own suite runs exactly those checks
+on every CI run: it renders a known fixture to MP4 and to WebM, asserts the codec, the frame
+size, the frame count and the duration against golden expectations, decodes a middle frame and
+asserts its mean colour still matches the source, and re-hashes the delivered file to confirm the
+manifest's `sha256` and `byteLength` describe the bytes that were actually written. Those tests
+need `ffmpeg` and `ffprobe` on `PATH` and skip themselves (loudly) when the binaries are absent.
+
 ## Exit codes and the stdout/stderr contract
 
 | Exit | Meaning | stdout |
