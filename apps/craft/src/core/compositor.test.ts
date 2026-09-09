@@ -3,9 +3,11 @@ import { describe, it, expect, vi } from 'vitest'
 // Skip tests that require DOM features not available in jsdom
 // These tests verify the compositor logic without instantiating the class
 
-// Mock requestAnimationFrame
+// Mock requestAnimationFrame. The cancel side has to really clear the timer:
+// the render loop reschedules itself, so a no-op cancel would leave it running
+// after the test that started it - firing into a torn-down environment.
 vi.stubGlobal('requestAnimationFrame', vi.fn((cb) => setTimeout(cb, 16)))
-vi.stubGlobal('cancelAnimationFrame', vi.fn())
+vi.stubGlobal('cancelAnimationFrame', vi.fn((id) => clearTimeout(id)))
 
 describe('Compositor - module exports', () => {
   it('exports Compositor class', async () => {
@@ -235,6 +237,9 @@ describe('Compositor - getOutputStream', () => {
     const stream = compositor.start(30)
     expect(compositor.getOutputStream()).toBe(stream)
 
+    // start() spun up the render loop; stop it before the mocked
+    // document.createElement (and the mock canvas it hands back) goes away.
+    compositor.stop()
     vi.restoreAllMocks()
   })
 })

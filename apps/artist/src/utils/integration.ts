@@ -1,7 +1,7 @@
 // Integration API for embedding video editor in other applications
 // Supports URL parameters and PostMessage communication
 
-import { isEmbedded } from '@escapesuite/shared/config';
+import { isEmbedded, parseHostOrigin } from '@escapesuite/shared/config';
 import type { IntegrationMessage, Project } from '../store/types';
 
 // Longest project name accepted from the `title` URL parameter.
@@ -9,12 +9,40 @@ const MAX_TITLE_LENGTH = 120;
 
 type MessageHandler = (message: IntegrationMessage) => void;
 
+// The origin a host named with `?hostOrigin=`, or null when it named none.
+// `undefined` means "not resolved yet": the URL is read once, on first use, and
+// the answer is reused for the life of the page.
+let hostOrigin: string | null | undefined;
+
+function getHostOrigin(): string | null {
+  if (hostOrigin === undefined) {
+    hostOrigin = parseHostOrigin(window.location.search);
+  }
+  return hostOrigin;
+}
+
+/** Test seam: pin the host origin without going through window.location. */
+export function __setHostOriginForTests(origin: string | null): void {
+  hostOrigin = origin;
+}
+
 /**
  * Initialize PostMessage listener
  */
 export function initIntegration(handler: MessageHandler): () => void {
-
   const listener = (event: MessageEvent) => {
+    // Only the embedding parent drives the editor. Without `?hostOrigin=` that
+    // is the whole check — any origin may frame us, and the framer is the only
+    // window whose messages we act on. With it, the host has also named itself,
+    // so messages arriving from anywhere else are dropped.
+    if (event.source !== window.parent) {
+      return;
+    }
+    const expectedOrigin = getHostOrigin();
+    if (expectedOrigin && event.origin !== expectedOrigin) {
+      return;
+    }
+
     // Validate message structure
     if (!event.data || typeof event.data !== 'object' || !event.data.type) {
       return;
@@ -44,7 +72,9 @@ export function initIntegration(handler: MessageHandler): () => void {
  */
 export function sendMessage(message: IntegrationMessage): void {
   if (isEmbedded()) {
-    window.parent.postMessage(message, '*');
+    // A host that named itself with `?hostOrigin=` gets its traffic addressed to
+    // that origin; otherwise the message goes to whoever is framing us.
+    window.parent.postMessage(message, getHostOrigin() ?? '*');
   }
 
   // Also dispatch as custom event for same-window integration
@@ -63,6 +93,7 @@ export function parseUrlParams(): {
   loadVideoId: string | null;
   suppressRestore: boolean;
   title: string | null;
+  hostOrigin: string | null;
 } {
   const params = new URLSearchParams(window.location.search);
 
@@ -83,11 +114,23 @@ export function parseUrlParams(): {
   const suppressRestoreParam = params.get('suppressRestore');
   const suppressRestore = suppressRestoreParam === '1' || suppressRestoreParam === 'true';
 
-  // Initial project name supplied by the host
-  const rawTitle = params.get('title')?.trim().slice(0, MAX_TITLE_LENGTH) ?? '';
+  // Initial project name supplied by the host. Trimmed again after the cut so a
+  // slice that lands on a space does not leave a trailing one.
+  const rawTitle = params.get('title')?.trim().slice(0, MAX_TITLE_LENGTH).trim() ?? '';
   const title = rawTitle || null;
 
-  return { videos, projectData, autoPlay, loadVideoId, suppressRestore, title };
+  // The host's own origin, for addressing postMessage traffic (see sendMessage).
+  hostOrigin = parseHostOrigin(window.location.search);
+
+  return {
+    videos,
+    projectData,
+    autoPlay,
+    loadVideoId,
+    suppressRestore,
+    title,
+    hostOrigin,
+  };
 }
 
 /**
@@ -214,15 +257,22 @@ export function generateShareUrl(
  * - LOAD_VIDEO: { url: string } - Load a video from URL
  * - LOAD_PROJECT: { data: Project } - Load a project
  * - EXPORT: { format: 'webm' | 'mp4' } - Trigger export
+ *   [documented but not currently implemented - App has no handler for it]
  * - GET_STATE: {} - Request current state
  * - SET_THEME: { theme: 'light' | 'dark' | 'system' } - Set theme preference
  * - GET_THEME: {} - Request current theme state
+ *
+ * Only messages whose `event.source` is `window.parent` are acted on, and when
+ * the host named itself with `?hostOrigin=` its `event.origin` must match too.
  *
  * Outgoing messages (to parent):
  * - READY: {} - Editor is initialized and ready
  * - VIDEO_LOADED: { id: string, name: string } - Video was loaded
  * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm', name: string } - Export finished
  * - EXPORT_PROGRESS: { progress: number, message: string } - Export progress
+ *   [documented but not currently implemented - nothing sends it]
+ * - PROJECT_SAVED: {} - Project was saved
+ *   [documented but not currently implemented - nothing sends it]
  * - STATE: { project: Project, videos: SourceVideo[] } - Current state
  * - ERROR: { message: string, code: string } - Error occurred
  * - THEME_CHANGED: { preference: string, resolved: string } - Theme was changed
@@ -236,14 +286,28 @@ export function generateShareUrl(
  *   ESCAPEARTIST itself at VITE_EDITOR_URL (default /artist/) with
  *   ?loadVideo=<id>. The id addresses a record in the shared IndexedDB
  *   ('video-editor-db'), so the host must point its editor at the same origin.
+ *   CRAFT's header "Open Editor" button is deliberately NOT routed through the
+ *   host - it still opens the editor itself, embedded or not. Only "Send to
+ *   Editor", which hands over a specific recording, becomes a message.
  *
  * URL parameters (read once at startup, see parseUrlParams):
  * - video=<url> - Load a video from a URL (repeatable)
  * - project=<base64> - Load a base64-encoded project
+ *   [documented but not currently implemented - parsed, never applied]
  * - autoplay=true - Start playback once loaded
+ *   [documented but not currently implemented - parsed, never applied]
  * - loadVideo=<id> - Load a recording from IndexedDB (ESCAPECRAFT handoff)
- * - suppressRestore=1|true - Skip the "Resume Previous Session?" prompt
- *   (the saved session is left in storage)
+ * - suppressRestore=1|true - Skip the "Resume Previous Session?" prompt.
+ *   ESCAPEARTIST neither offers nor writes the saved session under this flag:
+ *   the session autosave is off too, so a host-driven session leaves whatever
+ *   was in storage exactly as it found it.
  * - title=<name> - Initial project name (trimmed, max 120 chars); applied only
  *   when the project has not been named by project data or a restored session
+ * - hostOrigin=<origin> - The host's own origin, e.g. https://host.example.
+ *   Recommended for production hosts: outbound posts are addressed to it
+ *   instead of '*', and inbound messages from any other origin are ignored.
+ *   It protects the *host's* deployment, not against being framed - a hostile
+ *   page that frames the app also controls this URL and would simply supply
+ *   its own origin. Refusing to be framed is
+ *   `Content-Security-Policy: frame-ancestors` on the deployment.
  */

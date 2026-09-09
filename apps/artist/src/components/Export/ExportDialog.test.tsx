@@ -127,6 +127,13 @@ describe('ExportDialog', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // clearAllMocks wipes call history but keeps implementations, so a mock a
+    // previous test taught to reject or capture would leak into the next one.
+    mockExportToWebM.mockReset()
+    mockExportToWebM.mockResolvedValue(new Blob())
+    mockExportToMP4.mockReset()
+    mockExportToMP4.mockResolvedValue(new Blob())
+    mockSendMessage.mockReset()
     mockGetSetting.mockResolvedValue(undefined)
   })
 
@@ -527,6 +534,29 @@ describe('ExportDialog', () => {
       })
 
       expect(mockSendMessage).not.toHaveBeenCalled()
+    })
+
+    it('still completes the export when the host channel throws', async () => {
+      // The file has already been downloaded by the time the host is told about
+      // it — a broken host channel must not turn a finished export into a
+      // failure.
+      mockExportToWebM.mockResolvedValue(new Blob(['video-bytes'], { type: 'video/webm' }))
+      mockSendMessage.mockImplementation(() => {
+        throw new Error('host channel is gone')
+      })
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText('Export complete!')).toBeInTheDocument()
+      })
+      expect(screen.queryByText(/host channel is gone/i)).not.toBeInTheDocument()
+      expect(errorLog).toHaveBeenCalled()
+
+      errorLog.mockRestore()
     })
 
     it('does not send EXPORT_COMPLETE when the export is cancelled', async () => {

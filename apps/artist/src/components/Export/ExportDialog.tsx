@@ -129,11 +129,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      // Hand the finished file to an embedding host (no-op when not embedded)
-      sendMessage({
-        type: 'EXPORT_COMPLETE',
-        payload: { blob, format: extension, name: fileName },
-      });
+      // Hand the finished file to an embedding host (no-op when not embedded).
+      // The download above has already happened, so a host channel that throws
+      // (a closed frame, a rejected target origin) must not fail the export.
+      try {
+        sendMessage({
+          type: 'EXPORT_COMPLETE',
+          payload: { blob, format: extension, name: fileName },
+        });
+      } catch (hostError) {
+        console.error('Failed to notify host of completed export:', hostError);
+      }
 
       // Calculate total export duration from clips
       const totalDuration = clips.reduce((max, clip) => {

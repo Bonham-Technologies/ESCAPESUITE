@@ -137,11 +137,21 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   successful export (`name` is the download filename; not sent on failure or cancellation).
 - **CRAFT → host**: `{ type: 'SEND_TO_EDITOR', payload: { id } }` when embedded, instead of the
   `window.open()` it uses standalone. `id` addresses the recording in the shared IndexedDB.
+  CRAFT's header "Open Editor" button is deliberately *not* routed through the host — it still
+  opens the editor itself when embedded. Only "Send to Editor" becomes a message.
 - **URL params (ARTIST)**: `?video=url` to preload, `?project=base64` for state,
   `?loadVideo=<id>` for the CRAFT handoff, `?suppressRestore=1` to skip the
-  "Resume Previous Session?" prompt (the saved session is left in storage), and
-  `?title=<name>` to name the project (trimmed, max 120 chars; applied only while the name is
-  still the default `Untitled Project`).
+  "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
+  the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
+  applied only while the name is still the default `Untitled Project`).
+- **`?hostOrigin=<origin>`** (both apps): the host's own origin, e.g. `https://host.example`.
+  Recommended for production hosts. Outbound posts are addressed to it instead of `'*'`, and
+  ARTIST ignores inbound messages from anywhere else. It protects the **host's** deployment,
+  not against being framed — a hostile page that frames the app also controls the URL and would
+  supply its own origin; refusing to be framed is `Content-Security-Policy: frame-ancestors` on
+  the deployment. Parsed by `parseHostOrigin()` in `packages/shared/src/config`.
+- **Documented but not currently implemented**: inbound `EXPORT`, outbound `EXPORT_PROGRESS` and
+  `PROJECT_SAVED`, and the `?project=` / `?autoplay=` URL params. See `apps/artist/CLAUDE.md`.
 - **`VITE_EDITOR_URL`** (build-time, CRAFT): where standalone CRAFT opens the editor.
   Defaults to `/artist/`; normalised to a single trailing slash.
 - Proved end to end in a real iframe by `apps/e2e/tests/integration/host-embedding.spec.ts`.

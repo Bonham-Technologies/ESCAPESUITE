@@ -63,9 +63,21 @@ The editor can be embedded in other applications via:
 - **PostMessage**: Bidirectional communication with parent window
 - **URL parameters**: parsed once at startup by `parseUrlParams()` (later URL changes are ignored; `App` holds the parsed result in state)
 
-Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`, `GET_THEME` (inbound); `READY`, `VIDEO_LOADED`, `STATE`, `EXPORT_COMPLETE`, `EXPORT_PROGRESS`, `ERROR`, `THEME_CHANGED`, `THEME_STATE` (outbound)
+Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`, `GET_THEME` (inbound); `READY`, `VIDEO_LOADED`, `STATE`, `EXPORT_COMPLETE`, `EXPORT_PROGRESS`, `PROJECT_SAVED`, `ERROR`, `THEME_CHANGED`, `THEME_STATE` (outbound)
 
-`sendMessage()` posts to the parent only when `isEmbedded()` (from `@escapesuite/shared/config`) is true; it always dispatches a `videoeditor:message` CustomEvent for same-window hosts.
+**Documented but not currently implemented** — these appear in the protocol comment and in the `IntegrationMessage` union, but nothing implements them today; treat them as reserved names, not as a contract a host can rely on:
+
+| Name | Status |
+|------|--------|
+| inbound `EXPORT` | `App`'s handler has no case for it |
+| outbound `EXPORT_PROGRESS` | nothing sends it |
+| outbound `PROJECT_SAVED` | nothing sends it |
+| `?project=<base64>` | parsed by `parseUrlParams`, never applied |
+| `?autoplay=true` | parsed by `parseUrlParams`, never applied |
+
+`sendMessage()` posts to the parent only when `isEmbedded()` (from `@escapesuite/shared/config`) is true; it always dispatches a `videoeditor:message` CustomEvent for same-window hosts. The post is addressed to `?hostOrigin=` when the host supplied a valid one, and to `'*'` otherwise.
+
+**Inbound message filtering**: `initIntegration`'s listener acts only on events whose `event.source` is `window.parent` — the framing window is the only one that drives the editor. When `?hostOrigin=` is set, `event.origin` must match it as well.
 
 **Outgoing `EXPORT_COMPLETE`**: sent from `ExportDialog` right after a successful export (alongside the normal browser download, which is unchanged). Not sent when the export fails or is cancelled.
 
@@ -79,11 +91,12 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`,
 | Param | Effect |
 |-------|--------|
 | `?video=<url>` | Load a video from a URL (repeatable) |
-| `?project=<base64>` | Base64-encoded project state |
-| `?autoplay=true` | Start playback once loaded |
+| `?project=<base64>` | Base64-encoded project state — *documented but not currently implemented* (parsed, never applied) |
+| `?autoplay=true` | Start playback once loaded — *documented but not currently implemented* (parsed, never applied) |
 | `?loadVideo=<id>` | Load a recording from IndexedDB (ESCAPECRAFT handoff) |
-| `?suppressRestore=1` | Skip the "Resume Previous Session?" prompt. Accepts `1` or `true`. The saved session is **left in storage** (nothing is cleared) |
-| `?title=<name>` | Initial project name. Trimmed, capped at 120 chars, blank ignored. Applied only while the project name is still the default `'Untitled Project'`, so it never overrides a name from `?project=` data or a restored session |
+| `?suppressRestore=1` | Skip the "Resume Previous Session?" prompt. Accepts `1` or `true`. ESCAPEARTIST **neither offers nor writes** the saved session under this flag — the session autosave is switched off too, so a host-driven session leaves storage exactly as it found it |
+| `?title=<name>` | Initial project name. Trimmed, capped at 120 chars, trimmed again after the cut, blank ignored. Applied only while the project name is still the default `'Untitled Project'`, so it never overrides a name from `?project=` data or a restored session. `clearHistory()` runs right after, so the host naming the project is not an undo step |
+| `?hostOrigin=<origin>` | The host's own origin, e.g. `https://host.example`. **Recommended for production hosts.** Must be a bare origin (a URL whose serialisation equals its own origin); anything else is ignored with one console warning. Outbound posts go to it instead of `'*'`, and inbound messages from any other origin are dropped. It protects the **host's** deployment, *not* against being framed — a hostile page that frames the app also controls this URL and would just supply its own origin. Refusing to be framed is `Content-Security-Policy: frame-ancestors` on the deployment serving the app |
 
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)

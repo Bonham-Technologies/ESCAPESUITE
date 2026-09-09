@@ -261,6 +261,10 @@ function App() {
   useEffect(() => {
     if (!sessionRestored) return;
 
+    // ?suppressRestore=1 means the host drives its own state: ESCAPEARTIST
+    // neither offers the saved session nor writes over it.
+    if (urlParams.suppressRestore) return;
+
     const timeoutId = setTimeout(() => {
       const session: SessionState = {
         project,
@@ -274,7 +278,7 @@ function App() {
     }, AUTO_SAVE_DELAY);
 
     return () => clearTimeout(timeoutId);
-  }, [sessionRestored, project, sourceVideos, currentTime, selectedClipId, zoom]);
+  }, [sessionRestored, urlParams.suppressRestore, project, sourceVideos, currentTime, selectedClipId, zoom]);
 
   // Handle zoom
   const handleZoomIn = useCallback(() => {
@@ -599,12 +603,16 @@ function App() {
           }
           break;
 
-        case 'GET_STATE':
+        case 'GET_STATE': {
+          // Read the store now — this handler is installed once on mount, so
+          // the closed-over project/sourceVideos would be forever stale.
+          const state = useEditorStore.getState();
           sendMessage({
             type: 'STATE',
-            payload: { project, videos: sourceVideos },
+            payload: { project: state.project, videos: state.sourceVideos },
           });
           break;
+        }
 
         case 'SET_THEME':
           if (message.payload && typeof message.payload === 'object' && 'theme' in message.payload) {
@@ -687,6 +695,9 @@ function App() {
       const current = useEditorStore.getState().project;
       if (current.name === DEFAULT_PROJECT_NAME) {
         setProject({ ...current, name: title, modified: Date.now() });
+        // Naming the project is the host's doing, not an edit — leave nothing
+        // for the user to undo back past (handleRestoreSession does the same).
+        useEditorStore.getState().clearHistory();
       }
     }
 

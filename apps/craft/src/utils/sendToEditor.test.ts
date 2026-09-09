@@ -8,9 +8,19 @@ vi.mock('./analytics', () => ({
   },
 }));
 
+/** Point window.location.search at a query string for one test. */
+function withSearch(search: string): void {
+  Object.defineProperty(window, 'location', {
+    value: { ...window.location, search },
+    writable: true,
+    configurable: true,
+  });
+}
+
 describe('sendToEditor', () => {
   let originalParent: typeof window.parent;
   let originalOpen: typeof window.open;
+  let originalLocation: Location;
   let postMessage: ReturnType<typeof vi.fn>;
   let openSpy: ReturnType<typeof vi.fn>;
 
@@ -18,6 +28,7 @@ describe('sendToEditor', () => {
     vi.clearAllMocks();
     originalParent = window.parent;
     originalOpen = window.open;
+    originalLocation = window.location;
     postMessage = vi.fn();
     openSpy = vi.fn();
     window.open = openSpy;
@@ -26,6 +37,11 @@ describe('sendToEditor', () => {
   afterEach(() => {
     Object.defineProperty(window, 'parent', {
       value: originalParent,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
       writable: true,
       configurable: true,
     });
@@ -55,6 +71,30 @@ describe('sendToEditor', () => {
       );
       expect(openSpy).not.toHaveBeenCalled();
       expect(result).toBe('posted');
+    });
+
+    it('addresses the post at a valid hostOrigin', () => {
+      withSearch(`?hostOrigin=${encodeURIComponent('https://host.example')}`);
+
+      sendToEditor('abc123');
+
+      expect(postMessage).toHaveBeenCalledWith(
+        { type: 'SEND_TO_EDITOR', payload: { id: 'abc123' } },
+        'https://host.example'
+      );
+    });
+
+    it('falls back to the wildcard when hostOrigin is invalid', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      withSearch(`?hostOrigin=${encodeURIComponent('https://host.example/app')}`);
+
+      sendToEditor('abc123');
+
+      expect(postMessage).toHaveBeenCalledWith(
+        { type: 'SEND_TO_EDITOR', payload: { id: 'abc123' } },
+        '*'
+      );
+      warn.mockRestore();
     });
   });
 

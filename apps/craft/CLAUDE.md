@@ -86,6 +86,25 @@ recorded blob available there without re-uploading it. Outside an iframe,
 Editor" and the header's "Open Editor" button — honour `VITE_EDITOR_URL` via
 the shared `editorUrl()` helper.
 
+The header's **"Open Editor" button is deliberately not routed through the
+host**: embedded or not, it opens the editor itself. Only "Send to Editor",
+which hands over one specific recording, becomes a message.
+
+**`?hostOrigin=<origin>`**: when the host names its own origin on CRAFT's URL,
+the `SEND_TO_EDITOR` post is addressed to that origin instead of `'*'`. The
+value must be a bare origin (`https://host.example`); anything else is ignored
+with one console warning and the post falls back to `'*'`. The parser is
+`parseHostOrigin()` in `@escapesuite/shared/config`, shared with ESCAPEARTIST.
+It protects the **host's** deployment, not against being framed — a hostile
+page that frames CRAFT also controls this URL. Refusing to be framed is
+`Content-Security-Policy: frame-ancestors` on the deployment serving CRAFT.
+
+**Behaviour change for existing embedders**: CRAFT in *any* iframe now posts
+`SEND_TO_EDITOR` rather than opening a tab. A host that previously relied on
+the `window.open()` popup — including one that embedded CRAFT incidentally,
+without meaning to integrate — will see no new tab and must listen for the
+message and navigate to its own editor itself.
+
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
 - Target: ESNext, no code splitting

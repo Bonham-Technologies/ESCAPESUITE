@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react'
 import App from './App'
 import { useEditorStore } from './store/projectStore'
-import { getSessionState, clearSessionState } from './core/storage'
-import { parseUrlParams } from './utils/integration'
+import { getSessionState, clearSessionState, saveSessionState } from './core/storage'
+import { parseUrlParams, initIntegration, sendMessage } from './utils/integration'
 import type { SessionState } from './core/storage'
 
 // Mock all the complex dependencies
@@ -29,7 +29,7 @@ vi.mock('./core/projectManager', () => ({
 
 vi.mock('./utils/integration', () => ({
   initIntegration: vi.fn(() => () => {}),
-  parseUrlParams: vi.fn(() => ({ videos: [], projectData: null, autoPlay: false, loadVideoId: null, suppressRestore: false, title: null })),
+  parseUrlParams: vi.fn(() => ({ videos: [], projectData: null, autoPlay: false, loadVideoId: null, suppressRestore: false, title: null, hostOrigin: null })),
   loadVideoFromUrl: vi.fn(() => Promise.resolve({ blob: new Blob(), name: 'test.mp4' })),
   sendMessage: vi.fn(),
 }))
@@ -356,6 +356,7 @@ describe('App', () => {
         loadVideoId: null,
         suppressRestore: false,
         title: null,
+        hostOrigin: null,
         ...overrides,
       })
     }
@@ -407,6 +408,92 @@ describe('App', () => {
       await act(async () => { await Promise.resolve() })
 
       expect(useEditorStore.getState().project.name).toBe('Host Project')
+    })
+
+    it('leaves no undo step behind after applying the title', async () => {
+      urlParams({ title: 'Client Demo' })
+
+      render(<App />)
+
+      await waitFor(() => {
+        expect(useEditorStore.getState().project.name).toBe('Client Demo')
+      })
+      // The host naming the project is not an edit the user should be able to
+      // undo back past - handleRestoreSession clears history for the same reason.
+      expect(useEditorStore.getState().history.past).toHaveLength(0)
+    })
+  })
+
+  describe('session autosave', () => {
+    const urlParams = (overrides: Partial<ReturnType<typeof parseUrlParams>> = {}) => {
+      vi.mocked(parseUrlParams).mockReturnValue({
+        videos: [],
+        projectData: null,
+        autoPlay: false,
+        loadVideoId: null,
+        suppressRestore: false,
+        title: null,
+        hostOrigin: null,
+        ...overrides,
+      })
+    }
+
+    afterEach(() => {
+      vi.useRealTimers()
+      urlParams()
+    })
+
+    /** Render, settle the mount-time session read, then run the debounce out. */
+    const renderAndSettleAutosave = async () => {
+      render(<App />)
+      await act(async () => { await Promise.resolve() })
+      await act(async () => { vi.advanceTimersByTime(2500) })
+    }
+
+    it('writes the session after the debounce by default', async () => {
+      urlParams()
+      vi.useFakeTimers()
+
+      await renderAndSettleAutosave()
+
+      expect(saveSessionState).toHaveBeenCalled()
+    })
+
+    it('never writes the session when suppressRestore is set', async () => {
+      urlParams({ suppressRestore: true })
+      vi.useFakeTimers()
+
+      await renderAndSettleAutosave()
+
+      expect(saveSessionState).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('GET_STATE', () => {
+    /** Drive the handler that App passed to initIntegration. */
+    const dispatchToApp = async (message: { type: string; payload?: unknown }) => {
+      const handler = vi.mocked(initIntegration).mock.calls[0][0]
+      await act(async () => { await handler(message as never) })
+    }
+
+    it('replies with the current store state, not the state at mount', async () => {
+      render(<App />)
+      await act(async () => { await Promise.resolve() })
+
+      const project = useEditorStore.getState().project
+      act(() => {
+        useEditorStore.getState().setProject({ ...project, name: 'Renamed After Mount' })
+      })
+
+      await dispatchToApp({ type: 'GET_STATE' })
+
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'STATE',
+        payload: {
+          project: expect.objectContaining({ name: 'Renamed After Mount' }),
+          videos: useEditorStore.getState().sourceVideos,
+        },
+      })
     })
   })
 })

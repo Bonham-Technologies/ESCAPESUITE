@@ -1,5 +1,11 @@
-import { describe, it, expect, afterEach, vi } from 'vitest'
-import { isEmbedded, EDITOR_URL, editorUrl } from './index'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import {
+  isEmbedded,
+  EDITOR_URL,
+  editorUrl,
+  parseHostOrigin,
+  resetHostOriginWarning,
+} from './index'
 
 describe('isEmbedded', () => {
   afterEach(() => {
@@ -83,5 +89,61 @@ describe('VITE_EDITOR_URL override', () => {
     vi.resetModules()
     const { EDITOR_URL: overriddenUrl } = await import('./index')
     expect(overriddenUrl).toBe('https://host/editor/')
+  })
+})
+
+describe('parseHostOrigin', () => {
+  let warn: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warn.mockRestore()
+    resetHostOriginWarning()
+  })
+
+  it('returns null when the parameter is absent', () => {
+    expect(parseHostOrigin('')).toBeNull()
+    expect(parseHostOrigin('?title=Demo')).toBeNull()
+  })
+
+  it('accepts a bare https origin', () => {
+    expect(parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example')).toBe('https://host.example')
+  })
+
+  it('accepts an origin carrying an explicit port', () => {
+    expect(parseHostOrigin('?hostOrigin=http%3A%2F%2Flocalhost%3A5173')).toBe(
+      'http://localhost:5173'
+    )
+  })
+
+  it('rejects a value that is more than an origin', () => {
+    expect(parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example%2Fapp')).toBeNull()
+    expect(parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example%2F')).toBeNull()
+  })
+
+  it('rejects a value that is not a URL at all', () => {
+    expect(parseHostOrigin('?hostOrigin=host.example')).toBeNull()
+  })
+
+  it('rejects an opaque-origin scheme', () => {
+    expect(parseHostOrigin('?hostOrigin=data%3Atext%2Fhtml%2Chi')).toBeNull()
+  })
+
+  it('warns once for an invalid value', () => {
+    parseHostOrigin('?hostOrigin=nonsense')
+    parseHostOrigin('?hostOrigin=also-nonsense')
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('hostOrigin')
+  })
+
+  it('does not warn for a valid or absent value', () => {
+    parseHostOrigin('')
+    parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example')
+
+    expect(warn).not.toHaveBeenCalled()
   })
 })

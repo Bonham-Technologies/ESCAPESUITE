@@ -1,7 +1,7 @@
-import { dirname, resolve } from 'node:path'
+import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type Frame, type Page } from '@playwright/test'
-import { openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, openExportDialog } from '../../utils/artist'
 import { grantMediaPermissions } from '../../utils/media-mocks'
 
 /**
@@ -23,12 +23,14 @@ import { grantMediaPermissions } from '../../utils/media-mocks'
  * app is embedded from `/` beneath it.
  */
 
-const ARTIST_ORIGIN = 'http://localhost:5175'
 const CRAFT_ORIGIN = 'http://localhost:5174'
-const FIXTURE_MP4 = resolve(
+const FIXTURE_MP4 = resolvePath(
   dirname(fileURLToPath(import.meta.url)),
   '../../fixtures/headless/source.mp4'
 )
+
+// ESCAPEARTIST's autosave debounce (AUTO_SAVE_DELAY in apps/artist/src/App.tsx).
+const ARTIST_AUTO_SAVE_DELAY = 2000
 
 /** A message as captured by the host window (Blobs reduced to what survives evaluate). */
 interface CapturedMessage {
@@ -85,10 +87,16 @@ async function embed(page: Page, src: string): Promise<Frame> {
   return frame
 }
 
-/** Drop every embedded frame from the host page. */
+/**
+ * Drop every embedded frame from the host page and forget what it heard.
+ *
+ * Clearing the log matters: the next embed sends its own READY, and a test that
+ * waits for one must not be satisfied by the previous frame's.
+ */
 async function unembedAll(page: Page): Promise<void> {
   await page.evaluate(() => {
     document.body.innerHTML = ''
+    ;(window as unknown as { __hostMessages: unknown[] }).__hostMessages = []
   })
   await expect.poll(() => page.frames().length, { timeout: 15_000 }).toBe(1)
 }
@@ -191,6 +199,27 @@ async function seedArtistSession(page: Page, projectName: string): Promise<void>
   }, projectName)
 }
 
+/** Read back the project name of the session ESCAPEARTIST has in storage. */
+function storedSessionName(page: Page): Promise<string | null> {
+  return page.evaluate(async () => {
+    return new Promise<string | null>((resolve) => {
+      const request = indexedDB.open('video-editor-db')
+      request.onerror = () => resolve(null)
+      request.onsuccess = () => {
+        const get = request.result
+          .transaction('settings', 'readonly')
+          .objectStore('settings')
+          .get('current-session')
+        get.onerror = () => resolve(null)
+        get.onsuccess = () => {
+          const session = get.result as { project?: { name?: string } } | undefined
+          resolve(session?.project?.name ?? null)
+        }
+      }
+    })
+  })
+}
+
 /** Write a finished recording into ESCAPECRAFT's storage directly. */
 async function seedCraftRecording(page: Page, name: string): Promise<string> {
   return page.evaluate(async (recordingName) => {
@@ -245,7 +274,7 @@ test.describe('Host embedding contract', () => {
   }) => {
     test.setTimeout(90_000)
 
-    await openHostPage(page, ARTIST_ORIGIN)
+    await openHostPage(page, ARTIST_URL)
     await seedArtistSession(page, 'Seeded Session')
 
     await test.step('without suppressRestore the seeded session does prompt', async () => {
@@ -267,8 +296,7 @@ test.describe('Host embedding contract', () => {
     })
 
     await test.step('the host received READY', async () => {
-      const ready = await waitForHostMessage(page, 'READY')
-      expect(ready.type).toBe('READY')
+      await waitForHostMessage(page, 'READY')
     })
 
     await test.step('the restore prompt stays away', async () => {
@@ -288,24 +316,15 @@ test.describe('Host embedding contract', () => {
     })
 
     await test.step('the seeded session is left in storage, not cleared', async () => {
-      const stored = await page.evaluate(async () => {
-        return new Promise<string | null>((resolve) => {
-          const request = indexedDB.open('video-editor-db')
-          request.onerror = () => resolve(null)
-          request.onsuccess = () => {
-            const get = request.result
-              .transaction('settings', 'readonly')
-              .objectStore('settings')
-              .get('current-session')
-            get.onerror = () => resolve(null)
-            get.onsuccess = () => {
-              const session = get.result as { project?: { name?: string } } | undefined
-              resolve(session?.project?.name ?? null)
-            }
-          }
-        })
-      })
-      expect(stored).toBe('Seeded Session')
+      expect(await storedSessionName(page)).toBe('Seeded Session')
+    })
+
+    await test.step('and the autosave never writes over it either', async () => {
+      // suppressRestore also switches autosave off, so past the debounce the
+      // seeded session must still be the seeded session and not this frame's
+      // empty project.
+      await page.waitForTimeout(ARTIST_AUTO_SAVE_DELAY + 500)
+      expect(await storedSessionName(page)).toBe('Seeded Session')
     })
   })
 
@@ -313,7 +332,7 @@ test.describe('Host embedding contract', () => {
     // A real encode pass, even of a 1-second 64x48 clip, outruns the default.
     test.setTimeout(120_000)
 
-    await openHostPage(page, ARTIST_ORIGIN)
+    await openHostPage(page, ARTIST_URL)
     const frame = await embed(page, '/?suppressRestore=1')
 
     await test.step('put the fixture clip on the timeline', async () => {
@@ -364,7 +383,8 @@ test.describe('Host embedding contract', () => {
     expect(message.id).toBe(recordingId)
 
     // A popup would mean the host lost control of navigation.
-    await page.waitForTimeout(500)
-    expect(context.pages().length).toBe(pagesBefore)
+    await expect
+      .poll(() => context.pages().length, { timeout: 1500 })
+      .toBe(pagesBefore)
   })
 })
