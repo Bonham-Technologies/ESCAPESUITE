@@ -1,7 +1,11 @@
 // Integration API for embedding video editor in other applications
 // Supports URL parameters and PostMessage communication
 
+import { isEmbedded } from '@escapesuite/shared/config';
 import type { IntegrationMessage, Project } from '../store/types';
+
+// Longest project name accepted from the `title` URL parameter.
+const MAX_TITLE_LENGTH = 120;
 
 type MessageHandler = (message: IntegrationMessage) => void;
 
@@ -39,7 +43,7 @@ export function initIntegration(handler: MessageHandler): () => void {
  * Send message to parent window
  */
 export function sendMessage(message: IntegrationMessage): void {
-  if (window.parent !== window) {
+  if (isEmbedded()) {
     window.parent.postMessage(message, '*');
   }
 
@@ -57,6 +61,8 @@ export function parseUrlParams(): {
   projectData: string | null;
   autoPlay: boolean;
   loadVideoId: string | null;
+  suppressRestore: boolean;
+  title: string | null;
 } {
   const params = new URLSearchParams(window.location.search);
 
@@ -72,7 +78,16 @@ export function parseUrlParams(): {
   // Load video by ID from IndexedDB (from ESCAPECRAFT integration)
   const loadVideoId = params.get('loadVideo');
 
-  return { videos, projectData, autoPlay, loadVideoId };
+  // Skip the "Resume Previous Session?" prompt (hosts drive their own state).
+  // The saved session is left in storage untouched.
+  const suppressRestoreParam = params.get('suppressRestore');
+  const suppressRestore = suppressRestoreParam === '1' || suppressRestoreParam === 'true';
+
+  // Initial project name supplied by the host
+  const rawTitle = params.get('title')?.trim().slice(0, MAX_TITLE_LENGTH) ?? '';
+  const title = rawTitle || null;
+
+  return { videos, projectData, autoPlay, loadVideoId, suppressRestore, title };
 }
 
 /**
@@ -206,10 +221,20 @@ export function generateShareUrl(
  * Outgoing messages (to parent):
  * - READY: {} - Editor is initialized and ready
  * - VIDEO_LOADED: { id: string, name: string } - Video was loaded
- * - EXPORT_COMPLETE: { blob: Blob, format: string } - Export finished
+ * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm', name: string } - Export finished
  * - EXPORT_PROGRESS: { progress: number, message: string } - Export progress
  * - STATE: { project: Project, videos: SourceVideo[] } - Current state
  * - ERROR: { message: string, code: string } - Error occurred
  * - THEME_CHANGED: { preference: string, resolved: string } - Theme was changed
  * - THEME_STATE: { preference: string, resolved: string } - Current theme state
+ *
+ * URL parameters (read once at startup, see parseUrlParams):
+ * - video=<url> - Load a video from a URL (repeatable)
+ * - project=<base64> - Load a base64-encoded project
+ * - autoplay=true - Start playback once loaded
+ * - loadVideo=<id> - Load a recording from IndexedDB (ESCAPECRAFT handoff)
+ * - suppressRestore=1|true - Skip the "Resume Previous Session?" prompt
+ *   (the saved session is left in storage)
+ * - title=<name> - Initial project name (trimmed, max 120 chars); applied only
+ *   when the project has not been named by project data or a restored session
  */

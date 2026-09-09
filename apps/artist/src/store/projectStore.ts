@@ -108,10 +108,13 @@ function createEmptyTimeline(): Timeline {
   };
 }
 
+// Name given to a project that has never been named by the user or a host.
+export const DEFAULT_PROJECT_NAME = 'Untitled Project';
+
 function createEmptyProject(): Project {
   return {
     id: uuidv4(),
-    name: 'Untitled Project',
+    name: DEFAULT_PROJECT_NAME,
     created: Date.now(),
     modified: Date.now(),
     resolution: { width: 1920, height: 1080 },

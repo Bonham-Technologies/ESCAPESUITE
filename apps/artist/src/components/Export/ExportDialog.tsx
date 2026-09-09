@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store/projectStore';
 import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError, ExportError } from '../../core/exporter';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
+import { sendMessage } from '../../utils/integration';
 import type { ExportOptions, ExportProgress } from '../../store/types';
 import { formatTime } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
@@ -116,15 +117,23 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         extension = 'webm';
       }
 
+      const fileName = `${projectName || 'export'}.${extension}`;
+
       // Create download link
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${projectName || 'export'}.${extension}`;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+
+      // Hand the finished file to an embedding host (no-op when not embedded)
+      sendMessage({
+        type: 'EXPORT_COMPLETE',
+        payload: { blob, format: extension, name: fileName },
+      });
 
       // Calculate total export duration from clips
       const totalDuration = clips.reduce((max, clip) => {

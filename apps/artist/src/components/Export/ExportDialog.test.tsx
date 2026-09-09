@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ExportDialog } from './ExportDialog'
 
 // Mock the store
@@ -72,6 +72,15 @@ const { mockGetSetting, mockSetSetting } = vi.hoisted(() => ({
 vi.mock('../../core/storage', () => ({
   getSetting: mockGetSetting,
   setSetting: mockSetSetting,
+}))
+
+// Mock the host integration channel
+const { mockSendMessage } = vi.hoisted(() => ({
+  mockSendMessage: vi.fn(),
+}))
+
+vi.mock('../../utils/integration', () => ({
+  sendMessage: mockSendMessage,
 }))
 
 // Mock CSS modules
@@ -456,5 +465,83 @@ describe('ExportDialog', () => {
     })
 
     expect(mockSetSetting).not.toHaveBeenCalled()
+  })
+  describe('host integration', () => {
+    it('sends EXPORT_COMPLETE to the host after a successful export', async () => {
+      const exported = new Blob(['video-bytes'], { type: 'video/webm' })
+      mockExportToWebM.mockResolvedValue(exported)
+
+      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
+
+      await waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledTimes(1)
+      })
+
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: 'EXPORT_COMPLETE',
+        payload: {
+          blob: exported,
+          format: 'webm',
+          name: 'Test Project.webm',
+        },
+      })
+    })
+
+    it('reports the mp4 extension when exporting MP4', async () => {
+      const exported = new Blob(['mp4-bytes'], { type: 'video/mp4' })
+      mockExportToMP4.mockResolvedValue(exported)
+
+      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledTimes(1)
+      })
+
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: 'EXPORT_COMPLETE',
+        payload: {
+          blob: exported,
+          format: 'mp4',
+          name: 'Test Project.mp4',
+        },
+      })
+    })
+
+    it('does not send EXPORT_COMPLETE when the export fails', async () => {
+      mockExportToWebM.mockRejectedValue(new Error('Encoding failed'))
+
+      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+      const buttons = screen.getAllByRole('button', { name: /download webm/i })
+      fireEvent.click(buttons[buttons.length - 1])
+
+      await waitFor(() => {
+        expect(screen.getByText(/encoding failed/i)).toBeInTheDocument()
+      })
+
+      expect(mockSendMessage).not.toHaveBeenCalled()
+    })
+
+    it('does not send EXPORT_COMPLETE when the export is cancelled', async () => {
+      mockExportToWebM.mockRejectedValue(new MockExportAbortedError())
+
+      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
+
+      await waitFor(() => {
+        expect(mockExportToWebM).toHaveBeenCalled()
+      })
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      expect(mockSendMessage).not.toHaveBeenCalled()
+    })
   })
 })

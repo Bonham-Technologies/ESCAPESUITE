@@ -115,6 +115,19 @@ describe('integration', () => {
       expect(mockPostMessage).toHaveBeenCalledWith(message, '*')
     })
 
+    it('does not post to the parent when not embedded', () => {
+      const postMessage = vi.fn()
+      Object.defineProperty(window, 'parent', {
+        value: window,
+        writable: true,
+      })
+      window.postMessage = postMessage
+
+      sendMessage({ type: 'READY' })
+
+      expect(postMessage).not.toHaveBeenCalled()
+    })
+
     it('dispatches custom event for same-window integration', () => {
       const mockParent = { postMessage: vi.fn() }
       Object.defineProperty(window, 'parent', {
@@ -198,6 +211,61 @@ describe('integration', () => {
       expect(result.videos).toEqual([])
       expect(result.projectData).toBeNull()
       expect(result.autoPlay).toBe(false)
+      expect(result.suppressRestore).toBe(false)
+      expect(result.title).toBeNull()
+    })
+
+    it('parses suppressRestore from 1 or true', () => {
+      for (const value of ['1', 'true']) {
+        Object.defineProperty(window, 'location', {
+          value: { search: `?suppressRestore=${value}` },
+          writable: true,
+        })
+
+        expect(parseUrlParams().suppressRestore).toBe(true)
+      }
+    })
+
+    it('treats any other suppressRestore value as false', () => {
+      for (const value of ['0', 'false', 'yes', '']) {
+        Object.defineProperty(window, 'location', {
+          value: { search: `?suppressRestore=${value}` },
+          writable: true,
+        })
+
+        expect(parseUrlParams().suppressRestore).toBe(false)
+      }
+    })
+
+    it('parses and trims the title param', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?title=${encodeURIComponent('  Client Demo  ')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().title).toBe('Client Demo')
+    })
+
+    it('caps the title at 120 characters', () => {
+      const longTitle = 'a'.repeat(200)
+      Object.defineProperty(window, 'location', {
+        value: { search: `?title=${longTitle}` },
+        writable: true,
+      })
+
+      const result = parseUrlParams()
+
+      expect(result.title).toHaveLength(120)
+      expect(result.title).toBe('a'.repeat(120))
+    })
+
+    it('returns null for a blank title', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?title=${encodeURIComponent('   ')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().title).toBeNull()
     })
   })
 

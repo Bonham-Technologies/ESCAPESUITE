@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useEditorStore } from './store/projectStore';
+import { useEditorStore, DEFAULT_PROJECT_NAME } from './store/projectStore';
 import { VideoUploader, VideoLibrary } from './components/VideoUploader';
 import { ResolutionPicker } from './components/ResolutionPicker';
 import { Timeline } from './components/Timeline/Timeline';
@@ -57,6 +57,9 @@ function App() {
     return saved ? Math.min(MAX_TIMELINE_HEIGHT, Math.max(MIN_TIMELINE_HEIGHT, parseInt(saved, 10))) : DEFAULT_TIMELINE_HEIGHT;
   });
   const [isResizing, setIsResizing] = useState(false);
+
+  // URL parameters are read once at startup; later URL changes are ignored.
+  const [urlParams] = useState(parseUrlParams);
 
   const project = useEditorStore((state) => state.project);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
@@ -229,6 +232,13 @@ function App() {
   useEffect(() => {
     if (sessionRestored) return;
 
+    // A host that drives its own state can suppress the prompt with
+    // ?suppressRestore=1. The saved session is deliberately left in storage.
+    if (urlParams.suppressRestore) {
+      setSessionRestored(true);
+      return;
+    }
+
     const checkSession = async () => {
       try {
         const session = await getSessionState();
@@ -245,7 +255,7 @@ function App() {
     };
 
     checkSession();
-  }, [sessionRestored]);
+  }, [sessionRestored, urlParams.suppressRestore]);
 
   // Auto-save session on state changes (debounced)
   useEffect(() => {
@@ -619,8 +629,8 @@ function App() {
       }
     });
 
-    // Check for URL parameters
-    const { videos, loadVideoId } = parseUrlParams();
+    // Check for URL parameters (parsed once at startup)
+    const { videos, loadVideoId, title } = urlParams;
 
     // Load videos from URL parameters
     if (videos.length > 0) {
@@ -669,6 +679,15 @@ function App() {
           showNotification('Failed to load recording', 'error');
         }
       })();
+    }
+
+    // Apply a host-supplied title. Only fills in a project that has never been
+    // named - it never overrides a name from ?project= data or a restored session.
+    if (title) {
+      const current = useEditorStore.getState().project;
+      if (current.name === DEFAULT_PROJECT_NAME) {
+        setProject({ ...current, name: title, modified: Date.now() });
+      }
     }
 
     return cleanup;

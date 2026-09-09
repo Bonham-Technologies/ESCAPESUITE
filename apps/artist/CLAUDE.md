@@ -61,9 +61,29 @@ Web Worker for WebCodecs-based video decoding, enabling full-speed exports in ba
 ### Integration API (`src/utils/integration.ts`)
 The editor can be embedded in other applications via:
 - **PostMessage**: Bidirectional communication with parent window
-- **URL parameters**: `?video=url` to preload videos, `?project=base64` for project state
+- **URL parameters**: parsed once at startup by `parseUrlParams()` (later URL changes are ignored; `App` holds the parsed result in state)
 
-Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT` (inbound); `READY`, `VIDEO_LOADED`, `STATE`, `EXPORT_COMPLETE`, `ERROR` (outbound)
+Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`, `GET_THEME` (inbound); `READY`, `VIDEO_LOADED`, `STATE`, `EXPORT_COMPLETE`, `EXPORT_PROGRESS`, `ERROR`, `THEME_CHANGED`, `THEME_STATE` (outbound)
+
+`sendMessage()` posts to the parent only when `isEmbedded()` (from `@escapesuite/shared/config`) is true; it always dispatches a `videoeditor:message` CustomEvent for same-window hosts.
+
+**Outgoing `EXPORT_COMPLETE`**: sent from `ExportDialog` right after a successful export (alongside the normal browser download, which is unchanged). Not sent when the export fails or is cancelled.
+
+```ts
+{ type: 'EXPORT_COMPLETE', payload: { blob: Blob, format: 'mp4' | 'webm', name: string } }
+// name is `${projectName || 'export'}.${format}`
+```
+
+**URL parameters**:
+
+| Param | Effect |
+|-------|--------|
+| `?video=<url>` | Load a video from a URL (repeatable) |
+| `?project=<base64>` | Base64-encoded project state |
+| `?autoplay=true` | Start playback once loaded |
+| `?loadVideo=<id>` | Load a recording from IndexedDB (ESCAPECRAFT handoff) |
+| `?suppressRestore=1` | Skip the "Resume Previous Session?" prompt. Accepts `1` or `true`. The saved session is **left in storage** (nothing is cleared) |
+| `?title=<name>` | Initial project name. Trimmed, capped at 120 chars, blank ignored. Applied only while the project name is still the default `'Untitled Project'`, so it never overrides a name from `?project=` data or a restored session |
 
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
