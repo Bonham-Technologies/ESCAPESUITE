@@ -74,6 +74,16 @@ Enhanced capability detection with detailed unavailability reasons:
 - "Send to Editor" opens ESCAPEARTIST with `?loadVideo=<id>` parameter
 - Same-origin deployment (Vercel) enables seamless data sharing
 
+### Embedding
+When CRAFT runs in an iframe (`isEmbedded()` from `@escapesuite/shared/config`),
+"Send to Editor" does not open `/artist/` itself — it posts `SEND_TO_EDITOR
+{ id }` to the parent window instead, and the host is expected to navigate to
+its own editor URL with `?loadVideo=<id>`. Because CRAFT and the host-chosen
+editor are same-origin, the shared IndexedDB `video-editor-db` makes the
+recorded blob available there without re-uploading it. Outside an iframe,
+`VITE_EDITOR_URL` controls where CRAFT opens the editor (defaults to
+`/artist/`). See `src/utils/sendToEditor.ts`.
+
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
 - Target: ESNext, no code splitting
