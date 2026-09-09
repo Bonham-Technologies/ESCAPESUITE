@@ -97,7 +97,7 @@ with one console warning and the post falls back to `'*'`. The parser is
 `parseHostOrigin()` in `@escapesuite/shared/config`, shared with ESCAPEARTIST.
 It protects the **host's** deployment, not against being framed — a hostile
 page that frames CRAFT also controls this URL. Refusing to be framed is
-`Content-Security-Policy: frame-ancestors` on the deployment serving CRAFT.
+`Content-Security-Policy: frame-ancestors` on the deployment serving CRAFT. The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` plus `X-Frame-Options: SAMEORIGIN` from `vercel.json`, so it cannot be framed by other origins; a self-hosted or standalone build must set its own.
 
 **Behaviour change for existing embedders**: CRAFT in *any* iframe now posts
 `SEND_TO_EDITOR` rather than opening a tab. A host that previously relied on
