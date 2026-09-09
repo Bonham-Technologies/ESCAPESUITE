@@ -3,6 +3,7 @@ import {
   initIntegration,
   sendMessage,
   parseUrlParams,
+  __setHostOriginForTests,
   loadVideoFromUrl,
   decodeProjectData,
   encodeProjectData,
@@ -10,7 +11,28 @@ import {
 } from './integration'
 import type { Project, IntegrationMessage } from '../store/types'
 
+/**
+ * Dispatch a `message` event as the browser would for a real cross-document
+ * post: `source` names the window that sent it. jsdom leaves `source` null on a
+ * hand-built MessageEvent, and the listener rejects those, so every inbound
+ * message a test wants accepted has to be stamped like this.
+ */
+function dispatchMessage(
+  data: unknown,
+  { source, origin = '' }: { source?: unknown; origin?: string } = {}
+): void {
+  const event = new MessageEvent('message', { data, origin })
+  Object.defineProperty(event, 'source', {
+    value: source === undefined ? window.parent : source,
+  })
+  window.dispatchEvent(event)
+}
+
 describe('integration', () => {
+  afterEach(() => {
+    __setHostOriginForTests(null)
+  })
+
   describe('initIntegration', () => {
     let originalParent: typeof window.parent
 
@@ -59,10 +81,7 @@ describe('integration', () => {
       initIntegration(handler)
 
       // Simulate receiving a message
-      const event = new MessageEvent('message', {
-        data: { type: 'LOAD_VIDEO', payload: { url: 'http://example.com/video.mp4' } },
-      })
-      window.dispatchEvent(event)
+      dispatchMessage({ type: 'LOAD_VIDEO', payload: { url: 'http://example.com/video.mp4' } })
 
       expect(handler).toHaveBeenCalledWith({
         type: 'LOAD_VIDEO',
@@ -75,24 +94,64 @@ describe('integration', () => {
       initIntegration(handler)
 
       // Invalid message - no type
-      window.dispatchEvent(new MessageEvent('message', { data: { payload: 'test' } }))
+      dispatchMessage({ payload: 'test' })
       expect(handler).not.toHaveBeenCalled()
 
       // Invalid message - not an object
-      window.dispatchEvent(new MessageEvent('message', { data: 'string' }))
+      dispatchMessage('string')
       expect(handler).not.toHaveBeenCalled()
 
       // Invalid message - null
-      window.dispatchEvent(new MessageEvent('message', { data: null }))
+      dispatchMessage(null)
       expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('ignores messages from a window that is not the parent', () => {
+      const handler = vi.fn()
+      initIntegration(handler)
+
+      dispatchMessage({ type: 'GET_STATE' }, { source: { postMessage: vi.fn() } })
+
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('ignores messages from the parent at the wrong origin when hostOrigin is set', () => {
+      __setHostOriginForTests('https://host.example')
+      const handler = vi.fn()
+      initIntegration(handler)
+
+      dispatchMessage({ type: 'GET_STATE' }, { origin: 'https://evil.example' })
+
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('accepts messages from the parent at the configured hostOrigin', () => {
+      __setHostOriginForTests('https://host.example')
+      const handler = vi.fn()
+      initIntegration(handler)
+
+      dispatchMessage({ type: 'GET_STATE' }, { origin: 'https://host.example' })
+
+      expect(handler).toHaveBeenCalledWith({ type: 'GET_STATE', payload: undefined })
+    })
+
+    it('accepts messages from the parent at any origin when hostOrigin is unset', () => {
+      const handler = vi.fn()
+      initIntegration(handler)
+
+      dispatchMessage({ type: 'GET_STATE' }, { origin: 'https://anywhere.example' })
+
+      expect(handler).toHaveBeenCalledWith({ type: 'GET_STATE', payload: undefined })
     })
   })
 
   describe('sendMessage', () => {
     let originalParent: typeof window.parent
+    let originalPostMessage: typeof window.postMessage
 
     beforeEach(() => {
       originalParent = window.parent
+      originalPostMessage = window.postMessage
     })
 
     afterEach(() => {
@@ -100,6 +159,7 @@ describe('integration', () => {
         value: originalParent,
         writable: true,
       })
+      window.postMessage = originalPostMessage
     })
 
     it('sends message to parent window when in iframe', () => {
@@ -113,6 +173,33 @@ describe('integration', () => {
       sendMessage(message)
 
       expect(mockPostMessage).toHaveBeenCalledWith(message, '*')
+    })
+
+    it('does not post to the parent when not embedded', () => {
+      const postMessage = vi.fn()
+      Object.defineProperty(window, 'parent', {
+        value: window,
+        writable: true,
+      })
+      window.postMessage = postMessage
+
+      sendMessage({ type: 'READY' })
+
+      expect(postMessage).not.toHaveBeenCalled()
+    })
+
+    it('posts to the configured hostOrigin instead of the wildcard', () => {
+      const mockPostMessage = vi.fn()
+      Object.defineProperty(window, 'parent', {
+        value: { postMessage: mockPostMessage },
+        writable: true,
+      })
+      __setHostOriginForTests('https://host.example')
+
+      const message: IntegrationMessage = { type: 'READY' }
+      sendMessage(message)
+
+      expect(mockPostMessage).toHaveBeenCalledWith(message, 'https://host.example')
     })
 
     it('dispatches custom event for same-window integration', () => {
@@ -198,6 +285,93 @@ describe('integration', () => {
       expect(result.videos).toEqual([])
       expect(result.projectData).toBeNull()
       expect(result.autoPlay).toBe(false)
+      expect(result.suppressRestore).toBe(false)
+      expect(result.title).toBeNull()
+      expect(result.hostOrigin).toBeNull()
+    })
+
+    it('parses a valid hostOrigin', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?hostOrigin=${encodeURIComponent('https://host.example')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().hostOrigin).toBe('https://host.example')
+    })
+
+    it('returns null for an invalid hostOrigin', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      Object.defineProperty(window, 'location', {
+        value: { search: `?hostOrigin=${encodeURIComponent('https://host.example/app')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().hostOrigin).toBeNull()
+      warn.mockRestore()
+    })
+
+    it('parses suppressRestore from 1 or true', () => {
+      for (const value of ['1', 'true']) {
+        Object.defineProperty(window, 'location', {
+          value: { search: `?suppressRestore=${value}` },
+          writable: true,
+        })
+
+        expect(parseUrlParams().suppressRestore).toBe(true)
+      }
+    })
+
+    it('treats any other suppressRestore value as false', () => {
+      for (const value of ['0', 'false', 'yes', '']) {
+        Object.defineProperty(window, 'location', {
+          value: { search: `?suppressRestore=${value}` },
+          writable: true,
+        })
+
+        expect(parseUrlParams().suppressRestore).toBe(false)
+      }
+    })
+
+    it('parses and trims the title param', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?title=${encodeURIComponent('  Client Demo  ')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().title).toBe('Client Demo')
+    })
+
+    it('caps the title at 120 characters', () => {
+      const longTitle = 'a'.repeat(200)
+      Object.defineProperty(window, 'location', {
+        value: { search: `?title=${longTitle}` },
+        writable: true,
+      })
+
+      const result = parseUrlParams()
+
+      expect(result.title).toHaveLength(120)
+      expect(result.title).toBe('a'.repeat(120))
+    })
+
+    it('does not leave the title ending in a space when the cut lands mid-word', () => {
+      // 121 chars with a space at index 119, so the 120-char slice ends on it.
+      const longTitle = `${'a'.repeat(119)} b`
+      Object.defineProperty(window, 'location', {
+        value: { search: `?title=${encodeURIComponent(longTitle)}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().title).toBe('a'.repeat(119))
+    })
+
+    it('returns null for a blank title', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?title=${encodeURIComponent('   ')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().title).toBeNull()
     })
   })
 

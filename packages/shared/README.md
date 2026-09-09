@@ -51,16 +51,25 @@ Analytics enabled; `standalone` is the offline single-file build with no analyti
 network requests.
 
 ```ts
-import { BUILD_MODE, isSaaSMode, isStandaloneMode } from '@escapesuite/shared/config'
+import { BUILD_MODE, isSaaSMode, isStandaloneMode, isEmbedded, EDITOR_URL, editorUrl } from '@escapesuite/shared/config'
 
 if (isStandaloneMode()) {
   // running as an offline single-file build
 }
+
+if (isEmbedded()) {
+  // running inside a frame (e.g. ESCAPEARTIST embedded in a host page)
+}
+
+editorUrl({ loadVideo: 'abc-123' }) // '/artist/?loadVideo=abc-123'
 ```
 
 **Exports:**
 - `BUILD_MODE` - `'saas' | 'standalone'`, read from `VITE_BUILD_MODE`
 - `isSaaSMode()` / `isStandaloneMode()` - Build mode detection
+- `isEmbedded()` - True when running inside a frame; safe to call when `window` is undefined
+- `EDITOR_URL` - Where CRAFT sends recordings for editing, read from `VITE_EDITOR_URL` (default `/artist/`), normalised to end with a trailing slash
+- `editorUrl(params?)` - `EDITOR_URL` with an optional query string built from `params`
 
 ---
 

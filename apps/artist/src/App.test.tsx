@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react'
 import App from './App'
 import { useEditorStore } from './store/projectStore'
+import { getSessionState, clearSessionState, saveSessionState } from './core/storage'
+import { parseUrlParams, initIntegration, sendMessage } from './utils/integration'
+import type { SessionState } from './core/storage'
 
 // Mock all the complex dependencies
 vi.mock('./core/storage', () => ({
@@ -26,7 +29,7 @@ vi.mock('./core/projectManager', () => ({
 
 vi.mock('./utils/integration', () => ({
   initIntegration: vi.fn(() => () => {}),
-  parseUrlParams: vi.fn(() => ({ videos: [], projectData: null, autoPlay: false, loadVideoId: null })),
+  parseUrlParams: vi.fn(() => ({ videos: [], projectData: null, autoPlay: false, loadVideoId: null, suppressRestore: false, title: null, hostOrigin: null })),
   loadVideoFromUrl: vi.fn(() => Promise.resolve({ blob: new Blob(), name: 'test.mp4' })),
   sendMessage: vi.fn(),
 }))
@@ -323,6 +326,174 @@ describe('App', () => {
 
       // Inspector content should be hidden
       expect(screen.queryByText(/Select a clip/i)).not.toBeInTheDocument()
+    })
+  })
+
+  describe('host URL parameters', () => {
+    const savedSession = (): SessionState => ({
+      project: { ...useEditorStore.getState().project, name: 'Saved Project' },
+      sourceVideos: [{
+        id: 'video1',
+        name: 'test.mp4',
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000,
+      }],
+      currentTime: 0,
+      selectedClipId: null,
+      zoom: 1,
+      timestamp: Date.now(),
+    })
+
+    const urlParams = (overrides: Partial<ReturnType<typeof parseUrlParams>> = {}) => {
+      vi.mocked(parseUrlParams).mockReturnValue({
+        videos: [],
+        projectData: null,
+        autoPlay: false,
+        loadVideoId: null,
+        suppressRestore: false,
+        title: null,
+        hostOrigin: null,
+        ...overrides,
+      })
+    }
+
+    afterEach(() => {
+      urlParams()
+      vi.mocked(getSessionState).mockResolvedValue(undefined)
+    })
+
+    it('shows the restore prompt for a saved session by default', async () => {
+      urlParams()
+      vi.mocked(getSessionState).mockResolvedValue(savedSession())
+
+      render(<App />)
+
+      expect(await screen.findByText('Resume Previous Session?')).toBeInTheDocument()
+    })
+
+    it('skips the restore prompt when suppressRestore is set, keeping the saved session', async () => {
+      urlParams({ suppressRestore: true })
+      vi.mocked(getSessionState).mockResolvedValue(savedSession())
+
+      render(<App />)
+
+      // Let the session lookup that the control test relies on settle
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+
+      expect(screen.queryByText('Resume Previous Session?')).not.toBeInTheDocument()
+      expect(clearSessionState).not.toHaveBeenCalled()
+    })
+
+    it('applies the title param to a freshly created project', async () => {
+      urlParams({ title: 'Client Demo' })
+
+      render(<App />)
+
+      await waitFor(() => {
+        expect(useEditorStore.getState().project.name).toBe('Client Demo')
+      })
+    })
+
+    it('does not override a project name that came from project data', async () => {
+      urlParams({ title: 'Client Demo' })
+      const project = useEditorStore.getState().project
+      useEditorStore.getState().setProject({ ...project, name: 'Host Project' })
+
+      render(<App />)
+
+      await act(async () => { await Promise.resolve() })
+
+      expect(useEditorStore.getState().project.name).toBe('Host Project')
+    })
+
+    it('leaves no undo step behind after applying the title', async () => {
+      urlParams({ title: 'Client Demo' })
+
+      render(<App />)
+
+      await waitFor(() => {
+        expect(useEditorStore.getState().project.name).toBe('Client Demo')
+      })
+      // The host naming the project is not an edit the user should be able to
+      // undo back past - handleRestoreSession clears history for the same reason.
+      expect(useEditorStore.getState().history.past).toHaveLength(0)
+    })
+  })
+
+  describe('session autosave', () => {
+    const urlParams = (overrides: Partial<ReturnType<typeof parseUrlParams>> = {}) => {
+      vi.mocked(parseUrlParams).mockReturnValue({
+        videos: [],
+        projectData: null,
+        autoPlay: false,
+        loadVideoId: null,
+        suppressRestore: false,
+        title: null,
+        hostOrigin: null,
+        ...overrides,
+      })
+    }
+
+    afterEach(() => {
+      vi.useRealTimers()
+      urlParams()
+    })
+
+    /** Render, settle the mount-time session read, then run the debounce out. */
+    const renderAndSettleAutosave = async () => {
+      render(<App />)
+      await act(async () => { await Promise.resolve() })
+      await act(async () => { vi.advanceTimersByTime(2500) })
+    }
+
+    it('writes the session after the debounce by default', async () => {
+      urlParams()
+      vi.useFakeTimers()
+
+      await renderAndSettleAutosave()
+
+      expect(saveSessionState).toHaveBeenCalled()
+    })
+
+    it('never writes the session when suppressRestore is set', async () => {
+      urlParams({ suppressRestore: true })
+      vi.useFakeTimers()
+
+      await renderAndSettleAutosave()
+
+      expect(saveSessionState).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('GET_STATE', () => {
+    /** Drive the handler that App passed to initIntegration. */
+    const dispatchToApp = async (message: { type: string; payload?: unknown }) => {
+      const handler = vi.mocked(initIntegration).mock.calls[0][0]
+      await act(async () => { await handler(message as never) })
+    }
+
+    it('replies with the current store state, not the state at mount', async () => {
+      render(<App />)
+      await act(async () => { await Promise.resolve() })
+
+      const project = useEditorStore.getState().project
+      act(() => {
+        useEditorStore.getState().setProject({ ...project, name: 'Renamed After Mount' })
+      })
+
+      await dispatchToApp({ type: 'GET_STATE' })
+
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'STATE',
+        payload: {
+          project: expect.objectContaining({ name: 'Renamed After Mount' }),
+          videos: useEditorStore.getState().sourceVideos,
+        },
+      })
     })
   })
 })

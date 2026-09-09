@@ -16,8 +16,9 @@ import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
 import { fixWebMMetadata } from './core/converter';
-import { isStandaloneMode } from '@escapesuite/shared/config';
+import { isStandaloneMode, editorUrl } from '@escapesuite/shared/config';
 import { analytics } from './utils/analytics';
+import { sendToEditor } from './utils/sendToEditor';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
 
@@ -542,12 +543,9 @@ function App() {
     removeRecording(id);
   };
 
-  // Send recording to ESCAPEARTIST
+  // Send recording to ESCAPEARTIST (or the host, when embedded)
   const handleSendToEditor = (id: string) => {
-    analytics.recordingSentToEditor();
-    // Open ESCAPEARTIST with the video ID
-    const editorUrl = `/artist/?loadVideo=${id}`;
-    window.open(editorUrl, 'escapeartist');
+    sendToEditor(id);
   };
 
   // Play a recording
@@ -658,7 +656,7 @@ function App() {
           </button>
           <button
             className={`${styles.headerButton} ${styles.editorButton}`}
-            onClick={() => window.open('/artist/', 'escapeartist')}
+            onClick={() => window.open(editorUrl(), 'escapeartist')}
             title="Open Editor"
             aria-label="Open Editor in new window"
           >

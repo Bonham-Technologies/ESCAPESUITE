@@ -127,10 +127,34 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
                     Shared videos, thumbnails, projects
 ```
 
-### Integration API (ESCAPEARTIST)
-- PostMessage: bidirectional communication with parent window
-- URL params: `?video=url` to preload, `?project=base64` for state
-- "Send to Editor" from CRAFT uses `?loadVideo=<id>`
+### Integration API (embedding CRAFT / ARTIST in a host page)
+Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) — true whenever
+`window.parent !== window` — and talk to the host over `postMessage`. The full protocol lives in
+the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
+
+- **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
+  init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm', name: string }` after a
+  successful export (`name` is the download filename; not sent on failure or cancellation).
+- **CRAFT → host**: `{ type: 'SEND_TO_EDITOR', payload: { id } }` when embedded, instead of the
+  `window.open()` it uses standalone. `id` addresses the recording in the shared IndexedDB.
+  CRAFT's header "Open Editor" button is deliberately *not* routed through the host — it still
+  opens the editor itself when embedded. Only "Send to Editor" becomes a message.
+- **URL params (ARTIST)**: `?video=url` to preload, `?project=base64` for state,
+  `?loadVideo=<id>` for the CRAFT handoff, `?suppressRestore=1` to skip the
+  "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
+  the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
+  applied only while the name is still the default `Untitled Project`).
+- **`?hostOrigin=<origin>`** (both apps): the host's own origin, e.g. `https://host.example`.
+  Recommended for production hosts. Outbound posts are addressed to it instead of `'*'`, and
+  ARTIST ignores inbound messages from anywhere else. It protects the **host's** deployment,
+  not against being framed — a hostile page that frames the app also controls the URL and would
+  supply its own origin; refusing to be framed is `Content-Security-Policy: frame-ancestors` on
+  the deployment. Parsed by `parseHostOrigin()` in `packages/shared/src/config`.
+- **Documented but not currently implemented**: inbound `EXPORT`, outbound `EXPORT_PROGRESS` and
+  `PROJECT_SAVED`, and the `?project=` / `?autoplay=` URL params. See `apps/artist/CLAUDE.md`.
+- **`VITE_EDITOR_URL`** (build-time, CRAFT): where standalone CRAFT opens the editor.
+  Defaults to `/artist/`; normalised to a single trailing slash.
+- Proved end to end in a real iframe by `apps/e2e/tests/integration/host-embedding.spec.ts`.
 
 ### Headless render service (services/headless-artist)
 - `@escapesuite/headless-artist`: a one-shot CLI that renders ESCAPEARTIST projects in headless
@@ -151,13 +175,17 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 
 ## Environment Variables
 
-No environment variables are required to build or run any app in this repo.
+No environment variables are required to build or run any app in this repo. Two optional variables are available:
 
-The only optional variable is `VITE_BUILD_MODE`, which selects the build target for ESCAPECRAFT and ESCAPEARTIST:
+- `VITE_BUILD_MODE` selects the build target for ESCAPECRAFT and ESCAPEARTIST.
+- `VITE_EDITOR_URL` overrides where ESCAPECRAFT sends recordings for editing (default `/artist/`).
 
 ```env
 # Optional — defaults to a normal web build if unset
 VITE_BUILD_MODE=standalone   # produces the offline single-file build
+
+# Optional — defaults to /artist/ if unset
+VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
 ```
 
 ## Testing
