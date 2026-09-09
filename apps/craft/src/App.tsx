@@ -16,7 +16,7 @@ import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
 import { fixWebMMetadata } from './core/converter';
-import { isStandaloneMode } from '@escapesuite/shared/config';
+import { isStandaloneMode, editorUrl } from '@escapesuite/shared/config';
 import { analytics } from './utils/analytics';
 import { sendToEditor } from './utils/sendToEditor';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
@@ -656,7 +656,7 @@ function App() {
           </button>
           <button
             className={`${styles.headerButton} ${styles.editorButton}`}
-            onClick={() => window.open('/artist/', 'escapeartist')}
+            onClick={() => window.open(editorUrl(), 'escapeartist')}
             title="Open Editor"
             aria-label="Open Editor in new window"
           >

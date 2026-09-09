@@ -82,7 +82,9 @@ its own editor URL with `?loadVideo=<id>`. Because CRAFT and the host-chosen
 editor are same-origin, the shared IndexedDB `video-editor-db` makes the
 recorded blob available there without re-uploading it. Outside an iframe,
 `VITE_EDITOR_URL` controls where CRAFT opens the editor (defaults to
-`/artist/`). See `src/utils/sendToEditor.ts`.
+`/artist/`). See `src/utils/sendToEditor.ts`. Both editor links — "Send to
+Editor" and the header's "Open Editor" button — honour `VITE_EDITOR_URL` via
+the shared `editorUrl()` helper.
 
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
