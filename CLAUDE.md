@@ -151,13 +151,17 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 
 ## Environment Variables
 
-No environment variables are required to build or run any app in this repo.
+No environment variables are required to build or run any app in this repo. Two optional variables are available:
 
-The only optional variable is `VITE_BUILD_MODE`, which selects the build target for ESCAPECRAFT and ESCAPEARTIST:
+- `VITE_BUILD_MODE` selects the build target for ESCAPECRAFT and ESCAPEARTIST.
+- `VITE_EDITOR_URL` overrides where ESCAPECRAFT sends recordings for editing (default `/artist/`).
 
 ```env
 # Optional — defaults to a normal web build if unset
 VITE_BUILD_MODE=standalone   # produces the offline single-file build
+
+# Optional — defaults to /artist/ if unset
+VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
 ```
 
 ## Testing
