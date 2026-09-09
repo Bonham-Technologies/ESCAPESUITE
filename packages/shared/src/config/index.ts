@@ -16,7 +16,7 @@ export const isEmbedded = (): boolean =>
 // ESCAPEARTIST build; can be overridden to point at a different host.
 // Always normalised to end with a single trailing slash.
 const rawEditorUrl = import.meta.env.VITE_EDITOR_URL || '/artist/'
-export const EDITOR_URL = rawEditorUrl.endsWith('/') ? rawEditorUrl : `${rawEditorUrl}/`
+export const EDITOR_URL = rawEditorUrl.replace(/\/+$/, '') + '/'
 
 export const editorUrl = (params?: Record<string, string>): string => {
   if (!params || Object.keys(params).length === 0) return EDITOR_URL
