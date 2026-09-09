@@ -127,10 +127,24 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
                     Shared videos, thumbnails, projects
 ```
 
-### Integration API (ESCAPEARTIST)
-- PostMessage: bidirectional communication with parent window
-- URL params: `?video=url` to preload, `?project=base64` for state
-- "Send to Editor" from CRAFT uses `?loadVideo=<id>`
+### Integration API (embedding CRAFT / ARTIST in a host page)
+Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) — true whenever
+`window.parent !== window` — and talk to the host over `postMessage`. The full protocol lives in
+the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
+
+- **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
+  init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm', name: string }` after a
+  successful export (`name` is the download filename; not sent on failure or cancellation).
+- **CRAFT → host**: `{ type: 'SEND_TO_EDITOR', payload: { id } }` when embedded, instead of the
+  `window.open()` it uses standalone. `id` addresses the recording in the shared IndexedDB.
+- **URL params (ARTIST)**: `?video=url` to preload, `?project=base64` for state,
+  `?loadVideo=<id>` for the CRAFT handoff, `?suppressRestore=1` to skip the
+  "Resume Previous Session?" prompt (the saved session is left in storage), and
+  `?title=<name>` to name the project (trimmed, max 120 chars; applied only while the name is
+  still the default `Untitled Project`).
+- **`VITE_EDITOR_URL`** (build-time, CRAFT): where standalone CRAFT opens the editor.
+  Defaults to `/artist/`; normalised to a single trailing slash.
+- Proved end to end in a real iframe by `apps/e2e/tests/integration/host-embedding.spec.ts`.
 
 ### Headless render service (services/headless-artist)
 - `@escapesuite/headless-artist`: a one-shot CLI that renders ESCAPEARTIST projects in headless

@@ -228,6 +228,15 @@ export function generateShareUrl(
  * - THEME_CHANGED: { preference: string, resolved: string } - Theme was changed
  * - THEME_STATE: { preference: string, resolved: string } - Current theme state
  *
+ * CRAFT -> host (posted by ESCAPECRAFT, not by this app — documented here so
+ * one file describes the whole cross-app protocol; see
+ * apps/craft/src/utils/sendToEditor.ts):
+ * - SEND_TO_EDITOR: { id: string } - A recording is ready to edit. Sent to the
+ *   parent window only when CRAFT is embedded; standalone CRAFT opens
+ *   ESCAPEARTIST itself at VITE_EDITOR_URL (default /artist/) with
+ *   ?loadVideo=<id>. The id addresses a record in the shared IndexedDB
+ *   ('video-editor-db'), so the host must point its editor at the same origin.
+ *
  * URL parameters (read once at startup, see parseUrlParams):
  * - video=<url> - Load a video from a URL (repeatable)
  * - project=<base64> - Load a base64-encoded project
