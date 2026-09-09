@@ -149,7 +149,7 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   ARTIST ignores inbound messages from anywhere else. It protects the **host's** deployment,
   not against being framed — a hostile page that frames the app also controls the URL and would
   supply its own origin; refusing to be framed is `Content-Security-Policy: frame-ancestors` on
-  the deployment. Parsed by `parseHostOrigin()` in `packages/shared/src/config`.
+  the deployment. Parsed by `parseHostOrigin()` in `packages/shared/src/config`. The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` plus `X-Frame-Options: SAMEORIGIN` from `vercel.json`, so it cannot be framed by other origins; a self-hosted or standalone build must set its own.
 - **Documented but not currently implemented**: inbound `EXPORT`, outbound `EXPORT_PROGRESS` and
   `PROJECT_SAVED`, and the `?project=` / `?autoplay=` URL params. See `apps/artist/CLAUDE.md`.
 - **`VITE_EDITOR_URL`** (build-time, CRAFT): where standalone CRAFT opens the editor.

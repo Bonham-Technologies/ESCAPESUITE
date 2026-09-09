@@ -32,6 +32,8 @@ export const editorUrl = (params?: Record<string, string>): string => {
 // controls the app's URL, so a hostile framer would simply supply its own
 // origin. Refusing to be framed at all is `Content-Security-Policy:
 // frame-ancestors` on the deployment serving the app, not a URL parameter.
+// The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json;
+// self-hosted builds must set their own.
 //
 // The value must be a bare origin ('https://host.example', port allowed): a URL
 // whose serialisation is exactly its own origin. Anything else is ignored, with
