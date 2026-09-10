@@ -219,7 +219,7 @@ export function uninstallMediaErrorGlobal(): void {
 /** Build a MediaError-shaped object to hand to a <video> element's `error`. */
 export function mediaError(
   code: keyof typeof MEDIA_ERROR_CODES,
-  message = code
+  message: string = code
 ): { code: number; message: string } {
   return { code: MEDIA_ERROR_CODES[code], message }
 }

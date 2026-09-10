@@ -89,7 +89,13 @@ vi.stubGlobal('MediaRecorder', class MediaRecorder {
   onstop: (() => void) | null = null
   onerror: ((event: Event) => void) | null = null
 
-  constructor(public stream: MediaStream, public options?: MediaRecorderOptions) {}
+  stream: MediaStream
+  options?: MediaRecorderOptions
+
+  constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+    this.stream = stream
+    this.options = options
+  }
 
   start = vi.fn(() => { this.state = 'recording' })
   stop = vi.fn(() => {
@@ -107,7 +113,11 @@ vi.stubGlobal('MediaStream', class MediaStream {
   id = 'mock-stream-id'
   active = true
 
-  constructor(public tracks: MediaStreamTrack[] = []) {}
+  tracks: MediaStreamTrack[]
+
+  constructor(tracks: MediaStreamTrack[] = []) {
+    this.tracks = tracks
+  }
 
   getVideoTracks = vi.fn(() => this.tracks.filter(t => t.kind === 'video'))
   getAudioTracks = vi.fn(() => this.tracks.filter(t => t.kind === 'audio'))
@@ -119,6 +129,9 @@ vi.stubGlobal('MediaStream', class MediaStream {
 // Mock navigator.mediaDevices
 Object.defineProperty(navigator, 'mediaDevices', {
   writable: true,
+  // configurable so a test can redefine it (see withMediaDevices() in
+  // core/permissions.test.ts) and put the original back afterwards.
+  configurable: true,
   value: {
     getUserMedia: vi.fn().mockResolvedValue(new MediaStream()),
     getDisplayMedia: vi.fn().mockResolvedValue(new MediaStream()),

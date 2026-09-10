@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { Recorder, RecorderCallbacks } from './recorder'
+import { Recorder } from './recorder'
+import type { RecorderCallbacks } from './recorder'
 import type { RecordingConfig } from '../store/types'
 
 // Mock webm-duration-fix
@@ -63,10 +64,10 @@ function getRecorderInternals(recorder: Recorder): {
 function createMockStream(tracks: MediaStreamTrack[]): MediaStream {
   const stream = new MediaStream(tracks)
   vi.mocked(stream.getVideoTracks).mockReturnValue(
-    tracks.filter((t) => t.kind === 'video')
+    tracks.filter((t): t is MediaStreamVideoTrack => t.kind === 'video')
   )
   vi.mocked(stream.getAudioTracks).mockReturnValue(
-    tracks.filter((t) => t.kind === 'audio')
+    tracks.filter((t): t is MediaStreamAudioTrack => t.kind === 'audio')
   )
   vi.mocked(stream.getTracks).mockReturnValue(tracks)
   return stream
@@ -79,14 +80,16 @@ const defaultConfig: RecordingConfig = {
   microphoneEnabled: true,
   systemAudioEnabled: false,
   webcamPosition: 'bottom-right',
-  webcamSize: 'medium',
+  webcamSize: 0.2,
   webcamShape: 'circle',
-  countdown: 3,
+  countdownSeconds: 3,
 }
 
 describe('Recorder', () => {
   let recorder: Recorder
-  let callbacks: RecorderCallbacks
+  // Required<>: every callback is supplied below, so the tests can read them
+  // back (vi.mocked(callbacks.onStop)) without narrowing an optional away.
+  let callbacks: Required<RecorderCallbacks>
   let mockScreenStream: MediaStream
   let mockMicStream: MediaStream
   let mockWebcamStream: MediaStream
@@ -768,7 +771,7 @@ describe('Recorder', () => {
       recorder.start()
 
       const mediaRecorder = getMediaRecorder(recorder)
-      const fakeErrorEvent = { type: 'error' } as unknown as Event
+      const fakeErrorEvent = new ErrorEvent('error')
       mediaRecorder.onerror?.(fakeErrorEvent)
 
       expect(callbacks.onError).toHaveBeenCalledTimes(1)

@@ -27,9 +27,10 @@ const createMockMetadata = (overrides: Partial<SourceVideo> = {}): SourceVideo =
   duration: 60,
   width: 1920,
   height: 1080,
-  type: 'video/webm',
+  frameRate: 30,
+  mimeType: 'video/webm',
   size: 1024 * 1024 * 10, // 10MB
-  createdAt: Date.now(),
+  recordedAt: Date.now(),
   source: 'recording',
   thumbnailUrl: 'blob:thumbnail-url',
   ...overrides,
@@ -121,7 +122,7 @@ describe('storage', () => {
       const blob = new Blob(['data'], { type: 'video/webm' })
 
       await storage.storeVideo('rec-1', blob, createMockMetadata({ id: 'rec-1', source: 'recording' }))
-      await storage.storeVideo('imp-1', blob, createMockMetadata({ id: 'imp-1', source: 'import' }))
+      await storage.storeVideo('imp-1', blob, createMockMetadata({ id: 'imp-1', source: 'upload' }))
       await storage.storeVideo('rec-2', blob, createMockMetadata({ id: 'rec-2', source: 'recording' }))
 
       const recordings = await storage.getRecordingsMetadata()
@@ -166,7 +167,7 @@ describe('storage', () => {
       await db.put('videos', {
         id: 'imp-1',
         blob: { size: 5000 } as unknown as Blob,
-        metadata: createMockMetadata({ id: 'imp-1', source: 'import' }),
+        metadata: createMockMetadata({ id: 'imp-1', source: 'upload' }),
       })
 
       const total = await storage.getTotalRecordingsSize()
@@ -200,7 +201,7 @@ describe('storage', () => {
 
       await storage.storeVideo('rec-1', blob, createMockMetadata({ id: 'rec-1', source: 'recording' }))
       await storage.storeThumbnail('rec-1', thumb)
-      await storage.storeVideo('imp-1', blob, createMockMetadata({ id: 'imp-1', source: 'import' }))
+      await storage.storeVideo('imp-1', blob, createMockMetadata({ id: 'imp-1', source: 'upload' }))
       await storage.storeThumbnail('imp-1', thumb)
 
       await storage.clearAllRecordings()

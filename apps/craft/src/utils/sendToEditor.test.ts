@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { sendToEditor } from './sendToEditor';
 import { analytics } from './analytics';
 
@@ -21,16 +22,16 @@ describe('sendToEditor', () => {
   let originalParent: typeof window.parent;
   let originalOpen: typeof window.open;
   let originalLocation: Location;
-  let postMessage: ReturnType<typeof vi.fn>;
-  let openSpy: ReturnType<typeof vi.fn>;
+  let postMessage: Mock<Window['postMessage']>;
+  let openSpy: Mock<Window['open']>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     originalParent = window.parent;
     originalOpen = window.open;
     originalLocation = window.location;
-    postMessage = vi.fn();
-    openSpy = vi.fn();
+    postMessage = vi.fn<Window['postMessage']>();
+    openSpy = vi.fn<Window['open']>();
     window.open = openSpy;
   });
 

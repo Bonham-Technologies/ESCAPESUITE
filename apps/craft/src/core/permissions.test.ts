@@ -16,6 +16,19 @@ function withUserAgent(ua: string): () => void {
   return () => Object.defineProperty(navigator, 'userAgent', { value: original, configurable: true })
 }
 
+/**
+ * Swap `navigator.mediaDevices` for the duration of one test. It is a
+ * read-only accessor on Navigator, so it can only be replaced by redefining
+ * the property; the returned function puts the original back.
+ */
+function withMediaDevices(replacement: MediaDevices | undefined): () => void {
+  const original = navigator.mediaDevices
+  const define = (value: MediaDevices | undefined) =>
+    Object.defineProperty(navigator, 'mediaDevices', { value, configurable: true, writable: true })
+  define(replacement)
+  return () => define(original)
+}
+
 describe('permissions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -113,47 +126,46 @@ describe('permissions', () => {
     })
 
     it('marks every capability unavailable when mediaDevices does not exist', async () => {
-      const original = navigator.mediaDevices
-      // @ts-expect-error - simulating a browser without the mediaDevices API
-      navigator.mediaDevices = undefined
+      // Simulating a browser without the mediaDevices API at all.
+      const restore = withMediaDevices(undefined)
       try {
         const result = await detectCapabilities()
         expect(result.detailed.screenCapture.reason).toBe('api_not_supported')
         expect(result.detailed.webcam.reason).toBe('api_not_supported')
         expect(result.detailed.microphone.reason).toBe('api_not_supported')
       } finally {
-        navigator.mediaDevices = original
+        restore()
       }
     })
 
     it('marks webcam/microphone unavailable when getUserMedia is missing', async () => {
       const original = navigator.mediaDevices
-      navigator.mediaDevices = {
+      const restore = withMediaDevices({
         getDisplayMedia: original.getDisplayMedia,
         enumerateDevices: original.enumerateDevices,
-      } as unknown as MediaDevices
+      } as unknown as MediaDevices)
       try {
         const result = await detectCapabilities()
         expect(result.detailed.screenCapture.available).toBe(true)
         expect(result.detailed.webcam.reason).toBe('api_not_supported')
         expect(result.detailed.microphone.reason).toBe('api_not_supported')
       } finally {
-        navigator.mediaDevices = original
+        restore()
       }
     })
 
     it('marks screen capture unavailable when getDisplayMedia is missing', async () => {
       const original = navigator.mediaDevices
-      navigator.mediaDevices = {
+      const restore = withMediaDevices({
         getUserMedia: original.getUserMedia,
         enumerateDevices: original.enumerateDevices,
-      } as unknown as MediaDevices
+      } as unknown as MediaDevices)
       vi.mocked(original.enumerateDevices).mockResolvedValue([])
       try {
         const result = await detectCapabilities()
         expect(result.detailed.screenCapture.reason).toBe('api_not_supported')
       } finally {
-        navigator.mediaDevices = original
+        restore()
       }
     })
 
@@ -451,7 +463,7 @@ describe('permissions', () => {
     it('should return true when stream has audio tracks', () => {
       const stream = new MediaStream()
       vi.mocked(stream.getAudioTracks).mockReturnValue([
-        { id: 'audio-track', kind: 'audio' } as MediaStreamTrack,
+        { id: 'audio-track', kind: 'audio' } as MediaStreamAudioTrack,
       ])
 
       expect(hasSystemAudio(stream)).toBe(true)
