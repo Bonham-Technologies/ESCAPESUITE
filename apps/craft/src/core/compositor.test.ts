@@ -371,14 +371,51 @@ describe('Compositor', () => {
       compositor.stop()
     })
 
-    it('treats a zero padding as "unset" and falls back to the 20px default', () => {
+    it('honours a zero padding, drawing the overlay flush against the edge', () => {
       const compositor = new Compositor(1280, 720, { webcamShape: 'rectangle', webcamSize: 0.4, padding: 0 })
       const ctx = ctxOf(compositor)
       const webcam = attachWebcam(compositor)
 
       compositor.start(30)
 
-      expect(ctx.drawImage).toHaveBeenCalledWith(webcam.element, 1280 - 512 - 20, 720 - 288 - 20, 512, 288)
+      // bottom-right with no padding sits exactly on the canvas edge
+      expect(ctx.drawImage).toHaveBeenCalledWith(webcam.element, 1280 - 512, 720 - 288, 512, 288)
+      compositor.stop()
+    })
+
+    it('draws a zero-padded top-left overlay at the canvas origin', () => {
+      const compositor = new Compositor(1280, 720, {
+        webcamShape: 'rectangle',
+        webcamPosition: 'top-left',
+        padding: 0,
+      })
+      const ctx = ctxOf(compositor)
+      const webcam = attachWebcam(compositor)
+
+      compositor.start(30)
+
+      expect(ctx.drawImage).toHaveBeenCalledWith(webcam.element, 0, 0, 256, 144)
+      expect(ctx.roundRect).toHaveBeenCalledWith(0, 0, 256, 144, 8)
+      compositor.stop()
+    })
+
+    it('honours a zero padding applied through updateConfig()', () => {
+      const compositor = new Compositor(1280, 720, {
+        webcamShape: 'rectangle',
+        webcamPosition: 'top-left',
+        padding: 20,
+      })
+      const ctx = ctxOf(compositor)
+      const webcam = attachWebcam(compositor)
+
+      compositor.start(30)
+      expect(ctx.drawImage).toHaveBeenLastCalledWith(webcam.element, 20, 20, 256, 144)
+
+      compositor.updateConfig({ padding: 0 })
+      now += 40
+      tickAnimationFrames()
+
+      expect(ctx.drawImage).toHaveBeenLastCalledWith(webcam.element, 0, 0, 256, 144)
       compositor.stop()
     })
 
