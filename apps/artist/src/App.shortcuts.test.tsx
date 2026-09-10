@@ -355,6 +355,16 @@ describe('App keyboard shortcuts', () => {
       expect(notification()).toBe('Ripple Edit Tool')
     })
 
+    it('leaves the tool alone when ctrl+v has nothing to paste', async () => {
+      addClip('clip1', 0, 2)
+      store().setActiveTool('razor')
+      await renderApp()
+
+      press('v', { ctrlKey: true })
+
+      expect(store().activeTool).toBe('razor')
+    })
+
     it('toggles snapping with s', async () => {
       await renderApp()
 
@@ -383,6 +393,32 @@ describe('App keyboard shortcuts', () => {
       press('/', { shiftKey: true })
 
       expect(screen.getByRole('heading', { name: 'Keyboard Shortcuts' })).toBeInTheDocument()
+    })
+  })
+
+  describe('splitting', () => {
+    beforeEach(() => {
+      addClip('clip1', 0, 4)
+      store().setSelectedClipId('clip1')
+      store().setCurrentTime(1)
+    })
+
+    it('splits the selected clip at the playhead with ctrl+b', async () => {
+      await renderApp()
+
+      press('b', { ctrlKey: true })
+
+      expect(store().project.timeline.clips.map((c) => c.duration)).toEqual([1, 3])
+      expect(notification()).toBe('Clip split')
+    })
+
+    it('does not split when the playhead sits outside the clip', async () => {
+      store().setCurrentTime(9)
+      await renderApp()
+
+      press('b', { ctrlKey: true })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
     })
   })
 
