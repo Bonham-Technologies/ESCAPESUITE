@@ -778,3 +778,256 @@ describe('volume keyframes', () => {
     })
   })
 })
+
+// ============================================
+// Easing curves
+// ============================================
+
+describe('easing curves', () => {
+  /** The interpolated value at the midpoint of a 0 -> 1 ramp under `easing`. */
+  const midpoint = (easing: Keyframe['easing']) =>
+    interpolateKeyframes(
+      [
+        { time: 0, value: 0, easing },
+        { time: 1, value: 1, easing: 'linear' },
+      ],
+      0.5,
+      0
+    )
+
+  it.each([
+    ['linear', 0.5],
+    ['ease-in', 0.25],
+    ['ease-out', 0.75],
+    ['ease-in-out', 0.5],
+    ['ease-in-quad', 0.25],
+    ['ease-out-quad', 0.75],
+    ['ease-in-out-quad', 0.5],
+    ['ease-in-cubic', 0.125],
+    ['ease-out-cubic', 0.875],
+    ['ease-in-out-cubic', 0.5],
+  ] as const)('%s reaches %f at the halfway point', (easing, expected) => {
+    expect(midpoint(easing)).toBeCloseTo(expected, 10)
+  })
+
+  it.each([
+    ['ease-in', 0.25, 0.0625],
+    ['ease-out', 0.25, 0.4375],
+    ['ease-in-out', 0.25, 0.125],
+    ['ease-in-out', 0.75, 0.875],
+    ['ease-in-out-quad', 0.75, 0.875],
+    ['ease-in-cubic', 0.25, 0.015625],
+    ['ease-out-cubic', 0.25, 0.578125],
+    ['ease-in-out-cubic', 0.25, 0.0625],
+    ['ease-in-out-cubic', 0.75, 0.9375],
+  ] as const)('%s at t=%f is %f', (easing, t, expected) => {
+    const value = interpolateKeyframes(
+      [
+        { time: 0, value: 0, easing },
+        { time: 1, value: 1, easing: 'linear' },
+      ],
+      t,
+      0
+    )
+    expect(value).toBeCloseTo(expected, 10)
+  })
+
+  it('falls back to linear for an unknown easing name', () => {
+    const value = interpolateKeyframes(
+      [
+        { time: 0, value: 0, easing: 'bounce' as Keyframe['easing'] },
+        { time: 1, value: 10, easing: 'linear' },
+      ],
+      0.3,
+      0
+    )
+    expect(value).toBeCloseTo(3, 10)
+  })
+})
+
+describe('ensureKeyframesSorted', () => {
+  it('returns an empty or single-element array untouched', () => {
+    const empty: Keyframe[] = []
+    expect(ensureKeyframesSorted(empty)).toBe(empty)
+    const single: Keyframe[] = [{ time: 3, value: 1, easing: 'linear' }]
+    expect(ensureKeyframesSorted(single)).toBe(single)
+  })
+})
+
+// ============================================
+// Animation presets
+// ============================================
+
+describe('animation presets', () => {
+  const withPresets = (
+    inPreset: ClipAnimation['in']['type'],
+    outPreset: ClipAnimation['out']['type'],
+    durations: { in: number; out: number } = { in: 1, out: 1 }
+  ): ClipAnimation => ({
+    in: { type: inPreset, duration: durations.in, easing: 'linear' },
+    out: { type: outPreset, duration: durations.out, easing: 'linear' },
+    keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [], volume: [] },
+  })
+
+  const at = (time: number, animation: ClipAnimation, clipDuration = 10) =>
+    getAnimatedValues(time, clipDuration, animation, baseTransform, baseEffects)
+
+  /** Keyframes a preset generates for one property, via the public accessor. */
+  const keyframesFor = (
+    property: Parameters<typeof getAllKeyframesForProperty>[0],
+    animation: ClipAnimation,
+    clipDuration = 10
+  ) => getAllKeyframesForProperty(property, clipDuration, animation, baseTransform, baseEffects)
+
+  it('generates no keyframes for the "none" preset or a zero duration', () => {
+    expect(keyframesFor('opacity', withPresets('none', 'none'))).toEqual([])
+    expect(keyframesFor('opacity', withPresets('fade', 'fade', { in: 0, out: 0 }))).toEqual([])
+  })
+
+  it('fade in ramps opacity from 0 to the base value', () => {
+    const animation = withPresets('fade', 'none')
+    expect(at(0, animation).opacity).toBe(0)
+    expect(at(0.5, animation).opacity).toBeCloseTo(0.5, 10)
+    expect(at(1, animation).opacity).toBe(1)
+  })
+
+  it('fade out ramps opacity from the base value to 0 at the clip end', () => {
+    const animation = withPresets('none', 'fade')
+    expect(at(9, animation).opacity).toBe(1)
+    expect(at(9.5, animation).opacity).toBeCloseTo(0.5, 10)
+    expect(at(10, animation).opacity).toBe(0)
+  })
+
+  it.each([
+    ['slide-left', 'x', 0.5 + 0.5],
+    ['slide-right', 'x', 0.5 - 0.5],
+    ['slide-up', 'y', 0.5 + 0.5],
+    ['slide-down', 'y', 0.5 - 0.5],
+  ] as const)('%s in starts %s off-frame and settles at the base value', (preset, axis, start) => {
+    const animation = withPresets(preset, 'none')
+    expect(at(0, animation)[axis]).toBeCloseTo(start, 10)
+    expect(at(1, animation)[axis]).toBeCloseTo(0.5, 10)
+  })
+
+  it.each([
+    ['slide-left', 'x', 0.5 - 0.5],
+    ['slide-right', 'x', 0.5 + 0.5],
+    ['slide-up', 'y', 0.5 - 0.5],
+    ['slide-down', 'y', 0.5 + 0.5],
+  ] as const)('%s out leaves %s off-frame at the clip end', (preset, axis, end) => {
+    const animation = withPresets('none', preset)
+    expect(at(9, animation)[axis]).toBeCloseTo(0.5, 10)
+    expect(at(10, animation)[axis]).toBeCloseTo(end, 10)
+  })
+
+  it.each(['scale', 'scale-up'] as const)('%s in grows both axes from zero', (preset) => {
+    const animation = withPresets(preset, 'none')
+    expect(at(0, animation).scaleX).toBe(0)
+    expect(at(0, animation).scaleY).toBe(0)
+    expect(at(1, animation).scaleX).toBe(1)
+    expect(at(1, animation).scaleY).toBe(1)
+  })
+
+  it('scale-down in shrinks both axes from double size', () => {
+    const animation = withPresets('scale-down', 'none')
+    expect(at(0, animation).scaleX).toBe(2)
+    expect(at(0, animation).scaleY).toBe(2)
+    expect(at(1, animation).scaleX).toBe(1)
+  })
+
+  it.each(['scale', 'scale-down'] as const)('%s out shrinks both axes to zero', (preset) => {
+    const animation = withPresets('none', preset)
+    expect(at(9, animation).scaleX).toBe(1)
+    expect(at(10, animation).scaleX).toBe(0)
+    expect(at(10, animation).scaleY).toBe(0)
+  })
+
+  it('scale-up out grows both axes to double size while fading out', () => {
+    const animation = withPresets('none', 'scale-up')
+    expect(at(10, animation).scaleX).toBe(2)
+    expect(at(10, animation).scaleY).toBe(2)
+    expect(at(10, animation).opacity).toBe(0)
+  })
+
+  it('pop in overshoots past the base scale before settling', () => {
+    const animation = withPresets('pop', 'none')
+    expect(at(0, animation).scaleX).toBe(0)
+    expect(at(0.7, animation).scaleX).toBeCloseTo(1.1, 10)
+    expect(at(0.7, animation).scaleY).toBeCloseTo(1.1, 10)
+    expect(at(1, animation).scaleX).toBeCloseTo(1, 10)
+  })
+
+  it('pop out overshoots before collapsing to zero', () => {
+    const animation = withPresets('none', 'pop')
+    expect(at(9, animation).scaleX).toBeCloseTo(1, 10)
+    expect(at(9.3, animation).scaleX).toBeCloseTo(1.1, 10)
+    expect(at(10, animation).scaleX).toBe(0)
+    expect(at(10, animation).scaleY).toBe(0)
+  })
+
+  it('blur in starts heavily blurred and transparent', () => {
+    const animation = withPresets('blur', 'none')
+    expect(at(0, animation).blur).toBe(20)
+    expect(at(0, animation).opacity).toBe(0)
+    expect(at(1, animation).blur).toBe(0)
+    expect(at(1, animation).opacity).toBe(1)
+  })
+
+  it('blur out ends heavily blurred and transparent', () => {
+    const animation = withPresets('none', 'blur')
+    expect(at(9, animation).blur).toBe(0)
+    expect(at(10, animation).blur).toBe(20)
+    expect(at(10, animation).opacity).toBe(0)
+  })
+
+  it('applies an in and an out preset to the same clip', () => {
+    const animation = withPresets('fade', 'fade')
+    const keyframes = keyframesFor('opacity', animation)
+    expect(keyframes.map((k) => k.time)).toEqual([0, 1, 9, 10])
+    expect(at(0, animation).opacity).toBe(0)
+    expect(at(5, animation).opacity).toBe(1)
+    expect(at(10, animation).opacity).toBe(0)
+  })
+})
+
+describe('animation cache eviction', () => {
+  beforeEach(() => {
+    clearAnimationCache()
+  })
+
+  it('drops the whole cache once it is full, then repopulates', () => {
+    const compute = (key: string) =>
+      getAnimatedValuesCached(key, 0, 10, undefined, baseTransform, baseEffects)
+
+    for (let i = 0; i < 10000; i++) compute(`clip:${i}`)
+
+    // The 10 000th entry filled the cache; the next insert clears it first, so
+    // the earliest key is no longer served from cache — it is recomputed.
+    const before = compute('clip:0')
+    const after = compute('clip:10000')
+    const recomputed = compute('clip:0')
+
+    expect(after).toEqual(before)
+    // A cache hit returns the very same object; a recompute returns a new one.
+    expect(recomputed).not.toBe(before)
+    expect(recomputed).toEqual(before)
+  })
+})
+
+describe('getAnimatedVolume edge cases', () => {
+  it('falls back to the base volume when interpolation overflows to infinity', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0, easing: 'linear' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: {
+        x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+        volume: [
+          { time: 0, value: -Number.MAX_VALUE, easing: 'linear' },
+          { time: 2, value: Number.MAX_VALUE, easing: 'linear' },
+        ],
+      },
+    }
+
+    expect(getAnimatedVolume(1, animation, 0.75)).toBe(0.75)
+  })
+})

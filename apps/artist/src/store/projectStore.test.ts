@@ -1344,3 +1344,586 @@ describe('projectStore helper functions', () => {
     })
   })
 })
+
+describe('projectStore remaining behaviours', () => {
+  const video: SourceVideo = {
+    id: 'video1',
+    name: 'test.mp4',
+    duration: 30,
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    mimeType: 'video/mp4',
+    size: 1000,
+  }
+
+  const store = () => useEditorStore.getState()
+
+  /** Add a media clip and return the clip the store actually created. */
+  function addClip(
+    id: string,
+    position: number,
+    duration = 2,
+    trackId?: string
+  ) {
+    store().addClipToTimeline(
+      { id, sourceVideoId: video.id, name: id, startTime: 0, endTime: duration, duration },
+      trackId,
+      position
+    )
+    return store().project.timeline.clips.find((c) => c.id === id)!
+  }
+
+  beforeEach(() => {
+    store().resetProject()
+    useEditorStore.setState({
+      history: { past: [], future: [] },
+      markers: [],
+      keyframePanelState: {
+        ...store().keyframePanelState,
+        isOpen: false,
+        selectedProperty: null,
+        graphZoom: 1,
+      },
+    })
+    store().addSourceVideo(video)
+  })
+
+  describe('history size cap', () => {
+    it('drops the oldest snapshot once 50 are stored', () => {
+      // Each undoable action snapshots the state *before* it, so 60 calls push
+      // the initial state plus widths 100..158 — 60 entries, capped at 50.
+      for (let i = 0; i < 60; i++) store().setProjectResolution(100 + i, 100)
+
+      expect(store().history.past).toHaveLength(50)
+      // The ten oldest snapshots, including the initial state, have aged out.
+      expect(store().history.past[0].project.resolution.width).toBe(109)
+      expect(store().history.past[49].project.resolution.width).toBe(158)
+    })
+  })
+
+  describe('automatic track creation', () => {
+    it('stacks a new track on top when every existing track is occupied', () => {
+      const first = addClip('clip1', 0)
+      const second = addClip('clip2', 5)
+
+      const tracks = store().project.timeline.tracks
+      expect(tracks).toHaveLength(2)
+      expect(second.trackId).not.toBe(first.trackId)
+      const newTrack = tracks.find((t) => t.id === second.trackId)!
+      expect(newTrack.index).toBe(1)
+      expect(newTrack.name).toBe('Track 2')
+      expect(newTrack).toMatchObject({ visible: true, locked: false, muted: false, volume: 1, height: 60 })
+    })
+
+    it('names an auto-created text track "Text"', () => {
+      addClip('clip1', 0)
+      const overlay = store().addTextOverlayClip({ text: 'Hi' })
+
+      const track = store().project.timeline.tracks.find((t) => t.id === overlay.trackId)!
+      expect(track.name).toBe('Text')
+    })
+
+    it('names an auto-created shape track after the shape', () => {
+      addClip('clip1', 0)
+      const ellipse = store().addShapeOverlayClip({ type: 'ellipse' })
+
+      expect(store().project.timeline.tracks.find((t) => t.id === ellipse.trackId)!.name).toBe('Ellipse')
+    })
+
+    it('names an auto-created blur track "Blur" and gives it blur defaults', () => {
+      addClip('clip1', 0)
+      const blur = store().addShapeOverlayClip({ type: 'blur' })
+
+      expect(store().project.timeline.tracks.find((t) => t.id === blur.trackId)!.name).toBe('Blur')
+      expect(blur.name).toBe('Blur Region')
+      expect(blur.shapeData).toMatchObject({
+        fillColor: '#00000000',
+        strokeWidth: 0,
+        blurAmount: 10,
+      })
+    })
+  })
+
+  describe('removeSourceVideo', () => {
+    it('drops the clips that referenced it and shortens the timeline', () => {
+      addClip('clip1', 0, 4)
+      const other: SourceVideo = { ...video, id: 'video2' }
+      store().addSourceVideo(other)
+      store().addClipToTimeline(
+        { id: 'clip2', sourceVideoId: 'video2', name: 'clip2', startTime: 0, endTime: 2, duration: 2 },
+        undefined,
+        10
+      )
+      expect(store().project.timeline.duration).toBe(12)
+
+      store().removeSourceVideo('video2')
+
+      expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+      expect(store().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
+      expect(store().project.timeline.duration).toBe(4)
+    })
+  })
+
+  describe('rippleDeleteClip', () => {
+    it('removes the clip and pulls the later clips on that track back', () => {
+      const first = addClip('clip1', 0, 4)
+      addClip('clip2', 4, 3, first.trackId)
+      addClip('clip3', 10, 2, first.trackId)
+
+      store().setSelectedClipId('clip1')
+      store().rippleDeleteClip('clip1')
+
+      const byId = Object.fromEntries(store().project.timeline.clips.map((c) => [c.id, c]))
+      expect(byId.clip1).toBeUndefined()
+      expect(byId.clip2.timelinePosition).toBe(0)
+      expect(byId.clip3.timelinePosition).toBe(6)
+      expect(store().project.timeline.duration).toBe(8)
+      expect(store().selectedClipId).toBeNull()
+    })
+
+    it('leaves clips on other tracks where they are', () => {
+      const first = addClip('clip1', 0, 4)
+      const onOtherTrack = addClip('clip2', 8, 2)
+      expect(onOtherTrack.trackId).not.toBe(first.trackId)
+
+      store().rippleDeleteClip('clip1')
+
+      expect(store().project.timeline.clips.find((c) => c.id === 'clip2')!.timelinePosition).toBe(8)
+    })
+
+    it('never pulls a clip before zero', () => {
+      const first = addClip('clip1', 5, 10)
+      addClip('clip2', 15, 2, first.trackId)
+
+      store().rippleDeleteClip('clip1')
+
+      expect(store().project.timeline.clips.find((c) => c.id === 'clip2')!.timelinePosition).toBe(5)
+    })
+
+    it('ignores an unknown clip id', () => {
+      addClip('clip1', 0, 4)
+      const before = store().project
+
+      store().rippleDeleteClip('nope')
+
+      expect(store().project).toBe(before)
+    })
+
+    it('keeps the selection when a different clip is deleted', () => {
+      const first = addClip('clip1', 0, 4)
+      addClip('clip2', 4, 2, first.trackId)
+      store().setSelectedClipId('clip2')
+
+      store().rippleDeleteClip('clip1')
+
+      expect(store().selectedClipId).toBe('clip2')
+    })
+  })
+
+  describe('shiftClipsAfter', () => {
+    it('moves the clips at or after the given time on that track', () => {
+      const first = addClip('clip1', 0, 2)
+      addClip('clip2', 5, 2, first.trackId)
+      addClip('clip3', 10, 2, first.trackId)
+
+      store().shiftClipsAfter(first.trackId, 5, 3)
+
+      const byId = Object.fromEntries(store().project.timeline.clips.map((c) => [c.id, c]))
+      expect(byId.clip1.timelinePosition).toBe(0)
+      expect(byId.clip2.timelinePosition).toBe(8)
+      expect(byId.clip3.timelinePosition).toBe(13)
+      expect(store().project.timeline.duration).toBe(15)
+    })
+
+    it('clamps a negative shift at zero', () => {
+      const first = addClip('clip1', 4, 2)
+
+      store().shiftClipsAfter(first.trackId, 0, -10)
+
+      expect(store().project.timeline.clips[0].timelinePosition).toBe(0)
+    })
+
+    it('is a no-op for a zero delta', () => {
+      const first = addClip('clip1', 4, 2)
+      const before = store().project
+
+      store().shiftClipsAfter(first.trackId, 0, 0)
+
+      expect(store().project).toBe(before)
+    })
+
+    it('leaves other tracks alone', () => {
+      const first = addClip('clip1', 4, 2)
+      const other = addClip('clip2', 4, 2)
+      expect(other.trackId).not.toBe(first.trackId)
+
+      store().shiftClipsAfter(first.trackId, 0, 5)
+
+      const byId = Object.fromEntries(store().project.timeline.clips.map((c) => [c.id, c]))
+      expect(byId.clip1.timelinePosition).toBe(9)
+      expect(byId.clip2.timelinePosition).toBe(4)
+    })
+  })
+
+  describe('updateClip', () => {
+    it('recomputes the clip duration when the trim points move', () => {
+      addClip('clip1', 0, 10)
+
+      store().updateClip('clip1', { startTime: 2, endTime: 6 })
+
+      const clip = store().project.timeline.clips[0]
+      expect(clip.duration).toBe(4)
+      expect(store().project.timeline.duration).toBe(4)
+    })
+
+    it('leaves the duration alone for unrelated updates', () => {
+      addClip('clip1', 0, 10)
+
+      store().updateClip('clip1', { name: 'Renamed' })
+
+      expect(store().project.timeline.clips[0].duration).toBe(10)
+      expect(store().project.timeline.clips[0].name).toBe('Renamed')
+    })
+  })
+
+  describe('splitClip', () => {
+    it('refuses a split at or beyond the clip bounds', () => {
+      addClip('clip1', 0, 5)
+      const before = store().project
+
+      store().splitClip('clip1', 0)
+      expect(store().project).toBe(before)
+
+      store().splitClip('clip1', 5)
+      expect(store().project).toBe(before)
+    })
+  })
+
+  describe('setClipKeyframe', () => {
+    it('replaces a keyframe already sitting at that time', () => {
+      addClip('clip1', 0, 5)
+      store().setClipKeyframe('clip1', 'opacity', { time: 0, value: 1, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.5, easing: 'linear' })
+
+      store().setClipKeyframe('clip1', 'opacity', { time: 2.0005, value: 0.25, easing: 'ease-in' })
+
+      const keyframes = store().project.timeline.clips[0].animation!.keyframes.opacity!
+      expect(keyframes).toEqual([
+        { time: 0, value: 1, easing: 'linear' },
+        { time: 2.0005, value: 0.25, easing: 'ease-in' },
+      ])
+    })
+
+    it('auto-creates a zero keyframe from the clip transform', () => {
+      addClip('clip1', 0, 5)
+      store().updateClipTransform('clip1', { x: 0.25 })
+
+      store().setClipKeyframe('clip1', 'x', { time: 3, value: 0.75, easing: 'linear' })
+
+      expect(store().project.timeline.clips[0].animation!.keyframes.x).toEqual([
+        { time: 0, value: 0.25, easing: 'ease-out' },
+        { time: 3, value: 0.75, easing: 'linear' },
+      ])
+    })
+
+    it('auto-creates a zero keyframe from the clip blur effect', () => {
+      addClip('clip1', 0, 5)
+      store().updateClipEffects('clip1', { blur: 7 })
+
+      store().setClipKeyframe('clip1', 'blur', { time: 3, value: 0, easing: 'linear' })
+
+      expect(store().project.timeline.clips[0].animation!.keyframes.blur![0]).toEqual({
+        time: 0,
+        value: 7,
+        easing: 'ease-out',
+      })
+    })
+
+    it('auto-creates a zero volume keyframe at full volume', () => {
+      addClip('clip1', 0, 5)
+
+      store().setClipKeyframe('clip1', 'volume', { time: 3, value: 0, easing: 'linear' })
+
+      expect(store().project.timeline.clips[0].animation!.keyframes.volume![0]).toEqual({
+        time: 0,
+        value: 1,
+        easing: 'ease-out',
+      })
+    })
+
+    it('auto-creates zero keyframes from a text overlay position and rotation', () => {
+      const overlay = store().addTextOverlayClip({ text: 'Hi', x: 0.2, y: 0.8, rotation: 30 })
+
+      store().setClipKeyframe(overlay.id, 'x', { time: 2, value: 0.9, easing: 'linear' })
+      store().setClipKeyframe(overlay.id, 'rotation', { time: 2, value: 90, easing: 'linear' })
+
+      const clip = store().project.timeline.clips.find((c) => c.id === overlay.id)!
+      expect(clip.animation!.keyframes.x![0]).toEqual({ time: 0, value: 0.2, easing: 'ease-out' })
+      expect(clip.animation!.keyframes.rotation![0]).toEqual({ time: 0, value: 30, easing: 'ease-out' })
+    })
+
+    it('treats a text overlay with no rotation as zero', () => {
+      const overlay = store().addTextOverlayClip({ text: 'Hi' })
+      store().updateTextOverlayData(overlay.id, { rotation: undefined })
+
+      store().setClipKeyframe(overlay.id, 'rotation', { time: 2, value: 45, easing: 'linear' })
+
+      const clip = store().project.timeline.clips.find((c) => c.id === overlay.id)!
+      expect(clip.animation!.keyframes.rotation![0].value).toBe(0)
+    })
+
+    it('auto-creates a zero keyframe from a shape overlay position', () => {
+      const overlay = store().addShapeOverlayClip({ type: 'rectangle', x: 0.3, y: 0.4 })
+
+      store().setClipKeyframe(overlay.id, 'y', { time: 2, value: 0.9, easing: 'linear' })
+
+      const clip = store().project.timeline.clips.find((c) => c.id === overlay.id)!
+      expect(clip.animation!.keyframes.y![0]).toEqual({ time: 0, value: 0.4, easing: 'ease-out' })
+    })
+
+    it('does not auto-create when the caller already keyframed time zero', () => {
+      addClip('clip1', 0, 5)
+
+      store().setClipKeyframe('clip1', 'opacity', { time: 0, value: 0.5, easing: 'linear' })
+
+      expect(store().project.timeline.clips[0].animation!.keyframes.opacity).toEqual([
+        { time: 0, value: 0.5, easing: 'linear' },
+      ])
+    })
+  })
+
+  describe('duplicateClip', () => {
+    it('places the copy after the original when the track is clear', () => {
+      const original = addClip('clip1', 0, 4)
+
+      store().duplicateClip('clip1')
+
+      const copy = store().project.timeline.clips.find((c) => c.id !== 'clip1')!
+      expect(copy.timelinePosition).toBe(4)
+      expect(copy.trackId).toBe(original.trackId)
+      expect(copy.name).toBe('clip1 (copy)')
+      expect(store().selectedClipId).toBe(copy.id)
+    })
+
+    it('pushes the copy past a clip already occupying that slot', () => {
+      const first = addClip('clip1', 0, 4)
+      addClip('clip2', 4, 3, first.trackId)
+
+      store().duplicateClip('clip1')
+
+      const copy = store().project.timeline.clips.find(
+        (c) => c.id !== 'clip1' && c.id !== 'clip2'
+      )!
+      expect(copy.timelinePosition).toBe(7)
+      expect(store().project.timeline.duration).toBe(11)
+    })
+
+    it('walks past every occupied slot, in time order', () => {
+      const first = addClip('clip1', 0, 4)
+      // Added out of order so the copy placement really depends on the sort.
+      addClip('clip3', 8, 3, first.trackId)
+      addClip('clip2', 4, 3, first.trackId)
+
+      store().duplicateClip('clip1')
+
+      const copy = store().project.timeline.clips.find(
+        (c) => !['clip1', 'clip2', 'clip3'].includes(c.id)
+      )!
+      expect(copy.timelinePosition).toBe(11)
+    })
+
+    it('ignores an unknown clip id', () => {
+      addClip('clip1', 0, 4)
+      const before = store().project
+
+      store().duplicateClip('nope')
+
+      expect(store().project).toBe(before)
+    })
+  })
+
+  describe('standalone shape overlays', () => {
+    it('adds, updates and removes one, clearing the selection with it', () => {
+      const overlay = store().addShapeOverlay({ type: 'ellipse' })
+      expect(store().selectedOverlayId).toBe(overlay.id)
+      expect(store().selectedOverlayType).toBe('shape')
+
+      store().updateShapeOverlay(overlay.id, { strokeWidth: 4 })
+      expect(store().project.timeline.shapeOverlays![0].strokeWidth).toBe(4)
+
+      store().removeShapeOverlay(overlay.id)
+
+      expect(store().project.timeline.shapeOverlays).toEqual([])
+      expect(store().selectedOverlayId).toBeNull()
+      expect(store().selectedOverlayType).toBeNull()
+    })
+
+    it('keeps a different selection when another overlay is removed', () => {
+      const first = store().addShapeOverlay({ type: 'ellipse' })
+      const second = store().addShapeOverlay({ type: 'rectangle' })
+      expect(store().selectedOverlayId).toBe(second.id)
+
+      store().removeShapeOverlay(first.id)
+
+      expect(store().selectedOverlayId).toBe(second.id)
+      expect(store().selectedOverlayType).toBe('shape')
+      expect(store().project.timeline.shapeOverlays!.map((o) => o.id)).toEqual([second.id])
+    })
+  })
+
+  describe('recalculateTimelineDuration', () => {
+    it('resyncs the stored duration with the clips', () => {
+      addClip('clip1', 0, 4)
+      useEditorStore.setState({
+        project: {
+          ...store().project,
+          timeline: { ...store().project.timeline, duration: 999 },
+        },
+      })
+
+      store().recalculateTimelineDuration()
+
+      expect(store().project.timeline.duration).toBe(4)
+    })
+  })
+
+  describe('markers', () => {
+    it('updates a marker and keeps the list sorted by time', () => {
+      const first = store().addMarker(1, 'A')
+      store().addMarker(5, 'B')
+
+      store().updateMarker(first.id, { time: 8, label: 'Moved' })
+
+      expect(store().markers.map((m) => [m.time, m.label])).toEqual([
+        [5, 'B'],
+        [8, 'Moved'],
+      ])
+    })
+  })
+
+  describe('keyframe panel state', () => {
+    it('stores the panel size, selected property and clamped zoom', () => {
+      store().setKeyframePanelSize({ width: 700, height: 800 })
+      store().setKeyframePanelSelectedProperty('opacity')
+      store().setKeyframePanelZoom(2)
+
+      expect(store().keyframePanelState.size).toEqual({ width: 700, height: 800 })
+      expect(store().keyframePanelState.selectedProperty).toBe('opacity')
+      expect(store().keyframePanelState.graphZoom).toBe(2)
+
+      store().setKeyframePanelZoom(99)
+      expect(store().keyframePanelState.graphZoom).toBe(4)
+
+      store().setKeyframePanelZoom(0)
+      expect(store().keyframePanelState.graphZoom).toBe(0.5)
+
+      store().setKeyframePanelSelectedProperty(null)
+      expect(store().keyframePanelState.selectedProperty).toBeNull()
+    })
+  })
+
+  describe('setProject migration', () => {
+    it('leaves a modern project alone but fills in missing overlay arrays', () => {
+      const modern = {
+        id: 'p',
+        name: 'Modern',
+        created: 1,
+        modified: 1,
+        resolution: { width: 1280, height: 720 },
+        timeline: {
+          tracks: [
+            { id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },
+          ],
+          clips: [],
+          duration: 0,
+        },
+      }
+
+      store().setProject(modern as never)
+
+      expect(store().project.timeline.tracks).toHaveLength(1)
+      expect(store().project.timeline.textOverlays).toEqual([])
+      expect(store().project.timeline.shapeOverlays).toEqual([])
+    })
+
+    it('gives a project with no resolution the 1080p default', () => {
+      const legacy = {
+        id: 'p',
+        name: 'Legacy',
+        created: 1,
+        modified: 1,
+        timeline: {
+          tracks: [
+            { id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },
+          ],
+          clips: [],
+          textOverlays: [],
+          shapeOverlays: [],
+          duration: 0,
+        },
+      }
+
+      store().setProject(legacy as never)
+
+      expect(store().project.resolution).toEqual({ width: 1920, height: 1080 })
+    })
+
+    it('lays trackless clips out sequentially on a new default track', () => {
+      const legacy = {
+        id: 'p',
+        name: 'Ancient',
+        created: 1,
+        modified: 1,
+        resolution: { width: 1920, height: 1080 },
+        timeline: {
+          tracks: [],
+          clips: [
+            { id: 'a', sourceVideoId: 'video1', name: 'a', startTime: 0, endTime: 3, duration: 3 },
+            { id: 'b', sourceVideoId: 'video1', name: 'b', startTime: 0, endTime: 2, duration: 2 },
+          ],
+          duration: 0,
+        },
+      }
+
+      store().setProject(legacy as never)
+
+      const timeline = store().project.timeline
+      expect(timeline.tracks).toHaveLength(1)
+      const trackId = timeline.tracks[0].id
+      expect(timeline.clips.map((c) => [c.id, c.timelinePosition, c.trackId])).toEqual([
+        ['a', 0, trackId],
+        ['b', 3, trackId],
+      ])
+      expect(timeline.clips[0].blendMode).toBe('normal')
+      expect(timeline.clips[0].transform).toBeDefined()
+      expect(timeline.clips[0].effects).toBeDefined()
+      expect(timeline.clips[0].transition).toBeDefined()
+      expect(timeline.duration).toBe(5)
+      expect(timeline.textOverlays).toEqual([])
+      expect(timeline.shapeOverlays).toEqual([])
+    })
+
+    it('keeps positions that legacy clips already carried', () => {
+      const legacy = {
+        id: 'p',
+        name: 'Ancient',
+        created: 1,
+        modified: 1,
+        resolution: { width: 1920, height: 1080 },
+        timeline: {
+          tracks: [],
+          clips: [
+            { id: 'a', sourceVideoId: 'video1', name: 'a', startTime: 0, endTime: 3, duration: 3, timelinePosition: 10 },
+            { id: 'b', sourceVideoId: 'video1', name: 'b', startTime: 0, endTime: 2, duration: 2 },
+          ],
+          duration: 0,
+        },
+      }
+
+      store().setProject(legacy as never)
+
+      expect(store().project.timeline.clips.map((c) => c.timelinePosition)).toEqual([10, 0])
+    })
+  })
+})

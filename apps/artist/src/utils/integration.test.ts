@@ -415,6 +415,21 @@ describe('integration', () => {
       expect(result.name).toBe('my-video.mp4')
     })
 
+    it('falls back to video.mp4 when the URL path has no filename', async () => {
+      const mockBlob = new Blob(['video data'], { type: 'video/mp4' })
+
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        blob: () => Promise.resolve(mockBlob),
+        headers: new Headers({ 'content-type': 'video/mp4' }),
+        body: null,
+      } as Response)
+
+      const result = await loadVideoFromUrl('http://example.com/videos/')
+
+      expect(result.name).toBe('video.mp4')
+    })
+
     it('throws error on failed fetch', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: false,

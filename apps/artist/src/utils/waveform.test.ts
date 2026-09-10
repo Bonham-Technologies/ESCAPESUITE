@@ -2,9 +2,15 @@
  * Tests for waveform extraction utilities
  */
 
-import { describe, it, expect } from 'vitest';
-import { resamplePeaks, getPeaksForRange } from './waveform';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { extractWaveformData, resamplePeaks, getPeaksForRange } from './waveform';
 import type { WaveformPeak } from '../store/types';
+import {
+  createAudioBufferDouble,
+  installAudioContextDouble,
+  type AudioContextDoubles,
+} from '../test/doubles/audio';
+import { removeGlobal } from '../test/doubles/globals';
 
 describe('waveform utilities', () => {
   describe('resamplePeaks', () => {
@@ -150,13 +156,89 @@ describe('waveform utilities', () => {
 });
 
 describe('extractWaveformData', () => {
-  // Note: extractWaveformData requires AudioContext which is not available in jsdom
-  // These tests would need to mock AudioContext or run in a browser environment
+  let audio: AudioContextDoubles;
 
-  // Placeholder for integration tests
-  it.todo('extracts peaks from audio blob');
-  it.todo('handles video with audio track');
-  it.todo('returns hasAudio: false for video without audio');
-  it.todo('handles decoding errors gracefully');
-  it.todo('averages stereo channels');
+  afterEach(() => {
+    audio?.uninstall();
+    vi.restoreAllMocks();
+  });
+
+  /** A one-second mono buffer at 100 Hz, so 100 samples map to 100 peaks/s. */
+  const oneSecond = (values: number[]) =>
+    createAudioBufferDouble([Float32Array.from(values)], values.length);
+
+  it('extracts one peak per requested sample, each the min/max of its bucket', async () => {
+    // 4 samples at 4 Hz = 1 second; 2 peaks/s means 2 samples per peak.
+    audio = installAudioContextDouble(oneSecond([0.5, -0.25, 0.125, -0.875]));
+
+    const result = await extractWaveformData(new Blob(['audio']), 2);
+
+    expect(result.peaks).toEqual([
+      { min: -0.25, max: 0.5 },
+      { min: -0.875, max: 0.125 },
+    ]);
+    expect(result.hasAudio).toBe(true);
+    // The blob really was read and the context really was closed.
+    expect(audio.decodeCalls).toHaveLength(1);
+    expect(audio.closed).toBe(1);
+  });
+
+  it('averages the two channels of a stereo buffer', async () => {
+    audio = installAudioContextDouble(
+      createAudioBufferDouble(
+        [Float32Array.from([1, 0]), Float32Array.from([0, -1])],
+        2
+      )
+    );
+
+    const result = await extractWaveformData(new Blob(['audio']), 2);
+
+    // (1+0)/2 = 0.5 and (0+-1)/2 = -0.5
+    expect(result.peaks).toEqual([
+      { min: 0, max: 0.5 },
+      { min: -0.5, max: 0 },
+    ]);
+  });
+
+  it('reports hasAudio false for a silent track, while still returning peaks', async () => {
+    audio = installAudioContextDouble(oneSecond([0, 0.00048828125, -0.00048828125, 0]));
+
+    const result = await extractWaveformData(new Blob(['audio']), 2);
+
+    expect(result.peaks).toHaveLength(2);
+    expect(result.hasAudio).toBe(false);
+  });
+
+  it('returns no peaks and closes the context when the media has no decodable audio', async () => {
+    audio = installAudioContextDouble(null);
+
+    const result = await extractWaveformData(new Blob(['video-without-audio']));
+
+    expect(result).toEqual({ peaks: [], hasAudio: false });
+    expect(audio.closed).toBe(1);
+  });
+
+  it('defaults to 100 peaks per second of audio', async () => {
+    audio = installAudioContextDouble(
+      createAudioBufferDouble([new Float32Array(4800)], 4800)
+    );
+
+    const result = await extractWaveformData(new Blob(['audio']));
+
+    // 1 second of audio at the default rate
+    expect(result.peaks).toHaveLength(100);
+  });
+
+  it('warns and returns nothing when the audio pipeline throws outright', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const restore = removeGlobal('AudioContext');
+    try {
+      const result = await extractWaveformData(new Blob(['audio']));
+
+      expect(result).toEqual({ peaks: [], hasAudio: false });
+      expect(warn).toHaveBeenCalledWith('Failed to extract waveform data:', expect.any(Error));
+    } finally {
+      restore();
+    }
+  });
 });

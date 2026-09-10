@@ -114,6 +114,81 @@ describe('FrameCache', () => {
     });
   });
 
+  describe('replacing a cached frame', () => {
+    it('closes the old bitmap and keeps memory accounting straight', () => {
+      const first = new MockImageBitmap(100, 100);
+      const second = new MockImageBitmap(100, 100);
+
+      cache.set(1.0, first as unknown as ImageBitmap);
+      const memoryAfterFirst = cache.getStats().memoryBytes;
+
+      cache.set(1.0, second as unknown as ImageBitmap);
+
+      expect(first.closed).toBe(true);
+      expect(second.closed).toBe(false);
+      expect(cache.get(1.0)).toBe(second as unknown as ImageBitmap);
+      expect(cache.getStats().frameCount).toBe(1);
+      // Not double-counted: the replacement costs the same as the original.
+      expect(cache.getStats().memoryBytes).toBe(memoryAfterFirst);
+    });
+  });
+
+  describe('cacheFromCanvas', () => {
+    it('turns the canvas into a bitmap and caches it at that time', async () => {
+      const canvas = document.createElement('canvas');
+
+      await cache.cacheFromCanvas(2.0, canvas);
+
+      expect(createImageBitmap).toHaveBeenCalledWith(canvas);
+      expect(cache.has(2.0)).toBe(true);
+    });
+
+    it('warns and caches nothing when the bitmap cannot be created', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error('canvas tainted'));
+
+      await cache.cacheFromCanvas(3.0, document.createElement('canvas'));
+
+      expect(cache.has(3.0)).toBe(false);
+      expect(warn).toHaveBeenCalledWith('Failed to cache frame:', expect.any(Error));
+      warn.mockRestore();
+    });
+  });
+
+  describe('preload', () => {
+    it('renders and caches every frame in the range, reporting progress', async () => {
+      const renderFrame = vi.fn(async (_time: number) => document.createElement('canvas'));
+      const progress: number[] = [];
+
+      // 0 to 2/30s inclusive: frames 0, 1, 2.
+      await cache.preload(0, 2 / 30, renderFrame, (p) => progress.push(p));
+
+      expect(renderFrame.mock.calls.map((c) => c[0])).toEqual([0, 1 / 30, 2 / 30]);
+      expect(cache.getStats().frameCount).toBe(3);
+      expect(progress).toEqual([1 / 3, 2 / 3, 1]);
+    });
+
+    it('skips frames that are already cached', async () => {
+      cache.set(0, new MockImageBitmap() as unknown as ImageBitmap);
+      const renderFrame = vi.fn(async (_time: number) => document.createElement('canvas'));
+
+      await cache.preload(0, 1 / 30, renderFrame);
+
+      expect(renderFrame.mock.calls.map((c) => c[0])).toEqual([1 / 30]);
+    });
+
+    it('carries on when a frame cannot be rendered', async () => {
+      const renderFrame = vi.fn(async (time: number) =>
+        time === 0 ? null : document.createElement('canvas')
+      );
+
+      await cache.preload(0, 1 / 30, renderFrame);
+
+      expect(cache.has(0)).toBe(false);
+      expect(cache.has(1 / 30)).toBe(true);
+    });
+  });
+
   describe('clear and invalidate', () => {
     it('clear() removes all frames', () => {
       const bitmaps: MockImageBitmap[] = [];

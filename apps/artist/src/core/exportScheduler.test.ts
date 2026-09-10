@@ -129,7 +129,66 @@ describe('exportScheduler', () => {
     });
   });
 
+  describe('scheduleExport yield strategy', () => {
+    it('yields through requestIdleCallback when the browser offers one', async () => {
+      // A browser runs the idle callback later, on its own schedule.
+      const requestIdleCallback = vi.fn((cb: () => void) => {
+        queueMicrotask(() => cb());
+      });
+      vi.stubGlobal('requestIdleCallback', requestIdleCallback);
+      try {
+        let remaining = 3;
+        const onComplete = vi.fn();
+
+        const scheduled = scheduleExport(
+          {
+            process: async () => --remaining > 0,
+            onComplete,
+            onError: vi.fn(),
+            totalUnits: 3,
+          },
+          { yieldEveryN: 1 }
+        );
+
+        await scheduled.promise;
+
+        expect(onComplete).toHaveBeenCalled();
+        // Yielded through the idle callback rather than a timer.
+        expect(requestIdleCallback).toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+  });
+
   describe('processFramesInChunks', () => {
+    it('yields to the main thread every N frames', async () => {
+      const frames = [1, 2, 3, 4];
+      const processed: number[] = [];
+
+      const done = processFramesInChunks(
+        frames,
+        async (frame) => {
+          processed.push(frame);
+        },
+        undefined,
+        { yieldEveryN: 2 }
+      );
+
+      // Let every pending microtask run: the loop still parks on a timer, so
+      // it cannot have finished.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      const beforeTimers = [...processed];
+
+      await vi.runAllTimersAsync();
+      await done;
+
+      expect(beforeTimers.length).toBeLessThan(frames.length);
+      expect(processed).toEqual([1, 2, 3, 4]);
+    });
+
     it('processes all frames', async () => {
       const frames = [1, 2, 3, 4, 5];
       const processed: number[] = [];
@@ -173,7 +232,60 @@ describe('exportScheduler', () => {
     });
   });
 
+  describe('createYieldingFrameIterator yielding', () => {
+    it('parks on a timer every N frames', async () => {
+      const frames: number[] = [];
+
+      const consume = (async () => {
+        for await (const frame of createYieldingFrameIterator(0, 3, 2)) {
+          frames.push(frame);
+        }
+      })();
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      const beforeTimers = [...frames];
+
+      await vi.runAllTimersAsync();
+      await consume;
+
+      expect(beforeTimers.length).toBeLessThan(4);
+      expect(frames).toEqual([0, 1, 2, 3]);
+    });
+  });
+
   describe('AdaptiveYieldScheduler', () => {
+    it('keeps only the last 20 samples when adapting', async () => {
+      const scheduler = new AdaptiveYieldScheduler(60, 5);
+
+      // 25 slow samples, then 20 fast ones: the slow ones must have aged out.
+      for (let i = 0; i < 25; i++) scheduler.recordProcessingTime(100);
+      const afterSlow = scheduler.getYieldEveryN();
+      for (let i = 0; i < 20; i++) scheduler.recordProcessingTime(1);
+
+      // Smoothing halves the gap each time, so it settles at 2 rather than 1.
+      expect(afterSlow).toBe(2);
+      expect(scheduler.getYieldEveryN()).toBeGreaterThan(2);
+    });
+
+    it('yields only on multiples of the current interval', async () => {
+      const scheduler = new AdaptiveYieldScheduler(60, 3);
+
+      // 3 % 3 === 0, so this one parks on a timer.
+      let yielded = false;
+      const parked = scheduler.maybeYield(3).then(() => {
+        yielded = true;
+      });
+      expect(yielded).toBe(false);
+      await vi.advanceTimersByTimeAsync(0);
+      await parked;
+      expect(yielded).toBe(true);
+
+      // 4 % 3 !== 0, so this resolves without waiting for a timer.
+      await expect(scheduler.maybeYield(4)).resolves.toBeUndefined();
+    });
+
     it('adjusts yield frequency based on processing time', () => {
       const scheduler = new AdaptiveYieldScheduler(60, 5);
 
