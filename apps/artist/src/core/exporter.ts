@@ -16,6 +16,3 @@ export { isMP4ExportSupported, isWebMExportSupported } from './exportTypes';
 
 // Public API - error class
 export { ExportAbortedError } from './exportTypes';
-
-// Public API - testing utilities
-export { clearSeekPositions, getSeekPositionsCount } from './exportTypes';

@@ -4,12 +4,10 @@ import {
   blendModeToCanvas,
   calculateTimelineDuration,
   checkAborted,
-  clearSeekPositions,
   getActiveTransition,
   getBaseDimensions,
   getQualitySettings,
   getResolution,
-  getSeekPositionsCount,
   getSourceDimensions,
   isMP4ExportSupported,
   isWebMExportSupported,
@@ -347,15 +345,6 @@ describe('loadVideoElement / loadImageElement', () => {
     await expect(loadImageElement(new Blob(['i'], { type: 'image/png' }))).rejects.toThrow('Failed to load image')
     expect(revoke).toHaveBeenCalledWith('blob:mock-url')
     revoke.mockRestore()
-  })
-})
-
-describe('seek position tracking', () => {
-  it('is empty after a clear', () => {
-    // Nothing in the shipped pipeline writes to this map any more, so the only
-    // observable contract left is that clearing it leaves it empty.
-    clearSeekPositions()
-    expect(getSeekPositionsCount()).toBe(0)
   })
 })
 

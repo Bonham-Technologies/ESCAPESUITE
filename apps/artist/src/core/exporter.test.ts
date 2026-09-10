@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   isMP4ExportSupported,
   isWebMExportSupported,
-  clearSeekPositions,
-  getSeekPositionsCount,
   exportToWebM,
   exportToMP4,
   ExportAbortedError,
@@ -102,21 +100,6 @@ describe('exporter', () => {
       globalThis.VideoFrame = vi.fn() as unknown as typeof VideoFrame
 
       expect(isWebMExportSupported()).toBe(isMP4ExportSupported())
-    })
-  })
-
-  describe('seek position tracking', () => {
-    beforeEach(() => {
-      clearSeekPositions()
-    })
-
-    it('starts with empty seek positions', () => {
-      expect(getSeekPositionsCount()).toBe(0)
-    })
-
-    it('clears seek positions correctly', () => {
-      clearSeekPositions()
-      expect(getSeekPositionsCount()).toBe(0)
     })
   })
 

@@ -151,10 +151,9 @@ The export pipeline includes several optimizations to improve performance:
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for MP4 files (background-capable)
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
-- **Seek position tracking**: `seekVideoOptimized()` skips redundant video seeks if already within one frame of target position
-- **Frame tolerance**: Uses 1/frameRate (e.g., 0.033s at 30fps) to determine if seek is needed
+- **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
 - **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
-- **Cache lifecycle**: `clearSeekPositions()` and `clearAnimationCache()` called at export start
+- **Cache lifecycle**: `clearAnimationCache()` is called at export start
 - **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
 
 ### MP4 Export Reliability (`src/core/exporter.ts`)

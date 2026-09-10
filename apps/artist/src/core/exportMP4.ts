@@ -22,7 +22,6 @@ import {
   getQualitySettings,
   getResolution, getBaseDimensions,
   loadImageElement,
-  clearSeekPositions,
   yieldToMain,
   calculateTimelineDuration,
   getActiveTransition,
@@ -102,8 +101,7 @@ export async function exportToMP4(
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
 
-  // Clear optimization caches at start of export
-  clearSeekPositions();
+  // Clear the animation cache at start of export
   clearAnimationCache();
 
   onProgress({ phase: 'preparing', progress: 0, message: 'Preparing MP4 export...' });
