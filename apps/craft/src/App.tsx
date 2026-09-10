@@ -53,6 +53,10 @@ function App() {
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
+  // The screen and webcam streams live in the store (the preview reads them);
+  // the microphone stream is only ever handed to the recorder, so it is held
+  // here purely so stopAllStreams() can release it with the others.
+  const micStreamRef = useRef<MediaStream | null>(null);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [isPiPActive, setIsPiPActive] = useState(false);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
@@ -157,6 +161,8 @@ function App() {
     const { screenStream: activeScreen, webcamStream: activeWebcam } = useRecorderStore.getState();
     stopStream(activeScreen);
     stopStream(activeWebcam);
+    stopStream(micStreamRef.current);
+    micStreamRef.current = null;
     setStreams(null, null);
     setPreviewStream(null);
 
@@ -389,6 +395,7 @@ function App() {
 
       const { screen, webcam, mic } = await acquireStreams();
       setStreams(screen, webcam);
+      micStreamRef.current = mic;
 
       // Set up preview
       // This avoids canvas.captureStream() issues with hidden video elements
