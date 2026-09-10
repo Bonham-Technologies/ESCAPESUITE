@@ -147,6 +147,122 @@ describe('storage', () => {
     })
   })
 
+  describe('getTotalRecordingsSize', () => {
+    it('sums the size of recording-sourced blobs only', async () => {
+      // fake-indexeddb doesn't preserve Blob through structured clone (size
+      // comes back undefined), so write raw records with a `.size` field
+      // directly rather than round-tripping a real Blob through storeVideo.
+      const db = await storage.getDB()
+      await db.put('videos', {
+        id: 'rec-1',
+        blob: { size: 100 } as unknown as Blob,
+        metadata: createMockMetadata({ id: 'rec-1', source: 'recording' }),
+      })
+      await db.put('videos', {
+        id: 'rec-2',
+        blob: { size: 250 } as unknown as Blob,
+        metadata: createMockMetadata({ id: 'rec-2', source: 'recording' }),
+      })
+      await db.put('videos', {
+        id: 'imp-1',
+        blob: { size: 5000 } as unknown as Blob,
+        metadata: createMockMetadata({ id: 'imp-1', source: 'import' }),
+      })
+
+      const total = await storage.getTotalRecordingsSize()
+
+      expect(total).toBe(350)
+    })
+
+    it('returns 0 for an empty database', async () => {
+      const total = await storage.getTotalRecordingsSize()
+      expect(total).toBe(0)
+    })
+
+    it('treats a missing blob as zero size', async () => {
+      const db = await storage.getDB()
+      await db.put('videos', {
+        id: 'rec-no-blob',
+        blob: undefined as unknown as Blob,
+        metadata: createMockMetadata({ id: 'rec-no-blob', source: 'recording' }),
+      })
+
+      const total = await storage.getTotalRecordingsSize()
+
+      expect(total).toBe(0)
+    })
+  })
+
+  describe('clearAllRecordings', () => {
+    it('deletes recording videos and their thumbnails, leaving imports intact', async () => {
+      const blob = new Blob(['data'], { type: 'video/webm' })
+      const thumb = new Blob(['thumb'], { type: 'image/png' })
+
+      await storage.storeVideo('rec-1', blob, createMockMetadata({ id: 'rec-1', source: 'recording' }))
+      await storage.storeThumbnail('rec-1', thumb)
+      await storage.storeVideo('imp-1', blob, createMockMetadata({ id: 'imp-1', source: 'import' }))
+      await storage.storeThumbnail('imp-1', thumb)
+
+      await storage.clearAllRecordings()
+
+      expect(await storage.getVideo('rec-1')).toBeUndefined()
+      expect(await storage.getThumbnail('rec-1')).toBeUndefined()
+      expect(await storage.getVideo('imp-1')).toBeDefined()
+      expect(await storage.getThumbnail('imp-1')).toBeDefined()
+    })
+
+    it('does nothing on an empty database', async () => {
+      await expect(storage.clearAllRecordings()).resolves.toBeUndefined()
+    })
+  })
+
+  describe('hasSpaceForRecording', () => {
+    afterEach(() => {
+      Object.defineProperty(navigator, 'storage', { value: undefined, configurable: true })
+    })
+
+    it('returns true when available space comfortably exceeds the buffer', async () => {
+      Object.defineProperty(navigator, 'storage', {
+        value: { estimate: vi.fn().mockResolvedValue({ usage: 0, quota: 1024 * 1024 * 1024 }) }, // 1GB quota
+        configurable: true,
+      })
+
+      const result = await storage.hasSpaceForRecording(1024 * 1024) // 1MB recording
+      expect(result).toBe(true)
+    })
+
+    it('returns false when available space is within the 50MB buffer', async () => {
+      const quota = 60 * 1024 * 1024 // 60MB quota, no usage
+      Object.defineProperty(navigator, 'storage', {
+        value: { estimate: vi.fn().mockResolvedValue({ usage: 0, quota }) },
+        configurable: true,
+      })
+
+      // 20MB recording + 50MB buffer > 60MB available
+      const result = await storage.hasSpaceForRecording(20 * 1024 * 1024)
+      expect(result).toBe(false)
+    })
+
+    it('returns false exactly at the buffer boundary', async () => {
+      const estimatedSize = 10 * 1024 * 1024
+      const quota = estimatedSize + 50 * 1024 * 1024 // available === estimatedSize + buffer
+      Object.defineProperty(navigator, 'storage', {
+        value: { estimate: vi.fn().mockResolvedValue({ usage: 0, quota }) },
+        configurable: true,
+      })
+
+      const result = await storage.hasSpaceForRecording(estimatedSize)
+      expect(result).toBe(false)
+    })
+
+    it('returns false when the Storage API is unavailable', async () => {
+      Object.defineProperty(navigator, 'storage', { value: undefined, configurable: true })
+
+      const result = await storage.hasSpaceForRecording(1024)
+      expect(result).toBe(false)
+    })
+  })
+
   describe('blob URL operations', () => {
     it('creates a blob URL', () => {
       const blob = new Blob(['data'])

@@ -34,17 +34,17 @@ export default defineConfig({
       reporter: ['text', 'json', 'json-summary', 'html'],
       exclude: [
         'node_modules/',
-        'src/test/',
+        'src/test/**',
         '**/*.d.ts',
         '**/*.config.*',
         '**/types.ts',
       ],
       // Coverage floors — these only go up. See CLAUDE.md's Testing section.
       thresholds: {
-        lines: 42,
-        statements: 42,
-        branches: 45,
-        functions: 47,
+        lines: 55,
+        statements: 54,
+        branches: 57,
+        functions: 65,
       },
     },
   },

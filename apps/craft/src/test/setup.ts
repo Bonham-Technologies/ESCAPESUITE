@@ -1,5 +1,6 @@
 import '@escapesuite/shared/test/setup'
 import { vi } from 'vitest'
+import { installCanvasContextDouble } from './doubles/canvas'
 
 // Mock IndexedDB for storage tests
 const indexedDB = {
@@ -15,21 +16,10 @@ vi.stubGlobal('URL', class extends OriginalURL {
   static revokeObjectURL = vi.fn()
 })
 
-// Mock HTMLCanvasElement.getContext for WebCodecs recorder tests
-const originalGetContext = HTMLCanvasElement.prototype.getContext
-HTMLCanvasElement.prototype.getContext = function(contextId: string, options?: CanvasRenderingContext2DSettings) {
-  if (contextId === '2d') {
-    return {
-      drawImage: vi.fn(),
-      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
-      putImageData: vi.fn(),
-      clearRect: vi.fn(),
-      fillRect: vi.fn(),
-      canvas: this,
-    } as unknown as CanvasRenderingContext2D
-  }
-  return originalGetContext.call(this, contextId, options)
-}
+// Recording double for HTMLCanvasElement.getContext('2d') + toBlob(), shared
+// by every test (WebCodecs recorder, thumbnail generation, etc). See
+// src/test/doubles/canvas.ts for how to inspect/configure it per test.
+installCanvasContextDouble()
 
 // Helper to create a mock MediaStreamTrack with all required methods
 function createMockAudioTrack() {

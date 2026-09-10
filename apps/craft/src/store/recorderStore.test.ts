@@ -1,6 +1,18 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useRecorderStore } from './recorderStore'
-import { defaultConfig } from './types'
+import { defaultConfig, type DetailedCapabilities } from './types'
+import type { SourceVideo } from '@escapesuite/shared/types'
+
+// loadRecordings talks to the storage layer — that's a collaborator, not the
+// module under test, so it's mocked to control what recordings/thumbnails
+// come back while exercising recorderStore's own sorting/mapping logic.
+vi.mock('../core/storage', () => ({
+  getRecordingsMetadata: vi.fn(),
+  getThumbnail: vi.fn(),
+  createBlobUrl: vi.fn(),
+}))
+
+import { getRecordingsMetadata, getThumbnail, createBlobUrl } from '../core/storage'
 
 describe('recorderStore', () => {
   beforeEach(() => {
@@ -214,6 +226,72 @@ describe('recorderStore', () => {
       const { screenStream, webcamStream } = useRecorderStore.getState()
       expect(screenStream).toBeNull()
       expect(webcamStream).toBeNull()
+    })
+  })
+
+  describe('setDetailedCapabilities', () => {
+    it('should update detailed capabilities', () => {
+      const { setDetailedCapabilities } = useRecorderStore.getState()
+      const detailed: DetailedCapabilities = {
+        screenCapture: { available: true },
+        webcam: { available: false, reason: 'no_device', message: 'No camera found' },
+        microphone: { available: true },
+        systemAudio: { available: false, reason: 'browser_not_supported', message: 'Not supported' },
+        mediaRecorder: { available: true },
+      }
+
+      setDetailedCapabilities(detailed)
+
+      expect(useRecorderStore.getState().detailedCapabilities).toEqual(detailed)
+    })
+  })
+
+  describe('loadRecordings', () => {
+    beforeEach(() => {
+      vi.mocked(getRecordingsMetadata).mockReset()
+      vi.mocked(getThumbnail).mockReset()
+      vi.mocked(createBlobUrl).mockReset()
+    })
+
+    it('sorts recordings newest-first and resolves thumbnail URLs where available', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        { id: 'older', name: 'Older', duration: 10, size: 100, recordedAt: 1000 } as SourceVideo,
+        { id: 'newer', name: 'Newer', duration: 20, size: 200, recordedAt: 3000 } as SourceVideo,
+      ])
+      const thumbBlob = new Blob(['thumb'])
+      vi.mocked(getThumbnail).mockImplementation(async (id: string) =>
+        id === 'older' ? thumbBlob : undefined
+      )
+      vi.mocked(createBlobUrl).mockReturnValue('blob:thumb-url')
+
+      await useRecorderStore.getState().loadRecordings()
+
+      const { recordings } = useRecorderStore.getState()
+      expect(recordings.map((r) => r.id)).toEqual(['newer', 'older'])
+      expect(recordings.find((r) => r.id === 'older')?.thumbnailUrl).toBe('blob:thumb-url')
+      expect(recordings.find((r) => r.id === 'newer')?.thumbnailUrl).toBeUndefined()
+      expect(createBlobUrl).toHaveBeenCalledWith(thumbBlob)
+      expect(recordings[0].hasWebcam).toBe(false)
+      expect(recordings[0].hasAudio).toBe(true)
+    })
+
+    it('defaults createdAt to 0 when recordedAt is missing', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        { id: 'no-date', name: 'No Date', duration: 5, size: 50 } as SourceVideo,
+      ])
+      vi.mocked(getThumbnail).mockResolvedValue(undefined)
+
+      await useRecorderStore.getState().loadRecordings()
+
+      expect(useRecorderStore.getState().recordings[0].createdAt).toBe(0)
+    })
+
+    it('sets an empty recordings list when there is nothing stored', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([])
+
+      await useRecorderStore.getState().loadRecordings()
+
+      expect(useRecorderStore.getState().recordings).toEqual([])
     })
   })
 })
