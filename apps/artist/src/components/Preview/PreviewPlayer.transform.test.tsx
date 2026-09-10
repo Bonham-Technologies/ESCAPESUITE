@@ -420,6 +420,46 @@ describe('PreviewPlayer edge resize drags', () => {
     expect(clipOf(text.id).textData!.scale).toBeCloseTo(2, 5)
   })
 
+  it('scales text from the bottom handle by the height ratio', async () => {
+    const text = addText()
+
+    const preview = await renderPreview()
+    await drag(preview, [
+      [960, 540 + TEXT.halfH],
+      [960, 540 + TEXT.halfH + 57.6],
+    ])
+
+    // The text is 57.6 canvas px tall, so +57.6 doubles it.
+    expect(clipOf(text.id).textData!.scale).toBeCloseTo(2, 5)
+  })
+
+  it('leaves the width alone when a north-edge drag wanders sideways', async () => {
+    const shape = addShape()
+
+    const preview = await renderPreview()
+    await drag(preview, [
+      [960, 540 - SHAPE.halfH],
+      [960 + 192, 540 - SHAPE.halfH - 54],
+    ])
+
+    expect(clipOf(shape.id).shapeData!.height).toBeCloseTo(0.25, 5)
+    expect(clipOf(shape.id).shapeData!.width).toBeCloseTo(0.2, 5)
+  })
+
+  it('leaves the other axis alone when an east-edge drag wanders down', async () => {
+    addClip('clip1', 0, 4)
+    store().setSelectedClipId('clip1')
+
+    const preview = await renderPreview()
+    await drag(preview, [
+      [1920, 540],
+      [1920 + 192, 540 + 108],
+    ])
+
+    expect(clipOf('clip1').transform.scaleX).toBeCloseTo(1.1, 5)
+    expect(clipOf('clip1').transform.scaleY).toBe(1)
+  })
+
   it('scales only one axis of a media clip from a side handle', async () => {
     addClip('clip1', 0, 4)
     store().setSelectedClipId('clip1')
@@ -529,6 +569,36 @@ describe('PreviewPlayer keyframe-mode drags', () => {
     const keyframes = clipOf(shape.id).animation!.keyframes!
     expect(keyframes.scaleX![0].value).toBeCloseTo(1.5, 5)
     expect(keyframes.scaleY![0].value).toBeCloseTo(1.25, 5)
+  })
+
+  it('writes only the dragged axis from a side handle', async () => {
+    const shape = addShape()
+    inKeyframeMode(shape)
+
+    const preview = await renderPreview()
+    await drag(preview, [
+      [960 + SHAPE.halfW, 540],
+      [960 + SHAPE.halfW + 192, 540 + 108],
+    ])
+
+    const keyframes = clipOf(shape.id).animation!.keyframes!
+    expect(last(keyframes.scaleX!).value).toBeCloseTo(1.5, 5)
+    expect(keyframes.scaleY).toBeUndefined()
+  })
+
+  it('writes the vertical axis from the bottom handle', async () => {
+    const shape = addShape()
+    inKeyframeMode(shape)
+
+    const preview = await renderPreview()
+    await drag(preview, [
+      [960, 540 + SHAPE.halfH],
+      [960 + 192, 540 + SHAPE.halfH + 108],
+    ])
+
+    const keyframes = clipOf(shape.id).animation!.keyframes!
+    expect(last(keyframes.scaleY!).value).toBeCloseTo(1.5, 5)
+    expect(keyframes.scaleX).toBeUndefined()
   })
 
   it('writes a scale keyframe from the west edge and moves the centre with it', async () => {
