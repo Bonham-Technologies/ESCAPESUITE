@@ -218,6 +218,12 @@ in every package and fails the whole run if any package drops below its floor.
   package's config); never lower one to make a red build pass — fix the coverage gap
   or, if a threshold is measurably wrong (e.g. it was set from a bad measurement),
   say so explicitly in the PR description instead of quietly loosening it.
+- **Every `src` file counts.** Each config sets `coverage.include: ['src/**/*.{ts,tsx}']`
+  so a file the test suite never imports still appears in the report at 0%, instead of
+  being silently omitted from the denominator; the only exclusions beyond `src/test/**`,
+  type declarations, and config files are the three bootstrap/worker entry points named
+  in each package's `coverage.exclude` comment (`src/main.tsx` in plan/craft/artist,
+  artist's `src/headless/main.ts`, and artist's `src/workers/decodeWorker.ts`).
 - **Reading the report**: after `pnpm test:coverage`, run `pnpm coverage:report`
   (`node scripts/coverage-report.mjs`) for a table of every package's actual coverage
   next to its configured floor (`actual% / threshold%`, with `!` marking a value
