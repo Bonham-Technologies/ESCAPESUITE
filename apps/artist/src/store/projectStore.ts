@@ -173,6 +173,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     clipboard: null,
     inPoint: null,
     outPoint: null,
+    markers: [],
     history: pushToHistory(state),
   })),
 
