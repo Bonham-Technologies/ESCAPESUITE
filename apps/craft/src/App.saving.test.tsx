@@ -93,10 +93,7 @@ async function recordATake(options: { previewWidth?: number; duration?: number }
   const preview = getLastVideoDouble();
   preview?.setMetadata({ videoWidth: options.previewWidth ?? 0, videoHeight: 720 });
 
-  await act(async () => {
-    await user().click(recordButton());
-    await flush();
-  });
+  await user().click(recordButton());
   await flush();
 
   return { screenStream, mic, recorder };
@@ -181,10 +178,7 @@ describe('App saving a recording', () => {
     });
     recorder.duration = 0; // ...then the recorder forgets it, as a torn-down one does
 
-    await act(async () => {
-      await user().click(recordButton());
-      await flush();
-    });
+    await user().click(recordButton());
     await flush();
 
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Completed', { duration: 42 });
@@ -297,10 +291,7 @@ describe('App picture-in-picture saving', () => {
     await flush();
     recorderFactory.last().duration = 5;
 
-    await act(async () => {
-      await user().click(recordButton());
-      await flush();
-    });
+    await user().click(recordButton());
     await flush();
 
     expect(thumbnailModule.generateThumbnail).not.toHaveBeenCalled();

@@ -380,17 +380,17 @@ describe('App keyboard shortcuts', () => {
     resetRecorderStore({ countdownSeconds: 0 });
     await renderApp();
 
-    await act(async () => {
+    act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }));
-      await flush();
     });
+    await flush();
     expect(state()).toBe('recording');
 
     const recorder = recorderFactory.last();
-    await act(async () => {
+    act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }));
-      await flush();
     });
+    await flush();
     expect(recorder.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -400,10 +400,10 @@ describe('App keyboard shortcuts', () => {
     await renderApp();
     await startRecordingViaButton();
 
-    await act(async () => {
+    act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }));
-      await flush();
     });
+    await flush();
 
     expect(recorderFactory.createRecorder).toHaveBeenCalledTimes(1);
   });
@@ -429,10 +429,10 @@ describe('App keyboard shortcuts', () => {
     await renderApp();
     const slider = screen.getByLabelText('Webcam overlay size');
 
-    await act(async () => {
+    act(() => {
       slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
-      await flush();
     });
+    await flush();
 
     expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
   });
@@ -443,10 +443,10 @@ describe('App keyboard shortcuts', () => {
     const { unmount } = await renderApp();
     unmount();
 
-    await act(async () => {
+    act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }));
-      await flush();
     });
+    await flush();
 
     expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
   });

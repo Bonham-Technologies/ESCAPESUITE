@@ -13,7 +13,23 @@ import { createStreamDouble, createTrackDouble, type TrackDouble } from './doubl
 // real macrotask even when setInterval is faked for the countdown tests.
 const nativeSetTimeout = globalThis.setTimeout
 
-/** Let pending promise chains (IndexedDB included) settle inside act(). */
+/**
+ * Let pending promise chains (IndexedDB included) settle inside act().
+ *
+ * flush() opens its own act() scope, one per round, so **never call it from
+ * inside another act()**. React 19 only warns "the current testing environment
+ * is not configured to support act(...)" once `IS_REACT_ACT_ENVIRONMENT` is
+ * defined-and-false, and it is `undefined` — silent — until the first act()
+ * runs. An outer act() sets it to `true`, and anything that then awaits
+ * through testing-library's asyncWrapper (every `userEvent` call) flips it to
+ * `false` for the length of that await. Any store update the app lands in that
+ * window is reported, which is what `await act(async () => { await
+ * user().click(...); await flush() })` used to produce under parallel load.
+ *
+ * The shape to use instead: wrap only the state-changing call — `act(() => {
+ * window.dispatchEvent(...) })`, or nothing at all for a `userEvent` call,
+ * which brings its own act() — and then `await flush()` on its own.
+ */
 export async function flush(rounds = 3): Promise<void> {
   for (let i = 0; i < rounds; i++) {
     await act(async () => {
