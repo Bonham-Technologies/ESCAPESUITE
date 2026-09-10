@@ -665,20 +665,26 @@ describe('exportToMP4 failure handling', () => {
     expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
   })
 
-  it('does not honour an abort that arrives once muxing has started', async () => {
-    // checkAborted() runs per frame and per audio chunk, but not around
-    // flush/finalize: a cancellation that lands this late is ignored and the
-    // export runs to completion. Pinned here so a change to that is deliberate.
+  it('honours an abort that arrives once muxing has started', async () => {
+    // Cancelling late must still cancel: handing back a finished export is
+    // wrong for the user, and in an embedded host it fires EXPORT_COMPLETE for
+    // an export that was called off.
     mixAudio.mockResolvedValue(audioFor(0.2))
     const controller = new AbortController()
+    const progress: ExportProgress[] = []
     const onProgress = (p: ExportProgress) => {
+      progress.push(p)
       if (p.phase === 'muxing') controller.abort()
     }
 
-    const blob = await run({ signal: controller.signal, onProgress })
+    const result = await run({ signal: controller.signal, onProgress }).catch(
+      (e: unknown) => e
+    )
 
-    expect(blob.size).toBe(128)
-    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(result).toBeInstanceOf(ExportAbortedError)
+    expect(result).not.toBeInstanceOf(Blob)
+    expect(progress.some((p) => p.phase === 'complete')).toBe(false)
+    expect(lastMediabunnyOutput().finalizeCalls).toBeLessThanOrEqual(1)
     expect(webcodecs.videoEncoders[0].state).toBe('closed')
     expect(webcodecs.audioEncoders[0].state).toBe('closed')
     expect(allFramesClosed()).toBe(true)
