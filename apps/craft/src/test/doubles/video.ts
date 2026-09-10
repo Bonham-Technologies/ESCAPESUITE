@@ -8,19 +8,54 @@
 // and fire the events (loadeddata/error/seeked) the code listens for.
 import { vi } from 'vitest'
 
+/** Metadata fields a test can force onto the element. */
+export interface VideoMetadataOverrides {
+  videoWidth: number
+  videoHeight: number
+  duration: number
+  readyState: number
+  currentTime: number
+  paused: boolean
+  ended: boolean
+}
+
+export interface VideoFrameCallbackMetadataLike {
+  presentationTime: number
+  expectedDisplayTime: number
+  width: number
+  height: number
+  mediaTime: number
+  presentedFrames: number
+}
+
 export interface VideoElementDouble {
   readonly element: HTMLVideoElement
-  setMetadata(overrides: Partial<{
-    videoWidth: number
-    videoHeight: number
-    duration: number
-    readyState: number
-    currentTime: number
-  }>): void
+  /** vi.fn() standing in for HTMLMediaElement.play(). */
+  readonly play: ReturnType<typeof vi.fn>
+  /** vi.fn() standing in for HTMLMediaElement.pause(). */
+  readonly pause: ReturnType<typeof vi.fn>
+  setMetadata(overrides: Partial<VideoMetadataOverrides>): void
   fireLoadedData(): void
   fireLoadedMetadata(): void
   fireSeeked(): void
   fireError(): void
+  fireEnded(): void
+  /**
+   * Give the element a requestVideoFrameCallback()/cancelVideoFrameCallback()
+   * pair, which jsdom lacks. Code that feature-detects rVFC then takes that
+   * branch, and the test drives it with presentFrame().
+   */
+  enableRequestVideoFrameCallback(): void
+  /**
+   * Invoke the pending rVFC callback with the given mediaTime, as the browser
+   * would when a new frame is presented. Also advances currentTime to match.
+   * Returns false when no callback is pending.
+   */
+  presentFrame(mediaTime: number): boolean
+  /** Handles passed to cancelVideoFrameCallback(), in order. */
+  readonly cancelledFrameCallbacks: number[]
+  /** True while an rVFC callback is registered and not yet fired/cancelled. */
+  hasPendingFrameCallback(): boolean
 }
 
 function defineOn(video: HTMLVideoElement, prop: string, value: unknown): void {
@@ -30,18 +65,34 @@ function defineOn(video: HTMLVideoElement, prop: string, value: unknown): void {
 function wrap(video: HTMLVideoElement): VideoElementDouble {
   // Silence jsdom's "not implemented" console noise for media methods the
   // code under test may call; behave as inert no-ops instead.
-  video.play = vi.fn().mockResolvedValue(undefined) as unknown as typeof video.play
-  video.pause = vi.fn() as unknown as typeof video.pause
+  const play = vi.fn().mockResolvedValue(undefined)
+  const pause = vi.fn()
+  video.play = play as unknown as typeof video.play
+  video.pause = pause as unknown as typeof video.pause
   video.load = vi.fn() as unknown as typeof video.load
+
+  // jsdom's currentTime/paused/ended are accessors backed by an unimplemented
+  // media element; make them plain writable own properties so assignments from
+  // the code under test stick and tests can script playback progress.
+  defineOn(video, 'currentTime', 0)
+  defineOn(video, 'paused', false)
+  defineOn(video, 'ended', false)
+
+  let pendingCallback: ((now: number, metadata: VideoFrameCallbackMetadataLike) => void) | null = null
+  let nextHandle = 1
+  let pendingHandle = 0
+  let presentedFrames = 0
+  const cancelledFrameCallbacks: number[] = []
 
   return {
     element: video,
+    play,
+    pause,
+    cancelledFrameCallbacks,
     setMetadata(overrides) {
-      if (overrides.videoWidth !== undefined) defineOn(video, 'videoWidth', overrides.videoWidth)
-      if (overrides.videoHeight !== undefined) defineOn(video, 'videoHeight', overrides.videoHeight)
-      if (overrides.duration !== undefined) defineOn(video, 'duration', overrides.duration)
-      if (overrides.readyState !== undefined) defineOn(video, 'readyState', overrides.readyState)
-      if (overrides.currentTime !== undefined) defineOn(video, 'currentTime', overrides.currentTime)
+      for (const [key, value] of Object.entries(overrides)) {
+        if (value !== undefined) defineOn(video, key, value)
+      }
     },
     fireLoadedData() {
       video.dispatchEvent(new Event('loadeddata'))
@@ -54,6 +105,42 @@ function wrap(video: HTMLVideoElement): VideoElementDouble {
     },
     fireError() {
       video.dispatchEvent(new Event('error'))
+    },
+    fireEnded() {
+      defineOn(video, 'ended', true)
+      video.dispatchEvent(new Event('ended'))
+    },
+    enableRequestVideoFrameCallback() {
+      defineOn(video, 'requestVideoFrameCallback', (
+        cb: (now: number, metadata: VideoFrameCallbackMetadataLike) => void
+      ) => {
+        pendingCallback = cb
+        pendingHandle = nextHandle++
+        return pendingHandle
+      })
+      defineOn(video, 'cancelVideoFrameCallback', (handle: number) => {
+        cancelledFrameCallbacks.push(handle)
+        if (handle === pendingHandle) pendingCallback = null
+      })
+    },
+    presentFrame(mediaTime) {
+      const cb = pendingCallback
+      if (!cb) return false
+      pendingCallback = null
+      defineOn(video, 'currentTime', mediaTime)
+      presentedFrames += 1
+      cb(mediaTime * 1000, {
+        presentationTime: mediaTime * 1000,
+        expectedDisplayTime: mediaTime * 1000,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        mediaTime,
+        presentedFrames,
+      })
+      return true
+    },
+    hasPendingFrameCallback() {
+      return pendingCallback !== null
     },
   }
 }
@@ -90,6 +177,11 @@ export function uninstallVideoElementDouble(): void {
 /** The most recently created <video> element double. */
 export function getLastVideoDouble(): VideoElementDouble | undefined {
   return capturedVideos[capturedVideos.length - 1]
+}
+
+/** Every <video> element double created since install, oldest first. */
+export function getVideoDoubles(): VideoElementDouble[] {
+  return capturedVideos
 }
 
 export function resetVideoElementDouble(): void {

@@ -17,6 +17,12 @@ export interface ToBlobCall {
   quality: number | undefined
 }
 
+/** One recorded drawing call, in the order the code under test made it. */
+export interface CanvasCall {
+  method: string
+  args: unknown[]
+}
+
 export interface RecordingCanvasRenderingContext2D {
   readonly canvas: HTMLCanvasElement
   readonly drawImage: ReturnType<typeof vi.fn>
@@ -24,6 +30,22 @@ export interface RecordingCanvasRenderingContext2D {
   readonly clearRect: ReturnType<typeof vi.fn>
   readonly fillRect: ReturnType<typeof vi.fn>
   readonly getImageData: ReturnType<typeof vi.fn>
+  readonly save: ReturnType<typeof vi.fn>
+  readonly restore: ReturnType<typeof vi.fn>
+  readonly beginPath: ReturnType<typeof vi.fn>
+  readonly closePath: ReturnType<typeof vi.fn>
+  readonly arc: ReturnType<typeof vi.fn>
+  readonly roundRect: ReturnType<typeof vi.fn>
+  readonly clip: ReturnType<typeof vi.fn>
+  readonly stroke: ReturnType<typeof vi.fn>
+  fillStyle: string
+  strokeStyle: string
+  lineWidth: number
+  /**
+   * Every recorded drawing call in order, so tests can assert on sequencing
+   * (e.g. that a clip path is established before the drawImage it clips).
+   */
+  readonly calls: CanvasCall[]
   /** The (type, quality) arguments of every canvas.toBlob() call for this canvas. */
   readonly toBlobCalls: ToBlobCall[]
   /** What canvas.toBlob() hands back for this canvas. Mutate per-test as needed. */
@@ -45,13 +67,32 @@ const contextsByCanvas = new WeakMap<HTMLCanvasElement, RecordingCanvasRendering
 let lastContext: RecordingCanvasRenderingContext2D | null = null
 
 function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingContext2D {
+  const calls: CanvasCall[] = []
+  const record = (method: string, impl?: (...args: never[]) => unknown) =>
+    vi.fn((...args: unknown[]) => {
+      calls.push({ method, args })
+      return impl?.(...(args as never[]))
+    })
+
   const ctx: RecordingCanvasRenderingContext2D = {
     canvas,
-    drawImage: vi.fn(),
-    putImageData: vi.fn(),
-    clearRect: vi.fn(),
-    fillRect: vi.fn(),
-    getImageData: vi.fn(() => ctx.imageData),
+    drawImage: record('drawImage'),
+    putImageData: record('putImageData'),
+    clearRect: record('clearRect'),
+    fillRect: record('fillRect'),
+    getImageData: record('getImageData', () => ctx.imageData),
+    save: record('save'),
+    restore: record('restore'),
+    beginPath: record('beginPath'),
+    closePath: record('closePath'),
+    arc: record('arc'),
+    roundRect: record('roundRect'),
+    clip: record('clip'),
+    stroke: record('stroke'),
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    calls,
     toBlobCalls: [],
     toBlobResult: new Blob(['mock-canvas-image'], { type: 'image/jpeg' }),
     imageData: defaultImageData(),
@@ -115,4 +156,75 @@ export function getLastCanvasContext(): RecordingCanvasRenderingContext2D | null
 /** Clear the "last context" pointer between tests. Does not un-patch the prototype. */
 export function resetCanvasContextDouble(): void {
   lastContext = null
+}
+
+// --- canvas.captureStream() -------------------------------------------------
+//
+// jsdom has no captureStream() at all, so anything that composites to a canvas
+// and hands the result to MediaRecorder cannot even be constructed without
+// this. The double returns a MediaStream-like object per call and records the
+// requested frame rate so tests can assert on it.
+
+export interface CapturedCanvasStream {
+  readonly canvas: HTMLCanvasElement
+  readonly frameRate: number | undefined
+  getTracks(): MediaStreamTrack[]
+  getVideoTracks(): MediaStreamTrack[]
+  getAudioTracks(): MediaStreamTrack[]
+}
+
+let capturedStreams: CapturedCanvasStream[] = []
+let originalCaptureStream: unknown
+
+function makeCanvasTrack(canvas: HTMLCanvasElement): MediaStreamTrack {
+  return {
+    id: 'canvas-video-track',
+    kind: 'video',
+    label: `canvas ${canvas.width}x${canvas.height}`,
+    enabled: true,
+    readyState: 'live',
+    stop: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    getSettings: vi.fn(() => ({ width: canvas.width, height: canvas.height })),
+  } as unknown as MediaStreamTrack
+}
+
+/**
+ * Patch HTMLCanvasElement.prototype.captureStream. Scope this to the tests
+ * that need it (install in beforeEach, uninstall in afterEach).
+ */
+export function installCanvasCaptureStreamDouble(): void {
+  const proto = HTMLCanvasElement.prototype as unknown as Record<string, unknown>
+  if (originalCaptureStream !== undefined) return
+  originalCaptureStream = proto.captureStream ?? null
+  proto.captureStream = function (this: HTMLCanvasElement, frameRate?: number) {
+    const track = makeCanvasTrack(this)
+    const stream: CapturedCanvasStream = {
+      canvas: this,
+      frameRate,
+      getTracks: () => [track],
+      getVideoTracks: () => [track],
+      getAudioTracks: () => [],
+    }
+    capturedStreams.push(stream)
+    return stream
+  }
+}
+
+export function uninstallCanvasCaptureStreamDouble(): void {
+  if (originalCaptureStream === undefined) return
+  const proto = HTMLCanvasElement.prototype as unknown as Record<string, unknown>
+  if (originalCaptureStream === null) {
+    delete proto.captureStream
+  } else {
+    proto.captureStream = originalCaptureStream
+  }
+  originalCaptureStream = undefined
+  capturedStreams = []
+}
+
+/** Every stream handed out by the captureStream double, oldest first. */
+export function getCapturedCanvasStreams(): CapturedCanvasStream[] {
+  return capturedStreams
 }
