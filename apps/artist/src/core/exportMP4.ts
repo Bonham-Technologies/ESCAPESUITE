@@ -649,6 +649,11 @@ export async function exportToMP4(
 
     await output.finalize();
 
+    // A cancel that landed while we were muxing still counts: never hand back
+    // an export the caller asked to stop. Thrown before the 'complete' report,
+    // so the catch below does the cleanup and rethrows the abort as-is.
+    checkAborted(signal);
+
     // Clean up media elements
     await cleanup();
 
