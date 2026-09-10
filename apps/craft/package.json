@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build",
     "build:standalone": "cross-env-shell VITE_BUILD_MODE=standalone \"tsc -b && vite build\"",
     "lint": "eslint .",
+    "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
