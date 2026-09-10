@@ -213,9 +213,10 @@ describe('App saving a recording', () => {
   });
 
   it('releases the capture streams once the take is finished', async () => {
-    const { screenStream } = await recordATake();
+    const { screenStream, mic } = await recordATake();
 
     expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
+    expect(mic.audio!.stop).toHaveBeenCalledTimes(1);
     expect(useRecorderStore.getState().screenStream).toBeNull();
     expect(screen.getByText('Click record to start capturing')).toBeTruthy();
   });

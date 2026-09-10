@@ -225,7 +225,7 @@ describe('App countdown', () => {
   });
 
   it('abandons the countdown and releases the streams when cancelled', async () => {
-    const { screenStream } = armScreenCapture();
+    const { screenStream, mic } = armScreenCapture();
     await renderApp();
     await startRecordingViaButton();
 
@@ -233,6 +233,7 @@ describe('App countdown', () => {
 
     expect(state()).toBe('idle');
     expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
+    expect(mic.audio!.stop).toHaveBeenCalledTimes(1);
     expect(useRecorderStore.getState().screenStream).toBeNull();
 
     act(() => {
@@ -311,7 +312,7 @@ describe('App recording controls', () => {
   });
 
   it('throws the recording away when cancelled mid-take', async () => {
-    const { screenStream } = await startLiveRecording();
+    const { screenStream, mic } = await startLiveRecording();
     const recorder = recorderFactory.last();
     recorder.duration = 12;
     act(() => {
@@ -325,6 +326,7 @@ describe('App recording controls', () => {
     expect(state()).toBe('idle');
     expect(screen.getByText('00:00')).toBeTruthy();
     expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
+    expect(mic.audio!.stop).toHaveBeenCalledTimes(1);
 
     // The duration ticker is gone with it.
     recorder.duration = 30;
@@ -346,7 +348,7 @@ describe('App recording controls', () => {
   });
 
   it('surfaces a recorder failure and cleans up after it', async () => {
-    const { screenStream } = await startLiveRecording();
+    const { screenStream, mic } = await startLiveRecording();
     const consoleError = expectedConsoleError();
 
     act(() => {
@@ -356,6 +358,7 @@ describe('App recording controls', () => {
     expect(consoleError).toHaveBeenCalledWith('Recording error:', expect.any(Error));
     expect(state()).toBe('idle');
     expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
+    expect(mic.audio!.stop).toHaveBeenCalledTimes(1);
   });
 
   it('feeds the audio meters from the recorder', async () => {
