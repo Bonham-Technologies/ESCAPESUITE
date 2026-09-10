@@ -90,7 +90,7 @@ describe('useThrottledDragUpdate', () => {
     expect(update).not.toHaveBeenCalled()
   })
 
-  it('flush after the frame has run does not repeat the update', () => {
+  it('flush after the frame has run applies the same data a second time', () => {
     const update = vi.fn()
     const { result } = renderHook(() => useThrottledDragUpdate<{ x: number }>())
 
@@ -98,7 +98,9 @@ describe('useThrottledDragUpdate', () => {
     nextFrame()
     act(() => result.current.flush())
 
-    // The frame already applied it; flush re-applies the still-pending data.
+    // The frame applies the pending update but does not clear it, so a
+    // following flush applies it again. Harmless for the absolute values the
+    // drag handlers pass today; it would double-count a delta update.
     expect(update.mock.calls.map((c) => c[0])).toEqual([{ x: 1 }, { x: 1 }])
   })
 
@@ -235,7 +237,7 @@ describe('useMultiThrottledDragUpdate', () => {
     expect(scale).toHaveBeenCalledTimes(1)
   })
 
-  it('flushing a channel whose frame already ran does not repeat it', () => {
+  it('flushing a channel whose frame already ran applies the same data again', () => {
     const position = vi.fn()
     const { result } = renderHook(() => useMultiThrottledDragUpdate())
 
@@ -243,8 +245,9 @@ describe('useMultiThrottledDragUpdate', () => {
     nextFrame()
     act(() => result.current.flush('position'))
 
-    // The frame consumed the pending data by applying it, but left it in place,
-    // so an explicit flush applies the same data once more.
+    // Same as the single-channel hook: the frame applies the pending update but
+    // leaves it in place, so a following flush applies it again. Harmless for
+    // absolute values; it would double-count a delta update.
     expect(position.mock.calls.map((c) => c[0])).toEqual([{ x: 1 }, { x: 1 }])
   })
 
