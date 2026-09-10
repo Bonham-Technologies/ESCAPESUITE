@@ -1389,6 +1389,30 @@ describe('projectStore remaining behaviours', () => {
     store().addSourceVideo(video)
   })
 
+  describe('resetProject', () => {
+    it('clears markers so they do not survive onto the next project', () => {
+      store().addMarker(3, 'Old cue')
+      store().addMarker(7, 'Another')
+      expect(store().markers).toHaveLength(2)
+
+      store().resetProject()
+
+      expect(store().markers).toEqual([])
+    })
+
+    it('rewinds the playhead and drops the selection', () => {
+      addClip('clip1', 0, 4)
+      store().setCurrentTime(3)
+      store().setSelectedClipId('clip1')
+
+      store().resetProject()
+
+      expect(store().currentTime).toBe(0)
+      expect(store().selectedClipId).toBeNull()
+      expect(store().project.timeline.clips).toEqual([])
+    })
+  })
+
   describe('history size cap', () => {
     it('drops the oldest snapshot once 50 are stored', () => {
       // Each undoable action snapshots the state *before* it, so 60 calls push
