@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { getAllKeyframesForProperty, getAnimatedValues } from './animation'
 import type { ClipAnimation } from '../store/types'
-import { baseEffects, baseTransform } from './animation.testUtils'
+import { baseEffects, baseTransform } from '../test/fixtures/animation'
 
 describe('getAllKeyframesForProperty', () => {
   it('returns empty array when no animation', () => {

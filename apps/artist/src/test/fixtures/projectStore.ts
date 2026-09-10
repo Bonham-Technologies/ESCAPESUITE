@@ -1,10 +1,11 @@
 // Shared fixtures for the projectStore test files.
 //
 // The store is a module singleton, so every file that drives it needs the same
-// reset. Deliberately not named *.test.ts: vite.config's `include` glob would
-// otherwise pick it up as a suite containing no tests.
-import { useEditorStore } from './projectStore'
-import type { Clip, SourceVideo } from './types'
+// reset. Lives under src/test/ so neither the vitest `include` glob (which
+// would treat it as a suite containing no tests) nor the coverage `include`
+// glob (which would score test scaffolding as production code) picks it up.
+import { useEditorStore } from '../../store/projectStore'
+import type { Clip, SourceVideo } from '../../store/types'
 
 export const video: SourceVideo = {
   id: 'video1',

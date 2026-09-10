@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
 import type { Project } from './types'
-import { resetStoreForTest, store } from './projectStore.testUtils'
+import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 
 describe('projectStore integration', () => {
   beforeEach(() => {

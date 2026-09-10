@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
 import type { SourceVideo } from './types'
-import { addClip, resetStoreForTest, store, video } from './projectStore.testUtils'
+import { addClip, resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 
 describe('projectStore integration', () => {
   beforeEach(() => {

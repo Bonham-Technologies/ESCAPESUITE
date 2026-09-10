@@ -9,7 +9,7 @@ import {
   hasVolumeKeyframes,
 } from './animation'
 import type { ClipAnimation, ClipTransform } from '../store/types'
-import { baseEffects, baseTransform } from './animation.testUtils'
+import { baseEffects, baseTransform } from '../test/fixtures/animation'
 
 describe('getAnimatedValues', () => {
   it('returns base values when animation is undefined', () => {
