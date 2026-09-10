@@ -3,8 +3,12 @@
 // Reads each package's coverage/coverage-summary.json (produced by the vitest
 // `json-summary` reporter after `pnpm test:coverage`). Never throws or exits non-zero —
 // thresholds are enforced by vitest itself; this is a human-readable summary only.
+//
+// When $GITHUB_STEP_SUMMARY is set (i.e. running inside a GitHub Actions step), the
+// same table is also appended to that file as GitHub-flavored Markdown, so it shows
+// up in the job's Summary tab. No-op locally, where the var is unset.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, appendFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -51,27 +55,56 @@ function readSummary(dir) {
   }
 }
 
-function fmtCell(actualPct, threshold) {
+function fmtConsoleCell(actualPct, threshold) {
   if (actualPct === undefined || actualPct === null) return 'n/a'
   const rounded = actualPct.toFixed(2)
   const marker = actualPct >= threshold ? '' : ' !'
   return `${rounded}% / ${threshold}%${marker}`
 }
 
-const rows = packages.map(({ name, dir, thresholds }) => {
+function fmtMarkdownCell(actualPct, threshold) {
+  if (actualPct === undefined || actualPct === null) return 'n/a'
+  return `${actualPct.toFixed(2)}% (floor ${threshold})`
+}
+
+// One data pass, formatted two ways (console table, Markdown table).
+const data = packages.map(({ name, dir, thresholds }) => {
   const summary = readSummary(dir)
-  const cells = metrics.map((m) => fmtCell(summary?.[m]?.pct, thresholds[m]))
-  return [name, ...cells]
+  return { name, values: metrics.map((m) => ({ actual: summary?.[m]?.pct, threshold: thresholds[m] })) }
 })
 
 const header = ['Package', 'Lines', 'Statements', 'Branches', 'Functions']
-const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)))
 
-function printRow(cells) {
-  console.log(cells.map((c, i) => c.padEnd(widths[i])).join('  '))
+function printConsoleTable() {
+  const rows = data.map(({ name, values }) => [name, ...values.map((v) => fmtConsoleCell(v.actual, v.threshold))])
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)))
+  const printRow = (cells) => console.log(cells.map((c, i) => c.padEnd(widths[i])).join('  '))
+
+  console.log('Coverage report (actual / threshold; "!" marks a value below its floor)\n')
+  printRow(header)
+  printRow(widths.map((w) => '-'.repeat(w)))
+  for (const row of rows) printRow(row)
 }
 
-console.log('Coverage report (actual / threshold; "!" marks a value below its floor)\n')
-printRow(header)
-printRow(widths.map((w) => '-'.repeat(w)))
-for (const row of rows) printRow(row)
+function appendGithubStepSummary() {
+  const summaryFile = process.env.GITHUB_STEP_SUMMARY
+  if (!summaryFile) return
+
+  try {
+    const rows = data.map(({ name, values }) => [name, ...values.map((v) => fmtMarkdownCell(v.actual, v.threshold))])
+    const lines = [
+      '## Coverage',
+      '',
+      `| ${header.join(' | ')} |`,
+      `| ${header.map(() => '---').join(' | ')} |`,
+      ...rows.map((r) => `| ${r.join(' | ')} |`),
+      '',
+    ]
+    appendFileSync(summaryFile, lines.join('\n'))
+  } catch (err) {
+    console.error(`coverage-report: failed to write GITHUB_STEP_SUMMARY: ${err.message}`)
+  }
+}
+
+printConsoleTable()
+appendGithubStepSummary()
