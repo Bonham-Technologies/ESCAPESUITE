@@ -77,13 +77,16 @@ Files: `src/core/exportTypes.ts` (32%), `src/utils/canvasUtils.ts` (40%), `src/u
 - [ ] Test the render loop, seeking, play/pause, frame cache interaction, overlay hit-testing, transform handles (pointer sequences), keyboard shortcuts — via the canvas double. Report (do not perform) a decomposition proposal: which hooks/modules would fall out (e.g. `usePreviewRenderLoop`, `useTransformHandles`, `hitTest.ts`) with line counts; the operator decides separately.
 - [ ] Raise artist thresholds; target artist overall lines ≥85. Commit: `test(artist): cover PreviewPlayer; propose its decomposition`.
 
-## Task 8: ESCAPEPLAN → ≥95% lines
-- [ ] 8 files: pages/components/lib. Routing, theme, legal pages, SEO tags, analytics gating. Raise plan thresholds to ≥95/95/85/90. Commit: `test(plan): cover pages, theme, and lib`.
+## Task 8: ESCAPEPLAN and packages/shared → ≥95% lines each
+After Task 0b's correction the real numbers are plan 52.9% and shared 27.8% of lines. Uncovered (lines): shared `src/theme/theme.ts` 79/79, `src/storage/index.ts` 46/46, `src/theme/ThemeToggle.tsx` 18/18, `src/bootstrap/index.tsx` 5/5, `src/index.ts` 4/4, `src/analytics/index.ts` 1/1; plan `src/utils/themeStorage.ts` 19/19, `src/lib/launch.ts` 5/9, `src/pages/Home.tsx` 4/6, `Legal/Privacy.tsx` 2/2, `Legal/Terms.tsx` 2/2, `src/App.tsx` 1/1.
+- [ ] shared: `storage/index.ts` through real fake-indexeddb round trips (open/upgrade, every exported function, `getStorageEstimate` with and without `navigator.storage`, blob URL helpers); `theme/theme.ts` every branch (system preference via a `matchMedia` double, stored preference precedence, `data-theme` attribute writes, listeners added/removed); `ThemeToggle.tsx` with Testing Library (cycles, aria); `bootstrap/index.tsx` (renders the given root with providers — assert on DOM); barrel files by importing them and asserting the export surface.
+- [ ] plan: `themeStorage.ts` every branch (localStorage present/absent/throwing); `launch.ts` all branches; `Home.tsx` and both Legal pages rendered through the router; `App.tsx` route table (each route renders its page; 404 fallback).
+- [ ] Raise plan and shared thresholds to the achieved numbers (target ≥95/95/85/90 each). Commit: `test(plan,shared): cover theme, storage, bootstrap, pages, and lib`.
 
 ## Task 9: Final ratchet + policy
 - [ ] Re-run everything; set every package's thresholds to the achieved numbers; update the table in `CLAUDE.md`; the report script prints thresholds beside actuals. Commit: `test: ratchet coverage thresholds to achieved levels`.
 
 ## Done criteria
 - `pnpm test:coverage` enforces per-package thresholds; `pnpm coverage:report` prints the table locally and in the CI job summary.
-- shared ≥99, plan ≥95, headless-artist ≥85 (unit) with the Chromium-only files documented, craft ≥90, artist ≥85 lines — with branches within 10 points of lines in each package.
+- shared ≥95, plan ≥95, headless-artist ≥85 (unit) with the Chromium-only files documented, craft ≥90, artist ≥85 lines — with branches within 10 points of lines in each package.
 - No app behaviour changed except separately-committed bug fixes with failing tests first.
