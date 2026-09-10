@@ -19,7 +19,7 @@ const packages = [
   {
     name: '@escapesuite/plan',
     dir: 'apps/plan',
-    thresholds: { lines: 52, statements: 53, branches: 29, functions: 45 },
+    thresholds: { lines: 100, statements: 100, branches: 100, functions: 100 },
   },
   {
     name: '@escapesuite/craft',
@@ -34,7 +34,7 @@ const packages = [
   {
     name: '@escapesuite/shared',
     dir: 'packages/shared',
-    thresholds: { lines: 27, statements: 28, branches: 33, functions: 20 },
+    thresholds: { lines: 100, statements: 97, branches: 88, functions: 98 },
   },
   {
     name: '@escapesuite/headless-artist',
