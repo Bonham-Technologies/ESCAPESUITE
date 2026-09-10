@@ -31,6 +31,7 @@ import {
   uninstallVideoElementDouble,
   getLastVideoDouble,
 } from '../test/doubles/video'
+import { getCanvasContext } from '../test/doubles/canvas'
 import {
   createTrackDouble,
   createStreamDouble,
@@ -338,7 +339,13 @@ describe('WebCodecsRecorder', () => {
       const canvas = frame.source as HTMLCanvasElement
       expect(canvas.width).toBe(1920)
       expect(canvas.height).toBe(1080)
-      expect(video.element).toBeInstanceOf(HTMLVideoElement)
+      expect(getCanvasContext(canvas)!.drawImage).toHaveBeenCalledWith(
+        video.element,
+        0,
+        0,
+        1920,
+        1080
+      )
     })
 
     it('emits a keyframe once per second and delta frames in between', () => {
