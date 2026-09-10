@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { useEditorStore } from './store/projectStore'
 import { resetStoreForTest, store, addClip } from './test/fixtures/projectStore'
-import { renderApp } from './test/renderApp'
+import { renderApp, settleApp } from './test/renderApp'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
 import { saveProject, showOpenProjectDialog } from './core/projectManager'
@@ -112,6 +112,8 @@ describe('App keyboard shortcuts', () => {
       press('z', { ctrlKey: true })
 
       press('z', { ctrlKey: true, shiftKey: true })
+      // The restored clip sends the preview back to its media; let that land.
+      await settleApp()
 
       expect(store().project.timeline.clips).toHaveLength(1)
       expect(notification()).toBe('Redo')
@@ -122,6 +124,7 @@ describe('App keyboard shortcuts', () => {
       press('z', { ctrlKey: true })
 
       press('y', { ctrlKey: true })
+      await settleApp()
 
       expect(store().project.timeline.clips).toHaveLength(1)
     })

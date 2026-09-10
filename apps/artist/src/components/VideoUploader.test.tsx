@@ -115,8 +115,20 @@ describe('VideoUploader', () => {
   })
 
   describe('the drop zone', () => {
-    it('invites the user to drop or browse', () => {
+    /**
+     * Mount the uploader and let the storage estimate it asks for on mount resolve. Without
+     * this, the state update it makes lands after the test has finished — outside act(), and
+     * unasserted.
+     */
+    async function renderUploader(): Promise<void> {
       render(<VideoUploader />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+    }
+
+    it('invites the user to drop or browse', async () => {
+      await renderUploader()
 
       expect(screen.getByText('Drop media or click to browse')).toBeInTheDocument()
       const input = fileInput()
@@ -124,8 +136,8 @@ describe('VideoUploader', () => {
       expect(input.multiple).toBe(true)
     })
 
-    it('highlights itself while a file is dragged over it', () => {
-      render(<VideoUploader />)
+    it('highlights itself while a file is dragged over it', async () => {
+      await renderUploader()
 
       fireEvent.dragOver(dropZone())
       expect(dropZone()).toHaveClass(styles.dragOver)
@@ -134,8 +146,8 @@ describe('VideoUploader', () => {
       expect(dropZone()).not.toHaveClass(styles.dragOver)
     })
 
-    it('opens the file picker when clicked', () => {
-      render(<VideoUploader />)
+    it('opens the file picker when clicked', async () => {
+      await renderUploader()
       const click = vi.spyOn(fileInput(), 'click').mockImplementation(() => {})
 
       fireEvent.click(dropZone())

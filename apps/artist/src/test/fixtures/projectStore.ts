@@ -4,6 +4,7 @@
 // reset. Lives under src/test/ so neither the vitest `include` glob (which
 // would treat it as a suite containing no tests) nor the coverage `include`
 // glob (which would score test scaffolding as production code) picks it up.
+import { act } from '@testing-library/react'
 import { useEditorStore } from '../../store/projectStore'
 import { DEFAULT_KEYFRAME_PANEL_STATE } from '../../store/types'
 import type { Clip, SourceVideo } from '../../store/types'
@@ -19,7 +20,37 @@ export const video: SourceVideo = {
   size: 1000,
 }
 
-export const store = () => useEditorStore.getState()
+type EditorStore = ReturnType<typeof useEditorStore.getState>
+
+/**
+ * The editor store, with every action call flushed inside `act()`.
+ *
+ * Zustand notifies its React subscribers synchronously, so `store().setIsPlaying(true)` in a
+ * test that has a component mounted *is* a React update — one made outside `act()`, which
+ * React reports ("An update to PreviewPlayer inside a test was not wrapped in act(...)") and
+ * whose re-render has not necessarily happened by the time the next assertion runs. Wrapping
+ * it here rather than at each of the several hundred call sites keeps the tests reading like
+ * the app's own code and covers every file that drives the store through this fixture; with
+ * nothing mounted, `act` flushes an empty queue and changes nothing.
+ *
+ * Reads are untouched — `store().project` is the store's own object, not a copy.
+ */
+export const store = (): EditorStore => {
+  const state = useEditorStore.getState()
+  return new Proxy(state, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target) as unknown
+      if (typeof value !== 'function') return value
+      return (...args: unknown[]): unknown => {
+        let result: unknown
+        act(() => {
+          result = (value as (...a: unknown[]) => unknown).apply(target, args)
+        })
+        return result
+      }
+    },
+  })
+}
 
 /** Add a media clip and return the clip the store actually created. */
 export function addClip(
