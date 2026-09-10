@@ -20,6 +20,7 @@ import {
   renderApp,
   resetRecorderStore,
   installBrowserStubs,
+  flush,
   type BrowserStubs,
 } from './test/appHarness';
 import { installVideoElementDouble, uninstallVideoElementDouble } from './test/doubles/video';
@@ -232,9 +233,8 @@ describe('App recording hand-off and deletion', () => {
     await seedRecording({ id: 'drop', name: 'Drop Me', recordedAt: 1_000 });
     await renderApp();
 
-    await act(async () => {
-      await user().click(screen.getByRole('button', { name: 'Delete Drop Me' }));
-    });
+    await user().click(screen.getByRole('button', { name: 'Delete Drop Me' }));
+    await flush();
 
     expect(useRecorderStore.getState().recordings.map(r => r.id)).toEqual(['keep']);
     expect(items()).toHaveLength(1);
@@ -245,9 +245,8 @@ describe('App recording hand-off and deletion', () => {
     await seedRecording({ id: 'only', name: 'Only Take' });
     await renderApp();
 
-    await act(async () => {
-      await user().click(screen.getByRole('button', { name: 'Delete Only Take' }));
-    });
+    await user().click(screen.getByRole('button', { name: 'Delete Only Take' }));
+    await flush();
 
     expect(screen.getByText('No recordings yet')).toBeTruthy();
   });

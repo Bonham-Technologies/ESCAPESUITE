@@ -88,6 +88,37 @@ describe('App capability detection', () => {
     expect(screen.getByTitle('System audio capture is not supported in Firefox')).toBeTruthy();
   });
 
+  it('disables screen capture and the microphone when those are the missing ones', async () => {
+    permissionsOverrides.detectCapabilities.mockResolvedValue(
+      detectionResult(
+        { screenCapture: false, microphone: false },
+        {
+          screenCapture: {
+            available: false,
+            reason: 'not_secure_context',
+            message: 'Recording requires a secure connection (HTTPS)',
+          },
+          microphone: {
+            available: false,
+            reason: 'permission_denied',
+            message: 'Microphone access was denied. Check your browser settings.',
+          },
+        }
+      )
+    );
+
+    await renderApp();
+
+    expect(toggle('Screen')).toBeDisabled();
+    expect(toggle('Microphone')).toBeDisabled();
+    expect(toggle('Webcam')).toBeEnabled();
+    expect(screen.getByTitle('Recording requires a secure connection (HTTPS)')).toBeTruthy();
+    expect(
+      screen.getByTitle('Microphone access was denied. Check your browser settings.')
+    ).toBeTruthy();
+    expect(document.querySelectorAll('[class*="unavailableIcon"]')).toHaveLength(2);
+  });
+
   it('locks the source toggles while a recording is in flight', async () => {
     await renderApp();
     act(() => {

@@ -201,6 +201,16 @@ describe('App saving a recording', () => {
     expect(screen.getByText('No recordings yet')).toBeTruthy();
   });
 
+  it('marks a system-audio-only take as having audio', async () => {
+    resetRecorderStore({ countdownSeconds: 0, microphoneEnabled: false, systemAudioEnabled: true });
+    await recordATake();
+
+    expect(useRecorderStore.getState().recordings[0]).toMatchObject({
+      hasAudio: true,
+      hasWebcam: false,
+    });
+  });
+
   it('releases the capture streams once the take is finished', async () => {
     const { screenStream } = await recordATake();
 
@@ -227,6 +237,27 @@ describe('App recording thumbnails', () => {
     expect(thumbnailModule.generateThumbnail).toHaveBeenCalledTimes(1);
     const [meta] = await getRecordingsMetadata();
     await expect(getThumbnail(meta.id)).resolves.toBeDefined();
+  });
+
+  it('decodes from the file when the preview canvas has no 2D context', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    await recordATake({ previewWidth: 1280 });
+
+    expect(thumbnailModule.generateThumbnail).toHaveBeenCalledTimes(1);
+    expect(listedRecording()).toBeTruthy();
+  });
+
+  it('decodes from the file when the preview frame cannot be drawn', async () => {
+    // A cross-origin frame taints the canvas and drawImage throws.
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: () => {
+        throw new Error('SecurityError: tainted canvas');
+      },
+    } as unknown as CanvasRenderingContext2D);
+    await recordATake({ previewWidth: 1280 });
+
+    expect(thumbnailModule.generateThumbnail).toHaveBeenCalledTimes(1);
+    expect(listedRecording()).toBeTruthy();
   });
 
   it('draws a placeholder when the file cannot be decoded either', async () => {

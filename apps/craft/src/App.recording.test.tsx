@@ -29,6 +29,7 @@ import {
   uninstallCanvasCaptureStreamDouble,
 } from './test/doubles/canvas';
 import { installVideoElementDouble, uninstallVideoElementDouble } from './test/doubles/video';
+import { createStreamDouble, createTrackDouble } from './test/doubles/mediastream';
 
 vi.mock('./core/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./core/permissions')>();
@@ -485,6 +486,21 @@ describe('App picture-in-picture', () => {
     expect(initialized.screen!.getVideoTracks()[0].id).toBe('canvas-video-track');
     expect(initialized.screen!.getAudioTracks()).toEqual([screenStream.audio]);
     expect(initialized.webcam).toBe(webcam.stream);
+  });
+
+  it('falls back to 1080p when the screen track reports no dimensions', async () => {
+    const bareTrack = createTrackDouble('video', { id: 'screen-video', settings: {} });
+    const webcam = webcamStreamDouble();
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(createStreamDouble([bareTrack]));
+    permissionsOverrides.requestWebcam.mockResolvedValue(webcam.stream);
+    resetRecorderStore({ screenEnabled: true, webcamEnabled: true, countdownSeconds: 0 });
+    await renderApp();
+
+    await startRecordingViaButton();
+
+    const canvas = document.querySelector('[class*="preview"] canvas') as HTMLCanvasElement;
+    expect(canvas.width).toBe(1280);
+    expect(canvas.height).toBe(720);
   });
 
   it('tears the compositor down when the recording is cancelled', async () => {

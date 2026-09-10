@@ -24,7 +24,7 @@ const packages = [
   {
     name: '@escapesuite/craft',
     dir: 'apps/craft',
-    thresholds: { lines: 75, statements: 74, branches: 64, functions: 65 },
+    thresholds: { lines: 99, statements: 99, branches: 94, functions: 98 },
   },
   {
     name: '@escapesuite/artist',
