@@ -32,6 +32,51 @@ describe('projectStore integration', () => {
       expect(state.sourceVideos[0].name).toBe('test.mp4')
     })
 
+    it('replaces a source video whose id it already holds, rather than listing it twice', () => {
+      const video: SourceVideo = {
+        id: 'video1',
+        name: 'test.mp4',
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
+      }
+
+      useEditorStore.getState().addSourceVideo(video)
+      useEditorStore.getState().addSourceVideo({ ...video, name: 'renamed.mp4', duration: 42 })
+
+      // Source videos are keyed by id everywhere downstream — the media library renders
+      // one element per id, and every clip names the source it plays by id — so a second
+      // entry under an id the store already holds is never the media the caller meant to
+      // add. It is the same media, seen again: keep one entry, carrying the newer metadata.
+      const state = useEditorStore.getState()
+      expect(state.sourceVideos).toHaveLength(1)
+      expect(state.sourceVideos[0]).toMatchObject({ id: 'video1', name: 'renamed.mp4', duration: 42 })
+    })
+
+    it('keeps the order of the other source videos when it replaces one', () => {
+      const make = (id: string): SourceVideo => ({
+        id,
+        name: `${id}.mp4`,
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
+      })
+
+      useEditorStore.getState().addSourceVideo(make('a'))
+      useEditorStore.getState().addSourceVideo(make('b'))
+      useEditorStore.getState().addSourceVideo(make('c'))
+      useEditorStore.getState().addSourceVideo({ ...make('b'), name: 'b-again.mp4' })
+
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['a', 'b', 'c'])
+      expect(useEditorStore.getState().sourceVideos[1].name).toBe('b-again.mp4')
+    })
+
     it('removes a source video', () => {
       const video: SourceVideo = {
         id: 'video1',

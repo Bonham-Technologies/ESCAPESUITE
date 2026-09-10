@@ -283,6 +283,30 @@ describe('App project lifecycle', () => {
       expect(screen.queryByText('Resume Previous Session?')).not.toBeInTheDocument()
     })
 
+    it('lists a restored video once when the library already holds its id', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const user = userEvent.setup()
+      // resetStoreForTest seeds the library with one source video, and the saved session
+      // names that same id — exactly what an autosave of the current session looks like on
+      // the next visit.
+      expect(store().sourceVideos.map((v) => v.id)).toEqual([sampleVideo.id])
+      vi.mocked(getSessionState).mockResolvedValueOnce(savedSession())
+      await renderApp()
+
+      await user.click(await screen.findByRole('button', { name: 'Restore Session' }))
+
+      expect(store().sourceVideos.map((v) => v.id)).toEqual([sampleVideo.id])
+      expect(screen.getAllByText(sampleVideo.name)).toHaveLength(1)
+      expect(screen.getByText('1 item')).toBeInTheDocument()
+      // Two library rows under one React key is not cosmetic: React says the behaviour
+      // is unsupported, and a click on either row addresses the same source.
+      const keyWarning = consoleError.mock.calls.find((args) =>
+        args.some((arg) => typeof arg === 'string' && arg.includes('same key'))
+      )
+      expect(keyWarning).toBeUndefined()
+      consoleError.mockRestore()
+    })
+
     it('describes what is on offer', async () => {
       vi.mocked(getSessionState).mockResolvedValueOnce(savedSession())
       await renderApp()
