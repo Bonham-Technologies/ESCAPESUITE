@@ -295,7 +295,10 @@ export class Recorder {
    * Dispose of the recorder and all streams.
    */
   dispose(): void {
+    // Capture the stream first: cleanup() clears combinedStream, so reading it
+    // afterwards would hand stopStream() a null and leave the tracks running.
+    const combinedStream = this.combinedStream;
     this.cleanup();
-    stopStream(this.combinedStream);
+    stopStream(combinedStream);
   }
 }
