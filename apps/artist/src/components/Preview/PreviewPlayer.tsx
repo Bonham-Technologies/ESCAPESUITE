@@ -2041,21 +2041,25 @@ export function PreviewPlayer() {
       let newX = dragState.startOverlayX;
       let newY = dragState.startOverlayY;
 
-      // Handle different resize directions
+      // Handle different resize directions.
+      // Match on the compass direction alone: the mode name itself contains
+      // the 'e' and the 's' of "resize", so every handle would look like an
+      // east/south one.
       const mode = dragState.mode;
+      const direction = mode.startsWith('resize-') ? mode.slice('resize-'.length) : '';
 
-      if (mode.includes('e')) {
+      if (direction.includes('e')) {
         newWidth = Math.max(0.02, dragState.startWidth + deltaX);
       }
-      if (mode.includes('w')) {
+      if (direction.includes('w')) {
         const widthDelta = -deltaX;
         newWidth = Math.max(0.02, dragState.startWidth + widthDelta);
         newX = dragState.startOverlayX + deltaX / 2;
       }
-      if (mode.includes('s')) {
+      if (direction.includes('s')) {
         newHeight = Math.max(0.02, dragState.startHeight + deltaY);
       }
-      if (mode.includes('n')) {
+      if (direction.includes('n')) {
         const heightDelta = -deltaY;
         newHeight = Math.max(0.02, dragState.startHeight + heightDelta);
         newY = dragState.startOverlayY + deltaY / 2;
@@ -2137,10 +2141,10 @@ export function PreviewPlayer() {
         if (isKeyframeMode) {
           const widthRatio = newWidth / dragState.startWidth;
           const heightRatio = newHeight / dragState.startHeight;
-          if (mode.includes('e') || mode.includes('w')) {
+          if (direction.includes('e') || direction.includes('w')) {
             applyChange('scaleX', Math.max(0.1, widthRatio * dragState.startScaleX));
           }
-          if (mode.includes('n') || mode.includes('s')) {
+          if (direction.includes('n') || direction.includes('s')) {
             applyChange('scaleY', Math.max(0.1, heightRatio * dragState.startScaleY));
           }
           applyChange('x', newX);
@@ -2151,7 +2155,7 @@ export function PreviewPlayer() {
             // For text, side handles also scale
             const widthRatio = newWidth / dragState.startWidth;
             const heightRatio = newHeight / dragState.startHeight;
-            const scaleRatio = mode.includes('e') || mode.includes('w') ? widthRatio : heightRatio;
+            const scaleRatio = direction.includes('e') || direction.includes('w') ? widthRatio : heightRatio;
             const newScale = Math.max(0.1, dragState.startScaleX * scaleRatio);
             throttledTextUpdate.scheduleUpdate(
               ({ id, data }) => updateTextOverlayData(id, data, true),
@@ -2167,10 +2171,10 @@ export function PreviewPlayer() {
             const heightRatio = newHeight / dragState.startHeight;
             let newScaleX = dragState.startScaleX;
             let newScaleY = dragState.startScaleY;
-            if (mode.includes('e') || mode.includes('w')) {
+            if (direction.includes('e') || direction.includes('w')) {
               newScaleX = Math.max(0.1, dragState.startScaleX * widthRatio);
             }
-            if (mode.includes('n') || mode.includes('s')) {
+            if (direction.includes('n') || direction.includes('s')) {
               newScaleY = Math.max(0.1, dragState.startScaleY * heightRatio);
             }
             throttledTransformUpdate.scheduleUpdate(
