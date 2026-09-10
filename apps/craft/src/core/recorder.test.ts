@@ -46,6 +46,19 @@ function getMediaRecorder(recorder: Recorder): MediaRecorder {
   return mediaRecorder
 }
 
+// Same rationale as getMediaRecorder(): micAnalyser/systemAnalyser are only
+// ever set inside the microphone/system-audio branches of initialize(), so
+// asserting they are (or stay) null is a direct, private-field-backed proof
+// that a given audio source was actually wired up (or correctly skipped) —
+// independent of the shared AudioContext mock's destination track, which is
+// unconditionally non-empty and so can't distinguish "connected" from "not".
+function getRecorderInternals(recorder: Recorder): {
+  micAnalyser: AnalyserNode | null
+  systemAnalyser: AnalyserNode | null
+} {
+  return recorder as unknown as { micAnalyser: AnalyserNode | null; systemAnalyser: AnalyserNode | null }
+}
+
 // Helper to create mock MediaStream with specific tracks
 function createMockStream(tracks: MediaStreamTrack[]): MediaStream {
   const stream = new MediaStream(tracks)
@@ -107,6 +120,13 @@ describe('Recorder', () => {
   afterEach(() => {
     vi.useRealTimers()
     recorder.dispose()
+    // Restores any vi.spyOn() (e.g. console.warn) so a spy from one test
+    // never silences output for the rest of the file. Verified this doesn't
+    // clobber the vi.mock('./permissions', ...) factory implementations or
+    // the shared MediaStream/MediaRecorder mocks from setup.ts — restoring a
+    // vi.fn() created with an initial implementation puts back that initial
+    // implementation, not a bare no-op.
+    vi.restoreAllMocks()
   })
 
   describe('constructor', () => {
@@ -770,14 +790,17 @@ describe('Recorder', () => {
       recorder.start()
 
       const mediaRecorder = getMediaRecorder(recorder)
-      mediaRecorder.ondataavailable?.({ data: new Blob(['chunk-a']) } as BlobEvent)
-      mediaRecorder.ondataavailable?.({ data: new Blob([]) } as BlobEvent)
+      mediaRecorder.ondataavailable?.({ data: new Blob(['chunk-a']) } as BlobEvent) // 7 bytes
+      mediaRecorder.ondataavailable?.({ data: new Blob([]) } as BlobEvent) // 0 bytes — must be ignored
+      mediaRecorder.ondataavailable?.({ data: new Blob(['bc']) } as BlobEvent) // 2 bytes
 
       recorder.stop()
 
       await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalled())
       const [resultBlob] = vi.mocked(callbacks.onStop).mock.calls[0]
-      expect(resultBlob.size).toBeGreaterThan(0)
+      // Exact size proves the empty chunk was actually skipped, not just
+      // that the total happens to be non-zero.
+      expect(resultBlob.size).toBe(9)
     })
   })
 
@@ -1049,6 +1072,10 @@ describe('Recorder', () => {
       recorder.start()
 
       expect(recorder.isRecording()).toBe(true)
+      // No video source was enabled, so the stream handed to MediaRecorder
+      // must carry no video track at all.
+      expect(getMediaRecorder(recorder).stream.getVideoTracks()).toHaveLength(0)
+      expect(getRecorderInternals(recorder).micAnalyser).not.toBeNull()
     })
 
     it('should skip the webcam video track when webcamEnabled but the stream has none', async () => {
@@ -1064,6 +1091,10 @@ describe('Recorder', () => {
       recorder.start()
 
       expect(recorder.isRecording()).toBe(true)
+      // webcamEnabled is true, but the webcam stream has no video track, so
+      // none should have been added to the stream handed to MediaRecorder.
+      expect(getMediaRecorder(recorder).stream.getVideoTracks()).toHaveLength(0)
+      expect(getRecorderInternals(recorder).micAnalyser).not.toBeNull()
     })
 
     it('should skip system audio when systemAudioEnabled but the screen stream has no audio track', async () => {
@@ -1078,6 +1109,14 @@ describe('Recorder', () => {
       recorder.start()
 
       expect(recorder.isRecording()).toBe(true)
+      // The screen video track is still present in the stream handed to
+      // MediaRecorder...
+      const videoTracks = getMediaRecorder(recorder).stream.getVideoTracks()
+      expect(videoTracks).toHaveLength(1)
+      expect(videoTracks[0].kind).toBe('video')
+      // ...but no system-audio analyser was ever created, proving the
+      // systemAudioTrack branch was skipped rather than silently succeeding.
+      expect(getRecorderInternals(recorder).systemAnalyser).toBeNull()
     })
   })
 })

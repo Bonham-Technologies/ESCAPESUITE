@@ -36,10 +36,12 @@ describe('thumbnailGenerator', () => {
       const result = await promise
 
       expect(result).toBeInstanceOf(Blob)
-      expect(result.type).toBe('image/jpeg')
       expect(ctx.drawImage).toHaveBeenCalledWith(video.element, 0, 0, 320, 180)
       expect(ctx.canvas.width).toBe(320)
       expect(ctx.canvas.height).toBe(180)
+      // The source requested a JPEG at the expected quality — asserting the
+      // recorded call args, not just the double's default toBlobResult type.
+      expect(ctx.toBlobCalls).toEqual([{ type: 'image/jpeg', quality: 0.8 }])
       expect(video.element.muted).toBe(true)
       expect(video.element.preload).toBe('metadata')
       // Cleaned up: object URL revoked, src attribute cleared
@@ -111,6 +113,7 @@ describe('thumbnailGenerator', () => {
       expect(result).toBeInstanceOf(Blob)
       expect(video.element.play).toHaveBeenCalled()
       expect(ctx.drawImage).toHaveBeenCalledWith(video.element, 0, 0, 320, 180)
+      expect(ctx.toBlobCalls).toEqual([{ type: 'image/jpeg', quality: 0.8 }])
       expect(video.element.srcObject).toBeNull()
     })
 

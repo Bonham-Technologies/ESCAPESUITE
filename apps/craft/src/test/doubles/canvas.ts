@@ -12,6 +12,11 @@
 // a given canvas element.
 import { vi } from 'vitest'
 
+export interface ToBlobCall {
+  type: string | undefined
+  quality: number | undefined
+}
+
 export interface RecordingCanvasRenderingContext2D {
   readonly canvas: HTMLCanvasElement
   readonly drawImage: ReturnType<typeof vi.fn>
@@ -19,6 +24,8 @@ export interface RecordingCanvasRenderingContext2D {
   readonly clearRect: ReturnType<typeof vi.fn>
   readonly fillRect: ReturnType<typeof vi.fn>
   readonly getImageData: ReturnType<typeof vi.fn>
+  /** The (type, quality) arguments of every canvas.toBlob() call for this canvas. */
+  readonly toBlobCalls: ToBlobCall[]
   /** What canvas.toBlob() hands back for this canvas. Mutate per-test as needed. */
   toBlobResult: Blob | null
   /** What ctx.getImageData() returns. Mutate per-test as needed. */
@@ -45,6 +52,7 @@ function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingConte
     clearRect: vi.fn(),
     fillRect: vi.fn(),
     getImageData: vi.fn(() => ctx.imageData),
+    toBlobCalls: [],
     toBlobResult: new Blob(['mock-canvas-image'], { type: 'image/jpeg' }),
     imageData: defaultImageData(),
   }
@@ -85,8 +93,8 @@ export function installCanvasContextDouble(): void {
     type?: string,
     quality?: number
   ) {
-    void quality
     const ctx = contextsByCanvas.get(this) ?? createContext(this)
+    ctx.toBlobCalls.push({ type, quality })
     const result = ctx.toBlobResult !== undefined ? ctx.toBlobResult : new Blob([], { type: type || 'image/png' })
     // Real canvases call back asynchronously — preserve that so callers that
     // rely on it (e.g. awaiting a Promise wrapping toBlob) behave correctly.

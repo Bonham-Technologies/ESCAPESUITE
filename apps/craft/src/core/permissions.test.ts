@@ -78,6 +78,7 @@ describe('permissions', () => {
     })
 
     it('locks down every capability outside a secure context', async () => {
+      const originalIsSecureContext = window.isSecureContext
       Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
       try {
         const result = await detectCapabilities()
@@ -95,7 +96,7 @@ describe('permissions', () => {
         expect(result.detailed.systemAudio.reason).toBe('not_secure_context')
         expect(result.detailed.mediaRecorder.reason).toBe('not_secure_context')
       } finally {
-        Object.defineProperty(window, 'isSecureContext', { value: undefined, configurable: true })
+        Object.defineProperty(window, 'isSecureContext', { value: originalIsSecureContext, configurable: true })
       }
     })
 
@@ -195,6 +196,7 @@ describe('permissions', () => {
         { kind: 'videoinput', deviceId: '1', groupId: '1', label: 'Cam', toJSON: () => ({}) },
         { kind: 'audioinput', deviceId: '2', groupId: '2', label: 'Mic', toJSON: () => ({}) },
       ] as MediaDeviceInfo[])
+      const originalPermissions = navigator.permissions
       const query = vi.fn().mockResolvedValue({ state: 'denied' })
       Object.defineProperty(navigator, 'permissions', { value: { query }, configurable: true })
 
@@ -205,7 +207,7 @@ describe('permissions', () => {
         expect(result.capabilities.webcam).toBe(false)
         expect(result.capabilities.microphone).toBe(false)
       } finally {
-        Object.defineProperty(navigator, 'permissions', { value: undefined, configurable: true })
+        Object.defineProperty(navigator, 'permissions', { value: originalPermissions, configurable: true })
       }
     })
 
@@ -214,6 +216,7 @@ describe('permissions', () => {
         { kind: 'videoinput', deviceId: '1', groupId: '1', label: 'Cam', toJSON: () => ({}) },
         { kind: 'audioinput', deviceId: '2', groupId: '2', label: 'Mic', toJSON: () => ({}) },
       ] as MediaDeviceInfo[])
+      const originalPermissions = navigator.permissions
       const query = vi.fn().mockResolvedValue({ state: 'granted' })
       Object.defineProperty(navigator, 'permissions', { value: { query }, configurable: true })
 
@@ -224,12 +227,13 @@ describe('permissions', () => {
         expect(query).toHaveBeenCalledWith({ name: 'camera' })
         expect(query).toHaveBeenCalledWith({ name: 'microphone' })
       } finally {
-        Object.defineProperty(navigator, 'permissions', { value: undefined, configurable: true })
+        Object.defineProperty(navigator, 'permissions', { value: originalPermissions, configurable: true })
       }
     })
 
     it('treats query() throwing as an unknown permission state (still checks devices)', async () => {
       vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue([])
+      const originalPermissions = navigator.permissions
       const query = vi.fn().mockRejectedValue(new Error('not supported for this name'))
       Object.defineProperty(navigator, 'permissions', { value: { query }, configurable: true })
 
@@ -239,7 +243,7 @@ describe('permissions', () => {
         expect(result.detailed.webcam.reason).toBe('no_device')
         expect(result.detailed.microphone.reason).toBe('no_device')
       } finally {
-        Object.defineProperty(navigator, 'permissions', { value: undefined, configurable: true })
+        Object.defineProperty(navigator, 'permissions', { value: originalPermissions, configurable: true })
       }
     })
 
@@ -247,13 +251,14 @@ describe('permissions', () => {
       vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue([
         { kind: 'videoinput', deviceId: '1', groupId: '1', label: 'Cam', toJSON: () => ({}) },
       ] as MediaDeviceInfo[])
+      const originalPermissions = navigator.permissions
       Object.defineProperty(navigator, 'permissions', { value: {}, configurable: true })
 
       try {
         const result = await detectCapabilities()
         expect(result.detailed.webcam.available).toBe(true)
       } finally {
-        Object.defineProperty(navigator, 'permissions', { value: undefined, configurable: true })
+        Object.defineProperty(navigator, 'permissions', { value: originalPermissions, configurable: true })
       }
     })
 
@@ -271,12 +276,21 @@ describe('permissions', () => {
 
   describe('detectCapabilitiesSimple', () => {
     it('returns just the boolean capabilities', async () => {
+      vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue([
+        { kind: 'videoinput', deviceId: '1', groupId: '1', label: 'Cam', toJSON: () => ({}) },
+        { kind: 'audioinput', deviceId: '2', groupId: '2', label: 'Mic', toJSON: () => ({}) },
+      ] as MediaDeviceInfo[])
+
       const result = await detectCapabilitiesSimple()
+
+      // Default test-environment userAgent doesn't match any known browser,
+      // so systemAudio is deterministically false (see the browser-sniffing
+      // test above for the chrome/edge/firefox/safari/other matrix).
       expect(result).toEqual({
         screenCapture: true,
-        webcam: expect.any(Boolean),
-        microphone: expect.any(Boolean),
-        systemAudio: expect.any(Boolean),
+        webcam: true,
+        microphone: true,
+        systemAudio: false,
         mediaRecorder: true,
       })
     })
