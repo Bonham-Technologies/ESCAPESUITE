@@ -178,13 +178,26 @@ describe('PlaybackControls', () => {
     expect(store().currentTime).toBe(10)
   })
 
-  it('stops playback when the playhead is stepped or jumped', () => {
+  it('stops playback when the playhead is stepped', () => {
     withClip()
     store().setIsPlaying(true)
     render(<PlaybackControls />)
 
     fireEvent.click(screen.getByTitle('Step backward (←)'))
 
+    expect(store().isPlaying).toBe(false)
+  })
+
+  it('stops playback when the playhead jumps to either end', () => {
+    withClip()
+    store().setIsPlaying(true)
+    render(<PlaybackControls />)
+
+    fireEvent.click(screen.getByTitle('Go to end (End)'))
+    expect(store().isPlaying).toBe(false)
+
+    store().setIsPlaying(true)
+    fireEvent.click(screen.getByTitle('Go to start (Home)'))
     expect(store().isPlaying).toBe(false)
   })
 })

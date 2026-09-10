@@ -34,6 +34,8 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+const clipOf = (id: string): Clip => store().project.timeline.clips.find((c) => c.id === id)!
+
 const addText = (data: Partial<TextOverlayData> = {}, duration = 4): Clip =>
   store().addTextOverlayClip(data, undefined, 0, duration)
 
@@ -133,6 +135,21 @@ describe('PreviewPlayer click selection', () => {
     expect(store().selectedClipId).toBeNull()
   })
 
+  it('finds left-aligned text by the box that hangs to its right', async () => {
+    const text = addText({ textAlign: 'left' })
+    store().setSelectedClipId(null)
+
+    const preview = await renderPreview()
+    // A left-aligned run of 100px starts at the anchor, so its centre is 50px
+    // to the right of it.
+    fireEvent.mouseDown(preview.canvas, preview.at(960 + 45, 540))
+    await settle()
+
+    expect(store().selectedClipId).toBe(text.id)
+    fireEvent.mouseUp(window)
+    await settle(FRAME_MS)
+  })
+
   it('clears the selection when the click lands on empty canvas', async () => {
     const shape = addShape()
     store().selectClipsInRange([shape.id])
@@ -226,6 +243,20 @@ describe('PreviewPlayer marquee selection', () => {
     fireEvent.mouseMove(preview.canvas, preview.atCss(400, 400))
     await settle()
     fireEvent.mouseUp(preview.canvas, { ...preview.atCss(400, 400), ctrlKey: true })
+    await settle()
+
+    expect([...store().selectedClipIds].sort()).toEqual([right.id, left.id].sort())
+  })
+
+  it('adds to the existing selection when the meta key is held', async () => {
+    const { left, right } = twoShapes()
+    store().selectClipsInRange([right.id])
+
+    const preview = await renderPreview()
+    fireEvent.mouseDown(preview.canvas, preview.atCss(100, 100))
+    fireEvent.mouseMove(preview.canvas, preview.atCss(400, 400))
+    await settle()
+    fireEvent.mouseUp(preview.canvas, { ...preview.atCss(400, 400), metaKey: true })
     await settle()
 
     expect([...store().selectedClipIds].sort()).toEqual([right.id, left.id].sort())
@@ -407,21 +438,6 @@ describe('PreviewPlayer cursor', () => {
     return preview.canvas.style.cursor
   }
 
-  it('finds left-aligned text by the box that hangs to its right', async () => {
-    const text = addText({ textAlign: 'left' })
-    store().setSelectedClipId(null)
-
-    const preview = await renderPreview()
-    // A left-aligned run of 100px starts at the anchor, so its centre is 50px
-    // to the right of it.
-    fireEvent.mouseDown(preview.canvas, preview.at(960 + 45, 540))
-    await settle()
-
-    expect(store().selectedClipId).toBe(text.id)
-    fireEvent.mouseUp(window)
-    await settle(FRAME_MS)
-  })
-
   it('offers move over the body of the clip', async () => {
     const { preview } = await selectedShape()
     expect(await hover(preview, 960, 540)).toBe('move')
@@ -496,12 +512,11 @@ describe('PreviewPlayer keyframe-mode interaction', () => {
     fireEvent.mouseUp(preview.canvas, preview.at(0.2 * 1920, 540))
     await settle(FRAME_MS)
 
-    const untouched = store().project.timeline.clips.find((c) => c.id === other.id)!
-    expect(untouched.shapeData!.x).toBe(0.2)
-    expect(untouched.animation?.keyframes).toBeUndefined()
+    expect(clipOf(other.id).shapeData!.x).toBe(0.2)
+    expect(clipOf(other.id).animation?.keyframes).toBeUndefined()
     // The click counted as one on empty canvas, so it cleared the selection.
     expect(store().selectedClipId).toBeNull()
-    expect(selected.shapeData!.x).toBe(0.8)
+    expect(clipOf(selected.id).shapeData!.x).toBe(0.8)
   })
 
   it('still grabs the selected clip through its own handles in keyframe mode', async () => {
@@ -575,7 +590,7 @@ describe('PreviewPlayer inline text editing', () => {
     expect(textarea.style.fontSize).toBe('24px')
   })
 
-  it('places the editor over right-aligned text on a pillarboxed canvas', async () => {
+  it('places the editor over right-aligned text on a letterboxed canvas', async () => {
     addText({ text: 'Before', textAlign: 'right' })
     store().setSelectedClipId(null)
     const preview = await renderPreview({ rect: { left: 0, top: 0, width: 960, height: 600 } })
@@ -714,7 +729,7 @@ describe('PreviewPlayer hit testing through the letterbox', () => {
     await settle()
   })
 
-  it('catches a marquee drawn on a pillarboxed canvas', async () => {
+  it('catches a marquee drawn on a letterboxed canvas', async () => {
     const shape = addShape({ x: 0.5 })
     store().setSelectedClipId(null)
     const preview = await renderPreview({ rect: { left: 0, top: 0, width: 960, height: 600 } })
