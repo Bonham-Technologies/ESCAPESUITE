@@ -97,6 +97,14 @@ async function captureFramesViaPlayback(
   const hasRVFC = typeof (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback === 'function';
 
   return new Promise((resolve, reject) => {
+    // An already-aborted signal never fires 'abort', and the capture callbacks
+    // below bail out silently when signal.aborted is set — so without this the
+    // conversion would hang forever instead of settling.
+    if (signal?.aborted) {
+      reject(new ConversionAbortedError());
+      return;
+    }
+
     let frameIndex = 0;
     let lastCaptureTime = -frameDuration; // Ensure we capture frame 0
     let rvfcHandle: number | null = null;

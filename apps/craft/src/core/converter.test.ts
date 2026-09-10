@@ -556,6 +556,17 @@ describe('converter', () => {
   // --- cancellation --------------------------------------------------------
 
   describe('cancellation', () => {
+    it('aborts immediately when the signal is already aborted', async () => {
+      const controller = new AbortController()
+      controller.abort()
+      const { promise, video } = start(p => convertToMP4(SOURCE, p, controller.signal))
+      await settle()
+
+      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
+      expect(video.play).not.toHaveBeenCalled()
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+    })
+
     it('aborts mid-capture, stopping playback and closing every frame', async () => {
       const controller = new AbortController()
       const { promise, video } = start(p => convertToMP4(SOURCE, p, controller.signal))
