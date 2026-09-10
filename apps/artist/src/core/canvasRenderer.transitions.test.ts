@@ -336,6 +336,27 @@ describe('drawTransitionWithFrames', () => {
     ])
   })
 
+  // wipe-up reveals from the bottom and wipe-down from the top, matching the
+  // preview player and the element-based renderer above — the same clip must
+  // not wipe one way in a WebM export and the other way in an MP4 export.
+  it('wipes up by revealing the incoming clip from the bottom', () => {
+    draw('wipe-up', 0.25)
+
+    expect(ctx.argsFor('rect')).toEqual([
+      [0, 0, W, H * 0.75],
+      [0, H * 0.75, W, H * 0.25],
+    ])
+  })
+
+  it('wipes down by revealing the incoming clip from the top', () => {
+    draw('wipe-down', 0.25)
+
+    expect(ctx.argsFor('rect')).toEqual([
+      [0, H * 0.25, W, H * 0.75],
+      [0, 0, W, H * 0.25],
+    ])
+  })
+
   it('slides left: outgoing exits left, incoming enters from the right', () => {
     draw('slide-left', 0.25)
 
