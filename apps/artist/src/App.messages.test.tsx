@@ -10,7 +10,7 @@ import { defaultUrlParams, sampleVideo } from './test/appDoubles'
 import { initIntegration, loadVideoFromUrl, parseUrlParams, sendMessage } from './utils/integration'
 import { processVideoFile } from './core/videoProcessor'
 import { getThumbnail, getVideo } from './core/storage'
-import { getResolvedTheme, getTheme } from '@escapesuite/shared/theme'
+import { getTheme, setTheme } from '@escapesuite/shared/theme'
 
 vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
 vi.mock('./core/projectManager', async () =>
@@ -36,6 +36,9 @@ async function dispatchToApp(message: { type: string; payload?: unknown }) {
   })
 }
 
+/** The theme module's own default preference, and where each test leaves it. */
+const THEME_MODULE_DEFAULT = 'dark' as const
+
 const urlParams = (overrides: Partial<ReturnType<typeof defaultUrlParams>> = {}) => {
   vi.mocked(parseUrlParams).mockReturnValue({ ...defaultUrlParams(), ...overrides })
 }
@@ -48,8 +51,11 @@ describe('App inbound messages', () => {
     urlParams()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     uninstallCanvasDouble()
+    // The theme module is a singleton with state that outlives a render; put it
+    // back to its own default so no test depends on the order it ran in.
+    await setTheme(THEME_MODULE_DEFAULT)
     vi.clearAllMocks()
   })
 
@@ -125,15 +131,34 @@ describe('App inbound messages', () => {
   })
 
   describe('themes', () => {
-    it.each(['light', 'dark', 'system'] as const)('applies the %s theme and reports back', async (theme) => {
+    /**
+     * Render, and wait for the initTheme() App kicks off on mount to land.
+     *
+     * Nothing is asserted until it has: start from a preference initTheme is
+     * bound to replace, so "the theme is the module default again" is proof the
+     * mount-time load finished rather than something that was already true.
+     */
+    const renderWithSettledTheme = async () => {
+      await setTheme('light')
       await renderApp()
+      await waitFor(() => expect(getTheme()).toBe(THEME_MODULE_DEFAULT))
+    }
+
+    // 'system' resolves through matchMedia, which the shared test setup answers
+    // with matches: false — i.e. a light system.
+    it.each([
+      ['light', 'light'],
+      ['dark', 'dark'],
+      ['system', 'light'],
+    ] as const)('applies the %s theme and reports back', async (theme, resolved) => {
+      await renderWithSettledTheme()
 
       await dispatchToApp({ type: 'SET_THEME', payload: { theme } })
 
       await waitFor(() => {
         expect(sendMessage).toHaveBeenCalledWith({
           type: 'THEME_CHANGED',
-          payload: { preference: theme, resolved: getResolvedTheme() },
+          payload: { preference: theme, resolved },
         })
       })
       expect(getTheme()).toBe(theme)
@@ -155,14 +180,21 @@ describe('App inbound messages', () => {
       expect(sendMessage).not.toHaveBeenCalled()
     })
 
-    it('reports the current theme on request', async () => {
-      await renderApp()
+    it.each([
+      ['dark', 'dark'],
+      ['light', 'light'],
+      ['system', 'light'],
+    ] as const)('reports a %s preference on request', async (theme, resolved) => {
+      await renderWithSettledTheme()
+      await act(async () => {
+        await setTheme(theme)
+      })
 
       await dispatchToApp({ type: 'GET_THEME' })
 
       expect(sendMessage).toHaveBeenCalledWith({
         type: 'THEME_STATE',
-        payload: { preference: getTheme(), resolved: getResolvedTheme() },
+        payload: { preference: theme, resolved },
       })
     })
   })

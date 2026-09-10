@@ -202,6 +202,46 @@ describe('integration', () => {
       expect(mockPostMessage).toHaveBeenCalledWith(message, 'https://host.example')
     })
 
+    it('addresses posts to the host origin parseUrlParams read from the URL', () => {
+      // The startup path App takes. Every other hostOrigin test pins the value
+      // through the __setHostOriginForTests seam; this one proves that reading
+      // the URL — the only thing App actually does — is what arms sendMessage.
+      const originalLocation = window.location
+      Object.defineProperty(window, 'location', {
+        value: { search: `?hostOrigin=${encodeURIComponent('https://host.example')}` },
+        writable: true,
+      })
+      parseUrlParams()
+      const mockPostMessage = vi.fn()
+      Object.defineProperty(window, 'parent', {
+        value: { postMessage: mockPostMessage },
+        writable: true,
+      })
+
+      const message: IntegrationMessage = { type: 'READY' }
+      sendMessage(message)
+
+      expect(mockPostMessage).toHaveBeenCalledWith(message, 'https://host.example')
+      Object.defineProperty(window, 'location', { value: originalLocation, writable: true })
+    })
+
+    it('falls back to the wildcard when the URL named no host origin', () => {
+      const originalLocation = window.location
+      Object.defineProperty(window, 'location', { value: { search: '' }, writable: true })
+      parseUrlParams()
+      const mockPostMessage = vi.fn()
+      Object.defineProperty(window, 'parent', {
+        value: { postMessage: mockPostMessage },
+        writable: true,
+      })
+
+      const message: IntegrationMessage = { type: 'READY' }
+      sendMessage(message)
+
+      expect(mockPostMessage).toHaveBeenCalledWith(message, '*')
+      Object.defineProperty(window, 'location', { value: originalLocation, writable: true })
+    })
+
     it('dispatches custom event for same-window integration', () => {
       const mockParent = { postMessage: vi.fn() }
       Object.defineProperty(window, 'parent', {

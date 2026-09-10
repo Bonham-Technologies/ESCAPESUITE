@@ -195,22 +195,15 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
  * jsdom defines play()/pause()/load() only to report "Not implemented" to the
  * virtual console, so any component that renders a real <video> and pauses it
  * — the preview player does, on every clip change — floods the test output.
- * These no-ops keep the calls harmless and the output clean. Returns a function
- * that puts the originals back.
+ * These no-ops keep the calls harmless and the output clean.
+ *
+ * Install it at file scope: the calls that matter happen during
+ * testing-library's own unmount, which is outside any afterEach a test file
+ * owns, and each test file gets its own jsdom, so there is nothing to undo.
  */
-export function installMediaPlaybackStubs(): () => void {
+export function installMediaPlaybackStubs(): void {
   const proto = HTMLMediaElement.prototype
-  const originals = {
-    play: proto.play,
-    pause: proto.pause,
-    load: proto.load,
-  }
   proto.play = vi.fn(() => Promise.resolve())
   proto.pause = vi.fn()
   proto.load = vi.fn()
-  return () => {
-    proto.play = originals.play
-    proto.pause = originals.pause
-    proto.load = originals.load
-  }
 }

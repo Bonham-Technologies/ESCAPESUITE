@@ -51,6 +51,9 @@ describe('App project lifecycle', () => {
     resetStoreForTest()
     store().clearHistory()
     installCanvasDouble()
+    // The timeline-height tests write to localStorage, and artist's test setup
+    // installs its own store that the shared afterEach does not clear.
+    localStorage.clear()
     confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
