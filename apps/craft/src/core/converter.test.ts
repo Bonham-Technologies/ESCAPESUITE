@@ -581,6 +581,10 @@ describe('converter', () => {
       expect(video.cancelledFrameCallbacks.length).toBeGreaterThan(0)
       expect(allFramesClosed()).toBe(true)
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+      // The encoder was configured and never flushed; cancelling must still
+      // release it rather than leave a live encoder behind.
+      expect(lastVideoEncoder().closeCalls).toBe(1)
+      expect(lastVideoEncoder().state).toBe('closed')
     })
 
     it('aborts before the audio pass, leaving the muxer unfinalized', async () => {
@@ -598,6 +602,10 @@ describe('converter', () => {
       expect(lastAudioEncoder().encodes).toHaveLength(0)
       expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
       expect(allFramesClosed()).toBe(true)
+      // The video encoder closed on the normal path; the audio encoder had
+      // only been configured, and must not be left open by the abort.
+      expect(lastVideoEncoder().closeCalls).toBe(1)
+      expect(lastAudioEncoder().closeCalls).toBe(1)
     })
 
     it('carries the ConversionAbortedError name and message', () => {
@@ -793,6 +801,8 @@ describe('converter', () => {
 
       await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
       expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+      expect(lastVideoEncoder().closeCalls).toBe(1)
+      expect(lastAudioEncoder().closeCalls).toBe(1)
     })
 
     it('waits for audio encoder backpressure to clear', async () => {

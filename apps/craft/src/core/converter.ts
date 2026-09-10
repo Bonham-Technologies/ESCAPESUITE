@@ -348,6 +348,11 @@ export async function convertToMP4(
 
   const videoUrl = URL.createObjectURL(webmBlob);
 
+  // Declared out here so the finally below can release them however this
+  // function leaves — including a cancellation between the two encode passes.
+  let videoEncoder: VideoEncoder | null = null;
+  let audioEncoder: AudioEncoder | null = null;
+
   try {
     // Load video metadata
     await new Promise<void>((resolve, reject) => {
@@ -431,7 +436,7 @@ export async function convertToMP4(
     }
 
     // Create video encoder
-    const videoEncoder = new VideoEncoder({
+    videoEncoder = new VideoEncoder({
       output: async (chunk, meta) => {
         await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
       },
@@ -449,7 +454,6 @@ export async function convertToMP4(
     });
 
     // Create audio encoder if we have audio
-    let audioEncoder: AudioEncoder | null = null;
     if (audioData && audioSource) {
       audioEncoder = new AudioEncoder({
         output: async (chunk, meta) => {
@@ -575,6 +579,14 @@ export async function convertToMP4(
     return mp4Blob;
   } finally {
     URL.revokeObjectURL(videoUrl);
+    // Both encoders are already closed on the success path; this releases them
+    // when the conversion left early (cancellation, or a failure part-way).
+    if (videoEncoder && videoEncoder.state !== 'closed') {
+      videoEncoder.close();
+    }
+    if (audioEncoder && audioEncoder.state !== 'closed') {
+      audioEncoder.close();
+    }
   }
 }
 
@@ -618,6 +630,11 @@ export async function remuxToWebM(
   video.preload = 'auto';
 
   const videoUrl = URL.createObjectURL(webmBlob);
+
+  // Declared out here so the finally below can release them however this
+  // function leaves — including a cancellation between the two encode passes.
+  let videoEncoder: VideoEncoder | null = null;
+  let audioEncoder: AudioEncoder | null = null;
 
   try {
     // Load video metadata
@@ -683,7 +700,7 @@ export async function remuxToWebM(
     }
 
     // Create video encoder (VP9)
-    const videoEncoder = new VideoEncoder({
+    videoEncoder = new VideoEncoder({
       output: async (chunk, meta) => {
         await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
       },
@@ -701,7 +718,6 @@ export async function remuxToWebM(
     });
 
     // Create audio encoder if we have audio (Opus)
-    let audioEncoder: AudioEncoder | null = null;
     if (audioData && audioSource) {
       audioEncoder = new AudioEncoder({
         output: async (chunk, meta) => {
@@ -824,5 +840,13 @@ export async function remuxToWebM(
     return remuxedBlob;
   } finally {
     URL.revokeObjectURL(videoUrl);
+    // Both encoders are already closed on the success path; this releases them
+    // when the conversion left early (cancellation, or a failure part-way).
+    if (videoEncoder && videoEncoder.state !== 'closed') {
+      videoEncoder.close();
+    }
+    if (audioEncoder && audioEncoder.state !== 'closed') {
+      audioEncoder.close();
+    }
   }
 }
