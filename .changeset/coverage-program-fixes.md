@@ -22,3 +22,4 @@ ESCAPEARTIST:
 - Cancelling an export while it was muxing was ignored, and the export finished anyway.
 - Ctrl+B never split the selected clip, and Ctrl+V changed the active tool instead of pasting.
 - Dragging a left, right, top or bottom resize handle in the preview resized both axes at once instead of the one being dragged.
+- Restoring a session could list the same media twice in the library.

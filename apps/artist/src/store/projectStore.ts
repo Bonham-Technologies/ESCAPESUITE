@@ -187,10 +187,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   })),
 
   // Source video actions
-  addSourceVideo: (video: SourceVideo) => set((state) => ({
-    sourceVideos: [...state.sourceVideos, video],
-    history: pushToHistory(state),
-  })),
+  // Idempotent by id. Source videos are keyed by id everywhere downstream — the media
+  // library renders one element per id, and every clip names the source it plays by id —
+  // so a second entry under an id already held is never new media, it is the same media
+  // seen again (a restored session overlapping the library, the same URL loaded twice).
+  // Replaced in place rather than ignored, so the newer metadata (a fresh thumbnail URL,
+  // above all) wins, and rather than appended, so the library order does not shuffle.
+  addSourceVideo: (video: SourceVideo) => set((state) => {
+    const existing = state.sourceVideos.findIndex((v) => v.id === video.id)
+    const sourceVideos = existing === -1
+      ? [...state.sourceVideos, video]
+      : state.sourceVideos.map((v, i) => (i === existing ? video : v))
+    return { sourceVideos, history: pushToHistory(state) }
+  }),
 
   removeSourceVideo: (id: string) => set((state) => ({
     sourceVideos: state.sourceVideos.filter((v) => v.id !== id),
