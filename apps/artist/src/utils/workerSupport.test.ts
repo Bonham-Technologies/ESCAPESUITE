@@ -4,7 +4,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  canUseExportWorker,
   canUseExportWorkerAsync,
   getWorkerSupport,
   resetWorkerSupportCache,
@@ -20,80 +19,6 @@ describe('workerSupport', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
-  });
-
-  describe('canUseExportWorker', () => {
-    it('returns false when Worker is undefined', () => {
-      const restore = removeGlobal('Worker');
-      try {
-        expect(canUseExportWorker()).toBe(false);
-      } finally {
-        restore();
-      }
-    });
-
-    it('returns false when OfflineAudioContext is undefined', () => {
-      const worker = installWorkerDouble({ kind: 'reply', data: 'ok' });
-      const restore = removeGlobal('OfflineAudioContext');
-      try {
-        expect(canUseExportWorker()).toBe(false);
-        // Bailed out before even trying to construct a worker.
-        expect(worker.urls).toEqual([]);
-      } finally {
-        restore();
-        worker.uninstall();
-      }
-    });
-
-    it('returns false when the Worker constructor is blocked', () => {
-      const worker = installWorkerDouble({ kind: 'throwOnConstruct', message: 'CSP blocked' });
-      try {
-        expect(canUseExportWorker()).toBe(false);
-        expect(worker.urls).toEqual(['blob:mock-url']);
-      } finally {
-        worker.uninstall();
-      }
-    });
-
-    it('probes a real worker and cleans it up once it answers', async () => {
-      // NOTE: the probe is declared `: boolean` but returns the Promise it
-      // builds, cast. Callers therefore always see a truthy value; the answer is
-      // only observable by awaiting it, which is what this test does.
-      const worker = installWorkerDouble({ kind: 'reply', data: 'ok' });
-      const revoke = vi.spyOn(URL, 'revokeObjectURL');
-      try {
-        const probe = canUseExportWorker() as unknown as Promise<boolean>;
-        await expect(probe).resolves.toBe(true);
-        expect(worker.terminated).toBe(1);
-        expect(revoke).toHaveBeenCalledWith('blob:mock-url');
-      } finally {
-        worker.uninstall();
-      }
-    });
-
-    it('answers false when the probe worker errors', async () => {
-      const worker = installWorkerDouble({ kind: 'error' });
-      try {
-        const probe = canUseExportWorker() as unknown as Promise<boolean>;
-        await expect(probe).resolves.toBe(false);
-        expect(worker.terminated).toBe(1);
-      } finally {
-        worker.uninstall();
-      }
-    });
-
-    it('assumes success when the probe worker stays silent for 100ms', async () => {
-      vi.useFakeTimers();
-      const worker = installWorkerDouble({ kind: 'silent' });
-      try {
-        const probe = canUseExportWorker() as unknown as Promise<boolean>;
-        await vi.advanceTimersByTimeAsync(100);
-        await expect(probe).resolves.toBe(true);
-        expect(worker.terminated).toBe(1);
-      } finally {
-        worker.uninstall();
-      }
-    });
   });
 
   describe('canUseExportWorkerAsync', () => {

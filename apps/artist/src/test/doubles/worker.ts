@@ -1,8 +1,8 @@
-// Double for the Web Worker constructor used by the worker-support probes.
+// Double for the Web Worker constructor used by the worker-support probe.
 //
-// jsdom has no Worker at all, so `canUseExportWorker()` short-circuits on the
-// typeof check and the interesting paths — CSP blocking the construction, the
-// worker answering, the worker reporting no OfflineAudioContext, the probe
+// jsdom has no Worker at all, so `canUseExportWorkerAsync()` short-circuits on
+// the typeof check and the interesting paths — CSP blocking the construction,
+// the worker answering, the worker reporting no OfflineAudioContext, the probe
 // timing out — are unreachable. This double records the script URLs it was
 // constructed with, replies with a scripted answer, and can be told to throw
 // from the constructor the way a blocking CSP does.
@@ -49,9 +49,9 @@ export function installWorkerDouble(behaviour: WorkerBehaviour): WorkerDouble {
       if (state.behaviour.kind === 'throwOnConstruct') {
         throw new Error(state.behaviour.message ?? 'Refused to create a worker')
       }
-      // One probe script posts as soon as it loads and the other only answers a
-      // message, so schedule both triggers and let whichever comes first win —
-      // a worker only answers a given probe once either way.
+      // A probe script may post as soon as it loads or only answer a message,
+      // so schedule both triggers and let whichever comes first win — a worker
+      // only answers a given probe once either way.
       queueMicrotask(() => this.respond())
     }
 
