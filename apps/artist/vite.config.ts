@@ -164,10 +164,10 @@ export default defineConfig({
       ],
       // Coverage floors — these only go up. See CLAUDE.md's Testing section.
       thresholds: {
-        lines: 48,
-        statements: 49,
-        branches: 34,
-        functions: 60,
+        lines: 61,
+        statements: 60,
+        branches: 45,
+        functions: 64,
       },
     },
   },

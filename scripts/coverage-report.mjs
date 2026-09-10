@@ -29,7 +29,7 @@ const packages = [
   {
     name: '@escapesuite/artist',
     dir: 'apps/artist',
-    thresholds: { lines: 48, statements: 49, branches: 34, functions: 60 },
+    thresholds: { lines: 61, statements: 60, branches: 45, functions: 64 },
   },
   {
     name: '@escapesuite/shared',

@@ -11,10 +11,29 @@
 // generators use.
 import { vi } from 'vitest'
 
+/**
+ * The drawing state in effect when a call was made. Canvas state is set through
+ * properties rather than calls, so this snapshot is the only way to assert
+ * *what a particular drawImage/fillText was drawn with* — the alpha of each
+ * side of a crossfade, say, or the blend mode a clip composited under.
+ */
+export interface CanvasState {
+  globalAlpha: number
+  globalCompositeOperation: GlobalCompositeOperation
+  filter: string
+  fillStyle: string
+  strokeStyle: string
+  lineWidth: number
+  font: string
+  textAlign: CanvasTextAlign
+  textBaseline: CanvasTextBaseline
+}
+
 /** One recorded drawing call, in the order the code under test made it. */
 export interface CanvasCall {
   method: string
   args: unknown[]
+  state: CanvasState
 }
 
 export interface ToBlobCall {
@@ -29,6 +48,7 @@ export interface RecordingCanvasRenderingContext2D {
   readonly translate: ReturnType<typeof vi.fn>
   readonly rotate: ReturnType<typeof vi.fn>
   readonly scale: ReturnType<typeof vi.fn>
+  readonly setTransform: ReturnType<typeof vi.fn>
   readonly clearRect: ReturnType<typeof vi.fn>
   readonly fillRect: ReturnType<typeof vi.fn>
   readonly strokeRect: ReturnType<typeof vi.fn>
@@ -70,6 +90,8 @@ export interface RecordingCanvasRenderingContext2D {
   measuredTextWidth: number
   /** Convenience: the args of the calls with the given method name, in order. */
   argsFor(method: string): unknown[][]
+  /** The drawing state in effect at each call with the given method name. */
+  stateFor(method: string): CanvasState[]
 }
 
 const contextsByCanvas = new WeakMap<HTMLCanvasElement, RecordingCanvasRenderingContext2D>()
@@ -87,9 +109,20 @@ export function setDefaultToBlobResult(result: Blob | null): void {
 
 function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingContext2D {
   const calls: CanvasCall[] = []
+  const snapshot = (): CanvasState => ({
+    globalAlpha: ctx.globalAlpha,
+    globalCompositeOperation: ctx.globalCompositeOperation,
+    filter: ctx.filter,
+    fillStyle: ctx.fillStyle,
+    strokeStyle: ctx.strokeStyle,
+    lineWidth: ctx.lineWidth,
+    font: ctx.font,
+    textAlign: ctx.textAlign,
+    textBaseline: ctx.textBaseline,
+  })
   const record = (method: string, impl?: (...args: never[]) => unknown) =>
     vi.fn((...args: unknown[]) => {
-      calls.push({ method, args })
+      calls.push({ method, args, state: snapshot() })
       return impl?.(...(args as never[]))
     })
 
@@ -100,6 +133,7 @@ function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingConte
     translate: record('translate'),
     rotate: record('rotate'),
     scale: record('scale'),
+    setTransform: record('setTransform'),
     clearRect: record('clearRect'),
     fillRect: record('fillRect'),
     strokeRect: record('strokeRect'),
@@ -138,6 +172,7 @@ function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingConte
     toBlobResult: defaultToBlobResult,
     measuredTextWidth: 100,
     argsFor: (method: string) => calls.filter((c) => c.method === method).map((c) => c.args),
+    stateFor: (method: string) => calls.filter((c) => c.method === method).map((c) => c.state),
   }
   contextsByCanvas.set(canvas, ctx)
   lastContext = ctx
@@ -232,4 +267,72 @@ export function failNextGetContext(): void {
     if (contextId === '2d') return null
     return patched.call(this, contextId as '2d', options as CanvasRenderingContext2DSettings)
   } as typeof HTMLCanvasElement.prototype.getContext
+}
+
+/**
+ * An OffscreenCanvas double. jsdom has no OffscreenCanvas at all, so the blur
+ * shape overlay — which captures the frame so far into one and draws it back
+ * through a clip path — cannot run without this. Each instance carries a
+ * recording 2D context of its own, so the capture drawn *into* the offscreen
+ * canvas can be asserted separately from the compositing drawn back out.
+ */
+export interface OffscreenCanvasRecord {
+  readonly width: number
+  readonly height: number
+  readonly context: RecordingCanvasRenderingContext2D
+}
+
+export interface OffscreenCanvasDouble {
+  /** Every OffscreenCanvas the code under test constructed, in order. */
+  readonly instances: OffscreenCanvasRecord[]
+  /** Make getContext('2d') return null, the way an out-of-memory browser does. */
+  failGetContext: boolean
+  uninstall(): void
+}
+
+const OFFSCREEN_MISSING = Symbol('missing')
+
+export function installOffscreenCanvasDouble(): OffscreenCanvasDouble {
+  const g = globalThis as unknown as Record<string, unknown>
+  const previous = 'OffscreenCanvas' in g ? g.OffscreenCanvas : OFFSCREEN_MISSING
+
+  const instances: OffscreenCanvasRecord[] = []
+  const state = { failGetContext: false }
+
+  class OffscreenCanvasImpl {
+    readonly width: number
+    readonly height: number
+    readonly context: RecordingCanvasRenderingContext2D
+
+    constructor(width: number, height: number) {
+      this.width = width
+      this.height = height
+      const backing = document.createElement('canvas')
+      backing.width = width
+      backing.height = height
+      this.context = createContext(backing)
+      instances.push(this)
+    }
+
+    getContext(contextId: string): RecordingCanvasRenderingContext2D | null {
+      if (contextId !== '2d' || state.failGetContext) return null
+      return this.context
+    }
+  }
+
+  g.OffscreenCanvas = OffscreenCanvasImpl
+
+  return {
+    instances,
+    get failGetContext() {
+      return state.failGetContext
+    },
+    set failGetContext(next: boolean) {
+      state.failGetContext = next
+    },
+    uninstall() {
+      if (previous === OFFSCREEN_MISSING) delete g.OffscreenCanvas
+      else g.OffscreenCanvas = previous
+    },
+  }
 }

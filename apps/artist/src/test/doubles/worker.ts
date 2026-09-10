@@ -97,3 +97,118 @@ export function installWorkerDouble(behaviour: WorkerBehaviour): WorkerDouble {
     },
   }
 }
+
+// ---------------------------------------------------------------------------
+// Scripted worker for `?worker` module mocks
+//
+// Vite's `import Worker from './x?worker'` gives back a constructor, not the
+// global Worker, so `installWorkerDouble` cannot reach it — the module has to
+// be replaced instead:
+//
+//   vi.mock('../workers/exportWorker?worker', async () => {
+//     const { createScriptedWorkerModule } = await import('../test/doubles/worker')
+//     return createScriptedWorkerModule()
+//   })
+//
+// The double records every message posted into it and answers according to
+// `scriptedWorkerState.respond`, so a test can drive the whole request/response
+// conversation — including a worker that reports an error, one that never
+// answers, and one whose constructor throws.
+// ---------------------------------------------------------------------------
+
+export interface PostedMessage {
+  message: unknown
+  options: unknown
+}
+
+export interface ScriptedWorkerInstance {
+  onmessage: ((event: { data: unknown }) => void) | null
+  onerror: ((event: { message: string }) => void) | null
+  /** Deliver a message from the "worker" to whoever is listening. */
+  reply(data: unknown): void
+  /** Deliver an error event from the "worker". */
+  fail(message: string): void
+}
+
+export interface ScriptedWorkerState {
+  /** Every worker the code under test constructed, in order. */
+  readonly instances: ScriptedWorkerInstance[]
+  /** Every message posted into any of them, in order. */
+  readonly posted: PostedMessage[]
+  /** How many workers were terminate()d — a leak here leaks a real thread. */
+  terminated: number
+  /** Throw from the constructor, the way a blocking CSP does. */
+  constructorError: Error | null
+  /**
+   * Answer a posted message. The default answers the export worker's protocol:
+   * INIT → INIT_COMPLETE, EXTRACT_AUDIO → one progress tick then AUDIO_READY.
+   * Replies are delivered in a microtask, as a real worker's are.
+   */
+  respond: (message: unknown, worker: ScriptedWorkerInstance) => void
+  /** What the default responder hands back for EXTRACT_AUDIO. */
+  audio: { buffer: Float32Array; hasAudio: boolean }
+}
+
+function defaultRespond(message: unknown, worker: ScriptedWorkerInstance): void {
+  const type = (message as { type?: string } | null)?.type
+  if (type === 'INIT') {
+    worker.reply({ type: 'INIT_COMPLETE' })
+  } else if (type === 'EXTRACT_AUDIO') {
+    worker.reply({ type: 'AUDIO_PROGRESS', progress: 50 })
+    worker.reply({
+      type: 'AUDIO_READY',
+      audioBuffer: scriptedWorkerState.audio.buffer,
+      hasAudio: scriptedWorkerState.audio.hasAudio,
+    })
+  }
+}
+
+export const scriptedWorkerState: ScriptedWorkerState = {
+  instances: [],
+  posted: [],
+  terminated: 0,
+  constructorError: null,
+  respond: defaultRespond,
+  audio: { buffer: new Float32Array(8), hasAudio: true },
+}
+
+export function resetScriptedWorker(): void {
+  scriptedWorkerState.instances.length = 0
+  scriptedWorkerState.posted.length = 0
+  scriptedWorkerState.terminated = 0
+  scriptedWorkerState.constructorError = null
+  scriptedWorkerState.respond = defaultRespond
+  scriptedWorkerState.audio = { buffer: new Float32Array(8), hasAudio: true }
+}
+
+/** The module shape to hand back from a vi.mock('…?worker', …) factory. */
+export function createScriptedWorkerModule() {
+  class ScriptedWorker implements ScriptedWorkerInstance {
+    onmessage: ((event: { data: unknown }) => void) | null = null
+    onerror: ((event: { message: string }) => void) | null = null
+
+    constructor() {
+      if (scriptedWorkerState.constructorError) throw scriptedWorkerState.constructorError
+      scriptedWorkerState.instances.push(this)
+    }
+
+    postMessage = vi.fn((message: unknown, options?: unknown) => {
+      scriptedWorkerState.posted.push({ message, options })
+      queueMicrotask(() => scriptedWorkerState.respond(message, this))
+    })
+
+    terminate = vi.fn(() => {
+      scriptedWorkerState.terminated += 1
+    })
+
+    reply(data: unknown): void {
+      this.onmessage?.({ data })
+    }
+
+    fail(message: string): void {
+      this.onerror?.({ message })
+    }
+  }
+
+  return { default: ScriptedWorker }
+}

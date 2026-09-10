@@ -103,3 +103,73 @@ export function installAudioContextDouble(buffer: AudioBufferDouble | null): Aud
     },
   }
 }
+
+export interface OfflineContextConstruction {
+  numberOfChannels: number
+  length: number
+  sampleRate: number
+}
+
+export interface OfflineAudioContextDoubles {
+  /** The (channels, length, sampleRate) of every OfflineAudioContext created. */
+  readonly constructions: OfflineContextConstruction[]
+  /** Every ArrayBuffer handed to decodeAudioData(), in order. */
+  readonly decodeCalls: ArrayBuffer[]
+  /**
+   * What each decode resolves to, by call index. Returning null rejects the
+   * decode the way a file with no decodable audio track does.
+   */
+  decode: (data: ArrayBuffer, index: number) => AudioBufferDouble | null
+  uninstall(): void
+}
+
+const OFFLINE_MISSING = Symbol('missing')
+
+/**
+ * Install an OfflineAudioContext double for the export audio mixer.
+ *
+ * src/test/setup.ts's global stub returns undefined from decodeAudioData(),
+ * so the mixer cannot get past its first clip against it. This double decodes
+ * to whatever the test scripts and records the context geometry the mixer asked
+ * for, which is what proves the output buffer was sized from the timeline
+ * duration rather than the source.
+ */
+export function installOfflineAudioContextDouble(
+  decode: (data: ArrayBuffer, index: number) => AudioBufferDouble | null
+): OfflineAudioContextDoubles {
+  const g = globalThis as unknown as Record<string, unknown>
+  const previous = 'OfflineAudioContext' in g ? g.OfflineAudioContext : OFFLINE_MISSING
+
+  const constructions: OfflineContextConstruction[] = []
+  const decodeCalls: ArrayBuffer[] = []
+  const state = { decode }
+
+  g.OfflineAudioContext = class OfflineAudioContextDouble {
+    constructor(numberOfChannels: number, length: number, sampleRate: number) {
+      constructions.push({ numberOfChannels, length, sampleRate })
+    }
+
+    decodeAudioData = vi.fn(async (data: ArrayBuffer) => {
+      const index = decodeCalls.length
+      decodeCalls.push(data)
+      const buffer = state.decode(data, index)
+      if (!buffer) throw new Error('Unable to decode audio data')
+      return buffer as unknown as AudioBuffer
+    })
+  }
+
+  return {
+    constructions,
+    decodeCalls,
+    get decode() {
+      return state.decode
+    },
+    set decode(next) {
+      state.decode = next
+    },
+    uninstall() {
+      if (previous === OFFLINE_MISSING) delete g.OfflineAudioContext
+      else g.OfflineAudioContext = previous
+    },
+  }
+}
