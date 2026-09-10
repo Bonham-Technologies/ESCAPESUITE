@@ -188,3 +188,29 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     },
   }
 }
+
+/**
+ * Silence jsdom's unimplemented HTMLMediaElement playback methods.
+ *
+ * jsdom defines play()/pause()/load() only to report "Not implemented" to the
+ * virtual console, so any component that renders a real <video> and pauses it
+ * — the preview player does, on every clip change — floods the test output.
+ * These no-ops keep the calls harmless and the output clean. Returns a function
+ * that puts the originals back.
+ */
+export function installMediaPlaybackStubs(): () => void {
+  const proto = HTMLMediaElement.prototype
+  const originals = {
+    play: proto.play,
+    pause: proto.pause,
+    load: proto.load,
+  }
+  proto.play = vi.fn(() => Promise.resolve())
+  proto.pause = vi.fn()
+  proto.load = vi.fn()
+  return () => {
+    proto.play = originals.play
+    proto.pause = originals.pause
+    proto.load = originals.load
+  }
+}

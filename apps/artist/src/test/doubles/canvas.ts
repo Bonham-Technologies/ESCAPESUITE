@@ -68,6 +68,7 @@ export interface RecordingCanvasRenderingContext2D {
   readonly drawImage: ReturnType<typeof vi.fn>
   readonly getImageData: ReturnType<typeof vi.fn>
   readonly putImageData: ReturnType<typeof vi.fn>
+  readonly setLineDash: ReturnType<typeof vi.fn>
   fillStyle: string
   strokeStyle: string
   lineWidth: number
@@ -170,6 +171,7 @@ function createContext(
       colorSpace: 'srgb',
     }) as ImageData),
     putImageData: record('putImageData'),
+    setLineDash: record('setLineDash'),
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 0,

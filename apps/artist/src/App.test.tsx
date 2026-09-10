@@ -4,114 +4,29 @@ import App from './App'
 import { useEditorStore } from './store/projectStore'
 import { getSessionState, clearSessionState, saveSessionState } from './core/storage'
 import { parseUrlParams, initIntegration, sendMessage } from './utils/integration'
+import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
+import { installMediaPlaybackStubs } from './test/doubles/media'
 import type { SessionState } from './core/storage'
 
-// Mock all the complex dependencies
-vi.mock('./core/storage', () => ({
-  getVideoBlob: vi.fn(() => Promise.resolve(new Blob(['test'], { type: 'video/mp4' }))),
-  getStorageEstimate: vi.fn(() => Promise.resolve({ used: 0, quota: 100000000, available: 100000000 })),
-  clearAllVideos: vi.fn(() => Promise.resolve()),
-  deleteVideo: vi.fn(() => Promise.resolve()),
-  saveSessionState: vi.fn(() => Promise.resolve()),
-  getSessionState: vi.fn(() => Promise.resolve(null)),
-  clearSessionState: vi.fn(() => Promise.resolve()),
-  getVideo: vi.fn(() => Promise.resolve(null)),
-  getThumbnail: vi.fn(() => Promise.resolve(null)),
-  getSetting: vi.fn(() => Promise.resolve(null)),
-  setSetting: vi.fn(() => Promise.resolve()),
-}))
+// App's collaborators are replaced with the recording doubles shared by every
+// App test file; see src/test/appDoubles.ts.
+vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
+vi.mock('./core/projectManager', async () =>
+  (await import('./test/appDoubles')).projectManagerDouble()
+)
+vi.mock('./utils/integration', async () => (await import('./test/appDoubles')).integrationDouble())
+vi.mock('./core/videoProcessor', async () =>
+  (await import('./test/appDoubles')).videoProcessorDouble()
+)
 
-vi.mock('./core/projectManager', () => ({
-  saveProject: vi.fn(() => Promise.resolve()),
-  loadProject: vi.fn(() => Promise.resolve({ project: {}, sourceVideos: [] })),
-  showOpenProjectDialog: vi.fn(() => Promise.resolve(null)),
-}))
+// jsdom's <video> pause()/play()/load() only report "Not implemented" to the
+// virtual console, and the preview player pauses on every clip change. Patch
+// them for the whole file — including the unmount that testing-library's
+// cleanup triggers, which is outside any afterEach this file could own.
+installMediaPlaybackStubs()
 
-vi.mock('./utils/integration', () => ({
-  initIntegration: vi.fn(() => () => {}),
-  parseUrlParams: vi.fn(() => ({ videos: [], projectData: null, autoPlay: false, loadVideoId: null, suppressRestore: false, title: null, hostOrigin: null })),
-  loadVideoFromUrl: vi.fn(() => Promise.resolve({ blob: new Blob(), name: 'test.mp4' })),
-  sendMessage: vi.fn(),
-}))
-
-vi.mock('./core/videoProcessor', () => ({
-  processVideoFile: vi.fn(() => Promise.resolve({
-    id: 'video1',
-    name: 'test.mp4',
-    duration: 10,
-    width: 1920,
-    height: 1080,
-    frameRate: 30,
-    mimeType: 'video/mp4',
-    size: 1000000,
-  })),
-  processImageFile: vi.fn(() => Promise.resolve({
-    id: 'image1',
-    name: 'test.png',
-    duration: 5,
-    width: 800,
-    height: 600,
-    frameRate: 1,
-    mimeType: 'image/png',
-    size: 500000,
-    mediaType: 'image',
-  })),
-  processAudioFile: vi.fn(() => Promise.resolve({
-    id: 'audio1',
-    name: 'test.mp3',
-    duration: 120,
-    width: 0,
-    height: 0,
-    frameRate: 0,
-    mimeType: 'audio/mp3',
-    size: 3000000,
-    mediaType: 'audio',
-  })),
-}))
-
-// Mock canvas context
-const mockCanvasContext = {
-  fillStyle: '',
-  fillRect: vi.fn(),
-  drawImage: vi.fn(),
-  save: vi.fn(),
-  restore: vi.fn(),
-  beginPath: vi.fn(),
-  rect: vi.fn(),
-  clip: vi.fn(),
-  globalAlpha: 1,
-  globalCompositeOperation: 'source-over',
-  filter: 'none',
-  setTransform: vi.fn(),
-  ellipse: vi.fn(),
-  fill: vi.fn(),
-  stroke: vi.fn(),
-  moveTo: vi.fn(),
-  lineTo: vi.fn(),
-  closePath: vi.fn(),
-  translate: vi.fn(),
-  rotate: vi.fn(),
-  measureText: vi.fn(() => ({ width: 100 })),
-  textAlign: 'left',
-  textBaseline: 'middle',
-  font: '',
-  strokeStyle: '',
-  lineWidth: 1,
-  fillText: vi.fn(),
-}
-
-HTMLCanvasElement.prototype.getContext = vi.fn(() => mockCanvasContext) as unknown as typeof HTMLCanvasElement.prototype.getContext
-
-// Mock ResizeObserver
-class ResizeObserverMock {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-;(globalThis as any).ResizeObserver = ResizeObserverMock
-
-// Mock window.confirm
+// Nothing in this file drives a dialog that asks for confirmation, but App
+// renders components that may; keep confirm answering yes.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).confirm = vi.fn(() => true)
 
@@ -119,11 +34,13 @@ describe('App', () => {
   beforeEach(() => {
     useEditorStore.getState().resetProject()
     useEditorStore.setState({ history: { past: [], future: [] } })
+    installCanvasDouble()
     vi.clearAllMocks()
     cleanup()
   })
 
   afterEach(() => {
+    uninstallCanvasDouble()
     cleanup()
   })
 
