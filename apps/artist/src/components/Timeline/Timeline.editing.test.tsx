@@ -12,6 +12,7 @@ import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/pr
 import { setRect } from '../../test/doubles/layout'
 import { installResizeObserverDouble, type ResizeObserverDouble } from '../../test/doubles/resizeObserver'
 import styles from './Timeline.module.css'
+import marqueeStyles from '../Preview/MarqueeSelection.module.css'
 
 const PPS = 50
 const TRACK_HEIGHT = 60
@@ -473,15 +474,28 @@ describe('Timeline marquee selection', () => {
     expect([...store().selectedClipIds].sort()).toEqual(['clip1', 'clip2'])
   })
 
-  it('shows the rectangle while it is being dragged', () => {
+  it('shows the rectangle while it is being dragged and takes it away on release', () => {
+    const view = renderTimeline()
+    const box = () => view.root.querySelector(`.${marqueeStyles.marquee}`)
+
+    fireEvent.mouseDown(view.trackContainer, { clientX: 10, clientY: 10 })
+    expect(box()).toBeNull()
+
+    fireEvent.mouseMove(document, { clientX: 200, clientY: 50 })
+    expect(box()).toHaveStyle({ left: '10px', top: '10px', width: '190px', height: '40px' })
+
+    fireEvent.mouseUp(document, { clientX: 200, clientY: 50 })
+    expect(box()).toBeNull()
+  })
+
+  it('draws no rectangle for a press that never travels far enough', () => {
     const view = renderTimeline()
 
     fireEvent.mouseDown(view.trackContainer, { clientX: 10, clientY: 10 })
-    fireEvent.mouseMove(document, { clientX: 200, clientY: 50 })
+    fireEvent.mouseMove(document, { clientX: 12, clientY: 11 })
 
-    const box = view.root.querySelector(`.${styles.tracksContent} div[style*="left"]`)
-    expect(box).toBeTruthy()
-    fireEvent.mouseUp(document, { clientX: 200, clientY: 50 })
+    expect(view.root.querySelector(`.${marqueeStyles.marquee}`)).toBeNull()
+    fireEvent.mouseUp(document, { clientX: 12, clientY: 11 })
   })
 
   it('leaves clips outside the rectangle alone', () => {
