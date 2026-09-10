@@ -1,5 +1,11 @@
 # @escapesuite/shared
 
+## 1.3.0
+
+### Minor Changes
+
+- 90969e4: New config helpers: `isEmbedded()`, `EDITOR_URL` / `editorUrl(params)` driven by the optional `VITE_EDITOR_URL` build variable, and `parseHostOrigin()`.
+
 ## 1.2.1
 
 ### Patch Changes
