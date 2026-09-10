@@ -1,5 +1,6 @@
 import '@escapesuite/shared/test/setup'
 import { vi } from 'vitest'
+import { installCanvasContextDouble } from './doubles/canvas'
 
 // Mock IndexedDB for storage tests
 const indexedDB = {
@@ -15,21 +16,10 @@ vi.stubGlobal('URL', class extends OriginalURL {
   static revokeObjectURL = vi.fn()
 })
 
-// Mock HTMLCanvasElement.getContext for WebCodecs recorder tests
-const originalGetContext = HTMLCanvasElement.prototype.getContext
-HTMLCanvasElement.prototype.getContext = function(contextId: string, options?: CanvasRenderingContext2DSettings) {
-  if (contextId === '2d') {
-    return {
-      drawImage: vi.fn(),
-      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
-      putImageData: vi.fn(),
-      clearRect: vi.fn(),
-      fillRect: vi.fn(),
-      canvas: this,
-    } as unknown as CanvasRenderingContext2D
-  }
-  return originalGetContext.call(this, contextId, options)
-}
+// Recording double for HTMLCanvasElement.getContext('2d') + toBlob(), shared
+// by every test (WebCodecs recorder, thumbnail generation, etc). See
+// src/test/doubles/canvas.ts for how to inspect/configure it per test.
+installCanvasContextDouble()
 
 // Helper to create a mock MediaStreamTrack with all required methods
 function createMockAudioTrack() {
@@ -99,7 +89,13 @@ vi.stubGlobal('MediaRecorder', class MediaRecorder {
   onstop: (() => void) | null = null
   onerror: ((event: Event) => void) | null = null
 
-  constructor(public stream: MediaStream, public options?: MediaRecorderOptions) {}
+  stream: MediaStream
+  options?: MediaRecorderOptions
+
+  constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+    this.stream = stream
+    this.options = options
+  }
 
   start = vi.fn(() => { this.state = 'recording' })
   stop = vi.fn(() => {
@@ -117,7 +113,11 @@ vi.stubGlobal('MediaStream', class MediaStream {
   id = 'mock-stream-id'
   active = true
 
-  constructor(public tracks: MediaStreamTrack[] = []) {}
+  tracks: MediaStreamTrack[]
+
+  constructor(tracks: MediaStreamTrack[] = []) {
+    this.tracks = tracks
+  }
 
   getVideoTracks = vi.fn(() => this.tracks.filter(t => t.kind === 'video'))
   getAudioTracks = vi.fn(() => this.tracks.filter(t => t.kind === 'audio'))
@@ -129,6 +129,9 @@ vi.stubGlobal('MediaStream', class MediaStream {
 // Mock navigator.mediaDevices
 Object.defineProperty(navigator, 'mediaDevices', {
   writable: true,
+  // configurable so a test can redefine it (see withMediaDevices() in
+  // core/permissions.test.ts) and put the original back afterwards.
+  configurable: true,
   value: {
     getUserMedia: vi.fn().mockResolvedValue(new MediaStream()),
     getDisplayMedia: vi.fn().mockResolvedValue(new MediaStream()),

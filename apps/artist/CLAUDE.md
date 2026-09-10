@@ -151,10 +151,9 @@ The export pipeline includes several optimizations to improve performance:
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for MP4 files (background-capable)
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
-- **Seek position tracking**: `seekVideoOptimized()` skips redundant video seeks if already within one frame of target position
-- **Frame tolerance**: Uses 1/frameRate (e.g., 0.033s at 30fps) to determine if seek is needed
+- **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
 - **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
-- **Cache lifecycle**: `clearSeekPositions()` and `clearAnimationCache()` called at export start
+- **Cache lifecycle**: `clearAnimationCache()` is called at export start
 - **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
 
 ### MP4 Export Reliability (`src/core/exporter.ts`)
@@ -187,6 +186,46 @@ Waveform visualization adapts to clip selection state:
 - **Selected state**: White (`rgba(255, 255, 255, 0.85)`) for high contrast against blue selection background
 - **Custom color**: `color` prop overrides default/selected colors when provided
 - **Extreme zoom handling**: Canvas width clamped to `MAX_CANVAS_WIDTH` (4000px) to prevent exceeding browser limits (~32,767px). CSS scales the canvas up for wider clips while maintaining visual quality.
+
+### Testing
+
+Vitest + Testing Library in jsdom, with a v8 coverage floor enforced by `pnpm test:coverage`
+(see the root `CLAUDE.md`'s coverage policy for the numbers and the rule that they only go up).
+
+**Tests never mock the module under test.** Doubles stand in for boundaries the browser owns —
+canvas, media elements, WebCodecs, Web Audio, workers, IndexedDB, layout — never for ARTIST's
+own orchestration. A double records what it was asked to do and the test asserts on the
+outcome, not on the double.
+
+- **`src/test/doubles/`** — one file per browser API jsdom does not implement, each with a
+  header saying what it stands in for and why it has to exist: `canvas.ts` (a recording
+  `CanvasRenderingContext2D` plus `toBlob`), `media.ts` (the `<video>`/`<img>`/`<audio>`
+  elements the code creates, which jsdom never loads or fires events for), `audio.ts`
+  (`AudioContext`/`OfflineAudioContext` and real sample data to decode), `webcodecs.ts`
+  (`VideoFrame`, the encoder/decoder capability probes, and working encoders for the export
+  pipeline), `mediabunny.ts` (the muxer, recorded rather than run), `worker.ts` (the Web
+  Worker constructor the export-support probe builds), `resizeObserver.ts`, `fileReader.ts`,
+  `files.ts` (a `File` on Node's `Blob`, which survives fake-indexeddb's structured clone),
+  `globals.ts` (take a global away, the way a browser without that API looks) and `layout.ts`
+  (`setRect`/`setRects` — jsdom performs no layout, so every `getBoundingClientRect()` is
+  all-zero until a test gives an element a box).
+- **`src/test/fixtures/`** — shared data and the store reset. `projectStore.ts` exports
+  `store()`, `addClip()` and **`resetStoreForTest()`**, which puts the module-singleton store
+  back to a freshly loaded editor holding one source video (`resetProject()` alone leaves
+  `zoom`, `activeTool`, `loopPlayback`, the keyframe panel and the history behind).
+  `store()`'s action calls run inside `act()`, because a zustand change with a component
+  mounted is a React update. `animation.ts` and `exportPipeline.ts` hold the clip/transform
+  and export-pipeline shapes their suites share.
+- **Render helpers** — `src/test/renderApp.tsx` exports **`renderApp()`** (mount `App` and let
+  its mount-time session lookup and URL-parameter work resolve inside `act()`) and
+  `settleApp()` for the same wait mid-test. `src/test/renderPreview.tsx` exports
+  **`renderPreview()`**, which mounts `PreviewPlayer` against every double it needs, gives its
+  canvas a layout box, waits out the debounced redraw, and returns the recorded canvas calls
+  split into composited frames, plus `settle(ms)` (advance the fake clock, run the animation
+  frames that fall due, flush the promises, all inside `act()`).
+- **`src/test/appDoubles.ts`** holds the collaborator modules the `App.*.test.tsx` files
+  hand to `vi.mock` (storage, project manager, integration, video processor);
+  `src/test/domQueries.ts` holds the label-based control queries the editor panels share.
 
 ## Key Constraints
 

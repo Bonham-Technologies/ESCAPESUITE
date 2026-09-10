@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
 import type { SourceVideo } from './types'
+import { addClip, resetStoreForTest, store } from '../test/fixtures/projectStore'
 
 describe('projectStore integration', () => {
   beforeEach(() => {
@@ -31,6 +32,51 @@ describe('projectStore integration', () => {
       expect(state.sourceVideos[0].name).toBe('test.mp4')
     })
 
+    it('replaces a source video whose id it already holds, rather than listing it twice', () => {
+      const video: SourceVideo = {
+        id: 'video1',
+        name: 'test.mp4',
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
+      }
+
+      useEditorStore.getState().addSourceVideo(video)
+      useEditorStore.getState().addSourceVideo({ ...video, name: 'renamed.mp4', duration: 42 })
+
+      // Source videos are keyed by id everywhere downstream — the media library renders
+      // one element per id, and every clip names the source it plays by id — so a second
+      // entry under an id the store already holds is never the media the caller meant to
+      // add. It is the same media, seen again: keep one entry, carrying the newer metadata.
+      const state = useEditorStore.getState()
+      expect(state.sourceVideos).toHaveLength(1)
+      expect(state.sourceVideos[0]).toMatchObject({ id: 'video1', name: 'renamed.mp4', duration: 42 })
+    })
+
+    it('keeps the order of the other source videos when it replaces one', () => {
+      const make = (id: string): SourceVideo => ({
+        id,
+        name: `${id}.mp4`,
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
+      })
+
+      useEditorStore.getState().addSourceVideo(make('a'))
+      useEditorStore.getState().addSourceVideo(make('b'))
+      useEditorStore.getState().addSourceVideo(make('c'))
+      useEditorStore.getState().addSourceVideo({ ...make('b'), name: 'b-again.mp4' })
+
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['a', 'b', 'c'])
+      expect(useEditorStore.getState().sourceVideos[1].name).toBe('b-again.mp4')
+    })
+
     it('removes a source video', () => {
       const video: SourceVideo = {
         id: 'video1',
@@ -48,151 +94,6 @@ describe('projectStore integration', () => {
 
       useEditorStore.getState().removeSourceVideo('video1')
       expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
-    })
-  })
-
-  describe('clip management', () => {
-    const mockVideo: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-
-    beforeEach(() => {
-      useEditorStore.getState().addSourceVideo(mockVideo)
-    })
-
-    it('adds a clip to the timeline', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-
-      const clips = useEditorStore.getState().project.timeline.clips
-      expect(clips).toHaveLength(1)
-      expect(clips[0].sourceVideoId).toBe('video1')
-      expect(clips[0].duration).toBe(5)
-    })
-
-    it('updates clip position', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      useEditorStore.getState().updateClip(clipId, { timelinePosition: 2 })
-
-      const updatedClip = useEditorStore.getState().project.timeline.clips[0]
-      expect(updatedClip.timelinePosition).toBe(2)
-    })
-
-    it('removes a clip', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-      useEditorStore.getState().removeClipFromTimeline(clipId)
-
-      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
-    })
-
-    it('calculates timeline duration based on clips', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      // Add first clip at position 0, duration 5
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip 1',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-
-      expect(useEditorStore.getState().project.timeline.duration).toBe(5)
-
-      // Add second clip at position 10, duration 3
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip2',
-        name: 'Test Clip 2',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 3,
-        duration: 3,
-        animation: undefined,
-      }, trackId, 10)
-
-      expect(useEditorStore.getState().project.timeline.duration).toBe(13)
-    })
-  })
-
-  describe('track management', () => {
-    it('starts with one default track', () => {
-      const tracks = useEditorStore.getState().project.timeline.tracks
-      expect(tracks).toHaveLength(1)
-      expect(tracks[0].name).toBe('Track 1')
-    })
-
-    it('adds a new track', () => {
-      useEditorStore.getState().addTrack()
-
-      const tracks = useEditorStore.getState().project.timeline.tracks
-      expect(tracks).toHaveLength(2)
-      expect(tracks[1].name).toBe('Track 2')
-    })
-
-    it('removes a track', () => {
-      useEditorStore.getState().addTrack()
-      const trackId = useEditorStore.getState().project.timeline.tracks[1].id
-
-      useEditorStore.getState().removeTrack(trackId)
-
-      expect(useEditorStore.getState().project.timeline.tracks).toHaveLength(1)
-    })
-
-    it('updates track properties', () => {
-      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-
-      useEditorStore.getState().updateTrack(trackId, { muted: true, visible: false })
-
-      const track = useEditorStore.getState().project.timeline.tracks[0]
-      expect(track.muted).toBe(true)
-      expect(track.visible).toBe(false)
     })
   })
 
@@ -328,133 +229,6 @@ describe('projectStore integration', () => {
     })
   })
 
-  describe('clip operations', () => {
-    const mockVideo: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-
-    beforeEach(() => {
-      useEditorStore.getState().addSourceVideo(mockVideo)
-    })
-
-    it('splits a clip', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 10,
-        duration: 10,
-        animation: undefined,
-      }, trackId, 0)
-
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-      useEditorStore.getState().splitClip(clipId, 5)
-
-      const clips = useEditorStore.getState().project.timeline.clips
-      expect(clips).toHaveLength(2)
-      expect(clips[0].duration).toBe(5)
-      expect(clips[1].duration).toBe(5)
-      expect(clips[1].timelinePosition).toBe(5)
-    })
-
-    it('duplicates a clip', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-      useEditorStore.getState().duplicateClip(clipId)
-
-      const clips = useEditorStore.getState().project.timeline.clips
-      expect(clips).toHaveLength(2)
-      expect(clips[1].name).toBe('Test Clip (copy)')
-      expect(clips[1].timelinePosition).toBe(5) // After original
-    })
-
-    it('moves clip to different track', () => {
-      const track1 = useEditorStore.getState().project.timeline.tracks[0]
-      const track2 = useEditorStore.getState().addTrack()
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, track1.id, 0)
-
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-      useEditorStore.getState().moveClipToTrack(clipId, track2.id)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      expect(clip.trackId).toBe(track2.id)
-    })
-
-    it('sets clip timeline position', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-      useEditorStore.getState().setClipTimelinePosition(clipId, 10)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      expect(clip.timelinePosition).toBe(10)
-    })
-
-    it('prevents negative timeline position', () => {
-      const state = useEditorStore.getState()
-      const trackId = state.project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-      useEditorStore.getState().setClipTimelinePosition(clipId, -5)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      expect(clip.timelinePosition).toBe(0)
-    })
-  })
-
   describe('clip transform', () => {
     const mockVideo: SourceVideo = {
       id: 'video1',
@@ -530,205 +304,6 @@ describe('projectStore integration', () => {
     })
   })
 
-  describe('clip animation', () => {
-    const mockVideo: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-
-    beforeEach(() => {
-      useEditorStore.getState().addSourceVideo(mockVideo)
-      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, trackId, 0)
-    })
-
-    it('updates clip animation presets', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      useEditorStore.getState().updateClipAnimation(clipId, {
-        in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
-      })
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      expect(clip.animation?.in.type).toBe('fade')
-      expect(clip.animation?.in.duration).toBe(0.5)
-    })
-
-    it('sets keyframe for clip', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 1,
-        value: 0.5,
-        easing: 'linear',
-      })
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      // Auto-creates time-0 keyframe with base value + user keyframe at time 1
-      expect(clip.animation?.keyframes.opacity).toHaveLength(2)
-      expect(clip.animation?.keyframes.opacity?.[0].time).toBe(0) // Auto-created
-      expect(clip.animation?.keyframes.opacity?.[0].value).toBe(1) // Base opacity value
-      expect(clip.animation?.keyframes.opacity?.[1].time).toBe(1)
-      expect(clip.animation?.keyframes.opacity?.[1].value).toBe(0.5)
-    })
-
-    it('removes keyframe from clip', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      // Add keyframe first (this also auto-creates a time-0 keyframe)
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 1,
-        value: 0.5,
-        easing: 'linear',
-      })
-
-      // Remove both keyframes (the user one and the auto-created one)
-      useEditorStore.getState().removeClipKeyframe(clipId, 'opacity', 1)
-      useEditorStore.getState().removeClipKeyframe(clipId, 'opacity', 0)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      expect(clip.animation?.keyframes.opacity).toBeUndefined()
-    })
-
-    it('clears all keyframes for a property', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      // Add multiple keyframes
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 0,
-        value: 0,
-        easing: 'linear',
-      })
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 1,
-        value: 1,
-        easing: 'linear',
-      })
-
-      // Clear opacity keyframes
-      useEditorStore.getState().clearClipKeyframes(clipId, 'opacity')
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      expect(clip.animation?.keyframes.opacity).toBeUndefined()
-    })
-
-    it('clears all keyframes', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      // Add keyframes for multiple properties
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 0,
-        value: 0,
-        easing: 'linear',
-      })
-      useEditorStore.getState().setClipKeyframe(clipId, 'x', {
-        time: 0,
-        value: 0,
-        easing: 'linear',
-      })
-
-      // Clear all keyframes
-      useEditorStore.getState().clearClipKeyframes(clipId)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      expect(Object.keys(clip.animation?.keyframes || {}).length).toBe(0)
-    })
-
-    it('moves keyframe to new time', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      // Add a keyframe
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 1,
-        value: 0.5,
-        easing: 'ease-in',
-      })
-
-      // Move it to a new time
-      useEditorStore.getState().moveClipKeyframe(clipId, 'opacity', 1, 2)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      // Auto-created time-0 keyframe + moved keyframe at time 2
-      expect(clip.animation?.keyframes.opacity).toHaveLength(2)
-      expect(clip.animation?.keyframes.opacity?.[0].time).toBe(0) // Auto-created start keyframe
-      expect(clip.animation?.keyframes.opacity?.[1].time).toBe(2)
-      expect(clip.animation?.keyframes.opacity?.[1].value).toBe(0.5)
-      expect(clip.animation?.keyframes.opacity?.[1].easing).toBe('ease-in')
-    })
-
-    it('moves keyframe and replaces existing keyframe at destination', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      // Add two keyframes
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 1,
-        value: 0.5,
-        easing: 'linear',
-      })
-      useEditorStore.getState().setClipKeyframe(clipId, 'opacity', {
-        time: 2,
-        value: 1,
-        easing: 'ease-out',
-      })
-
-      // Move first keyframe to second keyframe's position
-      useEditorStore.getState().moveClipKeyframe(clipId, 'opacity', 1, 2)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      // Auto-created time-0 keyframe + the moved keyframe (which replaced the one at time 2)
-      expect(clip.animation?.keyframes.opacity).toHaveLength(2)
-      expect(clip.animation?.keyframes.opacity?.[0].time).toBe(0) // Auto-created start keyframe
-      expect(clip.animation?.keyframes.opacity?.[1].time).toBe(2)
-      expect(clip.animation?.keyframes.opacity?.[1].value).toBe(0.5) // Value from moved keyframe
-    })
-
-    it('keeps keyframes sorted after move', () => {
-      const clipId = useEditorStore.getState().project.timeline.clips[0].id
-
-      // Add three keyframes
-      useEditorStore.getState().setClipKeyframe(clipId, 'x', {
-        time: 0,
-        value: 0,
-        easing: 'linear',
-      })
-      useEditorStore.getState().setClipKeyframe(clipId, 'x', {
-        time: 1,
-        value: 0.5,
-        easing: 'linear',
-      })
-      useEditorStore.getState().setClipKeyframe(clipId, 'x', {
-        time: 3,
-        value: 1,
-        easing: 'linear',
-      })
-
-      // Move last keyframe to middle
-      useEditorStore.getState().moveClipKeyframe(clipId, 'x', 3, 0.5)
-
-      const clip = useEditorStore.getState().project.timeline.clips[0]
-      const keyframes = clip.animation?.keyframes.x
-      expect(keyframes).toHaveLength(3)
-      // Should be sorted by time
-      expect(keyframes?.[0].time).toBe(0)
-      expect(keyframes?.[1].time).toBe(0.5)
-      expect(keyframes?.[2].time).toBe(1)
-    })
-  })
-
   describe('overlay clips', () => {
     it('adds text overlay clip', () => {
       const clip = useEditorStore.getState().addTextOverlayClip({
@@ -778,105 +353,6 @@ describe('projectStore integration', () => {
       const updated = useEditorStore.getState().project.timeline.clips[0]
       expect(updated.shapeData?.fillColor).toBe('#ff0000ff')
       expect(updated.shapeData?.blurAmount).toBe(10)
-    })
-  })
-
-  describe('legacy overlays', () => {
-    it('adds and updates legacy text overlay', () => {
-      const overlay = useEditorStore.getState().addTextOverlay({
-        text: 'Legacy Text',
-      })
-
-      expect(overlay.text).toBe('Legacy Text')
-
-      useEditorStore.getState().updateTextOverlay(overlay.id, {
-        text: 'Updated Text',
-      })
-
-      const updated = useEditorStore.getState().project.timeline.textOverlays[0]
-      expect(updated.text).toBe('Updated Text')
-    })
-
-    it('removes legacy text overlay', () => {
-      const overlay = useEditorStore.getState().addTextOverlay({
-        text: 'To Remove',
-      })
-
-      useEditorStore.getState().removeTextOverlay(overlay.id)
-
-      expect(useEditorStore.getState().project.timeline.textOverlays).toHaveLength(0)
-    })
-
-    it('adds and updates legacy shape overlay', () => {
-      const overlay = useEditorStore.getState().addShapeOverlay({
-        type: 'rectangle',
-      })
-
-      expect(overlay.type).toBe('rectangle')
-
-      useEditorStore.getState().updateShapeOverlay(overlay.id, {
-        type: 'ellipse',
-      })
-
-      const updated = useEditorStore.getState().project.timeline.shapeOverlays[0]
-      expect(updated.type).toBe('ellipse')
-    })
-  })
-
-  describe('track operations', () => {
-    it('keeps at least one track', () => {
-      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-
-      useEditorStore.getState().removeTrack(trackId)
-
-      // Should still have one track
-      expect(useEditorStore.getState().project.timeline.tracks).toHaveLength(1)
-    })
-
-    it('reorders tracks', () => {
-      useEditorStore.getState().addTrack('Track 2')
-      useEditorStore.getState().addTrack('Track 3')
-
-      const tracks = useEditorStore.getState().project.timeline.tracks
-      const reordered = [tracks[2].id, tracks[0].id, tracks[1].id]
-
-      useEditorStore.getState().reorderTracks(reordered)
-
-      const newTracks = useEditorStore.getState().project.timeline.tracks
-      expect(newTracks[0].index).toBe(0)
-      expect(newTracks[1].index).toBe(1)
-      expect(newTracks[2].index).toBe(2)
-    })
-
-    it('removes clips when track is removed', () => {
-      // First track exists by default, we add a second one
-      const track2 = useEditorStore.getState().addTrack()
-
-      const video: SourceVideo = {
-        id: 'video1',
-        name: 'test.mp4',
-        duration: 10,
-        width: 1920,
-        height: 1080,
-        frameRate: 30,
-        mimeType: 'video/mp4',
-        size: 1000000,
-      }
-      useEditorStore.getState().addSourceVideo(video)
-
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Clip 1',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 5,
-        duration: 5,
-        animation: undefined,
-      }, track2.id, 0)
-
-      useEditorStore.getState().removeTrack(track2.id)
-
-      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
     })
   })
 
@@ -1341,6 +817,61 @@ describe('projectStore helper functions', () => {
 
       useEditorStore.getState().setLoopPlayback(false)
       expect(useEditorStore.getState().loopPlayback).toBe(false)
+    })
+  })
+})
+
+describe('projectStore remaining behaviours', () => {
+  beforeEach(resetStoreForTest)
+
+  describe('resetProject', () => {
+    it('clears markers so they do not survive onto the next project', () => {
+      store().addMarker(3, 'Old cue')
+      store().addMarker(7, 'Another')
+      expect(store().markers).toHaveLength(2)
+
+      store().resetProject()
+
+      expect(store().markers).toEqual([])
+    })
+
+    it('rewinds the playhead and drops the selection', () => {
+      addClip('clip1', 0, 4)
+      store().setCurrentTime(3)
+      store().setSelectedClipId('clip1')
+
+      store().resetProject()
+
+      expect(store().currentTime).toBe(0)
+      expect(store().selectedClipId).toBeNull()
+      expect(store().project.timeline.clips).toEqual([])
+    })
+  })
+
+  describe('history size cap', () => {
+    it('drops the oldest snapshot once 50 are stored', () => {
+      // Each undoable action snapshots the state *before* it, so 60 calls push
+      // the initial state plus widths 100..158 — 60 entries, capped at 50.
+      for (let i = 0; i < 60; i++) store().setProjectResolution(100 + i, 100)
+
+      expect(store().history.past).toHaveLength(50)
+      // The ten oldest snapshots, including the initial state, have aged out.
+      expect(store().history.past[0].project.resolution.width).toBe(109)
+      expect(store().history.past[49].project.resolution.width).toBe(158)
+    })
+  })
+
+  describe('markers', () => {
+    it('updates a marker and keeps the list sorted by time', () => {
+      const first = store().addMarker(1, 'A')
+      store().addMarker(5, 'B')
+
+      store().updateMarker(first.id, { time: 8, label: 'Moved' })
+
+      expect(store().markers.map((m) => [m.time, m.label])).toEqual([
+        [5, 'B'],
+        [8, 'Moved'],
+      ])
     })
   })
 })

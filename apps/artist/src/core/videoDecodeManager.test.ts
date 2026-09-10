@@ -503,6 +503,41 @@ describe('VideoDecodeManager', () => {
     });
   });
 
+  describe('STATUS responses', () => {
+    it('ignores them: they are answered by whoever asked, not the dispatcher', async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+      const onError = vi.fn();
+      manager.onError(onError);
+
+      let request: { requestId: number } | null = null;
+      mockWorkerInstance!.setMessageHandler((data) => {
+        request = data as { requestId: number };
+      });
+
+      // A pending frame request must not be disturbed by a STATUS message.
+      const framePromise = manager.getFrame('source1', 1);
+      mockWorkerInstance!.simulateMessage({
+        type: 'STATUS',
+        sourceId: 'source1',
+      } as unknown as DecodeWorkerResponse);
+
+      expect(onError).not.toHaveBeenCalled();
+
+      // The request is still outstanding and still resolvable.
+      const mockFrame = { close: vi.fn() } as unknown as VideoFrame;
+      mockWorkerInstance!.simulateMessage({
+        type: 'FRAME_READY',
+        requestId: request!.requestId,
+        sourceId: 'source1',
+        timestamp: 1,
+        frame: mockFrame,
+      });
+
+      await expect(framePromise).resolves.toBe(mockFrame);
+    });
+  });
+
   describe('singleton instance', () => {
     it('getVideoDecodeManager returns same instance', () => {
       const manager1 = getVideoDecodeManager();

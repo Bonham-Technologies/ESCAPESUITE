@@ -57,6 +57,31 @@ describe('getSink', () => {
   })
 })
 
+describe('s3 sink selection', () => {
+  it('validates config.prefix before the optional AWS SDK is even loaded', async () => {
+    await expect(getSink('s3', {})).rejects.toThrow(/s3 sink requires config\.prefix \(string\)/)
+    await expect(getSink('s3', { prefix: '' })).rejects.toThrow(/s3 sink requires config\.prefix \(string\)/)
+  })
+
+  it('builds a deliverable sink from a prefix, region and endpoint', async () => {
+    // s3.ts imports the SDK itself, lazily, inside this call; the upload path (keys, metadata,
+    // locations) is driven against a recording client in s3.sdk.test.ts.
+    const sink = await getSink('s3', {
+      prefix: 's3://bucket/renders',
+      region: 'us-west-2',
+      endpoint: 'https://minio.internal',
+    })
+
+    expect(typeof sink.deliver).toBe('function')
+  })
+
+  it('builds one from a bare prefix, leaving region and endpoint to the SDK', async () => {
+    const sink = await getSink('s3', { prefix: 'bucket', region: 42, endpoint: null })
+
+    expect(typeof sink.deliver).toBe('function')
+  })
+})
+
 describe('volume sink', () => {
   it('validates config.dir is required', async () => {
     await expect(getSink('volume', {})).rejects.toThrow(/volume sink requires config\.dir \(string\)/)
@@ -186,9 +211,92 @@ describe('volume sink cross-device fallback', () => {
   })
 })
 
+describe('volume sink failures', () => {
+  it('propagates a rename failure that is not a cross-device link', async () => {
+    const destDir = await makeTempDir()
+    const srcDir = await makeTempDir()
+    const manifest = fakeManifest({ jobId: 'job-gone' })
+
+    const sink = await getSink('volume', { dir: destDir })
+
+    // The render is not where the sink was told it would be: an ENOENT, not an EXDEV, so
+    // there is nothing to fall back to and the failure must surface as it is.
+    await expect(
+      sink.deliver(manifest.jobId, path.join(srcDir, 'never-written.mp4'), manifest),
+    ).rejects.toThrow(/ENOENT/)
+
+    expect(await fs.readdir(destDir)).toEqual([])
+  })
+
+  it('never lets a failed cleanup mask the copy failure that caused it', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
+    const manifest = fakeManifest({ jobId: 'job-exdev' })
+
+    const renameSpy = vi
+      .spyOn(fs, 'rename')
+      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
+    const copySpy = vi
+      .spyOn(fs, 'copyFile')
+      .mockRejectedValue(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }))
+    const rmSpy = vi
+      .spyOn(fs, 'rm')
+      .mockRejectedValue(Object.assign(new Error('read-only file system'), { code: 'EROFS' }))
+
+    try {
+      const sink = await getSink('volume', { dir: destDir })
+      // The ENOSPC, not the EROFS: the operator needs to know why the delivery failed.
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        'no space left on device',
+      )
+      expect(rmSpy).toHaveBeenCalled()
+    } finally {
+      renameSpy.mockRestore()
+      copySpy.mockRestore()
+      rmSpy.mockRestore()
+    }
+  })
+})
+
+describe('volume sink cross-device success', () => {
+  it('copies the render across the device boundary and removes the source', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
+    const manifest = fakeManifest({ jobId: 'job-exdev-ok' })
+
+    const renameSpy = vi
+      .spyOn(fs, 'rename')
+      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
+
+    try {
+      const sink = await getSink('volume', { dir: destDir })
+      const result = await sink.deliver(manifest.jobId, outputPath, manifest)
+
+      expect(result.outputLocation).toBe(path.join(destDir, 'job-exdev-ok.mp4'))
+      expect(await fs.readFile(result.outputLocation, 'utf8')).toBe('hello world')
+    } finally {
+      renameSpy.mockRestore()
+    }
+
+    // A copy that leaves the original behind fills the scratch volume one render at a time.
+    await expect(fs.access(outputPath)).rejects.toThrow()
+  })
+})
+
 describe('command sink', () => {
   it('validates config.command is required', async () => {
     await expect(getSink('command', {})).rejects.toThrow(/command sink requires config\.command \(string\)/)
+  })
+
+  it('rejects config.args that is not an array of strings', async () => {
+    await expect(getSink('command', { command: 'echo', args: 'one two' })).rejects.toThrow(
+      'command sink requires config.args (string[]) when provided',
+    )
+    await expect(getSink('command', { command: 'echo', args: ['one', 2] })).rejects.toThrow(
+      'command sink requires config.args (string[]) when provided',
+    )
   })
 
   it('rejects a non-object config.env', async () => {
@@ -282,6 +390,39 @@ describe('command sink', () => {
     )
   })
 
+  it('names the signal when the command is killed rather than exiting', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('killed bytes'))
+    const manifest = fakeManifest({ jobId: 'job-killed' })
+
+    const sink = await getSink('command', {
+      command: process.execPath,
+      args: ['-e', 'process.kill(process.pid, "SIGTERM")'],
+    })
+
+    // "exited with code null" would be the alternative, which says nothing about what happened.
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      /was killed by SIGTERM/,
+    )
+  })
+
+  it('reports a spawn failure that is not a missing command', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-noexec' })
+
+    // A delivery script somebody forgot to chmod +x: it exists, so "command not found" would
+    // send the operator looking in the wrong place.
+    const notExecutable = path.join(srcDir, 'deliver.sh')
+    await fs.writeFile(notExecutable, '#!/bin/sh\nexit 0\n', { mode: 0o644 })
+
+    const sink = await getSink('command', { command: notExecutable })
+
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      /could not be run: (?!command not found).*EACCES/,
+    )
+  })
+
   it('throws with the exit code and stderr tail when the command fails', async () => {
     const srcDir = await makeTempDir()
     const outputPath = await makeOutputFile(srcDir, Buffer.from('fail bytes'))
@@ -307,6 +448,15 @@ describe('command sink', () => {
 describe('webhook sink', () => {
   it('validates config.url is required', async () => {
     await expect(getSink('webhook', {})).rejects.toThrow(/webhook sink requires config\.url \(string\)/)
+  })
+
+  it('rejects config.headers that is not an object', async () => {
+    await expect(getSink('webhook', { url: 'http://x/', headers: ['authorization: x'] })).rejects.toThrow(
+      'webhook sink requires config.headers (object) when provided',
+    )
+    await expect(getSink('webhook', { url: 'http://x/', headers: 'authorization: x' })).rejects.toThrow(
+      'webhook sink requires config.headers (object) when provided',
+    )
   })
 
   it('posts a multipart body containing the manifest JSON and file bytes', async () => {
@@ -424,5 +574,32 @@ describe('webhook sink', () => {
     await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
       /webhook sink failed: 500/,
     )
+  })
+})
+
+describe('webhook sink transport failures', () => {
+  /** A port nothing is listening on: bind one, read it back, then give it up. */
+  async function closedPort(): Promise<number> {
+    const server = http.createServer()
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+    await new Promise((resolve) => server.close(resolve))
+    return port
+  }
+
+  it('surfaces a connection failure as itself, not as a timeout', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-refused' })
+    const port = await closedPort()
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/upload`, timeoutMs: 30_000 })
+
+    // The whole point: a refused connection reports itself in seconds. Calling it a timeout
+    // would tell an operator to look at a slow receiver that is not even running.
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      /fetch failed|ECONNREFUSED/,
+    )
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.not.toThrow(/timed out/)
   })
 })

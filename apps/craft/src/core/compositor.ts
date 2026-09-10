@@ -45,7 +45,9 @@ export class Compositor {
       webcamPosition: config.webcamPosition || 'bottom-right',
       webcamSize: config.webcamSize || 0.2,
       webcamShape: config.webcamShape || 'circle',
-      padding: config.padding || 20,
+      // ?? not || — a zero padding is a real choice (overlay flush against the
+      // canvas edge), whereas a zero webcam size is nonsense input.
+      padding: config.padding ?? 20,
     };
   }
 

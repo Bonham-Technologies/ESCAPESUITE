@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
@@ -9,14 +10,35 @@ import { runJob } from './run'
 import { startServer } from './serve'
 import type { RenderOutcome } from './types'
 
-/** Flipped by the one test that needs `realpathSync` to fail; false everywhere else. */
-const fsState = vi.hoisted(() => ({ realpathFails: false }))
+/**
+ * Two things the CLI reads off the real filesystem that a test cannot put there:
+ * `realpathSync` failing (an unreadable parent directory), and the `kit.json` the kit
+ * assembler writes next to the *built* CLI — which a source checkout, and therefore this
+ * test run, has none of. Everything else goes through the real `node:fs`.
+ */
+const fsState = vi.hoisted(() => ({
+  realpathFails: false,
+  kitJson: undefined as string | undefined,
+}))
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
+  const promises: typeof actual.promises = {
+    ...actual.promises,
+    readFile: (async (target: string, ...rest: unknown[]) => {
+      if (typeof target === 'string' && target.endsWith('kit.json')) {
+        if (fsState.kitJson === undefined) {
+          throw Object.assign(new Error(`ENOENT: no such file, open '${target}'`), { code: 'ENOENT' })
+        }
+        return fsState.kitJson
+      }
+      return (actual.promises.readFile as (...args: unknown[]) => unknown)(target, ...rest)
+    }) as typeof actual.promises.readFile,
+  }
+  const patched = { ...actual, promises }
   return {
-    ...actual,
-    default: actual,
+    ...patched,
+    default: patched,
     realpathSync: (target: string) => {
       if (fsState.realpathFails) throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
       return actual.realpathSync(target)
@@ -69,6 +91,7 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks()
   fsState.realpathFails = false
+  fsState.kitJson = undefined
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (dir) await fs.rm(dir, { recursive: true, force: true })
@@ -158,6 +181,201 @@ describe('render argument parsing', () => {
   })
 })
 
+describe('the command word', () => {
+  it('exits 2 with usage when no command is given at all', async () => {
+    expect(await main([], {})).toBe(2)
+    expect(stdout).toEqual([])
+    expect(stderrText()).toContain('error: no command given')
+    expect(stderrText()).toContain('Usage: headless-artist render')
+  })
+
+  it('exits 2 for a misspelled command rather than guessing what was meant', async () => {
+    expect(await main(['rendre', '--job', 'a.json'], {})).toBe(2)
+    expect(stderrText()).toContain('unknown command "rendre"')
+    expect(runJob).not.toHaveBeenCalled()
+  })
+
+  it('prints usage and exits 0 for a bare --help', async () => {
+    expect(await main(['--help'], {})).toBe(0)
+    expect(stdout).toEqual([])
+    expect(stderrText()).toContain('Usage: headless-artist render')
+  })
+
+  it('prints usage and exits 0 for a bare -h', async () => {
+    expect(await main(['-h'], {})).toBe(0)
+    expect(stderrText()).toContain('Usage: headless-artist render')
+  })
+})
+
+describe('--version', () => {
+  it('prints the kit.json the assembler wrote next to the CLI, on stdout, as one line', async () => {
+    fsState.kitJson = JSON.stringify({ kitVersion: '0.2.1', engineVersion: '1.4.0' })
+
+    expect(await main(['--version'], {})).toBe(0)
+
+    expect(stdout).toEqual([JSON.stringify({ kitVersion: '0.2.1', engineVersion: '1.4.0' }) + '\n'])
+    expect(stderrText()).toBe('')
+  })
+
+  it('says "unknown" rather than failing when there is no kit.json (a source checkout)', async () => {
+    expect(await main(['--version'], {})).toBe(0)
+    expect(stdout).toEqual([JSON.stringify({ kitVersion: 'unknown' }) + '\n'])
+  })
+
+  it('says "unknown" for a kit.json that is not a JSON object', async () => {
+    fsState.kitJson = '["not", "an", "object"]'
+
+    expect(await main(['--version'], {})).toBe(0)
+    expect(stdout).toEqual([JSON.stringify({ kitVersion: 'unknown' }) + '\n'])
+  })
+})
+
+describe('kit versions on a render', () => {
+  it('stamps the kit.json versions into the run deps, so they reach the manifest', async () => {
+    fsState.kitJson = JSON.stringify({ kitVersion: '0.2.1', engineVersion: '1.4.0' })
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(0)
+
+    expect(vi.mocked(runJob).mock.calls[0][1].versions).toEqual({
+      kitVersion: '0.2.1',
+      engineVersion: '1.4.0',
+    })
+  })
+
+  it('reports "unknown" for a version field that is not a string, rather than passing it on', async () => {
+    fsState.kitJson = JSON.stringify({ kitVersion: 7, engineVersion: null })
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(0)
+
+    expect(vi.mocked(runJob).mock.calls[0][1].versions).toEqual({
+      kitVersion: 'unknown',
+      engineVersion: 'unknown',
+    })
+  })
+})
+
+describe('HEADLESS_TIMEOUT_MS', () => {
+  it('passes a positive integer through to the run deps', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: '90000' })).toBe(0)
+
+    expect(vi.mocked(runJob).mock.calls[0][1].timeoutMs).toBe(90000)
+  })
+
+  it('leaves the budget unset when the variable is empty', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: '' })).toBe(0)
+
+    expect(vi.mocked(runJob).mock.calls[0][1].timeoutMs).toBeUndefined()
+  })
+
+  it('exits 2 before launching anything for a non-numeric budget', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: '30s' })).toBe(2)
+
+    expect(stderrText()).toContain('HEADLESS_TIMEOUT_MS must be a positive integer, got "30s"')
+    expect(runJob).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 for a zero budget, which would otherwise mean "no time at all"', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: '0' })).toBe(2)
+
+    expect(stderrText()).toContain('HEADLESS_TIMEOUT_MS must be a positive integer, got "0"')
+    expect(runJob).not.toHaveBeenCalled()
+  })
+})
+
+describe('reading the job spec', () => {
+  it('accepts the --job=<path> form', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', `--job=${jobFile}`], {})).toBe(0)
+
+    expect(runJob).toHaveBeenCalledTimes(1)
+    expect(stdout).toEqual([JSON.stringify(OUTCOME) + '\n'])
+  })
+
+  it('exits 2 when --job is the last argument, with nothing after it', async () => {
+    expect(await main(['render', '--job'], {})).toBe(2)
+    expect(stderrText()).toContain('--job needs a file path (or "-" for stdin)')
+  })
+
+  it('exits 2 for an empty --job=', async () => {
+    expect(await main(['render', '--job='], {})).toBe(2)
+    expect(stderrText()).toContain('render needs a job spec: --job <file>')
+  })
+
+  it('exits 2 when no source was named at all', async () => {
+    expect(await main(['render'], {})).toBe(2)
+    expect(stderrText()).toContain('render needs a job spec: --job <file>')
+  })
+
+  it('exits 2 for an unknown render option instead of treating it as a path', async () => {
+    expect(await main(['render', '--gpu'], {})).toBe(2)
+    expect(stderrText()).toContain('unknown option "--gpu"')
+    expect(runJob).not.toHaveBeenCalled()
+  })
+
+  it('reads the spec from stdin for "-", and names stdin in its errors', async () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'stdin')
+    Object.defineProperty(process, 'stdin', {
+      value: Readable.from([Buffer.from(JSON.stringify(validSpec()))]),
+      configurable: true,
+    })
+    try {
+      expect(await main(['render', '-'], {})).toBe(0)
+    } finally {
+      if (original) Object.defineProperty(process, 'stdin', original)
+    }
+
+    expect(runJob).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(runJob).mock.calls[0][0].jobId).toBe('job-1')
+  })
+
+  it('exits 2 when stdin carries something that is not JSON', async () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'stdin')
+    Object.defineProperty(process, 'stdin', {
+      value: Readable.from([Buffer.from('not json at all')]),
+      configurable: true,
+    })
+    try {
+      expect(await main(['render', '-'], {})).toBe(2)
+    } finally {
+      if (original) Object.defineProperty(process, 'stdin', original)
+    }
+
+    expect(stderrText()).toContain('job spec stdin is not valid JSON')
+  })
+
+  it('exits 2 when the job file does not exist, naming the path it tried', async () => {
+    const missing = path.join(os.tmpdir(), 'headless-artist-no-such-job.json')
+
+    expect(await main(['render', '--job', missing], {})).toBe(2)
+
+    expect(stderrText()).toContain(`job spec "${missing}" could not be read`)
+    expect(runJob).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 when the job file is not JSON', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-artist-cli-unit-'))
+    tempDirs.push(dir)
+    const jobFile = path.join(dir, 'job.json')
+    await fs.writeFile(jobFile, '{ this is not json')
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+    expect(stderrText()).toContain(`job spec "${jobFile}" is not valid JSON`)
+    expect(runJob).not.toHaveBeenCalled()
+  })
+})
+
 describe('unknown job-spec fields', () => {
   it('warns on stderr for an unknown top-level key and an unknown options key, then still runs', async () => {
     const jobFile = await writeJobSpec(
@@ -189,6 +407,66 @@ describe('unknown job-spec fields', () => {
   })
 })
 
+describe('the exit code a render returns', () => {
+  it('exits 1 when the job failed, and still prints the outcome line', async () => {
+    const failed: RenderOutcome = {
+      ok: false,
+      jobId: 'job-1',
+      error: 'Chromium page crashed',
+      durationMs: 30,
+    }
+    vi.mocked(runJob).mockResolvedValue(failed)
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(1)
+
+    // A failed job still reports itself on stdout — a broker reads the reason from there.
+    expect(stdout).toEqual([JSON.stringify(failed) + '\n'])
+  })
+
+  it('exits 2 for a spec the parser refuses, without dumping usage over the reason', async () => {
+    const jobFile = await writeJobSpec(validSpec({ options: { format: 'gif' } }))
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+    expect(stderrText()).toContain('error: options.format must be one of "mp4" or "webm"')
+    // Usage is for "you are holding it wrong", not for a spec that was read and understood.
+    expect(stderrText()).not.toContain('Usage: headless-artist render')
+    expect(runJob).not.toHaveBeenCalled()
+  })
+})
+
+describe('the run deps a render is given', () => {
+  it('passes the Chromium path and work dir from the environment', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(
+      await main(['render', '--job', jobFile], {
+        HEADLESS_CHROMIUM_PATH: '/usr/bin/chromium',
+        HEADLESS_WORK_DIR: '/scratch',
+        HEADLESS_GPU: 'true',
+      }),
+    ).toBe(0)
+
+    expect(vi.mocked(runJob).mock.calls[0][1]).toMatchObject({
+      chromiumPath: '/usr/bin/chromium',
+      workDir: '/scratch',
+      gpu: true,
+    })
+  })
+
+  it('leaves the Chromium path and work dir unset when the environment has none', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(0)
+
+    const deps = vi.mocked(runJob).mock.calls[0][1]
+    expect(deps.chromiumPath).toBeUndefined()
+    expect(deps.workDir).toBeUndefined()
+    expect(deps.gpu).toBe(false)
+  })
+})
+
 describe('the text logger', () => {
   /** A key carrying a newline, an ANSI escape and a NUL — the three shapes of log forgery. */
   const NASTY_KEY = 'ev\nil\u001b[31m\u0000'
@@ -200,6 +478,19 @@ describe('the text logger', () => {
 
     const line = stderr.find((written) => written.includes('unknown field'))
     expect(line).toBe('warning: unknown field "ev il [31m "\n')
+  })
+
+  it('lifts a failure to level "error" in json mode, and drops the prefix from the message', async () => {
+    vi.mocked(startServer).mockRejectedValue(new Error('listen EADDRINUSE'))
+
+    expect(await main(['serve'], { HEADLESS_LOG: 'json' })).toBe(1)
+
+    const entry = JSON.parse(stderr[stderr.length - 1] as string)
+    expect(entry).toMatchObject({
+      level: 'error',
+      msg: 'cannot listen on 127.0.0.1:8787: listen EADDRINUSE',
+    })
+    expect(entry.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 
   it('leaves the json logger alone — JSON.stringify already escapes them', async () => {
@@ -461,6 +752,12 @@ describe('serve', () => {
     expect(stderrText()).toContain('unexpected extra argument "job.json"')
   })
 
+  it('exits 2 when --port is the last argument, with nothing after it', async () => {
+    expect(await main(['serve', '--port'], {})).toBe(2)
+    expect(stderrText()).toContain('--port needs a value')
+    expect(startServer).not.toHaveBeenCalled()
+  })
+
   it('exits 2 when --port is given twice', async () => {
     expect(await main(['serve', '--port', '1', '--port', '2'], {})).toBe(2)
     expect(stderrText()).toContain('--port was given more than once')
@@ -484,7 +781,15 @@ describe('isDirectRun', () => {
   })
 
   it('returns false when node was given no entry file', () => {
-    expect(isDirectRun(undefined)).toBe(false)
+    // The parameter defaults to process.argv[1], so passing `undefined` would silently test
+    // the *default* instead — the "no entry" case only exists when argv really has none.
+    const argv = process.argv
+    process.argv = [argv[0]]
+    try {
+      expect(isDirectRun()).toBe(false)
+    } finally {
+      process.argv = argv
+    }
   })
 
   it('falls back to a lexical compare when realpathSync throws', () => {

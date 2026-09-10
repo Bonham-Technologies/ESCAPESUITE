@@ -47,6 +47,29 @@ describe('throttle utilities', () => {
       expect(fn).toHaveBeenLastCalledWith('call3');
     });
 
+    it('drops a pending trailing call when the clock outruns its timer', () => {
+      // A busy main thread can leave the trailing timer un-fired past its
+      // deadline. The next call must then run immediately AND cancel the stale
+      // trailing timer, so the function is not invoked twice for one burst.
+      const fn = vi.fn();
+      const throttled = throttle(fn, 100);
+
+      throttled('call1');
+      throttled('call2'); // schedules the trailing call
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      // Move the wall clock past the interval without letting timers run.
+      vi.setSystemTime(Date.now() + 150);
+      throttled('call3');
+
+      expect(fn).toHaveBeenCalledTimes(2);
+      expect(fn).toHaveBeenLastCalledWith('call3');
+
+      // The cancelled trailing timer never fires.
+      vi.advanceTimersByTime(1000);
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
     it('allows calls after interval has passed', () => {
       const fn = vi.fn();
       const throttled = throttle(fn, 100);

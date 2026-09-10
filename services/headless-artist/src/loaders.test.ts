@@ -109,6 +109,23 @@ describe('loadManifest', () => {
     await expect(loadManifest(path.join(dir, 'manifest.json'))).rejects.toThrow(/clip\.xyz/)
   })
 
+  it('throws on a source file with no extension and no mimeType supplied', async () => {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'project.json'), path.join(dir, 'project.json'))
+    await fs.writeFile(path.join(dir, 'clip'), 'not a real media file')
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        project: { $ref: './project.json' },
+        sources: [{ id: 'src-0', file: 'clip' }],
+      }),
+    )
+
+    await expect(loadManifest(path.join(dir, 'manifest.json'))).rejects.toThrow(
+      'could not infer a MIME type for "clip"; add "mimeType" to its entry in the manifest',
+    )
+  })
+
   it('throws on duplicate basenames among sources', async () => {
     const dir = await makeTempDir()
     await fs.mkdir(path.join(dir, 'a'))
@@ -413,5 +430,215 @@ describe('loadBundle video validation', () => {
     const bundlePath = await writeBundle(dir, [video, { ...video }])
 
     await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`duplicate source id "${video.id}"`)
+  })
+})
+
+describe('loadBundle malformed files', () => {
+  /** Writes `content` verbatim, so the parse/shape checks can be driven with any bytes. */
+  async function writeRaw(dir: string, content: string): Promise<string> {
+    const bundlePath = path.join(dir, 'bundle.veditor')
+    await fs.writeFile(bundlePath, content)
+    return bundlePath
+  }
+
+  it('names the file it could not read', async () => {
+    const dir = await makeTempDir()
+    const missing = path.join(dir, 'gone.veditor')
+
+    await expect(loadBundle(missing, dir)).rejects.toThrow(`bundle "${missing}" could not be read`)
+  })
+
+  it('names the file that is not valid JSON', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeRaw(dir, '{ "version": 1,')
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`bundle "${bundlePath}" is not valid JSON`)
+  })
+
+  it('rejects valid JSON that is not an object', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeRaw(dir, '[1, 2, 3]')
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`bundle "${bundlePath}" must be a JSON object`)
+  })
+
+  it('asks for an explicit "version": 1 rather than guessing at a bundle with none', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeRaw(dir, JSON.stringify({ project: {}, videos: [] }))
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`bundle "${bundlePath}" must declare "version": 1`)
+  })
+
+  it('rejects a bundle with no project', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeRaw(dir, JSON.stringify({ version: 1, videos: [] }))
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`bundle "${bundlePath}" is missing "project"`)
+  })
+
+  it('rejects a bundle whose videos are not an array', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeRaw(
+      dir,
+      JSON.stringify({ version: 1, project: { timeline: { clips: [] } }, videos: {} }),
+    )
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`bundle "${bundlePath}" is missing "videos"`)
+  })
+})
+
+describe('loadBundle temp-file naming', () => {
+  async function writeBundleWithVideo(dir: string, video: Record<string, unknown>): Promise<string> {
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    veditor.videos = [{ ...veditor.videos[0], ...video }]
+    const bundlePath = path.join(dir, 'bundle.veditor')
+    await fs.writeFile(bundlePath, JSON.stringify(veditor))
+    return bundlePath
+  }
+
+  it('falls back to .bin when neither the MIME type nor the name names an extension', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeBundleWithVideo(dir, { mimeType: 'video/x-unheard-of', name: '' })
+
+    const job = await loadBundle(bundlePath, dir)
+    try {
+      expect(path.extname(job.sourceFiles['src-0'])).toBe('.bin')
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  it('falls back to .bin for a name with no extension at all', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeBundleWithVideo(dir, { mimeType: 'video/x-unheard-of', name: 'take-three' })
+
+    const job = await loadBundle(bundlePath, dir)
+    try {
+      expect(path.extname(job.sourceFiles['src-0'])).toBe('.bin')
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  it('takes the extension from the name when the MIME type is unrecognised', async () => {
+    const dir = await makeTempDir()
+    const bundlePath = await writeBundleWithVideo(dir, { mimeType: 'video/x-unheard-of', name: 'take-3.MP4' })
+
+    const job = await loadBundle(bundlePath, dir)
+    try {
+      expect(path.basename(job.sourceFiles['src-0'])).toBe('src-0.mp4')
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  it('removes its temp directory when a video cannot be written, rather than leaking it', async () => {
+    const dir = await makeTempDir()
+    // A file name component past NAME_MAX (255): the write fails after mkdtemp, which is the
+    // only way into the loop's rollback. Anything else (ENOSPC, EIO) arrives there identically.
+    const bundlePath = await writeBundleWithVideo(dir, {
+      mimeType: 'video/x-unheard-of',
+      name: `take.${'a'.repeat(300)}`,
+    })
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(/ENAMETOOLONG/)
+
+    const entries = await fs.readdir(dir)
+    expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
+  })
+})
+
+describe('loadManifest malformed files', () => {
+  async function writeRaw(dir: string, content: string): Promise<string> {
+    const manifestPath = path.join(dir, 'manifest.json')
+    await fs.writeFile(manifestPath, content)
+    return manifestPath
+  }
+
+  it('names the file it could not read', async () => {
+    const dir = await makeTempDir()
+    const missing = path.join(dir, 'gone.json')
+
+    await expect(loadManifest(missing)).rejects.toThrow(`manifest "${missing}" could not be read`)
+  })
+
+  it('names the file that is not valid JSON', async () => {
+    const dir = await makeTempDir()
+    const manifestPath = await writeRaw(dir, 'sources: []')
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(`manifest "${manifestPath}" is not valid JSON`)
+  })
+
+  it('rejects valid JSON that is not an object', async () => {
+    const dir = await makeTempDir()
+    const manifestPath = await writeRaw(dir, '"just a string"')
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(`manifest "${manifestPath}" must be a JSON object`)
+  })
+
+  it('rejects a manifest with no project', async () => {
+    const dir = await makeTempDir()
+    const manifestPath = await writeRaw(dir, JSON.stringify({ sources: [] }))
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(`manifest "${manifestPath}" is missing "project"`)
+  })
+
+  it('rejects a manifest whose sources are not an array', async () => {
+    const dir = await makeTempDir()
+    const manifestPath = await writeRaw(
+      dir,
+      JSON.stringify({ project: { timeline: { clips: [] } }, sources: { 'src-0': 'clip.mp4' } }),
+    )
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(`manifest "${manifestPath}" is missing "sources"`)
+  })
+
+  it('rejects a source entry with no id or file', async () => {
+    const dir = await makeTempDir()
+    const manifestPath = await writeRaw(
+      dir,
+      JSON.stringify({ project: { timeline: { clips: [] } }, sources: [{ id: 'src-0' }] }),
+    )
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      `manifest "${manifestPath}" has a source entry missing "id" or "file"`,
+    )
+  })
+})
+
+describe('loadManifest project $ref', () => {
+  async function writeManifest(dir: string, project: unknown): Promise<string> {
+    const manifestPath = path.join(dir, 'manifest.json')
+    await fs.writeFile(manifestPath, JSON.stringify({ project, sources: [] }))
+    return manifestPath
+  }
+
+  it('names the missing project file, resolved against the manifest directory', async () => {
+    const dir = await makeTempDir()
+    const manifestPath = await writeManifest(dir, { $ref: './project.json' })
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      `references missing project file "${path.join(dir, 'project.json')}"`,
+    )
+  })
+
+  it('names the project file that is not valid JSON', async () => {
+    const dir = await makeTempDir()
+    await fs.writeFile(path.join(dir, 'project.json'), 'not json')
+    const manifestPath = await writeManifest(dir, { $ref: './project.json' })
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      `project file "${path.join(dir, 'project.json')}" is not valid JSON`,
+    )
+  })
+
+  it('rejects a project file whose contents are not an object', async () => {
+    const dir = await makeTempDir()
+    await fs.writeFile(path.join(dir, 'project.json'), '[]')
+    const manifestPath = await writeManifest(dir, { $ref: './project.json' })
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      `project file "${path.join(dir, 'project.json')}" does not contain a project object`,
+    )
   })
 })

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { Recorder, RecorderCallbacks } from './recorder'
+import { Recorder } from './recorder'
+import type { RecorderCallbacks } from './recorder'
 import type { RecordingConfig } from '../store/types'
 
 // Mock webm-duration-fix
@@ -37,14 +38,36 @@ function createMockTrack(kind: 'video' | 'audio', id: string = 'mock-track'): Me
   } as unknown as MediaStreamTrack
 }
 
+// Recorder keeps its MediaRecorder instance private; tests that need to
+// drive its event handlers directly (ondataavailable/onerror) reach through
+// this narrow cast rather than mocking the module under test.
+function getMediaRecorder(recorder: Recorder): MediaRecorder {
+  const mediaRecorder = (recorder as unknown as { mediaRecorder: MediaRecorder | null }).mediaRecorder
+  if (!mediaRecorder) throw new Error('Recorder has no active MediaRecorder')
+  return mediaRecorder
+}
+
+// Same rationale as getMediaRecorder(): micAnalyser/systemAnalyser are only
+// ever set inside the microphone/system-audio branches of initialize(), so
+// asserting they are (or stay) null is a direct, private-field-backed proof
+// that a given audio source was actually wired up (or correctly skipped) —
+// independent of the shared AudioContext mock's destination track, which is
+// unconditionally non-empty and so can't distinguish "connected" from "not".
+function getRecorderInternals(recorder: Recorder): {
+  micAnalyser: AnalyserNode | null
+  systemAnalyser: AnalyserNode | null
+} {
+  return recorder as unknown as { micAnalyser: AnalyserNode | null; systemAnalyser: AnalyserNode | null }
+}
+
 // Helper to create mock MediaStream with specific tracks
 function createMockStream(tracks: MediaStreamTrack[]): MediaStream {
   const stream = new MediaStream(tracks)
   vi.mocked(stream.getVideoTracks).mockReturnValue(
-    tracks.filter((t) => t.kind === 'video')
+    tracks.filter((t): t is MediaStreamVideoTrack => t.kind === 'video')
   )
   vi.mocked(stream.getAudioTracks).mockReturnValue(
-    tracks.filter((t) => t.kind === 'audio')
+    tracks.filter((t): t is MediaStreamAudioTrack => t.kind === 'audio')
   )
   vi.mocked(stream.getTracks).mockReturnValue(tracks)
   return stream
@@ -57,14 +80,16 @@ const defaultConfig: RecordingConfig = {
   microphoneEnabled: true,
   systemAudioEnabled: false,
   webcamPosition: 'bottom-right',
-  webcamSize: 'medium',
+  webcamSize: 0.2,
   webcamShape: 'circle',
-  countdown: 3,
+  countdownSeconds: 3,
 }
 
 describe('Recorder', () => {
   let recorder: Recorder
-  let callbacks: RecorderCallbacks
+  // Required<>: every callback is supplied below, so the tests can read them
+  // back (vi.mocked(callbacks.onStop)) without narrowing an optional away.
+  let callbacks: Required<RecorderCallbacks>
   let mockScreenStream: MediaStream
   let mockMicStream: MediaStream
   let mockWebcamStream: MediaStream
@@ -98,6 +123,13 @@ describe('Recorder', () => {
   afterEach(() => {
     vi.useRealTimers()
     recorder.dispose()
+    // Restores any vi.spyOn() (e.g. console.warn) so a spy from one test
+    // never silences output for the rest of the file. Verified this doesn't
+    // clobber the vi.mock('./permissions', ...) factory implementations or
+    // the shared MediaStream/MediaRecorder mocks from setup.ts — restoring a
+    // vi.fn() created with an initial implementation puts back that initial
+    // implementation, not a bare no-op.
+    vi.restoreAllMocks()
   })
 
   describe('constructor', () => {
@@ -108,6 +140,19 @@ describe('Recorder', () => {
     it('should create a Recorder instance without callbacks', () => {
       const recorderWithoutCallbacks = new Recorder()
       expect(recorderWithoutCallbacks).toBeInstanceOf(Recorder)
+      recorderWithoutCallbacks.dispose()
+    })
+
+    it('should run a full lifecycle without throwing when no callbacks are provided', async () => {
+      const recorderWithoutCallbacks = new Recorder()
+      await recorderWithoutCallbacks.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+
+      expect(() => recorderWithoutCallbacks.start()).not.toThrow()
+      vi.advanceTimersByTime(100) // triggers the audio-level monitoring tick
+      expect(() => recorderWithoutCallbacks.pause()).not.toThrow()
+      expect(() => recorderWithoutCallbacks.resume()).not.toThrow()
+      expect(() => recorderWithoutCallbacks.stop()).not.toThrow()
+
       recorderWithoutCallbacks.dispose()
     })
   })
@@ -205,15 +250,66 @@ describe('Recorder', () => {
     })
 
     it('should resume suspended AudioContext', async () => {
-      await recorder.initialize(
-        mockScreenStream,
-        null,
-        mockMicStream,
-        defaultConfig
-      )
+      // The shared AudioContext mock always reports state 'running', so this
+      // exercises that path indirectly. Use a dedicated suspended mock to
+      // actually verify resume() gets awaited.
+      const resumeMock = vi.fn().mockResolvedValue(undefined)
+      class SuspendedAudioContext {
+        state = 'suspended'
+        resume = resumeMock
+        createMediaStreamDestination = vi.fn(() => ({
+          stream: { getAudioTracks: vi.fn(() => []) },
+        }))
+        createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }))
+        createAnalyser = vi.fn(() => ({
+          connect: vi.fn(),
+          fftSize: 256,
+          frequencyBinCount: 128,
+          getByteFrequencyData: vi.fn(),
+        }))
+        close = vi.fn()
+      }
+      const OriginalAudioContext = globalThis.AudioContext
+      vi.stubGlobal('AudioContext', SuspendedAudioContext)
 
-      // Verify initialization completed without error (AudioContext handled)
-      expect(recorder.isRecording()).toBe(false)
+      const testRecorder = new Recorder(callbacks)
+      try {
+        await testRecorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+        expect(resumeMock).toHaveBeenCalledTimes(1)
+      } finally {
+        testRecorder.dispose()
+        vi.stubGlobal('AudioContext', OriginalAudioContext)
+      }
+    })
+
+    it('should not call resume() when the AudioContext is already running', async () => {
+      const resumeMock = vi.fn().mockResolvedValue(undefined)
+      class RunningAudioContext {
+        state = 'running'
+        resume = resumeMock
+        createMediaStreamDestination = vi.fn(() => ({
+          stream: { getAudioTracks: vi.fn(() => []) },
+        }))
+        createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }))
+        createAnalyser = vi.fn(() => ({
+          connect: vi.fn(),
+          fftSize: 256,
+          frequencyBinCount: 128,
+          getByteFrequencyData: vi.fn(),
+        }))
+        close = vi.fn()
+      }
+      const OriginalAudioContext = globalThis.AudioContext
+      vi.stubGlobal('AudioContext', RunningAudioContext)
+
+      const testRecorder = new Recorder(callbacks)
+      try {
+        await testRecorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+        expect(resumeMock).not.toHaveBeenCalled()
+      } finally {
+        testRecorder.dispose()
+        vi.stubGlobal('AudioContext', OriginalAudioContext)
+      }
     })
 
     it('should create MediaRecorder with correct options', async () => {
@@ -665,17 +761,127 @@ describe('Recorder', () => {
   })
 
   describe('error handling', () => {
-    it('should call onError when MediaRecorder errors', async () => {
+    it('should call onError and clean up when MediaRecorder reports an error', async () => {
       await recorder.initialize(
         mockScreenStream,
         null,
         mockMicStream,
         defaultConfig
       )
+      recorder.start()
 
-      // Access the MediaRecorder instance and trigger error
-      // Since we can't easily access private members, we test via the mock
-      expect(callbacks.onError).not.toHaveBeenCalled()
+      const mediaRecorder = getMediaRecorder(recorder)
+      const fakeErrorEvent = new ErrorEvent('error')
+      mediaRecorder.onerror?.(fakeErrorEvent)
+
+      expect(callbacks.onError).toHaveBeenCalledTimes(1)
+      expect(callbacks.onError).toHaveBeenCalledWith(expect.any(Error))
+      expect(vi.mocked(callbacks.onError).mock.calls[0][0].message).toContain('Recording error')
+      // cleanup() ran: the recorder tears down its MediaRecorder reference
+      expect(recorder.isRecording()).toBe(false)
+    })
+  })
+
+  describe('data collection', () => {
+    it('collects non-empty data chunks into the final blob and ignores empty ones', async () => {
+      await recorder.initialize(
+        mockScreenStream,
+        null,
+        mockMicStream,
+        defaultConfig
+      )
+      recorder.start()
+
+      const mediaRecorder = getMediaRecorder(recorder)
+      mediaRecorder.ondataavailable?.({ data: new Blob(['chunk-a']) } as BlobEvent) // 7 bytes
+      mediaRecorder.ondataavailable?.({ data: new Blob([]) } as BlobEvent) // 0 bytes — must be ignored
+      mediaRecorder.ondataavailable?.({ data: new Blob(['bc']) } as BlobEvent) // 2 bytes
+
+      recorder.stop()
+
+      await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalled())
+      const [resultBlob] = vi.mocked(callbacks.onStop).mock.calls[0]
+      // Exact size proves the empty chunk was actually skipped, not just
+      // that the total happens to be non-zero.
+      expect(resultBlob.size).toBe(9)
+    })
+  })
+
+  describe('track ended handling', () => {
+    it('stops recording when the video track ends while recording', async () => {
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+      await recorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+      recorder.start()
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const handler = vi.mocked(videoTrack.addEventListener).mock.calls.find(
+        ([event]) => event === 'ended'
+      )?.[1] as (() => void) | undefined
+      expect(handler).toBeDefined()
+
+      handler!()
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Track ended'))
+      expect(warnSpy).toHaveBeenCalledWith('Video track ended during recording, stopping...')
+      await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalled())
+    })
+
+    it('does not stop when the video track ends while not recording', async () => {
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+      await recorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+      // Not started — mediaRecorder.state is 'inactive'
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const handler = vi.mocked(videoTrack.addEventListener).mock.calls.find(
+        ([event]) => event === 'ended'
+      )?.[1] as (() => void) | undefined
+      expect(handler).toBeDefined()
+
+      handler!()
+
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(callbacks.onStop).not.toHaveBeenCalled()
+    })
+
+    it('does not stop recording when a non-video track ends', async () => {
+      const audioTrack = createMockTrack('audio', 'mixed-audio')
+      class AudioContextWithTrackableDestination {
+        state = 'running'
+        resume = vi.fn().mockResolvedValue(undefined)
+        createMediaStreamDestination = vi.fn(() => ({
+          stream: { getAudioTracks: vi.fn(() => [audioTrack]) },
+        }))
+        createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }))
+        createAnalyser = vi.fn(() => ({
+          connect: vi.fn(),
+          fftSize: 256,
+          frequencyBinCount: 128,
+          getByteFrequencyData: vi.fn(),
+        }))
+        close = vi.fn()
+      }
+      const OriginalAudioContext = globalThis.AudioContext
+      vi.stubGlobal('AudioContext', AudioContextWithTrackableDestination)
+
+      const testRecorder = new Recorder(callbacks)
+      try {
+        await testRecorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+        testRecorder.start()
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const handler = vi.mocked(audioTrack.addEventListener).mock.calls.find(
+          ([event]) => event === 'ended'
+        )?.[1] as (() => void) | undefined
+        expect(handler).toBeDefined()
+
+        handler!()
+
+        expect(warnSpy).toHaveBeenCalledTimes(1)
+        expect(callbacks.onStop).not.toHaveBeenCalled()
+      } finally {
+        testRecorder.dispose()
+        vi.stubGlobal('AudioContext', OriginalAudioContext)
+      }
     })
   })
 
@@ -694,6 +900,25 @@ describe('Recorder', () => {
       recorder.dispose()
 
       expect(stopStream).toHaveBeenCalled()
+    })
+
+    it('should stop the combined stream, not the field it has already cleared', async () => {
+      const { stopStream } = await import('./permissions')
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+
+      await recorder.initialize(
+        mockScreenStream,
+        null,
+        mockMicStream,
+        defaultConfig
+      )
+      recorder.start()
+
+      recorder.dispose()
+
+      const stopped = vi.mocked(stopStream).mock.calls.at(-1)?.[0]
+      expect(stopped).not.toBeNull()
+      expect(stopped!.getTracks()).toContain(videoTrack)
     })
 
     it('should close AudioContext', async () => {
@@ -855,6 +1080,65 @@ describe('Recorder', () => {
       recorder.start()
 
       expect(recorder.isRecording()).toBe(true)
+    })
+
+    it('should handle microphone-only recording (no video source)', async () => {
+      const config: RecordingConfig = {
+        ...defaultConfig,
+        screenEnabled: false,
+        webcamEnabled: false,
+        microphoneEnabled: true,
+      }
+
+      await recorder.initialize(null, null, mockMicStream, config)
+      recorder.start()
+
+      expect(recorder.isRecording()).toBe(true)
+      // No video source was enabled, so the stream handed to MediaRecorder
+      // must carry no video track at all.
+      expect(getMediaRecorder(recorder).stream.getVideoTracks()).toHaveLength(0)
+      expect(getRecorderInternals(recorder).micAnalyser).not.toBeNull()
+    })
+
+    it('should skip the webcam video track when webcamEnabled but the stream has none', async () => {
+      const webcamAudioOnly = createMockStream([createMockTrack('audio', 'webcam-audio')])
+      const config: RecordingConfig = {
+        ...defaultConfig,
+        screenEnabled: false,
+        webcamEnabled: true,
+        microphoneEnabled: true,
+      }
+
+      await recorder.initialize(null, webcamAudioOnly, mockMicStream, config)
+      recorder.start()
+
+      expect(recorder.isRecording()).toBe(true)
+      // webcamEnabled is true, but the webcam stream has no video track, so
+      // none should have been added to the stream handed to MediaRecorder.
+      expect(getMediaRecorder(recorder).stream.getVideoTracks()).toHaveLength(0)
+      expect(getRecorderInternals(recorder).micAnalyser).not.toBeNull()
+    })
+
+    it('should skip system audio when systemAudioEnabled but the screen stream has no audio track', async () => {
+      const screenVideoOnly = createMockStream([createMockTrack('video', 'screen-video')])
+      const config: RecordingConfig = {
+        ...defaultConfig,
+        microphoneEnabled: false,
+        systemAudioEnabled: true,
+      }
+
+      await recorder.initialize(screenVideoOnly, null, null, config)
+      recorder.start()
+
+      expect(recorder.isRecording()).toBe(true)
+      // The screen video track is still present in the stream handed to
+      // MediaRecorder...
+      const videoTracks = getMediaRecorder(recorder).stream.getVideoTracks()
+      expect(videoTracks).toHaveLength(1)
+      expect(videoTracks[0].kind).toBe('video')
+      // ...but no system-audio analyser was ever created, proving the
+      // systemAudioTrack branch was skipped rather than silently succeeding.
+      expect(getRecorderInternals(recorder).systemAnalyser).toBeNull()
     })
   })
 })

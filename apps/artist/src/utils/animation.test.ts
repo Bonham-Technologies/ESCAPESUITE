@@ -1,130 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  interpolateKeyframes,
-  ensureKeyframesSorted,
   getAnimatedValues,
   getAnimatedValuesCached,
   clearAnimationCache,
   hasAnimation,
-  getAllKeyframesForProperty,
   createDefaultAnimation,
   getAnimatedVolume,
   hasVolumeKeyframes,
 } from './animation'
-import type { Keyframe, ClipAnimation, ClipTransform, ClipEffects } from '../store/types'
-
-// Test fixtures
-const baseTransform: ClipTransform = {
-  x: 0.5,
-  y: 0.5,
-  scaleX: 1,
-  scaleY: 1,
-  rotation: 0,
-  opacity: 1,
-}
-
-const baseEffects: ClipEffects = {
-  blur: 0,
-}
-
-describe('interpolateKeyframes', () => {
-  it('returns default value when keyframes array is empty', () => {
-    expect(interpolateKeyframes([], 0.5, 100)).toBe(100)
-  })
-
-  it('returns default value when keyframes is undefined', () => {
-    expect(interpolateKeyframes(undefined as unknown as Keyframe[], 0.5, 100)).toBe(100)
-  })
-
-  it('returns first keyframe value when time is before first keyframe', () => {
-    const keyframes: Keyframe[] = [
-      { time: 1, value: 50, easing: 'linear' },
-      { time: 2, value: 100, easing: 'linear' },
-    ]
-    expect(interpolateKeyframes(keyframes, 0, 0)).toBe(50)
-  })
-
-  it('returns last keyframe value when time is after last keyframe', () => {
-    const keyframes: Keyframe[] = [
-      { time: 0, value: 0, easing: 'linear' },
-      { time: 1, value: 100, easing: 'linear' },
-    ]
-    expect(interpolateKeyframes(keyframes, 2, 0)).toBe(100)
-  })
-
-  it('interpolates linearly between keyframes with linear easing', () => {
-    const keyframes: Keyframe[] = [
-      { time: 0, value: 0, easing: 'linear' },
-      { time: 1, value: 100, easing: 'linear' },
-    ]
-    expect(interpolateKeyframes(keyframes, 0.5, 0)).toBe(50)
-    expect(interpolateKeyframes(keyframes, 0.25, 0)).toBe(25)
-    expect(interpolateKeyframes(keyframes, 0.75, 0)).toBe(75)
-  })
-
-  it('applies ease-in easing correctly', () => {
-    const keyframes: Keyframe[] = [
-      { time: 0, value: 0, easing: 'ease-in' },
-      { time: 1, value: 100, easing: 'linear' },
-    ]
-    // ease-in: t * t, so at t=0.5, eased value is 0.25
-    expect(interpolateKeyframes(keyframes, 0.5, 0)).toBe(25)
-  })
-
-  it('applies ease-out easing correctly', () => {
-    const keyframes: Keyframe[] = [
-      { time: 0, value: 0, easing: 'ease-out' },
-      { time: 1, value: 100, easing: 'linear' },
-    ]
-    // ease-out: t * (2 - t), so at t=0.5, eased value is 0.75
-    expect(interpolateKeyframes(keyframes, 0.5, 0)).toBe(75)
-  })
-
-  it('requires pre-sorted keyframes (use ensureKeyframesSorted for unsorted)', () => {
-    // interpolateKeyframes now expects pre-sorted keyframes for performance
-    // Use ensureKeyframesSorted to sort before interpolating
-    const unsortedKeyframes: Keyframe[] = [
-      { time: 2, value: 200, easing: 'linear' },
-      { time: 0, value: 0, easing: 'linear' },
-      { time: 1, value: 100, easing: 'linear' },
-    ]
-    const sortedKeyframes = ensureKeyframesSorted(unsortedKeyframes)
-    expect(interpolateKeyframes(sortedKeyframes, 0.5, 0)).toBe(50)
-    expect(interpolateKeyframes(sortedKeyframes, 1.5, 0)).toBe(150)
-  })
-
-  it('ensureKeyframesSorted sorts unsorted keyframes', () => {
-    const unsorted: Keyframe[] = [
-      { time: 2, value: 200, easing: 'linear' },
-      { time: 0, value: 0, easing: 'linear' },
-      { time: 1, value: 100, easing: 'linear' },
-    ]
-    const sorted = ensureKeyframesSorted(unsorted)
-    expect(sorted[0].time).toBe(0)
-    expect(sorted[1].time).toBe(1)
-    expect(sorted[2].time).toBe(2)
-  })
-
-  it('ensureKeyframesSorted returns same array if already sorted', () => {
-    const sorted: Keyframe[] = [
-      { time: 0, value: 0, easing: 'linear' },
-      { time: 1, value: 100, easing: 'linear' },
-      { time: 2, value: 200, easing: 'linear' },
-    ]
-    const result = ensureKeyframesSorted(sorted)
-    expect(result).toBe(sorted) // Same reference, not a copy
-  })
-
-  it('handles multiple keyframe segments', () => {
-    const keyframes: Keyframe[] = [
-      { time: 0, value: 0, easing: 'linear' },
-      { time: 1, value: 100, easing: 'linear' },
-      { time: 2, value: 50, easing: 'linear' },
-    ]
-    expect(interpolateKeyframes(keyframes, 0.5, 0)).toBe(50)
-    expect(interpolateKeyframes(keyframes, 1.5, 0)).toBe(75)
-  })
-})
+import type { ClipAnimation, ClipTransform } from '../store/types'
+import { baseEffects, baseTransform } from '../test/fixtures/animation'
 
 describe('getAnimatedValues', () => {
   it('returns base values when animation is undefined', () => {
@@ -288,49 +173,6 @@ describe('hasAnimation', () => {
       keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
     }
     expect(hasAnimation(animation)).toBe(false)
-  })
-})
-
-describe('getAllKeyframesForProperty', () => {
-  it('returns empty array when no animation', () => {
-    const result = getAllKeyframesForProperty('opacity', 2, undefined, baseTransform, baseEffects)
-    expect(result).toEqual([])
-  })
-
-  it('returns preset keyframes for opacity with fade-in', () => {
-    const animation: ClipAnimation = {
-      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
-      out: { type: 'none', duration: 0, easing: 'linear' },
-      keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
-    }
-
-    const result = getAllKeyframesForProperty('opacity', 2, animation, baseTransform, baseEffects)
-    expect(result).toHaveLength(2)
-    expect(result[0].time).toBe(0)
-    expect(result[0].value).toBe(0)
-    expect(result[1].time).toBe(0.5)
-    expect(result[1].value).toBe(1)
-  })
-
-  it('merges custom keyframes with preset keyframes', () => {
-    const animation: ClipAnimation = {
-      in: { type: 'fade', duration: 0.5, easing: 'linear' },
-      out: { type: 'none', duration: 0, easing: 'linear' },
-      keyframes: {
-        x: [],
-        y: [],
-        scaleX: [],
-        scaleY: [],
-        rotation: [],
-        opacity: [{ time: 1, value: 0.5, easing: 'linear' }],
-        blur: [],
-      },
-    }
-
-    const result = getAllKeyframesForProperty('opacity', 2, animation, baseTransform, baseEffects)
-    expect(result).toHaveLength(3)
-    expect(result[2].time).toBe(1)
-    expect(result[2].value).toBe(0.5)
   })
 })
 
@@ -776,5 +618,47 @@ describe('volume keyframes', () => {
       }
       expect(hasAnimation(animation)).toBe(true)
     })
+  })
+})
+
+describe('animation cache eviction', () => {
+  beforeEach(() => {
+    clearAnimationCache()
+  })
+
+  it('drops the whole cache once it is full, then repopulates', () => {
+    const compute = (key: string) =>
+      getAnimatedValuesCached(key, 0, 10, undefined, baseTransform, baseEffects)
+
+    for (let i = 0; i < 10000; i++) compute(`clip:${i}`)
+
+    // The 10 000th entry filled the cache; the next insert clears it first, so
+    // the earliest key is no longer served from cache — it is recomputed.
+    const before = compute('clip:0')
+    const after = compute('clip:10000')
+    const recomputed = compute('clip:0')
+
+    expect(after).toEqual(before)
+    // A cache hit returns the very same object; a recompute returns a new one.
+    expect(recomputed).not.toBe(before)
+    expect(recomputed).toEqual(before)
+  })
+})
+
+describe('getAnimatedVolume edge cases', () => {
+  it('falls back to the base volume when interpolation overflows to infinity', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0, easing: 'linear' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: {
+        x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [],
+        volume: [
+          { time: 0, value: -Number.MAX_VALUE, easing: 'linear' },
+          { time: 2, value: Number.MAX_VALUE, easing: 'linear' },
+        ],
+      },
+    }
+
+    expect(getAnimatedVolume(1, animation, 0.75)).toBe(0.75)
   })
 })

@@ -1,117 +1,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react'
-import App from './App'
+import { screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react'
+import { renderApp } from './test/renderApp'
 import { useEditorStore } from './store/projectStore'
 import { getSessionState, clearSessionState, saveSessionState } from './core/storage'
 import { parseUrlParams, initIntegration, sendMessage } from './utils/integration'
+import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
+import { installMediaPlaybackStubs } from './test/doubles/media'
 import type { SessionState } from './core/storage'
 
-// Mock all the complex dependencies
-vi.mock('./core/storage', () => ({
-  getVideoBlob: vi.fn(() => Promise.resolve(new Blob(['test'], { type: 'video/mp4' }))),
-  getStorageEstimate: vi.fn(() => Promise.resolve({ used: 0, quota: 100000000, available: 100000000 })),
-  clearAllVideos: vi.fn(() => Promise.resolve()),
-  deleteVideo: vi.fn(() => Promise.resolve()),
-  saveSessionState: vi.fn(() => Promise.resolve()),
-  getSessionState: vi.fn(() => Promise.resolve(null)),
-  clearSessionState: vi.fn(() => Promise.resolve()),
-  getVideo: vi.fn(() => Promise.resolve(null)),
-  getThumbnail: vi.fn(() => Promise.resolve(null)),
-  getSetting: vi.fn(() => Promise.resolve(null)),
-  setSetting: vi.fn(() => Promise.resolve()),
-}))
+// App's collaborators are replaced with the recording doubles shared by every
+// App test file; see src/test/appDoubles.ts.
+vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
+vi.mock('./core/projectManager', async () =>
+  (await import('./test/appDoubles')).projectManagerDouble()
+)
+vi.mock('./utils/integration', async () => (await import('./test/appDoubles')).integrationDouble())
+vi.mock('./core/videoProcessor', async () =>
+  (await import('./test/appDoubles')).videoProcessorDouble()
+)
 
-vi.mock('./core/projectManager', () => ({
-  saveProject: vi.fn(() => Promise.resolve()),
-  loadProject: vi.fn(() => Promise.resolve({ project: {}, sourceVideos: [] })),
-  showOpenProjectDialog: vi.fn(() => Promise.resolve(null)),
-}))
+// jsdom's <video> pause()/play()/load() only report "Not implemented" to the
+// virtual console, and the preview player pauses on every clip change. Patch
+// them for the whole file — including the unmount that testing-library's
+// cleanup triggers, which is outside any afterEach this file could own.
+installMediaPlaybackStubs()
 
-vi.mock('./utils/integration', () => ({
-  initIntegration: vi.fn(() => () => {}),
-  parseUrlParams: vi.fn(() => ({ videos: [], projectData: null, autoPlay: false, loadVideoId: null, suppressRestore: false, title: null, hostOrigin: null })),
-  loadVideoFromUrl: vi.fn(() => Promise.resolve({ blob: new Blob(), name: 'test.mp4' })),
-  sendMessage: vi.fn(),
-}))
-
-vi.mock('./core/videoProcessor', () => ({
-  processVideoFile: vi.fn(() => Promise.resolve({
-    id: 'video1',
-    name: 'test.mp4',
-    duration: 10,
-    width: 1920,
-    height: 1080,
-    frameRate: 30,
-    mimeType: 'video/mp4',
-    size: 1000000,
-  })),
-  processImageFile: vi.fn(() => Promise.resolve({
-    id: 'image1',
-    name: 'test.png',
-    duration: 5,
-    width: 800,
-    height: 600,
-    frameRate: 1,
-    mimeType: 'image/png',
-    size: 500000,
-    mediaType: 'image',
-  })),
-  processAudioFile: vi.fn(() => Promise.resolve({
-    id: 'audio1',
-    name: 'test.mp3',
-    duration: 120,
-    width: 0,
-    height: 0,
-    frameRate: 0,
-    mimeType: 'audio/mp3',
-    size: 3000000,
-    mediaType: 'audio',
-  })),
-}))
-
-// Mock canvas context
-const mockCanvasContext = {
-  fillStyle: '',
-  fillRect: vi.fn(),
-  drawImage: vi.fn(),
-  save: vi.fn(),
-  restore: vi.fn(),
-  beginPath: vi.fn(),
-  rect: vi.fn(),
-  clip: vi.fn(),
-  globalAlpha: 1,
-  globalCompositeOperation: 'source-over',
-  filter: 'none',
-  setTransform: vi.fn(),
-  ellipse: vi.fn(),
-  fill: vi.fn(),
-  stroke: vi.fn(),
-  moveTo: vi.fn(),
-  lineTo: vi.fn(),
-  closePath: vi.fn(),
-  translate: vi.fn(),
-  rotate: vi.fn(),
-  measureText: vi.fn(() => ({ width: 100 })),
-  textAlign: 'left',
-  textBaseline: 'middle',
-  font: '',
-  strokeStyle: '',
-  lineWidth: 1,
-  fillText: vi.fn(),
-}
-
-HTMLCanvasElement.prototype.getContext = vi.fn(() => mockCanvasContext) as unknown as typeof HTMLCanvasElement.prototype.getContext
-
-// Mock ResizeObserver
-class ResizeObserverMock {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-;(globalThis as any).ResizeObserver = ResizeObserverMock
-
-// Mock window.confirm
+// Nothing in this file drives a dialog that asks for confirmation, but App
+// renders components that may; keep confirm answering yes.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).confirm = vi.fn(() => true)
 
@@ -119,47 +34,49 @@ describe('App', () => {
   beforeEach(() => {
     useEditorStore.getState().resetProject()
     useEditorStore.setState({ history: { past: [], future: [] } })
+    installCanvasDouble()
     vi.clearAllMocks()
     cleanup()
   })
 
   afterEach(() => {
+    uninstallCanvasDouble()
     cleanup()
   })
 
   describe('rendering', () => {
-    it('renders the app header', () => {
-      render(<App />)
+    it('renders the app header', async () => {
+      await renderApp()
 
       expect(screen.getByText('ESCAPEARTIST')).toBeInTheDocument()
     })
 
-    it('renders the file menu button', () => {
-      render(<App />)
+    it('renders the file menu button', async () => {
+      await renderApp()
 
       expect(screen.getByText('File')).toBeInTheDocument()
     })
 
-    it('renders upload area', () => {
-      render(<App />)
+    it('renders upload area', async () => {
+      await renderApp()
 
       expect(screen.getByText('Drop media or click to browse')).toBeInTheDocument()
     })
 
-    it('renders timeline', () => {
-      render(<App />)
+    it('renders timeline', async () => {
+      await renderApp()
 
       expect(screen.getByText('Track 1')).toBeInTheDocument()
     })
 
-    it('renders playback controls', () => {
-      render(<App />)
+    it('renders playback controls', async () => {
+      await renderApp()
 
       expect(screen.getByTitle('Go to start (Home)')).toBeInTheDocument()
     })
 
-    it('renders export button', () => {
-      render(<App />)
+    it('renders export button', async () => {
+      await renderApp()
 
       expect(screen.getByText('Export')).toBeInTheDocument()
     })
@@ -167,7 +84,7 @@ describe('App', () => {
 
   describe('header buttons', () => {
     it('shows undo and redo buttons', async () => {
-      render(<App />)
+      await renderApp()
 
       // Use queryAll since there may be multiple matching elements
       await waitFor(() => {
@@ -179,20 +96,20 @@ describe('App', () => {
   })
 
   describe('zoom controls', () => {
-    it('shows zoom in button', () => {
-      render(<App />)
+    it('shows zoom in button', async () => {
+      await renderApp()
 
       expect(screen.getByTitle(/Zoom in/)).toBeInTheDocument()
     })
 
-    it('shows zoom out button', () => {
-      render(<App />)
+    it('shows zoom out button', async () => {
+      await renderApp()
 
       expect(screen.getByTitle(/Zoom out/)).toBeInTheDocument()
     })
 
-    it('zooms in when button clicked', () => {
-      render(<App />)
+    it('zooms in when button clicked', async () => {
+      await renderApp()
 
       const initialZoom = useEditorStore.getState().zoom
       const zoomInButton = screen.getByTitle(/Zoom in/)
@@ -201,11 +118,14 @@ describe('App', () => {
       expect(useEditorStore.getState().zoom).toBeGreaterThan(initialZoom)
     })
 
-    it('zooms out when button clicked', () => {
-      render(<App />)
+    it('zooms out when button clicked', async () => {
+      await renderApp()
 
-      // First zoom in to have room to zoom out
-      useEditorStore.getState().setZoom(2)
+      // First zoom in to have room to zoom out. Inside act(): a zustand change with the app
+      // mounted is a React update, and one made outside act() is one React reports.
+      act(() => {
+        useEditorStore.getState().setZoom(2)
+      })
 
       const zoomOutButton = screen.getByTitle(/Zoom out/)
       fireEvent.click(zoomOutButton)
@@ -215,8 +135,8 @@ describe('App', () => {
   })
 
   describe('file menu', () => {
-    it('renders file menu button', () => {
-      render(<App />)
+    it('renders file menu button', async () => {
+      await renderApp()
 
       const fileButton = screen.getByText('File')
       expect(fileButton).toBeInTheDocument()
@@ -224,8 +144,8 @@ describe('App', () => {
   })
 
   describe('export dialog', () => {
-    it('renders export button', () => {
-      render(<App />)
+    it('renders export button', async () => {
+      await renderApp()
 
       const exportButton = screen.getByText('Export')
       expect(exportButton).toBeInTheDocument()
@@ -249,21 +169,21 @@ describe('App', () => {
   })
 
   describe('inspector panel', () => {
-    it('renders inspector header', () => {
-      render(<App />)
+    it('renders inspector header', async () => {
+      await renderApp()
 
       expect(screen.getByText('Inspector')).toBeInTheDocument()
     })
 
-    it('renders collapse button in inspector', () => {
-      render(<App />)
+    it('renders collapse button in inspector', async () => {
+      await renderApp()
 
       const collapseButton = screen.getByTitle('Hide inspector')
       expect(collapseButton).toBeInTheDocument()
     })
 
-    it('toggles inspector collapsed state when button clicked', () => {
-      render(<App />)
+    it('toggles inspector collapsed state when button clicked', async () => {
+      await renderApp()
 
       // Find the collapse button by title
       const collapseButton = screen.getByTitle(/Hide inspector/i)
@@ -276,8 +196,8 @@ describe('App', () => {
       expect(screen.getByTitle(/Show inspector/i)).toBeInTheDocument()
     })
 
-    it('hides ClipEditor when inspector is collapsed', () => {
-      render(<App />)
+    it('hides ClipEditor when inspector is collapsed', async () => {
+      await renderApp()
 
       // Initially ClipEditor should be visible (shows empty state message)
       expect(screen.getByText(/Select a clip/i)).toBeInTheDocument()
@@ -290,8 +210,8 @@ describe('App', () => {
       expect(screen.queryByText(/Select a clip/i)).not.toBeInTheDocument()
     })
 
-    it('shows ClipEditor when inspector is expanded', () => {
-      render(<App />)
+    it('shows ClipEditor when inspector is expanded', async () => {
+      await renderApp()
 
       // Collapse first
       const collapseButton = screen.getByTitle(/Hide inspector/i)
@@ -307,15 +227,15 @@ describe('App', () => {
   })
 
   describe('mobile inspector toggle', () => {
-    it('renders mobile toggle button', () => {
-      render(<App />)
+    it('renders mobile toggle button', async () => {
+      await renderApp()
 
       const mobileToggle = screen.getByTitle('Toggle inspector')
       expect(mobileToggle).toBeInTheDocument()
     })
 
-    it('toggles inspector when mobile button clicked', () => {
-      render(<App />)
+    it('toggles inspector when mobile button clicked', async () => {
+      await renderApp()
 
       // Initially inspector should show content
       expect(screen.getByText(/Select a clip/i)).toBeInTheDocument()
@@ -370,7 +290,7 @@ describe('App', () => {
       urlParams()
       vi.mocked(getSessionState).mockResolvedValue(savedSession())
 
-      render(<App />)
+      await renderApp()
 
       expect(await screen.findByText('Resume Previous Session?')).toBeInTheDocument()
     })
@@ -379,7 +299,7 @@ describe('App', () => {
       urlParams({ suppressRestore: true })
       vi.mocked(getSessionState).mockResolvedValue(savedSession())
 
-      render(<App />)
+      await renderApp()
 
       // Let the session lookup that the control test relies on settle
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
@@ -391,7 +311,7 @@ describe('App', () => {
     it('applies the title param to a freshly created project', async () => {
       urlParams({ title: 'Client Demo' })
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() => {
         expect(useEditorStore.getState().project.name).toBe('Client Demo')
@@ -403,7 +323,7 @@ describe('App', () => {
       const project = useEditorStore.getState().project
       useEditorStore.getState().setProject({ ...project, name: 'Host Project' })
 
-      render(<App />)
+      await renderApp()
 
       await act(async () => { await Promise.resolve() })
 
@@ -413,7 +333,7 @@ describe('App', () => {
     it('leaves no undo step behind after applying the title', async () => {
       urlParams({ title: 'Client Demo' })
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() => {
         expect(useEditorStore.getState().project.name).toBe('Client Demo')
@@ -445,7 +365,7 @@ describe('App', () => {
 
     /** Render, settle the mount-time session read, then run the debounce out. */
     const renderAndSettleAutosave = async () => {
-      render(<App />)
+      await renderApp()
       await act(async () => { await Promise.resolve() })
       await act(async () => { vi.advanceTimersByTime(2500) })
     }
@@ -477,7 +397,7 @@ describe('App', () => {
     }
 
     it('replies with the current store state, not the state at mount', async () => {
-      render(<App />)
+      await renderApp()
       await act(async () => { await Promise.resolve() })
 
       const project = useEditorStore.getState().project

@@ -11,13 +11,21 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{js,ts,jsx,tsx}'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'json-summary', 'html'],
+      include: ['src/**/*.{ts,tsx}'],
       exclude: [
         'node_modules/',
-        'src/test/',
+        'src/test/**',
         '**/*.d.ts',
         '**/*.config.*',
       ],
+      // Coverage floors — these only go up. See CLAUDE.md's Testing section.
+      thresholds: {
+        lines: 100,
+        statements: 97,
+        branches: 88,
+        functions: 98,
+      },
     },
   },
 })

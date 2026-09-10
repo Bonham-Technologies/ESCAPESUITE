@@ -409,7 +409,7 @@ function App() {
       }
 
       // V = Selection tool
-      if (e.key === 'v' || e.key === 'V') {
+      if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setActiveTool('select');
         showNotification('Selection Tool', 'info');
@@ -424,8 +424,8 @@ function App() {
         return;
       }
 
-      // B = Ripple edit tool
-      if (e.key === 'b' || e.key === 'B') {
+      // B = Ripple edit tool (Ctrl+B is the split below, not this)
+      if ((e.key === 'b' || e.key === 'B') && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setActiveTool('ripple');
         showNotification('Ripple Edit Tool', 'info');

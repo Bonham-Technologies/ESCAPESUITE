@@ -1,129 +1,64 @@
+// The preview's empty states and its transport buttons.
+//
+// The drawing, selection, transform and playback behaviour each have a file of
+// their own; this one covers what the component shows when there is nothing to
+// draw, and PlaybackControls, which owns no canvas at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
-import { PreviewPlayer, PlaybackControls } from './PreviewPlayer'
-import { useEditorStore } from '../../store/projectStore'
-import type { SourceVideo } from '../../store/types'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { PlaybackControls, PreviewPlayer } from './PreviewPlayer'
+import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
+import { installPreviewDoubles, renderPreview, settle, type PreviewDoubles } from '../../test/renderPreview'
+import { resetFrameCache } from '../../core/frameCache'
 
-// Mock canvas context
-const mockCanvasContext = {
-  fillStyle: '',
-  fillRect: vi.fn(),
-  drawImage: vi.fn(),
-  save: vi.fn(),
-  restore: vi.fn(),
-  beginPath: vi.fn(),
-  rect: vi.fn(),
-  clip: vi.fn(),
-  globalAlpha: 1,
-  globalCompositeOperation: 'source-over',
-  filter: 'none',
-  setTransform: vi.fn(),
-  ellipse: vi.fn(),
-  fill: vi.fn(),
-  stroke: vi.fn(),
-  moveTo: vi.fn(),
-  lineTo: vi.fn(),
-  closePath: vi.fn(),
-  translate: vi.fn(),
-  rotate: vi.fn(),
-  measureText: vi.fn(() => ({ width: 100 })),
-  textAlign: 'left',
-  textBaseline: 'middle',
-  font: '',
-  strokeStyle: '',
-  lineWidth: 1,
-  fillText: vi.fn(),
-}
+vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
 
-HTMLCanvasElement.prototype.getContext = vi.fn(() => mockCanvasContext) as unknown as typeof HTMLCanvasElement.prototype.getContext
+let doubles: PreviewDoubles
 
-// Mock ResizeObserver
-class ResizeObserverMock {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
-}
-(globalThis as unknown as { ResizeObserver: typeof ResizeObserverMock }).ResizeObserver = ResizeObserverMock
+beforeEach(() => {
+  vi.useFakeTimers()
+  doubles = installPreviewDoubles()
+  resetStoreForTest()
+  resetFrameCache()
+})
 
-// Mock storage
-vi.mock('../../core/storage', () => ({
-  getVideoBlob: vi.fn(() => Promise.resolve(new Blob(['test'], { type: 'video/mp4' }))),
-}))
+afterEach(() => {
+  cleanup()
+  doubles.uninstall()
+  resetFrameCache()
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
 
-describe('PreviewPlayer', () => {
-  beforeEach(() => {
-    useEditorStore.getState().resetProject()
-    useEditorStore.setState({ history: { past: [], future: [] } })
-    vi.clearAllMocks()
-    cleanup()
+describe('PreviewPlayer empty state', () => {
+  it('shows the placeholder when there are no clips', async () => {
+    render(<PreviewPlayer />)
+    await settle(60)
+
+    expect(screen.getByText('Add clips to the timeline to preview')).toBeInTheDocument()
+    expect(document.querySelector('canvas')).toBeNull()
   })
 
-  afterEach(() => {
-    cleanup()
+  it('shows a zero timecode and no clip info', async () => {
+    render(<PreviewPlayer />)
+    await settle(60)
+
+    expect(screen.getByText('00:00.000')).toBeInTheDocument()
   })
 
-  describe('empty state', () => {
-    it('shows placeholder when no clips', () => {
-      render(<PreviewPlayer />)
+  it('shows the canvas once there is a clip to draw', async () => {
+    addClip('clip1', 0, 10)
+    store().setCurrentTime(5)
 
-      expect(screen.getByText('Add clips to the timeline to preview')).toBeInTheDocument()
-    })
+    const preview = await renderPreview()
 
-    it('displays timecode', () => {
-      render(<PreviewPlayer />)
-
-      // Should show 00:00.000 initially
-      expect(screen.getByText(/00:00/)).toBeInTheDocument()
-    })
-  })
-
-  describe('with clips', () => {
-    const mockVideo: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-
-    beforeEach(() => {
-      useEditorStore.getState().addSourceVideo(mockVideo)
-      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-      useEditorStore.getState().addClipToTimeline({
-        id: 'clip1',
-        name: 'Test Clip',
-        sourceVideoId: 'video1',
-        startTime: 0,
-        endTime: 10,
-        duration: 10,
-        animation: undefined,
-      }, trackId, 0)
-    })
-
-    it('shows clip info when at clip position', () => {
-      useEditorStore.getState().setCurrentTime(5)
-
-      render(<PreviewPlayer />)
-
-      // Should show loading or clip info
-      expect(screen.queryByText('Add clips to the timeline to preview')).not.toBeInTheDocument()
-    })
+    expect(screen.queryByText('Add clips to the timeline to preview')).not.toBeInTheDocument()
+    expect(preview.canvas).toBeInTheDocument()
+    expect(preview.view.getByText('1 clip • clip1')).toBeInTheDocument()
   })
 })
 
 describe('PlaybackControls', () => {
-  beforeEach(() => {
-    useEditorStore.getState().resetProject()
-    useEditorStore.setState({ history: { past: [], future: [] } })
-    cleanup()
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
+  const withClip = () => addClip('clip1', 0, 10)
 
   it('renders all control buttons', () => {
     render(<PlaybackControls />)
@@ -135,318 +70,217 @@ describe('PlaybackControls', () => {
     expect(screen.getByTitle('Go to end (End)')).toBeInTheDocument()
   })
 
-  it('disables play button when no clips', () => {
+  it('disables play when there is nothing to play', () => {
     render(<PlaybackControls />)
 
-    const playButton = screen.getByTitle('Play (Space)')
-    expect(playButton).toBeDisabled()
+    expect(screen.getByTitle('Play (Space)')).toBeDisabled()
   })
 
-  it('enables play button when clips exist', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-    useEditorStore.getState().addSourceVideo(video)
-
-    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-    useEditorStore.getState().addClipToTimeline({
-      id: 'clip1',
-      name: 'Test',
-      sourceVideoId: 'video1',
-      startTime: 0,
-      endTime: 10,
-      duration: 10,
-      animation: undefined,
-    }, trackId, 0)
+  it('disables play once the playhead is at the end of the timeline', () => {
+    withClip()
+    store().setCurrentTime(10)
 
     render(<PlaybackControls />)
 
-    const playButton = screen.getByTitle('Play (Space)')
-    expect(playButton).not.toBeDisabled()
+    expect(screen.getByTitle('Play (Space)')).toBeDisabled()
   })
 
-  it('goes to start when button clicked', () => {
-    useEditorStore.getState().setCurrentTime(5)
+  it('enables play when clips exist', () => {
+    withClip()
 
     render(<PlaybackControls />)
 
-    const startButton = screen.getByTitle('Go to start (Home)')
-    fireEvent.click(startButton)
-
-    expect(useEditorStore.getState().currentTime).toBe(0)
+    expect(screen.getByTitle('Play (Space)')).not.toBeDisabled()
   })
 
-  it('steps backward when button clicked', () => {
-    useEditorStore.getState().setCurrentTime(5)
-
+  it('goes to start when the button is clicked', () => {
+    store().setCurrentTime(5)
     render(<PlaybackControls />)
 
-    const backButton = screen.getByTitle('Step backward (←)')
-    fireEvent.click(backButton)
+    fireEvent.click(screen.getByTitle('Go to start (Home)'))
 
-    expect(useEditorStore.getState().currentTime).toBe(4)
+    expect(store().currentTime).toBe(0)
   })
 
-  it('steps forward when button clicked', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-    useEditorStore.getState().addSourceVideo(video)
-
-    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-    useEditorStore.getState().addClipToTimeline({
-      id: 'clip1',
-      name: 'Test',
-      sourceVideoId: 'video1',
-      startTime: 0,
-      endTime: 10,
-      duration: 10,
-      animation: undefined,
-    }, trackId, 0)
-
-    useEditorStore.getState().setCurrentTime(5)
-
+  it('steps backward when the button is clicked', () => {
+    store().setCurrentTime(5)
     render(<PlaybackControls />)
 
-    const forwardButton = screen.getByTitle('Step forward (→)')
-    fireEvent.click(forwardButton)
+    fireEvent.click(screen.getByTitle('Step backward (←)'))
 
-    expect(useEditorStore.getState().currentTime).toBe(6)
+    expect(store().currentTime).toBe(4)
   })
 
-  it('goes to end when button clicked', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-    useEditorStore.getState().addSourceVideo(video)
-
-    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-    useEditorStore.getState().addClipToTimeline({
-      id: 'clip1',
-      name: 'Test',
-      sourceVideoId: 'video1',
-      startTime: 0,
-      endTime: 10,
-      duration: 10,
-      animation: undefined,
-    }, trackId, 0)
-
+  it('steps forward when the button is clicked', () => {
+    withClip()
+    store().setCurrentTime(5)
     render(<PlaybackControls />)
 
-    const endButton = screen.getByTitle('Go to end (End)')
-    fireEvent.click(endButton)
+    fireEvent.click(screen.getByTitle('Step forward (→)'))
 
-    expect(useEditorStore.getState().currentTime).toBe(10)
+    expect(store().currentTime).toBe(6)
   })
 
-  it('toggles play state when play button clicked', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-    useEditorStore.getState().addSourceVideo(video)
-
-    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-    useEditorStore.getState().addClipToTimeline({
-      id: 'clip1',
-      name: 'Test',
-      sourceVideoId: 'video1',
-      startTime: 0,
-      endTime: 10,
-      duration: 10,
-      animation: undefined,
-    }, trackId, 0)
-
+  it('goes to end when the button is clicked', () => {
+    withClip()
     render(<PlaybackControls />)
 
-    const playButton = screen.getByTitle('Play (Space)')
-    fireEvent.click(playButton)
+    fireEvent.click(screen.getByTitle('Go to end (End)'))
 
-    expect(useEditorStore.getState().isPlaying).toBe(true)
+    expect(store().currentTime).toBe(10)
   })
 
-  it('shows pause button when playing', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-    useEditorStore.getState().addSourceVideo(video)
+  it('toggles play state when the play button is clicked', () => {
+    withClip()
+    render(<PlaybackControls />)
 
-    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-    useEditorStore.getState().addClipToTimeline({
-      id: 'clip1',
-      name: 'Test',
-      sourceVideoId: 'video1',
-      startTime: 0,
-      endTime: 10,
-      duration: 10,
-      animation: undefined,
-    }, trackId, 0)
+    fireEvent.click(screen.getByTitle('Play (Space)'))
 
-    useEditorStore.getState().setIsPlaying(true)
+    expect(store().isPlaying).toBe(true)
+  })
+
+  it('shows the pause button while playing', () => {
+    withClip()
+    store().setIsPlaying(true)
 
     render(<PlaybackControls />)
 
     expect(screen.getByTitle('Pause (Space)')).toBeInTheDocument()
   })
 
-  it('clamps step backward to 0', () => {
-    useEditorStore.getState().setCurrentTime(0.5)
+  it('pauses from the pause button even at the end of the timeline', () => {
+    withClip()
+    store().setCurrentTime(10)
+    store().setIsPlaying(true)
 
     render(<PlaybackControls />)
+    fireEvent.click(screen.getByTitle('Pause (Space)'))
 
-    const backButton = screen.getByTitle('Step backward (←)')
-    fireEvent.click(backButton)
-
-    expect(useEditorStore.getState().currentTime).toBe(0)
+    expect(store().isPlaying).toBe(false)
   })
 
-  it('clamps step forward to duration', () => {
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-    useEditorStore.getState().addSourceVideo(video)
-
-    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-    useEditorStore.getState().addClipToTimeline({
-      id: 'clip1',
-      name: 'Test',
-      sourceVideoId: 'video1',
-      startTime: 0,
-      endTime: 10,
-      duration: 10,
-      animation: undefined,
-    }, trackId, 0)
-
-    useEditorStore.getState().setCurrentTime(9.5)
-
+  it('clamps step backward to 0', () => {
+    store().setCurrentTime(0.5)
     render(<PlaybackControls />)
 
-    const forwardButton = screen.getByTitle('Step forward (→)')
-    fireEvent.click(forwardButton)
+    fireEvent.click(screen.getByTitle('Step backward (←)'))
 
-    expect(useEditorStore.getState().currentTime).toBe(10)
+    expect(store().currentTime).toBe(0)
+  })
+
+  it('clamps step forward to the timeline duration', () => {
+    withClip()
+    store().setCurrentTime(9.5)
+    render(<PlaybackControls />)
+
+    fireEvent.click(screen.getByTitle('Step forward (→)'))
+
+    expect(store().currentTime).toBe(10)
+  })
+
+  it('stops playback when the playhead is stepped', () => {
+    withClip()
+    store().setIsPlaying(true)
+    render(<PlaybackControls />)
+
+    fireEvent.click(screen.getByTitle('Step backward (←)'))
+
+    expect(store().isPlaying).toBe(false)
+  })
+
+  it('stops playback when the playhead jumps to either end', () => {
+    withClip()
+    store().setIsPlaying(true)
+    render(<PlaybackControls />)
+
+    fireEvent.click(screen.getByTitle('Go to end (End)'))
+    expect(store().isPlaying).toBe(false)
+
+    store().setIsPlaying(true)
+    fireEvent.click(screen.getByTitle('Go to start (Home)'))
+    expect(store().isPlaying).toBe(false)
   })
 })
 
 describe('PlaybackControls keyboard shortcuts', () => {
   beforeEach(() => {
-    useEditorStore.getState().resetProject()
-    useEditorStore.setState({ history: { past: [], future: [] } })
-
-    const video: SourceVideo = {
-      id: 'video1',
-      name: 'test.mp4',
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      mimeType: 'video/mp4',
-      size: 1000000,
-    }
-    useEditorStore.getState().addSourceVideo(video)
-
-    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-    useEditorStore.getState().addClipToTimeline({
-      id: 'clip1',
-      name: 'Test',
-      sourceVideoId: 'video1',
-      startTime: 0,
-      endTime: 10,
-      duration: 10,
-      animation: undefined,
-    }, trackId, 0)
-
-    cleanup()
+    addClip('clip1', 0, 10)
   })
 
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('handles Space key for play/pause', () => {
+  it('handles Space for play/pause', () => {
     render(<PlaybackControls />)
 
     fireEvent.keyDown(window, { code: 'Space' })
 
-    expect(useEditorStore.getState().isPlaying).toBe(true)
+    expect(store().isPlaying).toBe(true)
   })
 
   it('handles ArrowLeft for step backward', () => {
-    useEditorStore.getState().setCurrentTime(5)
-
+    store().setCurrentTime(5)
     render(<PlaybackControls />)
 
     fireEvent.keyDown(window, { code: 'ArrowLeft' })
 
-    expect(useEditorStore.getState().currentTime).toBe(4)
+    expect(store().currentTime).toBe(4)
   })
 
   it('handles ArrowRight for step forward', () => {
-    useEditorStore.getState().setCurrentTime(5)
-
+    store().setCurrentTime(5)
     render(<PlaybackControls />)
 
     fireEvent.keyDown(window, { code: 'ArrowRight' })
 
-    expect(useEditorStore.getState().currentTime).toBe(6)
+    expect(store().currentTime).toBe(6)
   })
 
-  it('handles Home key for go to start', () => {
-    useEditorStore.getState().setCurrentTime(5)
-
+  it('handles Home for go to start', () => {
+    store().setCurrentTime(5)
     render(<PlaybackControls />)
 
     fireEvent.keyDown(window, { code: 'Home' })
 
-    expect(useEditorStore.getState().currentTime).toBe(0)
+    expect(store().currentTime).toBe(0)
   })
 
-  it('handles End key for go to end', () => {
+  it('handles End for go to end', () => {
     render(<PlaybackControls />)
 
     fireEvent.keyDown(window, { code: 'End' })
 
-    expect(useEditorStore.getState().currentTime).toBe(10)
+    expect(store().currentTime).toBe(10)
+  })
+
+  it('ignores every other key', () => {
+    render(<PlaybackControls />)
+
+    fireEvent.keyDown(window, { code: 'KeyK' })
+
+    expect(store().currentTime).toBe(0)
+    expect(store().isPlaying).toBe(false)
+  })
+
+  it('leaves the transport alone while a text field has focus', () => {
+    const input = document.createElement('input')
+    document.body.append(input)
+    render(<PlaybackControls />)
+
+    fireEvent.keyDown(input, { code: 'Space' })
+    const textarea = document.createElement('textarea')
+    document.body.append(textarea)
+    fireEvent.keyDown(textarea, { code: 'ArrowRight' })
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(0)
+    input.remove()
+    textarea.remove()
+  })
+
+  it('stops listening once it is unmounted', () => {
+    const { unmount } = render(<PlaybackControls />)
+    unmount()
+
+    fireEvent.keyDown(window, { code: 'Space' })
+
+    expect(store().isPlaying).toBe(false)
   })
 })

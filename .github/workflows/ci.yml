@@ -75,13 +75,13 @@ jobs:
         run: pnpm lint
 
       - name: TypeScript check (plan)
-        run: pnpm --filter=@escapesuite/plan exec tsc --noEmit
+        run: pnpm --filter=@escapesuite/plan run typecheck
 
       - name: TypeScript check (craft)
-        run: pnpm --filter=@escapesuite/craft exec tsc --noEmit
+        run: pnpm --filter=@escapesuite/craft run typecheck
 
       - name: TypeScript check (artist)
-        run: pnpm --filter=@escapesuite/artist exec tsc --noEmit
+        run: pnpm --filter=@escapesuite/artist run typecheck
 
       - name: TypeScript check (headless-artist)
         run: pnpm --filter=@escapesuite/headless-artist run typecheck
@@ -116,6 +116,10 @@ jobs:
       - name: Run tests with coverage
         run: pnpm test:coverage
 
+      - name: Coverage summary
+        if: always()
+        run: pnpm coverage:report
+
       - name: Upload coverage reports
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
@@ -125,6 +129,8 @@ jobs:
             apps/plan/coverage/coverage-final.json
             apps/craft/coverage/coverage-final.json
             apps/artist/coverage/coverage-final.json
+            packages/shared/coverage/coverage-final.json
+            services/headless-artist/coverage/coverage-final.json
           fail_ci_if_error: false
 
   # Build - depends on lint/typecheck and test passing

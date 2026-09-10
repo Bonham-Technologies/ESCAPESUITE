@@ -265,24 +265,6 @@ export async function loadImageElement(blob: Blob): Promise<HTMLImageElement> {
   });
 }
 
-// Track last seek position per video (used by playback sync functions)
-const lastSeekPositions = new Map<string, number>();
-
-/**
- * Clear seek position tracking (call at start of export)
- * Exported for testing
- */
-export function clearSeekPositions(): void {
-  lastSeekPositions.clear();
-}
-
-/**
- * Get the current seek positions map size (for testing)
- */
-export function getSeekPositionsCount(): number {
-  return lastSeekPositions.size;
-}
-
 /**
  * Yield to allow other tasks to run without being throttled in background tabs.
  * Uses MessageChannel which is not subject to the same throttling as setTimeout.

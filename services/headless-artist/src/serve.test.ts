@@ -1,4 +1,5 @@
 import http from 'node:http'
+import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startServer } from './serve'
 import type { ServeOptions, ServeHandle } from './serve'
@@ -47,6 +48,7 @@ function validSpec(jobId = 'job-1', overrides: Record<string, unknown> = {}): Re
 }
 
 const servers: ServeHandle[] = []
+const sockets: net.Socket[] = []
 let logs: string[]
 let base: string
 
@@ -110,6 +112,27 @@ function postRaw(spec: Record<string, unknown>): RawRequest {
   return { status, destroy: () => req.destroy() }
 }
 
+/**
+ * A bare TCP connection to the server, for the handful of cases `fetch` cannot express:
+ * a request target too malformed to put in a URL, a body sent in two halves, and a second
+ * request pipelined onto a connection whose first one is still running.
+ */
+function rawSocket(): { socket: net.Socket; response: Promise<string>; connected: Promise<void> } {
+  const socket = net.connect(Number(new URL(base).port), '127.0.0.1')
+  sockets.push(socket)
+  const connected = new Promise<void>((resolve) => socket.once('connect', () => resolve()))
+  const response = new Promise<string>((resolve) => {
+    let buffer = ''
+    socket.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8')
+    })
+    // A reset is an answer too — the 413 path deliberately tears the socket down.
+    socket.on('close', () => resolve(buffer))
+    socket.on('error', () => resolve(buffer))
+  })
+  return { socket, response, connected }
+}
+
 /** Polls until `check` stops throwing, so tests never depend on a fixed number of ticks. */
 async function waitFor(check: () => void, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs
@@ -139,6 +162,11 @@ async function waitForHealth(match: Record<string, number>, timeoutMs = 2000): P
   }
 }
 
+/** The handle for the server the current test started. */
+function server(): ServeHandle {
+  return servers[servers.length - 1]
+}
+
 /** Lets pending microtasks and one timer tick drain, to prove something has *not* happened. */
 function settle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 20))
@@ -151,6 +179,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  while (sockets.length > 0) sockets.pop()?.destroy()
   while (servers.length > 0) {
     const server = servers.pop()
     if (server) await server.close()
@@ -335,6 +364,18 @@ describe('POST /render', () => {
     expect(runJob).not.toHaveBeenCalled()
   })
 
+  it('hangs up on a body far past the limit instead of draining it forever', async () => {
+    await start()
+
+    // Past MAX_BODY_BYTES * DRAIN_FACTOR: the server stops reading and tears the socket down,
+    // so the client sees a reset rather than an answer — which is the point. Draining a
+    // deliberate multi-gigabyte upload just to be polite is the failure mode being avoided.
+    await expect(postSpec(validSpec('job-1', { pad: 'x'.repeat(9 * 1024 * 1024) }))).rejects.toThrow()
+
+    expect(logs.some((line) => line.startsWith('POST /render 413'))).toBe(true)
+    expect(runJob).not.toHaveBeenCalled()
+  })
+
   it('accepts a content-type with a charset parameter', async () => {
     await start()
 
@@ -365,6 +406,72 @@ describe('POST /render', () => {
   })
 })
 
+describe('binding', () => {
+  it('rejects rather than resolving when the port is already taken', async () => {
+    const first = await start()
+
+    await expect(
+      startServer({
+        port: first.port,
+        host: '127.0.0.1',
+        deps: DEPS,
+        allowedSinks: ALLOWED_SINKS,
+        versions: VERSIONS,
+        log: (line) => logs.push(line),
+      }),
+    ).rejects.toThrow(/EADDRINUSE/)
+  })
+
+  it('binds loopback by default, because there is no authentication in front of it', async () => {
+    const handle = await startServer({
+      port: 0,
+      deps: DEPS,
+      allowedSinks: ALLOWED_SINKS,
+      versions: VERSIONS,
+      log: (line) => logs.push(line),
+    })
+    servers.push(handle)
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/healthz`)
+    expect(res.status).toBe(200)
+  })
+
+})
+
+describe('the log sink', () => {
+  it('survives one that throws, rather than turning it into an unhandled rejection', async () => {
+    const seen: string[] = []
+    await start({
+      log: (line) => {
+        seen.push(line)
+        throw new Error('the log sink broke')
+      },
+    })
+
+    expect((await fetch(`${base}/healthz`)).status).toBe(200)
+    expect(seen.some((line) => line.startsWith('GET /healthz 200'))).toBe(true)
+    // Still serving after the log threw.
+    expect((await fetch(`${base}/healthz`)).status).toBe(200)
+  })
+
+  it('falls back to stderr when there is none, leaving stdout to the one-shot CLI', async () => {
+    const written: string[] = []
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk))
+      return true
+    })
+
+    try {
+      await start({ log: undefined })
+      expect((await fetch(`${base}/healthz`)).status).toBe(200)
+    } finally {
+      stderr.mockRestore()
+    }
+
+    expect(written.some((line) => line.startsWith('GET /healthz 200'))).toBe(true)
+  })
+})
+
 describe('unknown routes', () => {
   it('returns 404 as JSON', async () => {
     await start()
@@ -374,6 +481,24 @@ describe('unknown routes', () => {
     expect(res.status).toBe(404)
     expect(res.headers.get('content-type')).toContain('application/json')
     expect(await res.json()).toMatchObject({ error: expect.stringContaining('not found') })
+  })
+})
+
+describe('a request target that is not a URL', () => {
+  it('answers 404 rather than taking the server down with it', async () => {
+    await start()
+
+    // "//[" is a legal HTTP request target that `new URL()` refuses (an unterminated IPv6
+    // host). Throwing out of the request listener would be an uncaught exception — the whole
+    // server, and every in-flight render with it.
+    const { socket, response, connected } = rawSocket()
+    await connected
+    socket.write('GET //[ HTTP/1.1\r\nhost: 127.0.0.1\r\nconnection: close\r\n\r\n')
+
+    expect(await response).toContain('HTTP/1.1 404 Not Found')
+    // Still serving.
+    expect((await fetch(`${base}/healthz`)).status).toBe(200)
+    expect(logs.some((line) => line.startsWith('GET //[ 404'))).toBe(true)
   })
 })
 
@@ -548,6 +673,64 @@ describe('close()', () => {
     gate.resolve(outcomeFor('job-a'))
     expect((await first).status).toBe(200)
     await closing
+  })
+
+  it('turns away a job whose body was still arriving when the drain began', async () => {
+    await start({ concurrency: 1 })
+    const body = JSON.stringify(validSpec('job-late'))
+
+    const { socket, response, connected } = rawSocket()
+    await connected
+    // Headers plus the first byte: the server has dispatched the request and is inside
+    // readBody, so this connection counts as active and survives closeIdleConnections.
+    socket.write(
+      `POST /render HTTP/1.1\r\nhost: 127.0.0.1\r\ncontent-type: application/json\r\n` +
+        `content-length: ${Buffer.byteLength(body)}\r\n\r\n${body.slice(0, 1)}`,
+    )
+    await settle()
+
+    const closing = server().close()
+    // Only now does the spec finish arriving — the job reaches the limiter after shutdown.
+    socket.write(body.slice(1))
+
+    const answer = await response
+    // Answered at all, rather than reset: the request was live before the drain started, so
+    // this 503 is the limiter refusing to *start* it, not the router refusing to accept it.
+    expect(answer).toContain('HTTP/1.1 503 Service Unavailable')
+    expect(answer).toContain('"error":"server shutting down"')
+    expect(runJob).not.toHaveBeenCalled()
+    await closing
+  })
+
+  it('turns away a request pipelined onto a live connection during the drain', async () => {
+    const gate = deferred<RenderOutcome>()
+    const started: string[] = []
+    vi.mocked(runJob).mockImplementation(async (spec) => {
+      started.push(spec.jobId)
+      return gate.promise
+    })
+    await start({ concurrency: 1 })
+    const body = JSON.stringify(validSpec('job-a'))
+
+    const { socket, response, connected } = rawSocket()
+    await connected
+    socket.write(
+      `POST /render HTTP/1.1\r\nhost: 127.0.0.1\r\ncontent-type: application/json\r\n` +
+        `content-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+    )
+    await waitFor(() => expect(started).toEqual(['job-a']))
+
+    const closing = server().close()
+    // server.close() stops new *connections*; this one is already open and its render is still
+    // running, so a client can pipeline another request straight into a draining server.
+    socket.write('GET /healthz HTTP/1.1\r\nhost: 127.0.0.1\r\n\r\n')
+    await waitFor(() => expect(logs.some((line) => line.startsWith('GET /healthz 503'))).toBe(true))
+
+    // The in-flight render was never touched by it.
+    gate.resolve(outcomeFor('job-a'))
+    await closing
+    await response
+    expect(started).toEqual(['job-a'])
   })
 
   it('is safe to call twice', async () => {

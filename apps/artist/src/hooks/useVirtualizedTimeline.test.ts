@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
-import { useVirtualizedTimeline, groupClipsByTrack } from './useVirtualizedTimeline';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, act, cleanup } from '@testing-library/react';
+import { useVirtualizedTimeline, useScrollTracker, groupClipsByTrack } from './useVirtualizedTimeline';
 import type { Clip } from '../store/types';
+import { installResizeObserverDouble } from '../test/doubles/resizeObserver';
 
 // Helper to create a mock clip
 function createMockClip(id: string, trackId: string, timelinePosition: number, duration: number): Clip {
@@ -143,5 +144,149 @@ describe('groupClipsByTrack', () => {
   it('returns empty map for empty input', () => {
     const grouped = groupClipsByTrack([]);
     expect(grouped.size).toBe(0);
+  });
+});
+
+describe('useScrollTracker', () => {
+  let observer: ReturnType<typeof installResizeObserverDouble>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    observer = installResizeObserverDouble();
+  });
+
+  afterEach(() => {
+    cleanup();
+    observer.uninstall();
+    vi.useRealTimers();
+  });
+
+  /** A scrollable container with the metrics jsdom otherwise reports as 0. */
+  function container(clientWidth = 800, scrollLeft = 0): HTMLDivElement {
+    const element = document.createElement('div');
+    Object.defineProperty(element, 'clientWidth', { value: clientWidth, configurable: true });
+    Object.defineProperty(element, 'scrollLeft', { value: scrollLeft, writable: true, configurable: true });
+    return element;
+  }
+
+  it('reports the container width as soon as it is observed', () => {
+    const onScroll = vi.fn();
+    const onResize = vi.fn();
+    const ref = { current: container(640) };
+
+    renderHook(() => useScrollTracker(ref, onScroll, onResize));
+
+    expect(onResize).toHaveBeenCalledExactlyOnceWith(640);
+    expect(observer.observed).toEqual([ref.current]);
+    expect(onScroll).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the ref is not attached yet', () => {
+    const onScroll = vi.fn();
+    const onResize = vi.fn();
+
+    renderHook(() =>
+      useScrollTracker({ current: null } as unknown as React.RefObject<HTMLElement>, onScroll, onResize)
+    );
+
+    expect(onResize).not.toHaveBeenCalled();
+    expect(observer.observed).toEqual([]);
+  });
+
+  it('reports the scroll position once per animation frame', () => {
+    const onScroll = vi.fn();
+    const element = container();
+    const ref = { current: element };
+
+    renderHook(() => useScrollTracker(ref, onScroll, vi.fn()));
+
+    element.scrollLeft = 120;
+    element.dispatchEvent(new Event('scroll'));
+    element.scrollLeft = 240;
+    element.dispatchEvent(new Event('scroll'));
+
+    // Coalesced: nothing reported until the frame runs.
+    expect(onScroll).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+
+    expect(onScroll).toHaveBeenCalledExactlyOnceWith(240);
+  });
+
+  it('reports again on the next frame after the first one has run', () => {
+    const onScroll = vi.fn();
+    const element = container();
+    const ref = { current: element };
+
+    renderHook(() => useScrollTracker(ref, onScroll, vi.fn()));
+
+    element.scrollLeft = 10;
+    element.dispatchEvent(new Event('scroll'));
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+
+    element.scrollLeft = 20;
+    element.dispatchEvent(new Event('scroll'));
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+
+    expect(onScroll.mock.calls.map((c) => c[0])).toEqual([10, 20]);
+  });
+
+  it('subscribes to scroll passively so it never blocks scrolling', () => {
+    const element = container();
+    const add = vi.spyOn(element, 'addEventListener');
+
+    renderHook(() => useScrollTracker({ current: element }, vi.fn(), vi.fn()));
+
+    const scrollSubscription = add.mock.calls.find((c) => c[0] === 'scroll')!;
+    expect(scrollSubscription[2]).toEqual({ passive: true });
+  });
+
+  it('reports the observed width whenever the container is resized', () => {
+    const onResize = vi.fn();
+    const element = container(800);
+
+    renderHook(() => useScrollTracker({ current: element }, vi.fn(), onResize));
+    onResize.mockClear();
+
+    act(() => {
+      observer.emit(element, { width: 1024, height: 200 });
+    });
+
+    expect(onResize).toHaveBeenCalledExactlyOnceWith(1024);
+  });
+
+  it('detaches the listener, the observer and any pending frame on unmount', () => {
+    const onScroll = vi.fn();
+    const onResize = vi.fn();
+    const element = container();
+
+    const { unmount } = renderHook(() => useScrollTracker({ current: element }, onScroll, onResize));
+
+    // Leave a frame pending, then unmount before it runs.
+    element.scrollLeft = 50;
+    element.dispatchEvent(new Event('scroll'));
+    unmount();
+
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+    expect(onScroll).not.toHaveBeenCalled();
+    expect(observer.disconnected).toBe(1);
+
+    // Further scrolls and resizes are ignored.
+    onResize.mockClear();
+    element.dispatchEvent(new Event('scroll'));
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+    observer.emit(element, { width: 999, height: 10 });
+    expect(onScroll).not.toHaveBeenCalled();
+    expect(onResize).not.toHaveBeenCalled();
   });
 });

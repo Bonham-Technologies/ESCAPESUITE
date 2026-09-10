@@ -32,8 +32,6 @@ function App() {
     currentDuration,
     countdownValue,
     audioLevels,
-    screenStream,
-    webcamStream,
     setConfig,
     setCapabilities,
     setDetailedCapabilities,
@@ -55,6 +53,10 @@ function App() {
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
+  // The screen and webcam streams live in the store (the preview reads them);
+  // the microphone stream is only ever handed to the recorder, so it is held
+  // here purely so stopAllStreams() can release it with the others.
+  const micStreamRef = useRef<MediaStream | null>(null);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [isPiPActive, setIsPiPActive] = useState(false);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
@@ -149,10 +151,18 @@ function App() {
     }
   }, [previewStream]);
 
-  // Stop all streams helper
+  // Stop all streams helper.
+  // Read the streams from the store rather than from this render's closure:
+  // the recorder's onStop/onError callbacks are captured while handleStart-
+  // Recording runs, i.e. one render before setStreams() lands, so a closed-over
+  // screenStream/webcamStream would still be null there and the capture would
+  // keep running after the take ended.
   const stopAllStreams = useCallback(() => {
-    stopStream(screenStream);
-    stopStream(webcamStream);
+    const { screenStream: activeScreen, webcamStream: activeWebcam } = useRecorderStore.getState();
+    stopStream(activeScreen);
+    stopStream(activeWebcam);
+    stopStream(micStreamRef.current);
+    micStreamRef.current = null;
     setStreams(null, null);
     setPreviewStream(null);
 
@@ -166,7 +176,7 @@ function App() {
     if (canvasPreviewRef.current) {
       canvasPreviewRef.current.innerHTML = '';
     }
-  }, [screenStream, webcamStream, setStreams]);
+  }, [setStreams]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
@@ -385,6 +395,7 @@ function App() {
 
       const { screen, webcam, mic } = await acquireStreams();
       setStreams(screen, webcam);
+      micStreamRef.current = mic;
 
       // Set up preview
       // This avoids canvas.captureStream() issues with hidden video elements

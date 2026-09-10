@@ -1,5 +1,19 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { vi } from 'vitest'
 import Home from './Home'
+
+// launchTool is a collaborator (it does real navigation/analytics work) —
+// mock it here, never the Home module under test.
+vi.mock('../lib/launch', async () => {
+  const actual = await vi.importActual<typeof import('../lib/launch')>('../lib/launch')
+  return {
+    ...actual,
+    launchTool: vi.fn(),
+  }
+})
+
+import { launchTool } from '../lib/launch'
 
 // Home renders no router-aware components (every link is a plain external <a>),
 // so it needs no router wrapper.
@@ -8,6 +22,10 @@ function renderHome() {
 }
 
 describe('Home (open-source landing)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('renders the hero with Use-now CTAs for both tools', () => {
     renderHome()
     expect(screen.getByRole('button', { name: /start recording/i })).toBeInTheDocument()
@@ -56,5 +74,33 @@ describe('Home (open-source landing)', () => {
       'href',
       'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest'
     )
+  })
+
+  it('launches ESCAPECRAFT from the hero "Start recording" CTA', async () => {
+    const user = userEvent.setup()
+    renderHome()
+    await user.click(screen.getByRole('button', { name: /start recording/i }))
+    expect(launchTool).toHaveBeenCalledWith('craft')
+  })
+
+  it('launches ESCAPEARTIST from the hero "Open the editor" CTA', async () => {
+    const user = userEvent.setup()
+    renderHome()
+    await user.click(screen.getByRole('button', { name: /open the editor/i }))
+    expect(launchTool).toHaveBeenCalledWith('artist')
+  })
+
+  it('launches ESCAPECRAFT from the tools-section "Use ESCAPECRAFT" CTA', async () => {
+    const user = userEvent.setup()
+    renderHome()
+    await user.click(screen.getByRole('button', { name: /use escapecraft/i }))
+    expect(launchTool).toHaveBeenCalledWith('craft')
+  })
+
+  it('launches ESCAPEARTIST from the tools-section "Use ESCAPEARTIST" CTA', async () => {
+    const user = userEvent.setup()
+    renderHome()
+    await user.click(screen.getByRole('button', { name: /use escapeartist/i }))
+    expect(launchTool).toHaveBeenCalledWith('artist')
   })
 })
