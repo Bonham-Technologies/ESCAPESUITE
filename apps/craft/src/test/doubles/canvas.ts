@@ -38,9 +38,12 @@ export interface RecordingCanvasRenderingContext2D {
   readonly roundRect: ReturnType<typeof vi.fn>
   readonly clip: ReturnType<typeof vi.fn>
   readonly stroke: ReturnType<typeof vi.fn>
+  readonly fillText: ReturnType<typeof vi.fn>
   fillStyle: string
   strokeStyle: string
   lineWidth: number
+  font: string
+  textAlign: string
   /**
    * Every recorded drawing call in order, so tests can assert on sequencing
    * (e.g. that a clip path is established before the drawImage it clips).
@@ -89,9 +92,12 @@ function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingConte
     roundRect: record('roundRect'),
     clip: record('clip'),
     stroke: record('stroke'),
+    fillText: record('fillText'),
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 0,
+    font: '',
+    textAlign: 'start',
     calls,
     toBlobCalls: [],
     toBlobResult: new Blob(['mock-canvas-image'], { type: 'image/jpeg' }),

@@ -187,3 +187,39 @@ export function getVideoDoubles(): VideoElementDouble[] {
 export function resetVideoElementDouble(): void {
   capturedVideos = []
 }
+
+// --- MediaError -------------------------------------------------------------
+//
+// jsdom ships no MediaError interface at all, so code that compares
+// `video.error.code` against `MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED` throws a
+// ReferenceError there even though it is fine in every browser. Install the
+// constant table for the duration of a test that drives media errors.
+
+const MEDIA_ERROR_CODES = {
+  MEDIA_ERR_ABORTED: 1,
+  MEDIA_ERR_NETWORK: 2,
+  MEDIA_ERR_DECODE: 3,
+  MEDIA_ERR_SRC_NOT_SUPPORTED: 4,
+} as const
+
+let mediaErrorInstalled = false
+
+export function installMediaErrorGlobal(): void {
+  if (mediaErrorInstalled) return
+  mediaErrorInstalled = true
+  ;(globalThis as unknown as Record<string, unknown>).MediaError = MEDIA_ERROR_CODES
+}
+
+export function uninstallMediaErrorGlobal(): void {
+  if (!mediaErrorInstalled) return
+  mediaErrorInstalled = false
+  delete (globalThis as unknown as Record<string, unknown>).MediaError
+}
+
+/** Build a MediaError-shaped object to hand to a <video> element's `error`. */
+export function mediaError(
+  code: keyof typeof MEDIA_ERROR_CODES,
+  message = code
+): { code: number; message: string } {
+  return { code: MEDIA_ERROR_CODES[code], message }
+}
