@@ -47,7 +47,6 @@ vi.mock('./utils/sendToEditor', async () => (await import('./test/appDoubles')).
 vi.mock('@vercel/analytics', async () => (await import('./test/appDoubles')).analyticsModule);
 
 let browser: BrowserStubs;
-let consoleError: ReturnType<typeof vi.spyOn>;
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
@@ -55,7 +54,6 @@ beforeEach(async () => {
   resetRecorderStore({ countdownSeconds: 0 });
   browser = installBrowserStubs();
   installVideoElementDouble();
-  consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
   await clearAllRecordings();
 });
 
@@ -193,6 +191,9 @@ describe('App saving a recording', () => {
   });
 
   it('reports a save failure and returns to idle', async () => {
+    // Only this test expects a console.error, so the spy is scoped to it and
+    // an unexpected error anywhere else still reaches the reporter.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     thumbnailModule.extractVideoMetadata.mockRejectedValue(new Error('cannot decode'));
     await recordATake();
 

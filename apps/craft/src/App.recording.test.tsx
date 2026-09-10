@@ -43,7 +43,6 @@ vi.mock('./utils/sendToEditor', async () => (await import('./test/appDoubles')).
 vi.mock('@vercel/analytics', async () => (await import('./test/appDoubles')).analyticsModule);
 
 let browser: BrowserStubs;
-let consoleError: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   // Only the interval timers are faked: the countdown and the duration ticker
@@ -54,7 +53,6 @@ beforeEach(() => {
   resetRecorderStore();
   browser = installBrowserStubs();
   installVideoElementDouble();
-  consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -65,6 +63,14 @@ afterEach(() => {
 });
 
 const user = () => userEvent.setup();
+
+/**
+ * Silence one expected console.error for the duration of a single test, so an
+ * unexpected one elsewhere still reaches the reporter.
+ */
+function expectedConsoleError(): ReturnType<typeof vi.spyOn> {
+  return vi.spyOn(console, 'error').mockImplementation(() => {});
+}
 
 function recordButton(): HTMLButtonElement {
   return screen.getByRole('button', { name: /^(start|stop) recording$/i }) as HTMLButtonElement;
@@ -148,6 +154,7 @@ describe('App start recording', () => {
   });
 
   it('reports the failure and returns to idle when capture is refused', async () => {
+    const consoleError = expectedConsoleError();
     permissionsOverrides.requestScreenCapture.mockRejectedValue(new Error('Permission denied'));
     await renderApp();
 
@@ -159,6 +166,7 @@ describe('App start recording', () => {
   });
 
   it('releases the streams it already got when a later source fails', async () => {
+    const consoleError = expectedConsoleError();
     const screenStream = screenStreamDouble();
     permissionsOverrides.requestScreenCapture.mockResolvedValue(screenStream.stream);
     permissionsOverrides.requestWebcam.mockRejectedValue(new Error('Camera in use'));
@@ -169,6 +177,7 @@ describe('App start recording', () => {
 
     expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
     expect(state()).toBe('idle');
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error));
   });
 
   it('starts immediately when the countdown is switched off', async () => {
@@ -338,6 +347,7 @@ describe('App recording controls', () => {
 
   it('surfaces a recorder failure and cleans up after it', async () => {
     const { screenStream } = await startLiveRecording();
+    const consoleError = expectedConsoleError();
 
     act(() => {
       recorderFactory.last().failWith(new Error('encoder died'));

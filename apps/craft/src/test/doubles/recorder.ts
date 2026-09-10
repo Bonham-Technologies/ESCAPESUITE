@@ -133,6 +133,7 @@ export interface RecorderFactoryDouble {
   recorderType: 'webcodecs' | 'mediarecorder'
   readonly createRecorder: ReturnType<typeof vi.fn>
   readonly getRecorderType: ReturnType<typeof vi.fn>
+  readonly canUseWebCodecsRecorder: ReturnType<typeof vi.fn>
   reset(): void
 }
 
@@ -161,11 +162,14 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
 
     getRecorderType: vi.fn(() => factory.recorderType),
 
+    canUseWebCodecsRecorder: vi.fn(() => factory.recorderType === 'webcodecs'),
+
     reset() {
       recorders.length = 0
       factory.recorderType = 'mediarecorder'
       factory.createRecorder.mockClear()
       factory.getRecorderType.mockClear()
+      factory.canUseWebCodecsRecorder.mockClear()
     },
   }
 

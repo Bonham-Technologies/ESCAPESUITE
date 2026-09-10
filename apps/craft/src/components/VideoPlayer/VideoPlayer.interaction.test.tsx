@@ -649,14 +649,27 @@ describe('VideoPlayer keyboard shortcuts', () => {
 });
 
 describe('VideoPlayer chrome', () => {
+  // The title is the only thing in the right-hand controls slot, so the slot
+  // being empty (no child element, no text) is what "no title" means. Asserting
+  // on the slot rather than a CSS-module class matters here: vitest does not
+  // process the CSS, so styles.title is the bare key 'title'.
+  function controlsRight(): HTMLElement {
+    return document.querySelector('[class*="controlsRight"]') as HTMLElement;
+  }
+
   it('shows the title when one is given', () => {
     mountPlayer({ title: 'Standup 2026-09-09' });
+
     expect(screen.getByText('Standup 2026-09-09')).toBeTruthy();
+    expect(controlsRight().children).toHaveLength(1);
+    expect(controlsRight().textContent).toBe('Standup 2026-09-09');
   });
 
-  it('omits the title element when no title is given', () => {
+  it('renders nothing in the title slot when no title is given', () => {
     mountPlayer();
-    expect(document.querySelector('[class*="VideoPlayer-module__title"]')).toBeNull();
+
+    expect(controlsRight().children).toHaveLength(0);
+    expect(controlsRight().textContent).toBe('');
   });
 
   it('starts paused when autoPlay is off', () => {

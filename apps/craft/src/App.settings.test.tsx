@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { act, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRecorderStore } from './store/recorderStore';
+import { themeStorage } from './utils/themeStorage';
 import {
   permissionsOverrides,
   detectionResult,
@@ -30,6 +31,18 @@ vi.mock('./core/converter', async () => (await import('./test/appDoubles')).conv
 vi.mock('./utils/sendToEditor', async () => (await import('./test/appDoubles')).sendToEditorModule);
 vi.mock('@vercel/analytics', async () => (await import('./test/appDoubles')).analyticsModule);
 
+// The theme module owns the document attribute and the media-query listener —
+// a collaborator, so App's use of it is asserted rather than re-tested here.
+const { initTheme, cleanupTheme } = vi.hoisted(() => ({
+  initTheme: vi.fn(),
+  cleanupTheme: vi.fn(),
+}));
+vi.mock('@escapesuite/shared/theme', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@escapesuite/shared/theme')>()),
+  initTheme,
+  cleanupTheme,
+}));
+
 const { isStandaloneMode } = vi.hoisted(() => ({ isStandaloneMode: vi.fn(() => false) }));
 vi.mock('@escapesuite/shared/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@escapesuite/shared/config')>()),
@@ -42,6 +55,8 @@ beforeEach(() => {
   resetAppDoubles();
   resetRecorderStore();
   isStandaloneMode.mockReturnValue(false);
+  initTheme.mockClear();
+  cleanupTheme.mockClear();
   browser = installBrowserStubs();
 });
 
@@ -53,6 +68,19 @@ afterEach(() => {
 function toggle(label: string): HTMLButtonElement {
   return screen.getByRole('button', { name: label }) as HTMLButtonElement;
 }
+
+describe('App mount', () => {
+  it('installs the theme with the app\'s storage adapter and tears it down on unmount', async () => {
+    const { unmount } = await renderApp();
+
+    expect(initTheme).toHaveBeenCalledWith(themeStorage);
+    expect(cleanupTheme).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(cleanupTheme).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('App capability detection', () => {
   it('asks the browser what it can capture and stores the answer', async () => {

@@ -54,9 +54,12 @@ export function detectionResult(
 
 export const recorderFactory = createRecorderFactoryDouble()
 
+// The whole public surface of core/recorder-factory, so a future import from
+// App cannot silently resolve to undefined.
 export const recorderFactoryModule = {
   createRecorder: recorderFactory.createRecorder,
   getRecorderType: recorderFactory.getRecorderType,
+  canUseWebCodecsRecorder: recorderFactory.canUseWebCodecsRecorder,
 }
 
 // --- core/permissions (only the capture entry points) -----------------------
