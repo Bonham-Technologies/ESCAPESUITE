@@ -1,76 +1,18 @@
 import { test, expect } from '@playwright/test'
-import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/indexeddb'
 
 const DB_NAME = 'video-editor-db'
 
 // Note: In development, CRAFT (5174) and ARTIST (5175) run on different origins,
-// so IndexedDB is NOT shared. In production (same domain), they share IndexedDB.
-// Tests that require cross-origin sharing are marked with a note about this limitation.
+// so IndexedDB is NOT shared. In production both apps are served from one origin
+// and really do share it.
+//
+// The three tests that needed that shared database ("both apps see same
+// database", "thumbnails accessible from both apps", "deleted recordings removed
+// from both apps") used to sit here marked `test.skip('… (requires same
+// origin)')`. They now live — un-skipped, against the real production layout —
+// in tests/production/indexeddb-sharing.spec.ts (`pnpm test:e2e:production`).
 
 test.describe('IndexedDB Data Sharing', () => {
-  // This test works in production but not in dev due to different origins
-  test.skip('both apps see same database (requires same origin)', async ({ browser }) => {
-    const context = await browser.newContext()
-
-    // Write data in CRAFT
-    const craftPage = await context.newPage()
-    await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
-
-    await craftPage.evaluate((dbName) => {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open(dbName, 1)
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains('recordings')) {
-            db.createObjectStore('recordings', { keyPath: 'id' })
-          }
-        }
-        request.onsuccess = () => {
-          const db = request.result
-          if (db.objectStoreNames.contains('recordings')) {
-            const tx = db.transaction('recordings', 'readwrite')
-            const store = tx.objectStore('recordings')
-            store.put({ id: 'shared-video', name: 'Test Recording', timestamp: Date.now() })
-            tx.oncomplete = () => resolve(true)
-            tx.onerror = () => reject(tx.error)
-          } else {
-            resolve(true)
-          }
-        }
-        request.onerror = () => reject(request.error)
-      })
-    }, DB_NAME)
-
-    // Check in ARTIST
-    const artistPage = await context.newPage()
-    await artistPage.goto('http://localhost:5175')
-    await artistPage.waitForLoadState('networkidle')
-
-    const hasData = await artistPage.evaluate((dbName) => {
-      return new Promise((resolve) => {
-        const request = indexedDB.open(dbName)
-        request.onsuccess = () => {
-          const db = request.result
-          if (db.objectStoreNames.contains('recordings')) {
-            const tx = db.transaction('recordings', 'readonly')
-            const store = tx.objectStore('recordings')
-            const getRequest = store.get('shared-video')
-            getRequest.onsuccess = () => resolve(!!getRequest.result)
-            getRequest.onerror = () => resolve(false)
-          } else {
-            resolve(false)
-          }
-        }
-        request.onerror = () => resolve(false)
-      })
-    }, DB_NAME)
-
-    expect(hasData).toBe(true)
-
-    await context.close()
-  })
-
   test('recording visible in both apps', async ({ browser }) => {
     const context = await browser.newContext()
 
@@ -89,70 +31,6 @@ test.describe('IndexedDB Data Sharing', () => {
 
     const artistLoaded = await artistPage.content()
     expect(artistLoaded).toContain('<div id="root">')
-
-    await context.close()
-  })
-})
-
-test.describe('Thumbnails Shared Correctly', () => {
-  // This test works in production but not in dev due to different origins
-  test.skip('thumbnails accessible from both apps (requires same origin)', async ({ browser }) => {
-    const context = await browser.newContext()
-
-    // Store thumbnail in CRAFT
-    const craftPage = await context.newPage()
-    await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
-
-    await craftPage.evaluate((dbName) => {
-      return new Promise((resolve) => {
-        const request = indexedDB.open(dbName, 1)
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains('thumbnails')) {
-            db.createObjectStore('thumbnails', { keyPath: 'id' })
-          }
-        }
-        request.onsuccess = () => {
-          const db = request.result
-          if (db.objectStoreNames.contains('thumbnails')) {
-            const tx = db.transaction('thumbnails', 'readwrite')
-            const store = tx.objectStore('thumbnails')
-            store.put({ id: 'thumb-1', videoId: 'video-1', data: 'base64data' })
-            tx.oncomplete = () => resolve(true)
-          } else {
-            resolve(true)
-          }
-        }
-        request.onerror = () => resolve(false)
-      })
-    }, DB_NAME)
-
-    // Verify accessible from ARTIST
-    const artistPage = await context.newPage()
-    await artistPage.goto('http://localhost:5175')
-    await artistPage.waitForLoadState('networkidle')
-
-    const hasThumbnail = await artistPage.evaluate((dbName) => {
-      return new Promise((resolve) => {
-        const request = indexedDB.open(dbName)
-        request.onsuccess = () => {
-          const db = request.result
-          if (db.objectStoreNames.contains('thumbnails')) {
-            const tx = db.transaction('thumbnails', 'readonly')
-            const store = tx.objectStore('thumbnails')
-            const getRequest = store.get('thumb-1')
-            getRequest.onsuccess = () => resolve(!!getRequest.result)
-            getRequest.onerror = () => resolve(false)
-          } else {
-            resolve(false)
-          }
-        }
-        request.onerror = () => resolve(false)
-      })
-    }, DB_NAME)
-
-    expect(hasThumbnail).toBe(true)
 
     await context.close()
   })
@@ -204,78 +82,6 @@ test.describe('Video Data Integrity', () => {
     }, DB_NAME)
 
     expect(integrity).toBe(true)
-  })
-})
-
-test.describe('Storage Cleanup Propagates', () => {
-  // This test works in production but not in dev due to different origins
-  test.skip('deleted recordings removed from both apps (requires same origin)', async ({ browser }) => {
-    const context = await browser.newContext()
-
-    // Create in CRAFT
-    const craftPage = await context.newPage()
-    await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
-
-    // Store and then delete
-    await craftPage.evaluate((dbName) => {
-      return new Promise((resolve) => {
-        const request = indexedDB.open(dbName, 1)
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains('recordings')) {
-            db.createObjectStore('recordings', { keyPath: 'id' })
-          }
-        }
-        request.onsuccess = () => {
-          const db = request.result
-          if (db.objectStoreNames.contains('recordings')) {
-            const tx = db.transaction('recordings', 'readwrite')
-            const store = tx.objectStore('recordings')
-            store.put({ id: 'to-delete', name: 'Delete Me' })
-
-            tx.oncomplete = () => {
-              // Delete it
-              const tx2 = db.transaction('recordings', 'readwrite')
-              const store2 = tx2.objectStore('recordings')
-              store2.delete('to-delete')
-              tx2.oncomplete = () => resolve(true)
-            }
-          } else {
-            resolve(true)
-          }
-        }
-        request.onerror = () => resolve(false)
-      })
-    }, DB_NAME)
-
-    // Verify deleted in ARTIST
-    const artistPage = await context.newPage()
-    await artistPage.goto('http://localhost:5175')
-    await artistPage.waitForLoadState('networkidle')
-
-    const stillExists = await artistPage.evaluate((dbName) => {
-      return new Promise((resolve) => {
-        const request = indexedDB.open(dbName)
-        request.onsuccess = () => {
-          const db = request.result
-          if (db.objectStoreNames.contains('recordings')) {
-            const tx = db.transaction('recordings', 'readonly')
-            const store = tx.objectStore('recordings')
-            const getRequest = store.get('to-delete')
-            getRequest.onsuccess = () => resolve(!!getRequest.result)
-            getRequest.onerror = () => resolve(false)
-          } else {
-            resolve(false)
-          }
-        }
-        request.onerror = () => resolve(false)
-      })
-    }, DB_NAME)
-
-    expect(stillExists).toBe(false)
-
-    await context.close()
   })
 })
 

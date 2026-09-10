@@ -49,7 +49,8 @@ const crossBrowserResponsiveProjects = [
 
 export default defineConfig({
   testDir: './tests',
-  testIgnore: ['**/standalone/**'], // Standalone tests use separate config
+  // Standalone and production-layout tests use separate configs
+  testIgnore: ['**/standalone/**', '**/production/**'],
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,

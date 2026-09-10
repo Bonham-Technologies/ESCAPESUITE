@@ -22,6 +22,8 @@ pnpm test:escapecraft    # Test only ESCAPECRAFT
 pnpm test:escapeartist   # Test only ESCAPEARTIST
 pnpm test:journeys       # Run user journey tests
 pnpm test:journeys:headed # Journey tests with visible browser
+pnpm test:standalone     # Offline single-file builds (needs pnpm build:standalone)
+pnpm test:production     # Production single-origin layout (needs pnpm build:deploy)
 ```
 
 ## Test Structure
@@ -48,6 +50,8 @@ tests/
 ├── standalone/              # Offline single-file build tests
 │   ├── craft.spec.ts        # ESCAPECRAFT offline build
 │   └── artist.spec.ts       # ESCAPEARTIST offline build
+├── production/              # Combined single-origin build tests
+│   └── indexeddb-sharing.spec.ts # Cross-app IndexedDB (CRAFT ⇄ ARTIST)
 └── journeys/                # User journey tests
     └── 01-record-edit-export.spec.ts
 ```
@@ -76,6 +80,26 @@ pnpm report:journeys         # View HTML report
 
 Journey tests use extended timeouts (60s per test) and run serially to maintain proper flow state.
 
+## Production-Layout Tests
+
+`tests/production/` runs against the combined build — `pnpm build:deploy` writes
+every app into the root `dist/`, exactly as Vercel serves it: ESCAPEPLAN at `/`,
+ESCAPECRAFT at `/craft/`, ESCAPEARTIST at `/artist/`. Served on one port, that is
+the only setup where the two tools share the `video-editor-db` IndexedDB
+database; the dev servers (5174 / 5175) are two origins and never do. The
+cross-app IndexedDB tests therefore live here rather than in `integration/`.
+
+```bash
+pnpm build:deploy        # from the monorepo root
+pnpm test:production     # from this directory (or pnpm test:e2e:production at the root)
+pnpm report:production   # view the HTML report
+```
+
+`playwright.production.config.ts` starts `scripts/serve-dist.mjs` on port 5190.
+That tiny zero-dependency server mirrors `vercel.json`'s rewrites; `npx serve`
+cannot — `serve -s` sends `/craft/` and `/artist/` to the ROOT `index.html`, and
+a `serve` config with rewrites fixes those two but then 404s on `/`.
+
 ## Test Utilities
 
 The `utils/` directory provides reusable testing utilities:
@@ -102,6 +126,9 @@ The CI workflow is optimized to balance thoroughness with speed:
   `e2e` job, journey test included (it is chromium-only and adds ~2 min)
 - The standalone suite runs in the `standalone` job, against the same offline
   bundles that job builds and publishes
+- The production-layout suite runs at the END of that same job, against the
+  combined `dist/` (`pnpm build:deploy` clobbers `apps/*/dist`, so it has to come
+  after the standalone artifact upload and the standalone suite)
 - Playwright browsers are cached to speed up runs
 - Concurrent runs are cancelled when new commits are pushed
 - E2E is skipped for Dependabot PRs
@@ -134,6 +161,9 @@ The `playwright.config.ts` configures:
 The `playwright.standalone.config.ts` serves the pre-built single-file bundles
 from `apps/craft/dist` and `apps/artist/dist` on ports 5184 / 5185, so run
 `pnpm build:standalone` before `pnpm test:e2e:standalone`.
+
+The `playwright.production.config.ts` serves the combined root `dist/` on port
+5190 (chromium only), so run `pnpm build:deploy` before `pnpm test:e2e:production`.
 
 ## Writing Tests
 

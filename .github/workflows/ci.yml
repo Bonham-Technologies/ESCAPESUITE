@@ -294,11 +294,13 @@ jobs:
   # Standalone — builds the offline single-file bundles ONCE, publishes them as
   # the `standalone-builds` artifact (standalone-release.yml downloads that
   # artifact cross-run, so the name and paths are a contract), then runs the
-  # standalone E2E suite against those exact files.
+  # standalone E2E suite against those exact files. It then builds the combined
+  # production `dist/` and runs the single-origin suite against that, so both
+  # built-output suites share one runner (and one pnpm install).
   #
   # The build + upload half is unconditional: standalone-release consumes the
   # artifact on main/dev pushes, and Dependabot PRs still need the build to be
-  # proven. Only the E2E half is skipped for Dependabot.
+  # proven. Only the E2E halves are skipped for Dependabot.
   standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -421,6 +423,37 @@ jobs:
         if: failure() && github.actor != 'dependabot[bot]'
         with:
           name: test-results-standalone
+          path: apps/e2e/test-results/
+          retention-days: 7
+
+      # Production layout — the combined `dist/` that Vercel serves, with every
+      # app on ONE origin (`/`, `/craft/`, `/artist/`), so CRAFT and ARTIST share
+      # `video-editor-db` the way they do in production. Deliberately LAST in this
+      # job: `build:deploy` rebuilds apps/*/dist as hosted bundles, which would
+      # otherwise clobber the standalone artifact and the suite that tests it.
+      - name: Build combined production dist
+        if: github.actor != 'dependabot[bot]'
+        run: pnpm build:deploy
+
+      - name: Run production-layout E2E tests
+        if: github.actor != 'dependabot[bot]'
+        run: pnpm test:e2e:production
+        env:
+          CI: true
+
+      - name: Upload Production Test Report
+        uses: actions/upload-artifact@v7
+        if: always() && github.actor != 'dependabot[bot]'
+        with:
+          name: playwright-report-production
+          path: apps/e2e/playwright-report-production/
+          retention-days: 30
+
+      - name: Upload Production Test Results
+        uses: actions/upload-artifact@v7
+        if: failure() && github.actor != 'dependabot[bot]'
+        with:
+          name: test-results-production
           path: apps/e2e/test-results/
           retention-days: 7
 

@@ -62,6 +62,8 @@ pnpm test:coverage       # With coverage reports
 pnpm test:e2e            # Playwright E2E tests (Chromium only in CI)
 pnpm test:e2e:browsers   # Cross-browser E2E (Chromium + Firefox + WebKit)
 pnpm test:e2e:browsers:all # Cross-browser E2E including responsive variants
+pnpm test:e2e:standalone # E2E against the offline single-file builds (run pnpm build:standalone first)
+pnpm test:e2e:production # E2E against the combined single-origin dist (run pnpm build:deploy first)
 
 # Linting
 pnpm lint                # Lint all apps
@@ -193,6 +195,11 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
 - **Unit tests**: Vitest with Testing Library, fake-indexeddb for storage mocking
 - **E2E tests**: Playwright with Chromium; CI runs the whole suite on every PR and push
 - **Journey test**: one end-to-end journey covering record → edit → export across ESCAPECRAFT and ESCAPEARTIST
+- **Production-layout tests**: `apps/e2e/tests/production/` runs against the combined
+  `dist/` from `pnpm build:deploy`, served on ONE port by `apps/e2e/scripts/serve-dist.mjs`
+  (which mirrors `vercel.json`'s rewrites). That is the only setup where CRAFT (`/craft/`)
+  and ARTIST (`/artist/`) share `video-editor-db`, so the cross-app IndexedDB tests live
+  there: `pnpm build:deploy && pnpm test:e2e:production`
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.
@@ -216,7 +223,7 @@ Eight jobs, with `ci-status` as the single required check:
 | `test` | Unit tests with coverage | PRs and pushes |
 | `build` | Production builds, bundle size report, packs + uploads the headless-artist kit | PRs and pushes |
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
-| `standalone` | Offline single-file builds + standalone E2E | PRs and pushes (E2E half skipped for Dependabot) |
+| `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes (E2E halves skipped for Dependabot) |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
 | `ci-status` | Summary/gate job | All PRs |
@@ -226,7 +233,8 @@ Eight jobs, with `ci-status` as the single required check:
 - Combined lint + type-check + audit saves ~30s of runner setup overhead
 - `standalone` builds the offline bundles once, uploads the `standalone-builds`
   artifact (consumed cross-run by `standalone-release.yml`), then tests that
-  same build
+  same build. It then runs `pnpm build:deploy` and the production-layout suite —
+  last, because that build overwrites `apps/*/dist` with the hosted bundles
 - `build` also runs `pnpm --filter=@escapesuite/headless-artist run pack:kit` and
   uploads the tarball as the `headless-artist-kit` artifact (consumed cross-run
   by `standalone-release.yml`, same pattern as `standalone-builds`)
