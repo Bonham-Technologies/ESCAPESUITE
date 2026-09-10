@@ -6,6 +6,7 @@ import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/pr
 import {
   audioSource,
   imageSource,
+  FRAME_MS,
   installPreviewDoubles,
   last,
   renderPreview,
@@ -35,9 +36,6 @@ afterEach(() => {
   vi.useRealTimers()
   vi.clearAllMocks()
 })
-
-/** One animation frame at 60Hz. */
-const FRAME = 16
 
 /**
  * Adding an overlay selects it, and a selected clip is drawn with handles on
@@ -164,7 +162,7 @@ describe('PreviewPlayer drawing', () => {
     preview.clearCalls()
 
     store().setCurrentTime(5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().methods).toEqual(['setTransform', 'fillRect'])
   })
@@ -378,7 +376,7 @@ describe('PreviewPlayer overlay drawing', () => {
     preview.clearCalls()
 
     store().setCurrentTime(2)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     // Halfway through a linear x tween: centre back at 0.5 → 960px.
     expect(last(preview.frame().of('fillRect')).args).toEqual([768, 432, 384, 216])
@@ -392,7 +390,7 @@ describe('PreviewPlayer overlay drawing', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(last(preview.frame().of('fillRect')).args).toEqual([576, 432, 768, 216])
   })
@@ -404,10 +402,10 @@ describe('PreviewPlayer overlay drawing', () => {
     expect(preview.frame().of('fillText')).toHaveLength(1)
 
     fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
     preview.clearCalls()
     store().setCurrentTime(1)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().of('fillText')).toHaveLength(0)
   })
@@ -455,7 +453,7 @@ describe('PreviewPlayer legacy overlay arrays', () => {
     preview.clearCalls()
 
     store().setCurrentTime(2)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().of('fillText')).toHaveLength(0)
   })
@@ -505,7 +503,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().of('drawImage').map((c) => c.state.globalAlpha)).toEqual([0.5, 0.5])
   })
@@ -517,12 +515,12 @@ describe('PreviewPlayer transitions', () => {
 
     preview.clearCalls()
     store().setCurrentTime(1)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     expect(preview.frame().of('drawImage').map((c) => c.state.globalAlpha)).toEqual([1, 0])
 
     preview.clearCalls()
     store().setCurrentTime(1.999)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     const [out, incoming] = preview.frame().of('drawImage').map((c) => c.state.globalAlpha)
     expect(out).toBeCloseTo(0.001, 3)
     expect(incoming).toBeCloseTo(0.999, 3)
@@ -535,7 +533,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     const frame = preview.frame()
 
     // sin(0.5π) * 3 = 3px, set on the outer save() that wraps both draws.
@@ -551,7 +549,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.25)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     const frame = preview.frame()
 
     expect(frame.argsFor('rect')).toEqual([
@@ -568,7 +566,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.25)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().argsFor('rect')).toEqual([
       [480, 0, 1440, 1080],
@@ -581,7 +579,7 @@ describe('PreviewPlayer transitions', () => {
     const preview = await renderPreview()
     preview.clearCalls()
     store().setCurrentTime(1.25)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     expect(preview.frame().argsFor('rect')).toEqual([
       [0, 0, 1920, 810],
       [0, 810, 1920, 270],
@@ -590,7 +588,7 @@ describe('PreviewPlayer transitions', () => {
     store().updateClipTransition('a', { type: 'wipe-down' })
     preview.clearCalls()
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     expect(preview.frame().argsFor('rect')).toEqual([
       [0, 540, 1920, 540],
       [0, 0, 1920, 540],
@@ -604,7 +602,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     // offsetX -960 for the outgoing clip, +960 for the incoming one.
     expect(preview.frame().argsFor('drawImage').map((args) => args[1])).toEqual([-960, 960])
@@ -617,7 +615,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().argsFor('drawImage').map((args) => args[2])).toEqual([-540, 540])
   })
@@ -627,13 +625,13 @@ describe('PreviewPlayer transitions', () => {
     const preview = await renderPreview()
     preview.clearCalls()
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     expect(preview.frame().argsFor('drawImage').map((args) => args[1])).toEqual([960, -960])
 
     store().updateClipTransition('a', { type: 'slide-down' })
     preview.clearCalls()
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     expect(preview.frame().argsFor('drawImage').map((args) => args[2])).toEqual([540, -540])
   })
 
@@ -645,7 +643,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     const draws = preview.frame().of('drawImage')
     expect(draws).toHaveLength(2)
@@ -663,7 +661,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().of('drawImage').map((c) => c.state.globalAlpha)).toEqual([0.5, 0.5])
   })
@@ -679,7 +677,7 @@ describe('PreviewPlayer transitions', () => {
     const preview = await renderPreview()
     preview.clearCalls()
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     // b, drawn at half size, is the incoming clip — not the later c.
     expect(preview.frame().argsFor('drawImage').map((args) => args[3])).toEqual([1920, 960])
@@ -698,7 +696,7 @@ describe('PreviewPlayer transitions', () => {
     const preview = await renderPreview()
     preview.clearCalls()
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     // The clip on the higher of the two remaining tracks wins the transition,
     // and is the half-size one drawn last.
@@ -713,7 +711,7 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.frame().of('drawImage').map((c) => c.state.globalAlpha)).toEqual([1])
   })
@@ -777,7 +775,7 @@ describe('PreviewPlayer frame cache', () => {
     expect(getFrameCache().has(0)).toBe(true)
 
     store().updateClipTransform('clip1', { x: 0.25 })
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(getFrameCache().has(0)).toBe(false)
   })
@@ -940,7 +938,7 @@ describe('PreviewPlayer info bar', () => {
     const preview = await renderPreview()
 
     store().setCurrentTime(5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.view.getByText('Gap')).toBeInTheDocument()
   })
@@ -950,7 +948,7 @@ describe('PreviewPlayer info bar', () => {
     const preview = await renderPreview()
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.view.getByText('00:01.500')).toBeInTheDocument()
   })

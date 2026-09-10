@@ -6,6 +6,7 @@ import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/pr
 import {
   audioSource,
   imageSource,
+  FRAME_MS,
   installPreviewDoubles,
   last,
   renderPreview,
@@ -37,8 +38,6 @@ afterEach(async () => {
   vi.useRealTimers()
   vi.clearAllMocks()
 })
-
-const FRAME = 16
 
 /** Start playback and let the transport spin for `ms` of wall clock. */
 async function play(ms = 0): Promise<void> {
@@ -115,7 +114,7 @@ describe('PreviewPlayer transport start', () => {
     )
 
     await renderPreview()
-    await play(FRAME * 3)
+    await play(FRAME_MS * 3)
 
     expect(doubles.media.videos).toHaveLength(0)
     expect(doubles.media.audios).toHaveLength(0)
@@ -128,7 +127,7 @@ describe('PreviewPlayer transport start', () => {
     store().removeClipFromTimeline('clip1')
     await settle(60)
 
-    await play(FRAME)
+    await play(FRAME_MS)
 
     expect(store().isPlaying).toBe(false)
   })
@@ -172,7 +171,7 @@ describe('PreviewPlayer transport start', () => {
     await renderPreview()
     const element = doubles.media.videos[0]
     element.play = vi.fn().mockRejectedValue(new Error('gesture required'))
-    await play(FRAME)
+    await play(FRAME_MS)
 
     expect(consoleError).toHaveBeenCalledWith(expect.any(Error))
     expect(store().isPlaying).toBe(true)
@@ -411,7 +410,7 @@ describe('PreviewPlayer transport running', () => {
     await play(100)
 
     store().setIsPlaying(false)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(doubles.media.videos[0].pause).toHaveBeenCalled()
     expect(doubles.media.videos[0].muted).toBe(true)
@@ -445,7 +444,7 @@ describe('PreviewPlayer scrubbing', () => {
     preview.clearCalls()
 
     store().setCurrentTime(4)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(last(doubles.media.seeks)).toBe(4)
     // A provisional composite with the frame in hand, then the settled one.
@@ -460,7 +459,7 @@ describe('PreviewPlayer scrubbing', () => {
     preview.clearCalls()
 
     store().setCurrentTime(0.01)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(doubles.media.seeks).toHaveLength(0)
     expect(preview.frames()).toHaveLength(1)
@@ -474,7 +473,7 @@ describe('PreviewPlayer scrubbing', () => {
     preview.clearCalls()
 
     store().setCurrentTime(4)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     const provisional = preview.frames().length
 
     await settle(300)
@@ -496,7 +495,7 @@ describe('PreviewPlayer scrubbing', () => {
     doubles.media.seeks.length = 0
 
     store().setCurrentTime(1.5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     // The outgoing clip seeks to 1.5 and the incoming one to 0 — it has not
     // started yet, so its source time is clamped at its own beginning.
@@ -512,7 +511,7 @@ describe('PreviewPlayer scrubbing', () => {
     preview.clearCalls()
 
     store().setCurrentTime(5)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(doubles.media.seeks).toHaveLength(0)
     expect(preview.frame().methods).toEqual(['setTransform', 'fillRect'])

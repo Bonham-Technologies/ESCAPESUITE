@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent } from '@testing-library/react'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import {
+  FRAME_MS,
   installPreviewDoubles,
   last,
   renderPreview,
@@ -40,8 +41,6 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-const FRAME = 16
-
 /** Half the width and height of a default shape overlay, in canvas pixels. */
 const SHAPE = { halfW: 192, halfH: 108 }
 /** The same for a default 48px text overlay. */
@@ -68,10 +67,10 @@ async function drag(preview: Preview, points: Array<[number, number]>, init: obj
   await settle()
   for (const point of rest) {
     fireEvent.mouseMove(window, { ...preview.at(...point), ...init })
-    await settle(FRAME)
+    await settle(FRAME_MS)
   }
   fireEvent.mouseUp(window)
-  await settle(FRAME)
+  await settle(FRAME_MS)
 }
 
 describe('PreviewPlayer move drags', () => {
@@ -137,9 +136,9 @@ describe('PreviewPlayer move drags', () => {
     fireEvent.mouseMove(window, preview.at(1000, 540))
     fireEvent.mouseMove(window, preview.at(1100, 540))
     fireEvent.mouseMove(window, preview.at(1152, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
     fireEvent.mouseUp(window)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(clipOf(shape.id).shapeData!.x).toBeCloseTo(0.6, 5)
   })
@@ -153,9 +152,9 @@ describe('PreviewPlayer move drags', () => {
     fireEvent.mouseLeave(preview.canvas)
     await settle()
     fireEvent.mouseMove(window, preview.at(1152, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
     fireEvent.mouseUp(window)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(clipOf(shape.id).shapeData!.x).toBeCloseTo(0.6, 5)
   })
@@ -169,7 +168,7 @@ describe('PreviewPlayer move drags', () => {
       [1152, 540],
     ])
     fireEvent.mouseMove(window, preview.at(1900, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(clipOf(shape.id).shapeData!.x).toBeCloseTo(0.6, 5)
   })

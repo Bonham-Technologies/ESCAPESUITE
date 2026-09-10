@@ -5,6 +5,7 @@ import { cleanup, fireEvent } from '@testing-library/react'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import {
   audioSource,
+  FRAME_MS,
   installPreviewDoubles,
   renderPreview,
   settle,
@@ -33,8 +34,6 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-const FRAME = 16
-
 const addText = (data: Partial<TextOverlayData> = {}, duration = 4): Clip =>
   store().addTextOverlayClip(data, undefined, 0, duration)
 
@@ -56,10 +55,10 @@ async function drag(preview: Preview, points: Array<[number, number]>): Promise<
   await settle()
   for (const point of rest) {
     fireEvent.mouseMove(window, preview.at(...point))
-    await settle(FRAME)
+    await settle(FRAME_MS)
   }
   fireEvent.mouseUp(window)
-  await settle(FRAME)
+  await settle(FRAME_MS)
 }
 
 describe('PreviewPlayer click selection', () => {
@@ -153,7 +152,7 @@ describe('PreviewPlayer click selection', () => {
 
     const preview = await renderPreview()
     store().setCurrentTime(2)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
     fireEvent.mouseUp(preview.canvas, preview.at(960, 540))
@@ -167,13 +166,13 @@ describe('PreviewPlayer click selection', () => {
     const preview = await renderPreview()
 
     store().setIsPlaying(true)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
     await settle()
 
     expect(store().selectedClipId).toBeNull()
     store().setIsPlaying(false)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 })
 
@@ -351,11 +350,11 @@ describe('PreviewPlayer selection handles', () => {
     const preview = await renderPreview()
     preview.clearCalls()
     store().setIsPlaying(true)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.calls('arc')).toHaveLength(0)
     store().setIsPlaying(false)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 
   it('draws no handles for a clip whose custom keyframes lock it', async () => {
@@ -388,7 +387,7 @@ describe('PreviewPlayer selection handles', () => {
     const preview = await renderPreview()
     preview.clearCalls()
     store().setCurrentTime(2)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.calls('arc')).toHaveLength(0)
   })
@@ -420,7 +419,7 @@ describe('PreviewPlayer cursor', () => {
 
     expect(store().selectedClipId).toBe(text.id)
     fireEvent.mouseUp(window)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 
   it('offers move over the body of the clip', async () => {
@@ -465,18 +464,18 @@ describe('PreviewPlayer cursor', () => {
     expect(preview.canvas.style.cursor).toBe('ew-resize')
 
     fireEvent.mouseUp(window)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 
   it('shows the default cursor while playing', async () => {
     const { preview } = await selectedShape()
     store().setIsPlaying(true)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(await hover(preview, 960, 540)).toBe('default')
 
     store().setIsPlaying(false)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 })
 
@@ -493,9 +492,9 @@ describe('PreviewPlayer keyframe-mode interaction', () => {
     fireEvent.mouseDown(preview.canvas, preview.at(0.2 * 1920, 540))
     await settle()
     fireEvent.mouseMove(window, preview.at(0.2 * 1920 + 200, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
     fireEvent.mouseUp(preview.canvas, preview.at(0.2 * 1920, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     const untouched = store().project.timeline.clips.find((c) => c.id === other.id)!
     expect(untouched.shapeData!.x).toBe(0.2)
@@ -532,7 +531,7 @@ describe('PreviewPlayer keyframe-mode interaction', () => {
 
     expect(store().selectedClipId).toBe(shape.id)
     fireEvent.mouseUp(window)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 
   it('ignores a clip that has custom keyframes while the panel is closed', async () => {
@@ -555,7 +554,7 @@ describe('PreviewPlayer inline text editing', () => {
     store().setSelectedClipId(null)
     const preview = await renderPreview()
     fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
     return { clip, preview, textarea: preview.view.container.querySelector('textarea')! }
   }
 
@@ -582,7 +581,7 @@ describe('PreviewPlayer inline text editing', () => {
     const preview = await renderPreview({ rect: { left: 0, top: 0, width: 960, height: 600 } })
 
     fireEvent.doubleClick(preview.canvas, preview.at(960 - 25, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     const textarea = preview.view.container.querySelector('textarea')!
     // Right-aligned text hangs left of its anchor: (960 - 100) / 2 in element
@@ -596,7 +595,7 @@ describe('PreviewPlayer inline text editing', () => {
 
     fireEvent.change(textarea, { target: { value: 'After' } })
     fireEvent.blur(textarea)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(store().project.timeline.clips.find((c) => c.id === clip.id)!.textData!.text).toBe('After')
     expect(document.querySelector('textarea')).toBeNull()
@@ -607,7 +606,7 @@ describe('PreviewPlayer inline text editing', () => {
 
     fireEvent.change(textarea, { target: { value: 'Discarded' } })
     fireEvent.keyDown(textarea, { key: 'Escape' })
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(store().project.timeline.clips.find((c) => c.id === clip.id)!.textData!.text).toBe('Before')
     expect(document.querySelector('textarea')).toBeNull()
@@ -618,11 +617,11 @@ describe('PreviewPlayer inline text editing', () => {
     expect(preview.view.container.querySelector('textarea')).not.toBeNull()
 
     store().setIsPlaying(true)
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.view.container.querySelector('textarea')).toBeNull()
     store().setIsPlaying(false)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 
   it('ignores a double-click that misses every text clip', async () => {
@@ -631,7 +630,7 @@ describe('PreviewPlayer inline text editing', () => {
 
     const preview = await renderPreview()
     fireEvent.doubleClick(preview.canvas, preview.at(100, 100))
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.view.container.querySelector('textarea')).toBeNull()
   })
@@ -642,7 +641,7 @@ describe('PreviewPlayer inline text editing', () => {
 
     const preview = await renderPreview()
     fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.view.container.querySelector('textarea')).toBeNull()
   })
@@ -653,13 +652,13 @@ describe('PreviewPlayer inline text editing', () => {
 
     const preview = await renderPreview()
     store().setIsPlaying(true)
-    await settle(FRAME)
+    await settle(FRAME_MS)
     fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     expect(preview.view.container.querySelector('textarea')).toBeNull()
     store().setIsPlaying(false)
-    await settle(FRAME)
+    await settle(FRAME_MS)
   })
 
   it('cancels a drag that the first click of the double-click started', async () => {
@@ -670,12 +669,12 @@ describe('PreviewPlayer inline text editing', () => {
     fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
     await settle()
     fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
 
     // The editor is open and no drag survived to move the text on the next move.
     expect(preview.view.container.querySelector('textarea')).not.toBeNull()
     fireEvent.mouseMove(window, preview.at(1400, 540))
-    await settle(FRAME)
+    await settle(FRAME_MS)
     expect(store().project.timeline.clips.find((c) => c.id === clip.id)!.textData!.x).toBe(0.5)
   })
 
