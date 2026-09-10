@@ -94,10 +94,19 @@ describe('ExportDialog', () => {
   // outlive the test that started them, so every test gets a fresh spy rather
   // than sharing one a stale timer could fire.
   let onClose: () => void
+  // Every successful export clicks a download anchor, which jsdom answers with
+  // a "Not implemented: navigation" warning. Record the clicks instead.
+  let clickedLinks: HTMLAnchorElement[]
+  let originalAnchorClick: () => void
 
   beforeEach(() => {
     vi.clearAllMocks()
     onClose = vi.fn()
+    clickedLinks = []
+    originalAnchorClick = HTMLAnchorElement.prototype.click
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      clickedLinks.push(this)
+    }
     mockExportToWebM.mockReset()
     mockExportToWebM.mockResolvedValue(new Blob())
     mockExportToMP4.mockReset()
@@ -112,6 +121,7 @@ describe('ExportDialog', () => {
   })
 
   afterEach(() => {
+    HTMLAnchorElement.prototype.click = originalAnchorClick
     vi.useRealTimers()
   })
 
@@ -399,30 +409,22 @@ describe('ExportDialog', () => {
     it('downloads the finished file and tells the host about it', async () => {
       const exported = new Blob(['video-bytes'], { type: 'video/webm' })
       mockExportToWebM.mockResolvedValue(exported)
-      const clickedLinks: HTMLAnchorElement[] = []
-      const originalClick = HTMLAnchorElement.prototype.click
-      HTMLAnchorElement.prototype.click = function () {
-        clickedLinks.push(this as HTMLAnchorElement)
-      }
-      try {
-        render(<ExportDialog isOpen={true} onClose={onClose} />)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
 
-        fireEvent.click(primaryExport())
+      fireEvent.click(primaryExport())
 
-        await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
-        expect(clickedLinks).toHaveLength(1)
-        expect(clickedLinks[0].download).toBe('Test Project.webm')
-        expect(URL.createObjectURL).toHaveBeenCalledWith(exported)
-        expect(URL.revokeObjectURL).toHaveBeenCalled()
-        expect(document.querySelector('a[download]')).toBeNull()
-        expect(mockSendMessage).toHaveBeenCalledWith({
-          type: 'EXPORT_COMPLETE',
-          payload: { blob: exported, format: 'webm', name: 'Test Project.webm' },
-        })
-        expect(mockAnalytics.exportCompleted).toHaveBeenCalledWith('webm', 5)
-      } finally {
-        HTMLAnchorElement.prototype.click = originalClick
-      }
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(clickedLinks).toHaveLength(1)
+      expect(clickedLinks[0].download).toBe('Test Project.webm')
+      expect(clickedLinks[0].href).toBe('blob:mock-url')
+      expect(URL.createObjectURL).toHaveBeenCalledWith(exported)
+      expect(URL.revokeObjectURL).toHaveBeenCalled()
+      expect(document.querySelector('a[download]')).toBeNull()
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: 'EXPORT_COMPLETE',
+        payload: { blob: exported, format: 'webm', name: 'Test Project.webm' },
+      })
+      expect(mockAnalytics.exportCompleted).toHaveBeenCalledWith('webm', 5)
     })
 
     it('names the file after the mp4 extension when exporting MP4', async () => {

@@ -126,28 +126,26 @@ describe('KeyframeEditor', () => {
       opacity: 0.5,
     })
     store().updateClipEffects('clip1', { blur: 7 })
+    const properties: [label: string, property: AnimatableProperty, clipValue: number][] = [
+      ['Position X', 'x', 0.25],
+      ['Position Y', 'y', 0.75],
+      ['Scale X', 'scaleX', 2],
+      ['Scale Y', 'scaleY', 3],
+      ['Rotation', 'rotation', 45],
+      ['Opacity', 'opacity', 0.5],
+      ['Blur', 'blur', 7],
+    ]
     // One keyframe per property so every property block is on screen.
-    const expected: Record<string, number> = {
-      'Position X': 0.25,
-      'Position Y': 0.75,
-      'Scale X': 2,
-      'Scale Y': 3,
-      Rotation: 45,
-      Opacity: 0.5,
-      Blur: 7,
-    }
-    const properties: AnimatableProperty[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur']
-    for (const property of properties) {
+    for (const [, property] of properties) {
       store().setClipKeyframe('clip1', property, { time: 3, value: 0, easing: 'linear' })
     }
     store().setCurrentTime(1)
     render(<KeyframeEditor />)
 
-    for (const [label, value] of Object.entries(expected)) {
+    for (const [label, property, clipValue] of properties) {
       const add = propertyBlock(label).querySelector<HTMLElement>(`.${styles.addButton}`)!
       await user.click(add)
-      const property = properties[Object.keys(expected).indexOf(label)]
-      expect(keyframesOf(property)).toContainEqual({ time: 1, value, easing: 'ease-out' })
+      expect(keyframesOf(property)).toContainEqual({ time: 1, value: clipValue, easing: 'ease-out' })
     }
   })
 

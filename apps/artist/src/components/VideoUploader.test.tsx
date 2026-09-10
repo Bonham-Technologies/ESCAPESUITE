@@ -5,6 +5,7 @@ import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore'
 import { getFrameCache, resetFrameCache } from '../core/frameCache'
 import { storeVideo, getAllVideoMetadata } from '../core/storage'
+import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { Project, SourceVideo } from '../store/types'
 import styles from './VideoUploader.module.css'
 
@@ -49,7 +50,9 @@ const imageMeta: SourceVideo = {
   ...videoMeta,
   id: 'image1',
   name: 'test.png',
-  duration: 5,
+  // Deliberately not DEFAULT_IMAGE_DURATION, so a clip that took the still
+  // default is distinguishable from one that copied the source duration.
+  duration: 7,
   width: 800,
   height: 600,
   mimeType: 'image/png',
@@ -216,13 +219,20 @@ describe('VideoUploader', () => {
     it('clears the file input so the same file can be picked again', async () => {
       render(<VideoUploader />)
       const input = fileInput()
+      // jsdom never reports a non-empty value for a file input, so record what
+      // the component writes rather than reading the value back.
+      const valueWrites: string[] = []
+      Object.defineProperty(input, 'value', {
+        configurable: true,
+        get: () => 'C:\\fakepath\\test.mp4',
+        set: (next: string) => valueWrites.push(next),
+      })
       Object.defineProperty(input, 'files', { value: [file('test.mp4', 'video/mp4')], configurable: true })
-      input.value = ''
 
       fireEvent.change(input)
 
       await waitFor(() => expect(mockProcessVideoFile).toHaveBeenCalled())
-      expect(input.value).toBe('')
+      expect(valueWrites).toEqual([''])
     })
 
     it('drops the finished upload from the list after a moment', async () => {
@@ -461,13 +471,15 @@ describe('VideoUploader', () => {
 
     it('keeps everything when the confirmation is declined', async () => {
       vi.mocked(globalThis.confirm).mockReturnValue(false)
+      await storeVideo('kept', new Blob(['bytes']), { ...videoMeta, id: 'kept' })
       store().addSourceVideo(videoMeta)
       render(<VideoUploader />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
-      await Promise.resolve()
+      await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
       expect(store().sourceVideos).toHaveLength(1)
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('kept')
     })
 
     it('hides the clear-all button when almost nothing is stored', async () => {
@@ -602,13 +614,16 @@ describe('VideoLibrary', () => {
     expect(clips[0].transform.scaleY).toBe(1)
   })
 
-  it('gives an image the default still duration', () => {
+  it('gives an image the default still duration rather than its own', () => {
     store().addSourceVideo(imageMeta)
     render(<VideoLibrary />)
 
     fireEvent.click(screen.getByTitle('Add to timeline'))
 
-    expect(store().project.timeline.clips[0].duration).toBe(5)
+    const clip = store().project.timeline.clips[0]
+    expect(clip.duration).toBe(DEFAULT_IMAGE_DURATION)
+    expect(clip.duration).not.toBe(imageMeta.duration)
+    expect(clip.endTime).toBe(DEFAULT_IMAGE_DURATION)
   })
 
   it('removes a video once confirmed', async () => {
@@ -624,12 +639,14 @@ describe('VideoLibrary', () => {
 
   it('keeps the video when the confirmation is declined', async () => {
     vi.mocked(globalThis.confirm).mockReturnValue(false)
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
     render(<VideoLibrary />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
-    await Promise.resolve()
+    await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
     expect(useEditorStore.getState().sourceVideos).toHaveLength(1)
+    expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
   })
 })

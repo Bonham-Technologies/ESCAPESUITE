@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { KeyframePanel } from './KeyframePanel'
 import { useEditorStore } from '../../store/projectStore'
 import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
+import { DEFAULT_KEYFRAME_PANEL_STATE } from '../../store/types'
 import type { Clip } from '../../store/types'
 import panelStyles from './KeyframePanel.module.css'
 import trackStyles from './KeyframeTrack.module.css'
@@ -46,8 +47,12 @@ const keyframesOf = (property: string) =>
 
 describe('KeyframePanel', () => {
   beforeEach(() => {
+    // The panel persists its layout in localStorage, and resetStoreForTest
+    // deliberately leaves the panel's own UI state alone, so both need
+    // clearing for each test to start from the documented default geometry.
     localStorage.clear()
     resetStoreForTest()
+    useEditorStore.setState({ keyframePanelState: { ...DEFAULT_KEYFRAME_PANEL_STATE } })
   })
 
   it('renders nothing while the panel is closed', () => {
@@ -364,21 +369,28 @@ describe('KeyframePanel', () => {
       expect(store().keyframePanelState.size).toEqual({ width: 800, height: 620 })
     })
 
-    it.each(['resizeN', 'resizeS', 'resizeE', 'resizeW', 'resizeNE', 'resizeNW', 'resizeSE', 'resizeSW'] as const)(
-      'starts a resize from the %s handle',
-      (handleClass) => {
-        openPanelWithClip()
-        render(<KeyframePanel />)
+    // The panel starts 700x520 and will not shrink below 500x500, so a
+    // 60px drag away from the origin grows an east/south edge by 60 and is
+    // clipped at the minimum on a west/north one.
+    it.each([
+      ['resizeN', 700, 500],
+      ['resizeS', 700, 580],
+      ['resizeE', 760, 520],
+      ['resizeW', 640, 520],
+      ['resizeNE', 760, 500],
+      ['resizeNW', 640, 500],
+      ['resizeSE', 760, 580],
+      ['resizeSW', 640, 580],
+    ] as const)('resizes to %s from the %s handle', (handleClass, width, height) => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
 
-        const handle = document.body.querySelector<HTMLElement>(`.${panelStyles[handleClass]}`)!
-        fireEvent.mouseDown(handle, { clientX: 0, clientY: 0 })
-        fireEvent.mouseMove(window, { clientX: 60, clientY: 60 })
-        fireEvent.mouseUp(window)
+      const handle = document.body.querySelector<HTMLElement>(`.${panelStyles[handleClass]}`)!
+      fireEvent.mouseDown(handle, { clientX: 0, clientY: 0 })
+      fireEvent.mouseMove(window, { clientX: 60, clientY: 60 })
+      fireEvent.mouseUp(window)
 
-        const { width, height } = store().keyframePanelState.size
-        expect(width).toBeGreaterThanOrEqual(500)
-        expect(height).toBeGreaterThanOrEqual(500)
-      }
-    )
+      expect(store().keyframePanelState.size).toEqual({ width, height })
+    })
   })
 })

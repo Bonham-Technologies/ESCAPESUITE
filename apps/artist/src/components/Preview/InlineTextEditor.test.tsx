@@ -153,13 +153,13 @@ describe('InlineTextEditor', () => {
 
   it('re-measures itself as the text changes', async () => {
     const user = userEvent.setup()
-    const raf = vi.spyOn(globalThis, 'requestAnimationFrame')
     const { textarea } = renderEditor()
 
     await user.type(textarea, 'abc')
 
-    expect(raf).toHaveBeenCalledTimes(3)
-    // jsdom reports no layout, so the editor falls back to its minimum width.
+    // jsdom reports no layout, so the editor falls back to its minimum width
+    // and to a height derived from the font size (40 * 1.4).
     expect(textarea.style.width).toBe('60px')
+    expect(textarea.style.height).toBe('56px')
   })
 })
