@@ -233,9 +233,12 @@ never above what the suite actually achieves:
   description instead of quietly loosening it.
 - **Every `src` file counts.** Each config sets `coverage.include: ['src/**/*.{ts,tsx}']`
   so a file the test suite never imports still appears in the report at 0%, instead of
-  being silently omitted from the denominator. Beyond `src/test/**`, type declarations and
-  config files, four files are excluded, each with a comment in its package's
-  `coverage.exclude` naming the suite that does cover it: the bootstrap entry points
+  being silently omitted from the denominator. Beyond `src/test/**`, `.d.ts` and config
+  files, craft and artist also exclude `**/types.ts` — those files are interfaces (erased
+  at compile time) plus a handful of default data literals such as
+  `DEFAULT_KEYFRAME_PANEL_STATE`, which have no branches of their own and are executed by
+  every importer. Four files beyond that are excluded, each with a comment in its
+  package's `coverage.exclude` naming the suite that does cover it: the bootstrap entry points
   `src/main.tsx` (plan/craft/artist) and artist's `src/headless/main.ts`, artist's
   `src/workers/decodeWorker.ts` (runs only inside a Web Worker; covered by the e2e MP4
   export tests), and `services/headless-artist`'s `src/renderDriver.ts` (needs real

@@ -316,7 +316,8 @@ describe('runJob', () => {
     expect(written).toContain('error: boom\n')
   })
 
-  it('reports a work directory it could not remove as a warning, not as a failed job', async () => {
+  // Skipped as root, where the mode bits below do not stop anything and the rm succeeds.
+  it.skipIf(process.getuid?.() === 0)('reports a work directory it could not remove as a warning, not as a failed job', async () => {
     const workDir = await makeTempDir()
     const outDir = await makeTempDir()
     // Sealing the work root after the job dir exists is what an operator's own permissions

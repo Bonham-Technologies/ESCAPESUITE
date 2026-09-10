@@ -436,7 +436,10 @@ describe('binding', () => {
     expect(res.status).toBe(200)
   })
 
-  it('survives a log sink that throws, rather than turning it into an unhandled rejection', async () => {
+})
+
+describe('the log sink', () => {
+  it('survives one that throws, rather than turning it into an unhandled rejection', async () => {
     const seen: string[] = []
     await start({
       log: (line) => {
@@ -451,7 +454,7 @@ describe('binding', () => {
     expect((await fetch(`${base}/healthz`)).status).toBe(200)
   })
 
-  it('logs to stderr when no log sink is given, leaving stdout to the one-shot CLI', async () => {
+  it('falls back to stderr when there is none, leaving stdout to the one-shot CLI', async () => {
     const written: string[] = []
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
       written.push(String(chunk))

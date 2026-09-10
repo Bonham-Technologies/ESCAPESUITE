@@ -33,7 +33,12 @@ type EditorStore = ReturnType<typeof useEditorStore.getState>
  * the app's own code and covers every file that drives the store through this fixture; with
  * nothing mounted, `act` flushes an empty queue and changes nothing.
  *
- * Reads are untouched — `store().project` is the store's own object, not a copy.
+ * Reads are untouched — `store().project` is the store's own object, not a copy. The
+ * wrappers are built per property read, so `store().setZoom !== store().setZoom`; a test
+ * that needs the action itself (to spy on, or to compare) should reach for
+ * `useEditorStore.getState()`. That is also the escape hatch for a mutation a test wants
+ * left *unflushed*: `useEditorStore.getState().<action>(…)` goes straight to the store,
+ * with no `act()` around it.
  */
 export const store = (): EditorStore => {
   const state = useEditorStore.getState()

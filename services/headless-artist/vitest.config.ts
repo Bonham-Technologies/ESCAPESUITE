@@ -27,10 +27,13 @@ export default defineConfig({
         'src/renderDriver.ts',
       ],
       // Coverage floors — these only go up. See CLAUDE.md's Testing section.
-      // What is left uncovered is three lines that this suite cannot reach: cli.ts's
-      // `if (isDirectRun())` bootstrap, which runs only when the file is the process entry
-      // point (src/cli.chromium.test.ts spawns it for real), and serve.ts's catch for a
-      // synchronous throw from an always-async task plus its post-listen socket-error handler.
+      // What is left uncovered is four lines this suite cannot reach:
+      //   cli.ts 481-482  the `if (isDirectRun())` bootstrap, which runs only when the file
+      //                   is the process entry point (src/cli.chromium.test.ts spawns it for
+      //                   real, under test:e2e)
+      //   serve.ts 171    the catch for a task that throws synchronously; the only task the
+      //                   limiter is ever given is an async arrow, which cannot
+      //   serve.ts 454    the post-listen socket-error handler (EMFILE and friends)
       thresholds: {
         lines: 99,
         statements: 99,
