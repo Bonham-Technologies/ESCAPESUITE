@@ -899,6 +899,25 @@ describe('Recorder', () => {
       expect(stopStream).toHaveBeenCalled()
     })
 
+    it('should stop the combined stream, not the field it has already cleared', async () => {
+      const { stopStream } = await import('./permissions')
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+
+      await recorder.initialize(
+        mockScreenStream,
+        null,
+        mockMicStream,
+        defaultConfig
+      )
+      recorder.start()
+
+      recorder.dispose()
+
+      const stopped = vi.mocked(stopStream).mock.calls.at(-1)?.[0]
+      expect(stopped).not.toBeNull()
+      expect(stopped!.getTracks()).toContain(videoTrack)
+    })
+
     it('should close AudioContext', async () => {
       await recorder.initialize(
         mockScreenStream,
