@@ -32,8 +32,6 @@ function App() {
     currentDuration,
     countdownValue,
     audioLevels,
-    screenStream,
-    webcamStream,
     setConfig,
     setCapabilities,
     setDetailedCapabilities,
@@ -149,10 +147,16 @@ function App() {
     }
   }, [previewStream]);
 
-  // Stop all streams helper
+  // Stop all streams helper.
+  // Read the streams from the store rather than from this render's closure:
+  // the recorder's onStop/onError callbacks are captured while handleStart-
+  // Recording runs, i.e. one render before setStreams() lands, so a closed-over
+  // screenStream/webcamStream would still be null there and the capture would
+  // keep running after the take ended.
   const stopAllStreams = useCallback(() => {
-    stopStream(screenStream);
-    stopStream(webcamStream);
+    const { screenStream: activeScreen, webcamStream: activeWebcam } = useRecorderStore.getState();
+    stopStream(activeScreen);
+    stopStream(activeWebcam);
     setStreams(null, null);
     setPreviewStream(null);
 
@@ -166,7 +170,7 @@ function App() {
     if (canvasPreviewRef.current) {
       canvasPreviewRef.current.innerHTML = '';
     }
-  }, [screenStream, webcamStream, setStreams]);
+  }, [setStreams]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
