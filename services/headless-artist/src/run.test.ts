@@ -261,6 +261,90 @@ describe('runJob', () => {
     expect(logLines).toContain('error: boom')
   })
 
+  it('reports a rejection that is not an Error without printing "[object Object]"', async () => {
+    const workDir = await makeTempDir()
+    // Playwright and the page bridge can both reject with a bare value rather than an Error.
+    vi.mocked(renderInChromium).mockRejectedValue('page closed before the render started')
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: workDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome).toMatchObject({ ok: false, error: 'page closed before the render started' })
+  })
+
+  it('omits manifestLocation for a sink that does not durably store one', async () => {
+    const workDir = await makeTempDir()
+    mockRenderWriting('hello')
+
+    const outcome = await runJob(
+      makeSpec({
+        output: { sink: 'command', config: { command: process.execPath, args: ['-e', ''] } },
+      }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.outputLocation).toBe(`command:${process.execPath}`)
+    // Absent, not undefined: the outcome is printed as JSON, and a null field reads as a
+    // location that failed rather than one that never existed.
+    expect('manifestLocation' in outcome).toBe(false)
+  })
+
+  it('logs to stderr when no log sink was given, so a failure is never silent', async () => {
+    const workDir = await makeTempDir()
+    vi.mocked(renderInChromium).mockRejectedValue(new Error('boom'))
+    const written: string[] = []
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk))
+      return true
+    })
+
+    try {
+      await expect(
+        runJob(makeSpec({ output: { sink: 'volume', config: { dir: workDir } } }), {
+          bundlePath: '/bundle/headless.html',
+          workDir,
+          versions: VERSIONS,
+        }),
+      ).resolves.toMatchObject({ ok: false })
+    } finally {
+      stderr.mockRestore()
+    }
+
+    expect(written).toContain('error: boom\n')
+  })
+
+  it('reports a work directory it could not remove as a warning, not as a failed job', async () => {
+    const workDir = await makeTempDir()
+    const outDir = await makeTempDir()
+    // Sealing the work root after the job dir exists is what an operator's own permissions
+    // change, or a read-only remount, looks like from in here: the render is finished and
+    // delivered, and only the teardown fails.
+    vi.mocked(renderInChromium).mockImplementation(async (_bundle, _job, _options, outputPath) => {
+      await fs.writeFile(outputPath, 'delivered bytes')
+      await fs.chmod(workDir, 0o500)
+      return { outputPath, meta: META, chromiumVersion: '999.0.0' }
+    })
+
+    let outcome
+    try {
+      outcome = await runJob(
+        makeSpec({ output: { sink: 'volume', config: { dir: outDir } } }),
+        { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+      )
+    } finally {
+      await fs.chmod(workDir, 0o700)
+    }
+
+    expect(outcome.ok).toBe(true)
+    expect(await fs.readFile(path.join(outDir, 'job-1.mp4'), 'utf8')).toBe('delivered bytes')
+    expect(
+      logLines.some((line) => line.startsWith('[headless] warning: could not clean up the job work directory')),
+    ).toBe(true)
+  })
+
   it('removes the loader temp files and the job work dir after a bundle job', async () => {
     const workDir = await makeTempDir()
     const outDir = await makeTempDir()

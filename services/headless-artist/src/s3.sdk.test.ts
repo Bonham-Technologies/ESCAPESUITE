@@ -204,6 +204,31 @@ describe('fetchS3ToLocal', () => {
     expect(sdk.state.commands).toEqual([])
   })
 
+  it('rejects a uri that is not an s3:// object address, before any request', async () => {
+    const { fetchS3ToLocal } = await import('./s3')
+    const destDir = await makeTempDir()
+
+    await expect(fetchS3ToLocal('https://bucket.example/renders/a.mp4', destDir)).rejects.toThrow(
+      'invalid s3 uri: https://bucket.example/renders/a.mp4',
+    )
+    // A bucket with no key names no object either.
+    await expect(fetchS3ToLocal('s3://bucket', destDir)).rejects.toThrow('invalid s3 uri: s3://bucket')
+    expect(sdk.state.commands).toEqual([])
+  })
+
+  it('rejects a body shape this runtime can neither stream nor decode', async () => {
+    const { fetchS3ToLocal } = await import('./s3')
+    const destDir = await makeTempDir()
+    // Neither a Node Readable nor an SDK byte-array body: writing it would produce a file
+    // full of "[object Object]" that looks like a successful download.
+    sdk.state.body = { pipeTo: () => undefined }
+
+    await expect(fetchS3ToLocal('s3://bucket/a.mp4', destDir)).rejects.toThrow(
+      's3 object "s3://bucket/a.mp4" returned a body this runtime cannot read',
+    )
+    expect(await fs.readdir(destDir)).toEqual([])
+  })
+
   it('rejects an empty body', async () => {
     const { fetchS3ToLocal } = await import('./s3')
     const destDir = await makeTempDir()

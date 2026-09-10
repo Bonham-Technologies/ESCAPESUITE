@@ -81,6 +81,15 @@ describe('parseJobSpec', () => {
     expect(() => parseJobSpec(validSpec({ jobId: 'a'.repeat(129) }))).toThrow(/jobId/)
   })
 
+  it('rejects an input that is not an object at all', () => {
+    expect(() => parseJobSpec(validSpec({ input: '/tmp/manifest.json' }))).toThrow(
+      'input must be an object with exactly one of "bundle" or "manifest"',
+    )
+    expect(() => parseJobSpec(validSpec({ input: undefined }))).toThrow(
+      'input must be an object with exactly one of "bundle" or "manifest"',
+    )
+  })
+
   it('rejects an input with neither bundle nor manifest', () => {
     expect(() => parseJobSpec(validSpec({ input: {} }))).toThrow(/input/)
   })
