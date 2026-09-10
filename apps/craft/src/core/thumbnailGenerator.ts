@@ -139,6 +139,7 @@ export async function extractVideoMetadata(
   return new Promise((resolve) => {
     // Set a timeout in case the video never loads
     const timeout = setTimeout(() => {
+      cleanup();
       resolve(defaults);
     }, 5000);
 
