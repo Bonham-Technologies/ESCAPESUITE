@@ -2,6 +2,7 @@ node_modules/
 test-results/
 playwright-report/
 playwright-report-standalone/
+playwright-report-production/
 playwright-report-journeys/
 playwright/.cache/
 .env
