@@ -11,6 +11,7 @@ import { extractAndMixAudioWithWorker } from './audioMixer'
 import { storeVideo } from './storage'
 import { clearAnimationCache } from '../utils/animation'
 import {
+  fromEncodedChunk,
   getMediabunnyState,
   lastMediabunnyOutput,
   resetMediabunnyDouble,
@@ -182,6 +183,11 @@ describe('exportToMP4 muxing', () => {
 
     const packets = getMediabunnyState().videoSources[0].packets
     expect(packets).toHaveLength(6)
+    // Each packet wraps the chunk the encoder emitted for that frame.
+    expect(fromEncodedChunk).toHaveBeenCalledTimes(6)
+    expect(packets.map((p) => (p.packet as { chunk: unknown }).chunk)).toEqual(
+      webcodecs.videoEncoders[0].emitted
+    )
     expect(webcodecs.videoEncoders[0].encodes.map((e) => e.keyFrame)).toEqual([
       true,
       false,
@@ -657,6 +663,25 @@ describe('exportToMP4 failure handling', () => {
     expect(webcodecs.videoEncoders[0].state).toBe('closed')
     expect(webcodecs.audioEncoders[0].state).toBe('closed')
     expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
+
+  it('does not honour an abort that arrives once muxing has started', async () => {
+    // checkAborted() runs per frame and per audio chunk, but not around
+    // flush/finalize: a cancellation that lands this late is ignored and the
+    // export runs to completion. Pinned here so a change to that is deliberate.
+    mixAudio.mockResolvedValue(audioFor(0.2))
+    const controller = new AbortController()
+    const onProgress = (p: ExportProgress) => {
+      if (p.phase === 'muxing') controller.abort()
+    }
+
+    const blob = await run({ signal: controller.signal, onProgress })
+
+    expect(blob.size).toBe(128)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(webcodecs.videoEncoders[0].state).toBe('closed')
+    expect(webcodecs.audioEncoders[0].state).toBe('closed')
+    expect(allFramesClosed()).toBe(true)
   })
 
   it('retries a failed frame as a keyframe', async () => {

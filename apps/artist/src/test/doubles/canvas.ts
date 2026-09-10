@@ -107,8 +107,14 @@ export function setDefaultToBlobResult(result: Blob | null): void {
   defaultToBlobResult = result
 }
 
-function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingContext2D {
+function createContext(
+  canvas: HTMLCanvasElement,
+  { track = true }: { track?: boolean } = {}
+): RecordingCanvasRenderingContext2D {
   const calls: CanvasCall[] = []
+  // save()/restore() keep a real state stack, so the state recorded against a
+  // call made after a restore() is the state a browser would actually apply.
+  const stack: CanvasState[] = []
   const snapshot = (): CanvasState => ({
     globalAlpha: ctx.globalAlpha,
     globalCompositeOperation: ctx.globalCompositeOperation,
@@ -128,8 +134,14 @@ function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingConte
 
   const ctx: RecordingCanvasRenderingContext2D = {
     canvas,
-    save: record('save'),
-    restore: record('restore'),
+    save: record('save', () => {
+      stack.push(snapshot())
+    }),
+    restore: record('restore', () => {
+      const previous = stack.pop()
+      // An unbalanced restore() is a no-op on a real context too.
+      if (previous) Object.assign(ctx, previous)
+    }),
     translate: record('translate'),
     rotate: record('rotate'),
     scale: record('scale'),
@@ -175,7 +187,7 @@ function createContext(canvas: HTMLCanvasElement): RecordingCanvasRenderingConte
     stateFor: (method: string) => calls.filter((c) => c.method === method).map((c) => c.state),
   }
   contextsByCanvas.set(canvas, ctx)
-  lastContext = ctx
+  if (track) lastContext = ctx
   return ctx
 }
 
@@ -285,6 +297,8 @@ export interface OffscreenCanvasRecord {
 export interface OffscreenCanvasDouble {
   /** Every OffscreenCanvas the code under test constructed, in order. */
   readonly instances: OffscreenCanvasRecord[]
+  /** The context of the most recently constructed OffscreenCanvas, if any. */
+  readonly lastContext: RecordingCanvasRenderingContext2D | null
   /** Make getContext('2d') return null, the way an out-of-memory browser does. */
   failGetContext: boolean
   uninstall(): void
@@ -292,12 +306,20 @@ export interface OffscreenCanvasDouble {
 
 const OFFSCREEN_MISSING = Symbol('missing')
 
+let lastOffscreenContext: RecordingCanvasRenderingContext2D | null = null
+
+/** The context of the most recent OffscreenCanvas the code under test made. */
+export function getLastOffscreenContext(): RecordingCanvasRenderingContext2D | null {
+  return lastOffscreenContext
+}
+
 export function installOffscreenCanvasDouble(): OffscreenCanvasDouble {
   const g = globalThis as unknown as Record<string, unknown>
   const previous = 'OffscreenCanvas' in g ? g.OffscreenCanvas : OFFSCREEN_MISSING
 
   const instances: OffscreenCanvasRecord[] = []
   const state = { failGetContext: false }
+  lastOffscreenContext = null
 
   class OffscreenCanvasImpl {
     readonly width: number
@@ -310,7 +332,11 @@ export function installOffscreenCanvasDouble(): OffscreenCanvasDouble {
       const backing = document.createElement('canvas')
       backing.width = width
       backing.height = height
-      this.context = createContext(backing)
+      // Not tracked as the "last canvas context": an offscreen canvas is
+      // scratch space, and getLastCanvasContext() must keep pointing at the
+      // canvas the code under test is really drawing to.
+      this.context = createContext(backing, { track: false })
+      lastOffscreenContext = this.context
       instances.push(this)
     }
 
@@ -324,6 +350,9 @@ export function installOffscreenCanvasDouble(): OffscreenCanvasDouble {
 
   return {
     instances,
+    get lastContext() {
+      return lastOffscreenContext
+    },
     get failGetContext() {
       return state.failGetContext
     },
@@ -331,6 +360,7 @@ export function installOffscreenCanvasDouble(): OffscreenCanvasDouble {
       state.failGetContext = next
     },
     uninstall() {
+      lastOffscreenContext = null
       if (previous === OFFSCREEN_MISSING) delete g.OffscreenCanvas
       else g.OffscreenCanvas = previous
     },

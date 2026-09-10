@@ -483,13 +483,17 @@ describe('exportToWebM rendering', () => {
     expect(allFramesClosed()).toBe(true)
   })
 
-  it('releases the object URLs it created for the media', async () => {
+  it('releases exactly the object URLs it created for the media', async () => {
+    const create = vi.mocked(URL.createObjectURL)
     const revoke = vi.mocked(URL.revokeObjectURL)
+    create.mockClear()
     revoke.mockClear()
 
     await run()
 
-    expect(revoke).toHaveBeenCalled()
+    // One source, so one URL out and the same one back in.
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(revoke.mock.calls).toEqual([[create.mock.results[0].value]])
   })
 })
 
@@ -567,6 +571,25 @@ describe('exportToWebM failure handling', () => {
     expect(webcodecs.videoEncoders[0].state).toBe('closed')
     expect(webcodecs.audioEncoders[0].state).toBe('closed')
     expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
+
+  it('does not honour an abort that arrives once muxing has started', async () => {
+    // checkAborted() runs per frame and per audio chunk, but not around
+    // flush/finalize: a cancellation that lands this late is ignored and the
+    // export runs to completion. Pinned here so a change to that is deliberate.
+    mixAudio.mockResolvedValue(audioFor(0.2))
+    const controller = new AbortController()
+    const onProgress = (p: ExportProgress) => {
+      if (p.phase === 'muxing') controller.abort()
+    }
+
+    const blob = await run({ signal: controller.signal, onProgress })
+
+    expect(blob.size).toBe(128)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(webcodecs.videoEncoders[0].state).toBe('closed')
+    expect(webcodecs.audioEncoders[0].state).toBe('closed')
+    expect(allFramesClosed()).toBe(true)
   })
 
   it('rethrows a muxer failure as-is, after closing the encoder', async () => {

@@ -141,6 +141,18 @@ export interface EncodedPacketDouble {
 }
 
 /**
+ * Every chunk wrapped for the muxer, in order. Module-level so
+ * resetMediabunnyDouble() can clear its call history between tests.
+ */
+export const fromEncodedChunk = vi.fn(
+  (chunk: { type?: unknown; timestamp?: unknown }): EncodedPacketDouble => ({
+    chunk,
+    type: chunk?.type,
+    timestamp: chunk?.timestamp,
+  })
+)
+
+/**
  * The module shape to hand back from a vi.mock('mediabunny', ...) factory.
  * Every call is recorded in the module-level state shared with the test.
  */
@@ -170,13 +182,7 @@ export function createMediabunnyDouble() {
         state.audioSources.push(this)
       }
     },
-    EncodedPacket: {
-      fromEncodedChunk: vi.fn((chunk: { type?: unknown; timestamp?: unknown }): EncodedPacketDouble => ({
-        chunk,
-        type: chunk?.type,
-        timestamp: chunk?.timestamp,
-      })),
-    },
+    EncodedPacket: { fromEncodedChunk },
   }
 }
 
@@ -193,6 +199,7 @@ export function lastMediabunnyOutput(): OutputDouble {
 }
 
 export function resetMediabunnyDouble(): void {
+  fromEncodedChunk.mockClear()
   state.outputs.length = 0
   state.videoSources.length = 0
   state.audioSources.length = 0

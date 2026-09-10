@@ -20,6 +20,8 @@ const SAMPLE_RATE = 48000
 let posted: WorkerResponse[] = []
 let transfers: unknown[] = []
 let closed = 0
+/** Set to make the next postMessage throw, the way a DataCloneError does. */
+let postMessageFailure: Error | null = null
 let handler: (event: { data: WorkerRequest }) => Promise<void>
 
 beforeAll(() => {
@@ -33,7 +35,13 @@ beforeEach(() => {
   posted = []
   transfers = []
   closed = 0
+  postMessageFailure = null
   vi.spyOn(self, 'postMessage').mockImplementation(((message: WorkerResponse, options?: unknown) => {
+    if (postMessageFailure) {
+      const failure = postMessageFailure
+      postMessageFailure = null
+      throw failure
+    }
     posted.push(message)
     transfers.push(options)
   }) as typeof self.postMessage)
@@ -81,15 +89,26 @@ describe('TERMINATE', () => {
 
 describe('errors', () => {
   it('reports a failure back to the main thread instead of dying', async () => {
-    // A clip with no transition is malformed; the frame computation trips on it.
-    const broken = { ...makeClip(), transition: undefined } as unknown as Clip
-    await init([broken], [makeTrack()])
+    // Posting a response can fail for real — a payload the structured clone
+    // algorithm cannot copy throws DataCloneError out of postMessage. The
+    // worker has to survive that and report it rather than going silent.
+    postMessageFailure = new DOMException('response could not be cloned', 'DataCloneError')
+
+    await send({ type: 'INIT', clips: [], tracks: [], totalDuration: 1 })
+
+    expect(posted).toEqual([
+      { type: 'ERROR', error: expect.stringContaining('could not be cloned') },
+    ])
+  })
+
+  it('keeps serving messages after a failure', async () => {
+    postMessageFailure = new DOMException('response could not be cloned', 'DataCloneError')
+    await send({ type: 'INIT', clips: [], tracks: [], totalDuration: 1 })
     posted = []
 
-    await send({ type: 'COMPUTE_FRAME', frameTime: 0 })
+    await init([makeClip()], [makeTrack()])
 
-    expect(posted).toHaveLength(1)
-    expect(posted[0].type).toBe('ERROR')
+    expect(posted).toEqual([{ type: 'INIT_COMPLETE' }])
   })
 })
 

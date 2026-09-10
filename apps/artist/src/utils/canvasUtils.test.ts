@@ -109,7 +109,9 @@ describe('canvasUtils', () => {
 
       expect(draw).toHaveBeenCalledTimes(1);
       expect(methodsOf(ctx)).toEqual(['save', 'translate', 'rotate', 'translate', 'fillRect', 'restore']);
-      expect(ctx.globalAlpha).toBe(0.5);
+      expect(ctx.stateFor('fillRect')[0].globalAlpha).toBe(0.5);
+      // ...and the restore() puts it back, so the next draw is unaffected.
+      expect(ctx.globalAlpha).toBe(1);
     });
   });
 
@@ -306,22 +308,22 @@ describe('canvasUtils', () => {
       const ctx = ctx2d();
       drawShape(ctx, { type: 'rectangle', ...base });
 
-      expect(ctx.fillStyle).toBe('#ff0000');
-      expect(ctx.strokeStyle).toBe('#000000');
-      expect(ctx.lineWidth).toBe(2);
+      expect(ctx.stateFor('fillRect')[0].fillStyle).toBe('#ff0000');
+      expect(ctx.stateFor('strokeRect')[0].strokeStyle).toBe('#000000');
+      expect(ctx.stateFor('strokeRect')[0].lineWidth).toBe(2);
       expect(methodsOf(ctx)).toEqual(['save', 'fillRect', 'strokeRect', 'restore']);
     });
 
     it('applies opacity', () => {
       const ctx = ctx2d();
       drawShape(ctx, { type: 'rectangle', ...base, strokeWidth: 0, opacity: 0.5 });
-      expect(ctx.globalAlpha).toBe(0.5);
+      expect(ctx.stateFor('fillRect')[0].globalAlpha).toBe(0.5);
     });
 
     it('applies blur filter', () => {
       const ctx = ctx2d();
       drawShape(ctx, { type: 'rectangle', ...base, strokeWidth: 0, blur: 5 });
-      expect(ctx.filter).toBe('blur(5px)');
+      expect(ctx.stateFor('fillRect')[0].filter).toBe('blur(5px)');
     });
 
     it('applies rotation around the shape centre', () => {
@@ -392,10 +394,12 @@ describe('canvasUtils', () => {
       const ctx = ctx2d();
       drawTextWithBackground(ctx, { ...base });
 
-      expect(ctx.font).toBe('italic bold 20px Arial');
-      expect(ctx.textAlign).toBe('left');
-      expect(ctx.textBaseline).toBe('middle');
-      expect(ctx.fillStyle).toBe('#ffffff');
+      expect(ctx.stateFor('fillText')[0]).toMatchObject({
+        font: 'italic bold 20px Arial',
+        textAlign: 'left',
+        textBaseline: 'middle',
+        fillStyle: '#ffffff',
+      });
       expect(ctx.argsFor('fillText')).toEqual([['Hello', 200, 100]]);
       expect(methodsOf(ctx)).toEqual(['save', 'fillText', 'restore']);
     });
@@ -439,8 +443,8 @@ describe('canvasUtils', () => {
       const ctx = ctx2d();
       drawTextWithBackground(ctx, { ...base, opacity: 0.4, blur: 3, rotation: 45 });
 
-      expect(ctx.globalAlpha).toBe(0.4);
-      expect(ctx.filter).toBe('blur(3px)');
+      expect(ctx.stateFor('fillText')[0].globalAlpha).toBe(0.4);
+      expect(ctx.stateFor('fillText')[0].filter).toBe('blur(3px)');
       expect(ctx.translate).toHaveBeenNthCalledWith(1, 200, 100);
       expect(ctx.rotate).toHaveBeenCalledWith(Math.PI / 4);
     });
@@ -461,7 +465,7 @@ describe('canvasUtils', () => {
         blendMode: 'screen',
       });
 
-      expect(ctx.globalCompositeOperation).toBe('screen');
+      expect(ctx.stateFor('drawImage')[0].globalCompositeOperation).toBe('screen');
       expect(ctx.argsFor('drawImage')).toEqual([[source, 480, 270, 960, 540]]);
       expect(methodsOf(ctx)).toEqual(['save', 'drawImage', 'restore']);
     });
@@ -477,7 +481,7 @@ describe('canvasUtils', () => {
         transform: { x: 0, y: 0, scaleX: 1, scaleY: 1 },
       });
 
-      expect(ctx.globalCompositeOperation).toBe('source-over');
+      expect(ctx.stateFor('drawImage')[0].globalCompositeOperation).toBe('source-over');
     });
 
     it('applies opacity, blur and rotation about the drawn rect centre', () => {
@@ -491,8 +495,8 @@ describe('canvasUtils', () => {
         transform: { x: 0, y: 0, scaleX: 0.5, scaleY: 0.5, opacity: 0.3, blur: 2, rotation: 90 },
       });
 
-      expect(ctx.globalAlpha).toBe(0.3);
-      expect(ctx.filter).toBe('blur(2px)');
+      expect(ctx.stateFor('drawImage')[0].globalAlpha).toBe(0.3);
+      expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(2px)');
       // Drawn rect is 100x100 at (0,0), so the pivot is its centre.
       expect(ctx.translate).toHaveBeenNthCalledWith(1, 50, 50);
       expect(ctx.rotate).toHaveBeenCalledWith(Math.PI / 2);

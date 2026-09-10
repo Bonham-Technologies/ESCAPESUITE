@@ -6,7 +6,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { drawShapeOverlayToCanvasAnimated, drawTextOverlayToCanvasAnimated } from './canvasRenderer'
 import {
   createRecordingContext,
+  getLastCanvasContext,
+  getLastOffscreenContext,
+  installCanvasDouble,
   installOffscreenCanvasDouble,
+  uninstallCanvasDouble,
   type OffscreenCanvasDouble,
   type RecordingCanvasRenderingContext2D,
 } from '../test/doubles/canvas'
@@ -20,6 +24,87 @@ const methods = () => ctx.calls.map((c) => c.method)
 
 beforeEach(() => {
   ctx = createRecordingContext()
+})
+
+// The renderer assertions below read the drawing state captured at each call,
+// which is only meaningful if the double's save()/restore() behave like a real
+// context's. These pin that down directly.
+describe('recording canvas double (canary)', () => {
+  it('restores the state a save() captured', () => {
+    const c = createRecordingContext()
+    const draw = c as unknown as CanvasRenderingContext2D
+    c.globalAlpha = 1
+    c.filter = 'none'
+
+    draw.save()
+    c.globalAlpha = 0.25
+    c.filter = 'blur(4px)'
+    draw.fillRect(0, 0, 1, 1)
+    draw.restore()
+    draw.fillRect(0, 0, 1, 1)
+
+    // The first rect was drawn under the pushed state, the second under the
+    // restored one — the double does not leak state past a restore().
+    expect(c.stateFor('fillRect')[0]).toMatchObject({ globalAlpha: 0.25, filter: 'blur(4px)' })
+    expect(c.stateFor('fillRect')[1]).toMatchObject({ globalAlpha: 1, filter: 'none' })
+    expect(c.globalAlpha).toBe(1)
+    expect(c.filter).toBe('none')
+  })
+
+  it('restores every tracked property, and nests', () => {
+    const c = createRecordingContext()
+    const draw = c as unknown as CanvasRenderingContext2D
+    draw.save()
+    c.fillStyle = '#111111'
+    c.strokeStyle = '#222222'
+    c.lineWidth = 3
+    c.font = '10px Arial'
+    c.textAlign = 'end'
+    c.textBaseline = 'top'
+    c.globalCompositeOperation = 'screen'
+
+    draw.save()
+    c.fillStyle = '#333333'
+    draw.restore()
+    expect(c.fillStyle).toBe('#111111')
+
+    draw.restore()
+    expect(c).toMatchObject({
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 0,
+      font: '',
+      textAlign: 'start',
+      textBaseline: 'alphabetic',
+      globalCompositeOperation: 'source-over',
+    })
+  })
+
+  it('treats an unbalanced restore() as a no-op', () => {
+    const c = createRecordingContext()
+    c.globalAlpha = 0.5
+
+    ;(c as unknown as CanvasRenderingContext2D).restore()
+
+    expect(c.globalAlpha).toBe(0.5)
+  })
+
+  it('keeps an OffscreenCanvas out of getLastCanvasContext()', () => {
+    installCanvasDouble()
+    const offscreenDouble = installOffscreenCanvasDouble()
+    try {
+      const onscreen = document.createElement('canvas').getContext('2d')
+      const scratch = new OffscreenCanvas(10, 10).getContext('2d')
+
+      expect(getLastCanvasContext()).toBe(onscreen)
+      expect(offscreenDouble.instances).toHaveLength(1)
+      expect(getLastOffscreenContext()).toBe(scratch)
+      expect(offscreenDouble.lastContext).toBe(offscreenDouble.instances[0].context)
+    } finally {
+      offscreenDouble.uninstall()
+      uninstallCanvasDouble()
+    }
+  })
 })
 
 describe('drawTextOverlayToCanvasAnimated', () => {

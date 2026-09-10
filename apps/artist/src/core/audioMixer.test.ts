@@ -74,8 +74,10 @@ describe('extractAndMixAudio', () => {
   let offline: OfflineAudioContextDoubles
   let stereo: AudioBufferDouble
   let warn: ReturnType<typeof vi.spyOn>
+  let patchedBlobRead: ReturnType<typeof vi.spyOn> | null = null
 
   beforeEach(async () => {
+    patchedBlobRead = null
     stereo = createAudioBufferDouble([ramp(480), ramp(480, -1)], SAMPLE_RATE)
     offline = installOfflineAudioContextDouble(() => stereo)
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -83,6 +85,9 @@ describe('extractAndMixAudio', () => {
   })
 
   afterEach(() => {
+    // Restore here, not at the end of the test body: a failing assertion must
+    // not leave the patched prototype behind for the next test.
+    patchedBlobRead?.mockRestore()
     offline.uninstall()
     warn.mockRestore()
   })
@@ -264,7 +269,7 @@ describe('extractAndMixAudio', () => {
   })
 
   it('warns and carries on when reading a clip blob fails', async () => {
-    const failing = vi
+    patchedBlobRead = vi
       .spyOn(Blob.prototype, 'arrayBuffer')
       .mockRejectedValueOnce(new Error('read failed'))
     const clips = [
@@ -280,7 +285,6 @@ describe('extractAndMixAudio', () => {
     )
     // The second clip still made it into the mix.
     expect(mixed).not.toBeNull()
-    failing.mockRestore()
   })
 
   it('reports progress once per clip, ending at 100', async () => {
@@ -317,6 +321,9 @@ describe('extractAndMixAudioWithWorker', () => {
   })
 
   afterEach(() => {
+    // Unconditionally, not at the end of the timeout tests' bodies: a failing
+    // assertion must not leak fake timers into the tests that follow.
+    vi.useRealTimers()
     worker.uninstall()
     offline.uninstall()
     warn.mockRestore()
@@ -506,7 +513,6 @@ describe('extractAndMixAudioWithWorker', () => {
     )
     expect(result).not.toBeNull()
     expect(onProgress).toHaveBeenCalledWith(100) // the main-thread mixer ran
-    vi.useRealTimers()
   })
 
   it('falls back to the main thread when the audio request times out', async () => {
@@ -532,7 +538,6 @@ describe('extractAndMixAudioWithWorker', () => {
     )
     expect(result).not.toBeNull()
     expect(onProgress).toHaveBeenCalledWith(100)
-    vi.useRealTimers()
   })
 
   it('falls back to the main thread when the worker errors during extraction', async () => {
