@@ -1,69 +1,28 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ExportDialog } from './ExportDialog'
+import { ExportAbortedError, ExportError } from '../../core/exporter'
+import { useEditorStore } from '../../store/projectStore'
+import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
+import type { ExportProgress } from '../../store/types'
+import styles from './ExportDialog.module.css'
 
-// Mock the store
-const mockClips = [
-  { id: 'clip1', sourceVideoId: 'video1', timelinePosition: 0, duration: 5 },
-]
-
-const mockSourceVideos = [
-  { id: 'video1', name: 'test.mp4', duration: 10 },
-]
-
-vi.mock('../../store/projectStore', () => ({
-  useEditorStore: vi.fn((selector) => {
-    const state = {
-      project: {
-        name: 'Test Project',
-        resolution: { width: 1920, height: 1080 },
-        timeline: {
-          clips: mockClips,
-          tracks: [{ id: 'track1', name: 'Track 1', index: 0 }],
-        },
-      },
-      sourceVideos: mockSourceVideos,
-      inPoint: null,
-      outPoint: null,
-    }
-    return selector(state)
-  }),
+// The exporter itself is driven by its own suite; here it is a scripted
+// collaborator. The real error classes come through importOriginal so the
+// dialog's instanceof checks are the ones production runs.
+const { mockExportToWebM, mockExportToMP4, mockIsMP4ExportSupported } = vi.hoisted(() => ({
+  mockExportToWebM: vi.fn(),
+  mockExportToMP4: vi.fn(),
+  mockIsMP4ExportSupported: vi.fn(() => true),
 }))
 
-// Mock the exporter - use vi.hoisted for variables referenced in vi.mock
-const { mockExportToWebM, mockExportToMP4, MockExportAbortedError, MockExportError } = vi.hoisted(() => {
-  // Define mock classes inside hoisted block
-  class MockExportAbortedError extends Error {
-    constructor() {
-      super('Export was cancelled')
-      this.name = 'ExportAbortedError'
-    }
-  }
-  class MockExportError extends Error {
-    public readonly exportLog: Array<{ phase: string; detail: string; timestamp: number }>;
-    constructor(message: string, exportLog: Array<{ phase: string; detail: string; timestamp: number }>) {
-      super(message)
-      this.name = 'ExportError'
-      this.exportLog = exportLog
-    }
-  }
-  return {
-    mockExportToWebM: vi.fn(() => Promise.resolve(new Blob())),
-    mockExportToMP4: vi.fn(() => Promise.resolve(new Blob())),
-    MockExportAbortedError,
-    MockExportError,
-  }
-})
-
-vi.mock('../../core/exporter', () => ({
+vi.mock('../../core/exporter', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../core/exporter')>()),
   exportToWebM: mockExportToWebM,
   exportToMP4: mockExportToMP4,
-  isMP4ExportSupported: vi.fn(() => true),
-  ExportAbortedError: MockExportAbortedError,
-  ExportError: MockExportError,
+  isMP4ExportSupported: mockIsMP4ExportSupported,
 }))
 
-// Mock storage for settings persistence
 const { mockGetSetting, mockSetSetting } = vi.hoisted(() => ({
   mockGetSetting: vi.fn((): Promise<unknown> => Promise.resolve(undefined)),
   mockSetSetting: vi.fn(() => Promise.resolve()),
@@ -74,504 +33,729 @@ vi.mock('../../core/storage', () => ({
   setSetting: mockSetSetting,
 }))
 
-// Mock the host integration channel
-const { mockSendMessage } = vi.hoisted(() => ({
-  mockSendMessage: vi.fn(),
-}))
+const { mockSendMessage } = vi.hoisted(() => ({ mockSendMessage: vi.fn() }))
+vi.mock('../../utils/integration', () => ({ sendMessage: mockSendMessage }))
 
-vi.mock('../../utils/integration', () => ({
-  sendMessage: mockSendMessage,
-}))
-
-// Mock CSS modules
-vi.mock('./ExportDialog.module.css', () => ({
-  default: {
-    overlay: 'overlay',
-    dialog: 'dialog',
-    header: 'header',
-    title: 'title',
-    closeButton: 'closeButton',
-    body: 'body',
-    primarySection: 'primarySection',
-    primaryExportButton: 'primaryExportButton',
-    advancedSection: 'advancedSection',
-    advancedToggle: 'advancedToggle',
-    advancedChevron: 'advancedChevron',
-    advancedChevronOpen: 'advancedChevronOpen',
-    advancedContent: 'advancedContent',
-    advancedExportButton: 'advancedExportButton',
-    section: 'section',
-    label: 'label',
-    radioGroup: 'radioGroup',
-    radio: 'radio',
-    radioHint: 'radioHint',
-    radioDisabled: 'radioDisabled',
-    select: 'select',
-    error: 'error',
-    summary: 'summary',
-    footer: 'footer',
-    cancelButton: 'cancelButton',
-    exportButton: 'exportButton',
-    progressSection: 'progressSection',
-    progressInfo: 'progressInfo',
-    progressPhase: 'progressPhase',
-    progressMessage: 'progressMessage',
-    progressBar: 'progressBar',
-    progressFill: 'progressFill',
-    progressPercent: 'progressPercent',
+const { mockAnalytics } = vi.hoisted(() => ({
+  mockAnalytics: {
+    exportStarted: vi.fn(),
+    exportCompleted: vi.fn(),
+    exportFailed: vi.fn(),
   },
 }))
+vi.mock('../../utils/analytics', () => ({ analytics: mockAnalytics }))
+
+type ExportArgs = [
+  unknown, // clips
+  unknown, // sourceVideos
+  { format: string; quality: string; resolution: string; timeRange?: { start: number; end: number } },
+  (p: ExportProgress) => void,
+  unknown, // tracks
+  AbortSignal,
+  { width: number; height: number },
+]
+
+const webmArgs = () => mockExportToWebM.mock.calls[0] as unknown as ExportArgs
+const mp4Args = () => mockExportToMP4.mock.calls[0] as unknown as ExportArgs
+
+const advancedToggle = () => screen.getByRole('button', { name: /advanced options/i })
+const primaryExport = () => screen.getByRole('button', { name: /download webm/i })
+const advancedExport = () => {
+  const buttons = screen.getAllByRole('button', { name: /download (webm|mp4)/i })
+  return buttons[buttons.length - 1]
+}
+
+/** Let the export promise chain settle without waiting on a real timer. */
+async function settle() {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+}
+
+/**
+ * jsdom leaves offsetParent null on every element, which the dialog's focus
+ * trap reads as "not visible". Make the tree look laid out.
+ */
+function pretendElementsAreVisible(): () => void {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+    configurable: true,
+    get: () => document.body,
+  })
+  return () => {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
+  }
+}
 
 describe('ExportDialog', () => {
-  const mockOnClose = vi.fn()
+  // A completed export schedules its own close two seconds later. Those timers
+  // outlive the test that started them, so every test gets a fresh spy rather
+  // than sharing one a stale timer could fire.
+  let onClose: () => void
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // clearAllMocks wipes call history but keeps implementations, so a mock a
-    // previous test taught to reject or capture would leak into the next one.
+    onClose = vi.fn()
     mockExportToWebM.mockReset()
     mockExportToWebM.mockResolvedValue(new Blob())
     mockExportToMP4.mockReset()
     mockExportToMP4.mockResolvedValue(new Blob())
     mockSendMessage.mockReset()
+    mockIsMP4ExportSupported.mockReturnValue(true)
     mockGetSetting.mockResolvedValue(undefined)
+
+    resetStoreForTest()
+    store().setProject({ ...store().project, name: 'Test Project' })
+    addClip('clip1', 0, 5)
   })
 
-  it('does not render when isOpen is false', () => {
-    render(<ExportDialog isOpen={false} onClose={mockOnClose} />)
-    expect(screen.queryByText('Export Video')).not.toBeInTheDocument()
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('renders when isOpen is true', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-    expect(screen.getByText('Export Video')).toBeInTheDocument()
-  })
+  describe('rendering', () => {
+    it('does not render when isOpen is false', () => {
+      render(<ExportDialog isOpen={false} onClose={onClose} />)
 
-  it('shows primary Download WebM button', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-    expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
-  })
-
-  it('shows Advanced options toggle', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-    expect(screen.getByRole('button', { name: /advanced options/i })).toBeInTheDocument()
-  })
-
-  it('does not show format options by default', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-    expect(screen.queryByText('WebM (VP9 + Opus)')).not.toBeInTheDocument()
-    expect(screen.queryByText('MP4 (H.264 + AAC)')).not.toBeInTheDocument()
-  })
-
-  it('shows format/quality/resolution options when Advanced options is clicked', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    const advancedToggle = screen.getByRole('button', { name: /advanced options/i })
-    fireEvent.click(advancedToggle)
-
-    expect(screen.getByText('WebM (VP9 + Opus)')).toBeInTheDocument()
-    expect(screen.getByText('MP4 (H.264 + AAC)')).toBeInTheDocument()
-    expect(screen.getByText('Quality')).toBeInTheDocument()
-    expect(screen.getByText('Resolution')).toBeInTheDocument()
-  })
-
-  it('displays quality options in advanced section', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-
-    expect(screen.getByText('Low (faster export)')).toBeInTheDocument()
-    expect(screen.getByText('Medium')).toBeInTheDocument()
-    expect(screen.getByText('High (slower export)')).toBeInTheDocument()
-  })
-
-  it('displays resolution options with project resolution', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-
-    expect(screen.getByText('Project (1920x1080)')).toBeInTheDocument()
-    expect(screen.getByText('1080p')).toBeInTheDocument()
-    expect(screen.getByText('720p')).toBeInTheDocument()
-    expect(screen.getByText('480p')).toBeInTheDocument()
-  })
-
-  it('calls onClose when cancel button is clicked', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    const cancelButton = screen.getByRole('button', { name: /cancel/i })
-    fireEvent.click(cancelButton)
-
-    expect(mockOnClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('calls onClose when close button (x) is clicked', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    const closeButton = screen.getByRole('button', { name: /×/i })
-    fireEvent.click(closeButton)
-
-    expect(mockOnClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('calls onClose when overlay is clicked', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    const overlay = screen.getByText('Export Video').closest('.overlay')
-    if (overlay) {
-      fireEvent.click(overlay)
-    }
-
-    expect(mockOnClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('allows changing format selection in advanced options', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-
-    const webmRadio = screen.getByRole('radio', { name: /webm/i })
-    const mp4Radio = screen.getByRole('radio', { name: /mp4/i })
-
-    // WebM should be selected by default
-    expect(webmRadio).toBeChecked()
-    expect(mp4Radio).not.toBeChecked()
-
-    // Click MP4
-    fireEvent.click(mp4Radio)
-    expect(mp4Radio).toBeChecked()
-    expect(webmRadio).not.toBeChecked()
-  })
-
-  it('allows changing quality selection in advanced options', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-
-    const qualitySelect = screen.getByDisplayValue('Medium')
-    fireEvent.change(qualitySelect, { target: { value: 'low' } })
-
-    expect(qualitySelect).toHaveValue('low')
-  })
-
-  it('allows changing resolution selection in advanced options', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-
-    const resolutionSelect = screen.getByDisplayValue('Project (1920x1080)')
-    fireEvent.change(resolutionSelect, { target: { value: '720p' } })
-
-    expect(resolutionSelect).toHaveValue('720p')
-  })
-
-  it('has an enabled primary export button when clips exist', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    const exportButton = screen.getByRole('button', { name: /download webm/i })
-    expect(exportButton).not.toBeDisabled()
-  })
-
-  it('advanced export button label changes based on format', () => {
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-
-    // Default format is WebM - there should be two "Download WebM" buttons (primary + advanced)
-    const webmButtons = screen.getAllByRole('button', { name: /download webm/i })
-    expect(webmButtons).toHaveLength(2)
-
-    // Change to MP4
-    fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
-
-    // Advanced button should update to Download MP4
-    expect(screen.getByRole('button', { name: /download mp4/i })).toBeInTheDocument()
-    // Primary button should still say Download WebM
-    expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
-  })
-
-  it('primary button exports with default settings (WebM, medium, project)', async () => {
-    let capturedOptions: unknown
-    mockExportToWebM.mockImplementation((...args: unknown[]) => {
-      capturedOptions = args[2]
-      return Promise.resolve(new Blob())
+      expect(screen.queryByText('Export Video')).not.toBeInTheDocument()
     })
 
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+    it('renders a modal dialog when isOpen is true', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
 
-    const primaryButton = screen.getByRole('button', { name: /download webm/i })
-    fireEvent.click(primaryButton)
-
-    await vi.waitFor(() => {
-      expect(mockExportToWebM).toHaveBeenCalled()
+      expect(screen.getByRole('dialog')).toHaveAttribute('aria-modal', 'true')
+      expect(screen.getByText('Export Video')).toBeInTheDocument()
+      expect(primaryExport()).toBeEnabled()
     })
 
-    expect(capturedOptions).toEqual({
-      format: 'webm',
-      quality: 'medium',
-      resolution: 'project',
+    it('keeps the format, quality and resolution controls behind the advanced toggle', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(advancedToggle()).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByText('WebM (VP9 + Opus)')).not.toBeInTheDocument()
+      expect(screen.queryByText('MP4 (H.264 + AAC)')).not.toBeInTheDocument()
+
+      fireEvent.click(advancedToggle())
+
+      expect(advancedToggle()).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByText('WebM (VP9 + Opus)')).toBeInTheDocument()
+      expect(screen.getByText('MP4 (H.264 + AAC)')).toBeInTheDocument()
+      expect(screen.getByText('Low (faster export)')).toBeInTheDocument()
+      expect(screen.getByText('Medium')).toBeInTheDocument()
+      expect(screen.getByText('High (slower export)')).toBeInTheDocument()
+      expect(screen.getByText('1080p')).toBeInTheDocument()
+      expect(screen.getByText('720p')).toBeInTheDocument()
+      expect(screen.getByText('480p')).toBeInTheDocument()
+    })
+
+    it('offers the project resolution from the store', () => {
+      store().setProjectResolution(1280, 720)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(advancedToggle())
+
+      expect(screen.getByText('Project (1280x720)')).toBeInTheDocument()
+    })
+
+    it('mentions background-tab encoding only where MP4 is available', () => {
+      const { unmount } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+      expect(screen.getByText(/MP4 exports keep encoding in a background tab/)).toBeInTheDocument()
+      unmount()
+
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(screen.queryByText(/MP4 exports keep encoding/)).not.toBeInTheDocument()
+    })
+
+    it('disables the MP4 choice in a browser that cannot encode it', () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(advancedToggle())
+
+      expect(screen.getByRole('radio', { name: /mp4/i })).toBeDisabled()
+      expect(screen.getByText('Not supported in this browser')).toBeInTheDocument()
+    })
+
+    it('switches the advanced button label with the chosen format', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      expect(screen.getAllByRole('button', { name: /download webm/i })).toHaveLength(2)
+
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      expect(screen.getByRole('button', { name: /download mp4/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
+    })
+
+    it('moves the selection between the format radios', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      const webm = screen.getByRole('radio', { name: /webm/i })
+      const mp4 = screen.getByRole('radio', { name: /mp4/i })
+      expect(webm).toBeChecked()
+
+      fireEvent.click(mp4)
+      expect(mp4).toBeChecked()
+      expect(webm).not.toBeChecked()
     })
   })
 
-  it('advanced export button uses configured settings', async () => {
-    let capturedOptions: unknown
-    mockExportToWebM.mockImplementation((...args: unknown[]) => {
-      capturedOptions = args[2]
-      return Promise.resolve(new Blob())
+  describe('closing', () => {
+    it('closes from the Cancel button', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      expect(onClose).toHaveBeenCalledTimes(1)
     })
 
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+    it('closes from the × button', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
 
-    // Open advanced options
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+      fireEvent.click(screen.getByRole('button', { name: '×' }))
 
-    // Change quality to high
-    const qualitySelect = screen.getByDisplayValue('Medium')
-    fireEvent.change(qualitySelect, { target: { value: 'high' } })
-
-    // Change resolution to 720p
-    const resolutionSelect = screen.getByDisplayValue('Project (1920x1080)')
-    fireEvent.change(resolutionSelect, { target: { value: '720p' } })
-
-    // Click the advanced download button (the second "Download WebM" button)
-    const buttons = screen.getAllByRole('button', { name: /download webm/i })
-    const advancedButton = buttons[buttons.length - 1] // The one inside advanced section
-    fireEvent.click(advancedButton)
-
-    await vi.waitFor(() => {
-      expect(mockExportToWebM).toHaveBeenCalled()
+      expect(onClose).toHaveBeenCalledTimes(1)
     })
 
-    expect(capturedOptions).toEqual({
-      format: 'webm',
-      quality: 'high',
-      resolution: '720p',
+    it('closes when the backdrop is clicked but not the dialog itself', () => {
+      const { container } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(screen.getByRole('dialog'))
+      expect(onClose).not.toHaveBeenCalled()
+
+      fireEvent.click(container.querySelector(`.${styles.overlay}`)!)
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('closes on Escape without letting the editor shortcuts see the key', () => {
+      const editorShortcuts = vi.fn()
+      document.addEventListener('keydown', editorShortcuts)
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        fireEvent.keyDown(document, { key: 'Escape' })
+
+        expect(onClose).toHaveBeenCalledTimes(1)
+        expect(editorShortcuts).not.toHaveBeenCalled()
+      } finally {
+        document.removeEventListener('keydown', editorShortcuts)
+      }
     })
   })
 
-  it('saves settings to IndexedDB when using advanced export', async () => {
-    mockExportToWebM.mockResolvedValue(new Blob())
+  describe('focus handling', () => {
+    let restoreVisibility: () => void
 
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+    beforeEach(() => {
+      restoreVisibility = pretendElementsAreVisible()
+    })
 
-    // Open advanced and change settings
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-    const qualitySelect = screen.getByDisplayValue('Medium')
-    fireEvent.change(qualitySelect, { target: { value: 'high' } })
+    afterEach(() => {
+      restoreVisibility()
+    })
 
-    // Click advanced download button
-    const buttons = screen.getAllByRole('button', { name: /download webm/i })
-    fireEvent.click(buttons[buttons.length - 1])
+    it('moves focus into the dialog when it opens and back out when it closes', () => {
+      const opener = document.createElement('button')
+      document.body.appendChild(opener)
+      opener.focus()
 
-    await vi.waitFor(() => {
+      const { rerender } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+      expect(screen.getByRole('button', { name: '×' })).toHaveFocus()
+
+      rerender(<ExportDialog isOpen={false} onClose={onClose} />)
+      expect(opener).toHaveFocus()
+
+      opener.remove()
+    })
+
+    it('cycles focus forwards at the end of the dialog', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      const cancel = screen.getByRole('button', { name: /cancel/i })
+      cancel.focus()
+
+      fireEvent.keyDown(document, { key: 'Tab' })
+
+      expect(screen.getByRole('button', { name: '×' })).toHaveFocus()
+    })
+
+    it('cycles focus backwards at the start of the dialog', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      screen.getByRole('button', { name: '×' }).focus()
+
+      fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+
+      expect(screen.getByRole('button', { name: /cancel/i })).toHaveFocus()
+    })
+
+    it('leaves Tab alone in the middle of the dialog', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      const middle = primaryExport()
+      middle.focus()
+
+      fireEvent.keyDown(document, { key: 'Tab' })
+
+      expect(middle).toHaveFocus()
+    })
+
+    it('ignores keys other than Tab and Escape', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      const middle = primaryExport()
+      middle.focus()
+
+      fireEvent.keyDown(document, { key: 'a' })
+
+      expect(middle).toHaveFocus()
+      expect(onClose).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('running an export', () => {
+    it('exports the timeline with the default settings from the primary button', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      const [clips, sourceVideos, options, , tracks, signal, resolution] = webmArgs()
+      expect(clips).toBe(store().project.timeline.clips)
+      expect(sourceVideos).toBe(store().sourceVideos)
+      expect(tracks).toBe(store().project.timeline.tracks)
+      expect(resolution).toEqual({ width: 1920, height: 1080 })
+      expect(options).toEqual({
+        format: 'webm',
+        quality: 'medium',
+        resolution: 'project',
+        timeRange: undefined,
+      })
+      expect(signal).toBeInstanceOf(AbortSignal)
+      expect(mockSetSetting).not.toHaveBeenCalled()
+    })
+
+    it('exports with the configured settings from the advanced button', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      fireEvent.change(screen.getByDisplayValue('Medium'), { target: { value: 'high' } })
+      fireEvent.change(screen.getByDisplayValue('Project (1920x1080)'), { target: { value: '720p' } })
+
+      fireEvent.click(advancedExport())
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(webmArgs()[2]).toEqual({
+        format: 'webm',
+        quality: 'high',
+        resolution: '720p',
+        timeRange: undefined,
+      })
       expect(mockSetSetting).toHaveBeenCalledWith('lastExportSettings', {
         format: 'webm',
         quality: 'high',
-        resolution: 'project',
-      })
-    })
-  })
-
-  it('loads saved settings and expands advanced on open', async () => {
-    mockGetSetting.mockResolvedValue({
-      format: 'webm',
-      quality: 'high',
-      resolution: '720p',
-    })
-
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    // Wait for settings to load and advanced to expand
-    await vi.waitFor(() => {
-      expect(screen.getByText('Quality')).toBeInTheDocument()
-    })
-
-    // Verify settings are populated
-    expect(screen.getByDisplayValue('High (slower export)')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('720p')).toBeInTheDocument()
-  })
-
-  it('passes AbortSignal to export function when exporting', async () => {
-    let capturedSignal: AbortSignal | undefined
-    mockExportToWebM.mockImplementation((...args: unknown[]) => {
-      // The signal is the 6th argument (index 5)
-      capturedSignal = args[5] as AbortSignal | undefined
-      return Promise.resolve(new Blob())
-    })
-
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    const exportButton = screen.getByRole('button', { name: /download webm/i })
-    fireEvent.click(exportButton)
-
-    // Wait for the export to be called
-    await vi.waitFor(() => {
-      expect(mockExportToWebM).toHaveBeenCalled()
-    })
-
-    // Verify AbortSignal was passed
-    expect(capturedSignal).toBeDefined()
-    expect(capturedSignal).toBeInstanceOf(AbortSignal)
-  })
-
-  it('does not show error message when export is cancelled by user', async () => {
-    // Simulate export being cancelled
-    mockExportToWebM.mockImplementation(() => {
-      return Promise.reject(new MockExportAbortedError())
-    })
-
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    const exportButton = screen.getByRole('button', { name: /download webm/i })
-    fireEvent.click(exportButton)
-
-    // Wait for the export to be called and rejected
-    await vi.waitFor(() => {
-      expect(mockExportToWebM).toHaveBeenCalled()
-    })
-
-    // Wait a tick for error handling
-    await new Promise(resolve => setTimeout(resolve, 0))
-
-    // Should NOT show error message for user-initiated cancellation
-    expect(screen.queryByText(/error/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument()
-  })
-
-  it('shows error message for non-cancellation errors', async () => {
-    // Simulate a real error (not cancellation)
-    mockExportToWebM.mockImplementation(() => {
-      return Promise.reject(new Error('Encoding failed'))
-    })
-
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    // Open advanced to see error display
-    fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-
-    // Click the advanced download button
-    const buttons = screen.getAllByRole('button', { name: /download webm/i })
-    fireEvent.click(buttons[buttons.length - 1])
-
-    // Wait for error to be displayed
-    await vi.waitFor(() => {
-      expect(screen.getByText(/encoding failed/i)).toBeInTheDocument()
-    })
-  })
-
-  it('does not save settings when using primary export button', async () => {
-    mockExportToWebM.mockResolvedValue(new Blob())
-
-    render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-    // Click primary download button directly
-    fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
-
-    await vi.waitFor(() => {
-      expect(mockExportToWebM).toHaveBeenCalled()
-    })
-
-    expect(mockSetSetting).not.toHaveBeenCalled()
-  })
-  describe('host integration', () => {
-    it('sends EXPORT_COMPLETE to the host after a successful export', async () => {
-      const exported = new Blob(['video-bytes'], { type: 'video/webm' })
-      mockExportToWebM.mockResolvedValue(exported)
-
-      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-      fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
-
-      await waitFor(() => {
-        expect(mockSendMessage).toHaveBeenCalledTimes(1)
-      })
-
-      expect(mockSendMessage).toHaveBeenCalledWith({
-        type: 'EXPORT_COMPLETE',
-        payload: {
-          blob: exported,
-          format: 'webm',
-          name: 'Test Project.webm',
-        },
+        resolution: '720p',
       })
     })
 
-    it('reports the mp4 extension when exporting MP4', async () => {
-      const exported = new Blob(['mp4-bytes'], { type: 'video/mp4' })
-      mockExportToMP4.mockResolvedValue(exported)
-
-      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
-
-      fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+    it('runs the MP4 encoder when MP4 is chosen', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
       fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
       fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
 
-      await waitFor(() => {
-        expect(mockSendMessage).toHaveBeenCalledTimes(1)
-      })
+      await waitFor(() => expect(mockExportToMP4).toHaveBeenCalledTimes(1))
+      expect(mockExportToWebM).not.toHaveBeenCalled()
+      expect(mp4Args()[2].format).toBe('mp4')
+      expect(mockAnalytics.exportStarted).toHaveBeenCalledWith('mp4')
+    })
 
+    it('falls back to WebM when MP4 is chosen in a browser without MP4 support', async () => {
+      // The radio is disabled here, but a restored setting still asks for mp4.
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(mockExportToMP4).not.toHaveBeenCalled()
+      expect(webmArgs()[2].format).toBe('mp4')
+      expect(mockAnalytics.exportStarted).toHaveBeenCalledWith('webm')
+    })
+
+    it('restores the last used settings and opens the advanced section', async () => {
+      mockGetSetting.mockResolvedValue({ format: 'webm', quality: 'high', resolution: '720p' })
+
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(await screen.findByDisplayValue('High (slower export)')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('720p')).toBeInTheDocument()
+      expect(mockGetSetting).toHaveBeenCalledWith('lastExportSettings')
+    })
+
+    it('downloads the finished file and tells the host about it', async () => {
+      const exported = new Blob(['video-bytes'], { type: 'video/webm' })
+      mockExportToWebM.mockResolvedValue(exported)
+      const clickedLinks: HTMLAnchorElement[] = []
+      const originalClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function () {
+        clickedLinks.push(this as HTMLAnchorElement)
+      }
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        fireEvent.click(primaryExport())
+
+        await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+        expect(clickedLinks).toHaveLength(1)
+        expect(clickedLinks[0].download).toBe('Test Project.webm')
+        expect(URL.createObjectURL).toHaveBeenCalledWith(exported)
+        expect(URL.revokeObjectURL).toHaveBeenCalled()
+        expect(document.querySelector('a[download]')).toBeNull()
+        expect(mockSendMessage).toHaveBeenCalledWith({
+          type: 'EXPORT_COMPLETE',
+          payload: { blob: exported, format: 'webm', name: 'Test Project.webm' },
+        })
+        expect(mockAnalytics.exportCompleted).toHaveBeenCalledWith('webm', 5)
+      } finally {
+        HTMLAnchorElement.prototype.click = originalClick
+      }
+    })
+
+    it('names the file after the mp4 extension when exporting MP4', async () => {
+      const exported = new Blob(['mp4-bytes'], { type: 'video/mp4' })
+      mockExportToMP4.mockResolvedValue(exported)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(mockSendMessage).toHaveBeenCalledTimes(1))
       expect(mockSendMessage).toHaveBeenCalledWith({
         type: 'EXPORT_COMPLETE',
-        payload: {
-          blob: exported,
-          format: 'mp4',
-          name: 'Test Project.mp4',
-        },
+        payload: { blob: exported, format: 'mp4', name: 'Test Project.mp4' },
       })
     })
 
-    it('does not send EXPORT_COMPLETE when the export fails', async () => {
-      mockExportToWebM.mockRejectedValue(new Error('Encoding failed'))
+    it('falls back to a generic file name for an unnamed project', async () => {
+      store().setProject({ ...store().project, name: '' })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
 
-      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+      fireEvent.click(primaryExport())
 
-      fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
-      const buttons = screen.getAllByRole('button', { name: /download webm/i })
-      fireEvent.click(buttons[buttons.length - 1])
-
-      await waitFor(() => {
-        expect(screen.getByText(/encoding failed/i)).toBeInTheDocument()
-      })
-
-      expect(mockSendMessage).not.toHaveBeenCalled()
+      await waitFor(() => expect(mockSendMessage).toHaveBeenCalledTimes(1))
+      expect(mockSendMessage.mock.calls[0][0].payload.name).toBe('export.webm')
     })
 
     it('still completes the export when the host channel throws', async () => {
-      // The file has already been downloaded by the time the host is told about
-      // it — a broken host channel must not turn a finished export into a
-      // failure.
       mockExportToWebM.mockResolvedValue(new Blob(['video-bytes'], { type: 'video/webm' }))
       mockSendMessage.mockImplementation(() => {
         throw new Error('host channel is gone')
       })
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
 
-      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+        fireEvent.click(primaryExport())
 
-      fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
-
-      await waitFor(() => {
-        expect(screen.getByText('Export complete!')).toBeInTheDocument()
-      })
-      expect(screen.queryByText(/host channel is gone/i)).not.toBeInTheDocument()
-      expect(errorLog).toHaveBeenCalled()
-
-      errorLog.mockRestore()
+        await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+        expect(screen.queryByText(/host channel is gone/i)).not.toBeInTheDocument()
+        expect(errorLog).toHaveBeenCalledWith(
+          'Failed to notify host of completed export:',
+          expect.any(Error)
+        )
+      } finally {
+        errorLog.mockRestore()
+      }
     })
 
-    it('does not send EXPORT_COMPLETE when the export is cancelled', async () => {
-      mockExportToWebM.mockRejectedValue(new MockExportAbortedError())
+    it('closes itself a couple of seconds after finishing', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
 
-      render(<ExportDialog isOpen={true} onClose={mockOnClose} />)
+      fireEvent.click(primaryExport())
+      await settle()
+      expect(screen.getByText('Export complete!')).toBeInTheDocument()
+      expect(onClose).not.toHaveBeenCalled()
 
-      fireEvent.click(screen.getByRole('button', { name: /download webm/i }))
-
-      await waitFor(() => {
-        expect(mockExportToWebM).toHaveBeenCalled()
+      act(() => {
+        vi.advanceTimersByTime(2000)
       })
-      await new Promise(resolve => setTimeout(resolve, 0))
 
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('disables both export buttons for an empty timeline', () => {
+      store().removeClipFromTimeline('clip1')
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(screen.getByRole('button', { name: /download webm/i })).toBeDisabled()
+      fireEvent.click(advancedToggle())
+      expect(advancedExport()).toBeDisabled()
+    })
+
+    it('refuses to export once the timeline has been emptied underneath it', async () => {
+      // The buttons disable themselves, but the WebM fallback offered after an
+      // MP4 failure does not, so it is the one route back into handleExport.
+      mockExportToMP4.mockRejectedValue(new Error('Encoder unavailable'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(advancedToggle())
+        fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+        fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+
+        act(() => {
+          store().removeClipFromTimeline('clip1')
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Try WebM Instead' }))
+        await settle()
+
+        expect(mockExportToWebM).not.toHaveBeenCalled()
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+  })
+
+  describe('progress and cancellation', () => {
+    function scriptedExport() {
+      let report: (p: ExportProgress) => void = () => {}
+      let rejectExport: (e: unknown) => void = () => {}
+      mockExportToWebM.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise((_resolve, reject) => {
+            report = args[3] as (p: ExportProgress) => void
+            rejectExport = reject
+          })
+      )
+      return {
+        report: (p: ExportProgress) => act(() => report(p)),
+        rejectExport: (e: unknown) => rejectExport(e),
+      }
+    }
+
+    it('shows the phase, message and percentage the exporter reports', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      expect(screen.getByText('preparing')).toBeInTheDocument()
+      expect(screen.getByText('Preparing export...')).toBeInTheDocument()
+
+      await scripted.report({ phase: 'encoding', progress: 42.4, message: 'Encoding frames' })
+
+      expect(screen.getByText('encoding')).toBeInTheDocument()
+      expect(screen.getByText('Encoding frames')).toBeInTheDocument()
+      expect(screen.getByText('42%')).toBeInTheDocument()
+      expect(
+        document.querySelector<HTMLElement>(`.${styles.progressFill}`)!.style.width
+      ).toBe('42.4%')
+      // The export controls give way to a single Cancel button.
+      expect(screen.queryByRole('button', { name: /download webm/i })).not.toBeInTheDocument()
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    it('aborts the running export when cancelled and reports no error', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalled())
+      const signal = webmArgs()[5]
+      expect(signal.aborted).toBe(false)
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      expect(signal.aborted).toBe(true)
+      expect(onClose).toHaveBeenCalledTimes(1)
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       expect(mockSendMessage).not.toHaveBeenCalled()
+    })
+
+    it('hides the Cancel button once the export is complete', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('failures', () => {
+    it('reports a WebM failure and keeps the export controls available', async () => {
+      mockExportToWebM.mockRejectedValue(new Error('Encoding failed'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        fireEvent.click(primaryExport())
+
+        await waitFor(() =>
+          expect(screen.getByRole('alert')).toHaveTextContent('Export failed: Encoding failed')
+        )
+        expect(primaryExport()).toBeInTheDocument()
+        expect(mockSendMessage).not.toHaveBeenCalled()
+        expect(mockAnalytics.exportFailed).toHaveBeenCalledWith('webm', 'Error', 0)
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    it('describes a thrown non-Error as a plain export failure', async () => {
+      mockExportToWebM.mockRejectedValue('kaboom')
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        fireEvent.click(primaryExport())
+
+        await waitFor(() =>
+          expect(screen.getByRole('alert')).toHaveTextContent('Export failed: Export failed')
+        )
+        expect(mockAnalytics.exportFailed).toHaveBeenCalledWith('webm', 'unknown', 0)
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    it('offers a WebM retry after an MP4 failure and logs the diagnostic trail', async () => {
+      const log = [{ phase: 'encode', detail: 'encoder died', timestamp: 1 }]
+      mockExportToMP4.mockRejectedValue(new ExportError('Encoder unavailable', log))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(advancedToggle())
+        fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+        fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+        await waitFor(() =>
+          expect(screen.getByRole('alert')).toHaveTextContent(
+            'MP4 export failed: Encoder unavailable'
+          )
+        )
+        expect(debugLog).toHaveBeenCalledWith('[MP4 Export] Diagnostic log:', log)
+        expect(mockAnalytics.exportFailed).toHaveBeenCalledWith('mp4', 'ExportError', 0)
+
+        // The retry runs the WebM encoder with the same advanced settings.
+        fireEvent.click(screen.getByRole('button', { name: 'Try WebM Instead' }))
+
+        await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+        expect(webmArgs()[2]).toEqual({
+          format: 'mp4',
+          quality: 'medium',
+          resolution: 'project',
+          timeRange: undefined,
+        })
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
+    it('closes from the MP4 failure screen', async () => {
+      mockExportToMP4.mockRejectedValue(new Error('Encoder unavailable'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(advancedToggle())
+        fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+        fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+        expect(onClose).toHaveBeenCalledTimes(1)
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    it('drops a stale error when the dialog is closed and reopened', async () => {
+      mockExportToWebM.mockRejectedValue(new Error('Encoding failed'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const { rerender } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+
+        fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+        rerender(<ExportDialog isOpen={false} onClose={onClose} />)
+        rerender(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+  })
+
+  describe('exporting a section', () => {
+    it('offers section and full-video buttons once in and out points are set', async () => {
+      store().setInPoint(1)
+      store().setOutPoint(4)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /Export Section \(0:01 - 0:04\)/ }))
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(webmArgs()[2].timeRange).toEqual({ start: 1, end: 4 })
+    })
+
+    it('exports the whole timeline from the full-video button', async () => {
+      store().setInPoint(1)
+      store().setOutPoint(4)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Export Full Video' }))
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(webmArgs()[2].timeRange).toBeUndefined()
+    })
+
+    it('orders a reversed in/out pair', () => {
+      // The store's own setters swap a reversed pair, so drive the reversed
+      // state in directly to prove the dialog orders it too.
+      useEditorStore.setState({ inPoint: 4, outPoint: 1 })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(
+        screen.getByRole('button', { name: /Export Section \(0:01 - 0:04\)/ })
+      ).toBeInTheDocument()
+    })
+
+    it('prefers an explicit time range prop over the in/out points', async () => {
+      store().setInPoint(1)
+      store().setOutPoint(4)
+      render(
+        <ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 2, end: 3 }} />
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: /Export Section \(0:02 - 0:03\)/ }))
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(webmArgs()[2].timeRange).toEqual({ start: 2, end: 3 })
+    })
+
+    it('keeps the single download button when only one point is set', () => {
+      store().setInPoint(1)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Export Section/ })).not.toBeInTheDocument()
     })
   })
 })
