@@ -62,6 +62,7 @@ Files: `src/core/converter.ts` (317 lines, 0.9%), `src/core/compositor.ts` (29.8
 
 ## Task 4: ARTIST pure logic and hooks → ≥95% lines for these files
 Files: `src/core/exportTypes.ts` (32%), `src/utils/canvasUtils.ts` (40%), `src/utils/animation.ts` (71%), `src/utils/workerSupport.ts` (21%), `src/core/projectManager.ts` (8%), `src/core/videoProcessor.ts` (23%), hooks `useDocumentListener` (0%), `useThrottledDragUpdate` (12%), `useDraggablePanel` (48%), `useKeyframeDrag` (2%), `src/store/projectStore.ts` gaps (86%).
+Also in scope after Task 0b's correction (uncovered lines): `src/store/selectors.ts` 47/47, `src/core/frameManager.ts` 27/27, `src/utils/waveform.ts` 33/58, `src/core/frameCache.ts` 21/92, `src/hooks/useVirtualizedTimeline.ts` 20/43, `src/core/frameSource.ts` 15/88, `src/utils/deepClone.ts` 3/5, `src/utils/throttle.ts` 2/69, `src/utils/integration.ts` 1/78, `src/core/videoDecodeManager.ts` 2/119, `src/core/exportScheduler.ts` 7/64 — take each to 100% where the remaining lines are reachable in jsdom.
 - [ ] Pure functions get exhaustive tests (every branch of `getResolution`, transitions helpers, easing curves, keyframe interpolation, `calculateTimelineDuration`, quality settings). `projectManager`: save/load round trip through fake-indexeddb incl. version check, thumbnail handling, `extractMetadataFromBlob` for image/audio/video via the element doubles. `videoProcessor`: metadata extraction, waveform path, error branches. Hooks: `@testing-library/react` `renderHook` with fake timers.
 - [ ] Raise artist thresholds. Commit: `test(artist): cover pure core, utils, hooks, and projectManager`.
 
@@ -70,6 +71,7 @@ Files: `src/core/exportTypes.ts` (32%), `src/utils/canvasUtils.ts` (40%), `src/u
 - [ ] Raise artist thresholds. Commit: `test(artist): cover the audio mixer, canvas renderer, and both exporters with recording doubles`.
 
 ## Task 6: ARTIST components → ≥85% lines for KeyframePanel/*, ClipEditor, VideoUploader, InlineTextEditor, Timeline gaps, App gaps
+Also in scope after Task 0b's correction (uncovered lines): `src/components/OverlayEditor/OverlayEditor.tsx` 142/142, `src/components/ClipEditor/KeyframeEditor.tsx` 85/85, `src/components/ResolutionMismatchDialog.tsx` 8/8, `src/components/Preview/MarqueeSelection.tsx` 5/5, `src/components/ResolutionPicker.tsx` 12/26, `src/components/Toolbar/Toolbar.tsx` 9/34, `src/components/KeyboardShortcuts/KeyboardShortcuts.tsx` 5/7, `src/components/Export/ExportDialog.tsx` 33/139, `src/components/Timeline/ClipKeyframeDiamonds.tsx` 6/10, `src/components/ProjectLoadDialog.tsx` 1/2.
 - [ ] Testing Library with user-event; cover interactions and state transitions (drag via pointer events + fake timers; keyboard; validation). Timeline: zoom/waveform branches, razor/ripple tools, multi-select. App: message handler branches not yet covered, error notifications.
 - [ ] Raise artist thresholds. Commit: `test(artist): cover keyframe panel, clip editor, uploader, timeline, and App branches`.
 
