@@ -5,6 +5,7 @@
 // would treat it as a suite containing no tests) nor the coverage `include`
 // glob (which would score test scaffolding as production code) picks it up.
 import { useEditorStore } from '../../store/projectStore'
+import { DEFAULT_KEYFRAME_PANEL_STATE } from '../../store/types'
 import type { Clip, SourceVideo } from '../../store/types'
 
 export const video: SourceVideo = {
@@ -37,19 +38,24 @@ export function addClip(
 
 /**
  * Put the store back to a freshly loaded editor holding one source video.
- * resetProject() covers the project, playhead, selection and markers; the
- * keyframe panel is UI state it deliberately leaves alone, so reset that here.
+ *
+ * resetProject() covers the project, playhead, selection, clipboard, in/out
+ * points and markers, and nothing else: every other top-level field of the
+ * store survives it and would otherwise leak from one test into the next.
+ * Those are `zoom`, `snapEnabled`, `activeTool`, `loopPlayback`,
+ * `keyframePanelState` (the panel's own position and size included) and the
+ * history resetProject itself pushes to — all reset here. `snapThreshold` is
+ * the one remaining field, and it has no setter, so it cannot drift.
  */
 export function resetStoreForTest(): void {
   store().resetProject()
   useEditorStore.setState({
     history: { past: [], future: [] },
-    keyframePanelState: {
-      ...store().keyframePanelState,
-      isOpen: false,
-      selectedProperty: null,
-      graphZoom: 1,
-    },
+    zoom: 1,
+    snapEnabled: true,
+    activeTool: 'select',
+    loopPlayback: false,
+    keyframePanelState: structuredClone(DEFAULT_KEYFRAME_PANEL_STATE),
   })
   store().addSourceVideo(video)
 }

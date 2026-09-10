@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event'
 import { KeyframePanel } from './KeyframePanel'
 import { useEditorStore } from '../../store/projectStore'
 import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
-import { DEFAULT_KEYFRAME_PANEL_STATE } from '../../store/types'
 import type { Clip } from '../../store/types'
 import panelStyles from './KeyframePanel.module.css'
 import trackStyles from './KeyframeTrack.module.css'
@@ -47,12 +46,10 @@ const keyframesOf = (property: string) =>
 
 describe('KeyframePanel', () => {
   beforeEach(() => {
-    // The panel persists its layout in localStorage, and resetStoreForTest
-    // deliberately leaves the panel's own UI state alone, so both need
-    // clearing for each test to start from the documented default geometry.
+    // The panel also persists its layout in localStorage, which the store
+    // reset knows nothing about.
     localStorage.clear()
     resetStoreForTest()
-    useEditorStore.setState({ keyframePanelState: { ...DEFAULT_KEYFRAME_PANEL_STATE } })
   })
 
   it('renders nothing while the panel is closed', () => {
