@@ -65,8 +65,9 @@ pnpm test:e2e:browsers:all # Cross-browser E2E including responsive variants
 pnpm test:e2e:standalone # E2E against the offline single-file builds (run pnpm build:standalone first)
 pnpm test:e2e:production # E2E against the combined single-origin dist (run pnpm build:deploy first)
 
-# Linting
+# Linting & types
 pnpm lint                # Lint all apps
+pnpm -r run typecheck    # Type-check every package, test files included
 
 # Cleanup
 pnpm clean               # Remove all node_modules and dist
@@ -220,7 +221,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 99.87 | 99.06 | 94.46 | 98.93 |
-| `@escapesuite/artist` | 97.65 | 96.31 | 87.54 | 98.49 |
+| `@escapesuite/artist` | 97.65 | 96.31 | 87.55 | 98.49 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
@@ -230,14 +231,18 @@ never above what the suite actually achieves:
   that package's config, and the matching entry in `scripts/coverage-report.mjs`); never
   lower one to make a red build pass — fix the coverage gap, or, if a threshold is
   measurably wrong (e.g. it was set from a bad measurement), say so explicitly in the PR
-  description instead of quietly loosening it.
+  description instead of quietly loosening it. On the small denominators — shared,
+  headless-artist and plan each measure a few hundred branches, not thousands — a
+  whole-percent floor leaves essentially no headroom, so a single new untested branch
+  turns CI red there. That is by design: the fix is to test the branch, not to lower the
+  floor.
 - **Every `src` file counts.** Each config sets `coverage.include: ['src/**/*.{ts,tsx}']`
   so a file the test suite never imports still appears in the report at 0%, instead of
   being silently omitted from the denominator. Beyond `src/test/**`, `.d.ts` and config
   files, craft and artist also exclude `**/types.ts` — those files are interfaces (erased
   at compile time) plus a handful of default data literals such as
   `DEFAULT_KEYFRAME_PANEL_STATE`, which have no branches of their own and are executed by
-  every importer. Four files beyond that are excluded, each with a comment in its
+  every importer. Six files beyond that are excluded, each with a comment in its
   package's `coverage.exclude` naming the suite that does cover it: the bootstrap entry points
   `src/main.tsx` (plan/craft/artist) and artist's `src/headless/main.ts`, artist's
   `src/workers/decodeWorker.ts` (runs only inside a Web Worker; covered by the e2e MP4
