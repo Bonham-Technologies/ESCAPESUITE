@@ -139,6 +139,40 @@ Three download options with different speed/compatibility trade-offs:
   - `Recording Downloaded`
   - `Recording Deleted`
 
+### Testing
+
+Vitest + Testing Library in jsdom, with a v8 coverage floor enforced by `pnpm test:coverage`
+(see the root `CLAUDE.md`'s coverage policy for the numbers and the rule that they only go up).
+
+**Tests never mock the module under test.** Doubles stand in for boundaries the browser owns —
+screen and camera capture, canvas, WebCodecs, Web Audio, muxing, IndexedDB — never for
+CRAFT's own orchestration. A double records what it was asked to do and the test asserts on
+the outcome, not on the double.
+
+- **`src/test/doubles/`** — one file per browser API jsdom does not implement, each with a
+  header saying what it stands in for and why: `mediastream.ts` (`MediaStream` /
+  `MediaStreamTrack`, backed by a real `EventTarget` so an `ended` listener genuinely fires,
+  plus `MediaStreamTrackProcessor`), `recorder.ts` (the recorder `core/recorder-factory`
+  builds, keeping the same surface over MediaRecorder or WebCodecs), `canvas.ts` (a recording
+  `CanvasRenderingContext2D` plus `toBlob`), `video.ts` (the `<video>` elements the code
+  creates, which jsdom never loads), `audio.ts` (`AudioContext` and the nodes the recorder and
+  converter build on it), `webcodecs.ts` (`VideoEncoder`, `AudioEncoder`, `VideoDecoder`,
+  `VideoFrame`, `AudioData`) and `mediabunny.ts` (the muxer, recorded rather than run).
+- **`src/test/appDoubles.ts`** — the collaborator modules the `App.*.test.tsx` files hand to
+  `vi.mock`: the recorder factory, permission overrides, thumbnail generation, conversion,
+  "send to editor" and analytics. It imports no application code at runtime, so a `vi.mock`
+  factory can pull it in while the module it stands in for is still being mocked.
+  `resetAppDoubles()` clears every recorded call between tests.
+- **`src/test/appHarness.tsx`** — the shared App setup: **`resetRecorderStore(config?)`** puts
+  the Zustand store back to a freshly loaded app with every capability present (a missing
+  capability is something a test says explicitly), **`renderApp()`** mounts `App` and settles
+  its mount-time async work inside `act()`, `flush()` lets promise chains — IndexedDB included
+  — settle on a real macrotask even under fake timers, `screenStreamDouble()` /
+  `webcamStreamDouble()` / `micStreamDouble()` build the capture streams a take needs,
+  `installBrowserStubs()` covers the jsdom gaps `App` walks into (media playback, anchor
+  downloads, `window.open`), and the `installRafDouble()` family drives the PiP compositor's
+  animation frames by hand.
+
 ## Key Constraints
 
 - MediaRecorder API required (all modern browsers)

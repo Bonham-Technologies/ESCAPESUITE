@@ -39,7 +39,7 @@ const packages = [
   {
     name: '@escapesuite/headless-artist',
     dir: 'services/headless-artist',
-    thresholds: { lines: 91, statements: 91, branches: 83, functions: 94 },
+    thresholds: { lines: 99, statements: 99, branches: 98, functions: 98 },
   },
 ]
 

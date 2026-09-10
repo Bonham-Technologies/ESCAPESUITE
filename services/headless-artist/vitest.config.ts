@@ -27,13 +27,15 @@ export default defineConfig({
         'src/renderDriver.ts',
       ],
       // Coverage floors — these only go up. See CLAUDE.md's Testing section.
-      // Higher than the coverage program's original 85/83/80/80 baseline because excluding
-      // renderDriver.ts (see above) removes an always-near-0%-covered file from the denominator.
+      // What is left uncovered is three lines that this suite cannot reach: cli.ts's
+      // `if (isDirectRun())` bootstrap, which runs only when the file is the process entry
+      // point (src/cli.chromium.test.ts spawns it for real), and serve.ts's catch for a
+      // synchronous throw from an always-async task plus its post-listen socket-error handler.
       thresholds: {
-        lines: 91,
-        statements: 91,
-        branches: 83,
-        functions: 94,
+        lines: 99,
+        statements: 99,
+        branches: 98,
+        functions: 98,
       },
     },
   },

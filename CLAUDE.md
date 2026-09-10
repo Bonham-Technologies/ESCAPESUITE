@@ -212,18 +212,35 @@ Each package (`apps/plan`, `apps/craft`, `apps/artist`, `packages/shared`,
 functions). `pnpm test:coverage` (`turbo test:coverage`) runs `vitest run --coverage`
 in every package and fails the whole run if any package drops below its floor.
 
-- **Thresholds only go up.** They were set at Task 0 of the coverage program to each
-  package's measured baseline, rounded down to a whole percent. Raise a package's
-  thresholds when its coverage improves (update the `thresholds` block in that
-  package's config); never lower one to make a red build pass — fix the coverage gap
-  or, if a threshold is measurably wrong (e.g. it was set from a bad measurement),
-  say so explicitly in the PR description instead of quietly loosening it.
+**Where it stands** — measured 2026-09-10, at the end of the coverage program. Each
+package's floors are these numbers rounded down to a whole percent, so the floor is
+never above what the suite actually achieves:
+
+| Package | Lines | Statements | Branches | Functions |
+|---------|-------|------------|----------|-----------|
+| `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
+| `@escapesuite/craft` | 99.87 | 99.06 | 94.46 | 98.93 |
+| `@escapesuite/artist` | 97.65 | 96.31 | 87.54 | 98.49 |
+| `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
+| `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
+
+- **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
+  to a whole percent — so any real regression turns the build red rather than being
+  absorbed by slack. Raise them when coverage improves (update the `thresholds` block in
+  that package's config, and the matching entry in `scripts/coverage-report.mjs`); never
+  lower one to make a red build pass — fix the coverage gap, or, if a threshold is
+  measurably wrong (e.g. it was set from a bad measurement), say so explicitly in the PR
+  description instead of quietly loosening it.
 - **Every `src` file counts.** Each config sets `coverage.include: ['src/**/*.{ts,tsx}']`
   so a file the test suite never imports still appears in the report at 0%, instead of
-  being silently omitted from the denominator; the only exclusions beyond `src/test/**`,
-  type declarations, and config files are the three bootstrap/worker entry points named
-  in each package's `coverage.exclude` comment (`src/main.tsx` in plan/craft/artist,
-  artist's `src/headless/main.ts`, and artist's `src/workers/decodeWorker.ts`).
+  being silently omitted from the denominator. Beyond `src/test/**`, type declarations and
+  config files, four files are excluded, each with a comment in its package's
+  `coverage.exclude` naming the suite that does cover it: the bootstrap entry points
+  `src/main.tsx` (plan/craft/artist) and artist's `src/headless/main.ts`, artist's
+  `src/workers/decodeWorker.ts` (runs only inside a Web Worker; covered by the e2e MP4
+  export tests), and `services/headless-artist`'s `src/renderDriver.ts` (needs real
+  Chromium; covered by `src/renderDriver.chromium.test.ts`, which `test:coverage` does not
+  run).
 - **Reading the report**: after `pnpm test:coverage`, run `pnpm coverage:report`
   (`node scripts/coverage-report.mjs`) for a table of every package's actual coverage
   next to its configured floor (`actual% / threshold%`, with `!` marking a value

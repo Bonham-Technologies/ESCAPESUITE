@@ -28,8 +28,10 @@ describe('ThemeToggle', () => {
 
   it('marks the button matching the current preference as aria-pressed', () => {
     render(<ThemeToggle />)
-    // getTheme() defaults to 'dark' at module load
-    expect(screen.getByLabelText('Dark mode')).toHaveAttribute('aria-pressed', String(getTheme() === 'dark'))
+    // getTheme() defaults to 'dark' at module load, so the literal is the assertion:
+    // deriving it from getTheme() would pass whatever the component happened to render.
+    expect(getTheme()).toBe('dark')
+    expect(screen.getByLabelText('Dark mode')).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByLabelText('Light mode')).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByLabelText('System preference')).toHaveAttribute('aria-pressed', 'false')
   })

@@ -296,7 +296,7 @@ describe('reading the job spec', () => {
   it('accepts the --job=<path> form', async () => {
     const jobFile = await writeJobSpec(validSpec())
 
-    expect(await main([`render`, `--job=${jobFile}`], {})).toBe(0)
+    expect(await main(['render', `--job=${jobFile}`], {})).toBe(0)
 
     expect(runJob).toHaveBeenCalledTimes(1)
     expect(stdout).toEqual([JSON.stringify(OUTCOME) + '\n'])

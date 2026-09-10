@@ -53,6 +53,8 @@ describe('launchTool', () => {
     openSpy = vi.fn()
     assignSpy = vi.fn()
     vi.stubGlobal('open', openSpy)
+    // vi.stubGlobal replaces globals, not properties of one, so location.assign is
+    // redefined in place — jsdom's own would only log "Not implemented: navigation".
     Object.defineProperty(window.location, 'assign', {
       value: assignSpy,
       writable: true,
