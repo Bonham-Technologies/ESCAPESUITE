@@ -173,8 +173,10 @@ describe('WebCodecsRecorder', () => {
     globalThis.requestAnimationFrame = originalRaf
     globalThis.cancelAnimationFrame = originalCancelRaf
     rafCallbacks.clear()
-    vi.useRealTimers()
+    // Restore spies (performance.now among them) before handing the timers
+    // back, so nothing is left pointing at a faked clock.
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   // --- initialize ----------------------------------------------------------
@@ -855,6 +857,20 @@ describe('WebCodecsRecorder', () => {
       recorder.start()
       vi.advanceTimersByTime(2000)
       expect(recorder.getDuration()).toBeCloseTo(2, 1)
+    })
+
+    it('never reports recording and paused at the same time', () => {
+      recorder.start()
+      expect(recorder.isRecording()).toBe(true)
+      expect(recorder.isPaused()).toBe(false)
+
+      recorder.pause()
+      expect(recorder.isRecording()).toBe(false)
+      expect(recorder.isPaused()).toBe(true)
+
+      recorder.resume()
+      expect(recorder.isRecording()).toBe(true)
+      expect(recorder.isPaused()).toBe(false)
     })
 
     it('excludes paused time from the duration, live and after resume', () => {

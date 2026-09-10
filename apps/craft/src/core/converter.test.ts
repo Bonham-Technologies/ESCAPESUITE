@@ -481,7 +481,13 @@ describe('converter', () => {
       await settle(8)
       await promise
 
-      expect(lastAudioEncoder().encodes).toHaveLength(3)
+      const encoder = lastAudioEncoder()
+      expect(encoder.encodes).toHaveLength(3)
+      // 2400 samples = 3 chunks. The first chunk sees 25 then 22 (both over the
+      // limit, so it yields twice) before 5 lets it through; the remaining two
+      // chunks each read an empty queue once. Without the drain loop the
+      // caller would never read encodeQueueSize at all.
+      expect(encoder.queueReads).toEqual([25, 22, 5, 0, 0])
     })
   })
 
@@ -790,6 +796,20 @@ describe('converter', () => {
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
     })
 
+    it('aborts mid-capture and releases the open video encoder', async () => {
+      const controller = new AbortController()
+      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p, controller.signal))
+      await settle()
+      video.presentFrame(0)
+
+      controller.abort()
+
+      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
+      expect(lastVideoEncoder().closeCalls).toBe(1)
+      expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+      expect(allFramesClosed()).toBe(true)
+    })
+
     it('aborts before the audio pass', async () => {
       audio.decodeResult = createAudioBufferDouble({ length: 2400 })
       const controller = new AbortController()
@@ -815,8 +835,10 @@ describe('converter', () => {
       await settle(8)
       await promise
 
-      expect(lastAudioEncoder().encodes).toHaveLength(3)
+      const encoder = lastAudioEncoder()
+      expect(encoder.encodes).toHaveLength(3)
       expect(getMediabunnyState().audioSources[0].packets).toHaveLength(3)
+      expect(encoder.queueReads).toEqual([30, 21, 0, 0, 0])
     })
 
     it('rejects when the source video will not load', async () => {

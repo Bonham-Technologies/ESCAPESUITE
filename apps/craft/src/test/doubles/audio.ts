@@ -198,7 +198,8 @@ export function installAudioContextDouble(): AudioContextDoubleControl {
 export function uninstallAudioContextDouble(): void {
   if (!installed) return
   const g = globalThis as unknown as Record<string, unknown>
-  g.AudioContext = originalAudioContext
+  if (originalAudioContext === undefined) delete g.AudioContext
+  else g.AudioContext = originalAudioContext
   installed = false
   resetAudioContextDouble()
 }

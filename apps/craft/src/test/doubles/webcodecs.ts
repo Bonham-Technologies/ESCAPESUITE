@@ -64,6 +64,9 @@ class EncoderDouble {
 
   /** Set to make the next call at that step fail. */
   failAt: EncoderFailStep | null = null
+  /** Every value encodeQueueSize handed back, in order — lets a test prove the
+   *  caller actually consulted it (i.e. really drained the queue). */
+  readonly queueReads: number[] = []
   /** Queue depths handed back by encodeQueueSize; each read pops one. */
   private queueScript: number[] = []
 
@@ -83,7 +86,11 @@ class EncoderDouble {
     this.queueScript = [...depths]
     Object.defineProperty(this, 'encodeQueueSize', {
       configurable: true,
-      get: () => (this.queueScript.length > 0 ? this.queueScript.shift()! : 0),
+      get: () => {
+        const depth = this.queueScript.length > 0 ? this.queueScript.shift()! : 0
+        this.queueReads.push(depth)
+        return depth
+      },
     })
   }
 
@@ -178,6 +185,8 @@ export class AudioEncoderDouble extends EncoderDouble {
   }
 }
 
+// Seeded for ARTIST's decoder tests — CRAFT captures frames by playing a
+// <video>, so nothing in this app decodes yet.
 export class VideoDecoderDouble {
   static readonly instances: VideoDecoderDouble[] = []
   static supportPlan: ConfigSupportPlan = true
@@ -290,8 +299,16 @@ export function getCreatedFrames(kind?: 'VideoFrame' | 'AudioData'): FrameDouble
   return kind ? frameRegistry.filter(f => f.kind === kind) : [...frameRegistry]
 }
 
-/** True when every frame constructed so far has been close()d. */
+/**
+ * True when every frame constructed so far has been close()d. Throws when no
+ * frame was constructed at all, so the assertion can never pass vacuously.
+ */
 export function allFramesClosed(): boolean {
+  if (frameRegistry.length === 0) {
+    throw new Error(
+      'allFramesClosed(): no VideoFrame/AudioData was constructed, so this assertion would be vacuous'
+    )
+  }
   return frameRegistry.every(f => f.closed)
 }
 
