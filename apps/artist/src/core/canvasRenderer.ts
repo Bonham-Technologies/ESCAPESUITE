@@ -646,20 +646,23 @@ export function drawTransitionWithFrames(
       break;
 
     case 'wipe-up':
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) }
-      });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w, height: h * progress }
-      });
-      break;
-
-    case 'wipe-down':
+      // Reveal the incoming clip from the bottom, as drawTransition and the
+      // preview player do — the same clip must not wipe one way in a WebM
+      // export and the other way in an MP4 one.
       drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
         clipRegion: { x: 0, y: 0, width: w, height: h * (1 - progress) }
       });
       drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
         clipRegion: { x: 0, y: h * (1 - progress), width: w, height: h * progress }
+      });
+      break;
+
+    case 'wipe-down':
+      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
+        clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) }
+      });
+      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
+        clipRegion: { x: 0, y: 0, width: w, height: h * progress }
       });
       break;
 
