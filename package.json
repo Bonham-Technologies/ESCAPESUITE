@@ -21,6 +21,7 @@
     "test": "turbo test:run",
     "test:watch": "turbo test",
     "test:coverage": "turbo test:coverage",
+    "coverage:report": "node scripts/coverage-report.mjs",
     "test:e2e": "turbo test --filter=@escapesuite/e2e",
     "test:e2e:browsers": "pnpm --filter=@escapesuite/e2e run test:browsers",
     "test:e2e:browsers:all": "pnpm --filter=@escapesuite/e2e run test:browsers:all",

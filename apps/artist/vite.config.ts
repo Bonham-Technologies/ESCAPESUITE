@@ -150,7 +150,7 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{js,ts,jsx,tsx}'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'json-summary', 'html'],
       exclude: [
         'node_modules/',
         'src/test/',
@@ -158,6 +158,14 @@ export default defineConfig({
         '**/*.config.*',
         '**/types.ts',
       ],
+      // Coverage floors — these only go up. See CLAUDE.md's Testing section.
+      // functions is 51 (not 52): measured functions coverage is 51.88%, which floors to 51.
+      thresholds: {
+        lines: 36,
+        statements: 37,
+        branches: 26,
+        functions: 51,
+      },
     },
   },
 })
