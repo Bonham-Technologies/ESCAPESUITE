@@ -40,18 +40,25 @@ const port = Number(readArg('--port', '5190'))
 
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
   '.html': 'text/html; charset=utf-8',
   '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
   '.jpg': 'image/jpeg',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
+  '.mp3': 'audio/mpeg',
   '.mp4': 'video/mp4',
+  '.ogg': 'audio/ogg',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.wav': 'audio/wav',
   '.webm': 'video/webm',
+  '.webp': 'image/webp',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.xml': 'application/xml; charset=utf-8',
@@ -79,6 +86,11 @@ function resolveFile(requestPath) {
   }
   if (requestPath === '/artist' || requestPath.startsWith('/artist/')) {
     return fileFor('/artist/index.html')
+  }
+  // vercel.json's SPA catch-all is `/((?!craft|artist|assets|favicon).*)`: a
+  // build artefact that isn't on disk must 404, not silently return the hub.
+  if (/^\/(assets|favicon)/.test(requestPath)) {
+    return null
   }
   return fileFor('/index.html')
 }
@@ -121,6 +133,7 @@ const server = createServer((req, res) => {
   createReadStream(file).pipe(res)
 })
 
-server.listen(port, () => {
+// Loopback only — this serves a local build directory to a local browser.
+server.listen(port, '127.0.0.1', () => {
   console.log(`Serving ${root} at http://localhost:${port} (vercel.json rewrites)`)
 })

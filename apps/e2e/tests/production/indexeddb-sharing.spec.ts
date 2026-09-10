@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { databaseExists, getRecordCount } from '../../utils/indexeddb'
+import { getRecordCount, waitForIndexedDB } from '../../utils/indexeddb'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 
 /**
@@ -41,10 +41,14 @@ async function putRecord(
         request.onerror = () => reject(request.error)
         request.onsuccess = () => {
           const db = request.result
-          const tx = db.transaction(storeName, 'readwrite')
-          tx.objectStore(storeName).put(value)
-          tx.oncomplete = () => resolve(true)
-          tx.onerror = () => reject(tx.error)
+          try {
+            const tx = db.transaction(storeName, 'readwrite')
+            tx.objectStore(storeName).put(value)
+            tx.oncomplete = () => resolve(true)
+            tx.onerror = () => reject(tx.error)
+          } catch (error) {
+            reject(error)
+          }
         }
       })
     },
@@ -61,10 +65,14 @@ async function deleteRecord(page: Page, storeName: string, id: string) {
         request.onerror = () => reject(request.error)
         request.onsuccess = () => {
           const db = request.result
-          const tx = db.transaction(storeName, 'readwrite')
-          tx.objectStore(storeName).delete(id)
-          tx.oncomplete = () => resolve(true)
-          tx.onerror = () => reject(tx.error)
+          try {
+            const tx = db.transaction(storeName, 'readwrite')
+            tx.objectStore(storeName).delete(id)
+            tx.oncomplete = () => resolve(true)
+            tx.onerror = () => reject(tx.error)
+          } catch (error) {
+            reject(error)
+          }
         }
       })
     },
@@ -81,13 +89,13 @@ async function hasRecord(page: Page, storeName: string, id: string): Promise<boo
         request.onerror = () => resolve(false)
         request.onsuccess = () => {
           const db = request.result
-          if (!db.objectStoreNames.contains(storeName)) {
-            resolve(false)
-            return
+          try {
+            const getRequest = db.transaction(storeName, 'readonly').objectStore(storeName).get(id)
+            getRequest.onsuccess = () => resolve(!!getRequest.result)
+            getRequest.onerror = () => resolve(false)
+          } catch {
+            resolve(false) // Store doesn't exist
           }
-          const getRequest = db.transaction(storeName, 'readonly').objectStore(storeName).get(id)
-          getRequest.onsuccess = () => resolve(!!getRequest.result)
-          getRequest.onerror = () => resolve(false)
         }
       })
     },
@@ -103,15 +111,19 @@ async function readBlobSize(page: Page, storeName: string, id: string): Promise<
         const request = indexedDB.open(dbName)
         request.onerror = () => resolve(-1)
         request.onsuccess = () => {
-          const getRequest = request.result
-            .transaction(storeName, 'readonly')
-            .objectStore(storeName)
-            .get(id)
-          getRequest.onsuccess = () => {
-            const blob = (getRequest.result as { blob?: unknown } | undefined)?.blob
-            resolve(blob instanceof Blob ? blob.size : -1)
+          try {
+            const getRequest = request.result
+              .transaction(storeName, 'readonly')
+              .objectStore(storeName)
+              .get(id)
+            getRequest.onsuccess = () => {
+              const blob = (getRequest.result as { blob?: unknown } | undefined)?.blob
+              resolve(blob instanceof Blob ? blob.size : -1)
+            }
+            getRequest.onerror = () => resolve(-1)
+          } catch {
+            resolve(-1) // Store doesn't exist
           }
-          getRequest.onerror = () => resolve(-1)
         }
       })
     },
@@ -124,7 +136,8 @@ async function openCraft(page: Page) {
   await page.goto(CRAFT_URL)
   await page.waitForLoadState('networkidle')
   await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
-  expect(await databaseExists(page, DB_NAME)).toBe(true)
+  // The app opens the database on mount; poll rather than sample once
+  await waitForIndexedDB(page, DB_NAME)
 }
 
 /** Open ESCAPEARTIST (optionally with a `?loadVideo=` handoff). */
@@ -203,7 +216,8 @@ test.describe('IndexedDB Data Sharing', () => {
     await artistPage.waitForLoadState('networkidle')
 
     expect(artistPage.url()).toMatch(/\/artist\/\?loadVideo=[0-9a-f-]+$/)
-    await expect(artistPage.getByText(/Loaded recording:/)).toBeVisible({ timeout: 30_000 })
+    // The "Loaded recording:" toast auto-dismisses after ~3s, so it is not a
+    // safe assertion — the media library entry is the durable proof of the load.
     await expect(artistPage.getByRole('button', { name: 'Add to timeline' })).toBeVisible({
       timeout: 30_000,
     })
