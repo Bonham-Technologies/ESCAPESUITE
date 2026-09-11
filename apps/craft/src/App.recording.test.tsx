@@ -535,3 +535,85 @@ describe('App picture-in-picture', () => {
     expect(screen.getByText('Click record to start capturing')).toBeTruthy();
   });
 });
+
+describe('App unmount', () => {
+  // Screen + webcam puts the compositor in the picture, so the unmount has
+  // every kind of capture to release at once.
+  beforeEach(() => {
+    installCanvasCaptureStreamDouble();
+    installRafDouble();
+  });
+
+  afterEach(() => {
+    uninstallRafDouble();
+    uninstallCanvasCaptureStreamDouble();
+  });
+
+  function armEverySource() {
+    const screenStream = screenStreamDouble();
+    const webcam = webcamStreamDouble();
+    const mic = micStreamDouble();
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screenStream.stream);
+    permissionsOverrides.requestWebcam.mockResolvedValue(webcam.stream);
+    permissionsOverrides.requestMicrophone.mockResolvedValue(mic.stream);
+    resetRecorderStore({
+      screenEnabled: true,
+      webcamEnabled: true,
+      microphoneEnabled: true,
+      countdownSeconds: 3,
+    });
+    return { screenStream, webcam, mic };
+  }
+
+  it('abandons a countdown left running when the app goes away', async () => {
+    const { screenStream, webcam, mic } = armEverySource();
+    const { unmount } = await renderApp();
+    await startRecordingViaButton();
+    expect(state()).toBe('countdown');
+
+    unmount();
+
+    // The countdown interval is gone, so it can neither tick the store nor
+    // start a recorder nobody is watching any more.
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(recorderFactory.last().start).not.toHaveBeenCalled();
+    expect(useRecorderStore.getState().countdownValue).toBe(3);
+
+    // And the capture is released rather than left live.
+    expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
+    expect(webcam.video!.stop).toHaveBeenCalledTimes(1);
+    expect(mic.audio!.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the capture and the recorder when the app goes away mid-take', async () => {
+    const { screenStream, webcam, mic } = armEverySource();
+    resetRecorderStore({
+      screenEnabled: true,
+      webcamEnabled: true,
+      microphoneEnabled: true,
+      countdownSeconds: 0,
+    });
+    const { unmount } = await renderApp();
+    await startRecordingViaButton();
+    expect(state()).toBe('recording');
+    const recorder = recorderFactory.last();
+
+    unmount();
+
+    expect(recorder.dispose).toHaveBeenCalledTimes(1);
+    expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
+    expect(webcam.video!.stop).toHaveBeenCalledTimes(1);
+    expect(mic.audio!.stop).toHaveBeenCalledTimes(1);
+
+    // The duration ticker went with it.
+    expect(vi.getTimerCount()).toBe(0);
+    recorder.duration = 30;
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(useRecorderStore.getState().currentDuration).toBe(0);
+  });
+});
