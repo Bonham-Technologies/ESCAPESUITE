@@ -232,12 +232,21 @@ export function usePreviewMedia(): PreviewMedia {
     audioElementsRef.current = newAudios;
   }, [audioUrls]);
 
+  // The URLs as they stand right now, for the unmount cleanup below to read.
+  //
+  // That cleanup must run once, on unmount only — the reconcile effect hands
+  // URLs from the old map to the new one, so a cleanup keyed on the maps would
+  // revoke URLs that are still in use. A ref gives the one-shot closure a live
+  // view of the maps without making it re-register when they change.
+  const urlsRef = useRef<Map<string, string>[]>([]);
+  urlsRef.current = [videoUrls, imageUrls, audioUrls];
+
   // Cleanup
   useEffect(() => {
     return () => {
-      videoUrls.forEach(url => URL.revokeObjectURL(url));
-      imageUrls.forEach(url => URL.revokeObjectURL(url));
-      audioUrls.forEach(url => URL.revokeObjectURL(url));
+      for (const urls of urlsRef.current) {
+        urls.forEach(url => URL.revokeObjectURL(url));
+      }
       videoElementsRef.current.forEach(video => {
         video.pause();
         video.src = '';
