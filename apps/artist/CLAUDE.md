@@ -130,7 +130,7 @@ Clips support animated properties via keyframes:
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
 `drawFrame` that consults the frame cache before delegating. Everything it used to do
-inline lives in one module each, all of them pure or hook-shaped and separately tested:
+inline lives in one module each, all of them pure or hook-shaped; the pure modules and hooks have their own test files, while `drawFrame.ts`, `PlaybackControls.tsx` and `cursor.ts` are covered through the component tests:
 
 | Module | Owns |
 |--------|------|
