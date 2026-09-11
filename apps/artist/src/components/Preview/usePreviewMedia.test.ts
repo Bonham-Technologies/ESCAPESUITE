@@ -156,4 +156,22 @@ describe('usePreviewMedia release', () => {
     expect(audioElement.pause).toHaveBeenCalled()
     expect(audioElement.src).toBe('')
   })
+
+  it('revokes every live object URL on unmount', async () => {
+    store().addSourceVideo(audioSource)
+    addClip('clip1', 0, 2)
+    addMediaClip('song', audioSource.id)
+
+    const { unmount } = await mountMedia()
+    const live = vi.mocked(URL.createObjectURL).mock.results.map((r) => r.value as string)
+    expect(live).toHaveLength(2)
+
+    unmount()
+
+    // Emptying the elements is not enough: the blobs behind those URLs stay
+    // alive in the browser until each URL is revoked.
+    for (const url of live) {
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(url)
+    }
+  })
 })
