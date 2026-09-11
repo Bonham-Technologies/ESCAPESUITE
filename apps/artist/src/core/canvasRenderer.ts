@@ -44,6 +44,21 @@ function animatedValuesFor(clip: Clip, clipTime: number, options?: MediaDrawOpti
 }
 
 /**
+ * Whether a fill colour paints anything.
+ *
+ * The editors write a shape fill as eight-digit #RRGGBBAA and set the alpha to
+ * '00' for "no fill", so a zero alpha is the only invisible case they can
+ * produce — no shape fill is ever `transparent` or an `rgba()` string. A
+ * six-digit #RRGGBB carries no alpha and is fully opaque, which is why this
+ * cannot simply test the last two characters: that reads pure red (#ff0000)
+ * and black (#000000) as transparent.
+ */
+function hasVisibleFill(fillColor: string): boolean {
+  if (!fillColor) return false;
+  return !/^#[0-9a-f]{6}00$/i.test(fillColor);
+}
+
+/**
  * Apply a clip's own blur to the context.
  *
  * With `resetFilter` the filter is always assigned, so a clip with no blur of
@@ -222,11 +237,11 @@ export function drawShapeOverlayToCanvasAnimated(
   ctx.strokeStyle = shapeData.strokeColor;
   ctx.lineWidth = shapeData.strokeWidth;
 
-  const hasVisibleFill = shapeData.fillColor && !shapeData.fillColor.endsWith('00');
+  const fillIsVisible = hasVisibleFill(shapeData.fillColor);
 
   switch (shapeData.type) {
     case 'rectangle':
-      if (hasVisibleFill) {
+      if (fillIsVisible) {
         ctx.fillRect(centerX - width / 2, centerY - height / 2, width, height);
       }
       if (shapeData.strokeWidth > 0) {
@@ -236,7 +251,7 @@ export function drawShapeOverlayToCanvasAnimated(
     case 'ellipse':
       ctx.beginPath();
       ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
-      if (hasVisibleFill) {
+      if (fillIsVisible) {
         ctx.fill();
       }
       if (shapeData.strokeWidth > 0) {
