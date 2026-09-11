@@ -286,6 +286,27 @@ export interface TransitionModifiers {
 }
 
 /**
+ * Per-call overrides for drawing a media clip. Every default reproduces the
+ * export pipeline's own behaviour: the exporters pass none of these, the live
+ * preview passes both.
+ */
+export interface MediaDrawOptions {
+  /**
+   * Recompute the animated values on every call instead of reading them from
+   * the export memo cache. That cache is keyed by clip id and clip time rounded
+   * to the millisecond and is only cleared when an export starts, so an editor
+   * — which redraws the same clip at the same time after every edit — would
+   * keep drawing the values from before the edit.
+   */
+  uncachedAnimation?: boolean;
+  /**
+   * Reset `ctx.filter` to 'none' when the clip carries no blur of its own,
+   * rather than letting it inherit whatever filter the caller already set.
+   */
+  resetFilter?: boolean;
+}
+
+/**
  * Calculate total timeline duration from clips
  */
 export function calculateTimelineDuration(clips: Clip[]): number {

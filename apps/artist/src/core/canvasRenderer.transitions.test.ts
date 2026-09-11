@@ -169,6 +169,48 @@ describe('drawTransition', () => {
     expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
   })
 
+  it('passes the draw options down to both sides of the transition', () => {
+    // resetFilter is the visible one: a caller that asks for it draws two
+    // unblurred clips unfiltered, dissolve blur and all.
+    drawTransition(asCtx(), videos, images, transitionOf('dissolve', 0.5), NOW, W, H, {
+      uncachedAnimation: true,
+      resetFilter: true,
+    })
+
+    expect(drawnSources()).toEqual([out, incoming])
+    expect(ctx.stateFor('drawImage').map((state) => state.filter)).toEqual(['none', 'none'])
+  })
+
+  it('passes the draw options down when only one clip has media', () => {
+    videos.delete('v1')
+    ctx.filter = 'blur(3px)'
+
+    drawTransition(asCtx(), videos, images, transitionOf('fade', 0.25), NOW, W, H, {
+      resetFilter: true,
+    })
+
+    expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
+  })
+
+  it('passes the draw options down for an unknown transition type', () => {
+    ctx.filter = 'blur(3px)'
+
+    drawTransition(
+      asCtx(),
+      videos,
+      images,
+      transitionOf('iris' as TransitionType, 0.5),
+      NOW,
+      W,
+      H,
+      { resetFilter: true }
+    )
+
+    // Both clips drawn untouched, and neither inherits the ambient filter.
+    expect(ctx.stateFor('drawImage').map((state) => state.filter)).toEqual(['none', 'none'])
+    expect(drawnAlphas()).toEqual([1, 1])
+  })
+
   it('wipes left by shrinking the outgoing region from the right', () => {
     draw('wipe-left', 0.25)
 

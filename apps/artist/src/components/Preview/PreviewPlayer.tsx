@@ -2,13 +2,21 @@ import { useRef, useEffect, useState, useCallback, useMemo, type MouseEvent } fr
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getVideoBlob } from '../../core/storage';
 import { getFrameCache } from '../../core/frameCache';
-import { blendModeToCanvas } from '../../core/exportTypes';
+import {
+  drawClipToCanvas,
+  drawImageToCanvasWithModifiers,
+  drawShapeOverlayToCanvasAnimated,
+  drawTextOverlayToCanvasAnimated,
+  drawTransition,
+} from '../../core/canvasRenderer';
+import type { MediaDrawOptions, TransitionModifiers } from '../../core/exportTypes';
 import { formatTimecode } from '../../utils/timeUtils';
 import { getAnimatedValues, getAnimatedVolume } from '../../utils/animation';
 import { useThrottledDragUpdate } from '../../hooks';
-import type { Clip, Track, TransitionType, TextOverlayData, ShapeOverlayData } from '../../store/types';
+import type { Clip, Track, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import * as geometry from './previewGeometry';
+import { getActiveTransition } from './transitions';
 import * as hitTest from './hitTest';
 import * as selectionOverlay from './selectionOverlay';
 import type { DragMode, ManipulableClipType } from './types';
@@ -36,76 +44,21 @@ interface DragState {
 const DEFAULT_WIDTH = 1920;
 const DEFAULT_HEIGHT = 1080;
 
-// Helper to get transition info between clips
-interface TransitionInfo {
-  outgoingClip: Clip;
-  incomingClip: Clip;
-  progress: number; // 0 = start of transition, 1 = end
-  type: TransitionType;
-}
-
-function getActiveTransition(clips: Clip[], tracks: Track[], time: number): TransitionInfo | null {
-  // Find clips that are in a transition period
-  for (const clip of clips) {
-    if (clip.transition.type === 'none' || clip.transition.duration <= 0) continue;
-
-    const track = tracks.find(t => t.id === clip.trackId);
-    if (!track || !track.visible) continue;
-
-    const clipEnd = clip.timelinePosition + clip.duration;
-    const transitionStart = clipEnd - clip.transition.duration;
-
-    // Check if we're in the transition period
-    if (time >= transitionStart && time < clipEnd) {
-      // Find the incoming clip - first check same track, then look at other tracks
-      // The incoming clip should be the one that will be visible when this clip ends
-
-      // First, try to find a clip on the same track that starts at/near the end of this clip
-      let incomingClip = clips
-        .filter(c => c.trackId === clip.trackId && c.timelinePosition >= clipEnd - 0.01 && c.id !== clip.id)
-        .sort((a, b) => a.timelinePosition - b.timelinePosition)[0];
-
-      // If no same-track clip, find the topmost clip that will be visible at the end time
-      // (excluding the current clip and overlays)
-      if (!incomingClip) {
-        const clipsAtEnd = clips
-          .filter(c => {
-            if (c.id === clip.id) return false;
-            if (c.overlayType) return false; // Skip overlays
-            const cEnd = c.timelinePosition + c.duration;
-            return c.timelinePosition <= clipEnd && cEnd > clipEnd;
-          })
-          .map(c => {
-            const t = tracks.find(tr => tr.id === c.trackId);
-            return { clip: c, track: t };
-          })
-          .filter(({ track: t }) => t && t.visible)
-          .sort((a, b) => (b.track?.index ?? 0) - (a.track?.index ?? 0)); // Higher index = on top
-
-        if (clipsAtEnd.length > 0) {
-          incomingClip = clipsAtEnd[0].clip;
-        }
-      }
-
-      if (incomingClip) {
-        const progress = (time - transitionStart) / clip.transition.duration;
-        return {
-          outgoingClip: clip,
-          incomingClip,
-          progress: Math.min(1, Math.max(0, progress)),
-          type: clip.transition.type,
-        };
-      }
-    }
-  }
-  return null;
-}
+/**
+ * How the preview draws media clips, as against how an export does.
+ *
+ * `uncachedAnimation`: the export memo cache is keyed by clip id and clip time
+ * and only cleared when an export starts, so an editor that redraws the same
+ * clip at the same time after every edit would keep drawing pre-edit values.
+ * `resetFilter`: a clip with no blur of its own draws unfiltered here, even
+ * inside a dissolve, which is what the preview has always done.
+ */
+const PREVIEW_DRAW_OPTIONS: MediaDrawOptions = { uncachedAnimation: true, resetFilter: true };
 
 export function PreviewPlayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasCtxRef = useRef<CanvasRenderingContext2D | null>(null); // Cached 2d context
-  const blurCanvasRef = useRef<HTMLCanvasElement | null>(null); // Reusable offscreen canvas for blur
-  const blurCtxRef = useRef<CanvasRenderingContext2D | null>(null); // Cached blur context
+  const blurCanvasRef = useRef<HTMLCanvasElement | null>(null); // Reusable scratch canvas for shape blur
   const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const imageElementsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -401,18 +354,19 @@ export function PreviewPlayer() {
     };
   }, []);
 
-  // Helper to draw a single clip with optional transition modifiers
+  // Helper to draw a single clip with optional transition modifiers.
+  //
+  // The drawing itself is the export pipeline's — same geometry, same blend,
+  // same transition modifiers. What stays here is the preview's own decision
+  // about *whether* a clip can be drawn at all: an audio clip has nothing to
+  // show, and a video or image the browser has not decoded yet would paint a
+  // black flash mid-scrub if it were drawn at a fallback size.
   const drawClip = useCallback((
     ctx: CanvasRenderingContext2D,
     canvas: HTMLCanvasElement,
     clip: Clip,
     clipTime: number, // Time relative to clip start (for animations)
-    transitionModifiers?: {
-      opacity?: number;
-      offsetX?: number;
-      offsetY?: number;
-      clipRegion?: { x: number; y: number; width: number; height: number };
-    }
+    transitionModifiers?: TransitionModifiers
   ) => {
     // Check media type
     const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
@@ -422,290 +376,40 @@ export function PreviewPlayer() {
     // Audio clips don't render visually - skip drawing
     if (isAudio) return;
 
-    let drawSource: HTMLVideoElement | HTMLImageElement;
-    let sourceWidth: number;
-    let sourceHeight: number;
-
     if (isImage) {
       const img = imageElementsRef.current.get(clip.sourceVideoId);
       if (!img || !img.complete) return;
-      drawSource = img;
-      sourceWidth = img.naturalWidth || canvas.width;
-      sourceHeight = img.naturalHeight || canvas.height;
-    } else {
-      const video = videoElementsRef.current.get(clip.sourceVideoId);
-      // Allow drawing if video has any data (readyState >= 1 means metadata loaded)
-      // During seeking, readyState may temporarily drop, but we can still draw the current frame
-      // This prevents black flashes during scrubbing
-      if (!video || video.readyState < 1) return;
-      // If video dimensions aren't available yet, skip
-      if (!video.videoWidth || !video.videoHeight) return;
-      drawSource = video;
-      sourceWidth = video.videoWidth;
-      sourceHeight = video.videoHeight;
+      drawImageToCanvasWithModifiers(
+        ctx, img, clip, clipTime, canvas.width, canvas.height, transitionModifiers, PREVIEW_DRAW_OPTIONS
+      );
+      return;
     }
 
-    // Get animated values - this applies presets and custom keyframes
-    const animated = getAnimatedValues(
-      clipTime,
-      clip.duration,
-      clip.animation,
-      clip.transform || DEFAULT_TRANSFORM,
-      clip.effects || DEFAULT_EFFECTS
+    const video = videoElementsRef.current.get(clip.sourceVideoId);
+    // Allow drawing if video has any data (readyState >= 1 means metadata loaded)
+    // During seeking, readyState may temporarily drop, but we can still draw the current frame
+    // This prevents black flashes during scrubbing
+    if (!video || video.readyState < 1) return;
+    // If video dimensions aren't available yet, skip
+    if (!video.videoWidth || !video.videoHeight) return;
+    drawClipToCanvas(
+      ctx, video, clip, clipTime, canvas.width, canvas.height, transitionModifiers, PREVIEW_DRAW_OPTIONS
     );
-
-    ctx.save();
-    ctx.globalCompositeOperation = blendModeToCanvas[clip.blendMode] || 'source-over';
-
-    // Apply opacity with transition modifier
-    const baseOpacity = animated.opacity;
-    const finalOpacity = transitionModifiers?.opacity !== undefined
-      ? baseOpacity * transitionModifiers.opacity
-      : baseOpacity;
-    ctx.globalAlpha = finalOpacity;
-
-    // Apply blur effect (from animation or static)
-    // Always set filter to ensure it's reset between clips
-    const blurAmount = animated.blur;
-    ctx.filter = blurAmount > 0 ? `blur(${blurAmount}px)` : 'none';
-
-    // Apply clip region for wipe transitions
-    if (transitionModifiers?.clipRegion) {
-      const { x, y, width, height } = transitionModifiers.clipRegion;
-      ctx.beginPath();
-      ctx.rect(x, y, width, height);
-      ctx.clip();
-    }
-
-    // Base dimensions = native source pixels.
-    // Scale 1.0 = actual source size on the canvas.
-    // "Fit to canvas" is handled by setting scale to Math.min(canvasW/sourceW, canvasH/sourceH).
-    const scaledWidth = sourceWidth * animated.scaleX;
-    const scaledHeight = sourceHeight * animated.scaleY;
-
-    // Apply animated position with transition offset
-    const offsetX = transitionModifiers?.offsetX || 0;
-    const offsetY = transitionModifiers?.offsetY || 0;
-    const centerX = (animated.x * canvas.width) + offsetX;
-    const centerY = (animated.y * canvas.height) + offsetY;
-
-    // Apply rotation around center point
-    if (animated.rotation !== 0) {
-      ctx.translate(centerX, centerY);
-      ctx.rotate((animated.rotation * Math.PI) / 180);
-      ctx.translate(-centerX, -centerY);
-    }
-
-    const x = centerX - (scaledWidth / 2);
-    const y = centerY - (scaledHeight / 2);
-
-    ctx.drawImage(drawSource, x, y, scaledWidth, scaledHeight);
-    ctx.restore();
   }, [sourceVideos]);
 
-  // Helper to draw text overlay with full animated transform values
-  const drawTextOverlayAnimated = useCallback((
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    textData: TextOverlayData,
-    animated: { x: number; y: number; scaleX: number; scaleY: number; rotation: number; opacity: number; blur: number }
-  ) => {
-    ctx.save();
-    ctx.globalAlpha = animated.opacity;
-
-    // Apply blur effect if specified
-    if (animated.blur > 0) {
-      ctx.filter = `blur(${animated.blur}px)`;
+  // The scratch canvas a blur shape captures the frame so far into. One canvas,
+  // reused for the life of the component: the preview redraws continuously, and
+  // a fresh full-size canvas per frame would cost 8MB+ each time.
+  const blurScratchFor = useCallback((canvas: HTMLCanvasElement) => {
+    const scratch = blurCanvasRef.current;
+    if (!scratch || scratch.width !== canvas.width || scratch.height !== canvas.height) {
+      const replacement = document.createElement('canvas');
+      replacement.width = canvas.width;
+      replacement.height = canvas.height;
+      blurCanvasRef.current = replacement;
+      return replacement;
     }
-
-    // Use animated position instead of textData position
-    const x = animated.x * canvas.width;
-    const y = animated.y * canvas.height;
-
-    // Apply animated rotation and scale around the text position
-    ctx.translate(x, y);
-    if (animated.rotation !== 0) {
-      ctx.rotate((animated.rotation * Math.PI) / 180);
-    }
-    // Use the larger of scaleX/scaleY for uniform text scaling
-    const scale = Math.max(animated.scaleX, animated.scaleY);
-    if (scale !== 1) {
-      ctx.scale(scale, scale);
-    }
-    ctx.translate(-x, -y);
-
-    // Set up font
-    const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
-    const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
-    ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
-    ctx.textAlign = textData.textAlign;
-    ctx.textBaseline = 'middle';
-
-    // Split text into lines for multi-line support
-    const lines = textData.text.split('\n');
-    const lineHeight = textData.fontSize * 1.2;
-    const totalHeight = lines.length * lineHeight;
-
-    // Draw background if set
-    if (textData.backgroundColor && textData.backgroundColor !== '#00000000') {
-      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
-      const padding = textData.fontSize * 0.3;
-      const bgWidth = maxLineWidth + padding * 2;
-      const bgHeight = totalHeight + padding * 2;
-
-      let bgX = x - padding;
-      if (textData.textAlign === 'center') {
-        bgX = x - bgWidth / 2;
-      } else if (textData.textAlign === 'right') {
-        bgX = x - bgWidth + padding;
-      }
-
-      ctx.fillStyle = textData.backgroundColor;
-      ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
-    }
-
-    // Draw each line of text
-    ctx.fillStyle = textData.color;
-    lines.forEach((line, i) => {
-      const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
-      ctx.fillText(line, x, lineY);
-    });
-
-    ctx.restore();
-  }, []);
-
-  // Helper to draw shape overlay with full animated transform values
-  const drawShapeOverlayAnimated = useCallback((
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    shapeData: ShapeOverlayData,
-    animated: { x: number; y: number; scaleX: number; scaleY: number; rotation: number; opacity: number; blur: number }
-  ) => {
-    // Use animated position
-    const centerX = animated.x * canvas.width;
-    const centerY = animated.y * canvas.height;
-    // Apply animated scale to shape dimensions
-    const width = shapeData.width * canvas.width * animated.scaleX;
-    const height = shapeData.height * canvas.height * animated.scaleY;
-    const rotation = animated.rotation;
-    const blurAmount = shapeData.blurAmount ?? 0;
-
-    // Helper to create shape path
-    const createShapePath = () => {
-      ctx.beginPath();
-      switch (shapeData.type) {
-        case 'rectangle':
-          ctx.rect(centerX - width / 2, centerY - height / 2, width, height);
-          break;
-        case 'ellipse':
-        case 'blur':
-          ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
-          break;
-        default:
-          ctx.rect(centerX - width / 2, centerY - height / 2, width, height);
-      }
-    };
-
-    // If blur is enabled, capture and blur the region underneath
-    const effectiveBlurAmount = shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
-    if (effectiveBlurAmount > 0 && (shapeData.type === 'rectangle' || shapeData.type === 'ellipse' || shapeData.type === 'blur')) {
-      // Reuse offscreen canvas for blur (avoids allocating 8MB+ per frame)
-      if (!blurCanvasRef.current || blurCanvasRef.current.width !== canvas.width || blurCanvasRef.current.height !== canvas.height) {
-        blurCanvasRef.current = document.createElement('canvas');
-        blurCanvasRef.current.width = canvas.width;
-        blurCanvasRef.current.height = canvas.height;
-        blurCtxRef.current = blurCanvasRef.current.getContext('2d');
-      }
-      const offCtx = blurCtxRef.current;
-      if (offCtx) {
-        offCtx.clearRect(0, 0, canvas.width, canvas.height);
-        offCtx.drawImage(canvas, 0, 0);
-
-        ctx.save();
-
-        if (rotation !== 0) {
-          ctx.translate(centerX, centerY);
-          ctx.rotate((rotation * Math.PI) / 180);
-          ctx.translate(-centerX, -centerY);
-        }
-
-        createShapePath();
-        ctx.clip();
-
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.filter = `blur(${effectiveBlurAmount}px)`;
-        ctx.globalAlpha = animated.opacity;
-        ctx.drawImage(blurCanvasRef.current, 0, 0);
-
-        ctx.restore();
-      }
-    }
-
-    // Draw the fill color
-    ctx.save();
-    ctx.globalAlpha = animated.opacity;
-
-    // Apply animated blur effect to the shape itself
-    if (animated.blur > 0) {
-      ctx.filter = `blur(${animated.blur}px)`;
-    }
-
-    if (rotation !== 0) {
-      ctx.translate(centerX, centerY);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.translate(-centerX, -centerY);
-    }
-
-    ctx.fillStyle = shapeData.fillColor;
-    ctx.strokeStyle = shapeData.strokeColor;
-    ctx.lineWidth = shapeData.strokeWidth;
-
-    const hasVisibleFill = shapeData.fillColor && !shapeData.fillColor.endsWith('00');
-
-    switch (shapeData.type) {
-      case 'rectangle':
-        if (hasVisibleFill) {
-          ctx.fillRect(centerX - width / 2, centerY - height / 2, width, height);
-        }
-        if (shapeData.strokeWidth > 0) {
-          ctx.strokeRect(centerX - width / 2, centerY - height / 2, width, height);
-        }
-        break;
-      case 'ellipse':
-        ctx.beginPath();
-        ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
-        if (hasVisibleFill) {
-          ctx.fill();
-        }
-        if (shapeData.strokeWidth > 0) {
-          ctx.stroke();
-        }
-        break;
-      case 'blur':
-        // Blur type only applies blur effect, no fill/stroke
-        break;
-      case 'line':
-        ctx.beginPath();
-        ctx.moveTo(centerX - width / 2, centerY);
-        ctx.lineTo(centerX + width / 2, centerY);
-        ctx.stroke();
-        break;
-      case 'arrow':
-        const arrowSize = Math.min(width, height) * 0.2;
-        ctx.beginPath();
-        ctx.moveTo(centerX - width / 2, centerY);
-        ctx.lineTo(centerX + width / 2 - arrowSize, centerY);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(centerX + width / 2, centerY);
-        ctx.lineTo(centerX + width / 2 - arrowSize, centerY - arrowSize / 2);
-        ctx.lineTo(centerX + width / 2 - arrowSize, centerY + arrowSize / 2);
-        ctx.closePath();
-        ctx.fill();
-        break;
-    }
-
-    ctx.restore();
+    return scratch;
   }, []);
 
   // Draw a single frame to canvas
@@ -797,10 +501,14 @@ export function PreviewPlayer() {
       // Draw overlay with animated transform values
       // Skip drawing text that is currently being inline-edited (to avoid duplicate)
       if (clip.overlayType === 'shape' && clip.shapeData) {
-        drawShapeOverlayAnimated(ctx, canvas, clip.shapeData, animated);
+        // A blur shape captures the frame so far from the canvas itself, into
+        // the one scratch canvas this component reuses across frames.
+        drawShapeOverlayToCanvasAnimated(
+          ctx, clip.shapeData, canvas.width, canvas.height, animated, canvas, blurScratchFor(canvas)
+        );
       } else if (clip.overlayType === 'text' && clip.textData) {
         if (clip.id !== editingTextClipId) {
-          drawTextOverlayAnimated(ctx, canvas, clip.textData, animated);
+          drawTextOverlayToCanvasAnimated(ctx, clip.textData, canvas.width, canvas.height, animated);
         }
       }
     };
@@ -824,216 +532,49 @@ export function PreviewPlayer() {
 
     // Draw transition if active
     if (activeTransition) {
-      const { outgoingClip, incomingClip, progress, type } = activeTransition;
-      const outClipTime = getClipTime(outgoingClip);
-      const inClipTime = getClipTime(incomingClip);
-      const w = canvas.width;
-      const h = canvas.height;
-
-      switch (type) {
-        case 'fade':
-          // Crossfade: outgoing fades out, incoming fades in
-          drawClip(ctx, canvas, outgoingClip, outClipTime, { opacity: 1 - progress });
-          drawClip(ctx, canvas, incomingClip, inClipTime, { opacity: progress });
-          break;
-
-        case 'dissolve':
-          // Similar to fade but with slight blur effect during transition
-          // The blur is strongest in the middle of the transition
-          const dissolveBlur = Math.sin(progress * Math.PI) * 3;
-          ctx.save();
-          if (dissolveBlur > 0) {
-            ctx.filter = `blur(${dissolveBlur}px)`;
-          }
-          drawClip(ctx, canvas, outgoingClip, outClipTime, { opacity: 1 - progress });
-          drawClip(ctx, canvas, incomingClip, inClipTime, { opacity: progress });
-          ctx.restore();
-          break;
-
-        case 'wipe-left':
-          // Wipe from right to left
-          drawClip(ctx, canvas, outgoingClip, outClipTime, {
-            clipRegion: { x: 0, y: 0, width: w * (1 - progress), height: h }
-          });
-          drawClip(ctx, canvas, incomingClip, inClipTime, {
-            clipRegion: { x: w * (1 - progress), y: 0, width: w * progress, height: h }
-          });
-          break;
-
-        case 'wipe-right':
-          // Wipe from left to right
-          drawClip(ctx, canvas, outgoingClip, outClipTime, {
-            clipRegion: { x: w * progress, y: 0, width: w * (1 - progress), height: h }
-          });
-          drawClip(ctx, canvas, incomingClip, inClipTime, {
-            clipRegion: { x: 0, y: 0, width: w * progress, height: h }
-          });
-          break;
-
-        case 'wipe-up':
-          // Wipe from bottom to top
-          drawClip(ctx, canvas, outgoingClip, outClipTime, {
-            clipRegion: { x: 0, y: 0, width: w, height: h * (1 - progress) }
-          });
-          drawClip(ctx, canvas, incomingClip, inClipTime, {
-            clipRegion: { x: 0, y: h * (1 - progress), width: w, height: h * progress }
-          });
-          break;
-
-        case 'wipe-down':
-          // Wipe from top to bottom
-          drawClip(ctx, canvas, outgoingClip, outClipTime, {
-            clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) }
-          });
-          drawClip(ctx, canvas, incomingClip, inClipTime, {
-            clipRegion: { x: 0, y: 0, width: w, height: h * progress }
-          });
-          break;
-
-        case 'slide-left':
-          // Outgoing slides out to left, incoming slides in from right
-          drawClip(ctx, canvas, outgoingClip, outClipTime, { offsetX: -w * progress });
-          drawClip(ctx, canvas, incomingClip, inClipTime, { offsetX: w * (1 - progress) });
-          break;
-
-        case 'slide-right':
-          // Outgoing slides out to right, incoming slides in from left
-          drawClip(ctx, canvas, outgoingClip, outClipTime, { offsetX: w * progress });
-          drawClip(ctx, canvas, incomingClip, inClipTime, { offsetX: -w * (1 - progress) });
-          break;
-
-        case 'slide-up':
-          // Outgoing slides out to top, incoming slides in from bottom
-          drawClip(ctx, canvas, outgoingClip, outClipTime, { offsetY: -h * progress });
-          drawClip(ctx, canvas, incomingClip, inClipTime, { offsetY: h * (1 - progress) });
-          break;
-
-        case 'slide-down':
-          // Outgoing slides out to bottom, incoming slides in from top
-          drawClip(ctx, canvas, outgoingClip, outClipTime, { offsetY: h * progress });
-          drawClip(ctx, canvas, incomingClip, inClipTime, { offsetY: -h * (1 - progress) });
-          break;
-
-        default:
-          // For 'none' or unknown types, just draw normally
-          drawClip(ctx, canvas, outgoingClip, outClipTime);
-          drawClip(ctx, canvas, incomingClip, inClipTime);
-      }
+      drawTransition(
+        ctx,
+        videoElementsRef.current,
+        imageElementsRef.current,
+        activeTransition,
+        time,
+        canvas.width,
+        canvas.height,
+        PREVIEW_DRAW_OPTIONS
+      );
     }
 
-    // Draw shape overlays from legacy array (for backwards compatibility)
+    // Draw shape and text overlays from the legacy arrays (for backwards
+    // compatibility). A legacy overlay has no animation of its own: its stored
+    // position, rotation and opacity *are* the values it draws with.
     for (const shape of shapeOverlays) {
       if (time < shape.startTime || time >= shape.endTime) continue;
 
-      ctx.save();
-      ctx.globalAlpha = shape.opacity;
-
-      const centerX = shape.x * canvas.width;
-      const centerY = shape.y * canvas.height;
-      const width = shape.width * canvas.width;
-      const height = shape.height * canvas.height;
-
-      // Apply rotation if needed
-      if (shape.rotation !== 0) {
-        ctx.translate(centerX, centerY);
-        ctx.rotate((shape.rotation * Math.PI) / 180);
-        ctx.translate(-centerX, -centerY);
-      }
-
-      ctx.fillStyle = shape.fillColor;
-      ctx.strokeStyle = shape.strokeColor;
-      ctx.lineWidth = shape.strokeWidth;
-
-      switch (shape.type) {
-        case 'rectangle':
-          ctx.fillRect(centerX - width / 2, centerY - height / 2, width, height);
-          if (shape.strokeWidth > 0) {
-            ctx.strokeRect(centerX - width / 2, centerY - height / 2, width, height);
-          }
-          break;
-        case 'ellipse':
-          ctx.beginPath();
-          ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
-          ctx.fill();
-          if (shape.strokeWidth > 0) {
-            ctx.stroke();
-          }
-          break;
-        case 'line':
-          ctx.beginPath();
-          ctx.moveTo(centerX - width / 2, centerY);
-          ctx.lineTo(centerX + width / 2, centerY);
-          ctx.stroke();
-          break;
-        case 'arrow':
-          const arrowSize = Math.min(width, height) * 0.2;
-          ctx.beginPath();
-          ctx.moveTo(centerX - width / 2, centerY);
-          ctx.lineTo(centerX + width / 2 - arrowSize, centerY);
-          ctx.stroke();
-          // Arrow head
-          ctx.beginPath();
-          ctx.moveTo(centerX + width / 2, centerY);
-          ctx.lineTo(centerX + width / 2 - arrowSize, centerY - arrowSize / 2);
-          ctx.lineTo(centerX + width / 2 - arrowSize, centerY + arrowSize / 2);
-          ctx.closePath();
-          ctx.fill();
-          break;
-      }
-
-      ctx.restore();
+      drawShapeOverlayToCanvasAnimated(ctx, shape, canvas.width, canvas.height, {
+        x: shape.x,
+        y: shape.y,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: shape.rotation,
+        opacity: shape.opacity,
+        blur: 0,
+      });
     }
 
-    // Draw text overlays from legacy array (for backwards compatibility)
     for (const overlay of textOverlays) {
       if (time < overlay.startTime || time >= overlay.endTime) continue;
 
-      ctx.save();
-      ctx.globalAlpha = overlay.opacity;
-
-      // Set up font
-      const fontStyle = overlay.fontStyle === 'italic' ? 'italic ' : '';
-      const fontWeight = overlay.fontWeight === 'bold' ? 'bold ' : '';
-      ctx.font = `${fontStyle}${fontWeight}${overlay.fontSize}px ${overlay.fontFamily}`;
-      ctx.textAlign = overlay.textAlign;
-      ctx.textBaseline = 'middle';
-
-      const x = overlay.x * canvas.width;
-      const y = overlay.y * canvas.height;
-
-      // Split text into lines for multi-line support
-      const lines = overlay.text.split('\n');
-      const lineHeight = overlay.fontSize * 1.2;
-      const totalHeight = lines.length * lineHeight;
-
-      // Draw background if set
-      if (overlay.backgroundColor && overlay.backgroundColor !== '#00000000') {
-        const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
-        const padding = overlay.fontSize * 0.3;
-        const bgWidth = maxLineWidth + padding * 2;
-        const bgHeight = totalHeight + padding * 2;
-
-        let bgX = x - padding;
-        if (overlay.textAlign === 'center') {
-          bgX = x - bgWidth / 2;
-        } else if (overlay.textAlign === 'right') {
-          bgX = x - bgWidth + padding;
-        }
-
-        ctx.fillStyle = overlay.backgroundColor;
-        ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
-      }
-
-      // Draw each line of text
-      ctx.fillStyle = overlay.color;
-      lines.forEach((line, i) => {
-        const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
-        ctx.fillText(line, x, lineY);
+      drawTextOverlayToCanvasAnimated(ctx, overlay, canvas.width, canvas.height, {
+        x: overlay.x,
+        y: overlay.y,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        opacity: overlay.opacity,
+        blur: 0,
       });
-
-      ctx.restore();
     }
-  }, [clips, tracks, sourceVideos, textOverlays, shapeOverlays, drawClip, drawTextOverlayAnimated, drawShapeOverlayAnimated, editingTextClipId]);
+  }, [clips, tracks, sourceVideos, textOverlays, shapeOverlays, drawClip, blurScratchFor, editingTextClipId]);
 
   // Overlay bounds for a clip, against whatever source media the store holds.
   const getOverlayBounds = useCallback(

@@ -439,4 +439,73 @@ describe('drawShapeOverlayToCanvasAnimated with a blur region', () => {
 
     expect(offscreen.instances).toHaveLength(0)
   })
+
+  describe('with a scratch canvas', () => {
+    // A caller that redraws continuously (the preview) hands in one canvas to
+    // capture into, instead of paying for a full-size allocation every frame.
+    let scratch: HTMLCanvasElement
+
+    beforeEach(() => {
+      installCanvasDouble()
+      scratch = document.createElement('canvas')
+      scratch.width = W
+      scratch.height = H
+    })
+
+    afterEach(() => {
+      uninstallCanvasDouble()
+    })
+
+    const drawWithScratch = (shape = makeShapeData({ type: 'blur', blurAmount: 12 })) =>
+      drawShapeOverlayToCanvasAnimated(
+        ctx as unknown as CanvasRenderingContext2D,
+        shape,
+        W,
+        H,
+        makeAnimated(),
+        source,
+        scratch
+      )
+
+    it('captures into the scratch canvas and allocates nothing', () => {
+      drawWithScratch()
+
+      expect(offscreen.instances).toHaveLength(0)
+      const scratchCtx = getLastCanvasContext()!
+      expect(scratchCtx.canvas).toBe(scratch)
+      // Cleared first: the scratch still holds the previous frame's capture.
+      expect(scratchCtx.calls.map((c) => c.method)).toEqual(['clearRect', 'drawImage'])
+      expect(scratchCtx.argsFor('clearRect')).toEqual([[0, 0, W, H]])
+      expect(scratchCtx.argsFor('drawImage')).toEqual([[source, 0, 0]])
+    })
+
+    it('draws the same scratch canvas back through the clipped path', () => {
+      drawWithScratch()
+
+      expect(methods()).toEqual([
+        'save',
+        'beginPath',
+        'ellipse',
+        'clip',
+        'setTransform',
+        'drawImage',
+        'restore',
+        'save',
+        'restore',
+      ])
+      expect(ctx.argsFor('drawImage')[0]).toEqual([scratch, 0, 0])
+      expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(12px)')
+    })
+
+    it('reuses the one canvas across frames', () => {
+      drawWithScratch()
+      drawWithScratch()
+
+      expect(offscreen.instances).toHaveLength(0)
+      expect(getLastCanvasContext()!.argsFor('drawImage')).toEqual([
+        [source, 0, 0],
+        [source, 0, 0],
+      ])
+    })
+  })
 })

@@ -19,7 +19,7 @@ import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/m
 import { VideoFrameDouble, resetFrameRegistry } from '../test/doubles/webcodecs'
 import { makeClip } from '../test/fixtures/exportPipeline'
 import type { Clip } from '../store/types'
-import type { DrawableMediaSource, TransitionModifiers } from './exportTypes'
+import type { DrawableMediaSource, MediaDrawOptions, TransitionModifiers } from './exportTypes'
 
 const W = 1920
 const H = 1080
@@ -297,6 +297,76 @@ describe('drawMediaWithModifiers', () => {
 
     expect(drew).toBe(false)
     expect(ctx.calls).toEqual([])
+  })
+})
+
+describe('MediaDrawOptions', () => {
+  /** The same clip id and clip time, drawn twice with a transform change between. */
+  const drawTwiceAcrossAnEdit = (options?: MediaDrawOptions) => {
+    const before = makeClip({
+      transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+    })
+    const after = makeClip({
+      transform: { x: 0.5, y: 0.5, scaleX: 2, scaleY: 2, rotation: 0, opacity: 1 },
+    })
+
+    drawClipToCanvas(asCtx(), frame(640, 360), before, 0, W, H, undefined, options)
+    drawClipToCanvas(asCtx(), frame(640, 360), after, 0, W, H, undefined, options)
+
+    return ctx.argsFor('drawImage').map((args) => args[3])
+  }
+
+  it('serves the second draw from the memo cache by default', () => {
+    // An export draws each clip time once; the cache makes a re-ask free, and
+    // is keyed by clip id and time alone.
+    expect(drawTwiceAcrossAnEdit()).toEqual([640, 640])
+  })
+
+  it('recomputes the animated values when the caller asks for no cache', () => {
+    expect(drawTwiceAcrossAnEdit({ uncachedAnimation: true })).toEqual([640, 1280])
+  })
+
+  it('leaves an inherited filter alone by default', () => {
+    ctx.filter = 'blur(3px)'
+    drawClipToCanvas(asCtx(), frame(), makeClip(), 0, W, H)
+
+    expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(3px)')
+  })
+
+  it('clears an inherited filter for an unblurred clip when asked to reset it', () => {
+    ctx.filter = 'blur(3px)'
+    drawClipToCanvas(asCtx(), frame(), makeClip(), 0, W, H, undefined, { resetFilter: true })
+
+    expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
+  })
+
+  it('still applies the clip’s own blur over an inherited filter when resetting', () => {
+    ctx.filter = 'blur(3px)'
+    drawClipToCanvas(asCtx(), frame(), makeClip({ effects: { blur: 8 } }), 0, W, H, undefined, {
+      resetFilter: true,
+    })
+
+    expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(8px)')
+  })
+
+  it('reaches the image path through the dispatcher', () => {
+    const image = loadedImage(800, 600)
+    const clip = makeClip()
+    ctx.filter = 'blur(3px)'
+
+    drawMediaWithModifiers(
+      asCtx(),
+      new Map(),
+      new Map([[clip.sourceVideoId, image]]),
+      clip,
+      0,
+      W,
+      H,
+      undefined,
+      { uncachedAnimation: true, resetFilter: true }
+    )
+
+    expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
   })
 })
 
