@@ -258,6 +258,13 @@ describe('drawShapeOverlayToCanvasAnimated', () => {
     expect(ctx.argsFor('strokeRect')).toHaveLength(1)
   })
 
+  it('skips the fill when there is no fill colour at all', () => {
+    draw(makeShapeData({ fillColor: '' }))
+
+    expect(ctx.argsFor('fillRect')).toEqual([])
+    expect(ctx.argsFor('strokeRect')).toHaveLength(1)
+  })
+
   it('fills a six-digit colour whose blue channel happens to be 00', () => {
     // #ff0000 is pure red at full opacity: only an eight-digit colour carries
     // an alpha, and only an alpha of 00 means "no fill".

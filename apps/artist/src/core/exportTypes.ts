@@ -304,6 +304,13 @@ export interface MediaDrawOptions {
    * rather than letting it inherit whatever filter the caller already set.
    */
   resetFilter?: boolean;
+  /**
+   * Say nothing about media that is not ready to draw. An export reports it
+   * once per frame and a frame is drawn once; a preview redraws the same frame
+   * on every animation frame, and would repeat the same warning sixty times a
+   * second for as long as the playhead sat there.
+   */
+  quiet?: boolean;
 }
 
 /**

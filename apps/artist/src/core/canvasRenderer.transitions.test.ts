@@ -138,6 +138,19 @@ describe('drawTransition', () => {
     warn.mockRestore()
   })
 
+  it('says nothing about an unready video for a caller that asked for quiet', () => {
+    // A preview redraws the frame on every animation frame; the exporter's
+    // one warning per frame would be sixty a second here.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    videos.set('v1', video(640, 360, 0))
+    videos.set('v2', video(800, 450, 0))
+
+    drawTransition(asCtx(), videos, images, transitionOf('fade', 0.5), NOW, W, H, { quiet: true })
+
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
   it('crossfades outgoing out and incoming in', () => {
     draw('fade', 0.25)
 

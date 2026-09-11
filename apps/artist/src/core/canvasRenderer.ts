@@ -149,6 +149,24 @@ export function drawTextOverlayToCanvasAnimated(
 }
 
 /**
+ * Whether a shape overlay blurs what is behind it, and so needs the frame so
+ * far captured for it. Exported so a caller can skip preparing that capture —
+ * the preview allocates its scratch canvas off the back of this.
+ */
+export function shapeBlursBackground(shapeData: ShapeOverlayData): boolean {
+  if (shapeData.type !== 'rectangle' && shapeData.type !== 'ellipse' && shapeData.type !== 'blur') {
+    return false;
+  }
+  return effectiveShapeBlur(shapeData) > 0;
+}
+
+/** A blur shape blurs by 10px unless it says otherwise; any other shape only if asked. */
+function effectiveShapeBlur(shapeData: ShapeOverlayData): number {
+  const blurAmount = shapeData.blurAmount ?? 0;
+  return shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
+}
+
+/**
  * Draw a shape overlay to canvas with full animated transform values
  */
 export function drawShapeOverlayToCanvasAnimated(
@@ -167,7 +185,6 @@ export function drawShapeOverlayToCanvasAnimated(
   const width = shapeData.width * canvasWidth * animated.scaleX;
   const height = shapeData.height * canvasHeight * animated.scaleY;
   const rotation = animated.rotation;
-  const blurAmount = shapeData.blurAmount ?? 0;
 
   // Helper to create shape path
   const createShapePath = () => {
@@ -186,8 +203,8 @@ export function drawShapeOverlayToCanvasAnimated(
   };
 
   // If blur is enabled, capture and blur the region underneath
-  const effectiveBlurAmount = shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
-  if (effectiveBlurAmount > 0 && canvas && (shapeData.type === 'rectangle' || shapeData.type === 'ellipse' || shapeData.type === 'blur')) {
+  const effectiveBlurAmount = effectiveShapeBlur(shapeData);
+  if (canvas && shapeBlursBackground(shapeData)) {
     // A caller that redraws continuously (the preview) hands in one scratch
     // canvas to reuse: a fresh full-size canvas per frame costs megabytes.
     // An export draws each frame once, so it just allocates one.
@@ -517,11 +534,13 @@ export function drawTransition(
 
   // Warn if videos exist but aren't ready (potential black flash cause)
   // Using readyState >= 1 like preview player for forgiving rendering
-  if (outgoingVideo && outgoingVideo.readyState < 1) {
-    console.warn(`Transition: outgoing video not ready (readyState=${outgoingVideo.readyState}) at time ${currentTime}`);
-  }
-  if (incomingVideo && incomingVideo.readyState < 1) {
-    console.warn(`Transition: incoming video not ready (readyState=${incomingVideo.readyState}) at time ${currentTime}`);
+  if (!options?.quiet) {
+    if (outgoingVideo && outgoingVideo.readyState < 1) {
+      console.warn(`Transition: outgoing video not ready (readyState=${outgoingVideo.readyState}) at time ${currentTime}`);
+    }
+    if (incomingVideo && incomingVideo.readyState < 1) {
+      console.warn(`Transition: incoming video not ready (readyState=${incomingVideo.readyState}) at time ${currentTime}`);
+    }
   }
 
   // If only one clip has media, draw it normally

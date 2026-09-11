@@ -8,6 +8,7 @@ import {
   drawShapeOverlayToCanvasAnimated,
   drawTextOverlayToCanvasAnimated,
   drawTransition,
+  shapeBlursBackground,
 } from '../../core/canvasRenderer';
 import type { MediaDrawOptions, TransitionModifiers } from '../../core/exportTypes';
 import { formatTimecode } from '../../utils/timeUtils';
@@ -52,8 +53,15 @@ const DEFAULT_HEIGHT = 1080;
  * clip at the same time after every edit would keep drawing pre-edit values.
  * `resetFilter`: a clip with no blur of its own draws unfiltered here, even
  * inside a dissolve, which is what the preview has always done.
+ * `quiet`: media that is not ready yet is ordinary mid-scrub, and this frame
+ * is redrawn sixty times a second — the exporter's one-off warning would be a
+ * console flood here.
  */
-const PREVIEW_DRAW_OPTIONS: MediaDrawOptions = { uncachedAnimation: true, resetFilter: true };
+const PREVIEW_DRAW_OPTIONS: MediaDrawOptions = {
+  uncachedAnimation: true,
+  resetFilter: true,
+  quiet: true,
+};
 
 export function PreviewPlayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -399,7 +407,8 @@ export function PreviewPlayer() {
 
   // The scratch canvas a blur shape captures the frame so far into. One canvas,
   // reused for the life of the component: the preview redraws continuously, and
-  // a fresh full-size canvas per frame would cost 8MB+ each time.
+  // a fresh full-size canvas per frame would cost 8MB+ each time. Allocated on
+  // the first shape that actually blurs — a timeline with none never pays.
   const blurScratchFor = useCallback((canvas: HTMLCanvasElement) => {
     const scratch = blurCanvasRef.current;
     if (!scratch || scratch.width !== canvas.width || scratch.height !== canvas.height) {
@@ -502,9 +511,17 @@ export function PreviewPlayer() {
       // Skip drawing text that is currently being inline-edited (to avoid duplicate)
       if (clip.overlayType === 'shape' && clip.shapeData) {
         // A blur shape captures the frame so far from the canvas itself, into
-        // the one scratch canvas this component reuses across frames.
+        // the one scratch canvas this component reuses across frames. Shapes
+        // that cannot blur ask for neither.
+        const blurs = shapeBlursBackground(clip.shapeData);
         drawShapeOverlayToCanvasAnimated(
-          ctx, clip.shapeData, canvas.width, canvas.height, animated, canvas, blurScratchFor(canvas)
+          ctx,
+          clip.shapeData,
+          canvas.width,
+          canvas.height,
+          animated,
+          blurs ? canvas : undefined,
+          blurs ? blurScratchFor(canvas) : undefined
         );
       } else if (clip.overlayType === 'text' && clip.textData) {
         if (clip.id !== editingTextClipId) {
