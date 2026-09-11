@@ -3,14 +3,76 @@
 
 import type { Clip, TextOverlayData, ShapeOverlayData } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
-import { getAnimatedValuesCached } from '../utils/animation';
+import { getAnimatedValues, getAnimatedValuesCached } from '../utils/animation';
 import type {
   DrawableMediaSource,
+  MediaDrawOptions,
   TransitionInfo,
   TransitionModifiers,
   AnimatedOverlayValues,
 } from './exportTypes';
 import { blendModeToCanvas, getSourceDimensions } from './exportTypes';
+
+/**
+ * The animated transform/effect values of a clip at one instant.
+ *
+ * Exports go through the memo cache — a frame is drawn once and the same clip
+ * time never comes round again. A live preview asks for `uncachedAnimation`
+ * instead: it redraws the same clip at the same time after every edit, and the
+ * cache is keyed by time alone.
+ */
+function animatedValuesFor(clip: Clip, clipTime: number, options?: MediaDrawOptions) {
+  if (options?.uncachedAnimation) {
+    return getAnimatedValues(
+      clipTime,
+      clip.duration,
+      clip.animation,
+      clip.transform || DEFAULT_TRANSFORM,
+      clip.effects || DEFAULT_EFFECTS
+    );
+  }
+
+  const cacheKey = `${clip.id}:${clipTime.toFixed(3)}`;
+  return getAnimatedValuesCached(
+    cacheKey,
+    clipTime,
+    clip.duration,
+    clip.animation,
+    clip.transform || DEFAULT_TRANSFORM,
+    clip.effects || DEFAULT_EFFECTS
+  );
+}
+
+/**
+ * Whether a fill colour paints anything.
+ *
+ * The editors write a shape fill as eight-digit #RRGGBBAA and set the alpha to
+ * '00' for "no fill", so a zero alpha is the only invisible case they can
+ * produce — no shape fill is ever `transparent` or an `rgba()` string. A
+ * six-digit #RRGGBB carries no alpha and is fully opaque, which is why this
+ * cannot simply test the last two characters: that reads pure red (#ff0000)
+ * and black (#000000) as transparent.
+ */
+function hasVisibleFill(fillColor: string): boolean {
+  if (!fillColor) return false;
+  return !/^#[0-9a-f]{6}00$/i.test(fillColor);
+}
+
+/**
+ * Apply a clip's own blur to the context.
+ *
+ * With `resetFilter` the filter is always assigned, so a clip with no blur of
+ * its own draws unfiltered even when the caller has a filter set (the preview's
+ * behaviour); without it an ambient filter — the one a dissolve puts on both
+ * sides of the transition — is left in place.
+ */
+function applyClipBlur(ctx: CanvasRenderingContext2D, blurAmount: number, options?: MediaDrawOptions) {
+  if (blurAmount > 0) {
+    ctx.filter = `blur(${blurAmount}px)`;
+  } else if (options?.resetFilter) {
+    ctx.filter = 'none';
+  }
+}
 
 /**
  * Draw a text overlay to canvas with full animated transform values
@@ -87,6 +149,24 @@ export function drawTextOverlayToCanvasAnimated(
 }
 
 /**
+ * Whether a shape overlay blurs what is behind it, and so needs the frame so
+ * far captured for it. Exported so a caller can skip preparing that capture —
+ * the preview allocates its scratch canvas off the back of this.
+ */
+export function shapeBlursBackground(shapeData: ShapeOverlayData): boolean {
+  if (shapeData.type !== 'rectangle' && shapeData.type !== 'ellipse' && shapeData.type !== 'blur') {
+    return false;
+  }
+  return effectiveShapeBlur(shapeData) > 0;
+}
+
+/** A blur shape blurs by 10px unless it says otherwise; any other shape only if asked. */
+function effectiveShapeBlur(shapeData: ShapeOverlayData): number {
+  const blurAmount = shapeData.blurAmount ?? 0;
+  return shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
+}
+
+/**
  * Draw a shape overlay to canvas with full animated transform values
  */
 export function drawShapeOverlayToCanvasAnimated(
@@ -95,7 +175,8 @@ export function drawShapeOverlayToCanvasAnimated(
   canvasWidth: number,
   canvasHeight: number,
   animated: AnimatedOverlayValues,
-  canvas?: HTMLCanvasElement | OffscreenCanvas
+  canvas?: HTMLCanvasElement | OffscreenCanvas,
+  scratch?: HTMLCanvasElement
 ) {
   // Use animated position
   const centerX = animated.x * canvasWidth;
@@ -104,7 +185,6 @@ export function drawShapeOverlayToCanvasAnimated(
   const width = shapeData.width * canvasWidth * animated.scaleX;
   const height = shapeData.height * canvasHeight * animated.scaleY;
   const rotation = animated.rotation;
-  const blurAmount = shapeData.blurAmount ?? 0;
 
   // Helper to create shape path
   const createShapePath = () => {
@@ -123,11 +203,16 @@ export function drawShapeOverlayToCanvasAnimated(
   };
 
   // If blur is enabled, capture and blur the region underneath
-  const effectiveBlurAmount = shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
-  if (effectiveBlurAmount > 0 && canvas && (shapeData.type === 'rectangle' || shapeData.type === 'ellipse' || shapeData.type === 'blur')) {
-    const offscreen = new OffscreenCanvas(canvasWidth, canvasHeight);
-    const offCtx = offscreen.getContext('2d');
+  const effectiveBlurAmount = effectiveShapeBlur(shapeData);
+  if (canvas && shapeBlursBackground(shapeData)) {
+    // A caller that redraws continuously (the preview) hands in one scratch
+    // canvas to reuse: a fresh full-size canvas per frame costs megabytes.
+    // An export draws each frame once, so it just allocates one.
+    const offscreen = scratch ?? new OffscreenCanvas(canvasWidth, canvasHeight);
+    const offCtx = (offscreen as HTMLCanvasElement).getContext('2d');
     if (offCtx) {
+      // A reused canvas still holds the previous frame's capture.
+      if (scratch) offCtx.clearRect(0, 0, canvasWidth, canvasHeight);
       offCtx.drawImage(canvas, 0, 0);
 
       ctx.save();
@@ -169,11 +254,11 @@ export function drawShapeOverlayToCanvasAnimated(
   ctx.strokeStyle = shapeData.strokeColor;
   ctx.lineWidth = shapeData.strokeWidth;
 
-  const hasVisibleFill = shapeData.fillColor && !shapeData.fillColor.endsWith('00');
+  const fillIsVisible = hasVisibleFill(shapeData.fillColor);
 
   switch (shapeData.type) {
     case 'rectangle':
-      if (hasVisibleFill) {
+      if (fillIsVisible) {
         ctx.fillRect(centerX - width / 2, centerY - height / 2, width, height);
       }
       if (shapeData.strokeWidth > 0) {
@@ -183,7 +268,7 @@ export function drawShapeOverlayToCanvasAnimated(
     case 'ellipse':
       ctx.beginPath();
       ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
-      if (hasVisibleFill) {
+      if (fillIsVisible) {
         ctx.fill();
       }
       if (shapeData.strokeWidth > 0) {
@@ -229,19 +314,11 @@ export function drawClipToCanvas(
   clipTime: number, // Time relative to clip start (for animations)
   canvasWidth: number,
   canvasHeight: number,
-  transitionModifiers?: TransitionModifiers
+  transitionModifiers?: TransitionModifiers,
+  options?: MediaDrawOptions
 ) {
   // Get animated values - this applies presets and custom keyframes
-  // Use cached version for export performance
-  const cacheKey = `${clip.id}:${clipTime.toFixed(3)}`;
-  const animated = getAnimatedValuesCached(
-    cacheKey,
-    clipTime,
-    clip.duration,
-    clip.animation,
-    clip.transform || DEFAULT_TRANSFORM,
-    clip.effects || DEFAULT_EFFECTS
-  );
+  const animated = animatedValuesFor(clip, clipTime, options);
 
   // Save context state
   ctx.save();
@@ -257,10 +334,7 @@ export function drawClipToCanvas(
   ctx.globalAlpha = finalOpacity;
 
   // Apply blur effect (from animation or static)
-  const blurAmount = animated.blur;
-  if (blurAmount > 0) {
-    ctx.filter = `blur(${blurAmount}px)`;
-  }
+  applyClipBlur(ctx, animated.blur, options);
 
   // Apply clip region for wipe transitions
   if (transitionModifiers?.clipRegion) {
@@ -314,17 +388,18 @@ export function drawMediaWithModifiers(
   clipTime: number, // Time relative to clip start (for animations)
   canvasWidth: number,
   canvasHeight: number,
-  modifiers?: TransitionModifiers
+  modifiers?: TransitionModifiers,
+  options?: MediaDrawOptions
 ) {
   const video = videoElements.get(clip.sourceVideoId);
   if (video && video.readyState >= 1) {
-    drawClipToCanvas(ctx, video, clip, clipTime, canvasWidth, canvasHeight, modifiers);
+    drawClipToCanvas(ctx, video, clip, clipTime, canvasWidth, canvasHeight, modifiers, options);
     return true;
   }
 
   const image = imageElements.get(clip.sourceVideoId);
   if (image) {
-    drawImageToCanvasWithModifiers(ctx, image, clip, clipTime, canvasWidth, canvasHeight, modifiers);
+    drawImageToCanvasWithModifiers(ctx, image, clip, clipTime, canvasWidth, canvasHeight, modifiers, options);
     return true;
   }
 
@@ -366,19 +441,11 @@ export function drawImageToCanvasWithModifiers(
   clipTime: number, // Time relative to clip start (for animations)
   canvasWidth: number,
   canvasHeight: number,
-  transitionModifiers?: TransitionModifiers
+  transitionModifiers?: TransitionModifiers,
+  options?: MediaDrawOptions
 ) {
   // Get animated values - this applies presets and custom keyframes
-  // Use cached version for export performance
-  const cacheKey = `${clip.id}:${clipTime.toFixed(3)}`;
-  const animated = getAnimatedValuesCached(
-    cacheKey,
-    clipTime,
-    clip.duration,
-    clip.animation,
-    clip.transform || DEFAULT_TRANSFORM,
-    clip.effects || DEFAULT_EFFECTS
-  );
+  const animated = animatedValuesFor(clip, clipTime, options);
 
   ctx.save();
 
@@ -393,10 +460,7 @@ export function drawImageToCanvasWithModifiers(
   ctx.globalAlpha = finalOpacity;
 
   // Apply blur effect (from animation or static)
-  const blurAmount = animated.blur;
-  if (blurAmount > 0) {
-    ctx.filter = `blur(${blurAmount}px)`;
-  }
+  applyClipBlur(ctx, animated.blur, options);
 
   // Apply clip region for wipe transitions
   if (transitionModifiers?.clipRegion) {
@@ -447,7 +511,8 @@ export function drawTransition(
   transition: TransitionInfo,
   currentTime: number, // Current timeline time (for calculating clip times)
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  options?: MediaDrawOptions
 ): boolean {
   const { outgoingClip, incomingClip, progress, type } = transition;
 
@@ -469,19 +534,21 @@ export function drawTransition(
 
   // Warn if videos exist but aren't ready (potential black flash cause)
   // Using readyState >= 1 like preview player for forgiving rendering
-  if (outgoingVideo && outgoingVideo.readyState < 1) {
-    console.warn(`Transition: outgoing video not ready (readyState=${outgoingVideo.readyState}) at time ${currentTime}`);
-  }
-  if (incomingVideo && incomingVideo.readyState < 1) {
-    console.warn(`Transition: incoming video not ready (readyState=${incomingVideo.readyState}) at time ${currentTime}`);
+  if (!options?.quiet) {
+    if (outgoingVideo && outgoingVideo.readyState < 1) {
+      console.warn(`Transition: outgoing video not ready (readyState=${outgoingVideo.readyState}) at time ${currentTime}`);
+    }
+    if (incomingVideo && incomingVideo.readyState < 1) {
+      console.warn(`Transition: incoming video not ready (readyState=${incomingVideo.readyState}) at time ${currentTime}`);
+    }
   }
 
   // If only one clip has media, draw it normally
   if (!hasOutgoing) {
-    return drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, canvasWidth, canvasHeight, { opacity: progress });
+    return drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, canvasWidth, canvasHeight, { opacity: progress }, options);
   }
   if (!hasIncoming) {
-    return drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, canvasWidth, canvasHeight, { opacity: 1 - progress });
+    return drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, canvasWidth, canvasHeight, { opacity: 1 - progress }, options);
   }
 
   const w = canvasWidth;
@@ -490,8 +557,8 @@ export function drawTransition(
   switch (type) {
     case 'fade':
       // Crossfade: outgoing fades out, incoming fades in
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { opacity: progress });
+      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { opacity: 1 - progress }, options);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { opacity: progress }, options);
       break;
 
     case 'dissolve': {
@@ -501,8 +568,8 @@ export function drawTransition(
       if (dissolveBlur > 0) {
         ctx.filter = `blur(${dissolveBlur}px)`;
       }
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { opacity: progress });
+      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { opacity: 1 - progress }, options);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { opacity: progress }, options);
       ctx.restore();
       break;
     }
@@ -510,63 +577,63 @@ export function drawTransition(
     case 'wipe-left':
       drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
         clipRegion: { x: 0, y: 0, width: w * (1 - progress), height: h }
-      });
+      }, options);
       drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
         clipRegion: { x: w * (1 - progress), y: 0, width: w * progress, height: h }
-      });
+      }, options);
       break;
 
     case 'wipe-right':
       drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
         clipRegion: { x: w * progress, y: 0, width: w * (1 - progress), height: h }
-      });
+      }, options);
       drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
         clipRegion: { x: 0, y: 0, width: w * progress, height: h }
-      });
+      }, options);
       break;
 
     case 'wipe-up':
       drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
         clipRegion: { x: 0, y: 0, width: w, height: h * (1 - progress) }
-      });
+      }, options);
       drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
         clipRegion: { x: 0, y: h * (1 - progress), width: w, height: h * progress }
-      });
+      }, options);
       break;
 
     case 'wipe-down':
       drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
         clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) }
-      });
+      }, options);
       drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
         clipRegion: { x: 0, y: 0, width: w, height: h * progress }
-      });
+      }, options);
       break;
 
     case 'slide-left':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetX: -w * progress });
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetX: w * (1 - progress) });
+      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetX: -w * progress }, options);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetX: w * (1 - progress) }, options);
       break;
 
     case 'slide-right':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetX: w * progress });
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetX: -w * (1 - progress) });
+      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetX: w * progress }, options);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetX: -w * (1 - progress) }, options);
       break;
 
     case 'slide-up':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetY: -h * progress });
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetY: h * (1 - progress) });
+      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetY: -h * progress }, options);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetY: h * (1 - progress) }, options);
       break;
 
     case 'slide-down':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetY: h * progress });
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetY: -h * (1 - progress) });
+      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetY: h * progress }, options);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetY: -h * (1 - progress) }, options);
       break;
 
     default:
       // For 'none' or unknown types, just draw normally
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, undefined, options);
+      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, undefined, options);
   }
 
   return true;

@@ -127,7 +127,40 @@ Clips support animated properties via keyframes:
 - **KeyframeGraph.tsx**: Visual keyframe editor with Bezier curve display
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
 
-### Transform Controls (`src/components/Preview/PreviewPlayer.tsx`)
+### Preview (`src/components/Preview/`)
+`PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
+`drawFrame` that consults the frame cache before delegating. Everything it used to do
+inline lives in one module each, all of them pure or hook-shaped; the pure modules and hooks have their own test files, while `drawFrame.ts`, `PlaybackControls.tsx` and `cursor.ts` are covered through the component tests:
+
+| Module | Owns |
+|--------|------|
+| `drawFrame.ts` | Compositing one frame: track order, transitions, overlays, the legacy overlay arrays, and the blur scratch canvas |
+| `previewGeometry.ts` | Where a clip is on the canvas (`getOverlayBounds`), which clips can be manipulated, and the mouse-to-canvas mapping |
+| `hitTest.ts` | What is under the pointer: which clip, which handle, which drag it would start |
+| `selectionOverlay.ts` | Drawing the selection chrome — bounding box, the eight resize handles, the rotation handle, multi-select boxes |
+| `dragGeometry.ts` | The maths of a drag in progress: start measurements, resize/rotate deltas, marquee intersection, text hit for the double-click |
+| `transitions.ts` | Which transition, if any, is active at a given time |
+| `cursor.ts` | The CSS cursor a drag mode advertises |
+| `types.ts` | The shapes the above share (`DragMode`, `OverlayBounds`, `HandleHit`, `PreviewSceneContext`). **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
+| `InlineTextEditorAnchor.tsx` | Positioning `InlineTextEditor` over the text it edits, through the canvas' object-fit mapping |
+| `PlaybackControls.tsx` | The transport buttons and their keyboard shortcuts; no canvas at all |
+
+Hooks:
+
+| Hook | Owns |
+|------|------|
+| `usePreviewMedia.ts` | One object URL and one `<video>`/`<img>`/`<audio>` per source, reconciled as the timeline changes and released on unmount |
+| `usePreviewRenderLoop.ts` | When the canvas repaints: the rAF playback loop, seek-driven redraws, the debounced redraw after a media change |
+| `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports |
+
+**The preview draws through `core/canvasRenderer.ts`**, the same renderer an export
+uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the three differences:
+`uncachedAnimation` (the export's animation memo would serve pre-edit values to an
+editor that redraws the same clip at the same time), `resetFilter` (a clip with no blur
+of its own draws unfiltered, even inside a dissolve), and `quiet` (not-yet-decoded media
+is ordinary mid-scrub, and this frame redraws sixty times a second). Never fork a drawing
+function for the preview — if the two need to differ, that is another draw option.
+
 Interactive overlay manipulation in the preview canvas:
 - **Drag**: Move overlay position (updates `x`, `y`)
 - **Resize handles**: 8 handles (corners + sides) for scaling (`scaleX`, `scaleY`)

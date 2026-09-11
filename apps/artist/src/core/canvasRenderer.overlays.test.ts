@@ -258,6 +258,31 @@ describe('drawShapeOverlayToCanvasAnimated', () => {
     expect(ctx.argsFor('strokeRect')).toHaveLength(1)
   })
 
+  it('skips the fill when there is no fill colour at all', () => {
+    draw(makeShapeData({ fillColor: '' }))
+
+    expect(ctx.argsFor('fillRect')).toEqual([])
+    expect(ctx.argsFor('strokeRect')).toHaveLength(1)
+  })
+
+  it('fills a six-digit colour whose blue channel happens to be 00', () => {
+    // #ff0000 is pure red at full opacity: only an eight-digit colour carries
+    // an alpha, and only an alpha of 00 means "no fill".
+    draw(makeShapeData({ fillColor: '#ff0000' }))
+
+    expect(ctx.argsFor('fillRect')).toHaveLength(1)
+    expect(ctx.stateFor('fillRect')[0].fillStyle).toBe('#ff0000')
+  })
+
+  it('fills every six-digit colour that ends in a zero channel', () => {
+    for (const fillColor of ['#00ff00', '#ffff00', '#ff8800', '#000000']) {
+      ctx = createRecordingContext()
+      draw(makeShapeData({ fillColor, type: 'ellipse' }))
+
+      expect(ctx.argsFor('fill'), fillColor).toHaveLength(1)
+    }
+  })
+
   it('skips the stroke when the stroke width is zero', () => {
     draw(makeShapeData({ strokeWidth: 0 }))
 
@@ -438,5 +463,74 @@ describe('drawShapeOverlayToCanvasAnimated with a blur region', () => {
     )
 
     expect(offscreen.instances).toHaveLength(0)
+  })
+
+  describe('with a scratch canvas', () => {
+    // A caller that redraws continuously (the preview) hands in one canvas to
+    // capture into, instead of paying for a full-size allocation every frame.
+    let scratch: HTMLCanvasElement
+
+    beforeEach(() => {
+      installCanvasDouble()
+      scratch = document.createElement('canvas')
+      scratch.width = W
+      scratch.height = H
+    })
+
+    afterEach(() => {
+      uninstallCanvasDouble()
+    })
+
+    const drawWithScratch = (shape = makeShapeData({ type: 'blur', blurAmount: 12 })) =>
+      drawShapeOverlayToCanvasAnimated(
+        ctx as unknown as CanvasRenderingContext2D,
+        shape,
+        W,
+        H,
+        makeAnimated(),
+        source,
+        scratch
+      )
+
+    it('captures into the scratch canvas and allocates nothing', () => {
+      drawWithScratch()
+
+      expect(offscreen.instances).toHaveLength(0)
+      const scratchCtx = getLastCanvasContext()!
+      expect(scratchCtx.canvas).toBe(scratch)
+      // Cleared first: the scratch still holds the previous frame's capture.
+      expect(scratchCtx.calls.map((c) => c.method)).toEqual(['clearRect', 'drawImage'])
+      expect(scratchCtx.argsFor('clearRect')).toEqual([[0, 0, W, H]])
+      expect(scratchCtx.argsFor('drawImage')).toEqual([[source, 0, 0]])
+    })
+
+    it('draws the same scratch canvas back through the clipped path', () => {
+      drawWithScratch()
+
+      expect(methods()).toEqual([
+        'save',
+        'beginPath',
+        'ellipse',
+        'clip',
+        'setTransform',
+        'drawImage',
+        'restore',
+        'save',
+        'restore',
+      ])
+      expect(ctx.argsFor('drawImage')[0]).toEqual([scratch, 0, 0])
+      expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(12px)')
+    })
+
+    it('reuses the one canvas across frames', () => {
+      drawWithScratch()
+      drawWithScratch()
+
+      expect(offscreen.instances).toHaveLength(0)
+      expect(getLastCanvasContext()!.argsFor('drawImage')).toEqual([
+        [source, 0, 0],
+        [source, 0, 0],
+      ])
+    })
   })
 })
