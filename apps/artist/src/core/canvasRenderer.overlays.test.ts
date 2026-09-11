@@ -258,6 +258,24 @@ describe('drawShapeOverlayToCanvasAnimated', () => {
     expect(ctx.argsFor('strokeRect')).toHaveLength(1)
   })
 
+  it('fills a six-digit colour whose blue channel happens to be 00', () => {
+    // #ff0000 is pure red at full opacity: only an eight-digit colour carries
+    // an alpha, and only an alpha of 00 means "no fill".
+    draw(makeShapeData({ fillColor: '#ff0000' }))
+
+    expect(ctx.argsFor('fillRect')).toHaveLength(1)
+    expect(ctx.stateFor('fillRect')[0].fillStyle).toBe('#ff0000')
+  })
+
+  it('fills every six-digit colour that ends in a zero channel', () => {
+    for (const fillColor of ['#00ff00', '#ffff00', '#ff8800', '#000000']) {
+      ctx = createRecordingContext()
+      draw(makeShapeData({ fillColor, type: 'ellipse' }))
+
+      expect(ctx.argsFor('fill'), fillColor).toHaveLength(1)
+    }
+  })
+
   it('skips the stroke when the stroke width is zero', () => {
     draw(makeShapeData({ strokeWidth: 0 }))
 
