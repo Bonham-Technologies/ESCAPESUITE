@@ -213,7 +213,8 @@ Each package (`apps/plan`, `apps/craft`, `apps/artist`, `packages/shared`,
 functions). `pnpm test:coverage` (`turbo test:coverage`) runs `vitest run --coverage`
 in every package and fails the whole run if any package drops below its floor.
 
-**Where it stands** — measured 2026-09-10, at the end of the coverage program. Each
+**Where it stands** — measured 2026-09-10, at the end of the coverage program
+(`@escapesuite/artist` re-measured 2026-09-11, after the PreviewPlayer decomposition). Each
 package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -221,7 +222,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 99.87 | 99.06 | 94.46 | 98.93 |
-| `@escapesuite/artist` | 99.31 | 97.96 | 89.56 | 98.79 |
+| `@escapesuite/artist` | 99.30 | 98.00 | 89.82 | 98.98 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

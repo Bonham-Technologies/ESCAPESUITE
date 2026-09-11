@@ -5,7 +5,8 @@
 // draw, and PlaybackControls, which owns no canvas at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { PlaybackControls, PreviewPlayer } from './PreviewPlayer'
+import { PlaybackControls } from './PlaybackControls'
+import { PreviewPlayer } from './PreviewPlayer'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import { installPreviewDoubles, renderPreview, settle, type PreviewDoubles } from '../../test/renderPreview'
 import { resetFrameCache } from '../../core/frameCache'
