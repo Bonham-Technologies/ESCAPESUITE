@@ -221,7 +221,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 99.87 | 99.06 | 94.46 | 98.93 |
-| `@escapesuite/artist` | 99.27 | 97.75 | 88.86 | 98.79 |
+| `@escapesuite/artist` | 99.31 | 97.96 | 89.56 | 98.79 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

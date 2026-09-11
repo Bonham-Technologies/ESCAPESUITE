@@ -8,16 +8,13 @@ import { getAnimatedValues, getAnimatedVolume } from '../../utils/animation';
 import { useThrottledDragUpdate } from '../../hooks';
 import type { Clip, Track, TransitionType, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
+import * as geometry from './previewGeometry';
+import * as hitTest from './hitTest';
+import * as selectionOverlay from './selectionOverlay';
+import type { DragMode, ManipulableClipType } from './types';
 import { InlineTextEditor } from './InlineTextEditor';
 import { MarqueeSelection } from './MarqueeSelection';
 import styles from './PreviewPlayer.module.css';
-
-// Drag modes for different transform operations
-type DragMode = 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'resize-se' |
-                'resize-n' | 'resize-s' | 'resize-e' | 'resize-w' | 'rotate';
-
-// Clip type for manipulation - includes overlays and media clips
-type ManipulableClipType = 'text' | 'shape' | 'image' | 'video';
 
 // Drag state for overlay/clip manipulation
 interface DragState {
@@ -34,10 +31,6 @@ interface DragState {
   startScaleX: number;
   startScaleY: number;
 }
-
-// Handle size in pixels (for hit detection and drawing)
-const HANDLE_SIZE = 8;
-const ROTATION_HANDLE_OFFSET = 25; // Distance above the bounding box
 
 // Fallback canvas dimensions (used if resolution not yet available)
 const DEFAULT_WIDTH = 1920;
@@ -1042,546 +1035,60 @@ export function PreviewPlayer() {
     }
   }, [clips, tracks, sourceVideos, textOverlays, shapeOverlays, drawClip, drawTextOverlayAnimated, drawShapeOverlayAnimated, editingTextClipId]);
 
-  // Get overlay bounds in canvas pixels for a given clip
-  // Uses animated values from keyframes when available
-  const getOverlayBounds = useCallback((clip: Clip, canvas: HTMLCanvasElement, time?: number): {
-    centerX: number;
-    centerY: number;
-    width: number;
-    height: number;
-    rotation: number;
-  } | null => {
-    // Calculate animated values if time is provided
-    let animatedX: number | undefined;
-    let animatedY: number | undefined;
-    let animatedScaleX: number | undefined;
-    let animatedScaleY: number | undefined;
-    let animatedRotation: number | undefined;
-
-    if (time !== undefined && clip.animation) {
-      const clipTime = time - clip.timelinePosition;
-      if (clipTime >= 0 && clipTime <= clip.duration) {
-        // Build base transform from overlay properties
-        let baseTransform = clip.transform || DEFAULT_TRANSFORM;
-        if (clip.overlayType === 'text' && clip.textData) {
-          baseTransform = {
-            ...DEFAULT_TRANSFORM,
-            ...clip.transform,
-            x: clip.textData.x,
-            y: clip.textData.y,
-            scaleX: clip.textData.scale ?? 1,
-            scaleY: clip.textData.scale ?? 1,
-            rotation: clip.textData.rotation ?? 0,
-          };
-        } else if (clip.overlayType === 'shape' && clip.shapeData) {
-          baseTransform = {
-            ...DEFAULT_TRANSFORM,
-            ...clip.transform,
-            x: clip.shapeData.x,
-            y: clip.shapeData.y,
-            rotation: clip.shapeData.rotation,
-          };
-        }
-
-        const animated = getAnimatedValues(
-          clipTime,
-          clip.duration,
-          clip.animation,
-          baseTransform,
-          clip.effects || DEFAULT_EFFECTS
-        );
-
-        animatedX = animated.x;
-        animatedY = animated.y;
-        animatedScaleX = animated.scaleX;
-        animatedScaleY = animated.scaleY;
-        animatedRotation = animated.rotation;
-      }
-    }
-
-    if (clip.overlayType === 'shape' && clip.shapeData) {
-      const x = animatedX ?? clip.shapeData.x;
-      const y = animatedY ?? clip.shapeData.y;
-      const scaleX = animatedScaleX ?? 1;
-      const scaleY = animatedScaleY ?? 1;
-      const rotation = animatedRotation ?? clip.shapeData.rotation;
-
-      return {
-        centerX: x * canvas.width,
-        centerY: y * canvas.height,
-        width: clip.shapeData.width * canvas.width * scaleX,
-        height: clip.shapeData.height * canvas.height * scaleY,
-        rotation,
-      };
-    } else if (clip.overlayType === 'text' && clip.textData) {
-      // For text, we need to measure it
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
-
-      const textData = clip.textData;
-      const baseScale = textData.scale ?? 1;
-      const scaleX = animatedScaleX ?? baseScale;
-      const scaleY = animatedScaleY ?? baseScale;
-      const scale = Math.max(scaleX, scaleY);
-      const x = animatedX ?? textData.x;
-      const y = animatedY ?? textData.y;
-      const rotation = animatedRotation ?? (textData.rotation ?? 0);
-
-      const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
-      const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
-      ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
-      const lines = textData.text.split('\n');
-      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
-      const lineHeight = textData.fontSize * 1.2;
-      const totalHeight = lines.length * lineHeight;
-      const textWidth = maxLineWidth * scale;
-      const textHeight = totalHeight * scale;
-
-      // Adjust center based on text alignment
-      let centerX = x * canvas.width;
-      if (textData.textAlign === 'left') {
-        centerX += textWidth / 2;
-      } else if (textData.textAlign === 'right') {
-        centerX -= textWidth / 2;
-      }
-
-      return {
-        centerX,
-        centerY: y * canvas.height,
-        width: textWidth,
-        height: textHeight,
-        rotation,
-      };
-    } else if (!clip.overlayType && clip.sourceVideoId) {
-      // Image or video clip - use transform properties
-      const transform = clip.transform || DEFAULT_TRANSFORM;
-      const x = animatedX ?? transform.x;
-      const y = animatedY ?? transform.y;
-      const scaleX = animatedScaleX ?? transform.scaleX;
-      const scaleY = animatedScaleY ?? transform.scaleY;
-      const rotation = animatedRotation ?? (transform.rotation ?? 0);
-
-      // Get the source media dimensions
-      const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-      if (!sourceMedia) return null;
-
-      // Base dimensions = native source pixels (matches drawClip)
-      return {
-        centerX: x * canvas.width,
-        centerY: y * canvas.height,
-        width: sourceMedia.width * scaleX,
-        height: sourceMedia.height * scaleY,
-        rotation,
-      };
-    }
-    return null;
-  }, [sourceVideos]);
-
-  // Helper to determine if a clip is manipulable (overlays, images, videos - not audio)
-  const isManipulableClip = useCallback((clip: Clip): boolean => {
-    // Overlays are always manipulable
-    if (clip.overlayType) return true;
-    // Media clips are manipulable if they're not audio
-    if (clip.sourceVideoId) {
-      const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-      return sourceMedia?.mediaType !== 'audio';
-    }
-    return false;
-  }, [sourceVideos]);
-
-  // Get the manipulable clip type
-  const getClipType = useCallback((clip: Clip): ManipulableClipType | null => {
-    if (clip.overlayType === 'text') return 'text';
-    if (clip.overlayType === 'shape') return 'shape';
-    if (clip.sourceVideoId) {
-      const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-      if (sourceMedia?.mediaType === 'image') return 'image';
-      if (sourceMedia?.mediaType === 'audio') return null;
-      return 'video';
-    }
-    return null;
-  }, [sourceVideos]);
-
-  // Check if a clip has custom keyframes (not just presets)
-  const hasCustomKeyframes = useCallback((clip: Clip): boolean => {
-    if (!clip.animation?.keyframes) return false;
-    const properties: ('x' | 'y' | 'scaleX' | 'scaleY' | 'rotation' | 'opacity' | 'blur')[] =
-      ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur'];
-    for (const prop of properties) {
-      const kfs = clip.animation.keyframes[prop];
-      if (kfs && kfs.length > 0) return true;
-    }
-    return false;
-  }, []);
+  // Overlay bounds for a clip, against whatever source media the store holds.
+  const getOverlayBounds = useCallback(
+    (clip: Clip, canvas: HTMLCanvasElement, time?: number) =>
+      geometry.getOverlayBounds(clip, canvas, time, sourceVideos),
+    [sourceVideos]
+  );
 
   // Draw selection handles for the selected overlay or media clip
   const drawSelectionHandles = useCallback((time: number) => {
     const canvas = canvasRef.current;
-    if (!canvas || !selectedClipId || isPlaying) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Find the selected clip
-    const selectedClip = clips.find(c => c.id === selectedClipId);
-    if (!selectedClip || !isManipulableClip(selectedClip)) return;
-
-    // Check if clip is visible at current time
-    const clipEnd = selectedClip.timelinePosition + selectedClip.duration;
-    if (time < selectedClip.timelinePosition || time >= clipEnd) return;
-
-    // Don't draw handles if the clip can't be interacted with
-    // Case 1: Clip has custom keyframes but we're not in keyframe mode
-    if (hasCustomKeyframes(selectedClip) && !keyframePanelOpen) return;
-
-    const bounds = getOverlayBounds(selectedClip, canvas, time);
-    if (!bounds) return;
-
-    const { centerX, centerY, width, height, rotation } = bounds;
-    const halfW = width / 2;
-    const halfH = height / 2;
-
-    ctx.save();
-
-    // Apply rotation
-    ctx.translate(centerX, centerY);
-    ctx.rotate((rotation * Math.PI) / 180);
-
-    // Draw bounding box
-    ctx.strokeStyle = '#2196F3';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([]);
-    ctx.strokeRect(-halfW, -halfH, width, height);
-
-    // Draw corner handles
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#2196F3';
-    ctx.lineWidth = 2;
-    const handleSize = HANDLE_SIZE;
-    const halfHandle = handleSize / 2;
-
-    // Corner positions (relative to center)
-    const corners = [
-      { x: -halfW, y: -halfH }, // NW
-      { x: halfW, y: -halfH },  // NE
-      { x: -halfW, y: halfH },  // SW
-      { x: halfW, y: halfH },   // SE
-    ];
-
-    // Side positions
-    const sides = [
-      { x: 0, y: -halfH },      // N
-      { x: 0, y: halfH },       // S
-      { x: -halfW, y: 0 },      // W
-      { x: halfW, y: 0 },       // E
-    ];
-
-    // Draw corner handles (squares)
-    for (const corner of corners) {
-      ctx.fillRect(corner.x - halfHandle, corner.y - halfHandle, handleSize, handleSize);
-      ctx.strokeRect(corner.x - halfHandle, corner.y - halfHandle, handleSize, handleSize);
-    }
-
-    // Draw side handles (smaller squares)
-    const sideHandleSize = handleSize * 0.8;
-    const halfSideHandle = sideHandleSize / 2;
-    for (const side of sides) {
-      ctx.fillRect(side.x - halfSideHandle, side.y - halfSideHandle, sideHandleSize, sideHandleSize);
-      ctx.strokeRect(side.x - halfSideHandle, side.y - halfSideHandle, sideHandleSize, sideHandleSize);
-    }
-
-    // Draw rotation handle (circle above the bounding box)
-    const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
-
-    // Line connecting to rotation handle
-    ctx.beginPath();
-    ctx.setLineDash([4, 4]);
-    ctx.moveTo(0, -halfH);
-    ctx.lineTo(0, rotationHandleY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Rotation handle circle
-    ctx.beginPath();
-    ctx.arc(0, rotationHandleY, handleSize, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.restore();
-  }, [clips, selectedClipId, isPlaying, getOverlayBounds, isManipulableClip, hasCustomKeyframes, keyframePanelOpen]);
+    if (!canvas) return;
+    selectionOverlay.drawSelectionHandles(canvas, time, {
+      clips,
+      sourceVideos,
+      selectedClipId,
+      isPlaying,
+      keyframePanelOpen,
+    });
+  }, [clips, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
   const drawMultiSelectHandles = useCallback((time: number) => {
     const canvas = canvasRef.current;
-    if (!canvas || selectedClipIds.size <= 1 || isPlaying) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    for (const clipId of selectedClipIds) {
-      // Skip the primary selected clip - it already has full handles
-      if (clipId === selectedClipId) continue;
-
-      const clip = clips.find(c => c.id === clipId);
-      if (!clip || !isManipulableClip(clip)) continue;
-
-      // Check if clip is visible at current time
-      const clipEnd = clip.timelinePosition + clip.duration;
-      if (time < clip.timelinePosition || time >= clipEnd) continue;
-
-      const bounds = getOverlayBounds(clip, canvas, time);
-      if (!bounds) continue;
-
-      const { centerX, centerY, width, height, rotation } = bounds;
-      const halfW = width / 2;
-      const halfH = height / 2;
-
-      ctx.save();
-      ctx.translate(centerX, centerY);
-      ctx.rotate((rotation * Math.PI) / 180);
-
-      // Draw dashed bounding box for multi-selected clips
-      ctx.strokeStyle = '#2196F3';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(-halfW, -halfH, width, height);
-
-      ctx.restore();
-    }
-  }, [clips, selectedClipId, selectedClipIds, isPlaying, getOverlayBounds, isManipulableClip]);
+    if (!canvas) return;
+    selectionOverlay.drawMultiSelectHandles(canvas, time, {
+      clips,
+      sourceVideos,
+      selectedClipId,
+      selectedClipIds,
+      isPlaying,
+    });
+  }, [clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying]);
 
   // Get mouse position relative to canvas in normalized coordinates (0-1)
-  // Accounts for object-fit: contain which letterboxes the canvas content
   // Accepts any MouseEvent (canvas or window) so dragging works outside the canvas
   const getCanvasPosition = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-
-    const rect = canvas.getBoundingClientRect();
-
-    // Calculate the actual rendered size of the canvas content (accounting for object-fit: contain)
-    const canvasAspect = canvas.width / canvas.height;
-    const elementAspect = rect.width / rect.height;
-
-    let renderedWidth: number;
-    let renderedHeight: number;
-    let offsetX: number;
-    let offsetY: number;
-
-    if (canvasAspect > elementAspect) {
-      // Canvas is wider than element - letterboxed top/bottom
-      renderedWidth = rect.width;
-      renderedHeight = rect.width / canvasAspect;
-      offsetX = 0;
-      offsetY = (rect.height - renderedHeight) / 2;
-    } else {
-      // Canvas is taller than element - letterboxed left/right
-      renderedHeight = rect.height;
-      renderedWidth = rect.height * canvasAspect;
-      offsetX = (rect.width - renderedWidth) / 2;
-      offsetY = 0;
-    }
-
-    // Convert mouse position to be relative to the actual canvas content area
-    const mouseX = e.clientX - rect.left - offsetX;
-    const mouseY = e.clientY - rect.top - offsetY;
-
-    // Return normalized coordinates — NOT clamped, so dragging outside canvas works
-    return {
-      x: mouseX / renderedWidth,
-      y: mouseY / renderedHeight,
-    };
+    return geometry.getCanvasPosition(canvas, e);
   }, []);
 
   // Hit test: find what's at the given position (handles take priority over overlay bodies)
-  const hitTestHandles = useCallback((normalizedX: number, normalizedY: number): {
-    clipId: string;
-    clipType: ManipulableClipType;
-    mode: DragMode;
-  } | null => {
+  const hitTestHandles = useCallback((normalizedX: number, normalizedY: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-
-    const mouseX = normalizedX * canvas.width;
-    const mouseY = normalizedY * canvas.height;
-
-    // RESTRICTION 1: When keyframe panel is open, ONLY allow interaction with the selected clip
-    // This prevents accidentally clicking through and grabbing something else
-    if (keyframePanelOpen && selectedClipId) {
-      const selectedClip = clips.find(c => c.id === selectedClipId);
-      const selectedClipType = selectedClip ? getClipType(selectedClip) : null;
-      if (selectedClip && selectedClipType) {
-        const clipEnd = selectedClip.timelinePosition + selectedClip.duration;
-        if (currentTime >= selectedClip.timelinePosition && currentTime < clipEnd) {
-          const bounds = getOverlayBounds(selectedClip, canvas, currentTime);
-          if (bounds) {
-            const { centerX, centerY, width, height, rotation } = bounds;
-            const halfW = width / 2;
-            const halfH = height / 2;
-
-            const rad = (-rotation * Math.PI) / 180;
-            const dx = mouseX - centerX;
-            const dy = mouseY - centerY;
-            const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-            const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
-
-            const handleHitSize = HANDLE_SIZE * 1.5;
-            const edgeHitSize = HANDLE_SIZE * 1.2; // Narrower zone for edge detection
-
-            // Check rotation handle
-            const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
-            if (Math.abs(localX) < handleHitSize && Math.abs(localY - rotationHandleY) < handleHitSize) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'rotate' };
-            }
-
-            // Check corner handles (small zones right at corners)
-            const corners: { x: number; y: number; mode: DragMode }[] = [
-              { x: -halfW, y: -halfH, mode: 'resize-nw' },
-              { x: halfW, y: -halfH, mode: 'resize-ne' },
-              { x: -halfW, y: halfH, mode: 'resize-sw' },
-              { x: halfW, y: halfH, mode: 'resize-se' },
-            ];
-            for (const corner of corners) {
-              if (Math.abs(localX - corner.x) < handleHitSize && Math.abs(localY - corner.y) < handleHitSize) {
-                return { clipId: selectedClipId, clipType: selectedClipType, mode: corner.mode };
-              }
-            }
-
-            // Check edges — entire edge is a hit zone, not just the midpoint handle
-            // Top edge: along the full width, near the top border
-            if (Math.abs(localY - (-halfH)) < edgeHitSize && Math.abs(localX) <= halfW) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-n' };
-            }
-            // Bottom edge
-            if (Math.abs(localY - halfH) < edgeHitSize && Math.abs(localX) <= halfW) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-s' };
-            }
-            // Left edge
-            if (Math.abs(localX - (-halfW)) < edgeHitSize && Math.abs(localY) <= halfH) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-w' };
-            }
-            // Right edge
-            if (Math.abs(localX - halfW) < edgeHitSize && Math.abs(localY) <= halfH) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-e' };
-            }
-
-            // Check body for move
-            if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'move' };
-            }
-          }
-        }
-      }
-      // In keyframe mode, clicking outside the selected clip does nothing
-      return null;
-    }
-
-    // Get all active manipulable clips sorted by z-order (highest on top first)
-    const activeClips = getClipsAtTime(clips, tracks, currentTime);
-    const manipulableClips = activeClips
-      .filter(c => isManipulableClip(c.clip))
-      .sort((a, b) => {
-        // Overlays on top of media clips
-        if (a.clip.overlayType && !b.clip.overlayType) return 1;
-        if (!a.clip.overlayType && b.clip.overlayType) return -1;
-        // Text overlays on top of shape overlays
-        if (a.clip.overlayType === 'text' && b.clip.overlayType === 'shape') return 1;
-        if (a.clip.overlayType === 'shape' && b.clip.overlayType === 'text') return -1;
-        return (a.track?.index ?? 0) - (b.track?.index ?? 0);
-      })
-      .reverse(); // Now highest z-order first
-
-    // First pass: Check handles ONLY on the selected clip (if visible and doesn't have keyframes)
-    if (selectedClipId) {
-      const selectedClip = clips.find(c => c.id === selectedClipId);
-      const selectedClipType = selectedClip ? getClipType(selectedClip) : null;
-
-      // RESTRICTION 2: If clip has custom keyframes, only allow interaction in keyframe mode
-      // This is already handled since keyframePanelOpen check is above, and here we're NOT in keyframe mode
-      if (selectedClip && selectedClipType && !hasCustomKeyframes(selectedClip)) {
-        const clipEnd = selectedClip.timelinePosition + selectedClip.duration;
-        if (currentTime >= selectedClip.timelinePosition && currentTime < clipEnd) {
-          const bounds = getOverlayBounds(selectedClip, canvas, currentTime);
-          if (bounds) {
-            const { centerX, centerY, width, height, rotation } = bounds;
-            const halfW = width / 2;
-            const halfH = height / 2;
-
-            const rad = (-rotation * Math.PI) / 180;
-            const dx = mouseX - centerX;
-            const dy = mouseY - centerY;
-            const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-            const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
-
-            const handleHitSize = HANDLE_SIZE * 1.5;
-            const edgeHitSize = HANDLE_SIZE * 1.2;
-
-            // Check rotation handle
-            const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
-            if (Math.abs(localX) < handleHitSize && Math.abs(localY - rotationHandleY) < handleHitSize) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'rotate' };
-            }
-
-            // Check corner handles
-            const corners: { x: number; y: number; mode: DragMode }[] = [
-              { x: -halfW, y: -halfH, mode: 'resize-nw' },
-              { x: halfW, y: -halfH, mode: 'resize-ne' },
-              { x: -halfW, y: halfH, mode: 'resize-sw' },
-              { x: halfW, y: halfH, mode: 'resize-se' },
-            ];
-            for (const corner of corners) {
-              if (Math.abs(localX - corner.x) < handleHitSize && Math.abs(localY - corner.y) < handleHitSize) {
-                return { clipId: selectedClipId, clipType: selectedClipType, mode: corner.mode };
-              }
-            }
-
-            // Check edges — entire edge is a hit zone
-            if (Math.abs(localY - (-halfH)) < edgeHitSize && Math.abs(localX) <= halfW) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-n' };
-            }
-            if (Math.abs(localY - halfH) < edgeHitSize && Math.abs(localX) <= halfW) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-s' };
-            }
-            if (Math.abs(localX - (-halfW)) < edgeHitSize && Math.abs(localY) <= halfH) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-w' };
-            }
-            if (Math.abs(localX - halfW) < edgeHitSize && Math.abs(localY) <= halfH) {
-              return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-e' };
-            }
-          }
-        }
-      }
-    }
-
-    // Second pass: Check body hit on ALL clips in z-order (highest first)
-    // Skip clips that have custom keyframes (they can only be manipulated in keyframe mode)
-    for (const { clip } of manipulableClips) {
-      // RESTRICTION 2: Skip clips with custom keyframes when not in keyframe mode
-      if (hasCustomKeyframes(clip)) continue;
-
-      const clipType = getClipType(clip);
-      if (!clipType) continue;
-
-      const bounds = getOverlayBounds(clip, canvas, currentTime);
-      if (!bounds) continue;
-
-      const { centerX, centerY, width, height, rotation } = bounds;
-      const halfW = width / 2;
-      const halfH = height / 2;
-
-      const rad = (-rotation * Math.PI) / 180;
-      const dx = mouseX - centerX;
-      const dy = mouseY - centerY;
-      const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-      const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
-
-      if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
-        return { clipId: clip.id, clipType, mode: 'move' };
-      }
-    }
-
-    return null;
-  }, [clips, tracks, currentTime, selectedClipId, getOverlayBounds, isManipulableClip, getClipType, keyframePanelOpen, hasCustomKeyframes]);
+    return hitTest.hitTestHandles(normalizedX, normalizedY, canvas, {
+      clips,
+      tracks,
+      sourceVideos,
+      currentTime,
+      selectedClipId,
+      keyframePanelOpen,
+    });
+  }, [clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen]);
 
   // Mouse event handlers for drag-and-drop
   const handleMouseDown = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
