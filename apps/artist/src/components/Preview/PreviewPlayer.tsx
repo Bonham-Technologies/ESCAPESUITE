@@ -2,10 +2,11 @@ import { useRef, useEffect, useState, useCallback, useMemo, type MouseEvent } fr
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getVideoBlob } from '../../core/storage';
 import { getFrameCache } from '../../core/frameCache';
+import { blendModeToCanvas } from '../../core/exportTypes';
 import { formatTimecode } from '../../utils/timeUtils';
 import { getAnimatedValues, getAnimatedVolume } from '../../utils/animation';
 import { useThrottledDragUpdate } from '../../hooks';
-import type { BlendMode, Clip, Track, TransitionType, TextOverlayData, ShapeOverlayData } from '../../store/types';
+import type { Clip, Track, TransitionType, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import { InlineTextEditor } from './InlineTextEditor';
 import { MarqueeSelection } from './MarqueeSelection';
@@ -37,18 +38,6 @@ interface DragState {
 // Handle size in pixels (for hit detection and drawing)
 const HANDLE_SIZE = 8;
 const ROTATION_HANDLE_OFFSET = 25; // Distance above the bounding box
-
-// Map blend modes to canvas globalCompositeOperation
-const blendModeToCanvas: Record<BlendMode, GlobalCompositeOperation> = {
-  normal: 'source-over',
-  multiply: 'multiply',
-  screen: 'screen',
-  overlay: 'overlay',
-  darken: 'darken',
-  lighten: 'lighten',
-  difference: 'difference',
-  add: 'lighter',
-};
 
 // Fallback canvas dimensions (used if resolution not yet available)
 const DEFAULT_WIDTH = 1920;
@@ -520,214 +509,6 @@ export function PreviewPlayer() {
     ctx.drawImage(drawSource, x, y, scaledWidth, scaledHeight);
     ctx.restore();
   }, [sourceVideos]);
-
-  // Helper to draw text overlay from clip
-  const drawTextOverlay = useCallback((
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    textData: TextOverlayData,
-    opacity: number
-  ) => {
-    ctx.save();
-    ctx.globalAlpha = opacity;
-
-    const x = textData.x * canvas.width;
-    const y = textData.y * canvas.height;
-    const scale = textData.scale ?? 1;
-    const rotation = textData.rotation ?? 0;
-
-    // Apply rotation and scale around the text position
-    if (rotation !== 0 || scale !== 1) {
-      ctx.translate(x, y);
-      if (rotation !== 0) {
-        ctx.rotate((rotation * Math.PI) / 180);
-      }
-      if (scale !== 1) {
-        ctx.scale(scale, scale);
-      }
-      ctx.translate(-x, -y);
-    }
-
-    // Set up font
-    const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
-    const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
-    ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
-    ctx.textAlign = textData.textAlign;
-    ctx.textBaseline = 'middle';
-
-    // Split text into lines for multi-line support
-    const lines = textData.text.split('\n');
-    const lineHeight = textData.fontSize * 1.2;
-    const totalHeight = lines.length * lineHeight;
-
-    // Draw background if set
-    if (textData.backgroundColor && textData.backgroundColor !== '#00000000') {
-      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
-      const padding = textData.fontSize * 0.3;
-      const bgWidth = maxLineWidth + padding * 2;
-      const bgHeight = totalHeight + padding * 2;
-
-      let bgX = x - padding;
-      if (textData.textAlign === 'center') {
-        bgX = x - bgWidth / 2;
-      } else if (textData.textAlign === 'right') {
-        bgX = x - bgWidth + padding;
-      }
-
-      ctx.fillStyle = textData.backgroundColor;
-      ctx.fillRect(bgX, y - bgHeight / 2, bgWidth, bgHeight);
-    }
-
-    // Draw each line of text
-    ctx.fillStyle = textData.color;
-    lines.forEach((line, i) => {
-      const lineY = y - (totalHeight / 2) + (i * lineHeight) + (lineHeight / 2);
-      ctx.fillText(line, x, lineY);
-    });
-
-    ctx.restore();
-  }, []);
-
-  // Helper to draw shape overlay from clip
-  const drawShapeOverlay = useCallback((
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    shapeData: ShapeOverlayData,
-    opacity: number
-  ) => {
-    const centerX = shapeData.x * canvas.width;
-    const centerY = shapeData.y * canvas.height;
-    const width = shapeData.width * canvas.width;
-    const height = shapeData.height * canvas.height;
-    const blurAmount = shapeData.blurAmount ?? 0;
-
-    // Helper to create shape path
-    const createShapePath = () => {
-      ctx.beginPath();
-      switch (shapeData.type) {
-        case 'rectangle':
-          ctx.rect(centerX - width / 2, centerY - height / 2, width, height);
-          break;
-        case 'ellipse':
-        case 'blur':  // Blur renders as an ellipse
-          ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
-          break;
-        default:
-          ctx.rect(centerX - width / 2, centerY - height / 2, width, height);
-      }
-    };
-
-    // If blur is enabled, capture and blur the region underneath
-    // For 'blur' type, always apply blur effect regardless of blurAmount setting
-    const effectiveBlurAmount = shapeData.type === 'blur' ? (blurAmount || 10) : blurAmount;
-    if (effectiveBlurAmount > 0 && (shapeData.type === 'rectangle' || shapeData.type === 'ellipse' || shapeData.type === 'blur')) {
-      // Reuse offscreen canvas for blur (avoids allocating 8MB+ per frame)
-      if (!blurCanvasRef.current || blurCanvasRef.current.width !== canvas.width || blurCanvasRef.current.height !== canvas.height) {
-        blurCanvasRef.current = document.createElement('canvas');
-        blurCanvasRef.current.width = canvas.width;
-        blurCanvasRef.current.height = canvas.height;
-        blurCtxRef.current = blurCanvasRef.current.getContext('2d');
-      }
-      const offCtx = blurCtxRef.current;
-      if (offCtx) {
-        // Copy current canvas content to offscreen
-        offCtx.clearRect(0, 0, canvas.width, canvas.height);
-        offCtx.drawImage(canvas, 0, 0);
-
-        ctx.save();
-
-        // Apply rotation to create the rotated clip path
-        if (shapeData.rotation !== 0) {
-          ctx.translate(centerX, centerY);
-          ctx.rotate((shapeData.rotation * Math.PI) / 180);
-          ctx.translate(-centerX, -centerY);
-        }
-
-        // Create clipping path for the shape (in rotated coordinate space)
-        createShapePath();
-        ctx.clip();
-
-        // Reset transform to identity - the clip path stays, but we draw unrotated content
-        // This ensures the blur applies to the content as-is, not rotated
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-        // Apply blur filter and draw the captured content into the clipped region
-        ctx.filter = `blur(${effectiveBlurAmount}px)`;
-        ctx.globalAlpha = opacity;
-
-        // Draw from offscreen canvas (source) to main canvas (destination) with blur
-        // The content is drawn unrotated, but clipped to the rotated shape
-        ctx.drawImage(blurCanvasRef.current!, 0, 0);
-
-        ctx.restore();
-      }
-    }
-
-    // Draw the fill color (on top of blur if both are used)
-    ctx.save();
-    ctx.globalAlpha = opacity;
-
-    // Apply rotation if needed
-    if (shapeData.rotation !== 0) {
-      ctx.translate(centerX, centerY);
-      ctx.rotate((shapeData.rotation * Math.PI) / 180);
-      ctx.translate(-centerX, -centerY);
-    }
-
-    ctx.fillStyle = shapeData.fillColor;
-    ctx.strokeStyle = shapeData.strokeColor;
-    ctx.lineWidth = shapeData.strokeWidth;
-
-    // Only draw fill if it's not fully transparent
-    const hasVisibleFill = shapeData.fillColor && !shapeData.fillColor.endsWith('00');
-
-    switch (shapeData.type) {
-      case 'rectangle':
-        if (hasVisibleFill) {
-          ctx.fillRect(centerX - width / 2, centerY - height / 2, width, height);
-        }
-        if (shapeData.strokeWidth > 0) {
-          ctx.strokeRect(centerX - width / 2, centerY - height / 2, width, height);
-        }
-        break;
-      case 'ellipse':
-        ctx.beginPath();
-        ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
-        if (hasVisibleFill) {
-          ctx.fill();
-        }
-        if (shapeData.strokeWidth > 0) {
-          ctx.stroke();
-        }
-        break;
-      case 'blur':
-        // Blur type only applies blur effect, no fill/stroke needed
-        // The blur is already applied above, nothing more to draw
-        break;
-      case 'line':
-        ctx.beginPath();
-        ctx.moveTo(centerX - width / 2, centerY);
-        ctx.lineTo(centerX + width / 2, centerY);
-        ctx.stroke();
-        break;
-      case 'arrow':
-        const arrowSize = Math.min(width, height) * 0.2;
-        ctx.beginPath();
-        ctx.moveTo(centerX - width / 2, centerY);
-        ctx.lineTo(centerX + width / 2 - arrowSize, centerY);
-        ctx.stroke();
-        // Arrow head
-        ctx.beginPath();
-        ctx.moveTo(centerX + width / 2, centerY);
-        ctx.lineTo(centerX + width / 2 - arrowSize, centerY - arrowSize / 2);
-        ctx.lineTo(centerX + width / 2 - arrowSize, centerY + arrowSize / 2);
-        ctx.closePath();
-        ctx.fill();
-        break;
-    }
-
-    ctx.restore();
-  }, []);
 
   // Helper to draw text overlay with full animated transform values
   const drawTextOverlayAnimated = useCallback((
@@ -1259,7 +1040,7 @@ export function PreviewPlayer() {
 
       ctx.restore();
     }
-  }, [clips, tracks, sourceVideos, textOverlays, shapeOverlays, drawClip, drawTextOverlay, drawShapeOverlay, drawTextOverlayAnimated, drawShapeOverlayAnimated, editingTextClipId]);
+  }, [clips, tracks, sourceVideos, textOverlays, shapeOverlays, drawClip, drawTextOverlayAnimated, drawShapeOverlayAnimated, editingTextClipId]);
 
   // Get overlay bounds in canvas pixels for a given clip
   // Uses animated values from keyframes when available
