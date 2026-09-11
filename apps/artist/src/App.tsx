@@ -386,15 +386,15 @@ function App() {
         return;
       }
 
-      // + or = = Zoom in
-      if (e.key === '+' || e.key === '=') {
+      // + or = = Zoom in (Ctrl/Cmd + = is the browser's own page zoom)
+      if ((e.key === '+' || e.key === '=') && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         handleZoomIn();
         return;
       }
 
-      // - = Zoom out
-      if (e.key === '-') {
+      // - = Zoom out (Ctrl/Cmd + - is the browser's own page zoom)
+      if (e.key === '-' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         handleZoomOut();
         return;

@@ -178,6 +178,34 @@ function App() {
     }
   }, [setStreams]);
 
+  // Release everything when the recorder screen goes away.
+  //
+  // Nothing else runs on the way out: an unmount mid-countdown would leave the
+  // countdown interval ticking, and an unmount mid-take would leave the
+  // duration ticker, the recorder and the camera/microphone lights on. The
+  // cleanup has to run only on unmount, so it reaches the current
+  // stopAllStreams through a ref instead of closing over one render's copy.
+  const stopAllStreamsRef = useRef(stopAllStreams);
+  useEffect(() => {
+    stopAllStreamsRef.current = stopAllStreams;
+  }, [stopAllStreams]);
+
+  useEffect(() => () => {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    if (recorderRef.current) {
+      recorderRef.current.dispose();
+      recorderRef.current = null;
+    }
+    stopAllStreamsRef.current();
+  }, []);
+
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
     if (countdownIntervalRef.current) {

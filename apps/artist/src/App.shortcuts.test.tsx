@@ -315,6 +315,24 @@ describe('App keyboard shortcuts', () => {
 
       expect(store().zoom).toBeCloseTo(0.8)
     })
+
+    // Ctrl/Cmd + = and Ctrl/Cmd + - are the browser's own page zoom. The
+    // timeline must not answer them, and must not preventDefault them either —
+    // swallowing the chord is what stops the browser acting on it.
+    it.each([
+      ['ctrl', '=', { ctrlKey: true }],
+      ['ctrl', '-', { ctrlKey: true }],
+      ['cmd', '=', { metaKey: true }],
+      ['cmd', '-', { metaKey: true }],
+    ] as const)('leaves %s+%s to the browser', async (_name, key, chord) => {
+      await renderApp()
+      const before = store().zoom
+
+      const notPrevented = press(key, chord)
+
+      expect(store().zoom).toBe(before)
+      expect(notPrevented).toBe(true)
+    })
   })
 
   describe('panels and tools', () => {

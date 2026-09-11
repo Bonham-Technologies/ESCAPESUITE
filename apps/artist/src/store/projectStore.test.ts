@@ -77,6 +77,61 @@ describe('projectStore integration', () => {
       expect(useEditorStore.getState().sourceVideos[1].name).toBe('b-again.mp4')
     })
 
+    describe('a re-add that changes nothing', () => {
+      // A restored session overlapping the library re-adds media the store
+      // already holds, field for field. That is not an edit, so it must not
+      // land on the undo stack — an undo that restores an identical library
+      // looks to the user like undo did nothing.
+      const sameVideo = (): SourceVideo => ({
+        id: 'video1',
+        name: 'test.mp4',
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
+        thumbnailUrl: 'blob:thumb',
+        waveformData: [
+          { min: -1, max: 1 },
+          { min: 0, max: 0.5 },
+        ],
+      })
+
+      it('leaves the library and the undo history untouched', () => {
+        useEditorStore.getState().addSourceVideo(sameVideo())
+        const { sourceVideos, history } = useEditorStore.getState()
+
+        // A fresh object with the same contents, down to a new waveform array.
+        useEditorStore.getState().addSourceVideo(sameVideo())
+
+        const after = useEditorStore.getState()
+        expect(after.history.past).toHaveLength(history.past.length)
+        expect(after.sourceVideos).toBe(sourceVideos)
+      })
+
+      const realChanges: [string, Partial<SourceVideo>][] = [
+        ['a renamed file', { name: 'renamed.mp4' }],
+        ['a fresh thumbnail', { thumbnailUrl: 'blob:newer' }],
+        ['a re-read duration', { duration: 42 }],
+        ['re-analysed audio', { waveformData: [{ min: -0.5, max: 0.5 }, { min: 0, max: 0.5 }] }],
+        ['a shorter waveform', { waveformData: [{ min: -1, max: 1 }] }],
+        ['no waveform at all', { waveformData: undefined }],
+      ]
+
+      it.each(realChanges)('still replaces and records a step for %s', (_label, change) => {
+        useEditorStore.getState().addSourceVideo(sameVideo())
+        const before = useEditorStore.getState().history.past.length
+
+        useEditorStore.getState().addSourceVideo({ ...sameVideo(), ...change })
+
+        const after = useEditorStore.getState()
+        expect(after.history.past).toHaveLength(before + 1)
+        expect(after.sourceVideos).toHaveLength(1)
+        expect(after.sourceVideos[0]).toMatchObject(change)
+      })
+    })
+
     it('removes a source video', () => {
       const video: SourceVideo = {
         id: 'video1',

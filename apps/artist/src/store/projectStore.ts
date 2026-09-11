@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { EditorState, Project, SourceVideo, Clip, Timeline, Track, ClipTransform, ClipEffects, BlendMode, UndoableState, TextOverlay, ShapeOverlay, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe } from './types';
+import type { EditorState, Project, SourceVideo, Clip, Timeline, Track, ClipTransform, ClipEffects, BlendMode, UndoableState, TextOverlay, ShapeOverlay, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe, WaveformPeak } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA, DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { createUndoableSnapshot, cloneClip } from '../utils/deepClone';
 
@@ -128,6 +128,24 @@ function calculateTimelineDuration(clips: Clip[]): number {
   return Math.max(...clips.map(c => c.timelinePosition + c.duration));
 }
 
+// SourceVideo is flat scalars plus waveformData, an array of {min,max} pairs,
+// so "the same media, unchanged" is decidable field by field without a deep
+// clone. Used to tell a no-op re-add from one carrying newer metadata.
+function sameWaveform(a: WaveformPeak[] | undefined, b: WaveformPeak[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((peak, i) => peak.min === b[i].min && peak.max === b[i].max);
+}
+
+function sameSourceVideo(a: SourceVideo, b: SourceVideo): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof SourceVideo>;
+  for (const key of keys) {
+    if (key === 'waveformData') continue;
+    if (a[key] !== b[key]) return false;
+  }
+  return sameWaveform(a.waveformData, b.waveformData);
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   // Initial state
   project: createEmptyProject(),
@@ -193,8 +211,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // seen again (a restored session overlapping the library, the same URL loaded twice).
   // Replaced in place rather than ignored, so the newer metadata (a fresh thumbnail URL,
   // above all) wins, and rather than appended, so the library order does not shuffle.
+  // A re-add carrying identical metadata changes nothing, so it records nothing:
+  // an undo step that restores an identical library reads to the user as an undo
+  // that did nothing.
   addSourceVideo: (video: SourceVideo) => set((state) => {
     const existing = state.sourceVideos.findIndex((v) => v.id === video.id)
+    if (existing !== -1 && sameSourceVideo(state.sourceVideos[existing], video)) return state
     const sourceVideos = existing === -1
       ? [...state.sourceVideos, video]
       : state.sourceVideos.map((v, i) => (i === existing ? video : v))
