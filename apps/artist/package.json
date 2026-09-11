@@ -1,7 +1,7 @@
 {
   "name": "@escapesuite/artist",
   "private": true,
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "Client-side web video editor",
   "type": "module",
   "scripts": {
