@@ -204,32 +204,25 @@ describe('preview per-frame work', () => {
     expect(frame.composites).toBe(1)
   })
 
-  it('settles a playhead move into two composites when clips share a source', async () => {
+  it('settles a playhead move into one composite when clips share a source', async () => {
     const preview = await renderPreview({ rect: RECT })
 
     const frame = await measureFrame(preview, EFFECTS_FRAME_TIME)
 
-    // A finding pinned, not a target met. Measured 2026-09-12: 2 — the same
-    // frame painted twice for one move of the playhead.
+    // Exact, for the same reason as the single-clip case above: moving the
+    // playhead by less than the seek threshold must find every video already
+    // where it should be and paint once.
     //
-    // The cause is the seek-check loop in `usePreviewRenderLoop.ts`, which
-    // walks *clips* but seeks *elements*. All 12 clips in this scene draw from
-    // one source, so `usePreviewMedia` gives them one <video> between them:
-    // the loop sets that element's currentTime for the first live clip, then
-    // measures the same element against the second live clip's target — a
-    // second away — decides a seek is needed, and takes the event-driven
-    // branch, which draws immediately and again when `seeked` arrives. The
-    // test above shows one live clip composites once, so this is about sharing
-    // an element, not about the playhead moving.
-    //
-    // It is not academic: a picture-in-picture arrangement, or the same clip
-    // duplicated on two tracks, is exactly this shape. The fix is in that
-    // loop's per-element handling — seek each element once, for the clip that
-    // owns it, rather than once per clip — not in memoising the draw.
-    //
-    // When that lands this test fails, which is the point: fold it into the
-    // one above, at one composite.
-    expect(frame.composites).toBe(2)
+    // All 12 clips in this scene draw from one source, so `usePreviewMedia`
+    // gives them one <video> between them. The seek check in
+    // `usePreviewRenderLoop.ts` walks *clips* but seeks *elements*, so it used
+    // to set that element's currentTime for the first live clip, measure the
+    // same element against the second live clip's target — a second away —
+    // decide a seek was needed, and take the event-driven branch, which draws
+    // immediately and again when `seeked` arrives: two composites for one move.
+    // A picture-in-picture arrangement, or the same clip duplicated on two
+    // tracks, is exactly this shape.
+    expect(frame.composites).toBe(1)
   })
 })
 
