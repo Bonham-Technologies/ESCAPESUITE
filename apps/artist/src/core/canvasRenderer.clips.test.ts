@@ -333,40 +333,26 @@ describe('MediaDrawOptions', () => {
     expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(3px)')
   })
 
-  it('clears an inherited filter for an unblurred clip when asked to reset it', () => {
-    ctx.filter = 'blur(3px)'
-    drawClipToCanvas(asCtx(), frame(), makeClip(), 0, W, H, undefined, { resetFilter: true })
-
-    expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
-  })
-
-  it('still applies the clip’s own blur over an inherited filter when resetting', () => {
-    ctx.filter = 'blur(3px)'
-    drawClipToCanvas(asCtx(), frame(), makeClip({ effects: { blur: 8 } }), 0, W, H, undefined, {
-      resetFilter: true,
-    })
-
-    expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(8px)')
-  })
-
   it('reaches the image path through the dispatcher', () => {
+    // uncachedAnimation is the observable one: the same clip id and time,
+    // drawn twice across a scale edit, comes out at the new size only if the
+    // option travelled all the way down to the image draw.
     const image = loadedImage(800, 600)
-    const clip = makeClip()
-    ctx.filter = 'blur(3px)'
+    const before = makeClip({
+      transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+    })
+    const after = makeClip({
+      transform: { x: 0.5, y: 0.5, scaleX: 2, scaleY: 2, rotation: 0, opacity: 1 },
+    })
+    const images = new Map([[before.sourceVideoId, image]])
 
-    drawMediaWithModifiers(
-      asCtx(),
-      new Map(),
-      new Map([[clip.sourceVideoId, image]]),
-      clip,
-      0,
-      W,
-      H,
-      undefined,
-      { uncachedAnimation: true, resetFilter: true }
-    )
+    for (const clip of [before, after]) {
+      drawMediaWithModifiers(asCtx(), new Map(), images, clip, 0, W, H, undefined, {
+        uncachedAnimation: true,
+      })
+    }
 
-    expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
+    expect(ctx.argsFor('drawImage').map((args) => args[3])).toEqual([800, 1600])
   })
 })
 

@@ -159,10 +159,11 @@ uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the two differences:
 editor that redraws the same clip at the same time) and `quiet` (not-yet-decoded media
 is ordinary mid-scrub, and this frame redraws sixty times a second). Never fork a drawing
 function for the preview — if the two need to differ, that is another draw option.
-`MediaDrawOptions` also carries `resetFilter`, which the preview used to pass: it made a
-clip with no blur of its own assign `filter = 'none'`, which cancelled the blur a dissolve
-had just set on the context, so the preview's dissolve never blurred while an export's
-did. Nothing passes it now.
+`MediaDrawOptions` once carried a third, `resetFilter`, which made a clip with no blur of
+its own assign `filter = 'none'`. That cancelled the blur a dissolve had just set on the
+context, so the preview's dissolve never blurred while an export's did. The preview stopped
+passing it, and the option is gone: a clip with no blur now leaves the context's filter
+alone in both pipelines.
 
 Interactive overlay manipulation in the preview canvas:
 - **Drag**: Move overlay position (updates `x`, `y`)

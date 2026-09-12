@@ -14,7 +14,11 @@ import {
   makeTextData,
   makeTrack,
 } from '../../test/fixtures/exportPipeline'
-import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
+import {
+  failNextGetContext,
+  installCanvasDouble,
+  uninstallCanvasDouble,
+} from '../../test/doubles/canvas'
 import type { Clip, Keyframe, SourceVideo, Track } from '../../store/types'
 
 const CANVAS_W = 1920
@@ -132,6 +136,26 @@ describe('hitTestHandles body hits', () => {
     const clip = mediaClip({ animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }) })
 
     expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
+  })
+
+  it('skips a clip whose kind it cannot name', () => {
+    // An overlay type this build does not know — a project written by a later
+    // one — is manipulable in principle but has no handles to offer.
+    const unknown = mediaClip({
+      overlayType: 'hologram' as Clip['overlayType'],
+      sourceVideoId: 'not-in-the-project',
+    })
+
+    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [unknown] }))).toBeNull()
+  })
+
+  it('skips a clip it cannot measure', () => {
+    // Text is measured through the canvas' own 2D context; without one there
+    // are no bounds to test the point against.
+    const text = makeClip({ id: 'text1', duration: 4, overlayType: 'text', textData: makeTextData() })
+    failNextGetContext()
+
+    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [text] }))).toBeNull()
   })
 })
 
@@ -366,6 +390,14 @@ describe('hitHandlesOnClip', () => {
     const clip = mediaClip({ timelinePosition: 10 })
 
     expect(cascade(CENTER_X, CENTER_Y, scene({ clips: [clip] }), both)).toBeNull()
+  })
+
+  it('finds nothing for a clip it cannot measure', () => {
+    // Text needs the canvas' 2D context to measure; without one there is no box.
+    const text = makeClip({ id: 'clip1', duration: 4, overlayType: 'text', textData: makeTextData() })
+    failNextGetContext()
+
+    expect(cascade(CENTER_X, CENTER_Y, scene({ clips: [text] }), both)).toBeNull()
   })
 
   it('walks rotation handle, corners and edges in that order', () => {
