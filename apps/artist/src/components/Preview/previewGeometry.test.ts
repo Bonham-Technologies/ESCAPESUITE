@@ -426,7 +426,7 @@ describe('toLocalPoint', () => {
 
   it('rotates the point backwards for a quarter turn', () => {
     // The box turned 90° clockwise, so a point 100px to its right in screen
-    // space is 100px *below* the centre in the box's own frame.
+    // space is 100px *above* the centre in the box's own frame (negative y).
     const local = toLocalPoint(box(90), 1060, 540)
 
     expect(local.x).toBeCloseTo(0, 10)
