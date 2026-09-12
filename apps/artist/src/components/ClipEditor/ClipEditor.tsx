@@ -579,10 +579,10 @@ export function ClipEditor() {
                       const currentAlpha = fillColor.length > 7 ? fillColor.substring(7) : 'ff';
                       handleShapeDataChange({ fillColor: e.target.value + currentAlpha });
                     }}
-                    disabled={!hasVisibleFill(selectedClip.shapeData.fillColor)}
+                    disabled={!hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff')}
                   />
                   <button
-                    className={`${styles.noFillButton} ${hasVisibleFill(selectedClip.shapeData.fillColor) ? '' : styles.active}`}
+                    className={`${styles.noFillButton} ${hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? '' : styles.active}`}
                     onClick={() => {
                       const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
                       if (hasVisibleFill(fillColor)) {
@@ -593,9 +593,9 @@ export function ClipEditor() {
                         handleShapeDataChange({ fillColor: fillColor.substring(0, 7) + '80' });
                       }
                     }}
-                    title={hasVisibleFill(selectedClip.shapeData.fillColor) ? 'No fill (transparent)' : 'Enable fill'}
+                    title={hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? 'No fill (transparent)' : 'Enable fill'}
                   >
-                    {hasVisibleFill(selectedClip.shapeData.fillColor) ? '⊗' : '⊘'}
+                    {hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? '⊗' : '⊘'}
                   </button>
                 </div>
                 <div className={styles.colorInput}>
@@ -608,7 +608,7 @@ export function ClipEditor() {
                 </div>
               </div>
 
-              {hasVisibleFill(selectedClip.shapeData.fillColor) && (
+              {hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') && (
                 <div className={styles.transformRow}>
                   <label>Fill opacity</label>
                   <input
