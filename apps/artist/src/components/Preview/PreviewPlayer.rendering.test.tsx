@@ -216,7 +216,10 @@ describe('PreviewPlayer frame cache', () => {
     preview.clearCalls()
     await settle(60)
 
-    expect(preview.methods()).toEqual(['drawImage'])
+    // setTransform: every draw starts by putting the project-to-raster
+    // transform on the context, the cached path included, so a cached frame
+    // does not inherit whatever the last draw left there.
+    expect(preview.methods()).toEqual(['setTransform', 'drawImage'])
     expect(preview.calls('drawImage')[0].args).toEqual([
       getFrameCache().get(0),
       0,

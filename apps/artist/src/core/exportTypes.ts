@@ -306,6 +306,21 @@ export interface MediaDrawOptions {
    * second for as long as the playhead sat there.
    */
   quiet?: boolean;
+  /**
+   * Device pixels per drawing unit, for the lengths that are not in drawing
+   * units at all.
+   *
+   * `ctx.filter` is the exception to everything else on a 2D context: a
+   * `blur(4px)` is four pixels of the *output bitmap* and the current transform
+   * does not touch it (verified in Chromium — the same filter over a halved
+   * transform blurs across exactly as many device pixels). Everywhere the
+   * canvas is the project — every export — that distinction does not exist and
+   * this stays 1. The preview rasterises at the size it is displayed at, so a
+   * blur the project calls 4px has to be asked for in the device pixels that
+   * many project pixels currently occupy, or the picture in the editor would
+   * blur harder than the file it exports.
+   */
+  filterScale?: number;
 }
 
 /**

@@ -62,15 +62,28 @@ export function hasVisibleFill(fillColor: string): boolean {
 }
 
 /**
+ * A blur radius given in drawing units, as `ctx.filter` wants it.
+ *
+ * `filter` lengths are pixels of the output bitmap and ignore the current
+ * transform, so a caller whose canvas is not 1:1 with the coordinates it draws
+ * in has to say so (see `MediaDrawOptions.filterScale`). For every canvas that
+ * is its own project — all of them but the preview — the scale is 1 and this is
+ * the string it always was.
+ */
+function blurFilter(radius: number, filterScale: number = 1): string {
+  return `blur(${radius * filterScale}px)`;
+}
+
+/**
  * Apply a clip's own blur to the context.
  *
  * A clip with no blur of its own leaves the context's filter alone, so an
  * ambient one — the blur a dissolve puts on both sides of the transition —
  * survives. That is why the preview and an export blur a dissolve alike.
  */
-function applyClipBlur(ctx: CanvasRenderingContext2D, blurAmount: number) {
+function applyClipBlur(ctx: CanvasRenderingContext2D, blurAmount: number, filterScale?: number) {
   if (blurAmount > 0) {
-    ctx.filter = `blur(${blurAmount}px)`;
+    ctx.filter = blurFilter(blurAmount, filterScale);
   }
 }
 
@@ -82,14 +95,16 @@ export function drawTextOverlayToCanvasAnimated(
   textData: TextOverlayData,
   canvasWidth: number,
   canvasHeight: number,
-  animated: AnimatedOverlayValues
+  animated: AnimatedOverlayValues,
+  /** Device pixels per drawing unit; see `MediaDrawOptions.filterScale`. */
+  filterScale?: number
 ) {
   ctx.save();
   ctx.globalAlpha = animated.opacity;
 
   // Apply blur effect if specified
   if (animated.blur > 0) {
-    ctx.filter = `blur(${animated.blur}px)`;
+    ctx.filter = blurFilter(animated.blur, filterScale);
   }
 
   // Use animated position instead of textData position
@@ -176,7 +191,9 @@ export function drawShapeOverlayToCanvasAnimated(
   canvasHeight: number,
   animated: AnimatedOverlayValues,
   canvas?: HTMLCanvasElement | OffscreenCanvas,
-  scratch?: HTMLCanvasElement
+  scratch?: HTMLCanvasElement,
+  /** Device pixels per drawing unit; see `MediaDrawOptions.filterScale`. */
+  filterScale?: number
 ) {
   // Use animated position
   const centerX = animated.x * canvasWidth;
@@ -208,11 +225,18 @@ export function drawShapeOverlayToCanvasAnimated(
     // A caller that redraws continuously (the preview) hands in one scratch
     // canvas to reuse: a fresh full-size canvas per frame costs megabytes.
     // An export draws each frame once, so it just allocates one.
-    const offscreen = scratch ?? new OffscreenCanvas(canvasWidth, canvasHeight);
+    //
+    // The capture is in the source canvas' *own* pixels — `drawImage` with no
+    // size draws it at its intrinsic size, and it is handed back below at the
+    // identity transform — so the scratch is sized to the canvas rather than to
+    // the project. For an exporter's canvas the two are the same number; for
+    // the preview, which rasterises at the size it is displayed at, the canvas
+    // is the smaller of the two and the blur is correspondingly cheaper.
+    const offscreen = scratch ?? new OffscreenCanvas(canvas.width, canvas.height);
     const offCtx = (offscreen as HTMLCanvasElement).getContext('2d');
     if (offCtx) {
       // A reused canvas still holds the previous frame's capture.
-      if (scratch) offCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+      if (scratch) offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
       offCtx.drawImage(canvas, 0, 0);
 
       ctx.save();
@@ -226,8 +250,10 @@ export function drawShapeOverlayToCanvasAnimated(
       createShapePath();
       ctx.clip();
 
+      // The capture is the canvas' own pixels, so it goes back at the identity
+      // transform — and the blur radius is in those same pixels.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.filter = `blur(${effectiveBlurAmount}px)`;
+      ctx.filter = blurFilter(effectiveBlurAmount, filterScale);
       ctx.globalAlpha = animated.opacity;
       ctx.drawImage(offscreen, 0, 0);
 
@@ -241,7 +267,7 @@ export function drawShapeOverlayToCanvasAnimated(
 
   // Apply animated blur effect to the shape itself
   if (animated.blur > 0) {
-    ctx.filter = `blur(${animated.blur}px)`;
+    ctx.filter = blurFilter(animated.blur, filterScale);
   }
 
   if (rotation !== 0) {
@@ -334,7 +360,7 @@ export function drawClipToCanvas(
   ctx.globalAlpha = finalOpacity;
 
   // Apply blur effect (from animation or static)
-  applyClipBlur(ctx, animated.blur);
+  applyClipBlur(ctx, animated.blur, options?.filterScale);
 
   // Apply clip region for wipe transitions
   if (transitionModifiers?.clipRegion) {
@@ -460,7 +486,7 @@ export function drawImageToCanvasWithModifiers(
   ctx.globalAlpha = finalOpacity;
 
   // Apply blur effect (from animation or static)
-  applyClipBlur(ctx, animated.blur);
+  applyClipBlur(ctx, animated.blur, options?.filterScale);
 
   // Apply clip region for wipe transitions
   if (transitionModifiers?.clipRegion) {
@@ -639,7 +665,7 @@ export function drawTransition(
     const dissolveBlur = Math.sin(progress * Math.PI) * 3;
     ctx.save();
     if (dissolveBlur > 0) {
-      ctx.filter = `blur(${dissolveBlur}px)`;
+      ctx.filter = blurFilter(dissolveBlur, options?.filterScale);
     }
     const drewOutgoing = hasOutgoing && drawSide('outgoing');
     const drewIncoming = hasIncoming && drawSide('incoming');
@@ -708,6 +734,8 @@ export function drawTransitionWithFrames(
   };
 
   if (type === 'dissolve') {
+    // No filterScale here: this pipeline draws decoded VideoFrames, which only
+    // an export has, and an export's canvas is always its own project.
     const dissolveBlur = Math.sin(progress * Math.PI) * 3;
     ctx.save();
     if (dissolveBlur > 0) {

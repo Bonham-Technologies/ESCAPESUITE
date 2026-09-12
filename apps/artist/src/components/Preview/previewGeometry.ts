@@ -6,24 +6,33 @@
 import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo } from '../../store/types';
-import type { ManipulableClipType, NormalizedPoint, OverlayBounds } from './types';
+import type { ManipulableClipType, NormalizedPoint, OverlayBounds, ProjectSize } from './types';
 
 // Handle size in pixels (for hit detection and drawing)
 export const HANDLE_SIZE = 8;
 export const ROTATION_HANDLE_OFFSET = 25; // Distance above the bounding box
 
 /**
- * Get overlay bounds in canvas pixels for a given clip.
+ * Get overlay bounds in project pixels for a given clip.
  * Uses animated values from keyframes when available.
  *
  * Text is measured through the canvas' own 2D context, so the caller has to
- * pass the canvas the bounds are for rather than just its dimensions.
+ * pass the canvas the bounds are for rather than just its dimensions. The
+ * measurement is transform-independent — `measureText` reports user-space
+ * units, and the font is set in project pixels — so the bounds come out in
+ * project space however the canvas happens to be rasterised.
+ *
+ * `project` defaults to the canvas' own pixel size, which is right only where
+ * the canvas *is* the project (the exporters' canvases, and the tests that
+ * build one). The preview rasterises at its displayed size and passes its
+ * project resolution explicitly.
  */
 export function getOverlayBounds(
   clip: Clip,
   canvas: HTMLCanvasElement,
   time: number | undefined,
-  sourceVideos: SourceVideo[]
+  sourceVideos: SourceVideo[],
+  project: ProjectSize = canvas
 ): OverlayBounds | null {
   // Calculate animated values if time is provided
   let animatedX: number | undefined;
@@ -81,10 +90,10 @@ export function getOverlayBounds(
     const rotation = animatedRotation ?? clip.shapeData.rotation;
 
     return {
-      centerX: x * canvas.width,
-      centerY: y * canvas.height,
-      width: clip.shapeData.width * canvas.width * scaleX,
-      height: clip.shapeData.height * canvas.height * scaleY,
+      centerX: x * project.width,
+      centerY: y * project.height,
+      width: clip.shapeData.width * project.width * scaleX,
+      height: clip.shapeData.height * project.height * scaleY,
       rotation,
     };
   } else if (clip.overlayType === 'text' && clip.textData) {
@@ -116,7 +125,7 @@ export function getOverlayBounds(
     const textHeight = totalHeight * scale;
 
     // Adjust center based on text alignment
-    let centerX = x * canvas.width;
+    let centerX = x * project.width;
     if (textData.textAlign === 'left') {
       centerX += textWidth / 2;
     } else if (textData.textAlign === 'right') {
@@ -125,7 +134,7 @@ export function getOverlayBounds(
 
     return {
       centerX,
-      centerY: y * canvas.height,
+      centerY: y * project.height,
       width: textWidth,
       height: textHeight,
       rotation,
@@ -145,8 +154,8 @@ export function getOverlayBounds(
 
     // Base dimensions = native source pixels (matches drawClip)
     return {
-      centerX: x * canvas.width,
-      centerY: y * canvas.height,
+      centerX: x * project.width,
+      centerY: y * project.height,
       width: sourceMedia.width * scaleX,
       height: sourceMedia.height * scaleY,
       rotation,
@@ -196,7 +205,7 @@ export function hasCustomKeyframes(clip: Clip): boolean {
 }
 
 /**
- * A point in canvas pixels, expressed in a clip's own unrotated frame.
+ * A point in project pixels, expressed in a clip's own unrotated frame.
  *
  * Every box on the preview is axis-aligned before its rotation is applied, so
  * a hit test rotates the point backwards around the box's centre rather than
@@ -218,7 +227,7 @@ export function toLocalPoint(bounds: OverlayBounds, x: number, y: number): { x: 
  *
  * The preview canvas is laid out with `object-fit: contain`, so the drawing is
  * scaled to fit and letterboxed on whichever axis has room to spare. Anything
- * that maps between the element's CSS pixels and the canvas' own pixels — the
+ * that maps between the element's CSS pixels and the project's own pixels — the
  * mouse, a marquee rectangle, the inline text editor — needs these numbers.
  */
 export interface CanvasContentBox {
@@ -228,7 +237,7 @@ export interface CanvasContentBox {
   /** Size of the letterbox bar on each side, in the element's CSS pixels. */
   offsetX: number;
   offsetY: number;
-  /** CSS pixels per canvas pixel. Equal on both axes, up to rounding. */
+  /** CSS pixels per project pixel. Equal on both axes, up to rounding. */
   scaleX: number;
   scaleY: number;
 }
@@ -238,12 +247,19 @@ export interface CanvasContentBox {
  *
  * The element box is a parameter so a caller that already has the rect — the
  * mouse handlers read it for `left`/`top` as well — does not measure twice.
+ *
+ * The aspect that decides the letterboxing is the *project's*, not the backing
+ * store's: the preview rasterises at its displayed size, and rounding that to
+ * whole device pixels would otherwise nudge the mapping by a fraction of a
+ * pixel every time the window changed size. `project` defaults to the canvas
+ * itself for the canvases that are their own project.
  */
 export function contentBox(
   canvas: HTMLCanvasElement,
-  rect: { width: number; height: number } = canvas.getBoundingClientRect()
+  rect: { width: number; height: number } = canvas.getBoundingClientRect(),
+  project: ProjectSize = canvas
 ): CanvasContentBox {
-  const canvasAspect = canvas.width / canvas.height;
+  const canvasAspect = project.width / project.height;
   const elementAspect = rect.width / rect.height;
 
   let width: number;
@@ -270,8 +286,8 @@ export function contentBox(
     height,
     offsetX,
     offsetY,
-    scaleX: width / canvas.width,
-    scaleY: height / canvas.height,
+    scaleX: width / project.width,
+    scaleY: height / project.height,
   };
 }
 
@@ -282,10 +298,11 @@ export function contentBox(
  */
 export function getCanvasPosition(
   canvas: HTMLCanvasElement,
-  e: { clientX: number; clientY: number }
+  e: { clientX: number; clientY: number },
+  project: ProjectSize = canvas
 ): NormalizedPoint {
   const rect = canvas.getBoundingClientRect();
-  const content = contentBox(canvas, rect);
+  const content = contentBox(canvas, rect, project);
 
   // Convert mouse position to be relative to the actual canvas content area
   const mouseX = e.clientX - rect.left - content.offsetX;
@@ -296,4 +313,52 @@ export function getCanvasPosition(
     x: mouseX / content.width,
     y: mouseY / content.height,
   };
+}
+
+/**
+ * The backing store a preview canvas should carry, and the scale that gets a
+ * project-space frame onto it.
+ *
+ * The canvas element is laid out at `width: 100%; height: 100%` with
+ * `object-fit: contain`, so what the viewer sees is the project letterboxed
+ * into `box`. Rasterising at `project.resolution` and letting CSS shrink the
+ * result means a 4K project paints 8.3 megapixels to show maybe 0.1 — the cost
+ * of a preview frame is proportional to the pixels it touches, and those are
+ * the ones nobody sees. So the backing store is the *contained* box in device
+ * pixels instead, and one `setTransform(scale, 0, 0, scale, 0, 0)` per frame
+ * carries the unchanged project-space drawing onto it.
+ *
+ * Two deliberate limits:
+ *
+ * - the raster never exceeds the project. A small project in a large box would
+ *   otherwise be rasterised sharper than it is — a different picture — and
+ *   cost more than it does today, which is the opposite of the point.
+ * - with no box yet (before the first ResizeObserver callback) it is the
+ *   project, so the first frame after mount is drawn exactly as it always was
+ *   and the resize that follows corrects it.
+ *
+ * The height is rounded off the *width's* scale rather than its own, so the
+ * one scale factor is exactly `width / project.width` and a frame drawn under
+ * it lands on whole device pixels horizontally.
+ */
+export function previewRaster(
+  project: ProjectSize,
+  box: { width: number; height: number } | null,
+  devicePixelRatio: number
+): { width: number; height: number; scale: number } {
+  const unscaled = { width: project.width, height: project.height, scale: 1 };
+  if (!box || box.width <= 0 || box.height <= 0) return unscaled;
+  if (project.width <= 0 || project.height <= 0) return unscaled;
+
+  const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  const fit = Math.min(
+    (box.width * dpr) / project.width,
+    (box.height * dpr) / project.height,
+    1
+  );
+  if (fit >= 1) return unscaled;
+
+  const width = Math.max(1, Math.round(project.width * fit));
+  const scale = width / project.width;
+  return { width, height: Math.max(1, Math.round(project.height * scale)), scale };
 }

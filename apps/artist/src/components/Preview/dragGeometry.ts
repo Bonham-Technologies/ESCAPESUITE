@@ -10,10 +10,10 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo, Track } from '../../store/types';
 import { getClipsAtTime } from '../../store/projectStore';
 import * as geometry from './previewGeometry';
-import type { ManipulableClipType } from './types';
+import type { ManipulableClipType, ProjectSize } from './types';
 
 /**
- * Where a clip starts a drag from: position and size in the canvas' own 0-1
+ * Where a clip starts a drag from: position and size in the project's own 0-1
  * space, rotation in degrees, scale as a multiplier.
  */
 export interface DragStartMeasurements {
@@ -39,21 +39,26 @@ export function measureDragStart(
   canvas: HTMLCanvasElement | null,
   currentTime: number,
   isKeyframeMode: boolean,
-  sourceVideos: SourceVideo[]
+  sourceVideos: SourceVideo[],
+  projectSize?: ProjectSize
 ): DragStartMeasurements {
   let startX = 0, startY = 0, startWidth = 0, startHeight = 0, startRotation = 0, startScaleX = 1, startScaleY = 1;
 
+  /** The project the measurements are in; a canvas that is its own project by default. */
+  const sizeOf = (c: HTMLCanvasElement): ProjectSize => projectSize ?? c;
+
   const boundsOf = (time: number) =>
-    canvas ? geometry.getOverlayBounds(clip, canvas, time, sourceVideos) : null;
+    canvas ? geometry.getOverlayBounds(clip, canvas, time, sourceVideos, sizeOf(canvas)) : null;
 
   if (isKeyframeMode && canvas) {
     // Use animated values from getOverlayBounds
     const bounds = boundsOf(currentTime);
     if (bounds) {
-      startX = bounds.centerX / canvas.width;
-      startY = bounds.centerY / canvas.height;
-      startWidth = bounds.width / canvas.width;
-      startHeight = bounds.height / canvas.height;
+      const size = sizeOf(canvas);
+      startX = bounds.centerX / size.width;
+      startY = bounds.centerY / size.height;
+      startWidth = bounds.width / size.width;
+      startHeight = bounds.height / size.height;
       startRotation = bounds.rotation;
       // For scale, we need to calculate from the animated scale
       if (clip.overlayType === 'text' && clip.textData) {
@@ -101,8 +106,9 @@ export function measureDragStart(
     if (canvas) {
       const bounds = boundsOf(currentTime);
       if (bounds) {
-        startWidth = bounds.width / canvas.width;
-        startHeight = bounds.height / canvas.height;
+        const size = sizeOf(canvas);
+        startWidth = bounds.width / size.width;
+        startHeight = bounds.height / size.height;
       }
     }
   } else if (clipType === 'shape' && clip.shapeData) {
@@ -123,8 +129,9 @@ export function measureDragStart(
     if (canvas) {
       const bounds = boundsOf(currentTime);
       if (bounds) {
-        startWidth = bounds.width / canvas.width;
-        startHeight = bounds.height / canvas.height;
+        const size = sizeOf(canvas);
+        startWidth = bounds.width / size.width;
+        startHeight = bounds.height / size.height;
       }
     }
   }
@@ -136,7 +143,7 @@ export function measureDragStart(
  * The ids of the clips a marquee rectangle swept.
  *
  * The rectangle arrives in the canvas element's own CSS pixels; the clips are
- * measured in canvas pixels. Both are mapped into the 0-1 space of the
+ * measured in project pixels. Both are mapped into the 0-1 space of the
  * *rendered* content, which is what object-fit: contain letterboxes, so a
  * marquee drawn over a letterbox bar selects nothing rather than everything.
  */
@@ -146,10 +153,11 @@ export function clipsIntersectingMarquee(
   current: { x: number; y: number },
   clips: Clip[],
   currentTime: number,
-  sourceVideos: SourceVideo[]
+  sourceVideos: SourceVideo[],
+  project: ProjectSize = canvas
 ): string[] {
   // The rendered canvas area within the element (object-fit: contain)
-  const content = geometry.contentBox(canvas);
+  const content = geometry.contentBox(canvas, canvas.getBoundingClientRect(), project);
 
   // Convert marquee rect from CSS pixels to normalized canvas coords (0-1)
   const normLeft = Math.min(start.x, current.x);
@@ -169,14 +177,14 @@ export function clipsIntersectingMarquee(
     const clipEnd = clip.timelinePosition + clip.duration;
     if (currentTime < clip.timelinePosition || currentTime >= clipEnd) continue;
 
-    const bounds = geometry.getOverlayBounds(clip, canvas, currentTime, sourceVideos);
+    const bounds = geometry.getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
     if (!bounds) continue;
 
     // Convert bounds to normalized coords
-    const bLeft = (bounds.centerX - bounds.width / 2) / canvas.width;
-    const bTop = (bounds.centerY - bounds.height / 2) / canvas.height;
-    const bRight = (bounds.centerX + bounds.width / 2) / canvas.width;
-    const bBottom = (bounds.centerY + bounds.height / 2) / canvas.height;
+    const bLeft = (bounds.centerX - bounds.width / 2) / project.width;
+    const bTop = (bounds.centerY - bounds.height / 2) / project.height;
+    const bRight = (bounds.centerX + bounds.width / 2) / project.width;
+    const bBottom = (bounds.centerY + bounds.height / 2) / project.height;
 
     // Check AABB intersection (ignoring rotation for simplicity)
     if (bRight > mLeft && bLeft < mRight && bBottom > mTop && bTop < mBottom) {
@@ -200,14 +208,15 @@ export function textClipAtPoint(
   clips: Clip[],
   tracks: Track[],
   currentTime: number,
-  sourceVideos: SourceVideo[]
+  sourceVideos: SourceVideo[],
+  project: ProjectSize = canvas
 ): Clip | null {
   const activeClips = getClipsAtTime(clips, tracks, currentTime);
   // Check in reverse z-order (top-most first)
   for (const { clip } of [...activeClips].reverse()) {
     if (clip.overlayType !== 'text' || !clip.textData) continue;
 
-    const bounds = geometry.getOverlayBounds(clip, canvas, currentTime, sourceVideos);
+    const bounds = geometry.getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
     if (!bounds) continue;
 
     const halfW = bounds.width / 2;

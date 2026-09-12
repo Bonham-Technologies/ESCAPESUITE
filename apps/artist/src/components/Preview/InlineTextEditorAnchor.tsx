@@ -7,6 +7,7 @@
 // the editor lands on the text rather than beside it.
 import type { Clip, SourceVideo } from '../../store/types';
 import { contentBox, getOverlayBounds } from './previewGeometry';
+import type { ProjectSize } from './types';
 import { InlineTextEditor } from './InlineTextEditor';
 
 /**
@@ -19,8 +20,14 @@ const NO_SOURCES: SourceVideo[] = [];
 export interface InlineTextEditorAnchorProps {
   /** The text clip being edited; anything else renders no editor. */
   clip: Clip | undefined;
-  /** The preview canvas, for its pixel size, its layout box and its text metrics. */
+  /** The preview canvas, for its layout box and its text metrics. */
   canvas: HTMLCanvasElement;
+  /**
+   * The project's pixel grid, which the clip's bounds are in. Defaults to the
+   * canvas' own size, which is right only for a canvas that is its own project
+   * — the preview's is rasterised at the size it is displayed at.
+   */
+  projectSize?: ProjectSize;
   onCommit: (newText: string) => void;
   onCancel: () => void;
 }
@@ -29,20 +36,23 @@ export interface InlineTextEditorAnchorProps {
 export function InlineTextEditorAnchor({
   clip,
   canvas,
+  projectSize,
   onCommit,
   onCancel,
 }: InlineTextEditorAnchorProps) {
   const textData = clip?.textData;
   if (!clip || !textData) return null;
 
-  // The box the text occupies in canvas pixels. Deliberately un-animated: the
+  const project = projectSize ?? canvas;
+
+  // The box the text occupies in project pixels. Deliberately un-animated: the
   // editor takes over the clip's stored text, and its keyframes are not
   // applied to the box the textarea covers.
-  const bounds = getOverlayBounds(clip, canvas, undefined, NO_SOURCES);
+  const bounds = getOverlayBounds(clip, canvas, undefined, NO_SOURCES, project);
   if (!bounds) return null;
 
   // The rendered canvas area within the element (object-fit: contain)
-  const content = contentBox(canvas);
+  const content = contentBox(canvas, canvas.getBoundingClientRect(), project);
 
   // The bounds are centred; the editor is positioned from its top left corner.
   const textLeft = bounds.centerX - bounds.width / 2;
