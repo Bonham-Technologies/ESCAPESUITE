@@ -205,12 +205,29 @@ let originalGetContext: typeof HTMLCanvasElement.prototype.getContext | null = n
 let originalToBlob: typeof HTMLCanvasElement.prototype.toBlob | null = null
 
 /**
+ * How many times getContext() has been called since the double was installed.
+ *
+ * Recording only — the double behaves identically whether or not anything reads
+ * it. It exists because "the context is looked up once and cached" is a
+ * per-frame performance property the preview deliberately holds (see
+ * PreviewPlayer's canvasCtxRef), and a getContext() per draw is exactly the
+ * kind of regression the ceilings in `*.perf.test.ts` are there to catch.
+ */
+let getContextCalls = 0
+
+/** getContext() calls recorded since the double was installed. */
+export function getContextCallCount(): number {
+  return getContextCalls
+}
+
+/**
  * Patch HTMLCanvasElement.prototype.getContext('2d') and .toBlob() with the
  * recording double. Scope it to the tests that need it: install in beforeEach,
  * uninstall in afterEach.
  */
 export function installCanvasDouble(): void {
   if (originalGetContext) return
+  getContextCalls = 0
   originalGetContext = HTMLCanvasElement.prototype.getContext
   originalToBlob = HTMLCanvasElement.prototype.toBlob
 
@@ -219,6 +236,7 @@ export function installCanvasDouble(): void {
     contextId: string,
     options?: unknown
   ) {
+    getContextCalls += 1
     if (contextId === '2d') {
       return (contextsByCanvas.get(this) ?? createContext(this)) as unknown as RenderingContext
     }
@@ -246,6 +264,7 @@ export function installCanvasDouble(): void {
 
 export function uninstallCanvasDouble(): void {
   if (!originalGetContext) return
+  getContextCalls = 0
   HTMLCanvasElement.prototype.getContext = originalGetContext
   HTMLCanvasElement.prototype.toBlob = originalToBlob!
   originalGetContext = null

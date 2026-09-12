@@ -6,9 +6,12 @@ export default defineConfig({
     // Builds the headless bundle + kit once before the chromium suite (see the file for why,
     // and why it no-ops for every other invocation, including the plain unit suite).
     globalSetup: ['./test/globalSetup.ts'],
-    // The *.chromium.test.ts files each launch their own headless Chromium and encode real
-    // video; running three of those at once triples peak CPU/memory on a CI runner for no
-    // measurable time savings (the slow part was the now-deduplicated build, not the renders).
+    // The *.chromium.test.ts files (and *.bench.test.ts, which is the same kind of thing
+    // under a name test:e2e's filter cannot reach) each launch their own headless Chromium
+    // and encode real video; running three of those at once triples peak CPU/memory on a CI
+    // runner for no measurable time savings (the slow part was the now-deduplicated build,
+    // not the renders). Serialising matters doubly for the benchmark: a second browser
+    // sharing the CPU would change the number it is reporting.
     // The unit suite is fast enough that serialising it costs nothing worth measuring.
     fileParallelism: false,
     coverage: {

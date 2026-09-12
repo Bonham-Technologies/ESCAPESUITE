@@ -166,11 +166,16 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   (`window.__renderProject` / `window.__renderProjectToFile` — see `apps/artist/CLAUDE.md`).
 - Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);
   `pack:kit` assembles and `npm pack`s it into `dist/escapesuite-headless-artist-<version>.tgz`;
-  `test:run` runs unit tests only (no browser); `test:e2e` runs the Chromium tests.
+  `test:run` runs unit tests only (no browser); `test:e2e` runs the Chromium tests;
+  `test:perf` runs just the render benchmark (`src/perf.bench.test.ts`) and writes
+  `perf-report.json` beside the package.
 - Convention: tests named `*.chromium.test.ts` launch real headless Chromium against the
   ARTIST headless bundle, which `test/globalSetup.ts` builds ONCE per vitest run (gated by
-  `HEADLESS_BUILD=1`, which only `test:e2e` sets — every other invocation is a no-op). They
-  are excluded from `test:run`/CI's `test` job and run separately.
+  `HEADLESS_BUILD=1`, which `test:e2e` and `test:perf` set — every other invocation is a
+  no-op). They are excluded from `test:run`/CI's `test` job and run separately.
+- The benchmark is `*.bench.test.ts`, NOT `*.chromium.test.ts`, precisely so `test:e2e`'s
+  `chromium.test` substring filter does not sweep it into CI's gating `e2e` job;
+  `test:run` and `test:coverage` exclude the suffix explicitly. Only `test:perf` names it.
 - CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.63.0 as
   `apps/e2e`, sharing its browser cache) and packs + uploads the kit as the
   `headless-artist-kit` artifact in the `build` job; `standalone-release.yml` attaches the
@@ -205,6 +210,74 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.
 
+### Performance benchmarks
+
+`pnpm perf` measures, it does not assert. `apps/e2e/scripts/perf.mjs` runs the Chromium-only
+Playwright project in `apps/e2e/tests/perf/` (`playwright.perf.config.ts`: one worker, no
+retries, fixed launch args) and then the headless kit's `src/perf.bench.test.ts`, then
+**always** merges whatever results exist with `apps/e2e/scripts/perf-report.mjs` into
+`perf-report.json` at the repo root plus a Markdown table (appended to
+`$GITHUB_STEP_SUMMARY` in CI) — a failed benchmark still leaves the surviving numbers
+readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is emptied by the
+perf project's `globalSetup` first, so a stale result can never be reported as current.
+All three outputs are gitignored.
+
+Three benchmarks, each run three times and reported as the median, all against **one
+deterministic 12-clip, 13-second scene** (14 clips over 4 tracks at 1280x720, clips
+scaled to fill the frame — scale 1 means native pixel size here) built in-test from
+`apps/e2e/fixtures/headless/source.mp4` and loaded through the documented integration
+API (`GET_STATE` for the imported source's id, then `LOAD_PROJECT`) — there is no app
+code for the benchmarks' sake:
+
+- **`preview-playback`** — 6 s of playback, first second discarded: rendered fps (counted
+  by wrapping `requestAnimationFrame`), long tasks, JS heap delta after a CDP-forced GC,
+  and CDP `TaskDuration` / `LayoutCount` / `RecalcStyleCount`.
+- **`export-mp4` / `export-webm`** — one 720p export of the same scene through the export
+  dialog: wall time, frames encoded and encoder queue high-water (both from a wrapper on
+  `VideoEncoder.prototype.encode`), heap delta.
+- **`headless-kit-render`** — `services/headless-artist` rendering
+  `fixtures/headless/project.json`, Chromium launch included.
+
+CI runs them in a `perf` job that needs `build`, is `continue-on-error: true` and is
+deliberately **not** in `ci-status`'s `needs` — runner CPU varies, so a number moving is
+worth looking at and never worth blocking a merge on. It uploads `perf-report.json` (and
+any `*.cpuprofile`) as the `perf-report` artifact.
+
+`PERF_PROFILE=1 pnpm perf` additionally records a CPU profile of each browser benchmark —
+on a **fourth, discarded run**, so the medians stay unprofiled — into
+`apps/e2e/perf-results/*.cpuprofile`, alongside a `*.maps.json` holding the inline source
+maps of every `/src/` module it sampled. `apps/e2e/scripts/profile-top.mjs` turns the pair
+into top-by-self-time and top-app-code-by-total-time tables (also embedded in
+`perf-report.json` when the profiles exist), resolving each frame through the maps so
+locations are lines in the `.ts` files and not in Vite's transformed output. Its fold — a
+sample is charged the interval that *follows* it, and recursion counts once per sample — is
+covered by `apps/e2e/scripts/profile-top.test.mjs`, run by `pnpm test:scripts` (node:test,
+no browser) in CI's `test` job.
+
+Baseline numbers, the machine they came from and the launch args they used live in
+[docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md); the
+hotspot analysis those profiles produced, and the ranked fix list it argues for, in
+[docs/performance/2026-09-12-profile.md](docs/performance/2026-09-12-profile.md).
+
+**Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
+Four ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
+`apps/artist/src/core/exportMP4.perf.test.ts`, `apps/craft/src/core/compositor.perf.test.ts`
+and `apps/craft/src/core/converter.perf.test.ts` — run the same scene through the same
+doubles the behaviour tests use and count what one frame costs: 2D-context calls,
+`drawImage`/`measureText`/`save`/`restore`, animation lookups, `getContext` calls, object
+URLs, `VideoFrame`s created versus closed, `encode`/`flush` calls. They are `*.perf.test.ts`
+rather than `bench` files on purpose: counts do not depend on the runner's CPU, so they can
+be enforced in CI and in `test:coverage` like any other test. ARTIST's scene is the browser
+benchmark's scene, built for unit tests in `apps/artist/src/test/fixtures/perfScene.ts`, so
+a ceiling here and a millisecond figure there describe the same work.
+**The rule: a ceiling is 2x the measured value rounded up, with the measurement and its date
+in a comment beside it. Conservation laws (frames created == closed, one encode per frame,
+balanced save/restore, one composite per animation frame) are asserted exactly. When a fix
+lands, re-measure and lower the ceiling; never raise one without saying, in the PR, why the
+new cost is correct.** Two of the tests currently pin a *finding* rather than a target —
+the export's animation memo cache never hits, and the compositor's PiP overlay restores once
+more than it saves — and each says so, with the assertion to flip when it is fixed.
+
 ### Coverage policy
 
 Each package (`apps/plan`, `apps/craft`, `apps/artist`, `packages/shared`,
@@ -222,7 +295,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 99.88 | 99.08 | 94.51 | 98.94 |
-| `@escapesuite/artist` | 99.31 | 98.00 | 89.80 | 98.97 |
+| `@escapesuite/artist` | 99.31 | 98.03 | 89.79 | 98.97 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
@@ -277,7 +350,7 @@ never above what the suite actually achieves:
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
-Eight jobs, with `ci-status` as the single required check:
+Nine jobs, with `ci-status` as the single required check (`perf` is informational and deliberately not one of its dependencies):
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
@@ -287,6 +360,7 @@ Eight jobs, with `ci-status` as the single required check:
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
 | `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes (E2E halves skipped for Dependabot) |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
+| `perf` | `pnpm perf` benchmarks; informational only, never gates | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
 | `ci-status` | Summary/gate job | All PRs |
 

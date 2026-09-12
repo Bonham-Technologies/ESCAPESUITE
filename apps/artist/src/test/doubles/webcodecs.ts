@@ -18,6 +18,19 @@ export interface FrameDouble {
 }
 
 const liveFrames = new Set<VideoFrameDouble>()
+/**
+ * How many VideoFrameDoubles have ever been constructed and closed.
+ *
+ * Recording only. `liveFrames` alone cannot answer "created == closed", because
+ * a closed frame leaves the set — and a pipeline that created no frames at all
+ * would look just as clean as one that closed every frame it made.
+ */
+const frameTotals = { created: 0, closed: 0 }
+
+/** VideoFrameDoubles constructed and closed since the last reset. */
+export function frameCounts(): { created: number; closed: number } {
+  return { ...frameTotals }
+}
 
 export interface VideoFrameInit {
   displayWidth?: number
@@ -57,12 +70,15 @@ export class VideoFrameDouble implements FrameDouble {
     this.timestamp = init.timestamp ?? 0
     this.duration = init.duration
     liveFrames.add(this)
+    frameTotals.created += 1
   }
 
   close(): void {
     this.closeCalls += 1
+    // A double close() is a bug the pipeline should not commit; count the frame
+    // as closed once, so `created === closed` stays a real conservation law.
+    if (liveFrames.delete(this)) frameTotals.closed += 1
     this.closed = true
-    liveFrames.delete(this)
   }
 }
 
@@ -78,6 +94,8 @@ export function allFramesClosed(): boolean {
 
 export function resetFrameRegistry(): void {
   liveFrames.clear()
+  frameTotals.created = 0
+  frameTotals.closed = 0
 }
 
 export interface CodecProbe {

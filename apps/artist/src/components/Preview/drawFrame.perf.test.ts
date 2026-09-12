@@ -1,0 +1,268 @@
+// Per-frame work ceilings for the preview compositor.
+//
+// Ordinary tests, not `bench` mode: they measure through the same doubles every
+// other preview test uses, then assert the measurement has not grown. That way
+// they run in CI and in `test:coverage` like anything else, and a regression
+// fails the build instead of moving a number in a report nobody reads.
+//
+// The scene is the benchmark scene — the 12-clip, two-media-track, two-overlay,
+// one-transition timeline `apps/e2e/tests/perf/` plays in a real browser (see
+// `src/test/fixtures/perfScene.ts`). The browser benchmark reports what a frame
+// costs in milliseconds; these tests pin what it costs in *calls*, which is the
+// part that does not depend on the runner's CPU.
+//
+// How a ceiling is chosen: measure once, set the ceiling at 2x the measurement
+// rounded up, and write the measured value and the date beside it. Counts that
+// are exact properties rather than budgets — save/restore balance, one cached
+// context, no object URLs per frame, one composite per animation frame — are
+// asserted exactly. When a fix lands, re-measure and lower the ceiling; never
+// raise one without saying why.
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
+import { resetStoreForTest, store } from '../../test/fixtures/projectStore'
+import {
+  EFFECTS_FRAME_TIME,
+  SINGLE_CLIP_FRAME_TIME,
+  TRANSITION_FRAME_TIME,
+  SCENE_SOURCE_HEIGHT,
+  SCENE_SOURCE_WIDTH,
+  buildSceneProject,
+  sceneSource,
+} from '../../test/fixtures/perfScene'
+import {
+  FRAME_MS,
+  installPreviewDoubles,
+  renderPreview,
+  settle,
+  type Preview,
+  type PreviewDoubles,
+} from '../../test/renderPreview'
+import { getContextCallCount } from '../../test/doubles/canvas'
+import { resetFrameCache } from '../../core/frameCache'
+import { useEditorStore } from '../../store/projectStore'
+import * as animation from '../../utils/animation'
+
+vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
+
+let doubles: PreviewDoubles
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  doubles = installPreviewDoubles({
+    video: { videoWidth: SCENE_SOURCE_WIDTH, videoHeight: SCENE_SOURCE_HEIGHT, duration: 2 },
+  })
+  resetStoreForTest()
+  resetFrameCache()
+  store().setProject(buildSceneProject())
+  store().addSourceVideo(sceneSource)
+})
+
+afterEach(async () => {
+  if (store().isPlaying) {
+    store().setIsPlaying(false)
+    await settle(FRAME_MS * 2)
+  }
+  cleanup()
+  doubles.uninstall()
+  resetFrameCache()
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
+
+/** The canvas is 1280x720; its layout box is that at half scale, unletterboxed. */
+const RECT = { left: 0, top: 0, width: 640, height: 360 }
+
+interface FrameMeasurement {
+  /**
+   * Every 2D-context *method* call one composite made. Property assignments
+   * (globalAlpha, filter, fillStyle, font) are not calls and are not counted —
+   * the recording context records methods only.
+   */
+  totalCalls: number
+  saves: number
+  restores: number
+  drawImages: number
+  measureTexts: number
+  /** fill() + fillRect(): the calls that rasterise a region. */
+  fills: number
+  /** stroke() + strokeRect(). */
+  strokes: number
+  /** Composites one playhead move settles into. */
+  composites: number
+  /** getAnimatedValues() calls per composite, counted through the module boundary. */
+  animatedValues: number
+  /** getContext() calls the measured draws made — the preview caches its context. */
+  getContexts: number
+  /** URL.createObjectURL() calls the measured draws made — loading is not per-frame. */
+  objectUrls: number
+}
+
+/**
+ * Composite the scene at `time` and count what one frame took.
+ *
+ * The playhead is first moved to `time` and left to settle: a scrub seeks the
+ * active videos and redraws when the seeks report back, and those draws are the
+ * seek settling rather than the steady-state frame. The measured draw is then
+ * provoked by nudging the playhead by less than the 50 ms seek threshold, which
+ * takes the "nothing to seek" branch.
+ *
+ * How many composites that nudge settles into depends on how many clips are
+ * live (see `composites` and the test that pins it), so the per-frame counts
+ * come from the first composite and the animation-lookup count is divided by
+ * how many composites ran.
+ */
+async function measureFrame(preview: Preview, time: number): Promise<FrameMeasurement> {
+  store().setCurrentTime(time)
+  await settle(FRAME_MS * 4)
+
+  const getAnimatedValues = vi.spyOn(animation, 'getAnimatedValues')
+  const createObjectURL = vi.mocked(URL.createObjectURL)
+  const urlsBefore = createObjectURL.mock.calls.length
+  const contextsBefore = getContextCallCount()
+  preview.clearCalls()
+
+  store().setCurrentTime(time + 0.001)
+  await settle(FRAME_MS * 2)
+
+  const frames = preview.frames()
+  const frame = frames[0]
+  // Dividing by the composite count is only meaningful if every composite of
+  // one playhead move really did draw the same thing.
+  expect(frames.map((f) => f.calls.length)).toEqual(frames.map(() => frame.calls.length))
+  expect(getAnimatedValues.mock.calls.length % frames.length).toBe(0)
+
+  const measurement: FrameMeasurement = {
+    totalCalls: frame.calls.length,
+    saves: frame.of('save').length,
+    restores: frame.of('restore').length,
+    drawImages: frame.of('drawImage').length,
+    measureTexts: frame.of('measureText').length,
+    fills: frame.of('fill').length + frame.of('fillRect').length,
+    strokes: frame.of('stroke').length + frame.of('strokeRect').length,
+    composites: frames.length,
+    animatedValues: getAnimatedValues.mock.calls.length / frames.length,
+    getContexts: getContextCallCount() - contextsBefore,
+    objectUrls: createObjectURL.mock.calls.length - urlsBefore,
+  }
+  getAnimatedValues.mockRestore()
+  return measurement
+}
+
+describe('preview per-frame work', () => {
+  it('composites the effects frame within its ceilings', async () => {
+    // The heaviest media frame in the scene: the blurred full-frame V1 clip
+    // (6-8 s) under the `screen`-blended picture-in-picture V2 clip (7-9 s),
+    // with the text and shape overlays on top.
+    const preview = await renderPreview({ rect: RECT })
+
+    const frame = await measureFrame(preview, EFFECTS_FRAME_TIME)
+
+    // Measured 2026-09-12: 25 calls, 2 drawImage, 1 measureText, 3 fills,
+    // 1 stroke, 4 getAnimatedValues, 4 save/restore pairs.
+    expect(frame.totalCalls).toBeLessThanOrEqual(50)
+    expect(frame.drawImages).toBeLessThanOrEqual(4)
+    expect(frame.measureTexts).toBeLessThanOrEqual(2)
+    expect(frame.fills).toBeLessThanOrEqual(6)
+    expect(frame.strokes).toBeLessThanOrEqual(2)
+    expect(frame.animatedValues).toBeLessThanOrEqual(8)
+    // Exact: every save() the frame makes is matched, or the next frame starts
+    // from a context state the last one left behind.
+    expect(frame.saves).toBe(frame.restores)
+    // Exact: the component looks its 2D context up once and keeps it.
+    expect(frame.getContexts).toBe(0)
+    // Exact: media loading happens when the timeline changes, never per frame.
+    expect(frame.objectUrls).toBe(0)
+  })
+
+  it('composites the transition frame within its ceilings', async () => {
+    // Inside the scene's one transition: V1's third clip (4-6 s) fades into the
+    // fourth over its last half second, with V2's clip and both overlays drawn
+    // as usual — three media draws in one frame instead of two.
+    const preview = await renderPreview({ rect: RECT })
+
+    const frame = await measureFrame(preview, TRANSITION_FRAME_TIME)
+
+    // Measured 2026-09-12: 28 calls, 3 drawImage, 1 measureText,
+    // 5 getAnimatedValues, 5 save/restore pairs.
+    expect(frame.totalCalls).toBeLessThanOrEqual(56)
+    expect(frame.drawImages).toBeLessThanOrEqual(6)
+    expect(frame.measureTexts).toBeLessThanOrEqual(2)
+    expect(frame.animatedValues).toBeLessThanOrEqual(10)
+    expect(frame.saves).toBe(frame.restores)
+    expect(frame.getContexts).toBe(0)
+    expect(frame.objectUrls).toBe(0)
+  })
+
+  it('settles a playhead move into one composite when one clip is live', async () => {
+    const preview = await renderPreview({ rect: RECT })
+
+    const frame = await measureFrame(preview, SINGLE_CLIP_FRAME_TIME)
+
+    // Exact: with a single media clip live, moving the playhead by less than
+    // the seek threshold finds every video already where it should be, takes
+    // the "nothing to seek" branch, and paints once.
+    expect(frame.composites).toBe(1)
+  })
+
+  it('settles a playhead move into two composites when clips share a source', async () => {
+    const preview = await renderPreview({ rect: RECT })
+
+    const frame = await measureFrame(preview, EFFECTS_FRAME_TIME)
+
+    // A finding pinned, not a target met. Measured 2026-09-12: 2 — the same
+    // frame painted twice for one move of the playhead.
+    //
+    // The cause is the seek-check loop in `usePreviewRenderLoop.ts`, which
+    // walks *clips* but seeks *elements*. All 12 clips in this scene draw from
+    // one source, so `usePreviewMedia` gives them one <video> between them:
+    // the loop sets that element's currentTime for the first live clip, then
+    // measures the same element against the second live clip's target — a
+    // second away — decides a seek is needed, and takes the event-driven
+    // branch, which draws immediately and again when `seeked` arrives. The
+    // test above shows one live clip composites once, so this is about sharing
+    // an element, not about the playhead moving.
+    //
+    // It is not academic: a picture-in-picture arrangement, or the same clip
+    // duplicated on two tracks, is exactly this shape. The fix is in that
+    // loop's per-element handling — seek each element once, for the clip that
+    // owns it, rather than once per clip — not in memoising the draw.
+    //
+    // When that lands this test fails, which is the point: fold it into the
+    // one above, at one composite.
+    expect(frame.composites).toBe(2)
+  })
+})
+
+describe('preview render loop', () => {
+  it('composites exactly one frame per animation frame and throttles the store', async () => {
+    const TICKS = 30
+    const preview = await renderPreview({ rect: RECT })
+    store().setCurrentTime(EFFECTS_FRAME_TIME)
+    await settle(FRAME_MS * 4)
+
+    let storeTimeUpdates = 0
+    const unsubscribe = useEditorStore.subscribe((state, previous) => {
+      if (state.currentTime !== previous.currentTime) storeTimeUpdates += 1
+    })
+    preview.clearCalls()
+
+    store().setIsPlaying(true)
+    await settle(FRAME_MS * TICKS)
+    const composites = preview.frames().length
+
+    store().setIsPlaying(false)
+    await settle(FRAME_MS * 2)
+    unsubscribe()
+
+    // Exact: the rAF loop paints once per animation frame — never twice, and
+    // never skipping one. A loop that also redrew on a React render would show
+    // up here as more composites than ticks.
+    expect(composites).toBe(TICKS)
+    // The loop writes the playhead back to the store every 200 ms rather than
+    // every frame, so a 480 ms window is 2 store writes and not 30. Measured
+    // 2026-09-12: 2. Deliberately exact rather than 2x measured — it is derived
+    // from the loop's own 200 ms throttle constant, so slack would only hide
+    // that constant changing.
+    expect(storeTimeUpdates).toBeLessThanOrEqual(Math.floor((FRAME_MS * TICKS) / 200))
+  })
+})

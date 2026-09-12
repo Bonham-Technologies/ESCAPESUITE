@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "test:escapeplan": "playwright test tests/escapeplan",
@@ -19,6 +20,7 @@
     "test:browsers": "playwright test --project=chromium --project=firefox --project=webkit",
     "test:browsers:all": "playwright test",
     "test:journeys": "playwright test --config=playwright.journeys.config.ts",
+    "test:perf": "playwright test --config=playwright.perf.config.ts",
     "test:journeys:headed": "playwright test --config=playwright.journeys.config.ts --headed",
     "test:journeys:ui": "playwright test --config=playwright.journeys.config.ts --ui",
     "report": "playwright show-report",

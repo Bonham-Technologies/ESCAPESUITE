@@ -29,9 +29,10 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "test:run": "vitest run --exclude '**/*.chromium.test.ts'",
-    "test:coverage": "vitest run --coverage --exclude '**/*.chromium.test.ts'",
-    "test:e2e": "cross-env HEADLESS_BUILD=1 vitest run chromium.test"
+    "test:run": "vitest run --exclude '**/*.chromium.test.ts' --exclude '**/*.bench.test.ts'",
+    "test:coverage": "vitest run --coverage --exclude '**/*.chromium.test.ts' --exclude '**/*.bench.test.ts'",
+    "test:e2e": "cross-env HEADLESS_BUILD=1 vitest run chromium.test",
+    "test:perf": "cross-env HEADLESS_BUILD=1 vitest run src/perf.bench.test.ts"
   },
   "dependencies": { "playwright": "1.63.0" },
   "devDependencies": {

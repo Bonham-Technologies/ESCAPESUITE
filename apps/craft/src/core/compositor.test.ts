@@ -14,45 +14,16 @@ import {
   getLastVideoDouble,
   type VideoElementDouble,
 } from '../test/doubles/video'
+import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 
 // The render loop reschedules itself on every tick, so cancelAnimationFrame
 // has to genuinely clear the pending callback — a no-op cancel would leave the
 // loop drawing into a torn-down environment after the test that started it.
-const rafCallbacks = new Map<number, FrameRequestCallback>()
-let nextRafHandle = 1
-let originalRaf: typeof globalThis.requestAnimationFrame
-let originalCancelRaf: typeof globalThis.cancelAnimationFrame
+// That is what the shared rAF double gives us.
+let raf: RafDouble
 
-function installRafDouble(): void {
-  originalRaf = globalThis.requestAnimationFrame
-  originalCancelRaf = globalThis.cancelAnimationFrame
-  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-    const handle = nextRafHandle++
-    rafCallbacks.set(handle, cb)
-    return handle
-  }) as typeof globalThis.requestAnimationFrame
-  globalThis.cancelAnimationFrame = ((handle: number) => {
-    rafCallbacks.delete(handle)
-  }) as typeof globalThis.cancelAnimationFrame
-}
-
-function uninstallRafDouble(): void {
-  globalThis.requestAnimationFrame = originalRaf
-  globalThis.cancelAnimationFrame = originalCancelRaf
-  rafCallbacks.clear()
-}
-
-/** Run every currently-pending rAF callback exactly once. */
-function tickAnimationFrames(): number {
-  const pending = [...rafCallbacks.entries()]
-  rafCallbacks.clear()
-  for (const [, cb] of pending) cb(0)
-  return pending.length
-}
-
-function pendingFrameCount(): number {
-  return rafCallbacks.size
-}
+const tickAnimationFrames = (): number => raf.tick()
+const pendingFrameCount = (): number => raf.pending()
 
 let now = 0
 
@@ -87,9 +58,7 @@ function attachWebcam(
 describe('Compositor', () => {
   beforeEach(() => {
     now = 100_000
-    rafCallbacks.clear()
-    nextRafHandle = 1
-    installRafDouble()
+    raf = installRafDouble()
     installVideoElementDouble()
     installCanvasCaptureStreamDouble()
     vi.spyOn(performance, 'now').mockImplementation(() => now)
@@ -98,7 +67,7 @@ describe('Compositor', () => {
   afterEach(() => {
     uninstallCanvasCaptureStreamDouble()
     uninstallVideoElementDouble()
-    uninstallRafDouble()
+    raf.uninstall()
     vi.restoreAllMocks()
   })
 
