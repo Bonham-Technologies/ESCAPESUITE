@@ -154,12 +154,15 @@ Hooks:
 | `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports |
 
 **The preview draws through `core/canvasRenderer.ts`**, the same renderer an export
-uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the three differences:
+uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the two differences:
 `uncachedAnimation` (the export's animation memo would serve pre-edit values to an
-editor that redraws the same clip at the same time), `resetFilter` (a clip with no blur
-of its own draws unfiltered, even inside a dissolve), and `quiet` (not-yet-decoded media
+editor that redraws the same clip at the same time) and `quiet` (not-yet-decoded media
 is ordinary mid-scrub, and this frame redraws sixty times a second). Never fork a drawing
 function for the preview — if the two need to differ, that is another draw option.
+`MediaDrawOptions` also carries `resetFilter`, which the preview used to pass: it made a
+clip with no blur of its own assign `filter = 'none'`, which cancelled the blur a dissolve
+had just set on the context, so the preview's dissolve never blurred while an export's
+did. Nothing passes it now.
 
 Interactive overlay manipulation in the preview canvas:
 - **Drag**: Move overlay position (updates `x`, `y`)

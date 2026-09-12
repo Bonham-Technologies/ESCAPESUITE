@@ -61,10 +61,11 @@ function hasVisibleFill(fillColor: string): boolean {
 /**
  * Apply a clip's own blur to the context.
  *
- * With `resetFilter` the filter is always assigned, so a clip with no blur of
- * its own draws unfiltered even when the caller has a filter set (the preview's
- * behaviour); without it an ambient filter — the one a dissolve puts on both
- * sides of the transition — is left in place.
+ * By default an ambient filter — the one a dissolve puts on both sides of the
+ * transition — is left in place for a clip with no blur of its own, which is
+ * why the preview and an export blur a dissolve alike. `resetFilter` assigns
+ * the filter either way, so such a clip draws unfiltered even when the caller
+ * has one set; nothing in the app asks for that today.
  */
 function applyClipBlur(ctx: CanvasRenderingContext2D, blurAmount: number, options?: MediaDrawOptions) {
   if (blurAmount > 0) {

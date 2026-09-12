@@ -30,15 +30,12 @@ import { getActiveTransition } from './transitions';
  * `uncachedAnimation`: the export memo cache is keyed by clip id and clip time
  * and only cleared when an export starts, so an editor that redraws the same
  * clip at the same time after every edit would keep drawing pre-edit values.
- * `resetFilter`: a clip with no blur of its own draws unfiltered here, even
- * inside a dissolve, which is what the preview has always done.
  * `quiet`: media that is not ready yet is ordinary mid-scrub, and this frame
  * is redrawn sixty times a second — the exporter's one-off warning would be a
  * console flood here.
  */
 export const PREVIEW_DRAW_OPTIONS: MediaDrawOptions = {
   uncachedAnimation: true,
-  resetFilter: true,
   quiet: true,
 };
 
