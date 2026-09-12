@@ -46,6 +46,9 @@ function animatedValuesFor(clip: Clip, clipTime: number, options?: MediaDrawOpti
 /**
  * Whether a fill colour paints anything.
  *
+ * Exported because the inspector has to agree with the canvas about it: a shape
+ * the renderer fills must not show "no fill" in the panel beside it.
+ *
  * The editors write a shape fill as eight-digit #RRGGBBAA and set the alpha to
  * '00' for "no fill", so a zero alpha is the only invisible case they can
  * produce — no shape fill is ever `transparent` or an `rgba()` string. A
@@ -53,7 +56,7 @@ function animatedValuesFor(clip: Clip, clipTime: number, options?: MediaDrawOpti
  * cannot simply test the last two characters: that reads pure red (#ff0000)
  * and black (#000000) as transparent.
  */
-function hasVisibleFill(fillColor: string): boolean {
+export function hasVisibleFill(fillColor: string): boolean {
   if (!fillColor) return false;
   return !/^#[0-9a-f]{6}00$/i.test(fillColor);
 }

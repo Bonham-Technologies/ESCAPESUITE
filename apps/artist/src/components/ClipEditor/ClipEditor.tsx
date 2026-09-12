@@ -4,6 +4,7 @@ import { formatTimecode } from '../../utils/timeUtils';
 import { DEFAULT_TRANSFORM } from '../../store/types';
 import type { BlendMode, TransitionType, TextAlign, ShapeType, TextOverlayData, ShapeOverlayData, AnimationPresetType, EasingType } from '../../store/types';
 import { hasAnimation } from '../../utils/animation';
+import { hasVisibleFill } from '../../core/canvasRenderer';
 import styles from './ClipEditor.module.css';
 
 // Collapsible section component
@@ -578,23 +579,23 @@ export function ClipEditor() {
                       const currentAlpha = fillColor.length > 7 ? fillColor.substring(7) : 'ff';
                       handleShapeDataChange({ fillColor: e.target.value + currentAlpha });
                     }}
-                    disabled={selectedClip.shapeData.fillColor.endsWith('00')}
+                    disabled={!hasVisibleFill(selectedClip.shapeData.fillColor)}
                   />
                   <button
-                    className={`${styles.noFillButton} ${selectedClip.shapeData.fillColor.endsWith('00') ? styles.active : ''}`}
+                    className={`${styles.noFillButton} ${hasVisibleFill(selectedClip.shapeData.fillColor) ? '' : styles.active}`}
                     onClick={() => {
                       const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
-                      if (fillColor.endsWith('00')) {
-                        // Re-enable fill with 50% opacity
-                        handleShapeDataChange({ fillColor: fillColor.substring(0, 7) + '80' });
-                      } else {
+                      if (hasVisibleFill(fillColor)) {
                         // Set to no fill (0% opacity)
                         handleShapeDataChange({ fillColor: fillColor.substring(0, 7) + '00' });
+                      } else {
+                        // Re-enable fill with 50% opacity
+                        handleShapeDataChange({ fillColor: fillColor.substring(0, 7) + '80' });
                       }
                     }}
-                    title={selectedClip.shapeData.fillColor.endsWith('00') ? 'Enable fill' : 'No fill (transparent)'}
+                    title={hasVisibleFill(selectedClip.shapeData.fillColor) ? 'No fill (transparent)' : 'Enable fill'}
                   >
-                    {selectedClip.shapeData.fillColor.endsWith('00') ? '⊘' : '⊗'}
+                    {hasVisibleFill(selectedClip.shapeData.fillColor) ? '⊗' : '⊘'}
                   </button>
                 </div>
                 <div className={styles.colorInput}>
@@ -607,7 +608,7 @@ export function ClipEditor() {
                 </div>
               </div>
 
-              {!selectedClip.shapeData.fillColor.endsWith('00') && (
+              {hasVisibleFill(selectedClip.shapeData.fillColor) && (
                 <div className={styles.transformRow}>
                   <label>Fill opacity</label>
                   <input
