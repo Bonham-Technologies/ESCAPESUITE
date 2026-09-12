@@ -10,7 +10,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getFrameCache } from '../../core/frameCache';
 import { drawPreviewFrame } from './drawFrame';
-import { previewRaster } from './previewGeometry';
+import { previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
 import { usePreviewMedia } from './usePreviewMedia';
 import { usePreviewRenderLoop } from './usePreviewRenderLoop';
@@ -19,10 +19,6 @@ import { InlineTextEditorAnchor } from './InlineTextEditorAnchor';
 import { MarqueeSelection } from './MarqueeSelection';
 import { PreviewTimecode } from './PreviewTimecode';
 import styles from './PreviewPlayer.module.css';
-
-// Fallback canvas dimensions (used if resolution not yet available)
-const DEFAULT_WIDTH = 1920;
-const DEFAULT_HEIGHT = 1080;
 
 export function PreviewPlayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,11 +55,14 @@ export function PreviewPlayer() {
 
   // The project's own pixel grid — the space every number in the preview is in.
   // Not the canvas' backing store, which follows the size it is displayed at
-  // (see `previewRaster`). Falls back to the defaults for safety.
-  const canvasDimensions = useMemo(() => ({
-    width: resolution?.width || DEFAULT_WIDTH,
-    height: resolution?.height || DEFAULT_HEIGHT,
-  }), [resolution?.width, resolution?.height]);
+  // (see `previewRaster`). `projectSizeOf` is the one derivation, shared with
+  // `useTransformHandles`.
+  const projectWidth = resolution?.width;
+  const projectHeight = resolution?.height;
+  const canvasDimensions = useMemo(
+    () => projectSizeOf({ width: projectWidth, height: projectHeight }),
+    [projectWidth, projectHeight]
+  );
 
   // Inline text editing state
   const [editingTextClipId, setEditingTextClipId] = useState<string | null>(null);

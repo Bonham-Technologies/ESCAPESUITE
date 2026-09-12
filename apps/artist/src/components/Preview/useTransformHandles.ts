@@ -98,12 +98,9 @@ export function useTransformHandles({
 
   // The project's pixel grid: every measurement below is in it, and it is not
   // the canvas' backing store, which follows the size the preview is displayed
-  // at. Falls back to the canvas for a project with no resolution recorded.
+  // at. `projectSizeOf` is the one derivation, shared with `PreviewPlayer`.
   const resolution = useEditorStore((state) => state.project.resolution);
-  const projectSize = useMemo(
-    () => (resolution ? { width: resolution.width, height: resolution.height } : undefined),
-    [resolution]
-  );
+  const projectSize = useMemo(() => geometry.projectSizeOf(resolution), [resolution]);
 
   // Drag state for overlay manipulation
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -127,7 +124,7 @@ export function useTransformHandles({
   const getCanvasPosition = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-    return geometry.getCanvasPosition(canvas, e, projectSize ?? canvas);
+    return geometry.getCanvasPosition(canvas, e, projectSize);
   }, [canvasRef, projectSize]);
 
   // Hit test: find what's at the given position (handles take priority over overlay bodies)
@@ -141,7 +138,7 @@ export function useTransformHandles({
       currentTime,
       selectedClipId,
       keyframePanelOpen,
-    }, projectSize ?? canvas);
+    }, projectSize);
   }, [canvasRef, clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen, projectSize]);
 
   // Mouse event handlers for drag-and-drop
@@ -469,7 +466,7 @@ export function useTransformHandles({
 
         const intersecting = clipsIntersectingMarquee(
           canvas, marqueeStart, marqueeCurrent!, clips, currentTime, sourceVideos,
-          projectSize ?? canvas
+          projectSize
         );
 
         const nativeEvent = e as unknown as { ctrlKey?: boolean; metaKey?: boolean } | undefined;
@@ -579,12 +576,11 @@ export function useTransformHandles({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const size = projectSize ?? canvas;
-    const mouseX = pos.x * size.width;
-    const mouseY = pos.y * size.height;
+    const mouseX = pos.x * projectSize.width;
+    const mouseY = pos.y * projectSize.height;
 
     const clip = textClipAtPoint(
-      mouseX, mouseY, canvas, clips, tracks, currentTime, sourceVideos, size
+      mouseX, mouseY, canvas, clips, tracks, currentTime, sourceVideos, projectSize
     );
     if (clip) {
       e.preventDefault();

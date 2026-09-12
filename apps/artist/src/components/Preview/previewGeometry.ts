@@ -8,6 +8,10 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo } from '../../store/types';
 import type { ManipulableClipType, NormalizedPoint, OverlayBounds, ProjectSize } from './types';
 
+/** The project size the preview assumes when a project records none. */
+export const DEFAULT_PROJECT_WIDTH = 1920;
+export const DEFAULT_PROJECT_HEIGHT = 1080;
+
 // Handle size in pixels (for hit detection and drawing)
 export const HANDLE_SIZE = 8;
 export const ROTATION_HANDLE_OFFSET = 25; // Distance above the bounding box
@@ -361,4 +365,26 @@ export function previewRaster(
   const width = Math.max(1, Math.round(project.width * fit));
   const scale = width / project.width;
   return { width, height: Math.max(1, Math.round(project.height * scale)), scale };
+}
+
+/**
+ * The project's pixel grid, as the preview should read it.
+ *
+ * Every number in this directory is in project space (see {@link ProjectSize}),
+ * so both the component that sizes the canvas and the hook that measures
+ * pointer positions against it have to derive that space the same way — from
+ * `project.resolution` and nothing else. They used to derive it separately, and
+ * the hook fell back to the canvas element when a project carried no
+ * resolution: the canvas is the *backing store*, which since the display-size
+ * raster landed is not the project at all, so that fallback would have mixed
+ * the two spaces. It is dead today — the store always records a resolution —
+ * and this is how it stays dead.
+ */
+export function projectSizeOf(
+  resolution: { width?: number; height?: number } | null | undefined
+): ProjectSize {
+  return {
+    width: resolution?.width || DEFAULT_PROJECT_WIDTH,
+    height: resolution?.height || DEFAULT_PROJECT_HEIGHT,
+  };
 }
