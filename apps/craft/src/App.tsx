@@ -53,6 +53,10 @@ function App() {
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const capturedThumbnailRef = useRef<Blob | null>(null);
+  // A recorder can flush its last chunk — and call onStop — after the take has
+  // been cancelled or the screen has gone away. The blob is then nobody's: it
+  // belongs to a recording the user threw away, and must not be saved.
+  const cancelledRef = useRef(false);
   // The screen and webcam streams live in the store (the preview reads them);
   // the microphone stream is only ever handed to the recorder, so it is held
   // here purely so stopAllStreams() can release it with the others.
@@ -191,6 +195,7 @@ function App() {
   }, [stopAllStreams]);
 
   useEffect(() => () => {
+    cancelledRef.current = true;
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
@@ -204,6 +209,14 @@ function App() {
       recorderRef.current = null;
     }
     stopAllStreamsRef.current();
+
+    // The store is a module singleton: it outlives this component. Left as it
+    // was, the next mount would come up mid-take — 'recording' with a duration
+    // and a countdown from a take whose recorder and capture are both gone.
+    const recorder = useRecorderStore.getState();
+    recorder.setState('idle');
+    recorder.setCurrentDuration(0);
+    recorder.setCountdown(0);
   }, []);
 
   // Cancel countdown
@@ -218,6 +231,7 @@ function App() {
 
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
+    cancelledRef.current = true;
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
@@ -419,6 +433,7 @@ function App() {
   // Handle start recording button
   const handleStartRecording = useCallback(async () => {
     try {
+      cancelledRef.current = false;
       setState('preparing');
 
       const { screen, webcam, mic } = await acquireStreams();
@@ -469,6 +484,9 @@ function App() {
         onPause: () => setState('paused'),
         onResume: () => setState('recording'),
         onStop: (blob) => {
+          // A stop that lands after the take was cancelled or the screen went
+          // away is a chunk nobody asked for: drop it rather than save it.
+          if (cancelledRef.current) return;
           // Capture duration before resetting
           const recordedDuration = recorderRef.current?.getDuration() || useRecorderStore.getState().currentDuration;
           analytics.recordingCompleted(recordedDuration);
