@@ -5,6 +5,7 @@ import {
   PLAYBACK_SECONDS,
   PLAYBACK_WARMUP_SECONDS,
   SCENE_CLIP_COUNT,
+  SCENE_RESOLUTION_LABEL,
   SCENE_TRACK_COUNT,
   installPerfInstrumentation,
   loadPerfScene,
@@ -49,7 +50,7 @@ test.describe('perf: preview playback', () => {
     writePerfResult({
       name: 'preview-playback',
       runs: PERF_RUNS,
-      scene: `${SCENE_CLIP_COUNT} clips / ${SCENE_TRACK_COUNT} tracks @ 1280x720`,
+      scene: `${SCENE_CLIP_COUNT} clips / ${SCENE_TRACK_COUNT} tracks @ ${SCENE_RESOLUTION_LABEL}`,
       windowSeconds: PLAYBACK_SECONDS - PLAYBACK_WARMUP_SECONDS,
       renderedFps: round(median(at('renderedFps'))),
       longTaskCount: median(at('longTaskCount')),
