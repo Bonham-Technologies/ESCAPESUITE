@@ -91,9 +91,22 @@ export function PreviewPlayer() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Cache the 2d context — getContext returns the same object but the lookup adds up
+    // Cache the 2d context — getContext returns the same object but the lookup adds up.
+    //
+    // `alpha: false` matches both exporters. Every frame starts with an opaque
+    // black fillRect in drawPreviewFrame, so the canvas never shows anything
+    // through — dropping the alpha channel lets the compositor skip a blend per
+    // blit without changing a pixel. Nothing else in the preview clears to
+    // transparent or composites against the canvas' own alpha (no clearRect, no
+    // destination-* blend mode; the shape-blur scratch canvas keeps its alpha).
+    //
+    // This must stay the FIRST getContext('2d') on this canvas: per the HTML
+    // spec a second call returns the context already created and ignores the
+    // options. The other preview call sites (selectionOverlay, previewGeometry,
+    // dragGeometry) all run after the first draw, off pointer events or after
+    // drawFrame in the render loop.
     if (!canvasCtxRef.current || canvasCtxRef.current.canvas !== canvas) {
-      canvasCtxRef.current = canvas.getContext('2d');
+      canvasCtxRef.current = canvas.getContext('2d', { alpha: false });
     }
     const ctx = canvasCtxRef.current;
     if (!ctx) return;
