@@ -344,9 +344,12 @@ describe('isManipulableClip', () => {
     expect(isManipulableClip(makeClip({ sourceVideoId: 'audio1' }), [audio])).toBe(false)
   })
 
-  it('treats a clip whose source is not loaded as manipulable', () => {
-    // An unknown source has no mediaType, which is not 'audio'.
-    expect(isManipulableClip(makeClip(), [])).toBe(true)
+  it('leaves a clip whose source is not loaded alone', () => {
+    // Nothing is known about the media — not its size, not even whether it
+    // draws at all — so there is nothing to put handles on. It used to be
+    // manipulable by accident: an absent source has no mediaType, and no
+    // mediaType is not 'audio'.
+    expect(isManipulableClip(makeClip(), [])).toBe(false)
   })
 
   it('rejects a clip with neither an overlay nor a source', () => {
@@ -369,8 +372,8 @@ describe('getClipType', () => {
     expect(getClipType(makeClip({ sourceVideoId: '' }), sources)).toBeNull()
   })
 
-  it('assumes video for a source that is not loaded', () => {
-    expect(getClipType(makeClip(), [])).toBe('video')
+  it('names no type for a source that is not loaded', () => {
+    expect(getClipType(makeClip(), [])).toBeNull()
   })
 })
 
