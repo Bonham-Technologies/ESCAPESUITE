@@ -22,6 +22,7 @@ import { cleanup } from '@testing-library/react'
 import { resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import {
   EFFECTS_FRAME_TIME,
+  SINGLE_CLIP_FRAME_TIME,
   TRANSITION_FRAME_TIME,
   SCENE_SOURCE_HEIGHT,
   SCENE_SOURCE_WIDTH,
@@ -105,9 +106,10 @@ interface FrameMeasurement {
  * provoked by nudging the playhead by less than the 50 ms seek threshold, which
  * takes the "nothing to seek" branch.
  *
- * That nudge currently settles into more than one identical composite (see
- * `composites`), so the per-frame counts come from the first composite and the
- * animation-lookup count is divided by how many composites ran.
+ * How many composites that nudge settles into depends on how many clips are
+ * live (see `composites` and the test that pins it), so the per-frame counts
+ * come from the first composite and the animation-lookup count is divided by
+ * how many composites ran.
  */
 async function measureFrame(preview: Preview, time: number): Promise<FrameMeasurement> {
   store().setCurrentTime(time)
@@ -191,16 +193,43 @@ describe('preview per-frame work', () => {
     expect(frame.objectUrls).toBe(0)
   })
 
-  it('settles a playhead move into a bounded number of composites', async () => {
+  it('settles a playhead move into one composite when one clip is live', async () => {
+    const preview = await renderPreview({ rect: RECT })
+
+    const frame = await measureFrame(preview, SINGLE_CLIP_FRAME_TIME)
+
+    // Exact: with a single media clip live, moving the playhead by less than
+    // the seek threshold finds every video already where it should be, takes
+    // the "nothing to seek" branch, and paints once.
+    expect(frame.composites).toBe(1)
+  })
+
+  it('settles a playhead move into two composites when clips share a source', async () => {
     const preview = await renderPreview({ rect: RECT })
 
     const frame = await measureFrame(preview, EFFECTS_FRAME_TIME)
 
-    // Measured 2026-09-12: 2 — one move of the playhead paints the same frame
-    // twice, because the scrub effect sets its own display time and re-runs on
-    // the render that follows. Halving this is a fix, not a regression: lower
-    // the ceiling when it lands.
-    expect(frame.composites).toBeLessThanOrEqual(4)
+    // A finding pinned, not a target met. Measured 2026-09-12: 2 — the same
+    // frame painted twice for one move of the playhead.
+    //
+    // The cause is the seek-check loop in `usePreviewRenderLoop.ts`, which
+    // walks *clips* but seeks *elements*. All 12 clips in this scene draw from
+    // one source, so `usePreviewMedia` gives them one <video> between them:
+    // the loop sets that element's currentTime for the first live clip, then
+    // measures the same element against the second live clip's target — a
+    // second away — decides a seek is needed, and takes the event-driven
+    // branch, which draws immediately and again when `seeked` arrives. The
+    // test above shows one live clip composites once, so this is about sharing
+    // an element, not about the playhead moving.
+    //
+    // It is not academic: a picture-in-picture arrangement, or the same clip
+    // duplicated on two tracks, is exactly this shape. The fix is in that
+    // loop's per-element handling — seek each element once, for the clip that
+    // owns it, rather than once per clip — not in memoising the draw.
+    //
+    // When that lands this test fails, which is the point: fold it into the
+    // one above, at one composite.
+    expect(frame.composites).toBe(2)
   })
 })
 
@@ -230,8 +259,10 @@ describe('preview render loop', () => {
     // up here as more composites than ticks.
     expect(composites).toBe(TICKS)
     // The loop writes the playhead back to the store every 200 ms rather than
-    // every frame, so a 480 ms window is 2 store writes and not 30.
-    // Measured 2026-09-12: 2.
+    // every frame, so a 480 ms window is 2 store writes and not 30. Measured
+    // 2026-09-12: 2. Deliberately exact rather than 2x measured — it is derived
+    // from the loop's own 200 ms throttle constant, so slack would only hide
+    // that constant changing.
     expect(storeTimeUpdates).toBeLessThanOrEqual(Math.floor((FRAME_MS * TICKS) / 200))
   })
 })

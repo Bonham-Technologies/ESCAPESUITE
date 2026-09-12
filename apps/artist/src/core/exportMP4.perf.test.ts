@@ -231,14 +231,20 @@ describe('export per-frame work', () => {
 
     // A finding pinned, not a target met. The scene has no keyframes at all, so
     // every one of these lookups asks for a value that cannot change — and the
-    // memo cache answers none of them, because `animatedValuesFor` keys it by
-    // `${clip.id}:${clipTime.toFixed(3)}` and the clip time is different on
-    // every frame. During an export the cache is therefore pure overhead: it
-    // stores one entry per clip per frame (measured 2026-09-12: 4 per frame,
-    // so ~1,560 for the full 13 s scene) and never reads one back.
+    // memo cache answers none of them, because both sites that build a key use
+    // `${clip.id}:${<clip time>.toFixed(3)}`, and the clip time is different on
+    // every frame:
+    //
+    //   - `animatedValuesFor` in `core/canvasRenderer.ts`, for media clips;
+    //   - `exportMP4.ts` (~495), for overlay clips.
+    //
+    // During an export the cache is therefore pure overhead: it stores one
+    // entry per clip per frame (measured 2026-09-12: 4 per frame, so ~1,560 for
+    // the full 13 s scene) and never reads one back.
     //
     // When that is fixed this test fails, which is the point: invert it into a
-    // floor on the hit ratio and lower the entries-per-frame ceiling.
+    // floor on the hit ratio and lower the entries-per-frame ceiling. Both key
+    // sites have to change together, or the ratio moves only half way.
     expect(measured.animationCacheHitRatio).toBe(0)
     expect(measured.animationCacheEntriesPerFrame).toBeLessThanOrEqual(8)
   })

@@ -56,6 +56,13 @@ export const SCENE_SOURCE_ID = 'perf-source'
 export const EFFECTS_FRAME_TIME = 7.5
 
 /**
+ * A frame with exactly one media clip live: V1's first clip runs 0-2 s and V2's
+ * first does not start until 1 s, so only one clip is asking the shared <video>
+ * element for a position. The two overlays are drawn as always; neither seeks.
+ */
+export const SINGLE_CLIP_FRAME_TIME = 0.5
+
+/**
  * A frame inside the scene's one transition: `V1`'s third clip (4–6 s) carries
  * a 0.5 s fade, so 5.5–6 s cross-dissolves it into the fourth while `V2`'s
  * third clip (5–7 s) and both overlays draw as usual.
