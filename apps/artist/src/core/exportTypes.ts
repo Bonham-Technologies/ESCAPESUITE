@@ -300,13 +300,6 @@ export interface MediaDrawOptions {
    */
   uncachedAnimation?: boolean;
   /**
-   * Reset `ctx.filter` to 'none' when the clip carries no blur of its own,
-   * rather than letting it inherit whatever filter the caller already set.
-   * Inheriting is the default because a dissolve's blur is set on the context
-   * around both of its draws: a clip that reset the filter would cancel it.
-   */
-  resetFilter?: boolean;
-  /**
    * Say nothing about media that is not ready to draw. An export reports it
    * once per frame and a frame is drawn once; a preview redraws the same frame
    * on every animation frame, and would repeat the same warning sixty times a

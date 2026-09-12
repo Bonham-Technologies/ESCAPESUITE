@@ -196,6 +196,86 @@ export function hasCustomKeyframes(clip: Clip): boolean {
 }
 
 /**
+ * A point in canvas pixels, expressed in a clip's own unrotated frame.
+ *
+ * Every box on the preview is axis-aligned before its rotation is applied, so
+ * a hit test rotates the point backwards around the box's centre rather than
+ * rotating the box's four corners forwards. `x`/`y` are then offsets from the
+ * centre, and a point is inside the box when both are within its half extents.
+ */
+export function toLocalPoint(bounds: OverlayBounds, x: number, y: number): { x: number; y: number } {
+  const rad = (-bounds.rotation * Math.PI) / 180;
+  const dx = x - bounds.centerX;
+  const dy = y - bounds.centerY;
+  return {
+    x: dx * Math.cos(rad) - dy * Math.sin(rad),
+    y: dx * Math.sin(rad) + dy * Math.cos(rad),
+  };
+}
+
+/**
+ * Where the canvas' drawn content sits inside the element that shows it.
+ *
+ * The preview canvas is laid out with `object-fit: contain`, so the drawing is
+ * scaled to fit and letterboxed on whichever axis has room to spare. Anything
+ * that maps between the element's CSS pixels and the canvas' own pixels — the
+ * mouse, a marquee rectangle, the inline text editor — needs these numbers.
+ */
+export interface CanvasContentBox {
+  /** Size of the drawn content in the element's CSS pixels. */
+  width: number;
+  height: number;
+  /** Size of the letterbox bar on each side, in the element's CSS pixels. */
+  offsetX: number;
+  offsetY: number;
+  /** CSS pixels per canvas pixel. Equal on both axes, up to rounding. */
+  scaleX: number;
+  scaleY: number;
+}
+
+/**
+ * Measure the object-fit: contain box for a canvas.
+ *
+ * The element box is a parameter so a caller that already has the rect — the
+ * mouse handlers read it for `left`/`top` as well — does not measure twice.
+ */
+export function contentBox(
+  canvas: HTMLCanvasElement,
+  rect: { width: number; height: number } = canvas.getBoundingClientRect()
+): CanvasContentBox {
+  const canvasAspect = canvas.width / canvas.height;
+  const elementAspect = rect.width / rect.height;
+
+  let width: number;
+  let height: number;
+  let offsetX: number;
+  let offsetY: number;
+
+  if (canvasAspect > elementAspect) {
+    // Canvas is wider than element - letterboxed top/bottom
+    width = rect.width;
+    height = rect.width / canvasAspect;
+    offsetX = 0;
+    offsetY = (rect.height - height) / 2;
+  } else {
+    // Canvas is taller than element - letterboxed left/right
+    height = rect.height;
+    width = rect.height * canvasAspect;
+    offsetX = (rect.width - width) / 2;
+    offsetY = 0;
+  }
+
+  return {
+    width,
+    height,
+    offsetX,
+    offsetY,
+    scaleX: width / canvas.width,
+    scaleY: height / canvas.height,
+  };
+}
+
+/**
  * Get mouse position relative to canvas in normalized coordinates (0-1).
  * Accounts for object-fit: contain which letterboxes the canvas content.
  * Accepts any MouseEvent (canvas or window) so dragging works outside the canvas.
@@ -205,37 +285,15 @@ export function getCanvasPosition(
   e: { clientX: number; clientY: number }
 ): NormalizedPoint {
   const rect = canvas.getBoundingClientRect();
-
-  // Calculate the actual rendered size of the canvas content (accounting for object-fit: contain)
-  const canvasAspect = canvas.width / canvas.height;
-  const elementAspect = rect.width / rect.height;
-
-  let renderedWidth: number;
-  let renderedHeight: number;
-  let offsetX: number;
-  let offsetY: number;
-
-  if (canvasAspect > elementAspect) {
-    // Canvas is wider than element - letterboxed top/bottom
-    renderedWidth = rect.width;
-    renderedHeight = rect.width / canvasAspect;
-    offsetX = 0;
-    offsetY = (rect.height - renderedHeight) / 2;
-  } else {
-    // Canvas is taller than element - letterboxed left/right
-    renderedHeight = rect.height;
-    renderedWidth = rect.height * canvasAspect;
-    offsetX = (rect.width - renderedWidth) / 2;
-    offsetY = 0;
-  }
+  const content = contentBox(canvas, rect);
 
   // Convert mouse position to be relative to the actual canvas content area
-  const mouseX = e.clientX - rect.left - offsetX;
-  const mouseY = e.clientY - rect.top - offsetY;
+  const mouseX = e.clientX - rect.left - content.offsetX;
+  const mouseY = e.clientY - rect.top - content.offsetY;
 
   // Return normalized coordinates — NOT clamped, so dragging outside canvas works
   return {
-    x: mouseX / renderedWidth,
-    y: mouseY / renderedHeight,
+    x: mouseX / content.width,
+    y: mouseY / content.height,
   };
 }

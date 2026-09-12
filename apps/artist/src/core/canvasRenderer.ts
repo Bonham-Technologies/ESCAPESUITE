@@ -64,17 +64,13 @@ export function hasVisibleFill(fillColor: string): boolean {
 /**
  * Apply a clip's own blur to the context.
  *
- * By default an ambient filter — the one a dissolve puts on both sides of the
- * transition — is left in place for a clip with no blur of its own, which is
- * why the preview and an export blur a dissolve alike. `resetFilter` assigns
- * the filter either way, so such a clip draws unfiltered even when the caller
- * has one set; nothing in the app asks for that today.
+ * A clip with no blur of its own leaves the context's filter alone, so an
+ * ambient one — the blur a dissolve puts on both sides of the transition —
+ * survives. That is why the preview and an export blur a dissolve alike.
  */
-function applyClipBlur(ctx: CanvasRenderingContext2D, blurAmount: number, options?: MediaDrawOptions) {
+function applyClipBlur(ctx: CanvasRenderingContext2D, blurAmount: number) {
   if (blurAmount > 0) {
     ctx.filter = `blur(${blurAmount}px)`;
-  } else if (options?.resetFilter) {
-    ctx.filter = 'none';
   }
 }
 
@@ -338,7 +334,7 @@ export function drawClipToCanvas(
   ctx.globalAlpha = finalOpacity;
 
   // Apply blur effect (from animation or static)
-  applyClipBlur(ctx, animated.blur, options);
+  applyClipBlur(ctx, animated.blur);
 
   // Apply clip region for wipe transitions
   if (transitionModifiers?.clipRegion) {
@@ -464,7 +460,7 @@ export function drawImageToCanvasWithModifiers(
   ctx.globalAlpha = finalOpacity;
 
   // Apply blur effect (from animation or static)
-  applyClipBlur(ctx, animated.blur, options);
+  applyClipBlur(ctx, animated.blur);
 
   // Apply clip region for wipe transitions
   if (transitionModifiers?.clipRegion) {

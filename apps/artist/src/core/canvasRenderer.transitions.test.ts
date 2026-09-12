@@ -201,46 +201,53 @@ describe('drawTransition', () => {
     expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
   })
 
-  it('passes the draw options down to both sides of the transition', () => {
-    // resetFilter is the visible one: a caller that asks for it draws two
-    // unblurred clips unfiltered, dissolve blur and all.
-    drawTransition(asCtx(), videos, images, transitionOf('dissolve', 0.5), NOW, W, H, {
-      uncachedAnimation: true,
-      resetFilter: true,
+  /**
+   * The same transition drawn twice with a scale edit between, at the same clip
+   * ids and times. uncachedAnimation is the observable draw option: with it
+   * set, the second draw re-reads the transform instead of the export's memo
+   * cache, so a side that received the option redraws at the new size. Returns
+   * the width of every drawImage, in order.
+   */
+  const drawTwiceAcrossAnEdit = (type: TransitionType, progress: number) => {
+    const scaled = (scale: number): TransitionInfo => ({
+      outgoingClip: {
+        ...outgoingClip,
+        transform: { x: 0.5, y: 0.5, scaleX: scale, scaleY: scale, rotation: 0, opacity: 1 },
+      },
+      incomingClip: {
+        ...incomingClip,
+        transform: { x: 0.5, y: 0.5, scaleX: scale, scaleY: scale, rotation: 0, opacity: 1 },
+      },
+      progress,
+      type,
     })
 
-    expect(drawnSources()).toEqual([out, incoming])
-    expect(ctx.stateFor('drawImage').map((state) => state.filter)).toEqual(['none', 'none'])
+    for (const scale of [1, 2]) {
+      drawTransition(asCtx(), videos, images, scaled(scale), NOW, W, H, {
+        uncachedAnimation: true,
+      })
+    }
+
+    return ctx.argsFor('drawImage').map((args) => args[3])
+  }
+
+  it('passes the draw options down to both sides of the transition', () => {
+    // The outgoing source is 640 wide and the incoming 800, so a scaled second
+    // pair proves the option reached each side rather than only the first.
+    expect(drawTwiceAcrossAnEdit('dissolve', 0.5)).toEqual([640, 800, 1280, 1600])
+    expect(drawnSources()).toEqual([out, incoming, out, incoming])
   })
 
   it('passes the draw options down when only one clip has media', () => {
     videos.delete('v1')
-    ctx.filter = 'blur(3px)'
 
-    drawTransition(asCtx(), videos, images, transitionOf('fade', 0.25), NOW, W, H, {
-      resetFilter: true,
-    })
-
-    expect(ctx.stateFor('drawImage')[0].filter).toBe('none')
+    expect(drawTwiceAcrossAnEdit('fade', 0.25)).toEqual([800, 1600])
   })
 
   it('passes the draw options down for an unknown transition type', () => {
-    ctx.filter = 'blur(3px)'
-
-    drawTransition(
-      asCtx(),
-      videos,
-      images,
-      transitionOf('iris' as TransitionType, 0.5),
-      NOW,
-      W,
-      H,
-      { resetFilter: true }
-    )
-
-    // Both clips drawn untouched, and neither inherits the ambient filter.
-    expect(ctx.stateFor('drawImage').map((state) => state.filter)).toEqual(['none', 'none'])
-    expect(drawnAlphas()).toEqual([1, 1])
+    // Both clips drawn untouched, and both still given the options.
+    expect(drawTwiceAcrossAnEdit('iris' as TransitionType, 0.5)).toEqual([640, 800, 1280, 1600])
+    expect(drawnAlphas()).toEqual([1, 1, 1, 1])
   })
 
   it('wipes left by shrinking the outgoing region from the right', () => {

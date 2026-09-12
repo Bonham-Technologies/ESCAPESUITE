@@ -4,7 +4,7 @@
 // space hitTestHandles takes, so the arithmetic that matters — the box a clip
 // occupies, the tolerance around a handle — stays visible in the test.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { hitTestHandles, type HitTestContext } from './hitTest'
+import { hitHandlesOnClip, hitTestHandles, type HitTestContext } from './hitTest'
 import { HANDLE_SIZE, ROTATION_HANDLE_OFFSET } from './previewGeometry'
 import {
   makeAnimation,
@@ -14,7 +14,11 @@ import {
   makeTextData,
   makeTrack,
 } from '../../test/fixtures/exportPipeline'
-import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
+import {
+  failNextGetContext,
+  installCanvasDouble,
+  uninstallCanvasDouble,
+} from '../../test/doubles/canvas'
 import type { Clip, Keyframe, SourceVideo, Track } from '../../store/types'
 
 const CANVAS_W = 1920
@@ -132,6 +136,26 @@ describe('hitTestHandles body hits', () => {
     const clip = mediaClip({ animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }) })
 
     expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
+  })
+
+  it('skips a clip whose kind it cannot name', () => {
+    // An overlay type this build does not know — a project written by a later
+    // one — is manipulable in principle but has no handles to offer.
+    const unknown = mediaClip({
+      overlayType: 'hologram' as Clip['overlayType'],
+      sourceVideoId: 'not-in-the-project',
+    })
+
+    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [unknown] }))).toBeNull()
+  })
+
+  it('skips a clip it cannot measure', () => {
+    // Text is measured through the canvas' own 2D context; without one there
+    // are no bounds to test the point against.
+    const text = makeClip({ id: 'text1', duration: 4, overlayType: 'text', textData: makeTextData() })
+    failNextGetContext()
+
+    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [text] }))).toBeNull()
   })
 })
 
@@ -334,5 +358,91 @@ describe('hitTestHandles with the keyframe panel open', () => {
     expect(
       hitAt(CENTER_X, CENTER_Y, scene({ clips: [mediaClip()], keyframePanelOpen: true }))?.mode
     ).toBe('move')
+  })
+})
+
+describe('hitHandlesOnClip', () => {
+  /** Run the cascade on a point given in canvas pixels. */
+  const cascade = (
+    x: number,
+    y: number,
+    context: HitTestContext,
+    options: { skipKeyframed: boolean; includeBody: boolean }
+  ) => hitHandlesOnClip('clip1', x, y, canvas, context, options)
+
+  const both = { skipKeyframed: false, includeBody: true }
+  const handlesOnly = { skipKeyframed: true, includeBody: false }
+
+  it('finds nothing for a clip id that is not in the scene', () => {
+    expect(cascade(CENTER_X, CENTER_Y, scene(), both)).toBeNull()
+  })
+
+  it('finds nothing for a clip with no manipulable type', () => {
+    // An audio clip has no box to put handles around.
+    const audio = makeSourceVideo({ id: 'audio1', mediaType: 'audio' })
+    const clip = mediaClip({ sourceVideoId: 'audio1' })
+
+    expect(cascade(CENTER_X, CENTER_Y, scene({ clips: [clip], sourceVideos: [audio] }), both))
+      .toBeNull()
+  })
+
+  it('finds nothing while the clip is off screen', () => {
+    const clip = mediaClip({ timelinePosition: 10 })
+
+    expect(cascade(CENTER_X, CENTER_Y, scene({ clips: [clip] }), both)).toBeNull()
+  })
+
+  it('finds nothing for a clip it cannot measure', () => {
+    // Text needs the canvas' 2D context to measure; without one there is no box.
+    const text = makeClip({ id: 'clip1', duration: 4, overlayType: 'text', textData: makeTextData() })
+    failNextGetContext()
+
+    expect(cascade(CENTER_X, CENTER_Y, scene({ clips: [text] }), both)).toBeNull()
+  })
+
+  it('walks rotation handle, corners and edges in that order', () => {
+    const context = scene({ clips: [mediaClip()] })
+
+    expect(cascade(CENTER_X, CENTER_Y - HALF_H - ROTATION_HANDLE_OFFSET, context, both)?.mode)
+      .toBe('rotate')
+    expect(cascade(CENTER_X - HALF_W, CENTER_Y - HALF_H, context, both)?.mode).toBe('resize-nw')
+    expect(cascade(CENTER_X + HALF_W, CENTER_Y + HALF_H, context, both)?.mode).toBe('resize-se')
+    expect(cascade(CENTER_X, CENTER_Y - HALF_H, context, both)?.mode).toBe('resize-n')
+    expect(cascade(CENTER_X + HALF_W, CENTER_Y, context, both)?.mode).toBe('resize-e')
+  })
+
+  it('names the clip and its type on every hit', () => {
+    const context = scene({ clips: [mediaClip()] })
+
+    expect(cascade(CENTER_X + HALF_W, CENTER_Y, context, both)).toEqual({
+      clipId: 'clip1',
+      clipType: 'video',
+      mode: 'resize-e',
+    })
+  })
+
+  it('counts the body as a move only when the caller asks for it', () => {
+    const context = scene({ clips: [mediaClip()] })
+
+    expect(cascade(CENTER_X, CENTER_Y, context, both)?.mode).toBe('move')
+    expect(cascade(CENTER_X, CENTER_Y, context, handlesOnly)).toBeNull()
+  })
+
+  it('skips a keyframed clip only when the caller asks it to', () => {
+    const clip = mediaClip({
+      animation: makeAnimation({ keyframes: { x: [kf(0, 0.5), kf(4, 0.5)] } }),
+    })
+    const context = scene({ clips: [clip] })
+    const edge = CENTER_X + HALF_W
+
+    expect(cascade(edge, CENTER_Y, context, { skipKeyframed: false, includeBody: false })?.mode)
+      .toBe('resize-e')
+    expect(cascade(edge, CENTER_Y, context, handlesOnly)).toBeNull()
+  })
+
+  it('finds nothing when the point misses the box entirely', () => {
+    const context = scene({ clips: [mediaClip()] })
+
+    expect(cascade(CENTER_X + HALF_W + HANDLE_SIZE * 2, CENTER_Y, context, both)).toBeNull()
   })
 })

@@ -6,11 +6,13 @@
 // copied off a run.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
+  contentBox,
   getCanvasPosition,
   getClipType,
   getOverlayBounds,
   hasCustomKeyframes,
   isManipulableClip,
+  toLocalPoint,
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
 } from './previewGeometry'
@@ -401,6 +403,100 @@ describe('hasCustomKeyframes', () => {
     const clip = makeClip({ animation: makeAnimation({ keyframes: { volume: [kf(0, 0.5)] } }) })
 
     expect(hasCustomKeyframes(clip)).toBe(false)
+  })
+})
+
+describe('toLocalPoint', () => {
+  /** A 200x100 box centred on the canvas, rotated by the given angle. */
+  const box = (rotation: number) => ({
+    centerX: 960,
+    centerY: 540,
+    width: 200,
+    height: 100,
+    rotation,
+  })
+
+  it('is an offset from the centre when the box is unrotated', () => {
+    expect(toLocalPoint(box(0), 1060, 590)).toEqual({ x: 100, y: 50 })
+  })
+
+  it('reports the centre as the origin whatever the rotation', () => {
+    expect(toLocalPoint(box(37), 960, 540)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('rotates the point backwards for a quarter turn', () => {
+    // The box turned 90° clockwise, so a point 100px to its right in screen
+    // space is 100px *above* the centre in the box's own frame (negative y).
+    const local = toLocalPoint(box(90), 1060, 540)
+
+    expect(local.x).toBeCloseTo(0, 10)
+    expect(local.y).toBeCloseTo(-100, 10)
+  })
+
+  it('rotates the point backwards for an arbitrary angle', () => {
+    // 30°: undoing it maps (dx, dy) = (100, 0) to (cos30 * 100, -sin30 * 100).
+    const local = toLocalPoint(box(30), 1060, 540)
+
+    expect(local.x).toBeCloseTo(Math.cos(Math.PI / 6) * 100, 10)
+    expect(local.y).toBeCloseTo(-Math.sin(Math.PI / 6) * 100, 10)
+  })
+})
+
+describe('contentBox', () => {
+  it('fills the element when the aspect ratios match', () => {
+    // 960x540 is exactly half of 1920x1080, so there is no bar on either axis.
+    const canvas = makeCanvas()
+
+    expect(contentBox(canvas, { width: 960, height: 540 })).toEqual({
+      width: 960,
+      height: 540,
+      offsetX: 0,
+      offsetY: 0,
+      scaleX: 0.5,
+      scaleY: 0.5,
+    })
+  })
+
+  it('letterboxes top and bottom when the canvas is wider than its box', () => {
+    // 16:9 content in a square box: 800 wide, 450 tall, 175px of bar each side.
+    const canvas = makeCanvas()
+
+    expect(contentBox(canvas, { width: 800, height: 800 })).toEqual({
+      width: 800,
+      height: 450,
+      offsetX: 0,
+      offsetY: 175,
+      scaleX: 800 / 1920,
+      scaleY: 450 / 1080,
+    })
+  })
+
+  it('letterboxes left and right when the canvas is taller than its box', () => {
+    // 9:16 content in a square box: 450 wide, 800 tall, 175px of bar each side.
+    const canvas = makeCanvas({ width: CANVAS_H, height: CANVAS_W })
+
+    expect(contentBox(canvas, { width: 800, height: 800 })).toEqual({
+      width: 450,
+      height: 800,
+      offsetX: 175,
+      offsetY: 0,
+      scaleX: 450 / 1080,
+      scaleY: 800 / 1920,
+    })
+  })
+
+  it('measures the element itself when no box is given', () => {
+    const canvas = makeCanvas()
+    setRect(canvas, { left: 100, top: 50, width: 800, height: 800 })
+
+    expect(contentBox(canvas)).toEqual({
+      width: 800,
+      height: 450,
+      offsetX: 0,
+      offsetY: 175,
+      scaleX: 800 / 1920,
+      scaleY: 450 / 1080,
+    })
   })
 })
 

@@ -130,13 +130,13 @@ Clips support animated properties via keyframes:
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
 `drawFrame` that consults the frame cache before delegating. Everything it used to do
-inline lives in one module each, all of them pure or hook-shaped; the pure modules and hooks have their own test files, while `drawFrame.ts`, `PlaybackControls.tsx` and `cursor.ts` are covered through the component tests:
+inline lives in one module each, all of them pure or hook-shaped; the pure modules, the hooks and `PlaybackControls.tsx` have their own test files, while `drawFrame.ts` and `cursor.ts` are covered through the component tests:
 
 | Module | Owns |
 |--------|------|
 | `drawFrame.ts` | Compositing one frame: track order, transitions, overlays, the legacy overlay arrays, and the blur scratch canvas |
-| `previewGeometry.ts` | Where a clip is on the canvas (`getOverlayBounds`), which clips can be manipulated, and the mouse-to-canvas mapping |
-| `hitTest.ts` | What is under the pointer: which clip, which handle, which drag it would start |
+| `previewGeometry.ts` | Where a clip is on the canvas (`getOverlayBounds`), which clips can be manipulated, the one object-fit: contain mapping between the canvas' pixels and its element's (`contentBox`, `getCanvasPosition`), and the inverse rotation every box test shares (`toLocalPoint`) |
+| `hitTest.ts` | What is under the pointer: which clip, which handle, which drag it would start. One cascade (`hitHandlesOnClip`) serves both passes — keyframe mode asks it for the selected clip alone, body included; outside it the same cascade runs handles-only before the z-order body pass |
 | `selectionOverlay.ts` | Drawing the selection chrome — bounding box, the eight resize handles, the rotation handle, multi-select boxes |
 | `dragGeometry.ts` | The maths of a drag in progress: start measurements, resize/rotate deltas, marquee intersection, text hit for the double-click |
 | `transitions.ts` | Which transition, if any, is active at a given time |
@@ -159,10 +159,11 @@ uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the two differences:
 editor that redraws the same clip at the same time) and `quiet` (not-yet-decoded media
 is ordinary mid-scrub, and this frame redraws sixty times a second). Never fork a drawing
 function for the preview — if the two need to differ, that is another draw option.
-`MediaDrawOptions` also carries `resetFilter`, which the preview used to pass: it made a
-clip with no blur of its own assign `filter = 'none'`, which cancelled the blur a dissolve
-had just set on the context, so the preview's dissolve never blurred while an export's
-did. Nothing passes it now.
+`MediaDrawOptions` once carried a third, `resetFilter`, which made a clip with no blur of
+its own assign `filter = 'none'`. That cancelled the blur a dissolve had just set on the
+context, so the preview's dissolve never blurred while an export's did. The preview stopped
+passing it, and the option is gone: a clip with no blur now leaves the context's filter
+alone in both pipelines.
 
 Interactive overlay manipulation in the preview canvas:
 - **Drag**: Move overlay position (updates `x`, `y`)
