@@ -220,7 +220,12 @@ export class Compositor {
         break;
     }
 
-    // Save context state
+    // Save context state. Each branch below restores it again once the webcam
+    // frame is drawn, so the border is stroked outside the clip path — that
+    // restore is the only one, and the pair stays balanced. An extra restore()
+    // on the way out is a no-op on a real canvas, but it is a stack operation
+    // per frame for nothing and it would silently undo a save() made by any
+    // future caller that wrapped this draw.
     this.ctx.save();
 
     if (webcamShape === 'circle') {
@@ -290,8 +295,6 @@ export class Compositor {
       this.ctx.lineWidth = 3;
       this.ctx.stroke();
     }
-
-    this.ctx.restore();
   }
 
   /**

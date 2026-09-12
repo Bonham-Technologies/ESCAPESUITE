@@ -125,9 +125,10 @@ describe('compositor per-second work', () => {
 
     const count = (method: string) => firstFrame.filter((c) => c.method === method).length
 
-    // Measured 2026-09-12: 13 calls — clear, screen draw, then save, the
+    // Measured 2026-09-12: 12 calls — clear, screen draw, then save, the
     // circular clip path, the webcam draw, restore, and the border stroke.
-    expect(firstFrame.length).toBeLessThanOrEqual(26)
+    // (13 before the second restore() was dropped.)
+    expect(firstFrame.length).toBeLessThanOrEqual(24)
     expect(count('drawImage')).toBeLessThanOrEqual(4)
     // Exact: one clear per frame, not one per layer.
     expect(count('fillRect')).toBe(1)
