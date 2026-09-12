@@ -113,6 +113,25 @@ describe('drawTransition', () => {
     expect(drawnAlphas()).toEqual([0.75])
   })
 
+  it('wipes with the incoming clip alone when the outgoing has no media', () => {
+    // A one-sided transition is still that transition: a wipe clips the side
+    // it does have to the region it would occupy, rather than fading it in.
+    videos.delete('v1')
+
+    expect(draw('wipe-left', 0.25)).toBe(true)
+    expect(ctx.argsFor('rect')).toEqual([[W * 0.75, 0, W * 0.25, H]])
+    expect(drawnAlphas()).toEqual([1])
+  })
+
+  it('slides the incoming clip in from below when the outgoing has no media', () => {
+    videos.delete('v1')
+
+    expect(draw('slide-up', 0.25)).toBe(true)
+    // 800x450 centred at 540 is y=315, offset down by the slide's h * (1 - progress).
+    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([315 + H * 0.75])
+    expect(drawnAlphas()).toEqual([1])
+  })
+
   it('counts an image-only source as media', () => {
     videos.delete('v2')
     const still = image(800, 450)
@@ -351,6 +370,18 @@ describe('drawTransitionWithFrames', () => {
     expect(draw('fade', 0.25, [outFrame, null])).toBe(true)
     expect(drawnSources()).toEqual([outFrame])
     expect(drawnAlphas()).toEqual([0.75])
+  })
+
+  it('wipes with the incoming frame alone when the outgoing is missing', () => {
+    expect(draw('wipe-left', 0.25, [null, inFrame])).toBe(true)
+    expect(ctx.argsFor('rect')).toEqual([[W * 0.75, 0, W * 0.25, H]])
+    expect(drawnAlphas()).toEqual([1])
+  })
+
+  it('slides the incoming frame in from below when the outgoing is missing', () => {
+    expect(draw('slide-up', 0.25, [null, inFrame])).toBe(true)
+    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([315 + H * 0.75])
+    expect(drawnAlphas()).toEqual([1])
   })
 
   it('crossfades the two frames', () => {

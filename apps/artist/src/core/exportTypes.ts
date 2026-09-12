@@ -288,7 +288,7 @@ export interface TransitionModifiers {
 /**
  * Per-call overrides for drawing a media clip. Every default reproduces the
  * export pipeline's own behaviour: the exporters pass none of these, the live
- * preview passes both.
+ * preview passes the two it needs.
  */
 export interface MediaDrawOptions {
   /**
@@ -302,6 +302,8 @@ export interface MediaDrawOptions {
   /**
    * Reset `ctx.filter` to 'none' when the clip carries no blur of its own,
    * rather than letting it inherit whatever filter the caller already set.
+   * Inheriting is the default because a dissolve's blur is set on the context
+   * around both of its draws: a clip that reset the filter would cancel it.
    */
   resetFilter?: boolean;
   /**

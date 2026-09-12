@@ -206,6 +206,30 @@ describe('App saving a recording', () => {
     });
   });
 
+  it('ignores a recorder stop that arrives after the take was cancelled', async () => {
+    const screenStream = screenStreamDouble();
+    const mic = micStreamDouble();
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screenStream.stream);
+    permissionsOverrides.requestMicrophone.mockResolvedValue(mic.stream);
+    await renderApp();
+    await user().click(recordButton());
+    await flush();
+    const recorder = recorderFactory.last();
+
+    await user().click(screen.getByRole('button', { name: 'Cancel recording' }));
+
+    // A recorder that had already flushed its last chunk calls back after
+    // dispose(). The user threw this take away: nothing may be saved.
+    await act(async () => {
+      recorder.callbacks.onStop?.(recorder.stopBlob);
+    });
+    await flush();
+
+    expect(await getRecordingsMetadata()).toEqual([]);
+    expect(useRecorderStore.getState().recordings).toEqual([]);
+    expect(useRecorderStore.getState().state).toBe('idle');
+  });
+
   it('releases the capture streams once the take is finished', async () => {
     const { screenStream, mic } = await recordATake();
 

@@ -204,6 +204,18 @@ describe('getOverlayBounds for text overlays', () => {
     )
   })
 
+  it('leaves the context’s font as it found it', () => {
+    // The context belongs to the preview, which draws through it on the very
+    // next frame: a measurement must not leave its own font behind.
+    const canvas = makeCanvas()
+    const ctx = getCanvasContext(canvas)!
+    ctx.font = '12px Courier'
+
+    getOverlayBounds(textClip({}, { fontSize: 40, fontFamily: 'Georgia' }), canvas, undefined, [])
+
+    expect(ctx.font).toBe('12px Courier')
+  })
+
   it('uses the text’s own rotation when there is no animation', () => {
     expect(
       getOverlayBounds(textClip({}, { rotation: 15 }), makeCanvas(), undefined, [])?.rotation
@@ -332,9 +344,12 @@ describe('isManipulableClip', () => {
     expect(isManipulableClip(makeClip({ sourceVideoId: 'audio1' }), [audio])).toBe(false)
   })
 
-  it('treats a clip whose source is not loaded as manipulable', () => {
-    // An unknown source has no mediaType, which is not 'audio'.
-    expect(isManipulableClip(makeClip(), [])).toBe(true)
+  it('leaves a clip whose source is not loaded alone', () => {
+    // Nothing is known about the media — not its size, not even whether it
+    // draws at all — so there is nothing to put handles on. It used to be
+    // manipulable by accident: an absent source has no mediaType, and no
+    // mediaType is not 'audio'.
+    expect(isManipulableClip(makeClip(), [])).toBe(false)
   })
 
   it('rejects a clip with neither an overlay nor a source', () => {
@@ -357,8 +372,8 @@ describe('getClipType', () => {
     expect(getClipType(makeClip({ sourceVideoId: '' }), sources)).toBeNull()
   })
 
-  it('assumes video for a source that is not loaded', () => {
-    expect(getClipType(makeClip(), [])).toBe('video')
+  it('names no type for a source that is not loaded', () => {
+    expect(getClipType(makeClip(), [])).toBeNull()
   })
 })
 

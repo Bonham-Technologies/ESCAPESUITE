@@ -214,15 +214,15 @@ functions). `pnpm test:coverage` (`turbo test:coverage`) runs `vitest run --cove
 in every package and fails the whole run if any package drops below its floor.
 
 **Where it stands** — measured 2026-09-10, at the end of the coverage program
-(`@escapesuite/artist` re-measured 2026-09-11, after the PreviewPlayer decomposition). Each
+(`@escapesuite/craft` and `@escapesuite/artist` re-measured 2026-09-12). Each
 package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 99.87 | 99.06 | 94.46 | 98.93 |
-| `@escapesuite/artist` | 99.30 | 98.00 | 89.82 | 98.98 |
+| `@escapesuite/craft` | 99.88 | 99.08 | 94.51 | 98.94 |
+| `@escapesuite/artist` | 99.31 | 98.00 | 89.80 | 98.97 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
@@ -312,16 +312,23 @@ Eight jobs, with `ci-status` as the single required check:
 - A release is cut by adding a changeset and merging it to `main`. `changesets/action` (v2) then pushes a `changeset-release/main` branch with the version bump and opens the "Version Packages" PR itself (the org setting "Allow GitHub Actions to create and approve pull requests" is enabled for this repo). CI on that bot-authored PR is held as "action required" until someone approves it. Relaxing the repository's fork-PR approval policy (now `first_time_contributors_new_to_github`) did not change this, so the hold is enforced at the organisation level (Organization → Settings → Actions → General → "Fork pull request workflows from outside collaborators"; org admin only). Approve the run under Actions ("Approve and run") or with `gh api -X POST repos/Bonham-Technologies/ESCAPESUITE/actions/runs/<run-id>/approve`. Merging the PR tags each changed package and creates a per-package GitHub Release, with the craft/artist standalone HTML and the headless-artist kit tarball attached to their respective releases.
 - Releases are named after the tag (`<pkg>@<version>`) and their body is that version's entry from the package's `CHANGELOG.md`, written by the action itself. The two failure modes differ: if a versioned package has a `CHANGELOG.md` but no entry for the new version, the action throws (`Could not find changelog entry for …`) and fails the job loudly; if the `CHANGELOG.md` is missing entirely, the action silently skips that package's release, and the attach job — which looks releases up by `tag_name` — then silently skips its assets too. A package with no changelog therefore ships a tag and nothing else, with a green run.
 - `changeset:publish` must stay `changeset git-tag`: the action discovers what to release solely from the `CHANGESETS_OUTPUT` NDJSON events that command writes, so swapping in a different publish script would leave the job green while creating no tags and no releases.
-- `standalone-release.yml` additionally creates a `v<craft version>` release carrying the same standalone HTML and kit tarball assets.
+- `standalone-release.yml` additionally creates an umbrella `v<highest app version>` release — the
+  higher of the `apps/craft` and `apps/artist` package versions — carrying the same standalone HTML
+  and kit tarball assets. It is the higher of the two rather than ESCAPECRAFT's because an
+  artist-only bump would otherwise reuse the existing tag, cut no release, and leave `latest`
+  pointing at the previous ESCAPEARTIST build. The HTML assets are named for their own app
+  (`ESCAPECRAFT-<craft version>.html`, `ESCAPEARTIST-<artist version>.html`, matching the names
+  `release.yml` attaches to the per-package releases); the kit tarball carries the umbrella version.
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)
 - Builds ESCAPECRAFT and ESCAPEARTIST in standalone mode (`VITE_BUILD_MODE=standalone`)
 - Also downloads the `headless-artist-kit` artifact from the same CI run and renames the
-  tarball to `escapesuite-headless-artist-<VERSION>.tgz` (VERSION here is the release's own
-  version — ESCAPECRAFT's — not the kit package's independent `0.1.0`)
-- On `main`, creates a GitHub Release and attaches the single-file HTML builds and the
-  headless-artist kit tarball directly to it
+  tarball to `escapesuite-headless-artist-<VERSION>.tgz` (VERSION here is the umbrella release's
+  own version — the higher of the craft and artist versions — not the kit package's
+  independent `0.1.0`)
+- On `main`, creates a GitHub Release and attaches the single-file HTML builds — each named
+  for its own app's version — and the headless-artist kit tarball directly to it
 - No cloud storage step and no license injection — the downloads are plain HTML files (and one
   npm tarball), ready to run
 

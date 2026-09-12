@@ -63,8 +63,12 @@ export function measureDragStart(
         if (ctx) {
           const fontStyle = clip.textData.fontStyle === 'italic' ? 'italic ' : '';
           const fontWeight = clip.textData.fontWeight === 'bold' ? 'bold ' : '';
+          // Same context the preview draws the next frame through: put the
+          // font back where it was once the measurement is taken.
+          ctx.save();
           ctx.font = `${fontStyle}${fontWeight}${clip.textData.fontSize}px ${clip.textData.fontFamily}`;
           const metrics = ctx.measureText(clip.textData.text);
+          ctx.restore();
           const baseWidth = metrics.width * baseScale;
           startScaleX = bounds.width / baseWidth * baseScale;
           startScaleY = startScaleX;

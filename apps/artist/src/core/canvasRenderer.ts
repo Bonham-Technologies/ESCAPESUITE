@@ -1,7 +1,7 @@
 // Canvas rendering functions for the export pipeline
 // Handles drawing clips, overlays, and transitions to canvas
 
-import type { Clip, TextOverlayData, ShapeOverlayData } from '../store/types';
+import type { Clip, TextOverlayData, ShapeOverlayData, TransitionType } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getAnimatedValues, getAnimatedValuesCached } from '../utils/animation';
 import type {
@@ -46,6 +46,9 @@ function animatedValuesFor(clip: Clip, clipTime: number, options?: MediaDrawOpti
 /**
  * Whether a fill colour paints anything.
  *
+ * Exported because the inspector has to agree with the canvas about it: a shape
+ * the renderer fills must not show "no fill" in the panel beside it.
+ *
  * The editors write a shape fill as eight-digit #RRGGBBAA and set the alpha to
  * '00' for "no fill", so a zero alpha is the only invisible case they can
  * produce — no shape fill is ever `transparent` or an `rgba()` string. A
@@ -53,7 +56,7 @@ function animatedValuesFor(clip: Clip, clipTime: number, options?: MediaDrawOpti
  * cannot simply test the last two characters: that reads pure red (#ff0000)
  * and black (#000000) as transparent.
  */
-function hasVisibleFill(fillColor: string): boolean {
+export function hasVisibleFill(fillColor: string): boolean {
   if (!fillColor) return false;
   return !/^#[0-9a-f]{6}00$/i.test(fillColor);
 }
@@ -61,10 +64,11 @@ function hasVisibleFill(fillColor: string): boolean {
 /**
  * Apply a clip's own blur to the context.
  *
- * With `resetFilter` the filter is always assigned, so a clip with no blur of
- * its own draws unfiltered even when the caller has a filter set (the preview's
- * behaviour); without it an ambient filter — the one a dissolve puts on both
- * sides of the transition — is left in place.
+ * By default an ambient filter — the one a dissolve puts on both sides of the
+ * transition — is left in place for a clip with no blur of its own, which is
+ * why the preview and an export blur a dissolve alike. `resetFilter` assigns
+ * the filter either way, so such a clip draws unfiltered even when the caller
+ * has one set; nothing in the app asks for that today.
  */
 function applyClipBlur(ctx: CanvasRenderingContext2D, blurAmount: number, options?: MediaDrawOptions) {
   if (blurAmount > 0) {
@@ -501,6 +505,76 @@ export function drawImageToCanvasWithModifiers(
   ctx.restore();
 }
 
+/** Which end of a transition a clip is: the one leaving, or the one arriving. */
+type TransitionSide = 'outgoing' | 'incoming';
+
+/**
+ * The modifiers one side of a transition draws with at a given progress.
+ *
+ * The geometry of a transition lives here and nowhere else, so the two
+ * renderers agree with each other, and — the reason it is a function rather
+ * than two switch statements — so a transition with media on only one side
+ * still draws that side the way the transition says, instead of fading it.
+ *
+ * Returns null for a type with no geometry of its own ('none', and anything
+ * unrecognised); each pipeline has its own idea of what to do then. A
+ * dissolve's blur is not a modifier — it is a filter on the context, set by
+ * the caller around both draws.
+ */
+function transitionModifiersFor(
+  type: TransitionType,
+  progress: number,
+  side: TransitionSide,
+  w: number,
+  h: number
+): TransitionModifiers | null {
+  const outgoing = side === 'outgoing';
+
+  switch (type) {
+    case 'fade':
+    case 'dissolve':
+      return { opacity: outgoing ? 1 - progress : progress };
+
+    case 'wipe-left':
+      return outgoing
+        ? { clipRegion: { x: 0, y: 0, width: w * (1 - progress), height: h } }
+        : { clipRegion: { x: w * (1 - progress), y: 0, width: w * progress, height: h } };
+
+    case 'wipe-right':
+      return outgoing
+        ? { clipRegion: { x: w * progress, y: 0, width: w * (1 - progress), height: h } }
+        : { clipRegion: { x: 0, y: 0, width: w * progress, height: h } };
+
+    // wipe-up reveals the incoming clip from the bottom and wipe-down from the
+    // top, in both renderers and the preview: the same clip must not wipe one
+    // way in a WebM export and the other way in an MP4 one.
+    case 'wipe-up':
+      return outgoing
+        ? { clipRegion: { x: 0, y: 0, width: w, height: h * (1 - progress) } }
+        : { clipRegion: { x: 0, y: h * (1 - progress), width: w, height: h * progress } };
+
+    case 'wipe-down':
+      return outgoing
+        ? { clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) } }
+        : { clipRegion: { x: 0, y: 0, width: w, height: h * progress } };
+
+    case 'slide-left':
+      return { offsetX: outgoing ? -w * progress : w * (1 - progress) };
+
+    case 'slide-right':
+      return { offsetX: outgoing ? w * progress : -w * (1 - progress) };
+
+    case 'slide-up':
+      return { offsetY: outgoing ? -h * progress : h * (1 - progress) };
+
+    case 'slide-down':
+      return { offsetY: outgoing ? h * progress : -h * (1 - progress) };
+
+    default:
+      return null;
+  }
+}
+
 /**
  * Draw a transition between two clips (supports both video and image)
  */
@@ -543,98 +617,47 @@ export function drawTransition(
     }
   }
 
-  // If only one clip has media, draw it normally
-  if (!hasOutgoing) {
-    return drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, canvasWidth, canvasHeight, { opacity: progress }, options);
-  }
-  if (!hasIncoming) {
-    return drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, canvasWidth, canvasHeight, { opacity: 1 - progress }, options);
-  }
-
   const w = canvasWidth;
   const h = canvasHeight;
 
-  switch (type) {
-    case 'fade':
-      // Crossfade: outgoing fades out, incoming fades in
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { opacity: 1 - progress }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { opacity: progress }, options);
-      break;
+  const drawSide = (side: TransitionSide): boolean => {
+    const clip = side === 'outgoing' ? outgoingClip : incomingClip;
+    const clipTime = side === 'outgoing' ? outClipTime : inClipTime;
+    return drawMediaWithModifiers(
+      ctx,
+      videoElements,
+      imageElements,
+      clip,
+      clipTime,
+      w,
+      h,
+      transitionModifiersFor(type, progress, side, w, h) ?? undefined,
+      options
+    );
+  };
 
-    case 'dissolve': {
-      // Similar to fade but with slight blur effect during transition
-      const dissolveBlur = Math.sin(progress * Math.PI) * 3;
-      ctx.save();
-      if (dissolveBlur > 0) {
-        ctx.filter = `blur(${dissolveBlur}px)`;
-      }
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { opacity: 1 - progress }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { opacity: progress }, options);
-      ctx.restore();
-      break;
+  // A dissolve's blur belongs to the transition rather than to either side, so
+  // it is set on the context around the draws instead of handed down as a
+  // modifier — including when only one side has media to draw.
+  if (type === 'dissolve') {
+    const dissolveBlur = Math.sin(progress * Math.PI) * 3;
+    ctx.save();
+    if (dissolveBlur > 0) {
+      ctx.filter = `blur(${dissolveBlur}px)`;
     }
-
-    case 'wipe-left':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w * (1 - progress), height: h }
-      }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: w * (1 - progress), y: 0, width: w * progress, height: h }
-      }, options);
-      break;
-
-    case 'wipe-right':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: w * progress, y: 0, width: w * (1 - progress), height: h }
-      }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w * progress, height: h }
-      }, options);
-      break;
-
-    case 'wipe-up':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w, height: h * (1 - progress) }
-      }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: 0, y: h * (1 - progress), width: w, height: h * progress }
-      }, options);
-      break;
-
-    case 'wipe-down':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) }
-      }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w, height: h * progress }
-      }, options);
-      break;
-
-    case 'slide-left':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetX: -w * progress }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetX: w * (1 - progress) }, options);
-      break;
-
-    case 'slide-right':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetX: w * progress }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetX: -w * (1 - progress) }, options);
-      break;
-
-    case 'slide-up':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetY: -h * progress }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetY: h * (1 - progress) }, options);
-      break;
-
-    case 'slide-down':
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, { offsetY: h * progress }, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, { offsetY: -h * (1 - progress) }, options);
-      break;
-
-    default:
-      // For 'none' or unknown types, just draw normally
-      drawMediaWithModifiers(ctx, videoElements, imageElements, outgoingClip, outClipTime, w, h, undefined, options);
-      drawMediaWithModifiers(ctx, videoElements, imageElements, incomingClip, inClipTime, w, h, undefined, options);
+    const drewOutgoing = hasOutgoing && drawSide('outgoing');
+    const drewIncoming = hasIncoming && drawSide('incoming');
+    ctx.restore();
+    return drewOutgoing || drewIncoming;
   }
+
+  // One side missing is still this transition, not a fade: the side that is
+  // there gets the very modifiers the two-sided path would have given it.
+  if (!hasOutgoing) return drawSide('incoming');
+  if (!hasIncoming) return drawSide('outgoing');
+
+  drawSide('outgoing');
+  drawSide('incoming');
 
   return true;
 }
@@ -665,111 +688,47 @@ export function drawTransitionWithFrames(
     return false;
   }
 
-  // If only one clip has media, draw it normally
-  if (!hasOutgoing) {
-    return drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, canvasWidth, canvasHeight, { opacity: progress });
-  }
-  if (!hasIncoming) {
-    return drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, canvasWidth, canvasHeight, { opacity: 1 - progress });
-  }
-
   const w = canvasWidth;
   const h = canvasHeight;
 
-  switch (type) {
-    case 'fade':
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { opacity: progress });
-      break;
+  // This pipeline's fallback for a type it does not know is a crossfade, where
+  // the element-based one draws both sides untouched.
+  const crossfade = (side: TransitionSide): TransitionModifiers =>
+    side === 'outgoing' ? { opacity: 1 - progress } : { opacity: progress };
 
-    case 'dissolve': {
-      const dissolveBlur = Math.sin(progress * Math.PI) * 3;
-      ctx.save();
-      if (dissolveBlur > 0) {
-        ctx.filter = `blur(${dissolveBlur}px)`;
-      }
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { opacity: progress });
-      ctx.restore();
-      break;
+  const drawSide = (side: TransitionSide): boolean => {
+    const frame = side === 'outgoing' ? outgoingFrame : incomingFrame;
+    const clip = side === 'outgoing' ? outgoingClip : incomingClip;
+    const clipTime = side === 'outgoing' ? outClipTime : inClipTime;
+    return drawMediaWithFrame(
+      ctx,
+      frame,
+      clip,
+      clipTime,
+      w,
+      h,
+      transitionModifiersFor(type, progress, side, w, h) ?? crossfade(side)
+    );
+  };
+
+  if (type === 'dissolve') {
+    const dissolveBlur = Math.sin(progress * Math.PI) * 3;
+    ctx.save();
+    if (dissolveBlur > 0) {
+      ctx.filter = `blur(${dissolveBlur}px)`;
     }
-
-    case 'wipe-left':
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w * (1 - progress), height: h }
-      });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: w * (1 - progress), y: 0, width: w * progress, height: h }
-      });
-      break;
-
-    case 'wipe-right':
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: w * progress, y: 0, width: w * (1 - progress), height: h }
-      });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w * progress, height: h }
-      });
-      break;
-
-    case 'wipe-up':
-      // Reveal the incoming clip from the bottom, as drawTransition and the
-      // preview player do — the same clip must not wipe one way in a WebM
-      // export and the other way in an MP4 one.
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w, height: h * (1 - progress) }
-      });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: 0, y: h * (1 - progress), width: w, height: h * progress }
-      });
-      break;
-
-    case 'wipe-down':
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, {
-        clipRegion: { x: 0, y: h * progress, width: w, height: h * (1 - progress) }
-      });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, {
-        clipRegion: { x: 0, y: 0, width: w, height: h * progress }
-      });
-      break;
-
-    case 'slide-left': {
-      const outX = -w * progress;
-      const inX = w * (1 - progress);
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetX: outX });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetX: inX });
-      break;
-    }
-
-    case 'slide-right': {
-      const outX = w * progress;
-      const inX = -w * (1 - progress);
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetX: outX });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetX: inX });
-      break;
-    }
-
-    case 'slide-up': {
-      const outY = -h * progress;
-      const inY = h * (1 - progress);
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetY: outY });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetY: inY });
-      break;
-    }
-
-    case 'slide-down': {
-      const outY = h * progress;
-      const inY = -h * (1 - progress);
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { offsetY: outY });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { offsetY: inY });
-      break;
-    }
-
-    default:
-      // Fallback: simple crossfade
-      drawMediaWithFrame(ctx, outgoingFrame, outgoingClip, outClipTime, w, h, { opacity: 1 - progress });
-      drawMediaWithFrame(ctx, incomingFrame, incomingClip, inClipTime, w, h, { opacity: progress });
+    const drewOutgoing = hasOutgoing && drawSide('outgoing');
+    const drewIncoming = hasIncoming && drawSide('incoming');
+    ctx.restore();
+    return drewOutgoing || drewIncoming;
   }
+
+  // One side missing is still this transition, not a fade.
+  if (!hasOutgoing) return drawSide('incoming');
+  if (!hasIncoming) return drawSide('outgoing');
+
+  drawSide('outgoing');
+  drawSide('incoming');
 
   return true;
 }

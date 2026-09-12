@@ -103,9 +103,13 @@ export function getOverlayBounds(
 
     const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
     const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
+    // The context is the preview's own, and the next frame draws through it:
+    // the measuring font has to come back off again.
+    ctx.save();
     ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
     const lines = textData.text.split('\n');
     const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+    ctx.restore();
     const lineHeight = textData.fontSize * 1.2;
     const totalHeight = lines.length * lineHeight;
     const textWidth = maxLineWidth * scale;
@@ -155,10 +159,12 @@ export function getOverlayBounds(
 export function isManipulableClip(clip: Clip, sourceVideos: SourceVideo[]): boolean {
   // Overlays are always manipulable
   if (clip.overlayType) return true;
-  // Media clips are manipulable if they're not audio
+  // Media clips are manipulable if they're not audio. A source that is not in
+  // the list has no dimensions to draw handles around, so it is not one either.
   if (clip.sourceVideoId) {
     const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-    return sourceMedia?.mediaType !== 'audio';
+    if (!sourceMedia) return false;
+    return sourceMedia.mediaType !== 'audio';
   }
   return false;
 }
@@ -169,8 +175,9 @@ export function getClipType(clip: Clip, sourceVideos: SourceVideo[]): Manipulabl
   if (clip.overlayType === 'shape') return 'shape';
   if (clip.sourceVideoId) {
     const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-    if (sourceMedia?.mediaType === 'image') return 'image';
-    if (sourceMedia?.mediaType === 'audio') return null;
+    if (!sourceMedia) return null;
+    if (sourceMedia.mediaType === 'image') return 'image';
+    if (sourceMedia.mediaType === 'audio') return null;
     return 'video';
   }
   return null;

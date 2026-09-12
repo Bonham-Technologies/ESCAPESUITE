@@ -88,6 +88,23 @@ describe('PreviewPlayer transitions', () => {
     expect(frame.of('drawImage').map((c) => c.state.globalAlpha)).toEqual([0.5, 0.5])
   })
 
+  it('blurs the dissolve, as an export of the same dissolve does', async () => {
+    twoClips('dissolve')
+
+    const preview = await renderPreview()
+    preview.clearCalls()
+
+    store().setCurrentTime(1.5)
+    await settle(FRAME_MS)
+
+    // sin(0.5π) * 3 = 3px, on both clips — the transition's own blur, which a
+    // clip carrying no blur of its own must not cancel.
+    expect(preview.frame().of('drawImage').map((c) => c.state.filter)).toEqual([
+      'blur(3px)',
+      'blur(3px)',
+    ])
+  })
+
   it('splits the canvas between the clips for a wipe', async () => {
     twoClips('wipe-left')
 

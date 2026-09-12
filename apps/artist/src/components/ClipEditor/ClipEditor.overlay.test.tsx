@@ -198,6 +198,17 @@ describe('ClipEditor shape overlay', () => {
     expect(shapeData().fillColor).toBe('#00000080')
   })
 
+  it('leaves an opaque fill that happens to end in 00 switched on', () => {
+    // #ff0000 is pure red, not a transparent colour: only an eight-digit
+    // #RRGGBBAA whose alpha is 00 means "no fill".
+    store().updateShapeOverlayData(clipNow().id, { fillColor: '#ff0000' })
+    render(<ClipEditor />)
+
+    expect(screen.getByTitle('No fill (transparent)')).not.toHaveClass(styles.active)
+    expect(rowColor('Fill')).toBeEnabled()
+    expect(screen.getByText('Fill opacity')).toBeInTheDocument()
+  })
+
   it('sets the fill opacity as an alpha channel', () => {
     render(<ClipEditor />)
 
