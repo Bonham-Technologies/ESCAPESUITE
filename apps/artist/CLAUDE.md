@@ -115,11 +115,14 @@ Clips support animated properties via keyframes:
 - **Easing types**: `linear`, `ease-in`, `ease-out`, `ease-in-out`, plus quadratic/cubic variants
 - **Preset animations**: Clips can have in/out presets (`fade`, `slide-*`, `scale-*`, `pop`, `blur`)
 - **Custom keyframes**: Per-property keyframe arrays override presets when present
-- `getAnimatedValues(time, clipDuration, animation, transform, effects)`: Returns interpolated values for a given time
-- `getAnimatedValuesCached(cacheKey, ...)`: Cached version for export performance (keyed by clipId:time)
-- `clearAnimationCache()`: Clears animation cache (called at export start)
+- `getAnimatedValues(time, clipDuration, animation, transform, effects)`: Returns interpolated values for a given time — the one entry point, for both the preview and the exporters
 - Keyframes are stored relative to clip start time (0 = clip start)
-- **Animation cache**: Cache (10,000 entries max) prevents redundant keyframe interpolation during exports
+- There is **no memo cache**. There used to be one (`getAnimatedValuesCached`, keyed
+  `clipId:time`, cleared at export start), but an export draws each clip time exactly once,
+  so the key never came round and the cache answered nothing while costing a `toFixed`, a
+  string concat and a `Map.set` per clip per frame; a preview cannot use a time-keyed cache
+  at all, because it redraws the same clip at the same time after every edit. Deleted
+  2026-09-12 — `exportMP4.perf.test.ts` pins the lookup count at frames x active clips.
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
@@ -144,22 +147,92 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 | `types.ts` | The shapes the above share (`DragMode`, `OverlayBounds`, `HandleHit`, `PreviewSceneContext`). **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
 | `InlineTextEditorAnchor.tsx` | Positioning `InlineTextEditor` over the text it edits, through the canvas' object-fit mapping |
 | `PlaybackControls.tsx` | The transport buttons and their keyboard shortcuts; no canvas at all |
+| `PreviewTimecode.tsx` | The playhead readout `<span>` — the only thing that re-renders on a playback tick (see below) |
 
 Hooks:
 
 | Hook | Owns |
 |------|------|
 | `usePreviewMedia.ts` | One object URL and one `<video>`/`<img>`/`<audio>` per source, reconciled as the timeline changes and released on unmount |
-| `usePreviewRenderLoop.ts` | When the canvas repaints: the rAF playback loop, seek-driven redraws, the debounced redraw after a media change |
+| `usePreviewRenderLoop.ts` | When the canvas repaints: the rAF playback loop, seek-driven redraws, the debounced redraw after a media change; also the display-time publish/subscribe pair the timecode reads (below) |
 | `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports |
 
+**The canvas backing store follows the size it is displayed at, not the project's.**
+`previewGeometry.previewRaster(project, box, devicePixelRatio)` computes it: the *contained*
+box (the letterboxed rectangle `object-fit: contain` would draw into, so the raster keeps the
+project's aspect ratio and never needs its own letterbox maths) times `devicePixelRatio`,
+capped so it never exceeds the project's own resolution (a small project in a large box is
+never rasterised sharper — or slower — than the project itself), falling back to the project
+size before the first `ResizeObserver` callback fires. `PreviewPlayer` tracks the box in a
+ref (not state — resizing it is imperative, and re-rendering the subtree on a window drag
+would cost real work for nothing) and only ever assigns `canvas.width`/`.height` when the
+computed size actually changes, because assigning either clears the canvas and resets all
+context state. Everything in this directory still computes in **project pixels** — nothing
+in `previewGeometry`, `hitTest`, `selectionOverlay`, `dragGeometry` or `drawFrame`'s draw
+calls changed coordinate systems. The one thing that carries project space onto the raster is
+`drawPreviewFrame` opening every frame with `ctx.setTransform(k, 0, 0, k, 0, 0)`, where
+`k = canvas.width / projectSize.width` is read back off the canvas' actual backing store (so
+it can never disagree with a resize that hasn't been redrawn yet). The frame cache's
+cached-frame path sets the same transform before blitting, so a bitmap captured at one box
+size is simply rescaled if the window has changed size since — there is no cache
+invalidation on resize, only a redraw at the new scale.
+
+`ctx.filter` is the one thing the transform does not reach: a CSS filter's length (a blur
+radius) is in output-bitmap pixels, unaffected by the CTM. Left alone, every blur in the
+preview would render `k`× too wide at any raster smaller than the project. `MediaDrawOptions.filterScale`
+(default `1`) converts a project-space blur radius into device pixels at every `ctx.filter` site on the preview's draw
+call sites; every export passes nothing and gets `blur(Xpx)` byte-identical to before. Handles
+stay sized in project pixels deliberately (no behaviour change) — their on-screen size is
+unchanged today only because `project px × k` cancels back out to the same CSS pixels CSS
+used to scale them to; making them a **constant screen size** regardless of project
+resolution is a follow-up, not yet done (divide the handle size by `k` at the draw site and in
+`hitTest`). `devicePixelRatio` is read at draw time, not subscribed to, so moving the window
+to a different-DPI display re-rasterises only on the next resize or edit, not immediately.
+
+**The playhead position does not re-render the preview, the timeline body, or `App`.**
+`usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every
+animation frame — a React render (and a forced layout) fifty times a second so a timecode
+readout could change three digits. It is now a ref plus a tiny publish/subscribe pair:
+`publishDisplayTime(time, immediate?)` writes the ref and notifies listeners, throttled to
+≤10 Hz except at a scrub, a loop-back, or the end of the timeline, where `immediate` publishes
+without waiting so the readout never lags the value it is meant to show.
+`PreviewTimecode.tsx` is the only subscriber — one `<span>` using
+`useSyncExternalStore(subscribe, getTime, getTime)` — so a playback tick now re-renders one
+`<span>` at most ten times a second instead of the whole preview subtree at fifty.
+
+The timeline's own playhead follows the same shape, one level up, because `Timeline.tsx`
+was not the only thing re-rendering on the store's throttled 200 ms `currentTime` write —
+`App.tsx` subscribed to it too and re-rendered `<Timeline/>` regardless of what `Timeline`
+itself did. Both were fixed: `Timeline.tsx` no longer reads `currentTime` at all — the
+playhead position lives in `TimelinePlayhead.tsx` and the "0:00 / 1:30" readout in
+`TimelineTimeReadout.tsx`, each `React.memo`'d and each subscribing to the store itself, so a
+playback tick re-renders only those two small components. `App.tsx` no longer holds a
+`currentTime` selector either; its four handlers that used the live render value (razor split
+at the playhead, add marker, set in/out point) read `useEditorStore.getState().currentTime`
+on demand inside the handler instead, and the debounced session-autosave effect (which
+depends on `currentTime` to know when to re-arm its debounce, deliberately not on every
+render) now does that via a `useEditorStore.subscribe` listener added inside the effect
+rather than through a render-triggering dependency.
+
+A scrub's seek check in `usePreviewRenderLoop.ts` works **per `<video>` element, not
+per clip**. `usePreviewMedia` keeps one element per source, so two live clips off one
+source — a picture-in-picture arrangement, or the same clip duplicated on two tracks —
+share it; a per-clip loop moved that element for the first clip, measured it against the
+second clip's target, decided a seek was still needed and took the event-driven branch,
+painting the frame twice for one move of the playhead. The desired time is collected into
+a `Map` keyed by element (later writes win, and the incoming side of a transition is
+applied after the clips, so the frame on screen is the one that was always drawn), then
+each element is compared and seeked at most once.
+
 **The preview draws through `core/canvasRenderer.ts`**, the same renderer an export
-uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the two differences:
-`uncachedAnimation` (the export's animation memo would serve pre-edit values to an
-editor that redraws the same clip at the same time) and `quiet` (not-yet-decoded media
-is ordinary mid-scrub, and this frame redraws sixty times a second). Never fork a drawing
-function for the preview — if the two need to differ, that is another draw option.
-`MediaDrawOptions` once carried a third, `resetFilter`, which made a clip with no blur of
+uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the difference that is the
+preview's alone: `quiet` (not-yet-decoded media is ordinary mid-scrub, and this frame
+redraws sixty times a second, so the exporter's one warning per frame would be a console
+flood), plus `filterScale` when the frame is rasterised at other than 1:1. Never fork a
+drawing function for the preview — if the two need to differ, that is another draw option.
+`MediaDrawOptions` once carried `uncachedAnimation`, which skipped the export's animation
+memo cache; that cache is gone (see the keyframe section above) and so is the option. It
+also once carried `resetFilter`, which made a clip with no blur of
 its own assign `filter = 'none'`. That cancelled the blur a dissolve had just set on the
 context, so the preview's dissolve never blurred while an export's did. The preview stopped
 passing it, and the option is gone: a clip with no blur now leaves the context's filter
@@ -189,8 +262,6 @@ The export pipeline includes several optimizations to improve performance:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for MP4 files (background-capable)
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
 - **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
-- **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
-- **Cache lifecycle**: `clearAnimationCache()` is called at export start
 - **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
 
 ### MP4 Export Reliability (`src/core/exporter.ts`)

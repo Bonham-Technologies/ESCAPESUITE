@@ -99,6 +99,58 @@ describe('App session storage', () => {
     expect(await getSessionState()).toBeUndefined()
   })
 
+  // The debounce is re-armed on every `currentTime` change, so a moving playhead
+  // holds the write off entirely. App does not subscribe to `currentTime` in its
+  // render path (that would re-render the whole timeline every ~200 ms — see
+  // App.rerender.test.tsx), so this re-arming runs off a store subscription;
+  // these three tests are what pin that it still behaves the same.
+  it('holds the write off while the playhead keeps moving', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    await renderApp()
+
+    // 2 s of fake time — past the 2 s debounce — but never 2 s without a write.
+    for (let i = 1; i <= 20; i++) {
+      store().setCurrentTime(i * 0.1)
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+    }
+    await flushStorage()
+
+    expect(await getSessionState()).toBeUndefined()
+  })
+
+  it('writes once the playhead settles, at the time it settled on', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    await renderApp()
+
+    for (let i = 1; i <= 20; i++) {
+      store().setCurrentTime(i * 0.1)
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+    }
+    await act(async () => {
+      vi.advanceTimersByTime(2500)
+    })
+    await flushStorage()
+
+    expect(await getSessionState()).toMatchObject({ currentTime: 2 })
+  })
+
+  it('clears the pending write on unmount', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { unmount } = await renderApp()
+
+    unmount()
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+    })
+    await flushStorage()
+
+    expect(await getSessionState()).toBeUndefined()
+  })
+
   it('leaves a stored session exactly as it found it under suppressRestore', async () => {
     const stored = storedSession()
     await saveSessionState(stored)

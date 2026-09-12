@@ -9,7 +9,6 @@ import { exportToMP4, ExportError } from './exportMP4'
 import { ExportAbortedError } from './exportTypes'
 import { extractAndMixAudioWithWorker } from './audioMixer'
 import { storeVideo } from './storage'
-import { clearAnimationCache } from '../utils/animation'
 import {
   fromEncodedChunk,
   getMediabunnyState,
@@ -104,7 +103,6 @@ const ctx = () => getLastCanvasContext() as RecordingCanvasRenderingContext2D
 
 beforeEach(async () => {
   resetMediabunnyDouble()
-  clearAnimationCache()
   mixAudio.mockReset()
   mixAudio.mockResolvedValue(null)
   installCanvasDouble()
@@ -125,7 +123,6 @@ afterEach(() => {
   logs.mockRestore()
   warns.mockRestore()
   errors.mockRestore()
-  clearAnimationCache()
 })
 
 describe('exportToMP4 preconditions', () => {

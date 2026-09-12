@@ -191,9 +191,10 @@ describe('PreviewPlayer transitions', () => {
     await settle(FRAME_MS)
     expect(preview.frame().argsFor('drawImage').map((args) => args[1])).toEqual([960, -960])
 
-    store().updateClipTransition('a', { type: 'slide-down' })
+    // Clear before the edit, not after: the playhead does not move, so the
+    // only composite is the one the transition change itself provokes.
     preview.clearCalls()
-    store().setCurrentTime(1.5)
+    store().updateClipTransition('a', { type: 'slide-down' })
     await settle(FRAME_MS)
     expect(preview.frame().argsFor('drawImage').map((args) => args[2])).toEqual([540, -540])
   })

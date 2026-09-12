@@ -13,7 +13,7 @@ import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
-import { getAnimatedValuesCached, clearAnimationCache } from '../utils/animation';
+import { getAnimatedValues } from '../utils/animation';
 import { isWebCodecsAvailable } from './frameSource';
 import type { DrawableMediaSource, ProgressCallback } from './exportTypes';
 import {
@@ -100,9 +100,6 @@ export async function exportToMP4(
   log('init', `Starting MP4 export with ${clips.length} clips`);
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
-
-  // Clear the animation cache at start of export
-  clearAnimationCache();
 
   onProgress({ phase: 'preparing', progress: 0, message: 'Preparing MP4 export...' });
 
@@ -491,10 +488,7 @@ export async function exportToMP4(
           };
         }
 
-        // Use cached version for export performance
-        const cacheKey = `${clip.id}:${overlayClipTime.toFixed(3)}`;
-        const animated = getAnimatedValuesCached(
-          cacheKey,
+        const animated = getAnimatedValues(
           overlayClipTime,
           clip.duration,
           clip.animation,

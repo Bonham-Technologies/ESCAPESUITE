@@ -238,6 +238,15 @@ code for the benchmarks' sake:
 - **`headless-kit-render`** — `services/headless-artist` rendering
   `fixtures/headless/project.json`, Chromium launch included.
 
+`PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
+project resolution for `preview-playback` only — the export benchmarks always render 720p
+regardless — and on a machine whose sequential runs drift (observed up to several percent
+across three consecutive `pnpm perf` invocations here), prefer **paired alternation** over a
+plain before/after: swap base and patched code round-robin against one warm dev server and
+run the benchmark spec directly, so drift affects both arms equally and cancels instead of
+being charged to whichever ran second. See `docs/performance/2026-09-12-profile.md`'s "After
+round 1" section for a worked example.
+
 CI runs them in a `perf` job that needs `build`, is `continue-on-error: true` and is
 deliberately **not** in `ci-status`'s `needs` — runner CPU varies, so a number moving is
 worth looking at and never worth blocking a merge on. It uploads `perf-report.json` (and
@@ -274,9 +283,8 @@ a ceiling here and a millisecond figure there describe the same work.
 in a comment beside it. Conservation laws (frames created == closed, one encode per frame,
 balanced save/restore, one composite per animation frame) are asserted exactly. When a fix
 lands, re-measure and lower the ceiling; never raise one without saying, in the PR, why the
-new cost is correct.** Two of the tests currently pin a *finding* rather than a target —
-the export's animation memo cache never hits, and the compositor's PiP overlay restores once
-more than it saves — and each says so, with the assertion to flip when it is fixed.
+new cost is correct.** A test that pins a *finding* rather than a target says so in its
+comment, with the assertion to flip when the finding is fixed.
 
 ### Coverage policy
 
@@ -295,7 +303,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 99.88 | 99.08 | 94.51 | 98.94 |
-| `@escapesuite/artist` | 99.31 | 98.03 | 89.79 | 98.97 |
+| `@escapesuite/artist` | 99.31 | 98.01 | 89.86 | 98.93 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

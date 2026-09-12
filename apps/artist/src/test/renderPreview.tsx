@@ -30,6 +30,8 @@ import {
   type MediaDoubles,
 } from './doubles/media'
 import { setRect, type Box } from './doubles/layout'
+import { installResizeObserverDouble, type ResizeObserverDouble } from './doubles/resizeObserver'
+import { useEditorStore } from '../store/projectStore'
 import type { SourceVideo } from '../store/types'
 
 // The preview pauses every media element it owns on unmount, which happens
@@ -65,6 +67,14 @@ export const audioSource: SourceVideo = {
 
 export interface PreviewDoubles {
   media: MediaDoubles
+  /**
+   * The preview's own ResizeObserver, so a test can tell it how big the canvas
+   * element is (see `Preview.resize`). The shared setup's global stub records
+   * nothing and never fires, which is exactly the state the preview reads as
+   * "no box yet" — so a file that never resizes rasterises at the project size,
+   * as the preview does before its first observation in a browser.
+   */
+  resizeObserver: ResizeObserverDouble
   uninstall(): void
 }
 
@@ -72,12 +82,19 @@ export interface PreviewDoubles {
  * Install the canvas and media-element doubles. Call in beforeEach and
  * uninstall in afterEach — both patch prototypes/globals shared by the file.
  */
+let activeResizeObserver: ResizeObserverDouble | null = null
+
 export function installPreviewDoubles(script: Partial<MediaDoubleScript> = {}): PreviewDoubles {
   installCanvasDouble()
   const media = installMediaElementDoubles(script)
+  const resizeObserver = installResizeObserverDouble()
+  activeResizeObserver = resizeObserver
   return {
     media,
+    resizeObserver,
     uninstall() {
+      activeResizeObserver = null
+      resizeObserver.uninstall()
       media.uninstall()
       uninstallCanvasDouble()
     },
@@ -109,23 +126,34 @@ export const FRAME_MS = 16
  */
 export const DEFAULT_RECT: Box = { left: 0, top: 0, width: 960, height: 540 }
 
+/** The project the store currently holds — the space the preview draws in. */
+function projectSize(): { width: number; height: number } {
+  const { width, height } = useEditorStore.getState().project.resolution
+  return { width, height }
+}
+
 /**
  * Split a recording into composited frames.
  *
- * Every composite starts the same way: the transform matrix is reset to the
- * identity and the whole canvas is filled black. Nothing else in the component
- * makes that pair of calls back to back — the blur overlay resets the transform
- * too, but follows it with a blurred drawImage, not a full-canvas fill.
+ * Every composite starts the same way: the transform matrix is set to the
+ * raster scale and the whole project area is filled black. Nothing else in the
+ * component makes that pair of calls back to back — the blur overlay resets the
+ * transform too, but follows it with a blurred drawImage, not a full fill.
+ *
+ * The scale is whatever the preview is rasterising at (1 until a test gives the
+ * canvas a box), so the transform is matched on its *shape* — a pure scale,
+ * no skew, no translation — rather than on a number.
  */
-function splitFrames(calls: CanvasCall[], canvas: HTMLCanvasElement): CanvasCall[][] {
-  const isIdentity = (args: unknown[]) =>
-    args.length === 6 && String(args) === String([1, 0, 0, 1, 0, 0])
+function splitFrames(calls: CanvasCall[]): CanvasCall[][] {
+  const size = projectSize()
+  const isFrameTransform = (args: unknown[]) =>
+    args.length === 6 && args[1] === 0 && args[2] === 0 && args[4] === 0 && args[5] === 0
   const isFullClear = (call: CanvasCall | undefined) =>
-    call?.method === 'fillRect' && String(call.args) === String([0, 0, canvas.width, canvas.height])
+    call?.method === 'fillRect' && String(call.args) === String([0, 0, size.width, size.height])
 
   const frames: CanvasCall[][] = []
   for (const [index, call] of calls.entries()) {
-    if (call.method === 'setTransform' && isIdentity(call.args) && isFullClear(calls[index + 1])) {
+    if (call.method === 'setTransform' && isFrameTransform(call.args) && isFullClear(calls[index + 1])) {
       frames.push([])
     }
     frames[frames.length - 1]?.push(call)
@@ -175,12 +203,18 @@ export interface Preview {
   /** One composited frame; negative indices count back from the newest. */
   frame(index?: number): FrameView
   /**
-   * Client coordinates for a point given in canvas pixels — the inverse of the
+   * Client coordinates for a point given in project pixels — the inverse of the
    * object-fit: contain mapping the component itself does.
    */
   at(canvasX: number, canvasY: number): { clientX: number; clientY: number }
   /** Client coordinates for a point given in the canvas' own CSS pixels. */
   atCss(cssX: number, cssY: number): { clientX: number; clientY: number }
+  /**
+   * Tell the preview how big its canvas element is, as a browser's
+   * ResizeObserver would. This is what makes it rasterise at display size:
+   * until it is called the preview has no box and draws at the project size.
+   */
+  resize(box: { width: number; height: number }): void
 }
 
 /**
@@ -188,7 +222,14 @@ export interface Preview {
  * give its canvas a layout box, and let the mount-time media load and the
  * post-load redraw complete.
  */
-export async function renderPreview({ rect = DEFAULT_RECT }: { rect?: Box } = {}): Promise<Preview> {
+export async function renderPreview({
+  rect = DEFAULT_RECT,
+  dpr,
+}: { rect?: Box; dpr?: number } = {}): Promise<Preview> {
+  // Set every time, so a file whose earlier test asked for a retina ratio does
+  // not leave one behind for the next.
+  Object.defineProperty(window, 'devicePixelRatio', { value: dpr ?? 1, configurable: true })
+
   const view = render(<PreviewPlayer />)
 
   // The media load is async: until it resolves the component shows its
@@ -214,7 +255,8 @@ export async function renderPreview({ rect = DEFAULT_RECT }: { rect?: Box } = {}
 
   const contentBox = () => {
     const box = canvas.getBoundingClientRect()
-    const canvasAspect = canvas.width / canvas.height
+    const size = projectSize()
+    const canvasAspect = size.width / size.height
     const elementAspect = box.width / box.height
     if (canvasAspect > elementAspect) {
       const renderedHeight = box.width / canvasAspect
@@ -246,23 +288,34 @@ export async function renderPreview({ rect = DEFAULT_RECT }: { rect?: Box } = {}
     calls: (method?: string) => (method ? since().filter((c) => c.method === method) : since()),
     argsFor: (method: string) => since().filter((c) => c.method === method).map((c) => c.args),
     methods: () => since().map((c) => c.method),
-    frames: () => splitFrames(since(), canvas).map(frameView),
+    frames: () => splitFrames(since()).map(frameView),
     frame: (index = -1) => {
-      const all = splitFrames(since(), canvas)
+      const all = splitFrames(since())
       const frame = index < 0 ? all[all.length + index] : all[index]
       if (!frame) throw new Error(`No composited frame at index ${index} (${all.length} recorded).`)
       return frameView(frame)
     },
     at: (canvasX: number, canvasY: number) => {
       const { box, width, height, offsetX, offsetY } = contentBox()
+      const size = projectSize()
       return {
-        clientX: box.left + offsetX + (canvasX / canvas.width) * width,
-        clientY: box.top + offsetY + (canvasY / canvas.height) * height,
+        clientX: box.left + offsetX + (canvasX / size.width) * width,
+        clientY: box.top + offsetY + (canvasY / size.height) * height,
       }
     },
     atCss: (cssX: number, cssY: number) => {
       const box = canvas.getBoundingClientRect()
       return { clientX: box.left + cssX, clientY: box.top + cssY }
+    },
+    resize: (box: { width: number; height: number }) => {
+      if (!activeResizeObserver) {
+        throw new Error('resize() needs installPreviewDoubles() — no ResizeObserver double is installed.')
+      }
+      setRect(canvas, { left: rect.left, top: rect.top, ...box })
+      const observer = activeResizeObserver
+      act(() => {
+        observer.emit(canvas, box)
+      })
     },
   }
 }

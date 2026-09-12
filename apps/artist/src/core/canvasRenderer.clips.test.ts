@@ -10,7 +10,6 @@ import {
   drawMediaWithFrame,
   drawMediaWithModifiers,
 } from './canvasRenderer'
-import { clearAnimationCache } from '../utils/animation'
 import {
   createRecordingContext,
   type RecordingCanvasRenderingContext2D,
@@ -30,7 +29,6 @@ let media: MediaDoubles
 const asCtx = () => ctx as unknown as CanvasRenderingContext2D
 
 beforeEach(() => {
-  clearAnimationCache()
   resetFrameRegistry()
   ctx = createRecordingContext()
   media = installMediaElementDoubles()
@@ -38,7 +36,6 @@ beforeEach(() => {
 
 afterEach(() => {
   media.uninstall()
-  clearAnimationCache()
 })
 
 /** A <video> the double has already "loaded" at the given size. */
@@ -316,14 +313,10 @@ describe('MediaDrawOptions', () => {
     return ctx.argsFor('drawImage').map((args) => args[3])
   }
 
-  it('serves the second draw from the memo cache by default', () => {
-    // An export draws each clip time once; the cache makes a re-ask free, and
-    // is keyed by clip id and time alone.
-    expect(drawTwiceAcrossAnEdit()).toEqual([640, 640])
-  })
-
-  it('recomputes the animated values when the caller asks for no cache', () => {
-    expect(drawTwiceAcrossAnEdit({ uncachedAnimation: true })).toEqual([640, 1280])
+  it('recomputes the animated values on every draw', () => {
+    // There is no memo cache: the same clip id and clip time, drawn again after
+    // a transform edit, comes out at the new size.
+    expect(drawTwiceAcrossAnEdit()).toEqual([640, 1280])
   })
 
   it('leaves an inherited filter alone by default', () => {
@@ -334,25 +327,18 @@ describe('MediaDrawOptions', () => {
   })
 
   it('reaches the image path through the dispatcher', () => {
-    // uncachedAnimation is the observable one: the same clip id and time,
-    // drawn twice across a scale edit, comes out at the new size only if the
-    // option travelled all the way down to the image draw.
+    // filterScale is the observable one: a blurred clip drawn through the
+    // dispatcher comes out with a halved blur only if the option travelled all
+    // the way down to the image draw.
     const image = loadedImage(800, 600)
-    const before = makeClip({
-      transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
-    })
-    const after = makeClip({
-      transform: { x: 0.5, y: 0.5, scaleX: 2, scaleY: 2, rotation: 0, opacity: 1 },
-    })
-    const images = new Map([[before.sourceVideoId, image]])
+    const clip = makeClip({ effects: { blur: 4 } })
+    const images = new Map([[clip.sourceVideoId, image]])
 
-    for (const clip of [before, after]) {
-      drawMediaWithModifiers(asCtx(), new Map(), images, clip, 0, W, H, undefined, {
-        uncachedAnimation: true,
-      })
-    }
+    drawMediaWithModifiers(asCtx(), new Map(), images, clip, 0, W, H, undefined, {
+      filterScale: 0.5,
+    })
 
-    expect(ctx.argsFor('drawImage').map((args) => args[3])).toEqual([800, 1600])
+    expect(ctx.stateFor('drawImage')[0].filter).toBe('blur(2px)')
   })
 })
 

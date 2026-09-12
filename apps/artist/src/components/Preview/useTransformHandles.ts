@@ -17,7 +17,7 @@
 // The store is read here with the same selectors the preview component uses,
 // so the caller hands over only what a hook cannot reach: the canvas, the
 // redraw functions, and the way in to inline text editing.
-import { useCallback, useEffect, useState, type MouseEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent, type RefObject } from 'react';
 import { useEditorStore } from '../../store/projectStore';
 import { useThrottledDragUpdate } from '../../hooks';
 import type { ClipTransform, TextOverlayData, ShapeOverlayData } from '../../store/types';
@@ -96,6 +96,12 @@ export function useTransformHandles({
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
   const setClipKeyframe = useEditorStore((state) => state.setClipKeyframe);
 
+  // The project's pixel grid: every measurement below is in it, and it is not
+  // the canvas' backing store, which follows the size the preview is displayed
+  // at. `projectSizeOf` is the one derivation, shared with `PreviewPlayer`.
+  const resolution = useEditorStore((state) => state.project.resolution);
+  const projectSize = useMemo(() => geometry.projectSizeOf(resolution), [resolution]);
+
   // Drag state for overlay manipulation
   const [dragState, setDragState] = useState<DragState | null>(null);
 
@@ -118,8 +124,8 @@ export function useTransformHandles({
   const getCanvasPosition = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-    return geometry.getCanvasPosition(canvas, e);
-  }, [canvasRef]);
+    return geometry.getCanvasPosition(canvas, e, projectSize);
+  }, [canvasRef, projectSize]);
 
   // Hit test: find what's at the given position (handles take priority over overlay bodies)
   const hitTestHandles = useCallback((normalizedX: number, normalizedY: number) => {
@@ -132,8 +138,8 @@ export function useTransformHandles({
       currentTime,
       selectedClipId,
       keyframePanelOpen,
-    });
-  }, [canvasRef, clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen]);
+    }, projectSize);
+  }, [canvasRef, clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen, projectSize]);
 
   // Mouse event handlers for drag-and-drop
   const handleMouseDown = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
@@ -153,7 +159,9 @@ export function useTransformHandles({
 
       const {
         startX, startY, startWidth, startHeight, startRotation, startScaleX, startScaleY,
-      } = measureDragStart(clip, hit.clipType, canvas, currentTime, isKeyframeMode, sourceVideos);
+      } = measureDragStart(
+        clip, hit.clipType, canvas, currentTime, isKeyframeMode, sourceVideos, projectSize
+      );
 
       setDragState({
         clipId: hit.clipId,
@@ -181,7 +189,7 @@ export function useTransformHandles({
         setMarqueeCurrent(null);
       }
     }
-  }, [isPlaying, getCanvasPosition, hitTestHandles, clips, setSelectedClipId, sourceVideos, keyframePanelOpen, selectedClipId, currentTime, canvasRef]);
+  }, [isPlaying, getCanvasPosition, hitTestHandles, clips, setSelectedClipId, sourceVideos, keyframePanelOpen, selectedClipId, currentTime, canvasRef, projectSize]);
 
   const handleMouseMove = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
     // Handle marquee drag
@@ -457,7 +465,8 @@ export function useTransformHandles({
         const canvas = canvasRef.current;
 
         const intersecting = clipsIntersectingMarquee(
-          canvas, marqueeStart, marqueeCurrent!, clips, currentTime, sourceVideos
+          canvas, marqueeStart, marqueeCurrent!, clips, currentTime, sourceVideos,
+          projectSize
         );
 
         const nativeEvent = e as unknown as { ctrlKey?: boolean; metaKey?: boolean } | undefined;
@@ -519,7 +528,7 @@ export function useTransformHandles({
       }
     }
     setDragState(null);
-  }, [dragState, clips, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, keyframePanelOpen, selectedClipId, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef]);
+  }, [dragState, clips, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, keyframePanelOpen, selectedClipId, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef, projectSize]);
 
   const handleMouseLeave = useCallback(() => {
     // Don't cancel drag when mouse leaves canvas — window listeners handle it
@@ -567,17 +576,19 @@ export function useTransformHandles({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const mouseX = pos.x * canvas.width;
-    const mouseY = pos.y * canvas.height;
+    const mouseX = pos.x * projectSize.width;
+    const mouseY = pos.y * projectSize.height;
 
-    const clip = textClipAtPoint(mouseX, mouseY, canvas, clips, tracks, currentTime, sourceVideos);
+    const clip = textClipAtPoint(
+      mouseX, mouseY, canvas, clips, tracks, currentTime, sourceVideos, projectSize
+    );
     if (clip) {
       e.preventDefault();
       e.stopPropagation();
       setEditingTextClipId(clip.id);
       setSelectedClipId(clip.id);
     }
-  }, [isPlaying, dragState, getCanvasPosition, clips, tracks, currentTime, sourceVideos, setSelectedClipId, canvasRef, setEditingTextClipId]);
+  }, [isPlaying, dragState, getCanvasPosition, clips, tracks, currentTime, sourceVideos, setSelectedClipId, canvasRef, setEditingTextClipId, projectSize]);
 
   // Determine cursor based on hover state
   const getCursor = useCallback((e: MouseEvent<HTMLCanvasElement>): string => {

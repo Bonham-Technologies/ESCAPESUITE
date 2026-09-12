@@ -367,6 +367,11 @@ describe('drawShapeOverlayToCanvasAnimated with a blur region', () => {
   beforeEach(() => {
     offscreen = installOffscreenCanvasDouble()
     source = document.createElement('canvas')
+    // The frame the blur captures: an exporter's canvas is its project, and the
+    // capture is taken at the canvas' own pixel size, so the stand-in has to
+    // carry the same size it is drawn at (jsdom's default is 300x150).
+    source.width = W
+    source.height = H
     ctx = createRecordingContext()
   })
 

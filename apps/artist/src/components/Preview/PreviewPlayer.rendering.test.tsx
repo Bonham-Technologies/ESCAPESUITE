@@ -73,6 +73,21 @@ describe('PreviewPlayer drawing', () => {
     expect(draw.args[0]).toBe(doubles.media.videos[0])
   })
 
+  it('asks for an opaque context, and is the first to ask', async () => {
+    addClip('clip1', 0, 2)
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+
+    await renderPreview()
+
+    // Every frame starts with the opaque black fillRect above, so the preview
+    // canvas needs no alpha channel. A later getContext('2d') on the same
+    // canvas — selectionOverlay's, previewGeometry's — is handed the context
+    // already created and its options are ignored, so the preview's must be
+    // the first call for `alpha: false` to take effect at all.
+    expect(getContext.mock.calls[0]).toEqual(['2d', { alpha: false }])
+    getContext.mockRestore()
+  })
+
   it('draws an image clip from the <img> element at its natural size', async () => {
     store().addSourceVideo(imageSource)
     addMediaClip('pic', imageSource.id)
@@ -201,7 +216,10 @@ describe('PreviewPlayer frame cache', () => {
     preview.clearCalls()
     await settle(60)
 
-    expect(preview.methods()).toEqual(['drawImage'])
+    // setTransform: every draw starts by putting the project-to-raster
+    // transform on the context, the cached path included, so a cached frame
+    // does not inherit whatever the last draw left there.
+    expect(preview.methods()).toEqual(['setTransform', 'drawImage'])
     expect(preview.calls('drawImage')[0].args).toEqual([
       getFrameCache().get(0),
       0,

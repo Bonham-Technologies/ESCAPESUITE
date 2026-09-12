@@ -13,7 +13,7 @@ import type {
 import { DEFAULT_ANIMATION } from '../store/types';
 
 // ============================================
-// ANIMATED VALUES TYPE (defined early for cache)
+// ANIMATED VALUES TYPE
 // ============================================
 
 export interface AnimatedValues {
@@ -25,52 +25,6 @@ export interface AnimatedValues {
   opacity: number;
   blur: number;
   volume: number;  // Audio volume (0-1)
-}
-
-// ============================================
-// ANIMATION CACHE FOR EXPORT PERFORMANCE
-// ============================================
-
-// Cache for animation values during export - keyed by clipId:time
-const animationCache = new Map<string, AnimatedValues>();
-const CACHE_MAX_SIZE = 10000; // Limit cache size to prevent memory issues
-
-/**
- * Clear the animation cache (call at start/end of export)
- */
-export function clearAnimationCache(): void {
-  animationCache.clear();
-}
-
-/**
- * Get cached animation values or compute and cache them
- * Use this during exports for better performance
- */
-export function getAnimatedValuesCached(
-  cacheKey: string,
-  clipTime: number,
-  clipDuration: number,
-  animation: ClipAnimation | undefined,
-  baseTransform: ClipTransform,
-  baseEffects: ClipEffects
-): AnimatedValues {
-  // Check cache first
-  const cached = animationCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  // Compute values
-  const result = getAnimatedValues(clipTime, clipDuration, animation, baseTransform, baseEffects);
-
-  // Cache result (with size limit) - clear entire cache when full to avoid
-  // expensive partial eviction
-  if (animationCache.size >= CACHE_MAX_SIZE) {
-    animationCache.clear();
-  }
-  animationCache.set(cacheKey, result);
-
-  return result;
 }
 
 // ============================================

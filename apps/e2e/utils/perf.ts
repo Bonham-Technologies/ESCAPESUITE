@@ -355,7 +355,7 @@ export async function readHeapAfterGc(page: Page, cdp: CDPSession): Promise<numb
  * JSON the editor's `LOAD_PROJECT` handler accepts, and importing the editor's
  * own types across the workspace boundary would couple the e2e package to it.
  */
-interface SceneProject {
+export interface SceneProject {
   id: string
   name: string
   created: number
@@ -370,8 +370,32 @@ interface SceneProject {
   }
 }
 
-/** Project canvas the scene renders at; also how the preview canvas is located. */
-export const SCENE_RESOLUTION = { width: 1280, height: 720 } as const
+/**
+ * Project canvas the scene renders at.
+ *
+ * `PERF_PROJECT_RESOLUTION=WxH` overrides it (1920x1080, 3840x2160, …). The
+ * preview's cost per frame is area-proportional, so the resolution is the knob
+ * that says how much of the benchmark is compositing and how much is everything
+ * else; the default stays 1280x720 so an unqualified `pnpm perf` keeps
+ * reporting the number the baseline doc holds.
+ *
+ * Everything downstream is derived — the clip scale that fills the frame, the
+ * project JSON, the scene label in the report — so a resolution is the only
+ * thing a caller has to say.
+ */
+export const SCENE_RESOLUTION = parseSceneResolution(process.env.PERF_PROJECT_RESOLUTION)
+
+function parseSceneResolution(spec: string | undefined): { width: number; height: number } {
+  if (!spec) return { width: 1280, height: 720 }
+  const match = /^(\d+)x(\d+)$/.exec(spec.trim())
+  if (!match) {
+    throw new Error(`PERF_PROJECT_RESOLUTION must look like 1920x1080, got "${spec}"`)
+  }
+  return { width: Number(match[1]), height: Number(match[2]) }
+}
+
+/** The scene's resolution as the report labels it, e.g. `1280x720`. */
+export const SCENE_RESOLUTION_LABEL = `${SCENE_RESOLUTION.width}x${SCENE_RESOLUTION.height}`
 
 /** Media clips in the generated scene, split evenly across the two media tracks. */
 const MEDIA_CLIPS = 12
@@ -584,7 +608,15 @@ export const SCENE_TRACK_COUNT = 4
  * would be — and the reply arrives as the `videoeditor:message` CustomEvent
  * `sendMessage` dispatches alongside every outbound post.
  */
-export async function loadPerfScene(page: Page): Promise<void> {
+export async function loadPerfScene(
+  page: Page,
+  /**
+   * Change the generated project before it is loaded. For a variant that has
+   * to be built the same way the benchmark scene is — the visual guard's
+   * blurred overlay, say — rather than a second scene that could drift from it.
+   */
+  transform?: (project: SceneProject) => SceneProject
+): Promise<void> {
   await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
   await page.waitForLoadState('networkidle')
 
@@ -616,7 +648,8 @@ export async function loadPerfScene(page: Page): Promise<void> {
       })
   )
 
-  const project = buildPerfScene(sourceVideoId)
+  const built = buildPerfScene(sourceVideoId)
+  const project = transform ? transform(built) : built
   await page.evaluate(
     (payload) => window.postMessage({ type: 'LOAD_PROJECT', payload }, '*'),
     project as unknown as Record<string, unknown>
@@ -636,6 +669,12 @@ export async function loadPerfScene(page: Page): Promise<void> {
   // so `document.querySelectorAll('video')` returns nothing. The canvas is the
   // observable surface, so sample that instead.
   //
+  // The preview is the first canvas in the document (App renders it above the
+  // timeline, whose waveforms are the only other canvases). Addressing it by
+  // position rather than by `canvas[width="1280"]` matters: the preview's
+  // backing store is its displayed size, not the project resolution, so its
+  // width attribute is a layout detail rather than a stable handle.
+  //
   // Redness, not mere non-blackness, is the test. The overlays (a blue rectangle
   // and white text) are drawn whether or not a single video frame has decoded,
   // so "not all black" would pass on an empty preview. The fixture is a solid
@@ -646,10 +685,8 @@ export async function loadPerfScene(page: Page): Promise<void> {
   // and the PiP box take a slice — and a quarter of the pixels is a deliberately
   // slack threshold for "real decoded video is on screen".
   await page.waitForFunction(
-    ([width, height]) => {
-      const canvas = document.querySelector<HTMLCanvasElement>(
-        `canvas[width="${width}"][height="${height}"]`
-      )
+    () => {
+      const canvas = document.querySelector<HTMLCanvasElement>('canvas')
       if (!canvas) return false
 
       const probe = document.createElement('canvas')
@@ -666,7 +703,7 @@ export async function loadPerfScene(page: Page): Promise<void> {
       }
       return red / (probe.width * probe.height) > 0.25
     },
-    [SCENE_RESOLUTION.width, SCENE_RESOLUTION.height] as const,
+    undefined,
     { timeout: 30_000 }
   )
 }

@@ -227,6 +227,9 @@ describe('App project lifecycle', () => {
     })
 
     it('saves first when asked to', async () => {
+      // The project-manager double resolves an empty project, which the load
+      // path logs as a failure; spy so the suite's output stays clean.
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       const user = userEvent.setup()
       await openWithWork(user)
 
@@ -234,6 +237,7 @@ describe('App project lifecycle', () => {
 
       await waitFor(() => expect(loadProject).toHaveBeenCalled())
       expect(saveProject).toHaveBeenCalled()
+      consoleError.mockRestore()
       expect(vi.mocked(saveProject).mock.invocationCallOrder[0]).toBeLessThan(
         vi.mocked(loadProject).mock.invocationCallOrder[0]
       )
@@ -256,6 +260,7 @@ describe('App project lifecycle', () => {
     })
 
     it('discards the current work when asked to', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       const user = userEvent.setup()
       await openWithWork(user)
 
@@ -263,6 +268,7 @@ describe('App project lifecycle', () => {
 
       await waitFor(() => expect(loadProject).toHaveBeenCalled())
       expect(saveProject).not.toHaveBeenCalled()
+      consoleError.mockRestore()
     })
   })
 

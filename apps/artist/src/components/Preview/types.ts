@@ -12,7 +12,22 @@ export type DragMode = 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'resiz
 // Clip type for manipulation - includes overlays and media clips
 export type ManipulableClipType = 'text' | 'shape' | 'image' | 'video';
 
-/** A clip's box on the canvas: centre and size in canvas pixels, rotation in degrees. */
+/**
+ * The logical canvas everything the preview computes is measured in.
+ *
+ * This is the project's own resolution — `project.resolution` — and it is the
+ * coordinate space of every number in this directory: clip transforms, overlay
+ * bounds, handle sizes, hit tests, the frame's own draw calls. It is
+ * deliberately *not* the preview canvas' backing store, which follows the size
+ * the element is displayed at (see `previewRaster`) and changes when the window
+ * does. Scale 100% means native source pixels against this, and nothing else.
+ */
+export interface ProjectSize {
+  width: number;
+  height: number;
+}
+
+/** A clip's box on the canvas: centre and size in project pixels, rotation in degrees. */
 export interface OverlayBounds {
   centerX: number;
   centerY: number;

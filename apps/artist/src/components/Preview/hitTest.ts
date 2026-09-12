@@ -12,7 +12,7 @@ import {
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
 } from './previewGeometry';
-import type { DragMode, HandleHit, PreviewSceneContext } from './types';
+import type { DragMode, HandleHit, PreviewSceneContext, ProjectSize } from './types';
 
 /** The slice of the scene a hit test reads. */
 export type HitTestContext = Pick<
@@ -47,7 +47,8 @@ export function hitHandlesOnClip(
   mouseY: number,
   canvas: HTMLCanvasElement,
   scene: Pick<HitTestContext, 'clips' | 'sourceVideos' | 'currentTime'>,
-  options: HandleCascadeOptions
+  options: HandleCascadeOptions,
+  project: ProjectSize = canvas
 ): HandleHit | null {
   const { clips, sourceVideos, currentTime } = scene;
 
@@ -59,7 +60,7 @@ export function hitHandlesOnClip(
   const clipEnd = clip.timelinePosition + clip.duration;
   if (currentTime < clip.timelinePosition || currentTime >= clipEnd) return null;
 
-  const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos);
+  const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
   if (!bounds) return null;
 
   const halfW = bounds.width / 2;
@@ -106,27 +107,35 @@ export function hitHandlesOnClip(
 /**
  * Hit test: find what's at the given position (handles take priority over
  * overlay bodies). The position is in the canvas' normalized 0-1 space, as
- * {@link getCanvasPosition} returns it.
+ * {@link getCanvasPosition} returns it, and the test itself runs in project
+ * pixels — `project` defaults to the canvas for a canvas that is its own
+ * project (see {@link getOverlayBounds}).
  */
 export function hitTestHandles(
   normalizedX: number,
   normalizedY: number,
   canvas: HTMLCanvasElement,
-  scene: HitTestContext
+  scene: HitTestContext,
+  project: ProjectSize = canvas
 ): HandleHit | null {
   const { clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen } = scene;
 
-  const mouseX = normalizedX * canvas.width;
-  const mouseY = normalizedY * canvas.height;
+  const mouseX = normalizedX * project.width;
+  const mouseY = normalizedY * project.height;
 
   // RESTRICTION 1: When keyframe panel is open, ONLY allow interaction with the
   // selected clip. This prevents accidentally clicking through and grabbing
   // something else — a click outside the selected clip does nothing at all.
   if (keyframePanelOpen && selectedClipId) {
-    return hitHandlesOnClip(selectedClipId, mouseX, mouseY, canvas, scene, {
-      skipKeyframed: false,
-      includeBody: true,
-    });
+    return hitHandlesOnClip(
+      selectedClipId,
+      mouseX,
+      mouseY,
+      canvas,
+      scene,
+      { skipKeyframed: false, includeBody: true },
+      project
+    );
   }
 
   // Get all active manipulable clips sorted by z-order (highest on top first)
@@ -149,10 +158,15 @@ export function hitTestHandles(
   // only, and keyframe mode has already returned above). A body hit is left to
   // the second pass, which considers every clip in z-order rather than this one.
   if (selectedClipId) {
-    const handle = hitHandlesOnClip(selectedClipId, mouseX, mouseY, canvas, scene, {
-      skipKeyframed: true,
-      includeBody: false,
-    });
+    const handle = hitHandlesOnClip(
+      selectedClipId,
+      mouseX,
+      mouseY,
+      canvas,
+      scene,
+      { skipKeyframed: true, includeBody: false },
+      project
+    );
     if (handle) return handle;
   }
 
@@ -165,7 +179,7 @@ export function hitTestHandles(
     const clipType = getClipType(clip, sourceVideos);
     if (!clipType) continue;
 
-    const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos);
+    const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
     if (!bounds) continue;
 
     const halfW = bounds.width / 2;

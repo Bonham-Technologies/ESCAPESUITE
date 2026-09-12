@@ -11,7 +11,7 @@ import {
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
 } from './previewGeometry';
-import type { PreviewSceneContext } from './types';
+import type { PreviewSceneContext, ProjectSize } from './types';
 
 /** The slice of the scene the full selection handles read. */
 export type SelectionOverlayContext = Pick<
@@ -25,11 +25,19 @@ export type MultiSelectOverlayContext = Pick<
   'clips' | 'sourceVideos' | 'selectedClipId' | 'selectedClipIds' | 'isPlaying'
 >;
 
-/** Draw selection handles for the selected overlay or media clip. */
+/**
+ * Draw selection handles for the selected overlay or media clip.
+ *
+ * Drawn in project pixels, on top of whatever transform the frame left on the
+ * context — so the handles scale with the picture, exactly as they did when CSS
+ * was the thing scaling it. `project` defaults to the canvas' own size for a
+ * canvas that is its own project.
+ */
 export function drawSelectionHandles(
   canvas: HTMLCanvasElement,
   time: number,
-  scene: SelectionOverlayContext
+  scene: SelectionOverlayContext,
+  project: ProjectSize = canvas
 ): void {
   const { clips, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen } = scene;
   if (!selectedClipId || isPlaying) return;
@@ -49,7 +57,7 @@ export function drawSelectionHandles(
   // Case 1: Clip has custom keyframes but we're not in keyframe mode
   if (hasCustomKeyframes(selectedClip) && !keyframePanelOpen) return;
 
-  const bounds = getOverlayBounds(selectedClip, canvas, time, sourceVideos);
+  const bounds = getOverlayBounds(selectedClip, canvas, time, sourceVideos, project);
   if (!bounds) return;
 
   const { centerX, centerY, width, height, rotation } = bounds;
@@ -129,7 +137,8 @@ export function drawSelectionHandles(
 export function drawMultiSelectHandles(
   canvas: HTMLCanvasElement,
   time: number,
-  scene: MultiSelectOverlayContext
+  scene: MultiSelectOverlayContext,
+  project: ProjectSize = canvas
 ): void {
   const { clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying } = scene;
   if (selectedClipIds.size <= 1 || isPlaying) return;
@@ -148,7 +157,7 @@ export function drawMultiSelectHandles(
     const clipEnd = clip.timelinePosition + clip.duration;
     if (time < clip.timelinePosition || time >= clipEnd) continue;
 
-    const bounds = getOverlayBounds(clip, canvas, time, sourceVideos);
+    const bounds = getOverlayBounds(clip, canvas, time, sourceVideos, project);
     if (!bounds) continue;
 
     const { centerX, centerY, width, height, rotation } = bounds;

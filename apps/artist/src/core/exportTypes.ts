@@ -292,20 +292,27 @@ export interface TransitionModifiers {
  */
 export interface MediaDrawOptions {
   /**
-   * Recompute the animated values on every call instead of reading them from
-   * the export memo cache. That cache is keyed by clip id and clip time rounded
-   * to the millisecond and is only cleared when an export starts, so an editor
-   * — which redraws the same clip at the same time after every edit — would
-   * keep drawing the values from before the edit.
-   */
-  uncachedAnimation?: boolean;
-  /**
    * Say nothing about media that is not ready to draw. An export reports it
    * once per frame and a frame is drawn once; a preview redraws the same frame
    * on every animation frame, and would repeat the same warning sixty times a
    * second for as long as the playhead sat there.
    */
   quiet?: boolean;
+  /**
+   * Device pixels per drawing unit, for the lengths that are not in drawing
+   * units at all.
+   *
+   * `ctx.filter` is the exception to everything else on a 2D context: a
+   * `blur(4px)` is four pixels of the *output bitmap* and the current transform
+   * does not touch it (verified in Chromium — the same filter over a halved
+   * transform blurs across exactly as many device pixels). Everywhere the
+   * canvas is the project — every export — that distinction does not exist and
+   * this stays 1. The preview rasterises at the size it is displayed at, so a
+   * blur the project calls 4px has to be asked for in the device pixels that
+   * many project pixels currently occupy, or the picture in the editor would
+   * blur harder than the file it exports.
+   */
+  filterScale?: number;
 }
 
 /**

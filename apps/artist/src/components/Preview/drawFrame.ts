@@ -23,24 +23,47 @@ import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, ShapeOverlay, SourceVideo, TextOverlay, Track } from '../../store/types';
 import { getActiveTransition } from './transitions';
+import type { ProjectSize } from './types';
 
 /**
  * How the preview draws media clips, as against how an export does.
  *
- * `uncachedAnimation`: the export memo cache is keyed by clip id and clip time
- * and only cleared when an export starts, so an editor that redraws the same
- * clip at the same time after every edit would keep drawing pre-edit values.
  * `quiet`: media that is not ready yet is ordinary mid-scrub, and this frame
  * is redrawn sixty times a second — the exporter's one-off warning would be a
  * console flood here.
  */
 export const PREVIEW_DRAW_OPTIONS: MediaDrawOptions = {
-  uncachedAnimation: true,
   quiet: true,
 };
 
+/**
+ * The preview's draw options for a frame rasterised at `filterScale` device
+ * pixels per project pixel.
+ *
+ * Memoised on the scale itself, which changes only when the window does: a
+ * frame that rasterises 1:1 gets the shared constant and every other frame
+ * reuses one object per raster size, so this costs no allocation per frame.
+ */
+let scaledDrawOptions: MediaDrawOptions = PREVIEW_DRAW_OPTIONS;
+
+function drawOptionsFor(filterScale: number): MediaDrawOptions {
+  if (filterScale === 1) return PREVIEW_DRAW_OPTIONS;
+  if (scaledDrawOptions.filterScale !== filterScale) {
+    scaledDrawOptions = { ...PREVIEW_DRAW_OPTIONS, filterScale };
+  }
+  return scaledDrawOptions;
+}
+
 /** Everything on the timeline that a preview frame is drawn from. */
 export interface PreviewFrameScene {
+  /**
+   * The project's own pixel grid — the space every draw call below is in.
+   *
+   * Not the canvas' size: the preview rasterises at whatever size it is
+   * displayed at, and the one transform {@link drawPreviewFrame} sets is what
+   * carries these coordinates onto that raster.
+   */
+  projectSize: ProjectSize;
   clips: Clip[];
   tracks: Track[];
   sourceVideos: SourceVideo[];
@@ -65,6 +88,10 @@ export interface PreviewFrameMedia {
 
 /**
  * The scratch canvas for this frame, allocated or resized only when it has to be.
+ *
+ * Sized to the canvas' *backing store* rather than to the project: a blur
+ * captures the frame so far off the canvas at its own pixel size, one device
+ * pixel to one, and hands it straight back at the identity transform.
  */
 function blurScratchFor(
   blurScratch: { current: HTMLCanvasElement | null },
@@ -92,11 +119,12 @@ function blurScratchFor(
  */
 function drawClip(
   ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
+  size: ProjectSize,
   clip: Clip,
   clipTime: number, // Time relative to clip start (for animations)
   scene: Pick<PreviewFrameScene, 'sourceVideos'>,
   media: Pick<PreviewFrameMedia, 'videoElements' | 'imageElements'>,
+  options: MediaDrawOptions,
   transitionModifiers?: TransitionModifiers
 ): void {
   // Check media type
@@ -111,7 +139,7 @@ function drawClip(
     const img = media.imageElements.get(clip.sourceVideoId);
     if (!img || !img.complete) return;
     drawImageToCanvasWithModifiers(
-      ctx, img, clip, clipTime, canvas.width, canvas.height, transitionModifiers, PREVIEW_DRAW_OPTIONS
+      ctx, img, clip, clipTime, size.width, size.height, transitionModifiers, options
     );
     return;
   }
@@ -124,7 +152,7 @@ function drawClip(
   // If video dimensions aren't available yet, skip
   if (!video.videoWidth || !video.videoHeight) return;
   drawClipToCanvas(
-    ctx, video, clip, clipTime, canvas.width, canvas.height, transitionModifiers, PREVIEW_DRAW_OPTIONS
+    ctx, video, clip, clipTime, size.width, size.height, transitionModifiers, options
   );
 }
 
@@ -132,10 +160,12 @@ function drawClip(
 function drawOverlayClip(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
+  size: ProjectSize,
   clip: Clip,
   time: number,
   editingTextClipId: string | null,
-  blurScratch: { current: HTMLCanvasElement | null }
+  blurScratch: { current: HTMLCanvasElement | null },
+  filterScale: number
 ): void {
   const overlayClipTime = time - clip.timelinePosition;
 
@@ -181,15 +211,18 @@ function drawOverlayClip(
     drawShapeOverlayToCanvasAnimated(
       ctx,
       clip.shapeData,
-      canvas.width,
-      canvas.height,
+      size.width,
+      size.height,
       animated,
       blurs ? canvas : undefined,
-      blurs ? blurScratchFor(blurScratch, canvas) : undefined
+      blurs ? blurScratchFor(blurScratch, canvas) : undefined,
+      filterScale
     );
   } else if (clip.overlayType === 'text' && clip.textData) {
     if (clip.id !== editingTextClipId) {
-      drawTextOverlayToCanvasAnimated(ctx, clip.textData, canvas.width, canvas.height, animated);
+      drawTextOverlayToCanvasAnimated(
+        ctx, clip.textData, size.width, size.height, animated, filterScale
+      );
     }
   }
 }
@@ -199,6 +232,11 @@ function drawOverlayClip(
  *
  * The caller owns the frame cache: this always draws, and always draws the
  * whole frame, starting from a reset context and a black fill.
+ *
+ * Everything below is in project pixels. The canvas it lands on is rasterised
+ * at the size it is displayed at, so the frame opens by setting the one
+ * transform that maps the project onto that raster — which for a canvas whose
+ * backing store *is* the project is the identity it always was.
  */
 export function drawPreviewFrame(
   ctx: CanvasRenderingContext2D,
@@ -207,17 +245,21 @@ export function drawPreviewFrame(
   scene: PreviewFrameScene,
   media: PreviewFrameMedia
 ): void {
-  const { clips, tracks, textOverlays, shapeOverlays, editingTextClipId } = scene;
+  const { projectSize, clips, tracks, textOverlays, shapeOverlays, editingTextClipId } = scene;
 
   // Reset all canvas state to defaults before drawing
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
   ctx.filter = 'none';
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform matrix
+  // Project pixels to device pixels, and the transform reset in one call.
+  const scale = canvas.width / projectSize.width;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  // …except `ctx.filter`, whose lengths the transform does not touch.
+  const options = drawOptionsFor(scale);
 
   // Clear canvas
   ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, projectSize.width, projectSize.height);
 
   // Check for active transitions
   const activeTransition = getActiveTransition(clips, tracks, time);
@@ -235,7 +277,9 @@ export function drawPreviewFrame(
   for (const { clip } of sortedClips) {
     if (clip.overlayType) {
       // Draw overlay clip
-      drawOverlayClip(ctx, canvas, clip, time, editingTextClipId, media.blurScratch);
+      drawOverlayClip(
+        ctx, canvas, projectSize, clip, time, editingTextClipId, media.blurScratch, scale
+      );
     } else {
       // Draw media clip - check if it's part of an active transition
       if (activeTransition &&
@@ -244,7 +288,7 @@ export function drawPreviewFrame(
         continue;
       }
       // Draw clip normally
-      drawClip(ctx, canvas, clip, time - clip.timelinePosition, scene, media);
+      drawClip(ctx, projectSize, clip, time - clip.timelinePosition, scene, media, options);
     }
   }
 
@@ -256,9 +300,9 @@ export function drawPreviewFrame(
       media.imageElements,
       activeTransition,
       time,
-      canvas.width,
-      canvas.height,
-      PREVIEW_DRAW_OPTIONS
+      projectSize.width,
+      projectSize.height,
+      options
     );
   }
 
@@ -268,28 +312,44 @@ export function drawPreviewFrame(
   for (const shape of shapeOverlays) {
     if (time < shape.startTime || time >= shape.endTime) continue;
 
-    drawShapeOverlayToCanvasAnimated(ctx, shape, canvas.width, canvas.height, {
-      x: shape.x,
-      y: shape.y,
-      scaleX: 1,
-      scaleY: 1,
-      rotation: shape.rotation,
-      opacity: shape.opacity,
-      blur: 0,
-    });
+    drawShapeOverlayToCanvasAnimated(
+      ctx,
+      shape,
+      projectSize.width,
+      projectSize.height,
+      {
+        x: shape.x,
+        y: shape.y,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: shape.rotation,
+        opacity: shape.opacity,
+        blur: 0,
+      },
+      undefined,
+      undefined,
+      scale
+    );
   }
 
   for (const overlay of textOverlays) {
     if (time < overlay.startTime || time >= overlay.endTime) continue;
 
-    drawTextOverlayToCanvasAnimated(ctx, overlay, canvas.width, canvas.height, {
-      x: overlay.x,
-      y: overlay.y,
-      scaleX: 1,
-      scaleY: 1,
-      rotation: 0,
-      opacity: overlay.opacity,
-      blur: 0,
-    });
+    drawTextOverlayToCanvasAnimated(
+      ctx,
+      overlay,
+      projectSize.width,
+      projectSize.height,
+      {
+        x: overlay.x,
+        y: overlay.y,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        opacity: overlay.opacity,
+        blur: 0,
+      },
+      scale
+    );
   }
 }

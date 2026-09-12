@@ -125,22 +125,21 @@ describe('compositor per-second work', () => {
 
     const count = (method: string) => firstFrame.filter((c) => c.method === method).length
 
-    // Measured 2026-09-12: 13 calls — clear, screen draw, then save, the
+    // Measured 2026-09-12: 12 calls — clear, screen draw, then save, the
     // circular clip path, the webcam draw, restore, and the border stroke.
-    expect(firstFrame.length).toBeLessThanOrEqual(26)
+    // (13 before the second restore() was dropped.)
+    expect(firstFrame.length).toBeLessThanOrEqual(24)
     expect(count('drawImage')).toBeLessThanOrEqual(4)
     // Exact: one clear per frame, not one per layer.
     expect(count('fillRect')).toBe(1)
-    // A finding pinned, not a target met: `drawWebcamOverlay` restores once
-    // before stroking the border and once more on the way out, so every PiP
-    // frame pops a state stack it never pushed. On a real canvas an unbalanced
-    // restore() is a no-op, which is why nothing looks wrong — but it is one
-    // stack operation per frame for nothing, and it would silently undo a
-    // save() made by any future caller that wrapped the overlay draw.
-    //
-    // When that is fixed this test fails, which is the point: change it to
-    // `expect(count('restore')).toBe(count('save'))`.
+    // Exact: `drawWebcamOverlay` saves once and restores once. It used to
+    // restore twice — once before stroking the border, once more on the way
+    // out — so every PiP frame popped a state stack it never pushed. On a real
+    // canvas an unbalanced restore() is a no-op, which is why nothing looked
+    // wrong, but it was a stack operation per frame for nothing and it would
+    // silently undo a save() made by any future caller that wrapped the
+    // overlay draw.
     expect(count('save')).toBe(1)
-    expect(count('restore')).toBe(count('save') + 1)
+    expect(count('restore')).toBe(count('save'))
   })
 })

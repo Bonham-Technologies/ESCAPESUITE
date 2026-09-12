@@ -11,9 +11,11 @@
 //    keeps the media elements in sync with it, and paints each frame.
 //
 // The loop runs off `performance.now()` rather than React state: the store
-// learns the new time only every 200ms, while `displayTime` (returned here)
-// updates every frame for the timecode readout.
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+// learns the new time only every 200ms, and the loop calls no React setter at
+// all per frame. The timecode readout instead subscribes to the playhead
+// (`subscribeDisplayTime` / `getDisplayTime`), so a frame re-renders one span
+// rather than the whole preview subtree — and only ten times a second.
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getFrameCache } from '../../core/frameCache';
 import { getAnimatedVolume } from '../../utils/animation';
@@ -39,9 +41,22 @@ export interface PreviewRenderLoopDeps {
 }
 
 export interface PreviewRenderLoop {
-  /** The playhead position to show, updated every frame during playback. */
-  displayTime: number;
+  /**
+   * Watch the playhead position the readout should show. Returns the
+   * unsubscribe. Listeners fire at most every `DISPLAY_TIME_PUBLISH_MS` during
+   * playback, and immediately on a scrub or at a playback boundary.
+   */
+  subscribeDisplayTime: (listener: () => void) => () => void;
+  /** The playhead position last published to the listeners. */
+  getDisplayTime: () => number;
 }
+
+/**
+ * How often, at most, playback tells the timecode readout the playhead moved.
+ * Ten updates a second is more than the eye reads off a millisecond field, and
+ * it keeps React out of the per-frame path entirely.
+ */
+const DISPLAY_TIME_PUBLISH_MS = 100;
 
 /**
  * Drive the preview canvas: redraw on media change, on scrub, and on play.
@@ -61,7 +76,32 @@ export function usePreviewRenderLoop({
   const loopPlaybackRef = useRef(false);
   const inPointRef = useRef<number | null>(null);
   const outPointRef = useRef<number | null>(null);
-  const [displayTime, setDisplayTime] = useState(0);
+  const displayTimeListenersRef = useRef<Set<() => void>>(new Set());
+  const displayTimeRef = useRef(0);
+  const lastPublishAtRef = useRef(Number.NEGATIVE_INFINITY);
+
+  /**
+   * Hand a new playhead position to the readout. `immediate` skips the throttle
+   * for the positions that must be exact the moment they happen: a scrub, the
+   * loop point, and the end of the timeline.
+   */
+  const publishDisplayTime = useCallback((time: number, immediate = false) => {
+    const now = performance.now();
+    if (!immediate && now - lastPublishAtRef.current < DISPLAY_TIME_PUBLISH_MS) return;
+    lastPublishAtRef.current = now;
+    if (displayTimeRef.current === time) return;
+    displayTimeRef.current = time;
+    for (const listener of displayTimeListenersRef.current) listener();
+  }, []);
+
+  const subscribeDisplayTime = useCallback((listener: () => void) => {
+    displayTimeListenersRef.current.add(listener);
+    return () => {
+      displayTimeListenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const getDisplayTime = useCallback(() => displayTimeRef.current, []);
 
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -106,7 +146,7 @@ export function usePreviewRenderLoop({
   useEffect(() => {
     if (isPlaying) return;
 
-    setDisplayTime(currentTime);
+    publishDisplayTime(currentTime, true);
 
     const activeClips = getClipsAtTime(clips, tracks, currentTime);
 
@@ -118,36 +158,50 @@ export function usePreviewRenderLoop({
       return;
     }
 
-    // Check if any active clips need video seeking
+    // Where each <video> element has to be for this frame.
+    //
+    // Collected per *element*, not per clip: `usePreviewMedia` keeps one
+    // element per source, so two live clips off one source — a
+    // picture-in-picture arrangement, or the same clip duplicated on two
+    // tracks — share it. Seeking per clip moved that element for the first
+    // clip, then measured it against the second clip's target, decided a seek
+    // was still needed and took the event-driven branch below, which paints
+    // the frame twice for one move of the playhead.
+    //
+    // Later writes win, which is what the per-clip loop already did in effect
+    // (each clip overwrote the element's currentTime), so the frame the user
+    // sees is unchanged: the last live clip's target, or the incoming side of
+    // a transition, which is applied after the clips for the same reason.
     const activeTransition = getActiveTransition(clips, tracks, currentTime);
-    let needsVideoSeek = false;
+    const seekTargets = new Map<HTMLVideoElement, number>();
+
+    const wantSeek = (sourceVideoId: string, sourceTime: number) => {
+      const sourceMedia = sourceVideos.find(s => s.id === sourceVideoId);
+      if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') return;
+
+      const video = videoElementsRef.current.get(sourceVideoId);
+      if (!video) return;
+
+      seekTargets.set(video, sourceTime);
+    };
 
     for (const { clip, clipTime } of activeClips) {
       if (clip.overlayType) continue; // Text/shape overlays don't need seeking
-      const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-      if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') continue;
-
-      const video = videoElementsRef.current.get(clip.sourceVideoId);
-      if (!video) continue;
-
-      const sourceTime = clip.startTime + clipTime;
-      if (Math.abs(video.currentTime - sourceTime) > 0.05) {
-        video.currentTime = sourceTime;
-        needsVideoSeek = true;
-      }
+      wantSeek(clip.sourceVideoId, clip.startTime + clipTime);
     }
 
     if (activeTransition) {
       const { incomingClip } = activeTransition;
       const inClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
-      const inSourceTime = incomingClip.startTime + inClipTime;
-      const sourceMedia = sourceVideos.find(s => s.id === incomingClip.sourceVideoId);
-      if (sourceMedia?.mediaType !== 'image' && sourceMedia?.mediaType !== 'audio') {
-        const video = videoElementsRef.current.get(incomingClip.sourceVideoId);
-        if (video && Math.abs(video.currentTime - inSourceTime) > 0.05) {
-          video.currentTime = inSourceTime;
-          needsVideoSeek = true;
-        }
+      wantSeek(incomingClip.sourceVideoId, incomingClip.startTime + inClipTime);
+    }
+
+    // One comparison and at most one seek per element.
+    let needsVideoSeek = false;
+    for (const [video, sourceTime] of seekTargets) {
+      if (Math.abs(video.currentTime - sourceTime) > 0.05) {
+        video.currentTime = sourceTime;
+        needsVideoSeek = true;
       }
     }
 
@@ -208,7 +262,7 @@ export function usePreviewRenderLoop({
         video.removeEventListener('seeked', seekedHandler);
       }
     };
-  }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef]);
+  }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
 
   // Invalidate frame cache when timeline content changes
   // This ensures we don't show stale cached frames after edits
@@ -376,7 +430,7 @@ export function usePreviewRenderLoop({
 
           // Update display and continue
           setCurrentTime(loopStart);
-          setDisplayTime(loopStart);
+          publishDisplayTime(loopStart, true);
           lastActiveClipIds = new Set();
           lastStoreUpdateTime = loopStart;
 
@@ -389,7 +443,7 @@ export function usePreviewRenderLoop({
           audioElementsRef.current.forEach(audio => audio.pause());
           setIsPlaying(false);
           setCurrentTime(timelineDuration);
-          setDisplayTime(timelineDuration);
+          publishDisplayTime(timelineDuration, true);
           return;
         }
       }
@@ -507,8 +561,9 @@ export function usePreviewRenderLoop({
         }
       }
 
-      // Update display time (local state, fast)
-      setDisplayTime(newTimelineTime);
+      // Tell the readout where the playhead is — throttled, and never a
+      // React setter on this path.
+      publishDisplayTime(newTimelineTime);
 
       // Update store less frequently (every 200ms)
       if (newTimelineTime - lastStoreUpdateTime > 0.2) {
@@ -522,6 +577,9 @@ export function usePreviewRenderLoop({
       animationFrameRef.current = requestAnimationFrame(animate);
     };
 
+    // Let the first frame of this playback publish straight away, whatever the
+    // last scrub left behind.
+    lastPublishAtRef.current = Number.NEGATIVE_INFINITY;
     animationFrameRef.current = requestAnimationFrame(animate);
 
     return () => {
@@ -530,7 +588,10 @@ export function usePreviewRenderLoop({
         animationFrameRef.current = null;
       }
     };
-  }, [isPlaying, clips, tracks, timelineDuration, setIsPlaying, setCurrentTime, drawFrame, sourceVideos, videoElementsRef, audioElementsRef, isPlayingRef]);
+  }, [isPlaying, clips, tracks, timelineDuration, setIsPlaying, setCurrentTime, drawFrame, sourceVideos, videoElementsRef, audioElementsRef, isPlayingRef, publishDisplayTime]);
 
-  return { displayTime };
+  return useMemo(
+    () => ({ subscribeDisplayTime, getDisplayTime }),
+    [subscribeDisplayTime, getDisplayTime]
+  );
 }

@@ -12,7 +12,10 @@ import {
   getOverlayBounds,
   hasCustomKeyframes,
   isManipulableClip,
+  projectSizeOf,
   toLocalPoint,
+  DEFAULT_PROJECT_HEIGHT,
+  DEFAULT_PROJECT_WIDTH,
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
 } from './previewGeometry'
@@ -539,5 +542,31 @@ describe('getCanvasPosition', () => {
     setRect(canvas, { left: 0, top: 0, width: 960, height: 540 })
 
     expect(getCanvasPosition(canvas, { clientX: -480, clientY: 810 })).toEqual({ x: -0.5, y: 1.5 })
+  })
+})
+
+describe('projectSizeOf', () => {
+  it('is the project resolution', () => {
+    expect(projectSizeOf({ width: 3840, height: 2160 })).toEqual({ width: 3840, height: 2160 })
+  })
+
+  it('falls back to the default project size when there is no resolution', () => {
+    // Never to the canvas: since the preview rasterises at its displayed size,
+    // the canvas' backing store is not the project's pixel grid.
+    const fallback = { width: DEFAULT_PROJECT_WIDTH, height: DEFAULT_PROJECT_HEIGHT }
+
+    expect(projectSizeOf(undefined)).toEqual(fallback)
+    expect(projectSizeOf(null)).toEqual(fallback)
+  })
+
+  it('falls back per axis for a resolution with a missing or zero side', () => {
+    expect(projectSizeOf({ width: 0, height: 720 })).toEqual({
+      width: DEFAULT_PROJECT_WIDTH,
+      height: 720,
+    })
+    expect(projectSizeOf({ width: 1280 })).toEqual({
+      width: 1280,
+      height: DEFAULT_PROJECT_HEIGHT,
+    })
   })
 })

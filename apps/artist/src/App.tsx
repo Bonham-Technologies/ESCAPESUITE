@@ -67,7 +67,6 @@ function App() {
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const zoom = useEditorStore((state) => state.zoom);
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
-  const currentTime = useEditorStore((state) => state.currentTime);
 
   const setProject = useEditorStore((state) => state.setProject);
   const addSourceVideo = useEditorStore((state) => state.addSourceVideo);
@@ -259,6 +258,14 @@ function App() {
   }, [sessionRestored, urlParams.suppressRestore]);
 
   // Auto-save session on state changes (debounced)
+  //
+  // `currentTime` re-arms the debounce but is deliberately NOT a dependency:
+  // playback writes it every ~200 ms, and a dependency would re-render App —
+  // and with it the whole timeline — on every tick. A store subscription gets
+  // the same re-arming without the render, so the behaviour is unchanged: while
+  // the playhead is moving the timer never elapses, and the session is written
+  // AUTO_SAVE_DELAY after it settles. The payload is read at fire time rather
+  // than closed over, so it is always the latest state.
   useEffect(() => {
     if (!sessionRestored) return;
 
@@ -266,20 +273,34 @@ function App() {
     // neither offers the saved session nor writes over it.
     if (urlParams.suppressRestore) return;
 
-    const timeoutId = setTimeout(() => {
-      const session: SessionState = {
-        project,
-        sourceVideos,
-        currentTime,
-        selectedClipId,
-        zoom,
-        timestamp: Date.now(),
-      };
-      saveSessionState(session).catch(console.error);
-    }, AUTO_SAVE_DELAY);
+    let timeoutId: ReturnType<typeof setTimeout>;
 
-    return () => clearTimeout(timeoutId);
-  }, [sessionRestored, urlParams.suppressRestore, project, sourceVideos, currentTime, selectedClipId, zoom]);
+    const arm = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        const state = useEditorStore.getState();
+        const session: SessionState = {
+          project: state.project,
+          sourceVideos: state.sourceVideos,
+          currentTime: state.currentTime,
+          selectedClipId: state.selectedClipId,
+          zoom: state.zoom,
+          timestamp: Date.now(),
+        };
+        saveSessionState(session).catch(console.error);
+      }, AUTO_SAVE_DELAY);
+    };
+
+    arm();
+    const unsubscribe = useEditorStore.subscribe((state, previous) => {
+      if (state.currentTime !== previous.currentTime) arm();
+    });
+
+    return () => {
+      clearTimeout(timeoutId);
+      unsubscribe();
+    };
+  }, [sessionRestored, urlParams.suppressRestore, project, sourceVideos, selectedClipId, zoom]);
 
   // Handle zoom
   const handleZoomIn = useCallback(() => {
@@ -446,7 +467,7 @@ function App() {
         e.preventDefault();
         const clip = clips.find(c => c.id === selectedClipId);
         if (clip) {
-          const splitTime = currentTime - clip.timelinePosition;
+          const splitTime = useEditorStore.getState().currentTime - clip.timelinePosition;
           if (splitTime > 0 && splitTime < clip.duration) {
             splitClip(selectedClipId, splitTime);
             showNotification('Clip split', 'info');
@@ -458,7 +479,7 @@ function App() {
       // M = Add marker (without modifiers)
       if (e.key === 'm' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         e.preventDefault();
-        addMarker(currentTime);
+        addMarker(useEditorStore.getState().currentTime);
         showNotification('Marker added', 'info');
         return;
       }
@@ -480,16 +501,18 @@ function App() {
       // I = Set in point at playhead
       if (e.key === 'i' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         e.preventDefault();
-        setInPoint(currentTime);
-        showNotification(`In point: ${formatTimeForNotification(currentTime)}`, 'info');
+        const inAt = useEditorStore.getState().currentTime;
+        setInPoint(inAt);
+        showNotification(`In point: ${formatTimeForNotification(inAt)}`, 'info');
         return;
       }
 
       // O = Set out point at playhead
       if (e.key === 'o' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         e.preventDefault();
-        setOutPoint(currentTime);
-        showNotification(`Out point: ${formatTimeForNotification(currentTime)}`, 'info');
+        const outAt = useEditorStore.getState().currentTime;
+        setOutPoint(outAt);
+        showNotification(`Out point: ${formatTimeForNotification(outAt)}`, 'info');
         return;
       }
 
@@ -531,7 +554,7 @@ function App() {
     canUndo, canRedo, undo, redo, selectedClipId, removeClipFromTimeline, rippleDeleteClip, activeTool,
     duplicateClip, handleSaveProject, handleLoadProject, clips.length,
     handleZoomIn, handleZoomOut, showNotification, keyframePanelOpen, setKeyframePanelOpen,
-    setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker, currentTime,
+    setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker,
     goToNextMarker, goToPreviousMarker, showShortcuts, splitClip,
     selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection,
     setInPoint, setOutPoint, clearInOutPoints, inPoint, outPoint
