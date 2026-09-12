@@ -8,9 +8,13 @@
 // the in/out points bound the loop.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
-import { usePreviewRenderLoop, type PreviewRenderLoopDeps } from './usePreviewRenderLoop'
+import {
+  usePreviewRenderLoop,
+  type PreviewRenderLoop,
+  type PreviewRenderLoopDeps,
+} from './usePreviewRenderLoop'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
-import { FRAME_MS, installPreviewDoubles, settle, type PreviewDoubles } from '../../test/renderPreview'
+import { FRAME_MS, installPreviewDoubles, last, settle, type PreviewDoubles } from '../../test/renderPreview'
 import { resetFrameCache } from '../../core/frameCache'
 
 let doubles: PreviewDoubles
@@ -186,8 +190,8 @@ describe('usePreviewRenderLoop playback', () => {
     expect(store().isPlaying).toBe(true)
     expect(store().currentTime).toBeCloseTo(1, 1)
     // Back inside the in/out range, and running on from there.
-    expect(result.current.displayTime).toBeGreaterThanOrEqual(1)
-    expect(result.current.displayTime).toBeLessThan(2)
+    expect(result.current.getDisplayTime()).toBeGreaterThanOrEqual(1)
+    expect(result.current.getDisplayTime()).toBeLessThan(2)
   })
 
   it('stops at the end of the timeline when loop playback is off', async () => {
@@ -200,7 +204,7 @@ describe('usePreviewRenderLoop playback', () => {
 
     expect(store().isPlaying).toBe(false)
     expect(store().currentTime).toBe(1)
-    expect(result.current.displayTime).toBe(1)
+    expect(result.current.getDisplayTime()).toBe(1)
   })
 })
 
@@ -268,5 +272,103 @@ describe('usePreviewRenderLoop scrubbing', () => {
     await settle(50)
 
     expect(deps.drawFrame).toHaveBeenCalledWith(store().currentTime)
+  })
+})
+
+describe('usePreviewRenderLoop display time', () => {
+  /**
+   * Subscribe to the readout and record every position it is told about.
+   * That list is the whole contract: how often React is asked to re-render the
+   * timecode, and with what.
+   */
+  function watch(loop: PreviewRenderLoop): { published: number[]; unsubscribe: () => void } {
+    const published: number[] = []
+    const unsubscribe = loop.subscribeDisplayTime(() => {
+      published.push(loop.getDisplayTime())
+    })
+    return { published, unsubscribe }
+  }
+
+  it('publishes at most ten times a second while playing', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    const { published } = watch(result.current)
+
+    play()
+    await settle(1000)
+
+    // A second of 16ms frames is ~60 draws but must be at most 10 publishes
+    // (plus the leading one the first frame of playback is allowed).
+    expect(playbackDraws(deps).length).toBeGreaterThan(30)
+    expect(published.length).toBeLessThanOrEqual(11)
+    expect(published.length).toBeGreaterThanOrEqual(5)
+    // Consecutive publishes are a throttle window apart, not a frame apart.
+    for (let i = 1; i < published.length; i++) {
+      expect(published[i] - published[i - 1]).toBeGreaterThanOrEqual(0.09)
+    }
+  })
+
+  it('publishes the in point exactly when playback loops back', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(1)
+    store().setOutPoint(2)
+    store().setCurrentTime(1.9)
+    const { deps, play } = harness()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    const { published } = watch(result.current)
+
+    play()
+    await settle(200)
+
+    expect(published).toContain(1)
+  })
+
+  it('publishes the timeline duration exactly when playback ends', async () => {
+    addClip('clip1', 0, 1)
+    const { deps, play } = harness()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    const { published } = watch(result.current)
+
+    play()
+    await settle(1200)
+
+    expect(last(published)).toBe(1)
+    expect(result.current.getDisplayTime()).toBe(1)
+  })
+
+  it('publishes a scrub straight away, with no throttle between scrubs', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, seek } = harness()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    const { published } = watch(result.current)
+
+    seek(2)
+    await settle(0)
+    seek(3)
+    await settle(0)
+
+    // Both, inside one throttle window — a scrub never lags the pointer.
+    expect(published).toEqual([2, 3])
+  })
+
+  it('stops notifying a listener that has unsubscribed', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    const { published, unsubscribe } = watch(result.current)
+
+    unsubscribe()
+    play()
+    await settle(500)
+
+    expect(published).toEqual([])
+    expect(result.current.getDisplayTime()).toBeGreaterThan(0)
   })
 })

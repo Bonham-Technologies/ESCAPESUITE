@@ -9,7 +9,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getFrameCache } from '../../core/frameCache';
-import { formatTimecode } from '../../utils/timeUtils';
 import { drawPreviewFrame } from './drawFrame';
 import * as selectionOverlay from './selectionOverlay';
 import { usePreviewMedia } from './usePreviewMedia';
@@ -17,6 +16,7 @@ import { usePreviewRenderLoop } from './usePreviewRenderLoop';
 import { useTransformHandles } from './useTransformHandles';
 import { InlineTextEditorAnchor } from './InlineTextEditorAnchor';
 import { MarqueeSelection } from './MarqueeSelection';
+import { PreviewTimecode } from './PreviewTimecode';
 import styles from './PreviewPlayer.module.css';
 
 // Fallback canvas dimensions (used if resolution not yet available)
@@ -192,7 +192,7 @@ export function PreviewPlayer() {
 
   // When the canvas gets repainted: on a media change, on a scrub, and on every
   // frame of playback.
-  const { displayTime } = usePreviewRenderLoop({
+  const { subscribeDisplayTime, getDisplayTime } = usePreviewRenderLoop({
     drawFrame,
     drawSelectionHandles,
     drawMultiSelectHandles,
@@ -256,7 +256,11 @@ export function PreviewPlayer() {
       </div>
 
       <div className={styles.info}>
-        <span className={styles.timecode}>{formatTimecode(displayTime)}</span>
+        <PreviewTimecode
+          subscribe={subscribeDisplayTime}
+          getTime={getDisplayTime}
+          className={styles.timecode}
+        />
         <span className={styles.clipInfo}>
           {hasActiveClips
             ? `${clipsAtTime.length} clip${clipsAtTime.length > 1 ? 's' : ''} • ${activeClipInfo?.clip.name}`
