@@ -238,6 +238,15 @@ code for the benchmarks' sake:
 - **`headless-kit-render`** — `services/headless-artist` rendering
   `fixtures/headless/project.json`, Chromium launch included.
 
+`PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
+project resolution for `preview-playback` only — the export benchmarks always render 720p
+regardless — and on a machine whose sequential runs drift (observed up to several percent
+across three consecutive `pnpm perf` invocations here), prefer **paired alternation** over a
+plain before/after: swap base and patched code round-robin against one warm dev server and
+run the benchmark spec directly, so drift affects both arms equally and cancels instead of
+being charged to whichever ran second. See `docs/performance/2026-09-12-profile.md`'s "After
+round 1" section for a worked example.
+
 CI runs them in a `perf` job that needs `build`, is `continue-on-error: true` and is
 deliberately **not** in `ci-status`'s `needs` — runner CPU varies, so a number moving is
 worth looking at and never worth blocking a merge on. It uploads `perf-report.json` (and
