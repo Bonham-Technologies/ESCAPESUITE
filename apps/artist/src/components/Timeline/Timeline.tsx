@@ -10,6 +10,8 @@ import { formatTime, timeToPixels, pixelsToTime } from '../../utils/timeUtils';
 import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
+import { TimelinePlayhead } from './TimelinePlayhead';
+import { TimelineTimeReadout } from './TimelineTimeReadout';
 import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
 
@@ -58,7 +60,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const timelineDuration = useEditorStore((state) => state.project.timeline.duration);
-  const currentTime = useEditorStore((state) => state.currentTime);
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
   const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
   const zoom = useEditorStore((state) => state.zoom);
@@ -652,9 +653,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     };
   }, [trimState, clips, sourceVideos, pixelsPerSecond, updateClip, activeTool, shiftClipsAfter]);
 
-  // Calculate playhead position
-  const playheadX = timeToPixels(currentTime, pixelsPerSecond);
-
   // Calculate total tracks height
   const totalTracksHeight = tracks.reduce((sum, t) => sum + t.height, 0);
 
@@ -1232,16 +1230,12 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
               />
             )}
 
-            {/* Playhead */}
-            <div
-              data-playhead
-              className={styles.playhead}
-              style={{ left: playheadX, height: totalTracksHeight }}
+            {/* Playhead (subscribes to currentTime itself — see TimelinePlayhead) */}
+            <TimelinePlayhead
+              pixelsPerSecond={pixelsPerSecond}
+              height={totalTracksHeight}
               onMouseDown={handlePlayheadMouseDown}
-            >
-              <div className={styles.playheadHead} />
-              <div className={styles.playheadLine} />
-            </div>
+            />
 
             {/* Marquee selection rectangle */}
             {tlMarqueeActive && tlMarqueeStart && tlMarqueeCurrent && (
@@ -1258,7 +1252,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
 
       {/* Timeline info */}
       <div className={styles.info}>
-        <span>{formatTime(currentTime)} / {formatTime(timelineDuration)}</span>
+        <TimelineTimeReadout duration={timelineDuration} />
         {inPoint !== null && outPoint !== null && (
           <span className={styles.inOutInfo}>
             Selection: {formatTime(inPoint)} - {formatTime(outPoint)} ({formatTime(outPoint - inPoint)})
