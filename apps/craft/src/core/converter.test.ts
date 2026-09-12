@@ -43,6 +43,7 @@ import {
   getLastCanvasContext,
   resetCanvasContextDouble,
 } from '../test/doubles/canvas'
+import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 
 const fixWebmDurationMock = vi.hoisted(() => vi.fn())
 
@@ -56,36 +57,10 @@ vi.mock('webm-duration-fix', () => ({ default: fixWebmDurationMock }))
 // The rAF fallback path in captureFramesViaPlayback reschedules itself, so the
 // double has to hold pending callbacks under test control rather than letting
 // them run free against a torn-down environment.
-const rafCallbacks = new Map<number, FrameRequestCallback>()
-let nextRafHandle = 1
-let originalRaf: typeof globalThis.requestAnimationFrame
-let originalCancelRaf: typeof globalThis.cancelAnimationFrame
+let raf: RafDouble
 
-function installRafDouble(): void {
-  originalRaf = globalThis.requestAnimationFrame
-  originalCancelRaf = globalThis.cancelAnimationFrame
-  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-    const handle = nextRafHandle++
-    rafCallbacks.set(handle, cb)
-    return handle
-  }) as typeof globalThis.requestAnimationFrame
-  globalThis.cancelAnimationFrame = ((handle: number) => {
-    rafCallbacks.delete(handle)
-  }) as typeof globalThis.cancelAnimationFrame
-}
-
-function uninstallRafDouble(): void {
-  globalThis.requestAnimationFrame = originalRaf
-  globalThis.cancelAnimationFrame = originalCancelRaf
-  rafCallbacks.clear()
-}
-
-function tickAnimationFrames(): number {
-  const pending = [...rafCallbacks.values()]
-  rafCallbacks.clear()
-  for (const cb of pending) cb(0)
-  return pending.length
-}
+const tickAnimationFrames = (): number => raf.tick()
+const pendingFrameCount = (): number => raf.pending()
 
 /** Let real promise jobs (Blob.arrayBuffer, MessageChannel yields) settle. */
 async function settle(times = 4): Promise<void> {
@@ -161,9 +136,7 @@ describe('converter', () => {
   let consoleError: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
-    rafCallbacks.clear()
-    nextRafHandle = 1
-    installRafDouble()
+    raf = installRafDouble()
     installWebCodecsDoubles()
     resetWebCodecsDoubles()
     resetMediabunnyDouble()
@@ -182,7 +155,7 @@ describe('converter', () => {
     uninstallVideoElementDouble()
     uninstallAudioContextDouble()
     uninstallWebCodecsDoubles()
-    uninstallRafDouble()
+    raf.uninstall()
     vi.restoreAllMocks()
   })
 
@@ -627,7 +600,7 @@ describe('converter', () => {
     it('captures frames from currentTime as the video plays', async () => {
       const { promise, video } = start(p => convertToMP4(SOURCE, p), { rvfc: false })
       await settle()
-      expect(rafCallbacks.size).toBe(1)
+      expect(pendingFrameCount()).toBe(1)
 
       video.setMetadata({ currentTime: 0.05 })
       tickAnimationFrames()
@@ -653,7 +626,7 @@ describe('converter', () => {
       await promise
 
       expect(lastVideoEncoder().encodes).toHaveLength(3)
-      expect(rafCallbacks.size).toBe(0)
+      expect(pendingFrameCount()).toBe(0)
     })
 
     it('finishes on the ended event when playback stalls short of the frame count', async () => {
@@ -669,7 +642,7 @@ describe('converter', () => {
       await promise
 
       expect(lastVideoEncoder().encodes).toHaveLength(3)
-      expect(rafCallbacks.size).toBe(0)
+      expect(pendingFrameCount()).toBe(0)
     })
 
     it('tops up the remaining frames when the video ends part-way through a tick', async () => {
@@ -684,19 +657,19 @@ describe('converter', () => {
       await promise
 
       expect(lastVideoEncoder().encodes).toHaveLength(3)
-      expect(rafCallbacks.size).toBe(0)
+      expect(pendingFrameCount()).toBe(0)
       expect(allFramesClosed()).toBe(true)
     })
 
     it('rejects on a playback error and cancels the pending animation frame', async () => {
       const { promise, video } = start(p => convertToMP4(SOURCE, p), { rvfc: false })
       await settle()
-      expect(rafCallbacks.size).toBe(1)
+      expect(pendingFrameCount()).toBe(1)
 
       video.fireError()
 
       await expect(promise).rejects.toThrow('Video playback error')
-      expect(rafCallbacks.size).toBe(0)
+      expect(pendingFrameCount()).toBe(0)
     })
 
     it('aborts mid-capture', async () => {
@@ -709,7 +682,7 @@ describe('converter', () => {
       controller.abort()
 
       await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
-      expect(rafCallbacks.size).toBe(0)
+      expect(pendingFrameCount()).toBe(0)
       expect(allFramesClosed()).toBe(true)
     })
   })

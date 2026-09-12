@@ -246,6 +246,25 @@ any `*.cpuprofile`) as the `perf-report` artifact.
 Baseline numbers, the machine they came from and the launch args they used live in
 [docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md).
 
+**Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
+Four ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
+`apps/artist/src/core/exportMP4.perf.test.ts`, `apps/craft/src/core/compositor.perf.test.ts`
+and `apps/craft/src/core/converter.perf.test.ts` — run the same scene through the same
+doubles the behaviour tests use and count what one frame costs: 2D-context calls,
+`drawImage`/`measureText`/`save`/`restore`, animation lookups, `getContext` calls, object
+URLs, `VideoFrame`s created versus closed, `encode`/`flush` calls. They are `*.perf.test.ts`
+rather than `bench` files on purpose: counts do not depend on the runner's CPU, so they can
+be enforced in CI and in `test:coverage` like any other test. ARTIST's scene is the browser
+benchmark's scene, built for unit tests in `apps/artist/src/test/fixtures/perfScene.ts`, so
+a ceiling here and a millisecond figure there describe the same work.
+**The rule: a ceiling is 2x the measured value rounded up, with the measurement and its date
+in a comment beside it. Conservation laws (frames created == closed, one encode per frame,
+balanced save/restore, one composite per animation frame) are asserted exactly. When a fix
+lands, re-measure and lower the ceiling; never raise one without saying, in the PR, why the
+new cost is correct.** Two of the tests currently pin a *finding* rather than a target —
+the export's animation memo cache never hits, and the compositor's PiP overlay restores once
+more than it saves — and each says so, with the assertion to flip when it is fixed.
+
 ### Coverage policy
 
 Each package (`apps/plan`, `apps/craft`, `apps/artist`, `packages/shared`,
@@ -263,7 +282,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 99.88 | 99.08 | 94.51 | 98.94 |
-| `@escapesuite/artist` | 99.31 | 98.00 | 89.80 | 98.97 |
+| `@escapesuite/artist` | 99.31 | 98.03 | 89.79 | 98.97 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
