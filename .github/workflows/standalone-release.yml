@@ -27,6 +27,8 @@ jobs:
       actions: read   # Required to download artifacts from triggering workflow
     outputs:
       version: ${{ steps.version.outputs.version }}
+      craft_version: ${{ steps.version.outputs.craft_version }}
+      artist_version: ${{ steps.version.outputs.artist_version }}
       craft_size: ${{ steps.sizes.outputs.craft }}
       artist_size: ${{ steps.sizes.outputs.artist }}
       kit_size: ${{ steps.sizes.outputs.kit }}
@@ -71,14 +73,32 @@ jobs:
       - name: Determine version
         id: version
         run: |
+          # The umbrella release is named after the HIGHER of the two app
+          # versions, not ESCAPECRAFT's. An artist-only bump used to leave the
+          # tag unchanged, so no new release was cut and `latest` kept pointing
+          # at the previous one with the previous ESCAPEARTIST build attached.
           CRAFT_VERSION=$(node -p "require('./apps/craft/package.json').version")
+          ARTIST_VERSION=$(node -p "require('./apps/artist/package.json').version")
+          BASE_VERSION=$(node -p "
+            const craft = require('./apps/craft/package.json').version;
+            const artist = require('./apps/artist/package.json').version;
+            const parts = (v) => v.split('-')[0].split('.').map(Number);
+            const [a, b] = [parts(craft), parts(artist)];
+            ((a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2])) >= 0 ? craft : artist;
+          ")
+          # PR builds are previews, so every name carries the PR suffix; a push
+          # to main leaves the names as the bare versions the per-package
+          # releases in release.yml use.
+          SUFFIX=""
           if [ "${{ steps.check.outputs.is_pr }}" = "true" ]; then
-            VERSION="${CRAFT_VERSION}-pr${{ steps.check.outputs.pr_number }}"
-          else
-            VERSION="${CRAFT_VERSION}"
+            SUFFIX="-pr${{ steps.check.outputs.pr_number }}"
           fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}"
+          echo "version=${BASE_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
+          echo "craft_version=${CRAFT_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
+          echo "artist_version=${ARTIST_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
+          echo "Umbrella version: ${BASE_VERSION}${SUFFIX}"
+          echo "ESCAPECRAFT version: ${CRAFT_VERSION}${SUFFIX}"
+          echo "ESCAPEARTIST version: ${ARTIST_VERSION}${SUFFIX}"
 
       - name: Get file sizes and prepare release artifacts
         id: sizes
@@ -105,10 +125,14 @@ jobs:
           fi
 
           VERSION="${{ steps.version.outputs.version }}"
+          CRAFT_VERSION="${{ steps.version.outputs.craft_version }}"
+          ARTIST_VERSION="${{ steps.version.outputs.artist_version }}"
 
-          # Copy to versioned names
-          cp "$CRAFT_HTML" "dist/craft/ESCAPECRAFT-${VERSION}.html"
-          cp "$ARTIST_HTML" "dist/artist/ESCAPEARTIST-${VERSION}.html"
+          # Copy to versioned names. Each HTML build carries its own app's
+          # version — the same name release.yml attaches to that package's own
+          # release — while the kit tarball carries the umbrella version.
+          cp "$CRAFT_HTML" "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.html"
+          cp "$ARTIST_HTML" "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html"
           cp "$KIT_TGZ" "dist/kit/escapesuite-headless-artist-${VERSION}.tgz"
 
           # Copy to latest names
@@ -116,8 +140,8 @@ jobs:
           cp "$ARTIST_HTML" "dist/artist/ESCAPEARTIST-latest.html"
 
           # Get sizes
-          CRAFT_SIZE=$(du -h "dist/craft/ESCAPECRAFT-${VERSION}.html" | cut -f1)
-          ARTIST_SIZE=$(du -h "dist/artist/ESCAPEARTIST-${VERSION}.html" | cut -f1)
+          CRAFT_SIZE=$(du -h "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.html" | cut -f1)
+          ARTIST_SIZE=$(du -h "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html" | cut -f1)
           KIT_SIZE=$(du -h "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" | cut -f1)
           echo "craft=~${CRAFT_SIZE}" >> $GITHUB_OUTPUT
           echo "artist=~${ARTIST_SIZE}" >> $GITHUB_OUTPUT
@@ -149,6 +173,8 @@ jobs:
         with:
           script: |
             const version = '${{ needs.prepare.outputs.version }}';
+            const craftVersion = '${{ needs.prepare.outputs.craft_version }}';
+            const artistVersion = '${{ needs.prepare.outputs.artist_version }}';
             const craftSize = '${{ needs.prepare.outputs.craft_size }}';
             const artistSize = '${{ needs.prepare.outputs.artist_size }}';
             const kitSize = '${{ needs.prepare.outputs.kit_size }}';
@@ -163,8 +189,8 @@ jobs:
               '',
               '| App | Version | Size |',
               '|-----|---------|------|',
-              `| ESCAPECRAFT | \`${version}\` | ${craftSize} |`,
-              `| ESCAPEARTIST | \`${version}\` | ${artistSize} |`,
+              `| ESCAPECRAFT | \`${craftVersion}\` | ${craftSize} |`,
+              `| ESCAPEARTIST | \`${artistVersion}\` | ${artistSize} |`,
               `| Headless render kit | \`${version}\` | ${kitSize} |`,
               '',
               '_✅ Built after CI passed_'
@@ -199,6 +225,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          CRAFT_VERSION: ${{ needs.prepare.outputs.craft_version }}
+          ARTIST_VERSION: ${{ needs.prepare.outputs.artist_version }}
           COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
           if gh release view "v${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
@@ -207,8 +235,8 @@ jobs:
           fi
 
           gh release create "v${VERSION}" \
-            "dist/craft/ESCAPECRAFT-${VERSION}.html" \
-            "dist/artist/ESCAPEARTIST-${VERSION}.html" \
+            "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.html" \
+            "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html" \
             "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" \
             --repo "${REPO}" \
             --target "${COMMIT}" \
