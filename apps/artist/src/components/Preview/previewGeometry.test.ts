@@ -204,6 +204,18 @@ describe('getOverlayBounds for text overlays', () => {
     )
   })
 
+  it('leaves the context’s font as it found it', () => {
+    // The context belongs to the preview, which draws through it on the very
+    // next frame: a measurement must not leave its own font behind.
+    const canvas = makeCanvas()
+    const ctx = getCanvasContext(canvas)!
+    ctx.font = '12px Courier'
+
+    getOverlayBounds(textClip({}, { fontSize: 40, fontFamily: 'Georgia' }), canvas, undefined, [])
+
+    expect(ctx.font).toBe('12px Courier')
+  })
+
   it('uses the text’s own rotation when there is no animation', () => {
     expect(
       getOverlayBounds(textClip({}, { rotation: 15 }), makeCanvas(), undefined, [])?.rotation
