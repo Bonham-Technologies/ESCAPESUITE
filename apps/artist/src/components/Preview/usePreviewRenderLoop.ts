@@ -158,36 +158,50 @@ export function usePreviewRenderLoop({
       return;
     }
 
-    // Check if any active clips need video seeking
+    // Where each <video> element has to be for this frame.
+    //
+    // Collected per *element*, not per clip: `usePreviewMedia` keeps one
+    // element per source, so two live clips off one source — a
+    // picture-in-picture arrangement, or the same clip duplicated on two
+    // tracks — share it. Seeking per clip moved that element for the first
+    // clip, then measured it against the second clip's target, decided a seek
+    // was still needed and took the event-driven branch below, which paints
+    // the frame twice for one move of the playhead.
+    //
+    // Later writes win, which is what the per-clip loop already did in effect
+    // (each clip overwrote the element's currentTime), so the frame the user
+    // sees is unchanged: the last live clip's target, or the incoming side of
+    // a transition, which is applied after the clips for the same reason.
     const activeTransition = getActiveTransition(clips, tracks, currentTime);
-    let needsVideoSeek = false;
+    const seekTargets = new Map<HTMLVideoElement, number>();
+
+    const wantSeek = (sourceVideoId: string, sourceTime: number) => {
+      const sourceMedia = sourceVideos.find(s => s.id === sourceVideoId);
+      if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') return;
+
+      const video = videoElementsRef.current.get(sourceVideoId);
+      if (!video) return;
+
+      seekTargets.set(video, sourceTime);
+    };
 
     for (const { clip, clipTime } of activeClips) {
       if (clip.overlayType) continue; // Text/shape overlays don't need seeking
-      const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-      if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') continue;
-
-      const video = videoElementsRef.current.get(clip.sourceVideoId);
-      if (!video) continue;
-
-      const sourceTime = clip.startTime + clipTime;
-      if (Math.abs(video.currentTime - sourceTime) > 0.05) {
-        video.currentTime = sourceTime;
-        needsVideoSeek = true;
-      }
+      wantSeek(clip.sourceVideoId, clip.startTime + clipTime);
     }
 
     if (activeTransition) {
       const { incomingClip } = activeTransition;
       const inClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
-      const inSourceTime = incomingClip.startTime + inClipTime;
-      const sourceMedia = sourceVideos.find(s => s.id === incomingClip.sourceVideoId);
-      if (sourceMedia?.mediaType !== 'image' && sourceMedia?.mediaType !== 'audio') {
-        const video = videoElementsRef.current.get(incomingClip.sourceVideoId);
-        if (video && Math.abs(video.currentTime - inSourceTime) > 0.05) {
-          video.currentTime = inSourceTime;
-          needsVideoSeek = true;
-        }
+      wantSeek(incomingClip.sourceVideoId, incomingClip.startTime + inClipTime);
+    }
+
+    // One comparison and at most one seek per element.
+    let needsVideoSeek = false;
+    for (const [video, sourceTime] of seekTargets) {
+      if (Math.abs(video.currentTime - sourceTime) > 0.05) {
+        video.currentTime = sourceTime;
+        needsVideoSeek = true;
       }
     }
 

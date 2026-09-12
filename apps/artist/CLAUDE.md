@@ -156,6 +156,16 @@ Hooks:
 | `usePreviewRenderLoop.ts` | When the canvas repaints: the rAF playback loop, seek-driven redraws, the debounced redraw after a media change |
 | `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports |
 
+A scrub's seek check in `usePreviewRenderLoop.ts` works **per `<video>` element, not
+per clip**. `usePreviewMedia` keeps one element per source, so two live clips off one
+source — a picture-in-picture arrangement, or the same clip duplicated on two tracks —
+share it; a per-clip loop moved that element for the first clip, measured it against the
+second clip's target, decided a seek was still needed and took the event-driven branch,
+painting the frame twice for one move of the playhead. The desired time is collected into
+a `Map` keyed by element (later writes win, and the incoming side of a transition is
+applied after the clips, so the frame on screen is the one that was always drawn), then
+each element is compared and seeked at most once.
+
 **The preview draws through `core/canvasRenderer.ts`**, the same renderer an export
 uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the difference that is the
 preview's alone: `quiet` (not-yet-decoded media is ordinary mid-scrub, and this frame
