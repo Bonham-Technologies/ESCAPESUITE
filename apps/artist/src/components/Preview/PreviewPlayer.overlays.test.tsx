@@ -360,6 +360,19 @@ describe('PreviewPlayer legacy overlay arrays', () => {
     }
   })
 
+  it('drops a legacy shape overlay once the playhead passes its end', async () => {
+    addClip('clip1', 0, 4)
+    store().addShapeOverlay({ type: 'rectangle', startTime: 0, endTime: 1, strokeWidth: 2 })
+
+    const preview = await renderPreview()
+    preview.clearCalls()
+
+    store().setCurrentTime(2)
+    await settle(FRAME_MS)
+
+    expect(preview.frame().of('strokeRect')).toHaveLength(0)
+  })
+
   it('rotates a legacy shape overlay', async () => {
     addClip('clip1', 0, 4)
     store().addShapeOverlay({ type: 'rectangle', startTime: 0, endTime: 4, rotation: 90 })
