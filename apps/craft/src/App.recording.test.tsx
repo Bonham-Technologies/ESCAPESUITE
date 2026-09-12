@@ -580,7 +580,10 @@ describe('App unmount', () => {
       vi.advanceTimersByTime(5000);
     });
     expect(recorderFactory.last().start).not.toHaveBeenCalled();
-    expect(useRecorderStore.getState().countdownValue).toBe(3);
+    // The store outlives the component, so the unmount puts it back to idle
+    // rather than leaving a countdown standing at 3 for the next mount.
+    expect(useRecorderStore.getState().countdownValue).toBe(0);
+    expect(state()).toBe('idle');
 
     // And the capture is released rather than left live.
     expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
@@ -615,5 +618,8 @@ describe('App unmount', () => {
       vi.advanceTimersByTime(1000);
     });
     expect(useRecorderStore.getState().currentDuration).toBe(0);
+
+    // And the store is no longer mid-take: a fresh mount starts from idle.
+    expect(state()).toBe('idle');
   });
 });
