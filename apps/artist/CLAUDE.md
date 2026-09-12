@@ -136,7 +136,7 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 |--------|------|
 | `drawFrame.ts` | Compositing one frame: track order, transitions, overlays, the legacy overlay arrays, and the blur scratch canvas |
 | `previewGeometry.ts` | Where a clip is on the canvas (`getOverlayBounds`), which clips can be manipulated, the one object-fit: contain mapping between the canvas' pixels and its element's (`contentBox`, `getCanvasPosition`), and the inverse rotation every box test shares (`toLocalPoint`) |
-| `hitTest.ts` | What is under the pointer: which clip, which handle, which drag it would start |
+| `hitTest.ts` | What is under the pointer: which clip, which handle, which drag it would start. One cascade (`hitHandlesOnClip`) serves both passes — keyframe mode asks it for the selected clip alone, body included; outside it the same cascade runs handles-only before the z-order body pass |
 | `selectionOverlay.ts` | Drawing the selection chrome — bounding box, the eight resize handles, the rotation handle, multi-select boxes |
 | `dragGeometry.ts` | The maths of a drag in progress: start measurements, resize/rotate deltas, marquee intersection, text hit for the double-click |
 | `transitions.ts` | Which transition, if any, is active at a given time |
