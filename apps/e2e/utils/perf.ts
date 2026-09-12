@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { CDPSession, Download, Page } from '@playwright/test'
+import { expect, type CDPSession, type Download, type Page } from '@playwright/test'
+import { ARTIST_URL, openExportAdvancedOptions, openExportDialog } from './artist'
 
 /**
  * Benchmark plumbing for `tests/perf/` — the measured windows, the scene they
@@ -25,8 +26,6 @@ export const PERF_RESULTS_DIR = path.join(E2E_ROOT, 'perf-results')
 
 /** The one media file every perf scene is built from (1 s, 64x48, H.264). */
 export const PERF_SOURCE_PATH = path.join(E2E_ROOT, 'fixtures/headless/source.mp4')
-
-export const ARTIST_URL = 'http://localhost:5175'
 
 /** Runs per benchmark. Wall-time metrics are reported as the median of these. */
 export const PERF_RUNS = 3
@@ -225,15 +224,52 @@ interface SceneProject {
   }
 }
 
+/** Project canvas the scene renders at; also how the preview canvas is located. */
+export const SCENE_RESOLUTION = { width: 1280, height: 720 } as const
+
 /** Media clips in the generated scene, split evenly across the two media tracks. */
 const MEDIA_CLIPS = 12
 const CLIPS_PER_TRACK = MEDIA_CLIPS / 2
+/**
+ * Seconds each clip occupies on the timeline.
+ *
+ * There is one fixture and it is one second long, so a longer timeline has to
+ * come from longer clips rather than more media. Two seconds per clip puts the
+ * scene at 13 s — comfortably longer than a playback press — and the second
+ * second of each clip holds the source's last frame (a seek past a video's
+ * duration clamps to its end), which composites and encodes exactly like any
+ * other frame. That is the point: the benchmark is measuring the compositor and
+ * the encoder, not the decoder's ability to find novel frames.
+ */
+const CLIP_SECONDS = 2
 /** Track 1's clips are offset by half a clip so the two tracks composite together. */
-const TRACK_1_OFFSET = 0.5
-/** The fixture source is exactly one second long, so every clip is one second. */
-const CLIP_SECONDS = 1
-/** Last clip ends at 5.5 + 1; the whole timeline is 6.5 s, longer than a playback window. */
-export const SCENE_DURATION_SECONDS = (CLIPS_PER_TRACK - 1) * CLIP_SECONDS + TRACK_1_OFFSET + CLIP_SECONDS
+const TRACK_1_OFFSET = CLIP_SECONDS / 2
+
+/**
+ * Scale that makes a `V1` clip fill the canvas width.
+ *
+ * Scale 1 means *native pixel size* in this editor, not fill-canvas (a deliberate
+ * product decision). The fixture is 64x48, so a clip at scale 1 draws a 64x48
+ * patch into a 1280x720 canvas — 0.3% of it. A benchmark built that way reports
+ * the cost of compositing almost nothing, which is the opposite of the point.
+ * 1280/64 = 20 puts a clip across the full canvas width (and 960 of its 720
+ * height, so it is cropped top and bottom — real full-frame drawing work).
+ */
+const FULL_FRAME_SCALE = SCENE_RESOLUTION.width / 64
+
+/** Picture-in-picture clips on `V2`, at roughly a third of the frame width. */
+const PIP_SCALE = FULL_FRAME_SCALE / 3
+/**
+ * V1 runs 0,2,4,6,8,10 and ends at 12; V2 is offset a second and ends at 13.
+ *
+ * The headroom matters. A playback window is a press of Play plus a fixed wall
+ * of waits, two forced GCs and several CDP round trips; if the timeline ran out
+ * first the transport would stop itself, and the run would either fail on the
+ * Pause click or quietly report a frame rate averaged over a stretch that was
+ * not playing. 13 s against a ~6 s press leaves better than 2x.
+ */
+export const SCENE_DURATION_SECONDS =
+  (CLIPS_PER_TRACK - 1) * CLIP_SECONDS + TRACK_1_OFFSET + CLIP_SECONDS
 
 function track(id: string, name: string, index: number) {
   return { id, name, index, visible: true, locked: false, muted: false, volume: 1, height: 64 }
@@ -245,8 +281,10 @@ function track(id: string, name: string, index: number) {
  * Everything varies by clip index and nothing by clock or random source, so two
  * runs composite exactly the same frames:
  *
- * - six clips on `V1`, back to back at 0,1,2,3,4,5 s, full frame;
- * - six clips on `V2`, offset half a second, scaled down to a picture-in-picture
+ * - six two-second clips on `V1`, back to back at 0,2,4,6,8,10 s, scaled to fill
+ *   the canvas (see FULL_FRAME_SCALE — scale 1 here means native 64x48 pixels,
+ *   which would composite nothing worth measuring);
+ * - six on `V2`, offset a second, at a third of that scale as a picture-in-picture
  *   box that walks across the frame and rotates, at 85% opacity — so every frame
  *   in the window composites two decoded sources, not one;
  * - every fourth clip carries a 4 px blur and every fifth a `screen` blend, to
@@ -277,13 +315,21 @@ export function buildPerfScene(sourceVideoId: string): SceneProject {
         ? {
             x: 0.2 + slot * 0.1,
             y: 0.3,
-            scaleX: 0.35,
-            scaleY: 0.35,
+            scaleX: PIP_SCALE,
+            scaleY: PIP_SCALE,
             rotation: slot * 3,
             opacity: 0.85,
             scaleLocked: true,
           }
-        : { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1, scaleLocked: true },
+        : {
+            x: 0.5,
+            y: 0.5,
+            scaleX: FULL_FRAME_SCALE,
+            scaleY: FULL_FRAME_SCALE,
+            rotation: 0,
+            opacity: 1,
+            scaleLocked: true,
+          },
       effects: { blur: i % 4 === 3 ? 4 : 0 },
       transition:
         i === 2 ? { type: 'fade', duration: 0.5 } : { type: 'none', duration: 0.5 },
@@ -353,7 +399,7 @@ export function buildPerfScene(sourceVideoId: string): SceneProject {
     name: 'Perf Scene',
     created: 0,
     modified: 0,
-    resolution: { width: 1280, height: 720 },
+    resolution: { ...SCENE_RESOLUTION },
     timeline: {
       tracks: [
         track('perf-track-0', 'V1', 0),
@@ -434,10 +480,46 @@ export async function loadPerfScene(page: Page): Promise<void> {
     .getByText(`${SCENE_CLIP_COUNT} clips · ${SCENE_TRACK_COUNT} tracks`)
     .waitFor({ timeout: 15_000 })
 
-  // The preview holds one <video> per source and decodes the first frame of each
-  // before it can composite; starting the clock before that turns decode latency
-  // into a low frame count.
-  await page.waitForTimeout(1500)
+  // The preview cannot composite a frame until its media has decoded one, and
+  // starting the clock before then turns decode latency into a low frame count.
+  // Wait for the condition, not a fixed delay: a slow machine then waits longer
+  // and a fast one does not wait at all.
+  //
+  // The obvious probe — `<video>.readyState` — is unavailable: `usePreviewMedia`
+  // builds its elements with `document.createElement` and never attaches them,
+  // so `document.querySelectorAll('video')` returns nothing. The canvas is the
+  // observable surface, so sample that instead.
+  //
+  // Redness, not mere non-blackness, is the test. The overlays (a blue rectangle
+  // and white text) are drawn whether or not a single video frame has decoded,
+  // so "not all black" would pass on an empty preview. The fixture is a solid
+  // red frame (see fixtures/headless/make-fixture.md) filling a full-frame V1
+  // clip, and a 4:3 source letterboxed into a 16:9 canvas covers ~75% of it —
+  // so a quarter of the pixels reading red means real decoded video is on screen.
+  await page.waitForFunction(
+    ([width, height]) => {
+      const canvas = document.querySelector<HTMLCanvasElement>(
+        `canvas[width="${width}"][height="${height}"]`
+      )
+      if (!canvas) return false
+
+      const probe = document.createElement('canvas')
+      probe.width = 64
+      probe.height = 36
+      const context = probe.getContext('2d')
+      if (!context) return false
+      context.drawImage(canvas, 0, 0, probe.width, probe.height)
+
+      const { data } = context.getImageData(0, 0, probe.width, probe.height)
+      let red = 0
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 100 && data[i + 1] < 80 && data[i + 2] < 80) red++
+      }
+      return red / (probe.width * probe.height) > 0.25
+    },
+    [SCENE_RESOLUTION.width, SCENE_RESOLUTION.height] as const,
+    { timeout: 30_000 }
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +570,14 @@ export async function measurePlayback(
   const cdpEnd = await readCdpMetrics(cdp)
   const end = await page.evaluate((windowStart: number) => {
     const now = performance.now()
+    // Long tasks are attributed to the window by their START time, so a task
+    // straddling the window's opening is excluded whole and one straddling its
+    // close is included whole. That is the honest choice for a "what happened
+    // while playing" figure — a long task is one unit of jank and splitting its
+    // duration across a boundary would report two shorter stalls that nobody
+    // experienced — but it does mean the total can exceed the window's own
+    // length by up to one task, and that a single task spanning the entire
+    // window would be counted as zero.
     const inWindow = window.__perf.longTasks.filter((task) => task.start >= windowStart)
     return {
       raf: window.__perf.rafCount,
@@ -497,7 +587,18 @@ export async function measurePlayback(
     }
   }, start.now)
 
-  await page.getByTitle('Pause (Space)').click()
+  // Still playing, therefore the whole window was playing. If the timeline had
+  // run out the transport would have stopped itself and the frame rate above
+  // would be an average over a stretch that was partly paused — a quietly wrong
+  // number, which is worse than a failed benchmark. The scene is built with more
+  // than 2x headroom (see SCENE_DURATION_SECONDS); this is the tripwire that
+  // says so out loud if that ever stops being true.
+  const pause = page.getByTitle('Pause (Space)')
+  await expect(
+    pause,
+    'playback stopped before the measured window closed — the scene is too short for this window'
+  ).toBeVisible({ timeout: 1000 })
+  await pause.click()
   const heapEnd = await readHeapAfterGc(page, cdp)
 
   const elapsedSeconds = (end.now - start.now) / 1000
@@ -533,16 +634,12 @@ export async function measureExport(
   cdp: CDPSession,
   format: 'mp4' | 'webm'
 ): Promise<ExportMeasurement> {
-  await page.getByRole('button', { name: 'Export video' }).click()
-  await page.getByRole('heading', { name: 'Export Video' }).waitFor()
-
-  // Format and resolution live behind a disclosure that starts collapsed on
-  // every open; expand it only when it actually is, so a future default of
-  // "expanded" does not collapse it here.
-  const advanced = page.getByRole('button', { name: 'Advanced options' })
-  if ((await advanced.getAttribute('aria-expanded')) !== 'true') {
-    await advanced.click()
-  }
+  // The same helpers the ESCAPEARTIST specs drive the dialog with — the
+  // benchmark measures the export a test would trigger, not a private
+  // approximation of it. Both are idempotent, which is what lets this run three
+  // times in a row against a dialog that stays mounted between opens.
+  await openExportDialog(page)
+  await openExportAdvancedOptions(page)
 
   await page.getByRole('radio', { name: format === 'mp4' ? /MP4/ : /WebM/ }).check()
   await page

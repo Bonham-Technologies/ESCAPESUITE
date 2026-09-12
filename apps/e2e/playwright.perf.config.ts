@@ -21,6 +21,9 @@ import { PERF_LAUNCH_ARGS } from './utils/perf'
  */
 export default defineConfig({
   testDir: './tests/perf',
+  // Empties perf-results/ first, so a benchmark that fails cannot leave last
+  // run's JSON behind for the report to present as this run's.
+  globalSetup: './scripts/perf-global-setup.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,

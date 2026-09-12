@@ -20,8 +20,13 @@ import type { RenderFileInput } from './types'
  * merges into the repo-root report; a CPU-speed threshold would fail on a slow
  * runner and pass on a fast one regardless of the code.
  *
- * Named `*.chromium.test.ts` so `test:run` (and CI's `test` job, and coverage)
- * skip it: it launches a real browser and encodes real video.
+ * Named with a `.bench.test.ts` suffix rather than `.chromium.test.ts`, so that
+ * `test:e2e` — whose filter is the substring "chromium.test", and which CI's
+ * gating `e2e` job runs — does NOT pick it up. A benchmark inside a gating job is
+ * three more real renders on every PR for numbers nobody reads there. `test:run`
+ * and `test:coverage` exclude the `.bench.test.ts` suffix explicitly, for the
+ * same reason they exclude the chromium tests: it launches a real browser and
+ * encodes real video. Only `test:perf` (and so `pnpm perf`) names it.
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))

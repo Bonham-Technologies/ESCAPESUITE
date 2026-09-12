@@ -167,12 +167,15 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);
   `pack:kit` assembles and `npm pack`s it into `dist/escapesuite-headless-artist-<version>.tgz`;
   `test:run` runs unit tests only (no browser); `test:e2e` runs the Chromium tests;
-  `test:perf` runs just the render benchmark (`src/perf.chromium.test.ts`) and writes
+  `test:perf` runs just the render benchmark (`src/perf.bench.test.ts`) and writes
   `perf-report.json` beside the package.
 - Convention: tests named `*.chromium.test.ts` launch real headless Chromium against the
   ARTIST headless bundle, which `test/globalSetup.ts` builds ONCE per vitest run (gated by
-  `HEADLESS_BUILD=1`, which only `test:e2e` sets — every other invocation is a no-op). They
-  are excluded from `test:run`/CI's `test` job and run separately.
+  `HEADLESS_BUILD=1`, which `test:e2e` and `test:perf` set — every other invocation is a
+  no-op). They are excluded from `test:run`/CI's `test` job and run separately.
+- The benchmark is `*.bench.test.ts`, NOT `*.chromium.test.ts`, precisely so `test:e2e`'s
+  `chromium.test` substring filter does not sweep it into CI's gating `e2e` job;
+  `test:run` and `test:coverage` exclude the suffix explicitly. Only `test:perf` names it.
 - CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.63.0 as
   `apps/e2e`, sharing its browser cache) and packs + uploads the kit as the
   `headless-artist-kit` artifact in the `build` job; `standalone-release.yml` attaches the
@@ -209,16 +212,22 @@ Test counts change frequently as coverage grows; run `pnpm test` for the current
 
 ### Performance benchmarks
 
-`pnpm perf` measures, it does not assert. It runs the Chromium-only Playwright project in
-`apps/e2e/tests/perf/` (`playwright.perf.config.ts`: one worker, no retries, fixed launch
-args) and then the headless kit's `src/perf.chromium.test.ts`, and merges the results with
-`apps/e2e/scripts/perf-report.mjs` into `perf-report.json` at the repo root plus a Markdown
-table (appended to `$GITHUB_STEP_SUMMARY` in CI). All three outputs are gitignored.
+`pnpm perf` measures, it does not assert. `apps/e2e/scripts/perf.mjs` runs the Chromium-only
+Playwright project in `apps/e2e/tests/perf/` (`playwright.perf.config.ts`: one worker, no
+retries, fixed launch args) and then the headless kit's `src/perf.bench.test.ts`, then
+**always** merges whatever results exist with `apps/e2e/scripts/perf-report.mjs` into
+`perf-report.json` at the repo root plus a Markdown table (appended to
+`$GITHUB_STEP_SUMMARY` in CI) — a failed benchmark still leaves the surviving numbers
+readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is emptied by the
+perf project's `globalSetup` first, so a stale result can never be reported as current.
+All three outputs are gitignored.
 
 Three benchmarks, each run three times and reported as the median, all against **one
-deterministic 12-clip scene** built in-test from `apps/e2e/fixtures/headless/source.mp4`
-and loaded through the documented integration API (`GET_STATE` for the imported source's
-id, then `LOAD_PROJECT`) — there is no app code for the benchmarks' sake:
+deterministic 12-clip, 13-second scene** (14 clips over 4 tracks at 1280x720, clips
+scaled to fill the frame — scale 1 means native pixel size here) built in-test from
+`apps/e2e/fixtures/headless/source.mp4` and loaded through the documented integration
+API (`GET_STATE` for the imported source's id, then `LOAD_PROJECT`) — there is no app
+code for the benchmarks' sake:
 
 - **`preview-playback`** — 6 s of playback, first second discarded: rendered fps (counted
   by wrapping `requestAnimationFrame`), long tasks, JS heap delta after a CDP-forced GC,

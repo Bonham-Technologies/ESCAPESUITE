@@ -27,19 +27,35 @@ export async function seedTextClip(page: ArtistScope): Promise<void> {
 /**
  * Open the export dialog. The project must already hold a clip — see
  * {@link seedTextClip}.
+ *
+ * Idempotent: calling it on an already-open dialog leaves it open rather than
+ * clicking "Export video" a second time. Callers that export more than once in
+ * a row (the perf benchmarks) would otherwise have to track dialog state
+ * themselves.
  */
 export async function openExportDialog(page: ArtistScope): Promise<void> {
-  const exportButton = page.getByRole('button', { name: 'Export video' })
-  await expect(exportButton).toBeEnabled()
-  await exportButton.click()
-  await expect(page.getByRole('heading', { name: 'Export Video' })).toBeVisible()
+  const heading = page.getByRole('heading', { name: 'Export Video' })
+  if (!(await heading.isVisible())) {
+    const exportButton = page.getByRole('button', { name: 'Export video' })
+    await expect(exportButton).toBeEnabled()
+    await exportButton.click()
+  }
+  await expect(heading).toBeVisible()
 }
 
 /**
  * Reveal the export dialog's format / quality / resolution controls, which sit
  * behind an "Advanced options" disclosure.
+ *
+ * Idempotent, and for a sharper reason than tidiness: the dialog stays mounted
+ * when it closes, so its disclosure state survives into the next open. A blind
+ * click would then *collapse* the controls the caller asked to see. The
+ * disclosure publishes `aria-expanded`, so ask it.
  */
 export async function openExportAdvancedOptions(page: ArtistScope): Promise<void> {
-  await page.getByRole('button', { name: 'Advanced options' }).click()
+  const disclosure = page.getByRole('button', { name: 'Advanced options' })
+  if ((await disclosure.getAttribute('aria-expanded')) !== 'true') {
+    await disclosure.click()
+  }
   await expect(page.getByRole('radio', { name: /WebM/ })).toBeVisible()
 }

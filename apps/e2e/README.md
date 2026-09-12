@@ -120,7 +120,7 @@ only, one worker, no retries, and fixed launch args
 (`--enable-precise-memory-info --disable-gpu --autoplay-policy=no-user-gesture-required`).
 It starts ESCAPEARTIST alone, on a strict port 5175.
 
-Both specs run against one deterministic 12-clip scene built by `utils/perf.ts`
+Both specs run against one deterministic 12-clip, 13-second scene built by `utils/perf.ts`
 from `fixtures/headless/source.mp4` and loaded through the documented integration
 API — the fixture is imported once through the media library's real file input,
 `GET_STATE` reports the id it was given, and `LOAD_PROJECT` installs a project
@@ -132,8 +132,12 @@ Everything else is measured from outside the page: `addInitScript` wrappers coun
 `Performance.getMetrics` and the `HeapProfiler.collectGarbage` that anchors every
 heap reading.
 
-Results land in `perf-results/` (gitignored); `scripts/perf-report.mjs` merges
-them with the headless kit's own report into `perf-report.json` at the repo root.
+`perf-results/` (gitignored) is emptied by the perf project's `globalSetup`
+before each run, so a benchmark that fails cannot leave last run's JSON behind
+for the report to present as current. `scripts/perf.mjs` — what root `pnpm perf`
+actually invokes — then runs both benchmark suites in sequence and **always**
+runs `scripts/perf-report.mjs`, which merges whatever exists with the headless
+kit's own report into `perf-report.json` at the repo root.
 Baseline numbers live in
 [docs/performance/2026-09-12-baseline.md](../../docs/performance/2026-09-12-baseline.md).
 

@@ -20,7 +20,8 @@ const REPO_ROOT = path.resolve(SERVICE_ROOT, '../..')
  *
  * `globalSetup` runs for every vitest invocation in this package, including the plain unit
  * suite (`test:run`), which never touches Chromium or the bundle and must not pay for this
- * build. `test:e2e` sets `HEADLESS_BUILD=1` specifically to opt in; everything else is a no-op.
+ * build. `test:e2e` and `test:perf` (the `src/perf.bench.test.ts` benchmark, which drives the
+ * same bundle) set `HEADLESS_BUILD=1` specifically to opt in; everything else is a no-op.
  */
 export default function setup(): void {
   if (process.env.HEADLESS_BUILD !== '1') return
