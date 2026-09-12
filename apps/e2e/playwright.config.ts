@@ -49,8 +49,11 @@ const crossBrowserResponsiveProjects = [
 
 export default defineConfig({
   testDir: './tests',
-  // Standalone and production-layout tests use separate configs
-  testIgnore: ['**/standalone/**', '**/production/**'],
+  // Standalone, production-layout and perf tests use separate configs. The perf
+  // benchmarks in particular must never run here: they assert nothing, they take
+  // minutes of real encoding, and a run under this config's parallel workers
+  // would publish numbers measured while other browsers fought it for the CPU.
+  testIgnore: ['**/standalone/**', '**/production/**', '**/perf/**'],
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,

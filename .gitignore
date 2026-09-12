@@ -35,6 +35,12 @@ playwright-report/
 test-results/
 playwright/.cache/
 
+# Performance benchmarks (pnpm perf) — measurements, not sources
+perf-report.json
+apps/e2e/perf-results/
+services/headless-artist/perf-report.json
+*.cpuprofile
+
 # Logs
 *.log
 npm-debug.log*

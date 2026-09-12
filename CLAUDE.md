@@ -166,7 +166,9 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   (`window.__renderProject` / `window.__renderProjectToFile` — see `apps/artist/CLAUDE.md`).
 - Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);
   `pack:kit` assembles and `npm pack`s it into `dist/escapesuite-headless-artist-<version>.tgz`;
-  `test:run` runs unit tests only (no browser); `test:e2e` runs the Chromium tests.
+  `test:run` runs unit tests only (no browser); `test:e2e` runs the Chromium tests;
+  `test:perf` runs just the render benchmark (`src/perf.chromium.test.ts`) and writes
+  `perf-report.json` beside the package.
 - Convention: tests named `*.chromium.test.ts` launch real headless Chromium against the
   ARTIST headless bundle, which `test/globalSetup.ts` builds ONCE per vitest run (gated by
   `HEADLESS_BUILD=1`, which only `test:e2e` sets — every other invocation is a no-op). They
@@ -204,6 +206,36 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.
+
+### Performance benchmarks
+
+`pnpm perf` measures, it does not assert. It runs the Chromium-only Playwright project in
+`apps/e2e/tests/perf/` (`playwright.perf.config.ts`: one worker, no retries, fixed launch
+args) and then the headless kit's `src/perf.chromium.test.ts`, and merges the results with
+`apps/e2e/scripts/perf-report.mjs` into `perf-report.json` at the repo root plus a Markdown
+table (appended to `$GITHUB_STEP_SUMMARY` in CI). All three outputs are gitignored.
+
+Three benchmarks, each run three times and reported as the median, all against **one
+deterministic 12-clip scene** built in-test from `apps/e2e/fixtures/headless/source.mp4`
+and loaded through the documented integration API (`GET_STATE` for the imported source's
+id, then `LOAD_PROJECT`) — there is no app code for the benchmarks' sake:
+
+- **`preview-playback`** — 6 s of playback, first second discarded: rendered fps (counted
+  by wrapping `requestAnimationFrame`), long tasks, JS heap delta after a CDP-forced GC,
+  and CDP `TaskDuration` / `LayoutCount` / `RecalcStyleCount`.
+- **`export-mp4` / `export-webm`** — one 720p export of the same scene through the export
+  dialog: wall time, frames encoded and encoder queue high-water (both from a wrapper on
+  `VideoEncoder.prototype.encode`), heap delta.
+- **`headless-kit-render`** — `services/headless-artist` rendering
+  `fixtures/headless/project.json`, Chromium launch included.
+
+CI runs them in a `perf` job that needs `build`, is `continue-on-error: true` and is
+deliberately **not** in `ci-status`'s `needs` — runner CPU varies, so a number moving is
+worth looking at and never worth blocking a merge on. It uploads `perf-report.json` (and
+any `*.cpuprofile`) as the `perf-report` artifact.
+
+Baseline numbers, the machine they came from and the launch args they used live in
+[docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md).
 
 ### Coverage policy
 
@@ -277,7 +309,7 @@ never above what the suite actually achieves:
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
-Eight jobs, with `ci-status` as the single required check:
+Nine jobs, with `ci-status` as the single required check (`perf` is informational and deliberately not one of its dependencies):
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
@@ -287,6 +319,7 @@ Eight jobs, with `ci-status` as the single required check:
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
 | `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes (E2E halves skipped for Dependabot) |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
+| `perf` | `pnpm perf` benchmarks; informational only, never gates | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
 | `ci-status` | Summary/gate job | All PRs |
 

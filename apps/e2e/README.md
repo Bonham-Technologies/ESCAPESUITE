@@ -24,6 +24,7 @@ pnpm test:journeys       # Run user journey tests
 pnpm test:journeys:headed # Journey tests with visible browser
 pnpm test:standalone     # Offline single-file builds (needs pnpm build:standalone)
 pnpm test:production     # Production single-origin layout (needs pnpm build:deploy)
+pnpm test:perf           # Performance benchmarks (prefer `pnpm perf` from the root)
 ```
 
 ## Test Structure
@@ -52,6 +53,9 @@ tests/
 │   └── artist.spec.ts       # ESCAPEARTIST offline build
 ├── production/              # Combined single-origin build tests
 │   └── indexeddb-sharing.spec.ts # Cross-app IndexedDB (CRAFT ⇄ ARTIST)
+├── perf/                    # Performance benchmarks (measure, never assert)
+│   ├── preview-playback.spec.ts
+│   └── export.spec.ts
 └── journeys/                # User journey tests
     └── 01-record-edit-export.spec.ts
 ```
@@ -100,6 +104,39 @@ That tiny zero-dependency server mirrors `vercel.json`'s rewrites; `npx serve`
 cannot — `serve -s` sends `/craft/` and `/artist/` to the ROOT `index.html`, and
 a `serve` config with rewrites fixes those two but then 404s on `/`.
 
+## Performance Benchmarks
+
+`tests/perf/` measures; it asserts nothing. A CPU-speed threshold would fail on a
+slow runner and pass on a fast one regardless of the code, so a regression shows
+up as a number in `perf-report.json`, not as a red test.
+
+```bash
+pnpm perf                # from the monorepo root — both benchmarks, the kit's, and the merged report
+pnpm test:perf           # from this directory — the browser benchmarks alone
+```
+
+`playwright.perf.config.ts` is deliberately unlike the other configs: Chromium
+only, one worker, no retries, and fixed launch args
+(`--enable-precise-memory-info --disable-gpu --autoplay-policy=no-user-gesture-required`).
+It starts ESCAPEARTIST alone, on a strict port 5175.
+
+Both specs run against one deterministic 12-clip scene built by `utils/perf.ts`
+from `fixtures/headless/source.mp4` and loaded through the documented integration
+API — the fixture is imported once through the media library's real file input,
+`GET_STATE` reports the id it was given, and `LOAD_PROJECT` installs a project
+whose 14 clips reference it. Nothing was added to the apps to make this possible.
+
+Everything else is measured from outside the page: `addInitScript` wrappers count
+`requestAnimationFrame` callbacks and `VideoEncoder.prototype.encode` calls, a
+`PerformanceObserver` collects long tasks, and a CDP session supplies
+`Performance.getMetrics` and the `HeapProfiler.collectGarbage` that anchors every
+heap reading.
+
+Results land in `perf-results/` (gitignored); `scripts/perf-report.mjs` merges
+them with the headless kit's own report into `perf-report.json` at the repo root.
+Baseline numbers live in
+[docs/performance/2026-09-12-baseline.md](../../docs/performance/2026-09-12-baseline.md).
+
 ## Test Utilities
 
 The `utils/` directory provides reusable testing utilities:
@@ -110,6 +147,7 @@ The `utils/` directory provides reusable testing utilities:
 | `error-mocks.ts` | Permission denial, offline/slow network, codec failures |
 | `indexeddb.ts` | IndexedDB management |
 | `media-mocks.ts` | Inert media stubs plus `mockSyntheticMedia` (real canvas/audio streams) |
+| `perf.ts` | The benchmark scene, the measured windows, and the result JSON |
 | `viewports.ts` | Shared viewport sizes |
 
 There are no auth, billing or licensing utilities: the apps have no accounts,
@@ -132,6 +170,8 @@ The CI workflow is optimized to balance thoroughness with speed:
 - Playwright browsers are cached to speed up runs
 - Concurrent runs are cancelled when new commits are pushed
 - E2E is skipped for Dependabot PRs
+- The `perf` job runs `pnpm perf` separately. It is `continue-on-error: true` and
+  is not one of `ci-status`'s dependencies — it publishes numbers, it never gates
 
 ### CI Optimizations
 | Optimization | Benefit |

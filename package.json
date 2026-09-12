@@ -27,6 +27,7 @@
     "test:e2e:browsers:all": "pnpm --filter=@escapesuite/e2e run test:browsers:all",
     "test:e2e:standalone": "pnpm --filter=@escapesuite/e2e run test:standalone",
     "test:e2e:production": "pnpm --filter=@escapesuite/e2e run test:production",
+    "perf": "pnpm --filter @escapesuite/e2e run test:perf && pnpm --filter @escapesuite/headless-artist run test:perf && node apps/e2e/scripts/perf-report.mjs",
     "clean": "turbo clean && rm -rf node_modules && rm -rf dist",
     "changeset": "changeset",
     "changeset:version": "changeset version",
