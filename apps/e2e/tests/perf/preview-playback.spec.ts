@@ -1,5 +1,6 @@
 import { test } from '@playwright/test'
 import {
+  PERF_PROFILE,
   PERF_RUNS,
   PLAYBACK_SECONDS,
   PLAYBACK_WARMUP_SECONDS,
@@ -62,5 +63,14 @@ test.describe('perf: preview playback', () => {
     // Visible in the Playwright log, so a run tells you its numbers without
     // opening the merged report.
     console.log('preview-playback runs:', JSON.stringify(measurements))
+
+    // `PERF_PROFILE=1` adds a fourth, profiled window whose measurement is
+    // thrown away. The sampler perturbs the very timing the medians above
+    // report, so it must not be one of the three — it is an extra run that
+    // exists only to produce `perf-results/preview.cpuprofile`.
+    if (PERF_PROFILE) {
+      await page.getByTitle('Go to start (Home)').click()
+      await measurePlayback(page, cdp, PLAYBACK_SECONDS, 'preview')
+    }
   })
 })

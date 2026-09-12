@@ -86,6 +86,70 @@ export function writePerfResult(result: PerfBenchmark): void {
 }
 
 // ---------------------------------------------------------------------------
+// CPU profiling (opt-in)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether this run should also record CPU profiles (`PERF_PROFILE=1`).
+ *
+ * Off by default, and deliberately so: the sampler perturbs exactly the timing
+ * the benchmarks exist to report. A profiled run is therefore an *extra* run
+ * whose measurement is thrown away — the medians in `perf-report.json` are
+ * always taken from unprofiled windows.
+ */
+export const PERF_PROFILE = process.env.PERF_PROFILE === '1'
+
+/**
+ * Sampling interval in microseconds. 100 µs (10 kHz) rather than the 1 ms
+ * default: a preview frame at 50 fps is 20 ms of wall time spread over a dozen
+ * short calls, and at 1 ms a function costing 0.5 ms per frame can miss the
+ * sampler entirely.
+ */
+const PROFILE_SAMPLING_INTERVAL_US = 100
+
+/**
+ * Run `body` with the renderer's sampling profiler on, writing the raw
+ * `.cpuprofile` to `perf-results/<name>.cpuprofile`.
+ *
+ * The file is the profiler's own JSON — `{nodes, startTime, endTime, samples,
+ * timeDeltas}` — exactly what `Profiler.stop` returns, so it opens in Chrome
+ * DevTools' Performance panel as-is and `scripts/profile-top.mjs` reads it
+ * without a parser of our own.
+ *
+ * This is the page's main thread only. The MP4 export decodes in a Web Worker,
+ * which has its own isolate and does not appear here; what it costs shows up
+ * only as main-thread idle while it works.
+ *
+ * With no `name`, `body` runs untouched and the profiler is never enabled — so
+ * every call site can pass a name conditionally instead of branching.
+ */
+export async function withCpuProfile<T>(
+  cdp: CDPSession,
+  name: string | undefined,
+  body: () => Promise<T>
+): Promise<T> {
+  if (!name) return body()
+
+  await cdp.send('Profiler.enable')
+  await cdp.send('Profiler.setSamplingInterval', { interval: PROFILE_SAMPLING_INTERVAL_US })
+  await cdp.send('Profiler.start')
+  try {
+    return await body()
+  } finally {
+    // Stopping and writing must not mask a failure from `body`, so every step
+    // here swallows its own error and says so instead of throwing.
+    try {
+      const { profile } = await cdp.send('Profiler.stop')
+      await cdp.send('Profiler.disable')
+      mkdirSync(PERF_RESULTS_DIR, { recursive: true })
+      writeFileSync(path.join(PERF_RESULTS_DIR, `${name}.cpuprofile`), JSON.stringify(profile))
+    } catch (error) {
+      console.warn(`perf: could not write ${name}.cpuprofile —`, error)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // In-page instrumentation
 // ---------------------------------------------------------------------------
 
@@ -494,8 +558,11 @@ export async function loadPerfScene(page: Page): Promise<void> {
   // and white text) are drawn whether or not a single video frame has decoded,
   // so "not all black" would pass on an empty preview. The fixture is a solid
   // red frame (see fixtures/headless/make-fixture.md) filling a full-frame V1
-  // clip, and a 4:3 source letterboxed into a 16:9 canvas covers ~75% of it —
-  // so a quarter of the pixels reading red means real decoded video is on screen.
+  // clip: FULL_FRAME_SCALE sizes the 4:3 source to the canvas *width*, so it
+  // covers the 16:9 frame edge to edge and is cropped top and bottom rather
+  // than letterboxed. Red should therefore be most of the frame — the overlays
+  // and the PiP box take a slice — and a quarter of the pixels is a deliberately
+  // slack threshold for "real decoded video is on screen".
   await page.waitForFunction(
     ([width, height]) => {
       const canvas = document.querySelector<HTMLCanvasElement>(
@@ -539,6 +606,10 @@ export interface PlaybackMeasurement {
 /**
  * Play the loaded scene and measure one window.
  *
+ * With a `profileName`, the window is recorded as
+ * `perf-results/<profileName>.cpuprofile` (see {@link withCpuProfile}); the
+ * measurement it returns is then profiler-skewed and should be discarded.
+ *
  * `seconds` is the whole press-play-to-pause span; the first
  * {@link PLAYBACK_WARMUP_SECONDS} of it are discarded, because the first frames
  * after play pay for seeking every source and warming the frame cache. The GC
@@ -548,7 +619,8 @@ export interface PlaybackMeasurement {
 export async function measurePlayback(
   page: Page,
   cdp: CDPSession,
-  seconds: number = PLAYBACK_SECONDS
+  seconds: number = PLAYBACK_SECONDS,
+  profileName?: string
 ): Promise<PlaybackMeasurement> {
   const windowSeconds = seconds - PLAYBACK_WARMUP_SECONDS
 
@@ -565,7 +637,7 @@ export async function measurePlayback(
     now: performance.now(),
   }))
 
-  await page.waitForTimeout(windowSeconds * 1000)
+  await withCpuProfile(cdp, profileName, () => page.waitForTimeout(windowSeconds * 1000))
 
   const cdpEnd = await readCdpMetrics(cdp)
   const end = await page.evaluate((windowStart: number) => {
@@ -625,6 +697,10 @@ export interface ExportMeasurement {
 /**
  * Export the loaded scene at 720p and measure one window.
  *
+ * With a `profileName`, the click-to-file span is recorded as
+ * `perf-results/<profileName>.cpuprofile` (see {@link withCpuProfile}); the
+ * measurement it returns is then profiler-skewed and should be discarded.
+ *
  * Wall time is the span from the click that starts the encode to the browser
  * handing over the finished file — the whole user-visible export, prepare and
  * mux included, not just the frame loop.
@@ -632,7 +708,8 @@ export interface ExportMeasurement {
 export async function measureExport(
   page: Page,
   cdp: CDPSession,
-  format: 'mp4' | 'webm'
+  format: 'mp4' | 'webm',
+  profileName?: string
 ): Promise<ExportMeasurement> {
   // The same helpers the ESCAPEARTIST specs drive the dialog with — the
   // benchmark measures the export a test would trigger, not a private
@@ -650,13 +727,15 @@ export async function measureExport(
   await page.evaluate(() => window.__perfReset())
   const heapStart = await readHeapAfterGc(page, cdp)
 
-  const downloadPromise = page.waitForEvent('download', { timeout: 600_000 })
   const startedAt = Date.now()
-  await page
-    .getByRole('button', { name: format === 'mp4' ? 'Download MP4' : 'Download WebM' })
-    .last()
-    .click()
-  const download: Download = await downloadPromise
+  const download: Download = await withCpuProfile(cdp, profileName, async () => {
+    const downloadPromise = page.waitForEvent('download', { timeout: 600_000 })
+    await page
+      .getByRole('button', { name: format === 'mp4' ? 'Download MP4' : 'Download WebM' })
+      .last()
+      .click()
+    return downloadPromise
+  })
   const wallMs = Date.now() - startedAt
 
   const counters = await page.evaluate(() => ({

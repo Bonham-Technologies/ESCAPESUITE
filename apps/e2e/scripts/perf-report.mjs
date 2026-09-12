@@ -4,6 +4,7 @@
  *
  * Inputs, all optional — a benchmark that did not run is simply absent:
  *   apps/e2e/perf-results/*.json          (one file per browser benchmark)
+ *   apps/e2e/perf-results/*.cpuprofile    (only when PERF_PROFILE=1 was set)
  *   services/headless-artist/perf-report.json
  *
  * Outputs:
@@ -21,6 +22,7 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readProfile, renderProfileMarkdown, summariseProfile } from './profile-top.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const E2E_ROOT = path.resolve(HERE, '..')
@@ -92,6 +94,46 @@ function collect() {
   })
 }
 
+/** `.cpuprofile` basename → how the report heads its section. */
+const PROFILE_LABELS = {
+  preview: 'Preview playback',
+  'export-mp4': 'MP4 export',
+  'export-webm': 'WebM export',
+}
+
+/** Order profile sections appear in, whichever of them exist. */
+const PROFILE_ORDER = ['preview', 'export-mp4', 'export-webm']
+
+/**
+ * Read whatever `.cpuprofile` files this run produced.
+ *
+ * Absent unless `PERF_PROFILE=1` was set — an ordinary `pnpm perf` writes none,
+ * and the report simply has no profile section. `perf-results/` is emptied at
+ * the start of every run, so a profile found here is always this run's.
+ */
+function collectProfiles() {
+  let files = []
+  try {
+    files = readdirSync(BROWSER_RESULTS_DIR).filter((name) => name.endsWith('.cpuprofile'))
+  } catch {
+    return []
+  }
+
+  const rank = (name) => {
+    const index = PROFILE_ORDER.indexOf(name)
+    return index === -1 ? PROFILE_ORDER.length : index
+  }
+
+  return files
+    .map((file) => {
+      const name = path.basename(file, '.cpuprofile')
+      const profile = readProfile(path.join(BROWSER_RESULTS_DIR, file))
+      return profile ? { name, label: PROFILE_LABELS[name] ?? name, profile } : null
+    })
+    .filter(Boolean)
+    .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
+}
+
 function formatBytes(value) {
   const sign = value < 0 ? '-' : ''
   const abs = Math.abs(value)
@@ -120,10 +162,10 @@ function headline(benchmark) {
   return '—'
 }
 
-function toMarkdown(benchmarks) {
+function toMarkdown(benchmarks, profiles) {
   const lines = ['## Performance benchmarks', '']
 
-  if (benchmarks.length === 0) {
+  if (benchmarks.length === 0 && profiles.length === 0) {
     lines.push('_No benchmark results were produced._', '')
     return lines.join('\n')
   }
@@ -147,17 +189,55 @@ function toMarkdown(benchmarks) {
     }
   }
 
+  if (profiles.length > 0) {
+    lines.push(
+      '',
+      '## CPU profiles',
+      '',
+      '_Recorded on an extra, profiled run (`PERF_PROFILE=1`) whose measurement is discarded —',
+      'the medians above are taken from unprofiled windows. Main thread only: the MP4 export\'s',
+      'decode worker has its own isolate and does not appear._',
+      ''
+    )
+    for (const { label, profile } of profiles) {
+      lines.push(renderProfileMarkdown(label, profile))
+    }
+  }
+
   lines.push('')
   return lines.join('\n')
 }
 
+/** The profile numbers that belong in `perf-report.json`, without the samples. */
+function profileSummary({ name, label, profile }) {
+  const summary = summariseProfile(profile)
+  const row = (stat) => ({
+    name: stat.name,
+    url: stat.url,
+    line: stat.line,
+    selfMs: Math.round(stat.self / 100) / 10,
+    totalMs: Math.round(stat.total / 100) / 10,
+  })
+  return {
+    name,
+    label,
+    windowMs: Math.round(summary.measuredUs / 100) / 10,
+    jsSelfMs: Math.round(summary.codeSelfUs / 100) / 10,
+    topSelf: summary.code.slice(0, 25).map(row),
+    topAppCodeTotal: summary.appCode.slice(0, 15).map(row),
+    synthetic: summary.synthetic.map(row),
+  }
+}
+
 function main() {
   const benchmarks = collect()
+  const profiles = collectProfiles()
   const report = {
     generatedAt: new Date().toISOString(),
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
     benchmarks,
+    ...(profiles.length > 0 ? { profiles: profiles.map(profileSummary) } : {}),
   }
 
   try {
@@ -167,7 +247,7 @@ function main() {
     warn(`could not write ${path.relative(REPO_ROOT, OUTPUT)} — ${error.message}`)
   }
 
-  const markdown = toMarkdown(benchmarks)
+  const markdown = toMarkdown(benchmarks, profiles)
   process.stdout.write(markdown + '\n')
 
   const summary = process.env.GITHUB_STEP_SUMMARY

@@ -243,8 +243,16 @@ deliberately **not** in `ci-status`'s `needs` — runner CPU varies, so a number
 worth looking at and never worth blocking a merge on. It uploads `perf-report.json` (and
 any `*.cpuprofile`) as the `perf-report` artifact.
 
+`PERF_PROFILE=1 pnpm perf` additionally records a CPU profile of each browser benchmark —
+on a **fourth, discarded run**, so the medians stay unprofiled — into
+`apps/e2e/perf-results/*.cpuprofile`, which `apps/e2e/scripts/profile-top.mjs` turns into
+top-by-self-time and top-app-code-by-total-time tables (also embedded in `perf-report.json`
+when the profiles exist).
+
 Baseline numbers, the machine they came from and the launch args they used live in
-[docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md).
+[docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md); the
+hotspot analysis those profiles produced, and the ranked fix list it argues for, in
+[docs/performance/2026-09-12-profile.md](docs/performance/2026-09-12-profile.md).
 
 **Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
 Four ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,

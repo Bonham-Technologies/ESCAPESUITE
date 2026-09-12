@@ -1,5 +1,6 @@
 import { test } from '@playwright/test'
 import {
+  PERF_PROFILE,
   PERF_RUNS,
   SCENE_CLIP_COUNT,
   SCENE_TRACK_COUNT,
@@ -57,6 +58,13 @@ for (const format of FORMATS) {
       })
 
       console.log(`export-${format} runs:`, JSON.stringify(measurements))
+
+      // `PERF_PROFILE=1` adds a fourth, profiled export whose measurement is
+      // thrown away — see the note in `preview-playback.spec.ts`. It writes
+      // `perf-results/export-${format}.cpuprofile`.
+      if (PERF_PROFILE) {
+        await measureExport(page, cdp, format, `export-${format}`)
+      }
     })
   })
 }
