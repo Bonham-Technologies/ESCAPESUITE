@@ -7,7 +7,7 @@
 // mocked out at the module level.
 //
 // Adapted from apps/craft/src/test/doubles/canvas.ts, extended with the
-// path/text/transform surface ESCAPEARTIST's canvasUtils and thumbnail
+// path/text/transform surface ESCAPEARTIST's canvas renderer and thumbnail
 // generators use.
 import { vi } from 'vitest'
 
