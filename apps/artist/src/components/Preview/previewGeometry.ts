@@ -103,9 +103,13 @@ export function getOverlayBounds(
 
     const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
     const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
+    // The context is the preview's own, and the next frame draws through it:
+    // the measuring font has to come back off again.
+    ctx.save();
     ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
     const lines = textData.text.split('\n');
     const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+    ctx.restore();
     const lineHeight = textData.fontSize * 1.2;
     const totalHeight = lines.length * lineHeight;
     const textWidth = maxLineWidth * scale;
