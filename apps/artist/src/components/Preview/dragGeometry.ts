@@ -210,18 +210,13 @@ export function textClipAtPoint(
     const bounds = geometry.getOverlayBounds(clip, canvas, currentTime, sourceVideos);
     if (!bounds) continue;
 
-    const { centerX, centerY, width, height, rotation } = bounds;
-    const halfW = width / 2;
-    const halfH = height / 2;
+    const halfW = bounds.width / 2;
+    const halfH = bounds.height / 2;
 
     // Transform mouse into local space (accounting for rotation)
-    const rad = (-rotation * Math.PI) / 180;
-    const dx = mouseX - centerX;
-    const dy = mouseY - centerY;
-    const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-    const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+    const local = geometry.toLocalPoint(bounds, mouseX, mouseY);
 
-    if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
+    if (Math.abs(local.x) <= halfW && Math.abs(local.y) <= halfH) {
       return clip;
     }
   }

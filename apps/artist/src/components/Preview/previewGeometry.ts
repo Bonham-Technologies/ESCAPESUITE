@@ -196,6 +196,24 @@ export function hasCustomKeyframes(clip: Clip): boolean {
 }
 
 /**
+ * A point in canvas pixels, expressed in a clip's own unrotated frame.
+ *
+ * Every box on the preview is axis-aligned before its rotation is applied, so
+ * a hit test rotates the point backwards around the box's centre rather than
+ * rotating the box's four corners forwards. `x`/`y` are then offsets from the
+ * centre, and a point is inside the box when both are within its half extents.
+ */
+export function toLocalPoint(bounds: OverlayBounds, x: number, y: number): { x: number; y: number } {
+  const rad = (-bounds.rotation * Math.PI) / 180;
+  const dx = x - bounds.centerX;
+  const dy = y - bounds.centerY;
+  return {
+    x: dx * Math.cos(rad) - dy * Math.sin(rad),
+    y: dx * Math.sin(rad) + dy * Math.cos(rad),
+  };
+}
+
+/**
  * Where the canvas' drawn content sits inside the element that shows it.
  *
  * The preview canvas is laid out with `object-fit: contain`, so the drawing is

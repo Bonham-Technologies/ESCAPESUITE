@@ -8,6 +8,7 @@ import {
   getOverlayBounds,
   hasCustomKeyframes,
   isManipulableClip,
+  toLocalPoint,
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
 } from './previewGeometry';
@@ -45,22 +46,17 @@ export function hitTestHandles(
       if (currentTime >= selectedClip.timelinePosition && currentTime < clipEnd) {
         const bounds = getOverlayBounds(selectedClip, canvas, currentTime, sourceVideos);
         if (bounds) {
-          const { centerX, centerY, width, height, rotation } = bounds;
-          const halfW = width / 2;
-          const halfH = height / 2;
+          const halfW = bounds.width / 2;
+          const halfH = bounds.height / 2;
 
-          const rad = (-rotation * Math.PI) / 180;
-          const dx = mouseX - centerX;
-          const dy = mouseY - centerY;
-          const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-          const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+          const local = toLocalPoint(bounds, mouseX, mouseY);
 
           const handleHitSize = HANDLE_SIZE * 1.5;
           const edgeHitSize = HANDLE_SIZE * 1.2; // Narrower zone for edge detection
 
           // Check rotation handle
           const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
-          if (Math.abs(localX) < handleHitSize && Math.abs(localY - rotationHandleY) < handleHitSize) {
+          if (Math.abs(local.x) < handleHitSize && Math.abs(local.y - rotationHandleY) < handleHitSize) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'rotate' };
           }
 
@@ -72,31 +68,31 @@ export function hitTestHandles(
             { x: halfW, y: halfH, mode: 'resize-se' },
           ];
           for (const corner of corners) {
-            if (Math.abs(localX - corner.x) < handleHitSize && Math.abs(localY - corner.y) < handleHitSize) {
+            if (Math.abs(local.x - corner.x) < handleHitSize && Math.abs(local.y - corner.y) < handleHitSize) {
               return { clipId: selectedClipId, clipType: selectedClipType, mode: corner.mode };
             }
           }
 
           // Check edges — entire edge is a hit zone, not just the midpoint handle
           // Top edge: along the full width, near the top border
-          if (Math.abs(localY - (-halfH)) < edgeHitSize && Math.abs(localX) <= halfW) {
+          if (Math.abs(local.y - (-halfH)) < edgeHitSize && Math.abs(local.x) <= halfW) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-n' };
           }
           // Bottom edge
-          if (Math.abs(localY - halfH) < edgeHitSize && Math.abs(localX) <= halfW) {
+          if (Math.abs(local.y - halfH) < edgeHitSize && Math.abs(local.x) <= halfW) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-s' };
           }
           // Left edge
-          if (Math.abs(localX - (-halfW)) < edgeHitSize && Math.abs(localY) <= halfH) {
+          if (Math.abs(local.x - (-halfW)) < edgeHitSize && Math.abs(local.y) <= halfH) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-w' };
           }
           // Right edge
-          if (Math.abs(localX - halfW) < edgeHitSize && Math.abs(localY) <= halfH) {
+          if (Math.abs(local.x - halfW) < edgeHitSize && Math.abs(local.y) <= halfH) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-e' };
           }
 
           // Check body for move
-          if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
+          if (Math.abs(local.x) <= halfW && Math.abs(local.y) <= halfH) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'move' };
           }
         }
@@ -133,22 +129,17 @@ export function hitTestHandles(
       if (currentTime >= selectedClip.timelinePosition && currentTime < clipEnd) {
         const bounds = getOverlayBounds(selectedClip, canvas, currentTime, sourceVideos);
         if (bounds) {
-          const { centerX, centerY, width, height, rotation } = bounds;
-          const halfW = width / 2;
-          const halfH = height / 2;
+          const halfW = bounds.width / 2;
+          const halfH = bounds.height / 2;
 
-          const rad = (-rotation * Math.PI) / 180;
-          const dx = mouseX - centerX;
-          const dy = mouseY - centerY;
-          const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-          const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+          const local = toLocalPoint(bounds, mouseX, mouseY);
 
           const handleHitSize = HANDLE_SIZE * 1.5;
           const edgeHitSize = HANDLE_SIZE * 1.2;
 
           // Check rotation handle
           const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
-          if (Math.abs(localX) < handleHitSize && Math.abs(localY - rotationHandleY) < handleHitSize) {
+          if (Math.abs(local.x) < handleHitSize && Math.abs(local.y - rotationHandleY) < handleHitSize) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'rotate' };
           }
 
@@ -160,22 +151,22 @@ export function hitTestHandles(
             { x: halfW, y: halfH, mode: 'resize-se' },
           ];
           for (const corner of corners) {
-            if (Math.abs(localX - corner.x) < handleHitSize && Math.abs(localY - corner.y) < handleHitSize) {
+            if (Math.abs(local.x - corner.x) < handleHitSize && Math.abs(local.y - corner.y) < handleHitSize) {
               return { clipId: selectedClipId, clipType: selectedClipType, mode: corner.mode };
             }
           }
 
           // Check edges — entire edge is a hit zone
-          if (Math.abs(localY - (-halfH)) < edgeHitSize && Math.abs(localX) <= halfW) {
+          if (Math.abs(local.y - (-halfH)) < edgeHitSize && Math.abs(local.x) <= halfW) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-n' };
           }
-          if (Math.abs(localY - halfH) < edgeHitSize && Math.abs(localX) <= halfW) {
+          if (Math.abs(local.y - halfH) < edgeHitSize && Math.abs(local.x) <= halfW) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-s' };
           }
-          if (Math.abs(localX - (-halfW)) < edgeHitSize && Math.abs(localY) <= halfH) {
+          if (Math.abs(local.x - (-halfW)) < edgeHitSize && Math.abs(local.y) <= halfH) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-w' };
           }
-          if (Math.abs(localX - halfW) < edgeHitSize && Math.abs(localY) <= halfH) {
+          if (Math.abs(local.x - halfW) < edgeHitSize && Math.abs(local.y) <= halfH) {
             return { clipId: selectedClipId, clipType: selectedClipType, mode: 'resize-e' };
           }
         }
@@ -195,17 +186,12 @@ export function hitTestHandles(
     const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos);
     if (!bounds) continue;
 
-    const { centerX, centerY, width, height, rotation } = bounds;
-    const halfW = width / 2;
-    const halfH = height / 2;
+    const halfW = bounds.width / 2;
+    const halfH = bounds.height / 2;
 
-    const rad = (-rotation * Math.PI) / 180;
-    const dx = mouseX - centerX;
-    const dy = mouseY - centerY;
-    const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-    const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+    const local = toLocalPoint(bounds, mouseX, mouseY);
 
-    if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
+    if (Math.abs(local.x) <= halfW && Math.abs(local.y) <= halfH) {
       return { clipId: clip.id, clipType, mode: 'move' };
     }
   }
