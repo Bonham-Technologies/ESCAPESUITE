@@ -3,7 +3,7 @@
 
 import type { Clip, TextOverlayData, ShapeOverlayData, TransitionType } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
-import { getAnimatedValues, getAnimatedValuesCached } from '../utils/animation';
+import { getAnimatedValues } from '../utils/animation';
 import type {
   DrawableMediaSource,
   MediaDrawOptions,
@@ -16,25 +16,14 @@ import { blendModeToCanvas, getSourceDimensions } from './exportTypes';
 /**
  * The animated transform/effect values of a clip at one instant.
  *
- * Exports go through the memo cache — a frame is drawn once and the same clip
- * time never comes round again. A live preview asks for `uncachedAnimation`
- * instead: it redraws the same clip at the same time after every edit, and the
- * cache is keyed by time alone.
+ * Always computed. There used to be a memo cache here keyed by clip id and
+ * clip time, but an export draws each clip time exactly once, so the key never
+ * came round again and the cache was pure overhead; a preview redraws the same
+ * clip at the same time after every edit, so it could not use the cache at all
+ * without showing pre-edit values.
  */
-function animatedValuesFor(clip: Clip, clipTime: number, options?: MediaDrawOptions) {
-  if (options?.uncachedAnimation) {
-    return getAnimatedValues(
-      clipTime,
-      clip.duration,
-      clip.animation,
-      clip.transform || DEFAULT_TRANSFORM,
-      clip.effects || DEFAULT_EFFECTS
-    );
-  }
-
-  const cacheKey = `${clip.id}:${clipTime.toFixed(3)}`;
-  return getAnimatedValuesCached(
-    cacheKey,
+function animatedValuesFor(clip: Clip, clipTime: number) {
+  return getAnimatedValues(
     clipTime,
     clip.duration,
     clip.animation,
@@ -344,7 +333,7 @@ export function drawClipToCanvas(
   options?: MediaDrawOptions
 ) {
   // Get animated values - this applies presets and custom keyframes
-  const animated = animatedValuesFor(clip, clipTime, options);
+  const animated = animatedValuesFor(clip, clipTime);
 
   // Save context state
   ctx.save();
@@ -471,7 +460,7 @@ export function drawImageToCanvasWithModifiers(
   options?: MediaDrawOptions
 ) {
   // Get animated values - this applies presets and custom keyframes
-  const animated = animatedValuesFor(clip, clipTime, options);
+  const animated = animatedValuesFor(clip, clipTime);
 
   ctx.save();
 

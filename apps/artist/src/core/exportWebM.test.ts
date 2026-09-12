@@ -8,7 +8,6 @@ import { exportToWebM } from './exportWebM'
 import { ExportAbortedError } from './exportTypes'
 import { extractAndMixAudioWithWorker } from './audioMixer'
 import { storeVideo } from './storage'
-import { clearAnimationCache } from '../utils/animation'
 import {
   getMediabunnyState,
   lastMediabunnyOutput,
@@ -100,7 +99,6 @@ const ctx = () => getLastCanvasContext() as RecordingCanvasRenderingContext2D
 
 beforeEach(async () => {
   resetMediabunnyDouble()
-  clearAnimationCache()
   mixAudio.mockReset()
   mixAudio.mockResolvedValue(null)
   installCanvasDouble()
@@ -119,7 +117,6 @@ afterEach(() => {
   uninstallCanvasDouble()
   warns.mockRestore()
   errors.mockRestore()
-  clearAnimationCache()
 })
 
 describe('exportToWebM preconditions', () => {

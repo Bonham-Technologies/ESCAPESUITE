@@ -274,9 +274,8 @@ a ceiling here and a millisecond figure there describe the same work.
 in a comment beside it. Conservation laws (frames created == closed, one encode per frame,
 balanced save/restore, one composite per animation frame) are asserted exactly. When a fix
 lands, re-measure and lower the ceiling; never raise one without saying, in the PR, why the
-new cost is correct.** Two of the tests currently pin a *finding* rather than a target —
-the export's animation memo cache never hits, and the compositor's PiP overlay restores once
-more than it saves — and each says so, with the assertion to flip when it is fixed.
+new cost is correct.** A test that pins a *finding* rather than a target says so in its
+comment, with the assertion to flip when the finding is fixed.
 
 ### Coverage policy
 

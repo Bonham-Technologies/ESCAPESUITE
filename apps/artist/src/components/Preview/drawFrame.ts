@@ -28,15 +28,11 @@ import type { ProjectSize } from './types';
 /**
  * How the preview draws media clips, as against how an export does.
  *
- * `uncachedAnimation`: the export memo cache is keyed by clip id and clip time
- * and only cleared when an export starts, so an editor that redraws the same
- * clip at the same time after every edit would keep drawing pre-edit values.
  * `quiet`: media that is not ready yet is ordinary mid-scrub, and this frame
  * is redrawn sixty times a second — the exporter's one-off warning would be a
  * console flood here.
  */
 export const PREVIEW_DRAW_OPTIONS: MediaDrawOptions = {
-  uncachedAnimation: true,
   quiet: true,
 };
 

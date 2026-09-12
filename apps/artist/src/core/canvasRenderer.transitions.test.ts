@@ -4,7 +4,6 @@
 // offset, at a given progress.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { drawTransition, drawTransitionWithFrames } from './canvasRenderer'
-import { clearAnimationCache } from '../utils/animation'
 import {
   createRecordingContext,
   type RecordingCanvasRenderingContext2D,
@@ -13,7 +12,7 @@ import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/m
 import { VideoFrameDouble, resetFrameRegistry } from '../test/doubles/webcodecs'
 import { makeClip } from '../test/fixtures/exportPipeline'
 import type { Clip, TransitionType } from '../store/types'
-import type { DrawableMediaSource, TransitionInfo } from './exportTypes'
+import type { DrawableMediaSource, MediaDrawOptions, TransitionInfo } from './exportTypes'
 
 const W = 1920
 const H = 1080
@@ -47,7 +46,6 @@ let media: MediaDoubles
 const asCtx = () => ctx as unknown as CanvasRenderingContext2D
 
 beforeEach(() => {
-  clearAnimationCache()
   resetFrameRegistry()
   ctx = createRecordingContext()
   media = installMediaElementDoubles()
@@ -55,7 +53,6 @@ beforeEach(() => {
 
 afterEach(() => {
   media.uninstall()
-  clearAnimationCache()
 })
 
 function video(width: number, height: number, readyState = 4): HTMLVideoElement {
@@ -202,52 +199,49 @@ describe('drawTransition', () => {
   })
 
   /**
-   * The same transition drawn twice with a scale edit between, at the same clip
-   * ids and times. uncachedAnimation is the observable draw option: with it
-   * set, the second draw re-reads the transform instead of the export's memo
-   * cache, so a side that received the option redraws at the new size. Returns
-   * the width of every drawImage, in order.
+   * A transition between two blurred clips, drawn at a raster scale.
+   * `filterScale` is the observable draw option: `ctx.filter` lengths are
+   * pixels of the output bitmap and ignore the current transform, so a side
+   * that received the option blurs by the scaled amount. The two clips blur by
+   * different amounts, so the recorded filters say which side got it. Returns
+   * the filter at every drawImage, in order.
    */
-  const drawTwiceAcrossAnEdit = (type: TransitionType, progress: number) => {
-    const scaled = (scale: number): TransitionInfo => ({
-      outgoingClip: {
-        ...outgoingClip,
-        transform: { x: 0.5, y: 0.5, scaleX: scale, scaleY: scale, rotation: 0, opacity: 1 },
-      },
-      incomingClip: {
-        ...incomingClip,
-        transform: { x: 0.5, y: 0.5, scaleX: scale, scaleY: scale, rotation: 0, opacity: 1 },
-      },
+  const drawBlurred = (type: TransitionType, progress: number, options?: MediaDrawOptions) => {
+    const blurred: TransitionInfo = {
+      outgoingClip: { ...outgoingClip, effects: { blur: 4 } },
+      incomingClip: { ...incomingClip, effects: { blur: 8 } },
       progress,
       type,
-    })
-
-    for (const scale of [1, 2]) {
-      drawTransition(asCtx(), videos, images, scaled(scale), NOW, W, H, {
-        uncachedAnimation: true,
-      })
     }
 
-    return ctx.argsFor('drawImage').map((args) => args[3])
+    drawTransition(asCtx(), videos, images, blurred, NOW, W, H, options)
+
+    return ctx.stateFor('drawImage').map((state) => state.filter)
   }
 
   it('passes the draw options down to both sides of the transition', () => {
-    // The outgoing source is 640 wide and the incoming 800, so a scaled second
-    // pair proves the option reached each side rather than only the first.
-    expect(drawTwiceAcrossAnEdit('dissolve', 0.5)).toEqual([640, 800, 1280, 1600])
-    expect(drawnSources()).toEqual([out, incoming, out, incoming])
+    // Both sides halved, not just the first one drawn.
+    expect(drawBlurred('dissolve', 0.5, { filterScale: 0.5 })).toEqual(['blur(2px)', 'blur(4px)'])
+    expect(drawnSources()).toEqual([out, incoming])
+  })
+
+  it('blurs each side by its own amount when no raster scale is given', () => {
+    expect(drawBlurred('dissolve', 0.5)).toEqual(['blur(4px)', 'blur(8px)'])
   })
 
   it('passes the draw options down when only one clip has media', () => {
     videos.delete('v1')
 
-    expect(drawTwiceAcrossAnEdit('fade', 0.25)).toEqual([800, 1600])
+    expect(drawBlurred('fade', 0.25, { filterScale: 0.5 })).toEqual(['blur(4px)'])
   })
 
   it('passes the draw options down for an unknown transition type', () => {
     // Both clips drawn untouched, and both still given the options.
-    expect(drawTwiceAcrossAnEdit('iris' as TransitionType, 0.5)).toEqual([640, 800, 1280, 1600])
-    expect(drawnAlphas()).toEqual([1, 1, 1, 1])
+    expect(drawBlurred('iris' as TransitionType, 0.5, { filterScale: 0.5 })).toEqual([
+      'blur(2px)',
+      'blur(4px)',
+    ])
+    expect(drawnAlphas()).toEqual([1, 1])
   })
 
   it('wipes left by shrinking the outgoing region from the right', () => {

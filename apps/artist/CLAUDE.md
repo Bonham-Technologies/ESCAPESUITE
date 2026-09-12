@@ -115,11 +115,14 @@ Clips support animated properties via keyframes:
 - **Easing types**: `linear`, `ease-in`, `ease-out`, `ease-in-out`, plus quadratic/cubic variants
 - **Preset animations**: Clips can have in/out presets (`fade`, `slide-*`, `scale-*`, `pop`, `blur`)
 - **Custom keyframes**: Per-property keyframe arrays override presets when present
-- `getAnimatedValues(time, clipDuration, animation, transform, effects)`: Returns interpolated values for a given time
-- `getAnimatedValuesCached(cacheKey, ...)`: Cached version for export performance (keyed by clipId:time)
-- `clearAnimationCache()`: Clears animation cache (called at export start)
+- `getAnimatedValues(time, clipDuration, animation, transform, effects)`: Returns interpolated values for a given time — the one entry point, for both the preview and the exporters
 - Keyframes are stored relative to clip start time (0 = clip start)
-- **Animation cache**: Cache (10,000 entries max) prevents redundant keyframe interpolation during exports
+- There is **no memo cache**. There used to be one (`getAnimatedValuesCached`, keyed
+  `clipId:time`, cleared at export start), but an export draws each clip time exactly once,
+  so the key never came round and the cache answered nothing while costing a `toFixed`, a
+  string concat and a `Map.set` per clip per frame; a preview cannot use a time-keyed cache
+  at all, because it redraws the same clip at the same time after every edit. Deleted
+  2026-09-12 — `exportMP4.perf.test.ts` pins the lookup count at frames x active clips.
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
@@ -154,12 +157,14 @@ Hooks:
 | `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports |
 
 **The preview draws through `core/canvasRenderer.ts`**, the same renderer an export
-uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the two differences:
-`uncachedAnimation` (the export's animation memo would serve pre-edit values to an
-editor that redraws the same clip at the same time) and `quiet` (not-yet-decoded media
-is ordinary mid-scrub, and this frame redraws sixty times a second). Never fork a drawing
-function for the preview — if the two need to differ, that is another draw option.
-`MediaDrawOptions` once carried a third, `resetFilter`, which made a clip with no blur of
+uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the difference that is the
+preview's alone: `quiet` (not-yet-decoded media is ordinary mid-scrub, and this frame
+redraws sixty times a second, so the exporter's one warning per frame would be a console
+flood), plus `filterScale` when the frame is rasterised at other than 1:1. Never fork a
+drawing function for the preview — if the two need to differ, that is another draw option.
+`MediaDrawOptions` once carried `uncachedAnimation`, which skipped the export's animation
+memo cache; that cache is gone (see the keyframe section above) and so is the option. It
+also once carried `resetFilter`, which made a clip with no blur of
 its own assign `filter = 'none'`. That cancelled the blur a dissolve had just set on the
 context, so the preview's dissolve never blurred while an export's did. The preview stopped
 passing it, and the option is gone: a clip with no blur now leaves the context's filter
@@ -189,8 +194,6 @@ The export pipeline includes several optimizations to improve performance:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for MP4 files (background-capable)
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
 - **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
-- **Animation caching**: Uses `getAnimatedValuesCached()` to avoid recomputing keyframe interpolations
-- **Cache lifecycle**: `clearAnimationCache()` is called at export start
 - **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
 
 ### MP4 Export Reliability (`src/core/exporter.ts`)

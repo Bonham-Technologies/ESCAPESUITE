@@ -4,7 +4,7 @@
 // over: run a real export of the benchmark scene through the WebCodecs,
 // mediabunny, canvas and media-element doubles, then assert the per-frame cost
 // has not grown. Nothing here is mocked that the export pipeline owns — the
-// canvas renderer, the frame manager, the animation cache and the exporter's
+// canvas renderer, the frame manager, the animation engine and the exporter's
 // own loop all run for real.
 //
 // Thirty frames of the scene's heaviest second (7-8 s: the blurred full-frame
@@ -17,7 +17,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToMP4 } from './exportMP4'
 import { storeVideo } from './storage'
-import { clearAnimationCache } from '../utils/animation'
 import * as animation from '../utils/animation'
 import { resetMediabunnyDouble } from '../test/doubles/mediabunny'
 import {
@@ -60,6 +59,8 @@ vi.mock('./audioMixer', () => ({
 /** The scene's heaviest second, at the exporter's fixed 30 fps. */
 const RANGE = { start: 7, end: 8 }
 const FRAMES = 30
+/** Clips live over that second: two media clips and the two overlays. */
+const ACTIVE_CLIPS = 4
 
 let media: MediaDoubles
 let webcodecs: WebCodecsDoubles
@@ -70,7 +71,6 @@ let errors: ReturnType<typeof vi.spyOn>
 
 beforeEach(async () => {
   resetMediabunnyDouble()
-  clearAnimationCache()
   installCanvasDouble()
   offscreen = installOffscreenCanvasDouble()
   media = installMediaElementDoubles({
@@ -96,7 +96,6 @@ afterEach(() => {
   logs.mockRestore()
   warns.mockRestore()
   errors.mockRestore()
-  clearAnimationCache()
 })
 
 /**
@@ -130,15 +129,10 @@ interface ExportMeasurement {
   drawImagesPerFrame: number
   savesPerFrame: number
   restoresPerFrame: number
-  /** getAnimatedValuesCached() calls per frame, through the module boundary. */
+  /** getAnimatedValues() calls per frame, through the module boundary. */
   animationLookupsPerFrame: number
-  /**
-   * Share of those lookups the memo cache answered, detected by identity: a hit
-   * hands back the object it stored, a miss computes a fresh one.
-   */
-  animationCacheHitRatio: number
-  /** Distinct values the memo cache stored, per frame — i.e. what it grows by. */
-  animationCacheEntriesPerFrame: number
+  /** getAnimatedValues() calls for the whole export. */
+  animationLookups: number
   /** getContext() calls for the whole export — the exporter makes one canvas. */
   getContexts: number
   videoFramesCreated: number
@@ -150,7 +144,7 @@ interface ExportMeasurement {
 async function measureExport(): Promise<ExportMeasurement> {
   const clips = buildSceneClips()
   const progress: ExportProgress[] = []
-  const getAnimatedValuesCached = vi.spyOn(animation, 'getAnimatedValuesCached')
+  const getAnimatedValues = vi.spyOn(animation, 'getAnimatedValues')
   const contextsBefore = getContextCallCount()
 
   await exportToMP4(
@@ -168,14 +162,7 @@ async function measureExport(): Promise<ExportMeasurement> {
   const encoder = webcodecs.videoEncoders[0]
   const frameTotals = frameCounts()
 
-  const results = getAnimatedValuesCached.mock.results
-  const seen = new Set<unknown>()
-  let hits = 0
-  for (const result of results) {
-    if (result.type !== 'return') continue
-    if (seen.has(result.value)) hits += 1
-    else seen.add(result.value)
-  }
+  const lookups = getAnimatedValues.mock.calls.length
 
   const measurement: ExportMeasurement = {
     framesEncoded: frames.length,
@@ -183,16 +170,15 @@ async function measureExport(): Promise<ExportMeasurement> {
     drawImagesPerFrame: median(frames.map((f) => f.filter((c) => c.method === 'drawImage').length)),
     savesPerFrame: median(frames.map((f) => f.filter((c) => c.method === 'save').length)),
     restoresPerFrame: median(frames.map((f) => f.filter((c) => c.method === 'restore').length)),
-    animationLookupsPerFrame: results.length / frames.length,
-    animationCacheHitRatio: results.length === 0 ? 0 : hits / results.length,
-    animationCacheEntriesPerFrame: seen.size / frames.length,
+    animationLookupsPerFrame: lookups / frames.length,
+    animationLookups: lookups,
     getContexts: getContextCallCount() - contextsBefore,
     videoFramesCreated: frameTotals.created,
     videoFramesClosed: frameTotals.closed,
     encodeCalls: encoder.encodes.length,
     videoFlushes: encoder.flushes,
   }
-  getAnimatedValuesCached.mockRestore()
+  getAnimatedValues.mockRestore()
   return measurement
 }
 
@@ -226,26 +212,21 @@ describe('export per-frame work', () => {
     expect(measured.videoFlushes).toBe(1)
   })
 
-  it('never answers an animation lookup from the memo cache', async () => {
+  it('computes every live clip\'s animated values exactly once per frame', async () => {
     const measured = await measureExport()
 
-    // A finding pinned, not a target met. The scene has no keyframes at all, so
-    // every one of these lookups asks for a value that cannot change — and the
-    // memo cache answers none of them, because both sites that build a key use
-    // `${clip.id}:${<clip time>.toFixed(3)}`, and the clip time is different on
-    // every frame:
+    // Exact, and a conservation law rather than a budget: there is no memo
+    // cache between the exporter and the animation engine any more, so the
+    // lookup count is frames x active clips and nothing else. There used to be
+    // one — keyed `${clip.id}:${<clip time>.toFixed(3)}` at both sites that
+    // build a key — but an export draws each clip time exactly once, so the key
+    // never came round again: the cache answered none of these lookups and
+    // stored one entry per clip per frame for the whole export.
     //
-    //   - `animatedValuesFor` in `core/canvasRenderer.ts`, for media clips;
-    //   - `exportMP4.ts` (~495), for overlay clips.
-    //
-    // During an export the cache is therefore pure overhead: it stores one
-    // entry per clip per frame (measured 2026-09-12: 4 per frame, so ~1,560 for
-    // the full 13 s scene) and never reads one back.
-    //
-    // When that is fixed this test fails, which is the point: invert it into a
-    // floor on the hit ratio and lower the entries-per-frame ceiling. Both key
-    // sites have to change together, or the ratio moves only half way.
-    expect(measured.animationCacheHitRatio).toBe(0)
-    expect(measured.animationCacheEntriesPerFrame).toBeLessThanOrEqual(8)
+    // Measured 2026-09-12: 4 active clips over this second of the scene (the
+    // full-frame V1 clip, the picture-in-picture V2 clip, and the text and
+    // shape overlays), so 4 per frame and 120 for the 30-frame range.
+    expect(measured.animationLookupsPerFrame).toBe(ACTIVE_CLIPS)
+    expect(measured.animationLookups).toBe(FRAMES * ACTIVE_CLIPS)
   })
 })
