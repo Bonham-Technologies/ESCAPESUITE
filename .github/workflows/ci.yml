@@ -116,6 +116,12 @@ jobs:
       - name: Run tests with coverage
         run: pnpm test:coverage
 
+      # The perf tooling's own unit tests (node:test, no browser). They guard
+      # the profile fold — an off-by-one there produces a plausible-looking
+      # table that credits every cost to the wrong function.
+      - name: Run script tests
+        run: pnpm test:scripts
+
       - name: Coverage summary
         if: always()
         run: pnpm coverage:report

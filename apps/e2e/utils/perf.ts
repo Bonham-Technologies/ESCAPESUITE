@@ -108,13 +108,88 @@ export const PERF_PROFILE = process.env.PERF_PROFILE === '1'
 const PROFILE_SAMPLING_INTERVAL_US = 100
 
 /**
- * Run `body` with the renderer's sampling profiler on, writing the raw
- * `.cpuprofile` to `perf-results/<name>.cpuprofile`.
+ * The source maps a profile needs to name real files, as written beside it.
  *
- * The file is the profiler's own JSON — `{nodes, startTime, endTime, samples,
- * timeDeltas}` — exactly what `Profiler.stop` returns, so it opens in Chrome
- * DevTools' Performance panel as-is and `scripts/profile-top.mjs` reads it
- * without a parser of our own.
+ * Keyed by the served module URL — the same string `callFrame.url` carries —
+ * and holding only what a lookup needs. `sourcesContent` is dropped: it is the
+ * bulk of a Vite dev map and `profile-top.mjs` never reads it.
+ */
+export interface ProfileSourceMaps {
+  [servedUrl: string]: { sources: string[]; sourceRoot?: string; mappings: string }
+}
+
+/**
+ * Collect the source maps for every app module the profile sampled.
+ *
+ * Without this the tables report *served* line numbers. Vite's dev server hands
+ * the browser an esbuild-transformed module, so `canvasRenderer.ts:238` in a raw
+ * profile is line 238 of the transformed text and has nothing to do with line
+ * 238 of the file on disk — which makes every citation in a hotspot report
+ * quietly wrong.
+ *
+ * Vite appends an inline base64 `sourceMappingURL` to each module it serves, so
+ * the map is already in the page's reach: fetch the module from inside the page
+ * (same origin, and it is the exact text the profiler's line numbers refer to),
+ * hand the base64 back and decode it here. Done after `Profiler.stop`, so the
+ * fetches cannot land inside a measured window.
+ */
+async function captureSourceMaps(
+  page: Page,
+  profile: { nodes?: { callFrame: { url?: string } }[] }
+): Promise<ProfileSourceMaps> {
+  const urls = new Set<string>()
+  for (const node of profile.nodes ?? []) {
+    const url = node.callFrame?.url
+    if (url && url.includes('/src/')) urls.add(url)
+  }
+
+  const maps: ProfileSourceMaps = {}
+  for (const url of urls) {
+    const base64 = await page.evaluate(async (target: string) => {
+      try {
+        const response = await fetch(target)
+        if (!response.ok) return null
+        const text = await response.text()
+        const match = /[#@]\s*sourceMappingURL=data:application\/json[^,]*base64,([A-Za-z0-9+/=]+)/.exec(
+          text
+        )
+        return match ? match[1] : null
+      } catch {
+        return null
+      }
+    }, url)
+    if (!base64) continue
+
+    try {
+      // Decoded here rather than with the page's `atob`, which returns latin-1
+      // and would mangle any non-ASCII in the map.
+      const parsed = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'))
+      if (typeof parsed?.mappings !== 'string' || !Array.isArray(parsed?.sources)) continue
+      maps[url] = {
+        sources: parsed.sources,
+        ...(parsed.sourceRoot ? { sourceRoot: parsed.sourceRoot } : {}),
+        mappings: parsed.mappings,
+      }
+    } catch {
+      // A module without a usable map simply has none; the report falls back to
+      // the served location and says so.
+    }
+  }
+
+  return maps
+}
+
+/**
+ * Run `body` with the renderer's sampling profiler on, writing the raw
+ * `.cpuprofile` to `perf-results/<name>.cpuprofile` and the source maps its
+ * frames need to `perf-results/<name>.maps.json`.
+ *
+ * The profile file is the profiler's own JSON — `{nodes, startTime, endTime,
+ * samples, timeDeltas}` — exactly what `Profiler.stop` returns, so it opens in
+ * Chrome DevTools' Performance panel as-is and `scripts/profile-top.mjs` reads
+ * it without a parser of our own. The map file is ours, and is what lets that
+ * script report locations in the `.ts` files rather than in Vite's transformed
+ * output (see {@link captureSourceMaps}).
  *
  * This is the page's main thread only. The MP4 export decodes in a Web Worker,
  * which has its own isolate and does not appear here; what it costs shows up
@@ -124,6 +199,7 @@ const PROFILE_SAMPLING_INTERVAL_US = 100
  * every call site can pass a name conditionally instead of branching.
  */
 export async function withCpuProfile<T>(
+  page: Page,
   cdp: CDPSession,
   name: string | undefined,
   body: () => Promise<T>
@@ -136,13 +212,19 @@ export async function withCpuProfile<T>(
   try {
     return await body()
   } finally {
-    // Stopping and writing must not mask a failure from `body`, so every step
-    // here swallows its own error and says so instead of throwing.
+    // Nothing in here may mask a failure from `body`, and the profiler must end
+    // up disabled even if stopping or writing throws — hence the nested
+    // `finally` around `Profiler.disable` rather than a single flat block.
     try {
-      const { profile } = await cdp.send('Profiler.stop')
-      await cdp.send('Profiler.disable')
-      mkdirSync(PERF_RESULTS_DIR, { recursive: true })
-      writeFileSync(path.join(PERF_RESULTS_DIR, `${name}.cpuprofile`), JSON.stringify(profile))
+      try {
+        const { profile } = await cdp.send('Profiler.stop')
+        mkdirSync(PERF_RESULTS_DIR, { recursive: true })
+        writeFileSync(path.join(PERF_RESULTS_DIR, `${name}.cpuprofile`), JSON.stringify(profile))
+        const maps = await captureSourceMaps(page, profile)
+        writeFileSync(path.join(PERF_RESULTS_DIR, `${name}.maps.json`), JSON.stringify(maps))
+      } finally {
+        await cdp.send('Profiler.disable')
+      }
     } catch (error) {
       console.warn(`perf: could not write ${name}.cpuprofile —`, error)
     }
@@ -637,7 +719,9 @@ export async function measurePlayback(
     now: performance.now(),
   }))
 
-  await withCpuProfile(cdp, profileName, () => page.waitForTimeout(windowSeconds * 1000))
+  await withCpuProfile(page, cdp, profileName, () =>
+    page.waitForTimeout(windowSeconds * 1000)
+  )
 
   const cdpEnd = await readCdpMetrics(cdp)
   const end = await page.evaluate((windowStart: number) => {
@@ -728,7 +812,7 @@ export async function measureExport(
   const heapStart = await readHeapAfterGc(page, cdp)
 
   const startedAt = Date.now()
-  const download: Download = await withCpuProfile(cdp, profileName, async () => {
+  const download: Download = await withCpuProfile(page, cdp, profileName, async () => {
     const downloadPromise = page.waitForEvent('download', { timeout: 600_000 })
     await page
       .getByRole('button', { name: format === 'mp4' ? 'Download MP4' : 'Download WebM' })

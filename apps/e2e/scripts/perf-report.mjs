@@ -5,6 +5,7 @@
  * Inputs, all optional — a benchmark that did not run is simply absent:
  *   apps/e2e/perf-results/*.json          (one file per browser benchmark)
  *   apps/e2e/perf-results/*.cpuprofile    (only when PERF_PROFILE=1 was set)
+ *   apps/e2e/perf-results/*.maps.json     (the source maps beside each profile)
  *   services/headless-artist/perf-report.json
  *
  * Outputs:
@@ -22,7 +23,12 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readProfile, renderProfileMarkdown, summariseProfile } from './profile-top.mjs'
+import {
+  readProfile,
+  readProfileMaps,
+  renderProfileMarkdown,
+  summariseProfile,
+} from './profile-top.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const E2E_ROOT = path.resolve(HERE, '..')
@@ -73,7 +79,12 @@ function collect() {
 
   let files = []
   try {
-    files = readdirSync(BROWSER_RESULTS_DIR).filter((name) => name.endsWith('.json'))
+    files = readdirSync(BROWSER_RESULTS_DIR).filter(
+      // `<name>.maps.json` is a profile's source maps, not a benchmark result.
+      // It parses as JSON perfectly well, which is exactly why it has to be
+      // excluded by name — otherwise it lands in the table as a nameless row.
+      (name) => name.endsWith('.json') && !name.endsWith('.maps.json')
+    )
   } catch {
     warn(`no browser results in ${path.relative(REPO_ROOT, BROWSER_RESULTS_DIR)}`)
   }
@@ -127,8 +138,12 @@ function collectProfiles() {
   return files
     .map((file) => {
       const name = path.basename(file, '.cpuprofile')
-      const profile = readProfile(path.join(BROWSER_RESULTS_DIR, file))
-      return profile ? { name, label: PROFILE_LABELS[name] ?? name, profile } : null
+      const full = path.join(BROWSER_RESULTS_DIR, file)
+      const profile = readProfile(full)
+      if (!profile) return null
+      // Without the maps the tables would report Vite's transformed line
+      // numbers, which are not the lines in the `.ts` files.
+      return { name, label: PROFILE_LABELS[name] ?? name, profile, maps: readProfileMaps(full) }
     })
     .filter(Boolean)
     .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
@@ -199,8 +214,8 @@ function toMarkdown(benchmarks, profiles) {
       'decode worker has its own isolate and does not appear._',
       ''
     )
-    for (const { label, profile } of profiles) {
-      lines.push(renderProfileMarkdown(label, profile))
+    for (const { label, profile, maps } of profiles) {
+      lines.push(renderProfileMarkdown(label, profile, maps))
     }
   }
 
@@ -209,12 +224,16 @@ function toMarkdown(benchmarks, profiles) {
 }
 
 /** The profile numbers that belong in `perf-report.json`, without the samples. */
-function profileSummary({ name, label, profile }) {
-  const summary = summariseProfile(profile)
+function profileSummary({ name, label, profile, maps }) {
+  const summary = summariseProfile(profile, maps)
   const row = (stat) => ({
     name: stat.name,
+    // The original file and line where a source map resolved one; the served
+    // module and its transformed line otherwise.
+    source: stat.source || '',
+    sourceLine: stat.sourceLine || 0,
     url: stat.url,
-    line: stat.line,
+    servedLine: stat.servedLine,
     selfMs: Math.round(stat.self / 100) / 10,
     totalMs: Math.round(stat.total / 100) / 10,
   })
@@ -222,6 +241,7 @@ function profileSummary({ name, label, profile }) {
     name,
     label,
     windowMs: Math.round(summary.measuredUs / 100) / 10,
+    attributedMs: Math.round(summary.attributedUs / 100) / 10,
     jsSelfMs: Math.round(summary.codeSelfUs / 100) / 10,
     topSelf: summary.code.slice(0, 25).map(row),
     topAppCodeTotal: summary.appCode.slice(0, 15).map(row),

@@ -245,9 +245,14 @@ any `*.cpuprofile`) as the `perf-report` artifact.
 
 `PERF_PROFILE=1 pnpm perf` additionally records a CPU profile of each browser benchmark —
 on a **fourth, discarded run**, so the medians stay unprofiled — into
-`apps/e2e/perf-results/*.cpuprofile`, which `apps/e2e/scripts/profile-top.mjs` turns into
-top-by-self-time and top-app-code-by-total-time tables (also embedded in `perf-report.json`
-when the profiles exist).
+`apps/e2e/perf-results/*.cpuprofile`, alongside a `*.maps.json` holding the inline source
+maps of every `/src/` module it sampled. `apps/e2e/scripts/profile-top.mjs` turns the pair
+into top-by-self-time and top-app-code-by-total-time tables (also embedded in
+`perf-report.json` when the profiles exist), resolving each frame through the maps so
+locations are lines in the `.ts` files and not in Vite's transformed output. Its fold — a
+sample is charged the interval that *follows* it, and recursion counts once per sample — is
+covered by `apps/e2e/scripts/profile-top.test.mjs`, run by `pnpm test:scripts` (node:test,
+no browser) in CI's `test` job.
 
 Baseline numbers, the machine they came from and the launch args they used live in
 [docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md); the
