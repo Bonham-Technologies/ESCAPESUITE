@@ -148,23 +148,8 @@ export function clipsIntersectingMarquee(
   currentTime: number,
   sourceVideos: SourceVideo[]
 ): string[] {
-  const rect = canvas.getBoundingClientRect();
-
-  // Calculate rendered canvas area (accounting for object-fit: contain)
-  const canvasAspect = canvas.width / canvas.height;
-  const elementAspect = rect.width / rect.height;
-  let renderedWidth: number, renderedHeight: number, offsetX: number, offsetY: number;
-  if (canvasAspect > elementAspect) {
-    renderedWidth = rect.width;
-    renderedHeight = rect.width / canvasAspect;
-    offsetX = 0;
-    offsetY = (rect.height - renderedHeight) / 2;
-  } else {
-    renderedHeight = rect.height;
-    renderedWidth = rect.height * canvasAspect;
-    offsetX = (rect.width - renderedWidth) / 2;
-    offsetY = 0;
-  }
+  // The rendered canvas area within the element (object-fit: contain)
+  const content = geometry.contentBox(canvas);
 
   // Convert marquee rect from CSS pixels to normalized canvas coords (0-1)
   const normLeft = Math.min(start.x, current.x);
@@ -172,10 +157,10 @@ export function clipsIntersectingMarquee(
   const normRight = Math.max(start.x, current.x);
   const normBottom = Math.max(start.y, current.y);
 
-  const mLeft = (normLeft - offsetX) / renderedWidth;
-  const mTop = (normTop - offsetY) / renderedHeight;
-  const mRight = (normRight - offsetX) / renderedWidth;
-  const mBottom = (normBottom - offsetY) / renderedHeight;
+  const mLeft = (normLeft - content.offsetX) / content.width;
+  const mTop = (normTop - content.offsetY) / content.height;
+  const mRight = (normRight - content.offsetX) / content.width;
+  const mBottom = (normBottom - content.offsetY) / content.height;
 
   // Find overlay clips whose bounding boxes intersect the marquee
   const intersecting: string[] = [];

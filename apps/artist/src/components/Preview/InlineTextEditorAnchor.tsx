@@ -6,7 +6,7 @@
 // then the object-fit: contain mapping into the element's own coordinates, so
 // the editor lands on the text rather than beside it.
 import type { Clip, SourceVideo } from '../../store/types';
-import { getOverlayBounds } from './previewGeometry';
+import { contentBox, getOverlayBounds } from './previewGeometry';
 import { InlineTextEditor } from './InlineTextEditor';
 
 /**
@@ -41,40 +41,17 @@ export function InlineTextEditorAnchor({
   const bounds = getOverlayBounds(clip, canvas, undefined, NO_SOURCES);
   if (!bounds) return null;
 
-  const rect = canvas.getBoundingClientRect();
-
-  // Calculate rendered canvas area within the element (object-fit: contain)
-  const canvasAspect = canvas.width / canvas.height;
-  const elementAspect = rect.width / rect.height;
-
-  let renderedWidth: number;
-  let renderedHeight: number;
-  let offsetX: number;
-  let offsetY: number;
-
-  if (canvasAspect > elementAspect) {
-    renderedWidth = rect.width;
-    renderedHeight = rect.width / canvasAspect;
-    offsetX = 0;
-    offsetY = (rect.height - renderedHeight) / 2;
-  } else {
-    renderedHeight = rect.height;
-    renderedWidth = rect.height * canvasAspect;
-    offsetX = (rect.width - renderedWidth) / 2;
-    offsetY = 0;
-  }
-
-  const scaleX = renderedWidth / canvas.width;
-  const scaleY = renderedHeight / canvas.height;
+  // The rendered canvas area within the element (object-fit: contain)
+  const content = contentBox(canvas);
 
   // The bounds are centred; the editor is positioned from its top left corner.
   const textLeft = bounds.centerX - bounds.width / 2;
   const textTop = bounds.centerY - bounds.height / 2;
 
   // Convert to screen-space relative to videoWrapper
-  const screenX = offsetX + textLeft * scaleX;
-  const screenY = offsetY + textTop * scaleY;
-  const screenFontSize = textData.fontSize * (textData.scale ?? 1) * scaleY;
+  const screenX = content.offsetX + textLeft * content.scaleX;
+  const screenY = content.offsetY + textTop * content.scaleY;
+  const screenFontSize = textData.fontSize * (textData.scale ?? 1) * content.scaleY;
 
   return (
     <InlineTextEditor

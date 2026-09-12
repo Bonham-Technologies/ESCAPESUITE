@@ -6,6 +6,7 @@
 // copied off a run.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
+  contentBox,
   getCanvasPosition,
   getClipType,
   getOverlayBounds,
@@ -401,6 +402,64 @@ describe('hasCustomKeyframes', () => {
     const clip = makeClip({ animation: makeAnimation({ keyframes: { volume: [kf(0, 0.5)] } }) })
 
     expect(hasCustomKeyframes(clip)).toBe(false)
+  })
+})
+
+describe('contentBox', () => {
+  it('fills the element when the aspect ratios match', () => {
+    // 960x540 is exactly half of 1920x1080, so there is no bar on either axis.
+    const canvas = makeCanvas()
+
+    expect(contentBox(canvas, { width: 960, height: 540 })).toEqual({
+      width: 960,
+      height: 540,
+      offsetX: 0,
+      offsetY: 0,
+      scaleX: 0.5,
+      scaleY: 0.5,
+    })
+  })
+
+  it('letterboxes top and bottom when the canvas is wider than its box', () => {
+    // 16:9 content in a square box: 800 wide, 450 tall, 175px of bar each side.
+    const canvas = makeCanvas()
+
+    expect(contentBox(canvas, { width: 800, height: 800 })).toEqual({
+      width: 800,
+      height: 450,
+      offsetX: 0,
+      offsetY: 175,
+      scaleX: 800 / 1920,
+      scaleY: 450 / 1080,
+    })
+  })
+
+  it('letterboxes left and right when the canvas is taller than its box', () => {
+    // 9:16 content in a square box: 450 wide, 800 tall, 175px of bar each side.
+    const canvas = makeCanvas({ width: CANVAS_H, height: CANVAS_W })
+
+    expect(contentBox(canvas, { width: 800, height: 800 })).toEqual({
+      width: 450,
+      height: 800,
+      offsetX: 175,
+      offsetY: 0,
+      scaleX: 450 / 1080,
+      scaleY: 800 / 1920,
+    })
+  })
+
+  it('measures the element itself when no box is given', () => {
+    const canvas = makeCanvas()
+    setRect(canvas, { left: 100, top: 50, width: 800, height: 800 })
+
+    expect(contentBox(canvas)).toEqual({
+      width: 800,
+      height: 450,
+      offsetX: 0,
+      offsetY: 175,
+      scaleX: 800 / 1920,
+      scaleY: 450 / 1080,
+    })
   })
 })
 
