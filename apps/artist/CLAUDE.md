@@ -180,7 +180,7 @@ invalidation on resize, only a redraw at the new scale.
 `ctx.filter` is the one thing the transform does not reach: a CSS filter's length (a blur
 radius) is in output-bitmap pixels, unaffected by the CTM. Left alone, every blur in the
 preview would render `k`× too wide at any raster smaller than the project. `MediaDrawOptions.filterScale`
-(default `1`) converts a project-space blur radius into device pixels at the two overlay draw
+(default `1`) converts a project-space blur radius into device pixels at every `ctx.filter` site on the preview's draw
 call sites; every export passes nothing and gets `blur(Xpx)` byte-identical to before. Handles
 stay sized in project pixels deliberately (no behaviour change) — their on-screen size is
 unchanged today only because `project px × k` cancels back out to the same CSS pixels CSS
