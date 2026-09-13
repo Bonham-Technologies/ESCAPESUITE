@@ -31,6 +31,57 @@ pnpm lint                # Run ESLint
 
 ## Architecture
 
+### App (`src/App.tsx`)
+`App.tsx` is wiring only — the single `useRecorderStore()` destructure, the two refs the take
+and the save share, the `showHelpModal` flag, the `isRecordingActive` derivation and
+`toggleSource`, one call per hook below, and the JSX that composes the components. It registers
+no effect of its own and binds no listener.
+
+The hooks are called in a fixed order — theme, capability bootstrap, media streams, recording
+save, recording controller, keyboard shortcuts, recording library — because that order is the
+order the effects ran in when they were all inline, and for the ones that bind something it is
+behaviour rather than tidiness: `useMediaStreams` registers the preview attach and then the
+`stopAllStreams` mirror, and `useRecordingController`'s unmount teardown — registered after
+both, and itself order-dependent (cancelled flag → duration interval → countdown interval →
+`recorder.dispose()` → `stopAllStreams()` → store reset) — reaches the live `stopAllStreams`
+through that mirror rather than through a stale closure. `useKeyboardShortcuts` binds the one
+window listener `App` itself owns, and `useRecordingLibrary` binds nothing and comes last.
+
+`recorderTypeRef` and `capturedThumbnailRef` are created in `App` and handed to two hooks by
+reference: `useRecordingController` writes them while a take runs, `useRecordingSave` reads
+them when the recorder's `onStop` fires. Every ref in the screen is created in exactly one
+place — a second `useRef()` in either hook would leave the save reading a recorder type and a
+thumbnail nobody wrote. The same rule puts `compositorRef`, `micStreamRef`, `previewRef` and
+`canvasPreviewRef` in `useMediaStreams`, and the recorder, cancelled-flag and interval refs in
+`useRecordingController`, each passed on to whoever else reads it.
+
+Every module below has its own test file; `App.tsx` itself is covered through
+`App.recording.test.tsx`, `App.saving.test.tsx`, `App.library.test.tsx` and
+`App.settings.test.tsx`, which drive the rendered app.
+
+| Module | Owns |
+|--------|------|
+| `App.tsx` | The composition: the store destructure, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
+| `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
+| `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
+| `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. No store, and no blob-URL creation |
+| `components/icons.tsx` | The inline SVG icon set, every path drawn in `currentColor`. The source icons take a `className` because their size is per call site; the action icons are `aria-hidden` and sized entirely by their button |
+| `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
+| `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
+| `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, every control reporting a config patch. It draws unconditionally; whether the panel exists at all is the caller's decision |
+| `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its four action buttons, each labelled with the recording's own name. It touches no storage — it hands ids and names back up |
+| `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
+| `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, and the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`) |
+| `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for |
+| `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby` |
+| `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
+| `hooks/useCapabilityBootstrap.ts` | The way in: capability detection and the initial `loadRecordings()`, both in one effect as they were inline — splitting them would change the order the store is written on mount |
+| `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
+| `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
+| `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
+| `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
+| `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete, and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
+
 ### State Management
 - **Zustand store** (`src/store/recorderStore.ts`): Single source of truth for recorder state
 - Core types defined in `src/store/types.ts`: `RecordingState`, `RecordingConfig`, `Recording`, `EnvironmentCapabilities`, `DetailedCapabilities`, `CapabilityInfo`
@@ -67,6 +118,9 @@ Enhanced capability detection with detailed unavailability reasons:
 - **Screen + Both**: Display with mic and system audio
 - **Webcam Only**: Camera with microphone
 - **Picture-in-Picture**: Screen with webcam overlay (adjustable position, size, shape)
+
+Which sources are captured is `src/hooks/useMediaStreams.ts`; what is done with them — countdown,
+start, pause, resume, stop, cancel and teardown — is `src/hooks/useRecordingController.ts`.
 
 ### Integration with ESCAPEARTIST
 - Both apps share `video-editor-db` IndexedDB database
@@ -157,7 +211,9 @@ the outcome, not on the double.
   `CanvasRenderingContext2D` plus `toBlob`), `video.ts` (the `<video>` elements the code
   creates, which jsdom never loads), `audio.ts` (`AudioContext` and the nodes the recorder and
   converter build on it), `webcodecs.ts` (`VideoEncoder`, `AudioEncoder`, `VideoDecoder`,
-  `VideoFrame`, `AudioData`) and `mediabunny.ts` (the muxer, recorded rather than run).
+  `VideoFrame`, `AudioData`), `mediabunny.ts` (the muxer, recorded rather than run) and
+  `browser.ts` (the prototype-level gaps `installBrowserStubs()` fills — media playback,
+  navigation from an anchor click, `window.open`).
 - **`src/test/appDoubles.ts`** — the collaborator modules the `App.*.test.tsx` files hand to
   `vi.mock`: the recorder factory, permission overrides, thumbnail generation, conversion,
   "send to editor" and analytics. It imports no application code at runtime, so a `vi.mock`
@@ -168,10 +224,10 @@ the outcome, not on the double.
   capability is something a test says explicitly), **`renderApp()`** mounts `App` and settles
   its mount-time async work inside `act()`, `flush()` lets promise chains — IndexedDB included
   — settle on a real macrotask even under fake timers, `screenStreamDouble()` /
-  `webcamStreamDouble()` / `micStreamDouble()` build the capture streams a take needs,
-  `installBrowserStubs()` covers the jsdom gaps `App` walks into (media playback, anchor
-  downloads, `window.open`), and the `installRafDouble()` family drives the PiP compositor's
-  animation frames by hand.
+  `webcamStreamDouble()` / `micStreamDouble()` build the capture streams a take needs, and the
+  `installRafDouble()` family drives the PiP compositor's animation frames by hand. It also
+  re-exports `installBrowserStubs()` from `doubles/browser.ts`, because every App suite reaches
+  for it through this module.
 
 ## Key Constraints
 
@@ -182,6 +238,9 @@ the outcome, not on the double.
 - WebCodecs API (MP4/Compatible WebM conversion) only works in Chrome/Edge
 
 ## Keyboard Shortcuts
+
+Bound by `src/hooks/useKeyboardShortcuts.ts` — the only window listener `App` itself binds; `VideoPlayer` binds its own while the playback dialog is open — and listed
+for the user by `src/components/RecorderControls/RecorderControls.tsx`.
 
 | Key | Action |
 |-----|--------|
