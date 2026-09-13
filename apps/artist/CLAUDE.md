@@ -327,6 +327,78 @@ and only exists when the clip has a source video (`handleResetToDefaults`). The 
 that tells them apart in the DOM is that the second carries a `title`, which is how
 `ClipEditor.test.tsx` distinguishes them.
 
+### App (`src/App.tsx`)
+`App.tsx` is wiring only — the seven `useState` calls the JSX needs, the store selectors, nine
+hook calls, three small inline lambdas and the composition itself. It binds no listener, holds
+no timer, and computes nothing; every effect, every disk and session write, and every piece of
+chrome lives in one module each under `src/app/`.
+
+**The hooks are called in a fixed order, and the order is the behaviour.** The order the hooks
+are called in is the order their effects run in, and it is the order the six effects ran in
+when they were all inline in this file: theme → session check → autosave → keydown → timeline
+resize → host integration. The three hooks that bind no effect (`useNotification`,
+`useProjectActions`, `useTimelineZoom`) sit where their results are first needed. Two of those
+positions are load-bearing rather than tidy: `useSessionRestore` writes the `sessionRestored`
+flag `useSessionAutosave` gates on, so registering the autosave any earlier would change which
+render first arms the debounce (`App.session.test.tsx`'s "writes nothing before the debounce
+elapses" and "clears the pending write on unmount" are the net); and `useThemeLifecycle` runs
+ahead of everything else, so the document is already themed by the time the editor mounts
+below it.
+
+**The store selectors stay in `App.tsx` on purpose.** Each hook takes what it needs as plain
+parameters rather than subscribing for itself, so the whole subscription set is readable in one
+place and every hook is testable without a store. `clips` is the one selector that has to stay
+a live array rather than a count: `useAppKeyboardShortcuts`' Ctrl+B (split) branch calls
+`clips.find(...)`, while `useProjectActions`' `clipCount` and the header's `canExport` only
+ever want `clips.length`.
+
+**`App` reads `currentTime` on demand and must never subscribe to it.** There is no
+`currentTime` selector anywhere in `App.tsx` or `src/app/`: the shortcut handlers that need the
+live value (razor split at the playhead, add marker, set in/out point) read
+`useEditorStore.getState().currentTime` inside the handler, and `useSessionAutosave` re-arms
+its debounce through a `useEditorStore.subscribe` listener added inside its effect rather than
+through a render-triggering dependency. See the note in the Preview section above for the whole
+story — `App` renders `<Timeline/>`, so a selector here would drag the entire tree through a
+re-render every ~200 ms of playback regardless of what `Timeline` itself reads.
+`App.rerender.test.tsx` pins exactly this, and nothing else does: a well-meaning change that
+turns one of those reads into a selector passes every other App test and fails only that file's
+single `toBeLessThanOrEqual(1)`.
+
+Every module below has its own test file. `App.tsx` itself is covered through the six
+`App.*.test.tsx` files that drive the rendered editor — `App.test.tsx` (the shell),
+`App.project.test.tsx` (new/open/save and the load-safety dialog), `App.session.test.tsx`
+(restore prompt and autosave), `App.shortcuts.test.tsx` (the keydown cascade),
+`App.messages.test.tsx` (the host integration surface) and `App.rerender.test.tsx` (the
+`currentTime` contract above). `src/App.module.css` is deliberately not split: all nine
+components import it from `../App.module.css`, and `App.project.test.tsx` imports it directly
+and queries `styles.menuBackdrop`.
+
+| Module | Owns |
+|--------|------|
+| `appConstants.ts` | The shell's plain numbers: the autosave debounce delay, the timeline panel's min/max/default height and the localStorage key it is persisted under. No behaviour, so `timelineHeight.ts`, the hooks and `App` read the same values instead of each spelling them out |
+| `timelineHeight.ts` | The timeline panel's height maths: `clampTimelineHeight` (which propagates `NaN` rather than clamping it), the localStorage read/write pair, and `heightFromPointer`, the resize drag's pointer-to-height conversion. Pure but for the two storage calls, so the maths is testable without a DOM |
+| `appFormat.ts` | The two notification strings: `formatTimeForNotification` (a one-line pass-through to `formatTime`, kept because three call sites read better for it) and `clipCountMessage`, which spells the pluralisation rule once |
+| `sessionSnapshot.ts` | `buildSessionSnapshot` — what of the editor's state the autosave writes, and in what shape. Takes the state and the timestamp as values rather than reading `getState()`/`Date.now()` itself, so the call site keeps control of *when* they are read |
+| `useThemeLifecycle.ts` | Starting the shared theme module on mount and stopping it on unmount. The editor's **first** effect, so `App` calls it first |
+| `useNotification.ts` | The transient status toast: one slot, not a queue. `showNotification` overwrites whatever is showing and opens a fresh three-second timer, which is deliberately neither stored nor cleared — carried behaviour, pinned by the App suite. Binds no effect; sits second because every hook after it takes `showNotification` |
+| `useProjectActions.ts` | Project lifecycle: save to disk, open from disk with the "you have unsaved work" dialog in front of it, and start over. Owns `isSaving`, `isLoading`, `showProjectLoadDialog` and the pending file. Takes `clipCount` as a number, the dependency both callbacks carried inline. Binds no effect; sits third because the shortcut hook takes `handleSaveProject` and `handleLoadProject` |
+| `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect |
+| `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
+| `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
+| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. The editor's **fourth** effect. Its deps array is the inline one character for character, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately |
+| `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **fifth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
+| `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
+| `AppHeader.tsx` | The top bar: the dashboard link (hidden in the standalone build, which this component asks about itself), the wordmark, the project-name field, and the File menu plus the quick Save and Export buttons |
+| `FileMenu.tsx` | The header's File dropdown: the button, the click-outside backdrop, and the four items with their shortcut hints. Each item acts and then closes; what "acts" means belongs to the caller |
+| `MediaLibrarySidebar.tsx` | The left sidebar: its header and collapse button, and — while open — the uploader, the resolution picker and the library listing |
+| `InspectorSidebar.tsx` | The right sidebar: the inspector's header and collapse button, with `ClipEditor` underneath while it is open |
+| `MobileInspectorToggle.tsx` | The floating inspector toggle shown at narrow widths, rendered inside `<main>` as a sibling of the inspector it controls |
+| `TimelineResizeHandle.tsx` | The grab strip between the editor body and the timeline. It reports the two gestures and nothing else; the drag belongs to `useTimelineHeight` |
+| `TimelinePane.tsx` | The bottom pane: add-track, zoom out, the zoom readout and zoom in, above `Timeline` itself. **Deliberately not memoised** — `App.rerender.test.tsx` counts `Timeline` renders, and a memo here would make that pass for the wrong reason and hide a future `currentTime` subscription |
+| `NotificationToast.tsx` | The status toast in the corner. The `{notification && …}` guard stays in `App`, so it never renders an empty live region |
+| `LoadingOverlay.tsx` | The modal spinner shown while a project loads. The `{isLoading && …}` guard likewise stays in `App` |
+| `SessionRestorePrompt.tsx` | The "Resume Previous Session?" modal and its two buttons. The `{showSessionPrompt && pendingSession && …}` guard stays in `App`, so `session` is always present here |
+
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`
 - Custom events in `src/utils/analytics.ts`:
@@ -362,8 +434,12 @@ To prevent black frames during export:
 - **Post-seek verification**: Always waits for frame data after successful seek
 - **Transition safety**: `drawTransition()` includes readyState verification
 
-### Responsive Inspector (`src/App.tsx`, `src/App.module.css`)
-The inspector panel (ClipEditor) adapts to different screen sizes:
+### Responsive Inspector (`src/app/InspectorSidebar.tsx`, `src/app/MobileInspectorToggle.tsx`, `src/App.module.css`)
+The inspector panel (ClipEditor) adapts to different screen sizes. `App.tsx` owns the
+`inspectorCollapsed` flag and hands it to both components; the markup lives in
+`src/app/InspectorSidebar.tsx` (the sidebar and its collapse button) and
+`src/app/MobileInspectorToggle.tsx` (the floating toggle), and the breakpoints in
+`src/App.module.css`:
 - **Collapsible**: Toggle button to collapse/expand inspector on any screen size
 - **Media queries**: Responsive breakpoints at 1200px, 1024px, 900px, and 640px
 - **Slide-out panel**: On screens < 900px, inspector becomes a fixed slide-out panel
