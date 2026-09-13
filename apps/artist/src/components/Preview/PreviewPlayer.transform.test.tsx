@@ -216,9 +216,11 @@ describe('PreviewPlayer rotate drags', () => {
   })
 
   it('adds the drag to the rotation the clip already had', async () => {
-    // A square project, because the angle is measured in normalised canvas
-    // coordinates: on a 16:9 frame the same visual angle reads differently on
-    // each axis, and only a square canvas makes the arithmetic exact.
+    // A square project, so the 45° the shape starts at is a 45° step in
+    // project pixels too and the grip sits exactly on the diagonal. The angle
+    // itself is measured in project pixels either way (see the 16:9 case
+    // below), so the squareness is only what makes this test's arithmetic
+    // easy to read.
     store().setProjectResolution(1080, 1080)
     const shape = addShape({ rotation: 45 })
 
@@ -231,6 +233,27 @@ describe('PreviewPlayer rotate drags', () => {
     ])
 
     expect(clipOf(shape.id).shapeData!.rotation).toBeCloseTo(90, 5)
+  })
+
+  it('turns the clip by the angle the pointer turned through, on a 16:9 project', async () => {
+    // 1280x720 laid out in the 960x540 box: same aspect, so nothing is
+    // letterboxed and a project pixel is a screen pixel times 0.75 on *both*
+    // axes. An angle read off the pointer therefore has to come out of project
+    // pixels — in normalised 0-1 coordinates the x axis spans 1280 px and the y
+    // axis 720, so the same screen direction reads as a different angle.
+    store().setProjectResolution(1280, 720)
+    const shape = addShape()
+
+    const preview = await renderPreview()
+    // The grip sits 97px straight above the centre (half of 0.2 * 720, plus the
+    // 25px offset). The release point is exactly 45 degrees clockwise of it:
+    // 200px right and 200px up from the centre, a square step on screen.
+    await drag(preview, [
+      [640, 360 - 72 - 25],
+      [640 + 200, 360 - 200],
+    ])
+
+    expect(clipOf(shape.id).shapeData!.rotation).toBeCloseTo(45, 5)
   })
 })
 
