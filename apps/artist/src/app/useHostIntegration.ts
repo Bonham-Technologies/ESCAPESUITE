@@ -98,6 +98,11 @@ export function useHostIntegration({
     // Check for URL parameters (parsed once at startup)
     const { videos, loadVideoId, title } = urlParams;
 
+    // The ?loadVideo= thumbnail's blob URL, handed back in the cleanup below.
+    // It is handed to `addSourceVideo` and lives as long as the media library
+    // entry, so it cannot be revoked at the point it is created.
+    let thumbnailObjectUrl: string | undefined;
+
     // Load videos from URL parameters
     if (videos.length > 0) {
       videos.forEach(async (url) => {
@@ -125,7 +130,8 @@ export function useHostIntegration({
               let thumbnailUrl: string | undefined;
               const thumbnailBlob = await getThumbnail(loadVideoId);
               if (thumbnailBlob) {
-                thumbnailUrl = URL.createObjectURL(thumbnailBlob);
+                thumbnailObjectUrl = URL.createObjectURL(thumbnailBlob);
+                thumbnailUrl = thumbnailObjectUrl;
               }
 
               // Add video to source videos
@@ -159,6 +165,9 @@ export function useHostIntegration({
       }
     }
 
-    return cleanup;
+    return () => {
+      cleanup();
+      if (thumbnailObjectUrl) URL.revokeObjectURL(thumbnailObjectUrl);
+    };
   }, []);
 }

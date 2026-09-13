@@ -38,7 +38,9 @@ export function TransitionSection({ transition, clipDuration, onTypeChange, onDu
             ))}
           </select>
         </div>
-        {transition?.type !== 'none' && (
+        {/* Same fallback as the select above: a clip saved with no transition
+            object reads as `none` here too, so it shows no duration row. */}
+        {(transition?.type ?? 'none') !== 'none' && (
           <div className={styles.transformRow}>
             <label>Duration</label>
             <input
