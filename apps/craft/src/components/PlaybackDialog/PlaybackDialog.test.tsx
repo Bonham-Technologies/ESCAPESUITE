@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PlaybackDialog } from './PlaybackDialog'
-import { installBrowserStubs, type BrowserStubs } from '../../test/appHarness'
+import { installBrowserStubs, type BrowserStubs } from '../../test/doubles/browser'
 import styles from '../../App.module.css'
 
 let browser: BrowserStubs

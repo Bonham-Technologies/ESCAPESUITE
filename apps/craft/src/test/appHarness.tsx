@@ -1,13 +1,23 @@
 // Shared setup for the ESCAPECRAFT App tests: a clean store, a rendered App,
-// and the handful of jsdom gaps App walks into (media playback, anchor
-// downloads, window.open).
+// and the rAF loop the PiP compositor is stepped through by hand.
+//
+// The jsdom gaps App walks into (media playback, anchor downloads,
+// window.open) live in `doubles/browser.ts` with the rest of the browser
+// doubles, and are re-exported here because every App suite reaches for them
+// through this module.
 import { act, render, type RenderResult } from '@testing-library/react'
-import { vi } from 'vitest'
 import App from '../App'
 import { useRecorderStore } from '../store/recorderStore'
 import { defaultConfig, type RecordingConfig } from '../store/types'
 import { allCapabilities, allDetailedCapabilities } from './appDoubles'
 import { createStreamDouble, createTrackDouble, type TrackDouble } from './doubles/mediastream'
+import { installBrowserStubs } from './doubles/browser'
+
+// Written as an import plus a plain re-export rather than `export … from`,
+// because react-refresh cannot see through the latter and flags every other
+// export in the file.
+export { installBrowserStubs }
+export type { BrowserStubs, DownloadAttempt } from './doubles/browser'
 
 // Held before any test installs fake timers, so flush() always yields on a
 // real macrotask even when setInterval is faked for the countdown tests.
@@ -102,62 +112,6 @@ export function webcamStreamDouble(): StreamWithTracks {
 export function micStreamDouble(): StreamWithTracks {
   const audio = createTrackDouble('audio', { id: 'mic-audio', label: 'microphone' })
   return { stream: createStreamDouble([audio]), audio }
-}
-
-// --- jsdom gaps App walks into ---------------------------------------------
-
-export interface DownloadAttempt {
-  href: string
-  download: string
-}
-
-export interface BrowserStubs {
-  /** Every <a download> the app clicked. */
-  readonly downloads: DownloadAttempt[]
-  /** window.open spy — the header's "Open Editor" button. */
-  readonly open: ReturnType<typeof vi.spyOn>
-  restore(): void
-}
-
-/**
- * jsdom implements neither HTMLMediaElement playback, nor navigation from an
- * anchor click, nor window.open — each one logs a "Not implemented" error
- * instead. Stand them all up, recording what the app asked for.
- */
-export function installBrowserStubs(): BrowserStubs {
-  const downloads: DownloadAttempt[] = []
-
-  const mediaDescriptors: Record<string, PropertyDescriptor | undefined> = {}
-  for (const name of ['play', 'pause', 'load'] as const) {
-    mediaDescriptors[name] = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, name)
-  }
-  Object.defineProperty(HTMLMediaElement.prototype, 'play', {
-    configurable: true,
-    value: vi.fn().mockResolvedValue(undefined),
-  })
-  Object.defineProperty(HTMLMediaElement.prototype, 'pause', { configurable: true, value: vi.fn() })
-  Object.defineProperty(HTMLMediaElement.prototype, 'load', { configurable: true, value: vi.fn() })
-
-  const clickSpy = vi
-    .spyOn(HTMLAnchorElement.prototype, 'click')
-    .mockImplementation(function (this: HTMLAnchorElement) {
-      downloads.push({ href: this.getAttribute('href') ?? '', download: this.download })
-    })
-
-  const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
-
-  return {
-    downloads,
-    open: openSpy,
-    restore() {
-      for (const [name, descriptor] of Object.entries(mediaDescriptors)) {
-        if (descriptor) Object.defineProperty(HTMLMediaElement.prototype, name, descriptor)
-        else delete (HTMLMediaElement.prototype as unknown as Record<string, unknown>)[name]
-      }
-      clickSpy.mockRestore()
-      openSpy.mockRestore()
-    },
-  }
 }
 
 // --- requestAnimationFrame ---------------------------------------------------

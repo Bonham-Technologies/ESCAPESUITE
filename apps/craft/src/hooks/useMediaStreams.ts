@@ -18,7 +18,7 @@ import {
   requestMicrophone,
   stopStream,
 } from '../core/permissions';
-import { Compositor } from '../core/compositor';
+import type { Compositor } from '../core/compositor';
 import { useRecorderStore } from '../store/recorderStore';
 import type { EnvironmentCapabilities, RecordingConfig } from '../store/types';
 
