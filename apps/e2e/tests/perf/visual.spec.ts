@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { SCENE_RESOLUTION_LABEL, loadPerfScene, type SceneProject } from '../../utils/perf'
 
@@ -30,7 +31,15 @@ test.describe('preview pixels', () => {
     'the committed baseline is the default 1280x720 scene'
   )
 
-  test('composites the scene the same way at 3s', async ({ page }) => {
+  test('composites the scene the same way at 3s', async ({ page }, testInfo) => {
+    // The baseline PNG is platform-specific (Playwright suffixes it with the
+    // browser and OS). It was captured on macOS; a runner without a baseline
+    // for its own platform must not fail the informational perf job — and it
+    // must not silently write one either. Skip until a baseline for that
+    // platform is committed (generate it from a CI artifact, never locally).
+    const baseline = testInfo.snapshotPath('preview-720p-3s.png')
+    test.skip(!existsSync(baseline), `no screenshot baseline for this platform: ${baseline}`)
+
     await loadPerfScene(page)
 
     // Home, then three one-second steps: an exact 3.000s playhead, with a
