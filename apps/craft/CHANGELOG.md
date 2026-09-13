@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.1
+
+### Patch Changes
+
+- f46d27a: Internal: the thumbnail size and quality constants now have a single definition, shared between the preview-thumbnail helpers and the generator.
+
 ## 2.2.9
 
 ### Patch Changes
