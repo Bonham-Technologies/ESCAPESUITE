@@ -1,11 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from './store/projectStore';
-import { VideoUploader, VideoLibrary } from './components/VideoUploader';
-import { ResolutionPicker } from './components/ResolutionPicker';
-import { Timeline } from './components/Timeline/Timeline';
 import { PreviewPlayer } from './components/Preview/PreviewPlayer';
 import { PlaybackControls } from './components/Preview/PlaybackControls';
-import { ClipEditor } from './components/ClipEditor/ClipEditor';
 import { ExportDialog } from './components/Export/ExportDialog';
 import { KeyframePanel } from './components/KeyframePanel';
 import { Toolbar } from './components/Toolbar';
@@ -18,11 +14,19 @@ import { saveSessionState, getSessionState, clearSessionState, getVideo, getThum
 import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
-import { isStandaloneMode } from '@escapesuite/shared/config';
 import { AUTO_SAVE_DELAY, DEFAULT_TIMELINE_HEIGHT } from './app/appConstants';
 import { clampTimelineHeight, heightFromPointer, readStoredTimelineHeight, storeTimelineHeight } from './app/timelineHeight';
 import { clipCountMessage, formatTimeForNotification } from './app/appFormat';
 import { buildSessionSnapshot } from './app/sessionSnapshot';
+import { AppHeader } from './app/AppHeader';
+import { MediaLibrarySidebar } from './app/MediaLibrarySidebar';
+import { InspectorSidebar } from './app/InspectorSidebar';
+import { MobileInspectorToggle } from './app/MobileInspectorToggle';
+import { TimelineResizeHandle } from './app/TimelineResizeHandle';
+import { TimelinePane } from './app/TimelinePane';
+import { NotificationToast } from './app/NotificationToast';
+import { LoadingOverlay } from './app/LoadingOverlay';
+import { SessionRestorePrompt } from './app/SessionRestorePrompt';
 import styles from './App.module.css';
 
 function App() {
@@ -708,115 +712,20 @@ function App() {
   return (
     <div className={styles.app}>
       {/* Header */}
-      <header className={styles.header}>
-        <div className={styles.headerLeft}>
-          {!isStandaloneMode() && (
-            <a href="/" className={styles.dashboardLink} title="Back to ESCAPE Suite">
-              ← ESCAPE Suite
-            </a>
-          )}
-          <h1 className={styles.logo}>ESCAPEARTIST</h1>
-        </div>
-
-        <div className={styles.headerCenter}>
-          <input
-            type="text"
-            value={project.name}
-            onChange={(e) =>
-              setProject({ ...project, name: e.target.value, modified: Date.now() })
-            }
-            className={styles.projectName}
-            placeholder="Project Name"
-            aria-label="Project name"
-          />
-        </div>
-
-        <div className={styles.headerRight}>
-          {/* File Menu Dropdown */}
-          <div className={styles.menuContainer}>
-            <button
-              className={styles.headerButton}
-              onClick={() => setShowFileMenu(!showFileMenu)}
-              aria-expanded={showFileMenu}
-              aria-haspopup="menu"
-              aria-label="File menu"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
-              File
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-
-            {showFileMenu && (
-              <>
-                <div className={styles.menuBackdrop} onClick={() => setShowFileMenu(false)} aria-hidden="true" />
-                <div className={styles.menuDropdown} role="menu" aria-label="File options">
-                  <button
-                    className={styles.menuItem}
-                    onClick={() => { handleNewProject(); setShowFileMenu(false); }}
-                  >
-                    <span className={styles.menuItemLabel}>New Project</span>
-                    <span className={styles.menuItemShortcut}>Ctrl+N</span>
-                  </button>
-                  <button
-                    className={styles.menuItem}
-                    onClick={() => { handleLoadProject(); setShowFileMenu(false); }}
-                    disabled={isLoading}
-                  >
-                    <span className={styles.menuItemLabel}>Open Project...</span>
-                    <span className={styles.menuItemShortcut}>Ctrl+O</span>
-                  </button>
-                  <button
-                    className={styles.menuItem}
-                    onClick={() => { handleSaveProject(); setShowFileMenu(false); }}
-                    disabled={isSaving}
-                  >
-                    <span className={styles.menuItemLabel}>Save Project</span>
-                    <span className={styles.menuItemShortcut}>Ctrl+S</span>
-                  </button>
-                  <div className={styles.menuDivider} />
-                  <button
-                    className={styles.menuItem}
-                    onClick={() => { setShowExport(true); setShowFileMenu(false); }}
-                    disabled={clips.length === 0}
-                  >
-                    <span className={styles.menuItemLabel}>Export Video...</span>
-                    <span className={styles.menuItemShortcut}>Ctrl+E</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Quick action buttons */}
-          <button className={styles.headerButton} onClick={handleSaveProject} disabled={isSaving} title="Save (Ctrl+S)" aria-label="Save project">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-              <polyline points="17 21 17 13 7 13 7 21" />
-              <polyline points="7 3 7 8 15 8" />
-            </svg>
-          </button>
-
-          <button
-            className={`${styles.headerButton} ${styles.exportButton}`}
-            onClick={() => setShowExport(true)}
-            disabled={clips.length === 0}
-            title="Export (Ctrl+E)"
-            aria-label="Export video"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            Export
-          </button>
-        </div>
-      </header>
+      <AppHeader
+        projectName={project.name}
+        onRenameProject={(name) => setProject({ ...project, name, modified: Date.now() })}
+        fileMenuOpen={showFileMenu}
+        onToggleFileMenu={() => setShowFileMenu(!showFileMenu)}
+        onCloseFileMenu={() => setShowFileMenu(false)}
+        onNewProject={handleNewProject}
+        onLoadProject={handleLoadProject}
+        onSaveProject={handleSaveProject}
+        onExport={() => setShowExport(true)}
+        isLoading={isLoading}
+        isSaving={isSaving}
+        canExport={clips.length > 0}
+      />
 
       {/* Toolbar */}
       <Toolbar onShowShortcuts={() => setShowShortcuts(true)} />
@@ -824,39 +733,10 @@ function App() {
       {/* Main content */}
       <main className={styles.main}>
         {/* Left sidebar - Video library */}
-        <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
-          <div className={styles.sidebarHeader}>
-            {!sidebarCollapsed && <span id="media-library-title">Media Library</span>}
-            <button
-              className={styles.collapseButton}
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-label={sidebarCollapsed ? 'Expand media library sidebar' : 'Collapse media library sidebar'}
-              aria-expanded={!sidebarCollapsed}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                {sidebarCollapsed ? (
-                  <polyline points="9 18 15 12 9 6" />
-                ) : (
-                  <polyline points="15 18 9 12 15 6" />
-                )}
-              </svg>
-            </button>
-          </div>
-
-          {!sidebarCollapsed && (
-            <>
-              <div className={styles.uploaderContainer}>
-                <VideoUploader />
-                <ResolutionPicker />
-              </div>
-
-              <div className={styles.libraryContainer}>
-                <VideoLibrary />
-              </div>
-            </>
-          )}
-        </aside>
+        <MediaLibrarySidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
 
         {/* Center - Preview */}
         <section className={styles.previewSection}>
@@ -865,83 +745,34 @@ function App() {
         </section>
 
         {/* Right sidebar - Clip Inspector */}
-        <aside className={`${styles.propertiesSidebar} ${inspectorCollapsed ? styles.inspectorCollapsed : ''}`} aria-labelledby="inspector-title">
-          <div className={styles.sidebarHeader}>
-            <span id="inspector-title">Inspector</span>
-            <button
-              className={styles.collapseButton}
-              onClick={() => setInspectorCollapsed(!inspectorCollapsed)}
-              title={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'}
-              aria-label={inspectorCollapsed ? 'Show inspector panel' : 'Hide inspector panel'}
-              aria-expanded={!inspectorCollapsed}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                {inspectorCollapsed ? (
-                  <polyline points="15 18 9 12 15 6" />
-                ) : (
-                  <polyline points="9 18 15 12 9 6" />
-                )}
-              </svg>
-            </button>
-          </div>
-          {!inspectorCollapsed && <ClipEditor />}
-        </aside>
+        <InspectorSidebar
+          collapsed={inspectorCollapsed}
+          onToggle={() => setInspectorCollapsed(!inspectorCollapsed)}
+        />
 
         {/* Mobile inspector toggle button */}
-        <button
-          className={styles.mobileInspectorToggle}
-          onClick={() => setInspectorCollapsed(!inspectorCollapsed)}
-          title="Toggle inspector"
-          aria-label={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'}
-          aria-expanded={!inspectorCollapsed}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <line x1="15" y1="3" x2="15" y2="21" />
-          </svg>
-        </button>
+        <MobileInspectorToggle
+          collapsed={inspectorCollapsed}
+          onToggle={() => setInspectorCollapsed(!inspectorCollapsed)}
+        />
       </main>
 
       {/* Resize handle */}
-      <div
-        className={`${styles.resizeHandle} ${isResizing ? styles.resizeHandleActive : ''}`}
+      <TimelineResizeHandle
+        isResizing={isResizing}
         onMouseDown={handleResizeStart}
         onDoubleClick={handleResizeDoubleClick}
-        title="Drag to resize timeline (double-click to reset)"
-      >
-        <div className={styles.resizeHandleGrip} />
-      </div>
+      />
 
       {/* Timeline */}
-      <footer className={styles.footer} style={{ height: timelineHeight }}>
-        <div className={styles.timelineControls}>
-          <button className={styles.addTrackButton} onClick={() => addTrack()} title="Add new track" aria-label="Add new track">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span>Add Track</span>
-          </button>
-          <div className={styles.controlsDivider} aria-hidden="true" />
-          <button className={styles.zoomButton} onClick={handleZoomOut} title="Zoom out" aria-label="Zoom out timeline">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <line x1="8" y1="11" x2="14" y2="11" />
-            </svg>
-          </button>
-          <span className={styles.zoomLabel} aria-label={`Zoom level ${Math.round(zoom * 100)}%`}>{Math.round(zoom * 100)}%</span>
-          <button className={styles.zoomButton} onClick={handleZoomIn} title="Zoom in" aria-label="Zoom in timeline">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <line x1="11" y1="8" x2="11" y2="14" />
-              <line x1="8" y1="11" x2="14" y2="11" />
-            </svg>
-          </button>
-        </div>
-        <Timeline onExportSelection={(timeRange) => { setExportTimeRange(timeRange); setShowExport(true); }} />
-      </footer>
+      <TimelinePane
+        height={timelineHeight}
+        zoom={zoom}
+        onAddTrack={addTrack}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onExportSelection={(timeRange) => { setExportTimeRange(timeRange); setShowExport(true); }}
+      />
 
       {/* Export dialog */}
       <ExportDialog isOpen={showExport} onClose={() => { setShowExport(false); setExportTimeRange(undefined); }} timeRange={exportTimeRange} />
@@ -950,51 +781,18 @@ function App() {
       <KeyframePanel />
 
       {/* Notification */}
-      {notification && (
-        <div className={`${styles.notification} ${styles[notification.type]}`} role="status" aria-live="polite">
-          {notification.message}
-        </div>
-      )}
+      {notification && <NotificationToast notification={notification} />}
 
       {/* Loading overlay */}
-      {isLoading && (
-        <div className={styles.loadingOverlay} role="dialog" aria-modal="true" aria-labelledby="loading-message">
-          <div className={styles.spinner} aria-hidden="true" />
-          <p id="loading-message">Loading project...</p>
-        </div>
-      )}
+      {isLoading && <LoadingOverlay />}
 
       {/* Session restore prompt */}
       {showSessionPrompt && pendingSession && (
-        <div className={styles.loadingOverlay} role="dialog" aria-modal="true" aria-labelledby="session-prompt-title">
-          <div className={styles.sessionPrompt}>
-            <h3 id="session-prompt-title">Resume Previous Session?</h3>
-            <p>
-              You have an unsaved session from{' '}
-              {new Date(pendingSession.timestamp).toLocaleString()}
-            </p>
-            <p>
-              Project: <strong>{pendingSession.project.name}</strong>
-              <br />
-              {pendingSession.sourceVideos.length} video(s),{' '}
-              {pendingSession.project.timeline.clips.length} clip(s) on timeline
-            </p>
-            <div className={styles.sessionPromptButtons}>
-              <button
-                className={styles.sessionRestoreButton}
-                onClick={() => handleRestoreSession(pendingSession)}
-              >
-                Restore Session
-              </button>
-              <button
-                className={styles.sessionDeclineButton}
-                onClick={handleDeclineSession}
-              >
-                Start Fresh
-              </button>
-            </div>
-          </div>
-        </div>
+        <SessionRestorePrompt
+          session={pendingSession}
+          onRestore={handleRestoreSession}
+          onDecline={handleDeclineSession}
+        />
       )}
 
       {/* Keyboard shortcuts panel */}
