@@ -303,7 +303,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.20 | 95.78 | 99.67 |
-| `@escapesuite/artist` | 99.33 | 98.50 | 91.72 | 98.95 |
+| `@escapesuite/artist` | 99.34 | 98.53 | 91.95 | 98.97 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
