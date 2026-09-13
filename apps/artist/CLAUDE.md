@@ -245,6 +245,42 @@ Interactive overlay manipulation in the preview canvas:
 - **Keyframe mode**: When keyframe panel is open, transforms create keyframes at current playhead time
 - Selection handles follow animated values during playback
 
+### Timeline (`src/components/Timeline/`)
+`Timeline.tsx` is wiring only — the store selectors, the refs for the three scrolling panes,
+one call per module below, and the JSX around them. It owns no gesture state and binds no
+document listeners itself. The hooks are called in a fixed order — playhead, in/out, scroll
+sync, clip drag, trim, track actions, marquee, seek — and the order matters for the four that
+bind listeners or observers: it is the order the effects ran in when they all lived inline,
+and a re-ordering would change which one re-binds first on a re-render. Two things the
+directory uses come from outside it: `useVirtualizedTimeline` (`src/hooks`), which decides
+which clips are near enough the viewport to draw, and `MarqueeSelection`
+(`src/components/Preview/`), the rectangle the preview and the timeline share. Every module
+here has its own test file except `types.ts`, which is types only (and excluded from
+coverage); `Timeline.tsx` itself is covered through `Timeline.test.tsx`,
+`Timeline.editing.test.tsx` and `Timeline.chrome.test.tsx`, which drive the rendered
+component.
+
+| Module | Owns |
+|--------|------|
+| `Timeline.tsx` | The composition: the store selectors, the container/ruler/headers/track refs, the hook calls in their fixed order, the in/out region and snap-line overlays, and the info bar |
+| `timelineGeometry.ts` | All of the timeline's maths as pure functions — ruler tick spacing, pointer-to-time, clamping, snap resolution for a drag, the trim's re-derivation from its origin, and the marquee's time/Y ranges and hit tests. No ref, no store, no render |
+| `types.ts` | `DragState` and `TrimState` — the two gesture shapes the hooks own and `TimelineTrack` draws from, so neither has to import the other. **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
+| `TimelineRuler.tsx` | The ruler: ticks and labels, the marker flags, the in/out handles and the region they bracket. Also exports `TimelineMarkerLines`, the marker verticals drawn down over the tracks |
+| `TimelinePlayhead.tsx` | The playhead line — `React.memo`'d and subscribing to `currentTime` itself, so a playback tick moves this element instead of re-rendering the timeline |
+| `TimelineTimeReadout.tsx` | The `current / total` readout in the info bar, split out for the same reason |
+| `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, waveform and keyframe diamonds |
+| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls |
+| `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
+| `AudioWaveform.tsx` | The canvas waveform inside a clip, capped at 4000 CSS px of backing store and CSS-scaled beyond it, because browsers refuse a canvas much wider |
+| `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
+| `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
+| `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point it writes |
+| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written once, on release |
+| `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it |
+| `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking |
+| `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips |
+| `useTimelineSeek.ts` | The two click-to-seek handlers — the ruler's, and the track area's with every reason it stands down (a drag, a scrub, the click that ended a marquee, a click on the playhead) and the deselection it does when the click really was on bare track |
+
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`
 - Custom events in `src/utils/analytics.ts`:

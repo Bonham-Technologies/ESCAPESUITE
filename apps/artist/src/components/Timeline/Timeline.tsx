@@ -1,16 +1,19 @@
-import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useCallback, useMemo } from 'react';
 import { useEditorStore } from '../../store/projectStore';
 import { formatTime, timeToPixels } from '../../utils/timeUtils';
 import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineTimeReadout } from './TimelineTimeReadout';
 import { TimelineMarkerLines, TimelineRuler } from './TimelineRuler';
-import { clampTime, pointerTime } from './timelineGeometry';
 import { TimelineTrack } from './TimelineTrack';
 import { TrackHeader } from './TrackHeader';
 import { useClipDrag } from './useClipDrag';
+import { useInOutDrag } from './useInOutDrag';
+import { usePlayheadDrag } from './usePlayheadDrag';
 import { useScrollSync } from './useScrollSync';
 import { useTimelineMarquee } from './useTimelineMarquee';
+import { useTimelineSeek } from './useTimelineSeek';
+import { useTrackHeaderActions } from './useTrackHeaderActions';
 import { useTrimDrag } from './useTrimDrag';
 import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
@@ -26,7 +29,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const rulerRef = useRef<HTMLDivElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const trackHeadersRef = useRef<HTMLDivElement>(null);
-  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
 
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -61,9 +63,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const outPoint = useEditorStore((state) => state.outPoint);
   const setInPoint = useEditorStore((state) => state.setInPoint);
   const setOutPoint = useEditorStore((state) => state.setOutPoint);
-
-  const [isDraggingInPoint, setIsDraggingInPoint] = useState(false);
-  const [isDraggingOutPoint, setIsDraggingOutPoint] = useState(false);
 
   const pixelsPerSecond = PIXELS_PER_SECOND_BASE * zoom;
   const minTimelineDuration = Math.max(timelineDuration, 60);
@@ -101,86 +100,23 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     [visibleClipsByTrack]
   );
 
-  // Handle ruler click to seek (and pause if playing)
-  const handleRulerClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (!rulerRef.current) return;
+  // Scrubbing the playhead
+  const { isDraggingPlayhead, handlePlayheadMouseDown } = usePlayheadDrag({
+    trackContainerRef,
+    pixelsPerSecond,
+    timelineDuration,
+    setCurrentTime,
+  });
 
-      if (isPlaying) {
-        setIsPlaying(false);
-      }
-
-      const rect = rulerRef.current.getBoundingClientRect();
-      const time = pointerTime(e.clientX, rect.left, rulerRef.current.scrollLeft, pixelsPerSecond);
-      const clampedTime = clampTime(time, timelineDuration || minTimelineDuration);
-      setCurrentTime(clampedTime);
-    },
-    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying]
-  );
-
-  // Handle playhead drag
-  const handlePlayheadMouseDown = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsDraggingPlayhead(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isDraggingPlayhead) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!trackContainerRef.current) return;
-
-      const rect = trackContainerRef.current.getBoundingClientRect();
-      const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
-      const clampedTime = clampTime(time, timelineDuration);
-      setCurrentTime(clampedTime);
-    };
-
-    const handleMouseUp = () => {
-      setIsDraggingPlayhead(false);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDraggingPlayhead, pixelsPerSecond, timelineDuration, setCurrentTime]);
-
-  // Handle in/out point marker drag
-  useEffect(() => {
-    if (!isDraggingInPoint && !isDraggingOutPoint) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const ref = trackContainerRef.current || rulerRef.current;
-      if (!ref) return;
-
-      const rect = ref.getBoundingClientRect();
-      const time = pointerTime(e.clientX, rect.left, ref.scrollLeft, pixelsPerSecond);
-      const clampedTime = clampTime(time, timelineDuration);
-
-      if (isDraggingInPoint) {
-        setInPoint(clampedTime);
-      } else {
-        setOutPoint(clampedTime);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDraggingInPoint(false);
-      setIsDraggingOutPoint(false);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDraggingInPoint, isDraggingOutPoint, pixelsPerSecond, timelineDuration, setInPoint, setOutPoint]);
+  // Dragging the in/out point markers on the ruler
+  const { handleInPointMouseDown, handleOutPointMouseDown } = useInOutDrag({
+    trackContainerRef,
+    rulerRef,
+    pixelsPerSecond,
+    timelineDuration,
+    setInPoint,
+    setOutPoint,
+  });
 
   // Keep the ruler, the headers and the track area scrolled together
   const { handleTrackScroll, handleHeadersScroll } = useScrollSync({
@@ -225,45 +161,14 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   // Calculate total tracks height
   const totalTracksHeight = tracks.reduce((sum, t) => sum + t.height, 0);
 
-  // Move track up (toward top of visual stack)
-  // sortedTracks is ordered top-first (highest index at [0])
-  // reorderTracks assigns index based on array position (first = index 0 = bottom)
-  // So we need to reverse the array before passing to reorderTracks
-  const moveTrackUp = useCallback((trackId: string) => {
-    const trackIndex = sortedTracks.findIndex(t => t.id === trackId);
-    if (trackIndex <= 0) return; // Already at top
-
-    // Swap with the track above in visual order
-    const newOrder = sortedTracks.map(t => t.id);
-    [newOrder[trackIndex], newOrder[trackIndex - 1]] = [newOrder[trackIndex - 1], newOrder[trackIndex]];
-    // Reverse so first item gets highest index (top)
-    reorderTracks([...newOrder].reverse());
-  }, [sortedTracks, reorderTracks]);
-
-  // Move track down (toward bottom of visual stack)
-  const moveTrackDown = useCallback((trackId: string) => {
-    const trackIndex = sortedTracks.findIndex(t => t.id === trackId);
-    if (trackIndex >= sortedTracks.length - 1) return; // Already at bottom
-
-    // Swap with the track below in visual order
-    const newOrder = sortedTracks.map(t => t.id);
-    [newOrder[trackIndex], newOrder[trackIndex + 1]] = [newOrder[trackIndex + 1], newOrder[trackIndex]];
-    // Reverse so first item gets highest index (top)
-    reorderTracks([...newOrder].reverse());
-  }, [sortedTracks, reorderTracks]);
-
-  // Delete track (with confirmation if it has clips)
-  const handleDeleteTrack = useCallback((trackId: string) => {
-    if (tracks.length <= 1) return; // Keep at least one track
-
-    const trackClips = clips.filter(c => c.trackId === trackId);
-    if (trackClips.length > 0) {
-      if (!confirm(`Delete track with ${trackClips.length} clip(s)? This cannot be undone.`)) {
-        return;
-      }
-    }
-    removeTrack(trackId);
-  }, [tracks.length, clips, removeTrack]);
+  // Raising, lowering and deleting a track from its header
+  const { moveTrackUp, moveTrackDown, handleDeleteTrack } = useTrackHeaderActions({
+    sortedTracks,
+    tracks,
+    clips,
+    reorderTracks,
+    removeTrack,
+  });
 
   // Track whether marquee was just completed so handleTrackClick can skip deselection
   const marqueeJustFinished = useRef(false);
@@ -280,45 +185,22 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     marqueeJustFinished,
   });
 
-  // Handle click on track to seek, pause, and deselect.
-  // Declared after the drag and marquee hooks because it reads what they own:
-  // a live `dragState` suppresses it, and `marqueeJustFinished` tells it that
-  // the click it is about to handle only ended a rubber-band selection.
-  const handleTrackClick = useCallback(
-    (e: React.MouseEvent) => {
-      // If a marquee selection just completed, skip normal click behavior
-      if (marqueeJustFinished.current) {
-        marqueeJustFinished.current = false;
-        return;
-      }
-
-      if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
-
-      // Only deselect if clicking directly on the track container, not on a clip or playhead
-      const target = e.target as HTMLElement;
-      const isClickOnClip = target.closest('[data-clip-id]');
-      const isClickOnPlayhead = target.closest('[data-playhead]');
-
-      // Don't seek or deselect when clicking playhead
-      if (isClickOnPlayhead) return;
-
-      if (isPlaying) {
-        setIsPlaying(false);
-      }
-
-      const rect = trackContainerRef.current.getBoundingClientRect();
-      const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
-      const clampedTime = clampTime(time, timelineDuration);
-      setCurrentTime(clampedTime);
-
-      // Deselect clip only when clicking on empty track space
-      if (!isClickOnClip) {
-        clearMultiSelection();
-        setSelectedClipId(null);
-      }
-    },
-    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying]
-  );
+  // Click-to-seek, on the ruler and on empty track space
+  const { handleRulerClick, handleTrackClick } = useTimelineSeek({
+    rulerRef,
+    trackContainerRef,
+    pixelsPerSecond,
+    timelineDuration,
+    minTimelineDuration,
+    isPlaying,
+    setIsPlaying,
+    setCurrentTime,
+    setSelectedClipId,
+    clearMultiSelection,
+    isDraggingPlayhead,
+    dragState,
+    marqueeJustFinishedRef: marqueeJustFinished,
+  });
 
   return (
     <div className={styles.container} ref={containerRef}>
@@ -333,8 +215,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
         outPoint={outPoint}
         onRulerClick={handleRulerClick}
         onRemoveMarker={removeMarker}
-        onInPointMouseDown={(e) => { e.stopPropagation(); setIsDraggingInPoint(true); }}
-        onOutPointMouseDown={(e) => { e.stopPropagation(); setIsDraggingOutPoint(true); }}
+        onInPointMouseDown={handleInPointMouseDown}
+        onOutPointMouseDown={handleOutPointMouseDown}
       />
 
       {/* Tracks area */}

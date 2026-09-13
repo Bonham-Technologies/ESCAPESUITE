@@ -295,7 +295,7 @@ functions). `pnpm test:coverage` (`turbo test:coverage`) runs `vitest run --cove
 in every package and fails the whole run if any package drops below its floor.
 
 **Where it stands** — measured 2026-09-10, at the end of the coverage program
-(`@escapesuite/craft` and `@escapesuite/artist` re-measured 2026-09-12). Each
+(`@escapesuite/craft` re-measured 2026-09-12, `@escapesuite/artist` 2026-09-13). Each
 package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -303,7 +303,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 99.88 | 99.08 | 94.51 | 98.94 |
-| `@escapesuite/artist` | 99.31 | 98.01 | 89.86 | 98.93 |
+| `@escapesuite/artist` | 99.33 | 98.24 | 90.73 | 98.94 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
