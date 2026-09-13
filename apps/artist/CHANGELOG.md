@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.10
+
+### Patch Changes
+
+- 5cd981b: Internal: the editor shell is split into focused modules — the chrome as components, the theme, session, autosave, shortcut, resize and host-integration concerns as hooks — with no behaviour change.
+
 ## 2.2.8
 
 ### Patch Changes
