@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.3.0
+
+### Minor Changes
+
+- 5301287: Each keyframe's easing can now be chosen in the keyframe panel: select a keyframe in the curve view and pick its easing from the same seven curves the animate-in/out presets offer. Previously every keyframe you created was locked to Ease In-Out.
+
+### Patch Changes
+
+- e30d359: A project carrying overlays from an older ARTIST version now brings them onto the timeline as ordinary overlay clips when it loads, so they can be selected, restyled, moved, trimmed and deleted — and, for the first time, they are included in exports and headless renders instead of being silently dropped. One visible change comes with that: a blur region from an older version, which used to draw nothing at all, now blurs the video underneath it.
+- 87230b7: Internal: the unreachable overlay editor and the old inline keyframe editor are removed, along with the legacy overlay store actions, selection state and preview draw loops they were the last readers of. Legacy overlays in old project files still load — they become ordinary overlay clips.
+
 ## 2.2.10
 
 ### Patch Changes
