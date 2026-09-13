@@ -125,7 +125,7 @@ describe('App recording playback', () => {
 
     await user().click(screen.getByRole('button', { name: 'Play Standup Demo' }));
 
-    const dialog = screen.getByRole('dialog');
+    const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveAccessibleName('Standup Demo');
     const video = dialog.querySelector('video') as HTMLVideoElement;
     expect(video).toHaveAttribute('src', 'blob:mock-url');
@@ -148,9 +148,9 @@ describe('App recording playback', () => {
     await user().click(screen.getByRole('button', { name: 'Play Standup Demo' }));
 
     await user().click(screen.getByText('Standup Demo', { selector: '[class*="playbackTitle"]' }));
-    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(await screen.findByRole('dialog')).toBeTruthy();
 
-    await user().click(screen.getByRole('dialog'));
+    await user().click(await screen.findByRole('dialog'));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -164,7 +164,7 @@ describe('App recording playback', () => {
 
     await user().click(screen.getByRole('button', { name: 'Play Second' }));
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('Second');
+    expect(await screen.findByRole('dialog')).toHaveAccessibleName('Second');
   });
 
   it('does nothing when the stored blob has gone missing', async () => {
@@ -183,7 +183,7 @@ describe('App recording playback', () => {
     await renderApp();
     await user().click(screen.getByRole('button', { name: 'Play Standup Demo' }));
 
-    const video = screen.getByRole('dialog').querySelector('video') as HTMLVideoElement;
+    const video = (await screen.findByRole('dialog')).querySelector('video') as HTMLVideoElement;
     act(() => {
       fireEvent.error(video);
     });
