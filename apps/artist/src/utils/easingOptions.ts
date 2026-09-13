@@ -10,6 +10,10 @@
 // it) so the keyframe panel does not have to reach into the inspector.
 import type { EasingType } from '../store/types';
 
+// The three omitted quad values (`ease-in-quad`, `ease-out-quad`, `ease-in-out-quad`) are
+// exact numerical aliases of `ease-in`, `ease-out`, and `ease-in-out` respectively (see
+// `animation.ts`), so offering them would add duplicate entries for zero expressive gain —
+// the omission is deliberate, not an oversight.
 /** A subset of `EasingType`: the quad variants exist in the engine but are not offered here. */
 export const EASING_TYPES: { value: EasingType; label: string }[] = [
   { value: 'linear', label: 'Linear' },

@@ -375,106 +375,106 @@ export function KeyframeGraph({
 
   return (
     <div className={styles.graphWrap}>
-    <svg
-      ref={svgRef}
-      className={styles.graph}
-      viewBox={`0 0 ${graphDimensions.width} ${graphDimensions.height}`}
-      preserveAspectRatio="xMidYMid meet"
-      onClick={handleGraphClick}
-      onDoubleClick={handleDoubleClick}
-    >
-      {/* Grid lines */}
-      <g className={styles.grid}>
-        {gridLines.map((line, i) => (
-          <g key={i}>
-            <line
-              x1={line.x1}
-              y1={line.y1}
-              x2={line.x2}
-              y2={line.y2}
-              className={styles.gridLine}
-            />
-            {line.label && line.x1 === line.x2 && (
-              // Time label (bottom)
-              <text
-                x={line.x1}
-                y={graphDimensions.height - 8}
-                className={styles.label}
-                textAnchor="middle"
-              >
-                {line.label}
-              </text>
-            )}
-            {line.label && line.y1 === line.y2 && (
-              // Value label (left)
-              <text
-                x={GRAPH_PADDING.left - 8}
-                y={line.y1 + 4}
-                className={styles.label}
-                textAnchor="end"
-              >
-                {line.label}
-              </text>
-            )}
-          </g>
-        ))}
-      </g>
-
-      {/* Value curve */}
-      <path d={curvePath} className={styles.curve} />
-
-      {/* Playhead */}
-      {playheadX !== null && (
-        <line
-          x1={playheadX}
-          y1={GRAPH_PADDING.top}
-          x2={playheadX}
-          y2={GRAPH_PADDING.top + graphDimensions.innerHeight}
-          className={styles.playhead}
-        />
-      )}
-
-      {/* Keyframe points */}
-      {keyframes.map((kf, i) => {
-        const isCustom = isCustomKeyframe(kf);
-        const isDragging = dragState?.isDragging && Math.abs(dragState.originalTime - kf.time) < 0.001;
-        const isSelected = selectedKeyframeTime !== null && Math.abs(selectedKeyframeTime - kf.time) < 0.001;
-
-        // Use drag state position if this keyframe is being dragged
-        const displayTime = isDragging ? dragState.currentTime : kf.time;
-        const displayValue = isDragging ? dragState.currentValue : kf.value;
-        const cx = graphDimensions.timeToX(displayTime);
-        const cy = graphDimensions.valueToY(displayValue);
-
-        return (
-          <circle
-            key={`${kf.time}-${i}`}
-            cx={cx}
-            cy={cy}
-            r={isDragging ? 8 : isSelected ? 7 : 6}
-            className={`${styles.keyframePoint} ${isCustom ? styles.custom : styles.preset} ${isDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''}`}
-            onMouseDown={(e) => handleKeyframeMouseDown(e, kf)}
-            onClick={(e) => handleKeyframeClick(e, kf)}
-            onContextMenu={(e) => handleKeyframeContextMenu(e, kf)}
-          >
-            <title>
-              {formatValue(displayValue, property)} @ {displayTime.toFixed(2)}s
-              {isCustom ? '\n(Drag to move, Right-click or Delete key to remove)' : '\n(Preset - cannot modify)'}
-            </title>
-          </circle>
-        );
-      })}
-
-      {/* Help text */}
-      <text
-        x={graphDimensions.width / 2}
-        y={graphDimensions.height - 2}
-        className={styles.helpLabel}
-        textAnchor="middle"
+      <svg
+        ref={svgRef}
+        className={styles.graph}
+        viewBox={`0 0 ${graphDimensions.width} ${graphDimensions.height}`}
+        preserveAspectRatio="xMidYMid meet"
+        onClick={handleGraphClick}
+        onDoubleClick={handleDoubleClick}
       >
-        Double-click to add • Right-click to delete • Drag to move
-      </text>
-    </svg>
+        {/* Grid lines */}
+        <g className={styles.grid}>
+          {gridLines.map((line, i) => (
+            <g key={i}>
+              <line
+                x1={line.x1}
+                y1={line.y1}
+                x2={line.x2}
+                y2={line.y2}
+                className={styles.gridLine}
+              />
+              {line.label && line.x1 === line.x2 && (
+                // Time label (bottom)
+                <text
+                  x={line.x1}
+                  y={graphDimensions.height - 8}
+                  className={styles.label}
+                  textAnchor="middle"
+                >
+                  {line.label}
+                </text>
+              )}
+              {line.label && line.y1 === line.y2 && (
+                // Value label (left)
+                <text
+                  x={GRAPH_PADDING.left - 8}
+                  y={line.y1 + 4}
+                  className={styles.label}
+                  textAnchor="end"
+                >
+                  {line.label}
+                </text>
+              )}
+            </g>
+          ))}
+        </g>
+
+        {/* Value curve */}
+        <path d={curvePath} className={styles.curve} />
+
+        {/* Playhead */}
+        {playheadX !== null && (
+          <line
+            x1={playheadX}
+            y1={GRAPH_PADDING.top}
+            x2={playheadX}
+            y2={GRAPH_PADDING.top + graphDimensions.innerHeight}
+            className={styles.playhead}
+          />
+        )}
+
+        {/* Keyframe points */}
+        {keyframes.map((kf, i) => {
+          const isCustom = isCustomKeyframe(kf);
+          const isDragging = dragState?.isDragging && Math.abs(dragState.originalTime - kf.time) < 0.001;
+          const isSelected = selectedKeyframeTime !== null && Math.abs(selectedKeyframeTime - kf.time) < 0.001;
+
+          // Use drag state position if this keyframe is being dragged
+          const displayTime = isDragging ? dragState.currentTime : kf.time;
+          const displayValue = isDragging ? dragState.currentValue : kf.value;
+          const cx = graphDimensions.timeToX(displayTime);
+          const cy = graphDimensions.valueToY(displayValue);
+
+          return (
+            <circle
+              key={`${kf.time}-${i}`}
+              cx={cx}
+              cy={cy}
+              r={isDragging ? 8 : isSelected ? 7 : 6}
+              className={`${styles.keyframePoint} ${isCustom ? styles.custom : styles.preset} ${isDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''}`}
+              onMouseDown={(e) => handleKeyframeMouseDown(e, kf)}
+              onClick={(e) => handleKeyframeClick(e, kf)}
+              onContextMenu={(e) => handleKeyframeContextMenu(e, kf)}
+            >
+              <title>
+                {formatValue(displayValue, property)} @ {displayTime.toFixed(2)}s
+                {isCustom ? '\n(Drag to move, Right-click or Delete key to remove)' : '\n(Preset - cannot modify)'}
+              </title>
+            </circle>
+          );
+        })}
+
+        {/* Help text */}
+        <text
+          x={graphDimensions.width / 2}
+          y={graphDimensions.height - 2}
+          className={styles.helpLabel}
+          textAnchor="middle"
+        >
+          Double-click to add • Right-click to delete • Drag to move
+        </text>
+      </svg>
 
       {selectedKeyframe && onKeyframeEasingChanged && (
         <div className={styles.easingRow}>
@@ -487,6 +487,12 @@ export function KeyframeGraph({
               onKeyframeEasingChanged(property, selectedKeyframe.time, e.target.value as EasingType)
             }
           >
+            {!EASING_TYPES.some(o => o.value === selectedKeyframe.easing) && (
+              // A project loaded from a file or a host can carry an EasingType the menu
+              // does not offer (the quad variants, which are exact aliases of ease-in /
+              // ease-out / ease-in-out). Show it rather than render a blank select.
+              <option value={selectedKeyframe.easing}>{selectedKeyframe.easing}</option>
+            )}
             {EASING_TYPES.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}

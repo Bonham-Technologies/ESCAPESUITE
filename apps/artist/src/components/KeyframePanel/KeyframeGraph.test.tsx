@@ -312,6 +312,27 @@ describe('KeyframeGraph', () => {
       )
     })
 
+    it('shows a stored easing the menu does not offer instead of a blank select', () => {
+      // 'ease-in-out-quad' is a real EasingType (an exact alias of 'ease-in-out') that a
+      // loaded project or host integration can carry even though EASING_TYPES omits it.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'ease-in-out-quad' })
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+
+      const select = easingSelect()!
+      expect(select.value).toBe('ease-in-out-quad')
+      expect(select.options).toHaveLength(EASING_TYPES.length + 1)
+    })
+
+    it('does not add an extra option when the stored easing is already offered', () => {
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+
+      expect(easingSelect()!.options).toHaveLength(EASING_TYPES.length)
+    })
+
     it('reports the chosen easing for the selected keyframe', async () => {
       const user = userEvent.setup()
       // The keyframe starts on a different curve, so picking Linear is a change.
