@@ -314,6 +314,24 @@ describe('useClipEditorActions clip actions', () => {
     expect(store().currentTime).toBe(3)
   })
 
+  it('rebuilds handleGoToClip when the selected clip changes under it', () => {
+    mediaClip(3, 2)
+    store().addTrack('second')
+    const secondTrack = store().project.timeline.tracks[1].id
+    addClip('clip2', 3, 2, secondTrack)
+    const { result } = mount()
+    const before = result.current.handleGoToClip
+
+    store().setSelectedClipId('clip2')
+
+    // Both clips start at 3s, so the position the callback writes has not
+    // moved: the only thing that changed is the clip it closes over, and it
+    // has to be in the dependency array for that to be visible at all.
+    expect(result.current.selectedClip!.id).toBe('clip2')
+    expect(result.current.selectedClip!.timelinePosition).toBe(3)
+    expect(result.current.handleGoToClip).not.toBe(before)
+  })
+
   it('duplicates the clip', () => {
     const clip = mediaClip()
     const { result } = mount()

@@ -158,4 +158,20 @@ describe('answering the prompt', () => {
     expect(result.current.pendingSession).toBeNull()
     expect(result.current.sessionRestored).toBe(true)
   })
+
+  it('logs a throw-away that fails rather than leaving it unhandled', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(clearSessionState).mockRejectedValueOnce(new Error('blocked'))
+    const { result } = await mountWithPendingSession(savedSession())
+
+    act(() => result.current.handleDeclineSession())
+
+    // The user's answer lands synchronously whatever storage does about it.
+    expect(result.current.showSessionPrompt).toBe(false)
+    expect(result.current.pendingSession).toBeNull()
+    expect(result.current.sessionRestored).toBe(true)
+
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalledWith(expect.any(Error)))
+    consoleError.mockRestore()
+  })
 })

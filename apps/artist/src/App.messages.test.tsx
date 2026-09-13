@@ -264,6 +264,29 @@ describe('App URL parameters', () => {
       })
     })
 
+    it('revokes the thumbnail it created when the editor goes away', async () => {
+      vi.mocked(getVideo).mockResolvedValueOnce({
+        blob: new Blob(),
+        metadata: { ...sampleVideo, id: 'recording1', name: 'Screen recording' },
+      })
+      vi.mocked(getThumbnail).mockResolvedValueOnce(new Blob(['thumb'], { type: 'image/jpeg' }))
+      urlParams({ loadVideoId: 'recording1' })
+
+      const { unmount } = await renderApp()
+      await waitFor(() =>
+        expect(store().sourceVideos.some((v) => v.id === 'recording1')).toBe(true)
+      )
+      const thumbnailUrl = store().sourceVideos.find((v) => v.id === 'recording1')!.thumbnailUrl
+      expect(URL.createObjectURL).toHaveBeenCalled()
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(thumbnailUrl)
+
+      unmount()
+
+      // The blob URL lives as long as the media library entry, so it is the
+      // effect's cleanup that hands it back — not the branch that made it.
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(thumbnailUrl)
+    })
+
     it('adds a recording that has no thumbnail', async () => {
       vi.mocked(getVideo).mockResolvedValueOnce({
         blob: new Blob(),
