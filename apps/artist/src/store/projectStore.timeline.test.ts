@@ -592,35 +592,6 @@ describe('projectStore remaining behaviours', () => {
     })
   })
 
-  describe('standalone shape overlays', () => {
-    it('adds, updates and removes one, clearing the selection with it', () => {
-      const overlay = store().addShapeOverlay({ type: 'ellipse' })
-      expect(store().selectedOverlayId).toBe(overlay.id)
-      expect(store().selectedOverlayType).toBe('shape')
-
-      store().updateShapeOverlay(overlay.id, { strokeWidth: 4 })
-      expect(store().project.timeline.shapeOverlays![0].strokeWidth).toBe(4)
-
-      store().removeShapeOverlay(overlay.id)
-
-      expect(store().project.timeline.shapeOverlays).toEqual([])
-      expect(store().selectedOverlayId).toBeNull()
-      expect(store().selectedOverlayType).toBeNull()
-    })
-
-    it('keeps a different selection when another overlay is removed', () => {
-      const first = store().addShapeOverlay({ type: 'ellipse' })
-      const second = store().addShapeOverlay({ type: 'rectangle' })
-      expect(store().selectedOverlayId).toBe(second.id)
-
-      store().removeShapeOverlay(first.id)
-
-      expect(store().selectedOverlayId).toBe(second.id)
-      expect(store().selectedOverlayType).toBe('shape')
-      expect(store().project.timeline.shapeOverlays!.map((o) => o.id)).toEqual([second.id])
-    })
-  })
-
   describe('recalculateTimelineDuration', () => {
     it('resyncs the stored duration with the clips', () => {
       addClip('clip1', 0, 4)

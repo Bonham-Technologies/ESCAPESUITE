@@ -2,9 +2,8 @@
 //
 // Pure functions: everything they read is a parameter, so the same maths that
 // decides what the panel shows also backs its tests, with no store and no
-// React in sight. They will later be shared with OverlayEditor, which is why
-// `overlayPositionValue` and `describeClip` take the whole clip rather than
-// pre-picked fields — everything else here takes plain values instead.
+// React in sight. `overlayPositionValue` and `describeClip` take the whole clip
+// rather than pre-picked fields; everything else here takes plain values instead.
 import type { Clip, ClipAnimation, SourceVideo } from '../../store/types';
 
 /** The type flags ClipEditor branches its sections on, plus the label its header shows. */

@@ -1,6 +1,7 @@
 // The overlays PreviewPlayer draws on top of the media: text and shape overlay
-// clips with their animated transforms, and the legacy overlay arrays a project
-// saved before overlays became clips still carries.
+// clips with their animated transforms, and the same overlays arriving as the
+// legacy arrays a project saved before overlays became clips still carries —
+// which `convertLegacyOverlays` folds into ordinary overlay clips on load.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent } from '@testing-library/react'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
@@ -13,7 +14,13 @@ import {
   type PreviewDoubles,
 } from '../../test/renderPreview'
 import { resetFrameCache } from '../../core/frameCache'
-import type { Clip, ShapeOverlayData, TextOverlayData } from '../../store/types'
+import type {
+  Clip,
+  ShapeOverlay,
+  ShapeOverlayData,
+  TextOverlay,
+  TextOverlayData,
+} from '../../store/types'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
 
@@ -294,10 +301,73 @@ describe('PreviewPlayer overlay drawing', () => {
   })
 })
 
-describe('PreviewPlayer legacy overlay arrays', () => {
-  it('draws a legacy text overlay while the playhead is inside its window', async () => {
+/**
+ * A legacy project loaded through `setProject`, which is what folds the two
+ * arrays into overlay clips (`store/legacyOverlays.ts`). These are regression
+ * tests for that conversion: the numbers below are the ones the deleted legacy
+ * draw loops produced, so they must hold unchanged now that the same overlay
+ * reaches the canvas as a clip.
+ *
+ * Loading deselects, the way adding a legacy overlay used to: these tests are
+ * about the overlay itself, and a selected clip draws handles on top.
+ */
+const legacyText = (overlay: Partial<TextOverlay> = {}): TextOverlay => ({
+  id: 'text1',
+  text: 'Legacy',
+  x: 0.5,
+  y: 0.5,
+  fontFamily: 'Arial',
+  fontSize: 48,
+  fontWeight: 'normal',
+  fontStyle: 'normal',
+  color: '#ffffff',
+  backgroundColor: '#00000000',
+  textAlign: 'center',
+  startTime: 0,
+  endTime: 4,
+  opacity: 1,
+  ...overlay,
+})
+
+const legacyShape = (overlay: Partial<ShapeOverlay> = {}): ShapeOverlay => ({
+  id: 'shape1',
+  type: 'rectangle',
+  x: 0.5,
+  y: 0.5,
+  width: 0.2,
+  height: 0.2,
+  fillColor: '#000000ff',
+  strokeColor: '#ffffff',
+  strokeWidth: 0,
+  startTime: 0,
+  endTime: 4,
+  opacity: 1,
+  rotation: 0,
+  ...overlay,
+})
+
+const loadLegacy = (overlays: {
+  textOverlays?: TextOverlay[]
+  shapeOverlays?: ShapeOverlay[]
+}): void => {
+  const project = store().project
+  store().setProject({
+    ...project,
+    timeline: {
+      ...project.timeline,
+      textOverlays: overlays.textOverlays ?? [],
+      shapeOverlays: overlays.shapeOverlays ?? [],
+    },
+  })
+  store().setSelectedClipId(null)
+}
+
+describe('PreviewPlayer legacy overlays converted on load', () => {
+  it('draws a converted legacy text overlay while the playhead is inside its window', async () => {
     addClip('clip1', 0, 4)
-    store().addTextOverlay({ text: 'Legacy', startTime: 0, endTime: 2, x: 0.25, y: 0.5, opacity: 0.5 })
+    loadLegacy({
+      textOverlays: [legacyText({ endTime: 2, x: 0.25, y: 0.5, opacity: 0.5 })],
+    })
 
     const preview = await renderPreview()
 
@@ -307,30 +377,33 @@ describe('PreviewPlayer legacy overlay arrays', () => {
     expect(text.state.globalAlpha).toBe(0.5)
   })
 
-  it('gives a legacy text overlay its background box', async () => {
+  it('gives a converted legacy text overlay its background box', async () => {
     addClip('clip1', 0, 4)
-    store().addTextOverlay({
-      text: 'Legacy',
-      startTime: 0,
-      endTime: 2,
-      backgroundColor: '#112233ff',
-      fontSize: 100,
-      textAlign: 'right',
+    loadLegacy({
+      textOverlays: [
+        legacyText({
+          endTime: 2,
+          backgroundColor: '#112233ff',
+          fontSize: 100,
+          textAlign: 'right',
+        }),
+      ],
     })
 
     const preview = await renderPreview()
     expect(preview.frame().of('fillRect')[1].args).toEqual([830, 450, 160, 180])
     expect(preview.frame().of('fillRect')[1].state.fillStyle).toBe('#112233ff')
 
-    store().updateTextOverlay(store().project.timeline.textOverlays[0].id, { textAlign: 'center' })
+    // And it is an ordinary overlay clip now, so the live panel's action edits it.
+    store().updateTextOverlayData('legacy-text-text1', { textAlign: 'center' })
     preview.clearCalls()
     await settle(60)
     expect(preview.frame().of('fillRect')[1].args).toEqual([880, 450, 160, 180])
   })
 
-  it('drops a legacy text overlay once the playhead passes its end', async () => {
+  it('drops a converted legacy text overlay once the playhead passes its end', async () => {
     addClip('clip1', 0, 4)
-    store().addTextOverlay({ text: 'Legacy', startTime: 0, endTime: 1 })
+    loadLegacy({ textOverlays: [legacyText({ endTime: 1 })] })
 
     const preview = await renderPreview()
     preview.clearCalls()
@@ -341,16 +414,18 @@ describe('PreviewPlayer legacy overlay arrays', () => {
     expect(preview.frame().of('fillText')).toHaveLength(0)
   })
 
-  it('draws every legacy shape type', async () => {
+  it('draws every converted legacy shape type', async () => {
     addClip('clip1', 0, 8)
-    const shape = store().addShapeOverlay({ type: 'ellipse', startTime: 0, endTime: 8, strokeWidth: 2 })
+    loadLegacy({
+      shapeOverlays: [legacyShape({ type: 'ellipse', endTime: 8, strokeWidth: 2 })],
+    })
 
     const preview = await renderPreview()
     expect(preview.frame().of('ellipse')).toHaveLength(1)
     expect(preview.frame().of('stroke')).toHaveLength(1)
 
     for (const type of ['rectangle', 'line', 'arrow'] as const) {
-      store().updateShapeOverlay(shape.id, { type })
+      store().updateShapeOverlayData('legacy-shape-shape1', { type })
       preview.clearCalls()
       await settle(60)
       const frame = preview.frame()
@@ -360,9 +435,11 @@ describe('PreviewPlayer legacy overlay arrays', () => {
     }
   })
 
-  it('drops a legacy shape overlay once the playhead passes its end', async () => {
+  it('drops a converted legacy shape overlay once the playhead passes its end', async () => {
     addClip('clip1', 0, 4)
-    store().addShapeOverlay({ type: 'rectangle', startTime: 0, endTime: 1, strokeWidth: 2 })
+    loadLegacy({
+      shapeOverlays: [legacyShape({ type: 'rectangle', endTime: 1, strokeWidth: 2 })],
+    })
 
     const preview = await renderPreview()
     preview.clearCalls()
@@ -373,9 +450,11 @@ describe('PreviewPlayer legacy overlay arrays', () => {
     expect(preview.frame().of('strokeRect')).toHaveLength(0)
   })
 
-  it('rotates a legacy shape overlay', async () => {
+  it('rotates a converted legacy shape overlay', async () => {
     addClip('clip1', 0, 4)
-    store().addShapeOverlay({ type: 'rectangle', startTime: 0, endTime: 4, rotation: 90 })
+    loadLegacy({
+      shapeOverlays: [legacyShape({ type: 'rectangle', endTime: 4, rotation: 90 })],
+    })
 
     const preview = await renderPreview()
 

@@ -17,10 +17,8 @@ import {
   selectSelectedClipId,
   selectSelectedTrack,
   selectSelectedTrackId,
-  selectShapeOverlays,
   selectSnapEnabled,
   selectSourceVideos,
-  selectTextOverlays,
   selectTimelineDuration,
   selectTrackCount,
   selectTracks,
@@ -121,22 +119,6 @@ describe('selectors', () => {
       expect(selectSourceVideos(s)).toEqual([video])
     })
 
-    it('return empty arrays when the overlay arrays are absent', () => {
-      const s = state()
-      expect(selectTextOverlays(s)).toEqual([])
-      expect(selectShapeOverlays(s)).toEqual([])
-
-      const legacy = {
-        ...s,
-        project: {
-          ...s.project,
-          timeline: { ...s.project.timeline, textOverlays: undefined, shapeOverlays: undefined },
-        },
-      } as unknown as EditorState
-      expect(selectTextOverlays(legacy)).toEqual([])
-      expect(selectShapeOverlays(legacy)).toEqual([])
-    })
-
     it('read the markers list', () => {
       act(() => {
         useEditorStore.getState().addMarker(2, 'Cue')
@@ -212,8 +194,6 @@ describe('selectors', () => {
       expect(result.current.currentTime).toBe(0)
       expect(result.current.isPlaying).toBe(false)
       expect(result.current.keyframePanelOpen).toBe(false)
-      expect(result.current.textOverlays).toEqual([])
-      expect(result.current.shapeOverlays).toEqual([])
 
       const first = result.current
       // A field this hook does not select must not produce a new snapshot.

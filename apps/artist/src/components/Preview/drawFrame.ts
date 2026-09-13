@@ -3,8 +3,8 @@
 // The drawing itself is the export pipeline's — `core/canvasRenderer` — so a
 // frame in the editor and the same frame in an export come out of the same
 // code. What lives here is the preview's own arrangement of it: track order,
-// which clips a transition takes over, the legacy overlay arrays, and the
-// decisions about what is drawable at all mid-scrub.
+// which clips a transition takes over, and the decisions about what is
+// drawable at all mid-scrub.
 //
 // Everything it reads is a parameter. The component owns the canvas, the
 // cached 2D context and the frame cache; this owns none of them, which is why
@@ -21,7 +21,7 @@ import type { MediaDrawOptions, TransitionModifiers } from '../../core/exportTyp
 import { getClipsAtTime } from '../../store/projectStore';
 import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
-import type { Clip, ShapeOverlay, SourceVideo, TextOverlay, Track } from '../../store/types';
+import type { Clip, SourceVideo, Track } from '../../store/types';
 import { getActiveTransition } from './transitions';
 import type { ProjectSize } from './types';
 
@@ -67,8 +67,6 @@ export interface PreviewFrameScene {
   clips: Clip[];
   tracks: Track[];
   sourceVideos: SourceVideo[];
-  textOverlays: TextOverlay[];
-  shapeOverlays: ShapeOverlay[];
   /** The text clip the inline editor has taken over, which the canvas must not draw. */
   editingTextClipId: string | null;
 }
@@ -245,7 +243,7 @@ export function drawPreviewFrame(
   scene: PreviewFrameScene,
   media: PreviewFrameMedia
 ): void {
-  const { projectSize, clips, tracks, textOverlays, shapeOverlays, editingTextClipId } = scene;
+  const { projectSize, clips, tracks, editingTextClipId } = scene;
 
   // Reset all canvas state to defaults before drawing
   ctx.globalAlpha = 1;
@@ -303,53 +301,6 @@ export function drawPreviewFrame(
       projectSize.width,
       projectSize.height,
       options
-    );
-  }
-
-  // Draw shape and text overlays from the legacy arrays (for backwards
-  // compatibility). A legacy overlay has no animation of its own: its stored
-  // position, rotation and opacity *are* the values it draws with.
-  for (const shape of shapeOverlays) {
-    if (time < shape.startTime || time >= shape.endTime) continue;
-
-    drawShapeOverlayToCanvasAnimated(
-      ctx,
-      shape,
-      projectSize.width,
-      projectSize.height,
-      {
-        x: shape.x,
-        y: shape.y,
-        scaleX: 1,
-        scaleY: 1,
-        rotation: shape.rotation,
-        opacity: shape.opacity,
-        blur: 0,
-      },
-      undefined,
-      undefined,
-      scale
-    );
-  }
-
-  for (const overlay of textOverlays) {
-    if (time < overlay.startTime || time >= overlay.endTime) continue;
-
-    drawTextOverlayToCanvasAnimated(
-      ctx,
-      overlay,
-      projectSize.width,
-      projectSize.height,
-      {
-        x: overlay.x,
-        y: overlay.y,
-        scaleX: 1,
-        scaleY: 1,
-        rotation: 0,
-        opacity: overlay.opacity,
-        blur: 0,
-      },
-      scale
     );
   }
 }

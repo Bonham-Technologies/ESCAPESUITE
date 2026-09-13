@@ -111,9 +111,12 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`,
 
 #### Legacy overlay arrays
 Older ARTIST versions stored overlays in `timeline.textOverlays` / `timeline.shapeOverlays`
-instead of as clips. Those arrays are **input-only**: `store/legacyOverlays.ts`'s
-`convertLegacyOverlays(timeline)` folds them into ordinary overlay clips and empties them, and
-nothing in the app writes them any more. It runs on **every** load path — both return paths of
+instead of as clips. Those arrays are **input-only — write-never, read-once**: nothing in the
+app creates, renders, edits or selects a legacy overlay, the only code that touches either
+array is `store/legacyOverlays.ts`'s `convertLegacyOverlays(timeline)`, and the `TextOverlay` /
+`ShapeOverlay` types survive in `store/types.ts` solely so an old file on disk still parses.
+The conversion folds them into ordinary overlay clips and empties them. It runs on **every**
+load path — both return paths of
 `ensureTimelineHasTracks` (`projectStore.ts`, so every `setProject` caller: Open Project, the
 media library, session restore and the host's `LOAD_PROJECT`) and `headless/renderProject.ts`'s
 `render()`, which does not go through the store. Before this, a legacy overlay drew in the
@@ -184,7 +187,7 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 
 | Module | Owns |
 |--------|------|
-| `drawFrame.ts` | Compositing one frame: track order, transitions, overlays, the blur scratch canvas, and the legacy overlay arrays — those last loops are now a fallback no load path can feed, since `convertLegacyOverlays` empties both arrays before the store or the headless entry ever sees them |
+| `drawFrame.ts` | Compositing one frame: track order, transitions, overlay clips and the blur scratch canvas. It knows nothing about the legacy overlay arrays — they are overlay clips by the time any project reaches the preview |
 | `previewGeometry.ts` | Where a clip is on the canvas (`getOverlayBounds`), which clips can be manipulated, the one object-fit: contain mapping between the canvas' pixels and its element's (`contentBox`, `getCanvasPosition`), and the inverse rotation every box test shares (`toLocalPoint`) |
 | `hitTest.ts` | What is under the pointer: which clip, which handle, which drag it would start. One cascade (`hitHandlesOnClip`) serves both passes — keyframe mode asks it for the selected clip alone, body included; outside it the same cascade runs handles-only before the z-order body pass |
 | `selectionOverlay.ts` | Drawing the selection chrome — bounding box, the eight resize handles, the rotation handle, multi-select boxes |
@@ -344,7 +347,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 |--------|------|
 | `ClipEditor.tsx` | The composition: the hook call, the empty-state early return, and the per-section guards in their fixed order. Owns `div.container` itself in both the empty and selected states, so that element's identity is stable across the empty↔selected transition |
 | `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`/`timeInClip`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays |
-| `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React — written to be shared with `OverlayEditor` later |
+| `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
 | `clipEditorOptions.ts` | The four `{ value, label }` option lists the dropdowns render — transitions, blend modes, animation presets, easings |
 | `CollapsibleSection.tsx` | One titled, collapsible block: its own open/closed flag, seeded from `defaultOpen` at mount and never re-read |
@@ -358,7 +361,6 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
 | `ActionsSection.tsx` | "Actions": go to, duplicate, and — video and audio only — split, which stays visible but disabled when the playhead is outside the clip or on its first frame |
-| `KeyframeEditor.tsx` | **Nothing live.** It is imported by nothing but its own `KeyframeEditor.test.tsx`; the keyframe editor the app actually renders is `src/components/KeyframePanel/`. Left in place deliberately during the decomposition — deleting it is a separate dead-code decision, not a refactor |
 
 Two things in here will surprise the next reader, and both are preserved on purpose.
 **`CollapsibleSection` owns nothing but its own open/closed flag, which it seeds from

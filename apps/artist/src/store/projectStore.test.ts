@@ -260,6 +260,20 @@ describe('projectStore integration', () => {
       useEditorStore.getState().setSelectedTrackId(null)
       expect(useEditorStore.getState().selectedTrackId).toBeNull()
     })
+
+    // Selecting a clip used to also clear a separate overlay selection, which the
+    // deleted OverlayEditor was the only thing that ever set. Nothing selects an
+    // overlay any more: overlays are clips, so `selectedClipId` is the whole of it.
+    it('touches no overlay-selection state, which no longer exists', () => {
+      useEditorStore.getState().setSelectedClipId('clip1')
+      const state = useEditorStore.getState() as unknown as Record<string, unknown>
+
+      expect('selectedOverlayId' in state).toBe(false)
+      expect('selectedOverlayType' in state).toBe(false)
+      expect('setSelectedOverlay' in state).toBe(false)
+      expect(state.selectedClipId).toBe('clip1')
+      expect(state.selectedClipIds).toEqual(new Set())
+    })
   })
 
   describe('zoom and snap', () => {
@@ -408,28 +422,6 @@ describe('projectStore integration', () => {
       const updated = useEditorStore.getState().project.timeline.clips[0]
       expect(updated.shapeData?.fillColor).toBe('#ff0000ff')
       expect(updated.shapeData?.blurAmount).toBe(10)
-    })
-  })
-
-  describe('overlay selection', () => {
-    it('deselects clip when selecting overlay', () => {
-      useEditorStore.getState().setSelectedClipId('clip1')
-      expect(useEditorStore.getState().selectedClipId).toBe('clip1')
-
-      useEditorStore.getState().setSelectedOverlay('overlay1', 'text')
-
-      expect(useEditorStore.getState().selectedOverlayId).toBe('overlay1')
-      expect(useEditorStore.getState().selectedClipId).toBeNull()
-    })
-
-    it('deselects overlay when selecting clip', () => {
-      useEditorStore.getState().setSelectedOverlay('overlay1', 'text')
-      expect(useEditorStore.getState().selectedOverlayId).toBe('overlay1')
-
-      useEditorStore.getState().setSelectedClipId('clip1')
-
-      expect(useEditorStore.getState().selectedClipId).toBe('clip1')
-      expect(useEditorStore.getState().selectedOverlayId).toBeNull()
     })
   })
 })

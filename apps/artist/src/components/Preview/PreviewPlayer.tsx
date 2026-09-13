@@ -40,8 +40,6 @@ export function PreviewPlayer() {
   const resolution = useEditorStore((state) => state.project.resolution);
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
-  const textOverlays = useEditorStore((state) => state.project.timeline.textOverlays || []);
-  const shapeOverlays = useEditorStore((state) => state.project.timeline.shapeOverlays || []);
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const currentTime = useEditorStore((state) => state.currentTime);
   const isPlaying = useEditorStore((state) => state.isPlaying);
@@ -166,8 +164,6 @@ export function PreviewPlayer() {
         clips,
         tracks,
         sourceVideos,
-        textOverlays,
-        shapeOverlays,
         editingTextClipId,
       },
       {
@@ -176,7 +172,7 @@ export function PreviewPlayer() {
         blurScratch: blurCanvasRef,
       }
     );
-  }, [canvasDimensions, clips, tracks, sourceVideos, textOverlays, shapeOverlays, editingTextClipId,
+  }, [canvasDimensions, clips, tracks, sourceVideos, editingTextClipId,
       videoElementsRef, imageElementsRef]);
 
   // Draw selection handles for the selected overlay or media clip

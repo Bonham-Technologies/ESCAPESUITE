@@ -2,39 +2,10 @@
 
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { EditorState, Project, SourceVideo, Clip, Timeline, Track, ClipTransform, ClipEffects, BlendMode, UndoableState, TextOverlay, ShapeOverlay, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe, WaveformPeak } from './types';
+import type { EditorState, Project, SourceVideo, Clip, Timeline, Track, ClipTransform, ClipEffects, BlendMode, UndoableState, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe, WaveformPeak } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA, DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { createUndoableSnapshot, cloneClip } from '../utils/deepClone';
 import { convertLegacyOverlays } from './legacyOverlays';
-
-// Legacy defaults for backwards compatibility
-const DEFAULT_TEXT_OVERLAY = {
-  text: 'Text',
-  x: 0.5,
-  y: 0.5,
-  fontFamily: 'Arial',
-  fontSize: 48,
-  fontWeight: 'normal' as const,
-  fontStyle: 'normal' as const,
-  color: '#ffffff',
-  backgroundColor: '#00000000',
-  textAlign: 'center' as const,
-  opacity: 1,
-};
-
-const DEFAULT_SHAPE_OVERLAY = {
-  type: 'rectangle' as const,
-  x: 0.5,
-  y: 0.5,
-  width: 0.2,
-  height: 0.2,
-  fillColor: '#000000ff',
-  strokeColor: '#ffffff',
-  strokeWidth: 0,
-  opacity: 1,
-  rotation: 0,
-  blurAmount: 0,
-};
 
 // Maximum history size to prevent memory issues
 const MAX_HISTORY_SIZE = 50;
@@ -156,8 +127,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedClipId: null,
   selectedClipIds: new Set<string>(),
   selectedTrackId: null,
-  selectedOverlayId: null,
-  selectedOverlayType: null,
   clipboard: null,
   inPoint: null,
   outPoint: null,
@@ -187,8 +156,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     selectedClipId: null,
     selectedClipIds: new Set<string>(),
     selectedTrackId: null,
-    selectedOverlayId: null,
-    selectedOverlayType: null,
     clipboard: null,
     inPoint: null,
     outPoint: null,
@@ -986,8 +953,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         },
       },
       selectedClipId: newClip.id,
-      selectedOverlayId: null,
-      selectedOverlayType: null,
       history: pushToHistory(state),
     });
 
@@ -1059,8 +1024,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         },
       },
       selectedClipId: newClip.id,
-      selectedOverlayId: null,
-      selectedOverlayType: null,
       history: pushToHistory(state),
     });
 
@@ -1114,134 +1077,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  // Legacy text overlay actions (for backwards compatibility)
-  addTextOverlay: (overlayData?) => {
-    const state = get();
-    const currentTime = state.currentTime;
-    const timelineDuration = state.project.timeline.duration;
-
-    const newOverlay: TextOverlay = {
-      ...DEFAULT_TEXT_OVERLAY,
-      ...overlayData,
-      id: uuidv4(),
-      startTime: overlayData?.startTime ?? currentTime,
-      endTime: overlayData?.endTime ?? Math.max(currentTime + 5, timelineDuration),
-    };
-
-    set({
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          textOverlays: [...(state.project.timeline.textOverlays || []), newOverlay],
-        },
-      },
-      selectedOverlayId: newOverlay.id,
-      selectedOverlayType: 'text',
-      selectedClipId: null, // Deselect clip when selecting overlay
-      history: pushToHistory(state),
-    });
-
-    return newOverlay;
-  },
-
-  updateTextOverlay: (id: string, updates: Partial<TextOverlay>) => set((state) => {
-    const newOverlays = (state.project.timeline.textOverlays || []).map(overlay =>
-      overlay.id === id ? { ...overlay, ...updates } : overlay
-    );
-
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          textOverlays: newOverlays,
-        },
-      },
-      history: pushToHistory(state),
-    };
-  }),
-
-  removeTextOverlay: (id: string) => set((state) => ({
-    project: {
-      ...state.project,
-      modified: Date.now(),
-      timeline: {
-        ...state.project.timeline,
-        textOverlays: (state.project.timeline.textOverlays || []).filter(o => o.id !== id),
-      },
-    },
-    selectedOverlayId: state.selectedOverlayId === id ? null : state.selectedOverlayId,
-    selectedOverlayType: state.selectedOverlayId === id ? null : state.selectedOverlayType,
-    history: pushToHistory(state),
-  })),
-
-  // Shape overlay actions
-  addShapeOverlay: (overlayData?) => {
-    const state = get();
-    const currentTime = state.currentTime;
-    const timelineDuration = state.project.timeline.duration;
-
-    const newOverlay: ShapeOverlay = {
-      ...DEFAULT_SHAPE_OVERLAY,
-      ...overlayData,
-      id: uuidv4(),
-      startTime: overlayData?.startTime ?? currentTime,
-      endTime: overlayData?.endTime ?? Math.max(currentTime + 5, timelineDuration),
-    };
-
-    set({
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          shapeOverlays: [...(state.project.timeline.shapeOverlays || []), newOverlay],
-        },
-      },
-      selectedOverlayId: newOverlay.id,
-      selectedOverlayType: 'shape',
-      selectedClipId: null, // Deselect clip when selecting overlay
-      history: pushToHistory(state),
-    });
-
-    return newOverlay;
-  },
-
-  updateShapeOverlay: (id: string, updates: Partial<ShapeOverlay>) => set((state) => {
-    const newOverlays = (state.project.timeline.shapeOverlays || []).map(overlay =>
-      overlay.id === id ? { ...overlay, ...updates } : overlay
-    );
-
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          shapeOverlays: newOverlays,
-        },
-      },
-      history: pushToHistory(state),
-    };
-  }),
-
-  removeShapeOverlay: (id: string) => set((state) => ({
-    project: {
-      ...state.project,
-      modified: Date.now(),
-      timeline: {
-        ...state.project.timeline,
-        shapeOverlays: (state.project.timeline.shapeOverlays || []).filter(o => o.id !== id),
-      },
-    },
-    selectedOverlayId: state.selectedOverlayId === id ? null : state.selectedOverlayId,
-    selectedOverlayType: state.selectedOverlayId === id ? null : state.selectedOverlayType,
-    history: pushToHistory(state),
-  })),
-
   // Playback actions
   setCurrentTime: (time: number) => set({ currentTime: time }),
   setIsPlaying: (playing: boolean) => set({ isPlaying: playing }),
@@ -1250,16 +1085,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSelectedClipId: (id: string | null) => set({
     selectedClipId: id,
     selectedClipIds: new Set<string>(), // Clear multi-selection on single click
-    // Deselect overlay when selecting clip
-    selectedOverlayId: id ? null : undefined,
-    selectedOverlayType: id ? null : undefined,
   }),
   setSelectedTrackId: (id: string | null) => set({ selectedTrackId: id }),
-  setSelectedOverlay: (id: string | null, type: 'text' | 'shape' | null) => set({
-    selectedOverlayId: id,
-    selectedOverlayType: type,
-    selectedClipId: id ? null : undefined, // Deselect clip when selecting overlay
-  }),
 
   // Multi-Select actions
   toggleClipSelection: (clipId: string) => set((state) => {
