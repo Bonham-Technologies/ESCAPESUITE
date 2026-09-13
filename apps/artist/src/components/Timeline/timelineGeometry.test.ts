@@ -35,7 +35,7 @@ describe('getRulerTicks', () => {
 
     expect(ticks).toHaveLength(10 / RULER_MINOR_INTERVAL + 1)
     expect(ticks[0]).toEqual({ time: 0, x: 0, isMajor: true })
-    expect(ticks.at(-1)).toEqual({ time: 10, x: 10 * PPS, isMajor: true })
+    expect(ticks[ticks.length - 1]).toEqual({ time: 10, x: 10 * PPS, isMajor: true })
   })
 
   it('labels every major interval and leaves the rest bare', () => {
