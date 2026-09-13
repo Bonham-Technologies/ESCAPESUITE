@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorStore } from '../../store/projectStore';
-import type { Clip, AnimatableProperty } from '../../store/types';
+import type { Clip, AnimatableProperty, EasingType } from '../../store/types';
 import { useDraggablePanel } from './hooks/useDraggablePanel';
 import { KeyframeTrack } from './KeyframeTrack';
 import { KeyframeGraph } from './KeyframeGraph';
@@ -176,6 +176,27 @@ export function KeyframePanel() {
     });
   }, [selectedClipId, setClipKeyframe]);
 
+  // Handle keyframe easing changed (from the graph's easing select)
+  const handleKeyframeEasingChanged = useCallback((
+    property: AnimatableProperty,
+    time: number,
+    easing: EasingType
+  ) => {
+    if (!selectedClipId) return;
+
+    // Fresh state, for the same reason handleKeyframeValueChanged reads it:
+    // the memoized clip can lag a keyframe that was just moved or added.
+    const state = useEditorStore.getState();
+    const freshClip = state.project.timeline.clips.find(c => c.id === selectedClipId);
+    const existingKf = (freshClip?.animation?.keyframes[property] || [])
+      .find(kf => Math.abs(kf.time - time) < 0.001);
+    if (!existingKf) return;
+
+    // setClipKeyframe replaces the keyframe at this time, so time and value
+    // survive untouched and the whole change is one history entry.
+    setClipKeyframe(selectedClipId, property, { ...existingKf, easing });
+  }, [selectedClipId, setClipKeyframe]);
+
   // Handle keyframe deletion
   const handleDeleteKeyframe = useCallback((property: AnimatableProperty, time: number) => {
     if (selectedClipId) {
@@ -246,6 +267,7 @@ export function KeyframePanel() {
                   onKeyframeValueChanged={handleKeyframeValueChanged}
                   onAddKeyframe={handleAddKeyframe}
                   onDeleteKeyframe={handleDeleteKeyframe}
+                  onKeyframeEasingChanged={handleKeyframeEasingChanged}
                 />
               </div>
             )}

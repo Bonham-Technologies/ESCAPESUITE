@@ -114,7 +114,8 @@ Clips support animated properties via keyframes:
 - **Animatable properties**: `x`, `y`, `scaleX`, `scaleY`, `rotation`, `opacity`, `blur`
 - **Easing types**: `linear`, `ease-in`, `ease-out`, `ease-in-out`, plus quadratic/cubic variants
 - **Preset animations**: Clips can have in/out presets (`fade`, `slide-*`, `scale-*`, `pop`, `blur`)
-- **Custom keyframes**: Per-property keyframe arrays override presets when present
+- **Custom keyframes**: Per-property keyframe arrays override presets when present; each keyframe's
+  easing is editable on its own in the keyframe panel, not only per preset
 - `getAnimatedValues(time, clipDuration, animation, transform, effects)`: Returns interpolated values for a given time — the one entry point, for both the preview and the exporters
 - Keyframes are stored relative to clip start time (0 = clip start)
 - There is **no memo cache**. There used to be one (`getAnimatedValuesCached`, keyed
@@ -128,6 +129,9 @@ Clips support animated properties via keyframes:
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
 - **ClipPreview.tsx**: Playback scrubber controls (uses main PreviewPlayer for rendering)
 - **KeyframeGraph.tsx**: Visual keyframe editor with Bezier curve display
+- **Per-keyframe easing**: select a keyframe in the graph and its easing `<select>` appears below it
+  (`EASING_TYPES` from `src/utils/easingOptions.ts`, shared with the animate-in/out presets); new
+  keyframes default to `ease-in-out` and a value drag preserves the stored easing
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
 
 ### Preview (`src/components/Preview/`)

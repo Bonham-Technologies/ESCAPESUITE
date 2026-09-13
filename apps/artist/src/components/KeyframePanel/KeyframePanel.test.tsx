@@ -287,6 +287,35 @@ describe('KeyframePanel', () => {
       expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0])
     })
 
+    it('changes the easing of the keyframe selected in the graph', async () => {
+      const user = userEvent.setup()
+      render(<KeyframePanel />)
+      measureGraph()
+
+      fireEvent.click(graphPoints()[1])
+      await user.selectOptions(screen.getByLabelText('Keyframe easing'), 'ease-in-cubic')
+
+      // Same keyframe, same time and value — only the curve moved.
+      expect(keyframesOf('opacity')).toEqual([
+        { time: 0, value: 1, easing: 'ease-out' },
+        { time: 1, value: 0.5, easing: 'ease-in-cubic' },
+      ])
+    })
+
+    it('makes the easing change a single undo step', async () => {
+      const user = userEvent.setup()
+      render(<KeyframePanel />)
+      measureGraph()
+      const historyBefore = store().history.past.length
+
+      fireEvent.click(graphPoints()[1])
+      await user.selectOptions(screen.getByLabelText('Keyframe easing'), 'ease-in-cubic')
+
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+      store().undo()
+      expect(keyframesOf('opacity')![1]).toEqual({ time: 1, value: 0.5, easing: 'linear' })
+    })
+
     it('adds a keyframe where the graph is double-clicked', () => {
       render(<KeyframePanel />)
       const svg = measureGraph()

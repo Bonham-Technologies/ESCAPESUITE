@@ -3,7 +3,7 @@
 // Each array's order is the order its <option>s appear in, so it is what the
 // user sees and what tests addressing a select by index resolve to — reordering
 // one of these tables is a visible change, not a tidy-up.
-import type { BlendMode, TransitionType, AnimationPresetType, EasingType } from '../../store/types';
+import type { BlendMode, TransitionType, AnimationPresetType } from '../../store/types';
 
 /** Transition Out → Type. */
 export const TRANSITION_TYPES: { value: TransitionType; label: string }[] = [
@@ -48,15 +48,10 @@ export const ANIMATION_PRESETS: { value: AnimationPresetType; label: string }[] 
 ];
 
 /**
- * Animate In / Animate Out → easing. A subset of `EasingType`: the quad
- * variants exist in the engine but are not offered here.
+ * Animate In / Animate Out → easing.
+ *
+ * The table itself lives in `src/utils/easingOptions.ts`, because the keyframe
+ * panel offers the same curves per keyframe; re-exported here so the inspector's
+ * own imports keep reading from one place.
  */
-export const EASING_TYPES: { value: EasingType; label: string }[] = [
-  { value: 'linear', label: 'Linear' },
-  { value: 'ease-in', label: 'Ease In' },
-  { value: 'ease-out', label: 'Ease Out' },
-  { value: 'ease-in-out', label: 'Ease In-Out' },
-  { value: 'ease-in-cubic', label: 'Ease In (Cubic)' },
-  { value: 'ease-out-cubic', label: 'Ease Out (Cubic)' },
-  { value: 'ease-in-out-cubic', label: 'Ease In-Out (Cubic)' },
-];
+export { EASING_TYPES } from '../../utils/easingOptions';

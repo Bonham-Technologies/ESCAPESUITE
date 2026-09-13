@@ -1,7 +1,8 @@
 import { useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import { getAllKeyframesForProperty, interpolateKeyframes } from '../../utils/animation';
-import type { AnimatableProperty, Keyframe, ClipAnimation, ClipTransform, ClipEffects } from '../../store/types';
+import type { AnimatableProperty, Keyframe, ClipAnimation, ClipTransform, ClipEffects, EasingType } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
+import { EASING_TYPES } from '../../utils/easingOptions';
 import styles from './KeyframeGraph.module.css';
 
 interface KeyframeGraphProps {
@@ -15,6 +16,8 @@ interface KeyframeGraphProps {
   onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
   onDeleteKeyframe?: (property: AnimatableProperty, time: number) => void;
+  /** Omit to hide the per-keyframe easing control entirely. */
+  onKeyframeEasingChanged?: (property: AnimatableProperty, time: number, easing: EasingType) => void;
 }
 
 // Property value ranges for display
@@ -43,6 +46,7 @@ export function KeyframeGraph({
   onKeyframeValueChanged,
   onAddKeyframe,
   onDeleteKeyframe,
+  onKeyframeEasingChanged,
 }: KeyframeGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -362,7 +366,15 @@ export function KeyframeGraph({
     ? graphDimensions.timeToX(playheadTime)
     : null;
 
+  // The selected keyframe, when it is one the user can edit. Preset keyframes
+  // are never selectable (see the isCustomKeyframe guards above), so this is
+  // undefined for them and the easing control simply does not render.
+  const selectedKeyframe = selectedKeyframeTime === null
+    ? undefined
+    : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
+
   return (
+    <div className={styles.graphWrap}>
     <svg
       ref={svgRef}
       className={styles.graph}
@@ -463,5 +475,24 @@ export function KeyframeGraph({
         Double-click to add • Right-click to delete • Drag to move
       </text>
     </svg>
+
+      {selectedKeyframe && onKeyframeEasingChanged && (
+        <div className={styles.easingRow}>
+          <span className={styles.easingLabel}>Easing</span>
+          <select
+            className={styles.easingSelect}
+            aria-label="Keyframe easing"
+            value={selectedKeyframe.easing}
+            onChange={(e) =>
+              onKeyframeEasingChanged(property, selectedKeyframe.time, e.target.value as EasingType)
+            }
+          >
+            {EASING_TYPES.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
   );
 }
