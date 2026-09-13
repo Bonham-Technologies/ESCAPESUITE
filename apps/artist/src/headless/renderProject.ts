@@ -1,6 +1,7 @@
 // apps/artist/src/headless/renderProject.ts
 import { exportToMP4, exportToWebM } from '../core/exporter'
 import { calculateTimelineDuration, getBaseDimensions, getResolution } from '../core/exportTypes'
+import { convertLegacyOverlays } from '../store/legacyOverlays'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, RenderMeta, RenderResult, SourceVideoInput } from './types'
 import type { ExportOptions, Project } from '../store/types'
@@ -57,8 +58,11 @@ async function render(
   request: RenderRequest,
   onProgress?: (p: number) => void,
 ): Promise<{ blob: Blob; meta: RenderMeta }> {
-  validateInput(request)
-  const { project } = request
+  // Legacy overlay arrays are input-only: fold them into clips before anything
+  // reads the timeline, so a headless render includes them exactly as the editor
+  // does (the store runs the same conversion on every load).
+  const project: Project = { ...request.project, timeline: convertLegacyOverlays(request.project.timeline) }
+  validateInput({ ...request, project })
   const options: ExportOptions = { resolution: 'project', ...request.options }
   // The seeded list is the completed one (probed width/height/duration); the
   // engine and the meta below both need those fields.

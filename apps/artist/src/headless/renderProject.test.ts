@@ -16,6 +16,14 @@ vi.mock('./seedSources', () => ({
 import { renderProject, renderProjectToFile } from './renderProject'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, SourceVideoInput } from './types'
+import type { Clip, TextOverlay } from '../store/types'
+
+/** A legacy text overlay as an older ARTIST version stored it, on the timeline's array. */
+const legacyText = (): TextOverlay => ({
+  id: 'legacy1', text: 'Legacy', startTime: 1, endTime: 3, x: 0.25, y: 0.5, opacity: 0.5,
+  fontFamily: 'Arial', fontSize: 48, fontWeight: 'normal', fontStyle: 'normal',
+  color: '#ffffff', backgroundColor: '#00000000', textAlign: 'center',
+})
 
 const baseInput = (): RenderInput => ({
   project: {
@@ -100,6 +108,21 @@ describe('renderProject', () => {
     ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({ id: 'txt', sourceVideoId: '', overlayType: 'text', timelinePosition: 0, duration: 1 })
     await expect(renderProject(input)).resolves.toBeTruthy()
   })
+
+  it('renders a legacy text overlay instead of dropping it from the export', async () => {
+    // The headless entry does not go through the store, so before the conversion
+    // landed here a project's legacy overlay arrays were silently excluded from
+    // every render: the exporters only ever iterate timeline.clips.
+    const input = baseInput()
+    input.project.timeline.textOverlays = [legacyText()]
+
+    await renderProject(input)
+
+    const clips = (exportToMP4.mock.calls[0] as unknown[])[0] as Clip[]
+    expect(clips).toHaveLength(2)
+    expect(clips[1]).toMatchObject({ overlayType: 'text', timelinePosition: 1, duration: 2 })
+    expect(clips[1].transform.opacity).toBe(0.5)
+  })
 })
 
 const fileInput = (names: string[]): HTMLInputElement => {
@@ -177,6 +200,18 @@ describe('renderProjectToFile', () => {
     expect(document.querySelectorAll('a[download]')).toHaveLength(0)
     // It was still attached at click time -- a detached anchor's click does nothing.
     expect(clicks[0].inBody).toBe(true)
+  })
+
+  it('renders a legacy text overlay in the streaming path too', async () => {
+    fileInput(['source.mp4'])
+    const input = fileInputBase()
+    input.project.timeline.textOverlays = [legacyText()]
+
+    await renderProjectToFile(input)
+
+    const clips = (exportToMP4.mock.calls[0] as unknown[])[0] as Clip[]
+    expect(clips).toHaveLength(2)
+    expect(clips[1]).toMatchObject({ id: 'legacy-text-legacy1', overlayType: 'text', timelinePosition: 1, duration: 2 })
   })
 
   it('uses the webm extension for a webm render', async () => {
