@@ -1,30 +1,17 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
-import {
-  useEditorStore,
-  getSnapPoints,
-  wouldOverlap,
-} from '../../store/projectStore';
-import type { Clip } from '../../store/types';
-import { formatTime, timeToPixels, pixelsToTime } from '../../utils/timeUtils';
+import { useEditorStore } from '../../store/projectStore';
+import { formatTime, timeToPixels } from '../../utils/timeUtils';
 import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineTimeReadout } from './TimelineTimeReadout';
 import { TimelineMarkerLines, TimelineRuler } from './TimelineRuler';
-import {
-  clampTime,
-  clipsIntersectingRange,
-  computeTrimUpdate,
-  exceedsMarqueeThreshold,
-  getSplitOffset,
-  marqueeTimeRange,
-  marqueeYRange,
-  pointerTime,
-  snapDragPosition,
-  trackSpansMarquee,
-} from './timelineGeometry';
+import { clampTime, pointerTime } from './timelineGeometry';
 import { TimelineTrack } from './TimelineTrack';
 import { TrackHeader } from './TrackHeader';
-import type { DragState, TrimState } from './types';
+import { useClipDrag } from './useClipDrag';
+import { useScrollSync } from './useScrollSync';
+import { useTimelineMarquee } from './useTimelineMarquee';
+import { useTrimDrag } from './useTrimDrag';
 import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
 
@@ -40,11 +27,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const trackHeadersRef = useRef<HTMLDivElement>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  const [trimState, setTrimState] = useState<TrimState | null>(null);
-  const [tlMarqueeStart, setTlMarqueeStart] = useState<{x: number; y: number} | null>(null);
-  const [tlMarqueeCurrent, setTlMarqueeCurrent] = useState<{x: number; y: number} | null>(null);
-  const tlMarqueeActive = tlMarqueeStart !== null && tlMarqueeCurrent !== null;
 
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -136,43 +118,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying]
   );
 
-  // Handle click on track to seek, pause, and deselect
-  const handleTrackClick = useCallback(
-    (e: React.MouseEvent) => {
-      // If a marquee selection just completed, skip normal click behavior
-      if (marqueeJustFinished.current) {
-        marqueeJustFinished.current = false;
-        return;
-      }
-
-      if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
-
-      // Only deselect if clicking directly on the track container, not on a clip or playhead
-      const target = e.target as HTMLElement;
-      const isClickOnClip = target.closest('[data-clip-id]');
-      const isClickOnPlayhead = target.closest('[data-playhead]');
-
-      // Don't seek or deselect when clicking playhead
-      if (isClickOnPlayhead) return;
-
-      if (isPlaying) {
-        setIsPlaying(false);
-      }
-
-      const rect = trackContainerRef.current.getBoundingClientRect();
-      const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
-      const clampedTime = clampTime(time, timelineDuration);
-      setCurrentTime(clampedTime);
-
-      // Deselect clip only when clicking on empty track space
-      if (!isClickOnClip) {
-        clearMultiSelection();
-        setSelectedClipId(null);
-      }
-    },
-    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying]
-  );
-
   // Handle playhead drag
   const handlePlayheadMouseDown = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -237,289 +182,45 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     };
   }, [isDraggingInPoint, isDraggingOutPoint, pixelsPerSecond, timelineDuration, setInPoint, setOutPoint]);
 
-  // Sync ruler scroll (horizontal) and track headers scroll (vertical) with track container scroll
-  const handleTrackScroll = useCallback(() => {
-    if (trackContainerRef.current) {
-      // Sync horizontal scroll with ruler
-      if (rulerRef.current) {
-        rulerRef.current.scrollLeft = trackContainerRef.current.scrollLeft;
-      }
-      // Sync vertical scroll with track headers
-      if (trackHeadersRef.current) {
-        trackHeadersRef.current.scrollTop = trackContainerRef.current.scrollTop;
-      }
-      // Update virtualization with new scroll position
-      onVirtualScroll(trackContainerRef.current.scrollLeft);
-    }
-  }, [onVirtualScroll]);
+  // Keep the ruler, the headers and the track area scrolled together
+  const { handleTrackScroll, handleHeadersScroll } = useScrollSync({
+    trackContainerRef,
+    rulerRef,
+    trackHeadersRef,
+    onVirtualScroll,
+    setContainerWidth,
+  });
 
-  // Sync track container scroll when track headers are scrolled
-  const handleHeadersScroll = useCallback(() => {
-    if (trackHeadersRef.current && trackContainerRef.current) {
-      trackContainerRef.current.scrollTop = trackHeadersRef.current.scrollTop;
-    }
-  }, []);
+  // Dragging a clip along the timeline (and the razor tool's split)
+  const { dragState, handleClipMouseDown } = useClipDrag({
+    trackContainerRef,
+    pixelsPerSecond,
+    clips,
+    tracks,
+    snapEnabled,
+    snapThreshold,
+    selectedClipIds,
+    activeTool,
+    setSelectedClipId,
+    toggleClipSelection,
+    moveSelectedClips,
+    setClipTimelinePosition,
+    moveClipToTrack,
+    splitClip,
+  });
 
-  // Track container width for virtualization
-  useEffect(() => {
-    const container = trackContainerRef.current;
-    if (!container) return;
-
-    // Set initial width
-    setContainerWidth(container.clientWidth);
-
-    // Observe resize
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
-    });
-
-    resizeObserver.observe(container);
-    return () => resizeObserver.disconnect();
-  }, [setContainerWidth]);
-
-  // Handle razor tool click on clip
-  const handleRazorClick = useCallback(
-    (e: React.MouseEvent, clip: Clip) => {
-      if (!trackContainerRef.current) return;
-
-      const track = tracks.find(t => t.id === clip.trackId);
-      if (!track || track.locked) return;
-
-      const containerRect = trackContainerRef.current.getBoundingClientRect();
-      const scrollLeft = trackContainerRef.current.scrollLeft;
-      const clickTime = pointerTime(e.clientX, containerRect.left, scrollLeft, pixelsPerSecond);
-
-      // Only split if click is within the clip bounds (not on edges)
-      const splitTimeRelative = getSplitOffset(clickTime, clip.timelinePosition, clip.duration);
-
-      if (splitTimeRelative !== null) {
-        splitClip(clip.id, splitTimeRelative);
-      }
-    },
-    [tracks, pixelsPerSecond, splitClip]
-  );
-
-  // Handle clip drag start
-  const handleClipMouseDown = useCallback(
-    (e: React.MouseEvent, clip: Clip) => {
-      e.stopPropagation();
-
-      // Handle razor tool
-      if (activeTool === 'razor') {
-        handleRazorClick(e, clip);
-        return;
-      }
-
-      // Ctrl+click (or Cmd+click on Mac) toggles multi-selection
-      if (e.ctrlKey || e.metaKey) {
-        toggleClipSelection(clip.id);
-        return;
-      }
-
-      // If the clip is part of a multi-selection, keep the selection for bulk drag
-      // Otherwise, select just this clip
-      if (!selectedClipIds.has(clip.id)) {
-        setSelectedClipId(clip.id);
-      }
-
-      const track = tracks.find(t => t.id === clip.trackId);
-      if (!track || track.locked) return;
-
-      const clipElement = e.currentTarget as HTMLElement;
-      const clipRect = clipElement.getBoundingClientRect();
-      const offsetX = e.clientX - clipRect.left;
-
-      setDragState({
-        clipId: clip.id,
-        originalTrackId: clip.trackId,
-        originalPosition: clip.timelinePosition,
-        currentTrackId: clip.trackId,
-        currentPosition: clip.timelinePosition,
-        snappedPosition: null,
-        offsetX,
-      });
-    },
-    [tracks, setSelectedClipId, toggleClipSelection, selectedClipIds, activeTool, handleRazorClick]
-  );
-
-  // Handle drag movement
-  useEffect(() => {
-    if (!dragState) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!trackContainerRef.current) return;
-
-      const containerRect = trackContainerRef.current.getBoundingClientRect();
-      const scrollLeft = trackContainerRef.current.scrollLeft;
-
-      // Calculate new timeline position
-      // Kept as the original two-step expression: `pointerTime` would sum the
-      // same terms in a different order, and the extraction promised identical
-      // floating-point results.
-      const x = e.clientX - containerRect.left + scrollLeft - dragState.offsetX;
-      let newPosition = pixelsToTime(x, pixelsPerSecond);
-      newPosition = Math.max(0, newPosition);
-
-      // Apply snapping if enabled
-      let snappedPosition: number | null = null;
-      if (snapEnabled) {
-        const snapPoints = getSnapPoints(clips, dragState.clipId);
-        const threshold = pixelsToTime(snapThreshold, pixelsPerSecond);
-        const clip = clips.find(c => c.id === dragState.clipId);
-
-        if (clip) {
-          const snapped = snapDragPosition(newPosition, clip.duration, snapPoints, threshold);
-          newPosition = snapped.position;
-          snappedPosition = snapped.snappedPosition;
-        }
-      }
-
-      // Determine target track based on mouse Y position
-      const trackElements = trackContainerRef.current.querySelectorAll('[data-track-id]');
-      let targetTrackId = dragState.currentTrackId;
-
-      trackElements.forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        if (e.clientY >= rect.top && e.clientY < rect.bottom) {
-          targetTrackId = el.getAttribute('data-track-id') || targetTrackId;
-        }
-      });
-
-      setDragState(prev => prev ? {
-        ...prev,
-        currentTrackId: targetTrackId,
-        currentPosition: newPosition,
-        snappedPosition,
-      } : null);
-    };
-
-    const handleMouseUp = () => {
-      if (dragState) {
-        const clip = clips.find(c => c.id === dragState.clipId);
-        if (clip) {
-          const deltaTime = dragState.currentPosition - dragState.originalPosition;
-
-          // Bulk drag: if dragged clip is part of multi-selection, move all selected clips
-          if (selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1 && deltaTime !== 0) {
-            moveSelectedClips(deltaTime, 0);
-          } else {
-            // Single clip move
-            // Check for overlaps before committing
-            const overlap = wouldOverlap(
-              clips,
-              dragState.currentTrackId,
-              dragState.currentPosition,
-              clip.duration,
-              dragState.clipId
-            );
-
-            if (!overlap) {
-              // Commit the move
-              if (dragState.currentTrackId !== dragState.originalTrackId) {
-                moveClipToTrack(dragState.clipId, dragState.currentTrackId);
-              }
-              if (deltaTime !== 0) {
-                setClipTimelinePosition(dragState.clipId, dragState.currentPosition);
-              }
-            }
-          }
-        }
-      }
-      setDragState(null);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [dragState, clips, snapEnabled, snapThreshold, pixelsPerSecond, moveClipToTrack, setClipTimelinePosition, selectedClipIds, moveSelectedClips]);
-
-  // Handle trim edge mouse down
-  const handleTrimMouseDown = useCallback(
-    (e: React.MouseEvent, clip: Clip, edge: 'start' | 'end') => {
-      e.stopPropagation();
-      e.preventDefault();
-
-      const track = tracks.find(t => t.id === clip.trackId);
-      if (!track || track.locked) return;
-
-      setSelectedClipId(clip.id);
-      setTrimState({
-        clipId: clip.id,
-        edge,
-        originalStartTime: clip.startTime,
-        originalEndTime: clip.endTime,
-        originalTimelinePosition: clip.timelinePosition,
-      });
-    },
-    [tracks, setSelectedClipId]
-  );
-
-  // Handle trim drag
-  useEffect(() => {
-    if (!trimState) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!trackContainerRef.current) return;
-
-      const clip = clips.find(c => c.id === trimState.clipId);
-      if (!clip) return;
-
-      const sourceVideo = sourceVideos.find(v => v.id === clip.sourceVideoId);
-
-      const containerRect = trackContainerRef.current.getBoundingClientRect();
-      const scrollLeft = trackContainerRef.current.scrollLeft;
-      const mouseTime = pointerTime(e.clientX, containerRect.left, scrollLeft, pixelsPerSecond);
-
-      const update = computeTrimUpdate({
-        edge: trimState.edge,
-        mouseTime,
-        clip,
-        sourceVideo,
-        origin: {
-          startTime: trimState.originalStartTime,
-          endTime: trimState.originalEndTime,
-          timelinePosition: trimState.originalTimelinePosition,
-        },
-      });
-
-      if (update) {
-        updateClip(trimState.clipId, update);
-      }
-    };
-
-    const handleMouseUp = () => {
-      // If ripple tool is active, shift subsequent clips
-      if (activeTool === 'ripple' && trimState) {
-        const clip = clips.find((c) => c.id === trimState.clipId);
-        if (clip) {
-          const originalEnd = trimState.originalTimelinePosition +
-            (trimState.originalEndTime - trimState.originalStartTime);
-          const currentEnd = clip.timelinePosition + (clip.endTime - clip.startTime);
-          const delta = currentEnd - originalEnd;
-
-          if (delta !== 0) {
-            // Shift all clips after the original end position
-            shiftClipsAfter(clip.trackId, originalEnd, delta);
-          }
-        }
-      }
-      setTrimState(null);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [trimState, clips, sourceVideos, pixelsPerSecond, updateClip, activeTool, shiftClipsAfter]);
+  // Dragging a clip's edge
+  const { trimState, handleTrimMouseDown } = useTrimDrag({
+    trackContainerRef,
+    pixelsPerSecond,
+    clips,
+    sourceVideos,
+    tracks,
+    activeTool,
+    setSelectedClipId,
+    updateClip,
+    shiftClipsAfter,
+  });
 
   // Calculate total tracks height
   const totalTracksHeight = tracks.reduce((sum, t) => sum + t.height, 0);
@@ -567,103 +268,57 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   // Track whether marquee was just completed so handleTrackClick can skip deselection
   const marqueeJustFinished = useRef(false);
 
-  // Handle mousedown on track area to start marquee selection
-  const handleTrackMouseDown = useCallback(
+  // Rubber-band selection over the track area
+  const { marquee, handleTrackMouseDown } = useTimelineMarquee({
+    trackContainerRef,
+    pixelsPerSecond,
+    clips,
+    selectedClipIds,
+    selectClipsInRange,
+    isDraggingPlayhead,
+    dragState,
+    marqueeJustFinished,
+  });
+
+  // Handle click on track to seek, pause, and deselect.
+  // Declared after the drag and marquee hooks because it reads what they own:
+  // a live `dragState` suppresses it, and `marqueeJustFinished` tells it that
+  // the click it is about to handle only ended a rubber-band selection.
+  const handleTrackClick = useCallback(
     (e: React.MouseEvent) => {
+      // If a marquee selection just completed, skip normal click behavior
+      if (marqueeJustFinished.current) {
+        marqueeJustFinished.current = false;
+        return;
+      }
+
       if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
 
+      // Only deselect if clicking directly on the track container, not on a clip or playhead
       const target = e.target as HTMLElement;
       const isClickOnClip = target.closest('[data-clip-id]');
       const isClickOnPlayhead = target.closest('[data-playhead]');
 
-      // Only start marquee on empty space
-      if (isClickOnClip || isClickOnPlayhead) return;
+      // Don't seek or deselect when clicking playhead
+      if (isClickOnPlayhead) return;
+
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
 
       const rect = trackContainerRef.current.getBoundingClientRect();
-      setTlMarqueeStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-      setTlMarqueeCurrent(null);
+      const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
+      const clampedTime = clampTime(time, timelineDuration);
+      setCurrentTime(clampedTime);
+
+      // Deselect clip only when clicking on empty track space
+      if (!isClickOnClip) {
+        clearMultiSelection();
+        setSelectedClipId(null);
+      }
     },
-    [isDraggingPlayhead, dragState]
+    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying]
   );
-
-  // Marquee mousemove/mouseup via useEffect (document-level events)
-  useEffect(() => {
-    if (!tlMarqueeStart) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!trackContainerRef.current) return;
-      const rect = trackContainerRef.current.getBoundingClientRect();
-      const currentX = e.clientX - rect.left;
-      const currentY = e.clientY - rect.top;
-      const dx = currentX - tlMarqueeStart.x;
-      const dy = currentY - tlMarqueeStart.y;
-      if (exceedsMarqueeThreshold(dx, dy)) {
-        setTlMarqueeCurrent({ x: currentX, y: currentY });
-      }
-    };
-
-    const handleMouseUp = (e: MouseEvent) => {
-      if (tlMarqueeActive && trackContainerRef.current) {
-        const current = tlMarqueeCurrent!;
-        const scrollLeft = trackContainerRef.current.scrollLeft;
-
-        // Convert marquee X pixel positions to time values
-        const { startTime, endTime } = marqueeTimeRange(
-          tlMarqueeStart.x,
-          current.x,
-          scrollLeft,
-          pixelsPerSecond
-        );
-
-        // Determine which tracks the marquee spans by Y position
-        const { topPx, bottomPx } = marqueeYRange(tlMarqueeStart.y, current.y);
-
-        // Find track elements and match Y ranges
-        const trackElements = trackContainerRef.current.querySelectorAll('[data-track-id]');
-        const containerRect = trackContainerRef.current.getBoundingClientRect();
-        const scrollTop = trackContainerRef.current.scrollTop;
-
-        const spannedTrackIds = new Set<string>();
-        trackElements.forEach((el) => {
-          const elRect = el.getBoundingClientRect();
-          // Convert to container-relative coordinates
-          const elTop = elRect.top - containerRect.top + scrollTop;
-          const elBottom = elRect.bottom - containerRect.top + scrollTop;
-          // Check if track overlaps with marquee Y range
-          if (trackSpansMarquee(elTop, elBottom, topPx, bottomPx)) {
-            const trackId = el.getAttribute('data-track-id');
-            if (trackId) spannedTrackIds.add(trackId);
-          }
-        });
-
-        // Find all clips within the time range on the spanned tracks
-        const intersecting = clipsIntersectingRange(clips, spannedTrackIds, startTime, endTime);
-
-        if (e.ctrlKey || e.metaKey) {
-          const existing = Array.from(selectedClipIds);
-          const combined = [...new Set([...existing, ...intersecting])];
-          selectClipsInRange(combined);
-        } else {
-          selectClipsInRange(intersecting);
-        }
-
-        marqueeJustFinished.current = true;
-      } else {
-        // No drag - let handleTrackClick handle the deselect + seek
-      }
-
-      setTlMarqueeStart(null);
-      setTlMarqueeCurrent(null);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [tlMarqueeStart, tlMarqueeActive, tlMarqueeCurrent, pixelsPerSecond, clips, selectedClipIds, selectClipsInRange]);
 
   return (
     <div className={styles.container} ref={containerRef}>
@@ -782,12 +437,12 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
             />
 
             {/* Marquee selection rectangle */}
-            {tlMarqueeActive && tlMarqueeStart && tlMarqueeCurrent && (
+            {marquee.active && marquee.start && marquee.current && (
               <MarqueeSelection
-                startX={tlMarqueeStart.x}
-                startY={tlMarqueeStart.y}
-                currentX={tlMarqueeCurrent.x}
-                currentY={tlMarqueeCurrent.y}
+                startX={marquee.start.x}
+                startY={marquee.start.y}
+                currentX={marquee.current.x}
+                currentY={marquee.current.y}
               />
             )}
           </div>
