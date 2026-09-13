@@ -328,8 +328,8 @@ that tells them apart in the DOM is that the second carries a `title`, which is 
 `ClipEditor.test.tsx` distinguishes them.
 
 ### App (`src/App.tsx`)
-`App.tsx` is wiring only — the seven `useState` calls the JSX needs, the store selectors, nine
-hook calls, three small inline lambdas and the composition itself. It binds no listener, holds
+`App.tsx` is wiring only — the seven `useState` calls the JSX and the hooks need, the store selectors, nine
+hook calls, the handful of inline lambdas the JSX needs and the composition itself. It binds no listener, holds
 no timer, and computes nothing; every effect, every disk and session write, and every piece of
 chrome lives in one module each under `src/app/`.
 
@@ -369,7 +369,7 @@ Every module below has its own test file. `App.tsx` itself is covered through th
 `App.project.test.tsx` (new/open/save and the load-safety dialog), `App.session.test.tsx`
 (restore prompt and autosave), `App.shortcuts.test.tsx` (the keydown cascade),
 `App.messages.test.tsx` (the host integration surface) and `App.rerender.test.tsx` (the
-`currentTime` contract above). `src/App.module.css` is deliberately not split: all nine
+`currentTime` contract above). `src/App.module.css` is deliberately not split: all ten
 components import it from `../App.module.css`, and `App.project.test.tsx` imports it directly
 and queries `styles.menuBackdrop`.
 
