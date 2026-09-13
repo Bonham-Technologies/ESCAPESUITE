@@ -1,7 +1,7 @@
 // The recorder's window-level keyboard shortcuts: R, P, S and Escape, each
 // gated on the state the app is in.
 //
-// One effect, and the only window listener in the screen. Its dependency array
+// One effect, and the only window listener App itself binds (VideoPlayer binds its own while the playback dialog is open). Its dependency array
 // is the whole set of handlers plus `state`, so the listener is torn down and
 // re-bound whenever any of them changes identity — including on every change
 // to `config`, which handleStartRecording depends on. That is the behaviour as

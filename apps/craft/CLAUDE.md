@@ -239,7 +239,7 @@ the outcome, not on the double.
 
 ## Keyboard Shortcuts
 
-Bound by `src/hooks/useKeyboardShortcuts.ts` — the screen's only window listener — and listed
+Bound by `src/hooks/useKeyboardShortcuts.ts` — the only window listener `App` itself binds; `VideoPlayer` binds its own while the playback dialog is open — and listed
 for the user by `src/components/RecorderControls/RecorderControls.tsx`.
 
 | Key | Action |
