@@ -371,6 +371,34 @@ describe('projectStore integration', () => {
       expect(clip.transition.type).toBe('fade')
       expect(clip.transition.duration).toBe(1)
     })
+
+    // A foreign or hand-edited project file can carry a clip with no `transition` at all —
+    // `Clip.transition` is required, but `loadProject` validates only the version number, and
+    // the migration backfill runs only when tracks or the legacy overlay arrays are missing.
+    // Picking a type for such a clip must not write a transition without a duration:
+    // `TransitionSection` renders `transition.duration.toFixed(1)`, which throws on undefined.
+    it('seeds the default transition when the clip carries none, so the duration is never lost', () => {
+      const state = useEditorStore.getState()
+      const legacyClip: Partial<Clip> = { ...state.project.timeline.clips[0] }
+      delete legacyClip.transition
+      useEditorStore.setState({
+        project: {
+          ...state.project,
+          timeline: {
+            ...state.project.timeline,
+            clips: [legacyClip as Clip],
+          },
+        },
+      })
+      const clipId = useEditorStore.getState().project.timeline.clips[0].id
+
+      useEditorStore.getState().updateClipTransition(clipId, { type: 'fade' })
+
+      const clip = useEditorStore.getState().project.timeline.clips[0]
+      expect(clip.transition.type).toBe('fade')
+      expect(typeof clip.transition.duration).toBe('number')
+      expect(clip.transition.duration).toBe(0.5)
+    })
   })
 
   describe('overlay clips', () => {
