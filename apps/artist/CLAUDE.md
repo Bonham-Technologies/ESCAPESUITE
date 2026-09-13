@@ -112,8 +112,9 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`,
 #### Legacy overlay arrays
 Older ARTIST versions stored overlays in `timeline.textOverlays` / `timeline.shapeOverlays`
 instead of as clips. Those arrays are **input-only — write-never, read-once**: nothing in the
-app creates, renders, edits or selects a legacy overlay, the only code that touches either
-array is `store/legacyOverlays.ts`'s `convertLegacyOverlays(timeline)`, and the `TextOverlay` /
+app creates, renders, edits or selects a legacy overlay; apart from `ensureTimelineHasTracks`
+normalising a missing array to `[]` first, the only code that touches either array is
+`store/legacyOverlays.ts`'s `convertLegacyOverlays(timeline)`; and the `TextOverlay` /
 `ShapeOverlay` types survive in `store/types.ts` solely so an old file on disk still parses.
 The conversion folds them into ordinary overlay clips and empties them. It runs on **every**
 load path — both return paths of

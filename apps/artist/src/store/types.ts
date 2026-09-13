@@ -224,8 +224,9 @@ export const DEFAULT_SHAPE_OVERLAY_DATA: ShapeOverlayData = {
 
 // Legacy overlay types, kept so an older project file can still be read.
 //
-// INPUT ONLY — write-never, read-once. `store/legacyOverlays.ts` is the only code
-// that touches either array: `convertLegacyOverlays` turns them into ordinary
+// INPUT ONLY — write-never, read-once. Apart from `ensureTimelineHasTracks`
+// normalising a missing array to `[]` first, `store/legacyOverlays.ts` is the only
+// code that touches either array: `convertLegacyOverlays` turns them into ordinary
 // overlay clips and empties them on every load path (`ensureTimelineHasTracks`, so
 // every `setProject` caller) and in the headless render entry. Nothing in the app
 // creates, renders, edits or selects a legacy overlay, and no loaded project still
