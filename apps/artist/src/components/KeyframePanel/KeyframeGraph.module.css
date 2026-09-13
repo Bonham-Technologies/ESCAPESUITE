@@ -76,3 +76,38 @@
   font-size: 9px;
   pointer-events: none;
 }
+
+/* Holds the graph and the selected keyframe's easing control; the <svg> itself
+   keeps .graph, which is what measures and coordinate maths address. */
+.graphWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.easingRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.easingLabel {
+  font-size: 11px;
+  color: #999;
+}
+
+.easingSelect {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  color: #ddd;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 3px;
+}
+
+.easingSelect:focus-visible {
+  outline: 1px solid #4a9eff;
+  outline-offset: 1px;
+}

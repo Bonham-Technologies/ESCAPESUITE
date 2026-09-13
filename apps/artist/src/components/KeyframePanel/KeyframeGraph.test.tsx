@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { KeyframeGraph } from './KeyframeGraph'
 import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
 import type { AnimatableProperty, Clip, ClipAnimation } from '../../store/types'
+import { EASING_TYPES } from '../../utils/easingOptions'
 import styles from './KeyframeGraph.module.css'
 
 // The graph draws into a 500x200 viewBox with 50px of padding on the left, 20
@@ -38,6 +40,7 @@ function renderGraph(
     playheadTime?: number
     animation?: ClipAnimation | undefined
     withDelete?: boolean
+    withEasing?: boolean
   } = {}
 ) {
   const clip = currentClip()
@@ -45,6 +48,7 @@ function renderGraph(
   const onKeyframeValueChanged = vi.fn()
   const onAddKeyframe = vi.fn()
   const onDeleteKeyframe = vi.fn()
+  const onKeyframeEasingChanged = vi.fn()
   const view = render(
     <KeyframeGraph
       property={property}
@@ -57,9 +61,17 @@ function renderGraph(
       onKeyframeValueChanged={onKeyframeValueChanged}
       onAddKeyframe={onAddKeyframe}
       onDeleteKeyframe={options.withDelete === false ? undefined : onDeleteKeyframe}
+      onKeyframeEasingChanged={options.withEasing === false ? undefined : onKeyframeEasingChanged}
     />
   )
-  return { ...view, onKeyframeMoved, onKeyframeValueChanged, onAddKeyframe, onDeleteKeyframe }
+  return {
+    ...view,
+    onKeyframeMoved,
+    onKeyframeValueChanged,
+    onAddKeyframe,
+    onDeleteKeyframe,
+    onKeyframeEasingChanged,
+  }
 }
 
 const points = (container: HTMLElement) =>
@@ -272,6 +284,126 @@ describe('KeyframeGraph', () => {
       fireEvent.click(points(container)[1])
       expect(() => fireEvent.contextMenu(points(container)[1])).not.toThrow()
       expect(() => fireEvent.keyDown(window, { key: 'Delete' })).not.toThrow()
+    })
+  })
+
+  describe('choosing a keyframe easing', () => {
+    const easingSelect = () => screen.queryByLabelText<HTMLSelectElement>('Keyframe easing')
+
+    beforeEach(() => {
+      opacityKeyframes()
+    })
+
+    it('offers no easing control until a keyframe is selected', () => {
+      renderGraph('opacity')
+
+      expect(easingSelect()).toBeNull()
+    })
+
+    it('shows the selected keyframe easing, with every curve in the shared order', () => {
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+
+      const select = easingSelect()!
+      expect(select.value).toBe('linear')
+      expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual(
+        EASING_TYPES.map((o) => [o.value, o.label])
+      )
+    })
+
+    it('shows a stored easing the menu does not offer instead of a blank select', () => {
+      // 'ease-in-out-quad' is a real EasingType (an exact alias of 'ease-in-out') that a
+      // loaded project or host integration can carry even though EASING_TYPES omits it.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'ease-in-out-quad' })
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+
+      const select = easingSelect()!
+      expect(select.value).toBe('ease-in-out-quad')
+      expect(select.options).toHaveLength(EASING_TYPES.length + 1)
+    })
+
+    it('does not add an extra option when the stored easing is already offered', () => {
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+
+      expect(easingSelect()!.options).toHaveLength(EASING_TYPES.length)
+    })
+
+    it('reports the chosen easing for the selected keyframe', async () => {
+      const user = userEvent.setup()
+      // The keyframe starts on a different curve, so picking Linear is a change.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'ease-in-out' })
+      const { container, onKeyframeEasingChanged } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+      await user.selectOptions(easingSelect()!, 'linear')
+
+      expect(onKeyframeEasingChanged).toHaveBeenCalledWith('opacity', 1, 'linear')
+    })
+
+    it('is reachable from the keyboard and commits without a pointer', async () => {
+      const user = userEvent.setup()
+      const { container, onKeyframeEasingChanged } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+      await user.tab()
+
+      expect(easingSelect()).toHaveFocus()
+      // selectOptions drives the select by value, the way a keyboard does.
+      await user.selectOptions(easingSelect()!, 'ease-out-cubic')
+      expect(onKeyframeEasingChanged).toHaveBeenCalledWith('opacity', 1, 'ease-out-cubic')
+    })
+
+    it('goes away when the graph background is clicked', () => {
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+      fireEvent.click(container.querySelector('svg')!)
+
+      expect(easingSelect()).toBeNull()
+    })
+
+    it('goes away when the selected keyframe is deleted', () => {
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+      fireEvent.keyDown(window, { key: 'Delete' })
+
+      expect(easingSelect()).toBeNull()
+    })
+
+    it('never appears for a preset keyframe', () => {
+      resetStoreForTest()
+      addClip('clip1', 0, CLIP_DURATION)
+      store().updateClipAnimation('clip1', { in: { type: 'fade', duration: 1, easing: 'ease-out' } })
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[0])
+
+      expect(easingSelect()).toBeNull()
+    })
+
+    it('renders nothing when the host offers no easing handler', () => {
+      const { container } = renderGraph('opacity', { withEasing: false })
+
+      fireEvent.click(points(container)[1])
+
+      expect(easingSelect()).toBeNull()
+      expect(points(container)[1]).toHaveClass(styles.selected)
+    })
+
+    it('leaves the graph itself addressable as the svg', () => {
+      const { container } = renderGraph('opacity')
+
+      fireEvent.click(points(container)[1])
+
+      const graph = container.querySelector(`.${styles.graph}`)!
+      expect(graph.tagName).toBe('svg')
+      expect(measureGraph(container)).toBe(graph)
     })
   })
 
