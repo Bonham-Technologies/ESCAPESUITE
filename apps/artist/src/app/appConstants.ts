@@ -7,9 +7,13 @@
 /** Auto-save debounce delay, in milliseconds. */
 export const AUTO_SAVE_DELAY = 2000;
 
-/** Timeline panel height constraints, in pixels. */
+/** Shortest the timeline panel can be dragged, in pixels. */
 export const MIN_TIMELINE_HEIGHT = 120;
+
+/** Tallest the timeline panel can be dragged, in pixels. */
 export const MAX_TIMELINE_HEIGHT = 600;
+
+/** Timeline panel height on a first visit, before anything is persisted, in pixels. */
 export const DEFAULT_TIMELINE_HEIGHT = 320;
 
 /** LocalStorage key the timeline panel's height is persisted under. */

@@ -435,6 +435,29 @@ describe('PreviewPlayer legacy overlays converted on load', () => {
     }
   })
 
+  // `store/legacyOverlays.test.ts:134` pins the conversion of a legacy 'blur' shape —
+  // the live default radius of 10, with the stored fill and stroke carried through.
+  // This is the other half: that the converted clip actually reaches the canvas as a
+  // working blur region, which the legacy draw loop never did (it passed no canvas, so
+  // a legacy blur shape drew nothing at all).
+  it('draws a converted legacy blur shape as a working blur region', async () => {
+    addClip('clip1', 0, 4)
+    loadLegacy({
+      shapeOverlays: [legacyShape({ type: 'blur', fillColor: '#123456ff', strokeWidth: 3 })],
+    })
+
+    const preview = await renderPreview()
+    const frame = preview.frame()
+
+    expect(frame.of('clip')).toHaveLength(1)
+    const drawBack = last(frame.of('drawImage'))
+    expect(drawBack.args.slice(1)).toEqual([0, 0])
+    expect(drawBack.state.filter).toBe('blur(10px)')
+    // A blur region paints no fill and no stroke of its own, whatever it stored.
+    expect(frame.of('fill')).toHaveLength(0)
+    expect(frame.of('stroke')).toHaveLength(0)
+  })
+
   it('drops a converted legacy shape overlay once the playhead passes its end', async () => {
     addClip('clip1', 0, 4)
     loadLegacy({

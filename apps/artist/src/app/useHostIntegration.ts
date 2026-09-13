@@ -12,15 +12,12 @@
 // four being stable for the component's life, which they are.
 import { useEffect } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
-import { initIntegration, loadVideoFromUrl, sendMessage, type parseUrlParams } from '../utils/integration';
+import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
 import { processVideoFile } from '../core/videoProcessor';
 import { getVideo, getThumbnail } from '../core/storage';
 import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
-
-/** The URL parameters, read once at startup. */
-export type UrlParams = ReturnType<typeof parseUrlParams>;
 
 /** What the host surface needs from the editor. */
 export interface HostIntegrationDeps {

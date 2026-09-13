@@ -9,10 +9,10 @@ interface FileMenuProps {
   onClose: () => void;
   /** Start a new project. The confirmation prompt lives with the caller. */
   onNewProject: () => void;
-  /** Open a project from disk. */
-  onLoadProject: () => void;
-  /** Save the current project to disk. */
-  onSaveProject: () => void;
+  /** Open a project from disk. Async at the source; the result is not awaited here. */
+  onLoadProject: () => void | Promise<void>;
+  /** Save the current project to disk. Async at the source; the result is not awaited here. */
+  onSaveProject: () => void | Promise<void>;
   /** Open the export dialog. */
   onExport: () => void;
   /** A project load is in flight, so Open is disabled. */

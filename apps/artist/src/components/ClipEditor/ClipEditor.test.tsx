@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { ClipEditor } from './ClipEditor'
 import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
 import { rowControl } from '../../test/domQueries'
-import type { SourceVideo } from '../../store/types'
+import { useEditorStore } from '../../store/projectStore'
+import type { Clip, SourceVideo } from '../../store/types'
 import styles from './ClipEditor.module.css'
 
 /** Open (or close) a collapsible section by its title. */
@@ -293,6 +294,29 @@ describe('ClipEditor', () => {
 
       expect(clipNow().effects?.blur).toBe(12.5)
       expect(screen.getByText('12.5px')).toBeInTheDocument()
+    })
+
+    // `Clip.effects` is required, but `loadProject` validates only the version number,
+    // so a foreign or hand-edited project file can hand the inspector a clip with no
+    // effects object at all. `selectedClip.effects?.blur ?? 0` is what keeps that from
+    // rendering `undefinedpx` (or throwing on the slider's value) — this is the arm.
+    it('reads a missing effects object as no blur', async () => {
+      const user = userEvent.setup()
+      const project = store().project
+      const legacyClip: Partial<Clip> = { ...project.timeline.clips[0] }
+      delete legacyClip.effects
+      useEditorStore.setState({
+        project: {
+          ...project,
+          timeline: { ...project.timeline, clips: [legacyClip as Clip] },
+        },
+      })
+      render(<ClipEditor />)
+
+      await toggleSection(user, 'Effects')
+
+      expect(rowControl('Blur')).toHaveValue('0')
+      expect(screen.getByText('0.0px')).toBeInTheDocument()
     })
   })
 

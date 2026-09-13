@@ -525,8 +525,6 @@ most likely to hide a real change in the noise. Do it as its own hunk within Tas
 5. `setScaleLocked` depends on `[]` and calls `useEditorStore.getState()` three times instead of
    closing over the clip it has; and two separate subscriptions both find the selected clip
    (`useClipEditorActions.ts:99-115`). Merging either changes re-render frequency.
-6. `ClipEditor.tsx:56-58`'s alternating root element type remounts the `overflow-y: auto` container
-   across the empty↔selected transition, resetting `scrollTop` (ClipEditor review M1 / follow-up 15) — **verify; believed fixed in the ClipEditor fix round.**
-7. craft's unmemoised library handlers and `toggleSource`; the preview-attach effect's
+6. craft's unmemoised library handlers and `toggleSource`; the preview-attach effect's
    `[previewStream]` deps while it reads two refs; `handleStartRecording` depending on the whole
    `config` object.

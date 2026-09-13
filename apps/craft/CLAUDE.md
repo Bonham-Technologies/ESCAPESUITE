@@ -92,7 +92,12 @@ Every module below has its own test file; `App.tsx` itself is covered through
 - `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
-- `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction
+- `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction. Its size, type
+  and quality constants are **imported from `utils/previewThumbnail.ts`**, not declared here:
+  five suites (`App.settings`, `App.saving`, `App.recording`, `App.library`,
+  `hooks/useRecordingSave`) `vi.mock('./core/thumbnailGenerator')` wholesale, so a constant
+  declared in this module would vanish under the mock. `utils/previewThumbnail.ts` is never
+  mocked, which is what makes it the single definition — keep it that way
 - `converter.ts`: Video format conversion using WebCodecs + Mediabunny
 
 ### VideoPlayer Component (`src/components/VideoPlayer/`)

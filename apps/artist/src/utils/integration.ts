@@ -84,17 +84,32 @@ export function sendMessage(message: IntegrationMessage): void {
 }
 
 /**
+ * The startup URL parameters, as `parseUrlParams` reads them.
+ *
+ * Named rather than inline so consumers can spell the shape directly — the app
+ * hook that carries it around used to reach for `ReturnType<typeof parseUrlParams>`.
+ */
+export interface UrlParams {
+  /** Every `?video=` URL, in order. */
+  videos: string[];
+  /** `?project=`, base64-encoded project JSON. Not currently consumed. */
+  projectData: string | null;
+  /** `?autoplay=true`. Not currently consumed. */
+  autoPlay: boolean;
+  /** `?loadVideo=<id>`: the ESCAPECRAFT handoff, an id in the shared IndexedDB. */
+  loadVideoId: string | null;
+  /** `?suppressRestore=1`: skip the "Resume Previous Session?" prompt. */
+  suppressRestore: boolean;
+  /** `?title=`, trimmed and capped at MAX_TITLE_LENGTH; null when empty. */
+  title: string | null;
+  /** `?hostOrigin=`, validated; null when absent or not a usable origin. */
+  hostOrigin: string | null;
+}
+
+/**
  * Parse URL parameters for initial configuration
  */
-export function parseUrlParams(): {
-  videos: string[];
-  projectData: string | null;
-  autoPlay: boolean;
-  loadVideoId: string | null;
-  suppressRestore: boolean;
-  title: string | null;
-  hostOrigin: string | null;
-} {
+export function parseUrlParams(): UrlParams {
   const params = new URLSearchParams(window.location.search);
 
   // Get video URLs (can be multiple: ?video=url1&video=url2)

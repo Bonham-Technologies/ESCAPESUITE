@@ -35,8 +35,13 @@ export interface AppKeyboardShortcutsDeps {
   rippleDeleteClip: (clipId: string) => void;
   activeTool: ToolType;
   duplicateClip: (clipId: string) => void;
-  handleSaveProject: () => void;
-  handleLoadProject: () => void;
+  /**
+   * Both are `async` at the source (`useProjectActions`), so the type is widened to
+   * accept a promise: the shortcut fires and forgets, but an `await` added here — or a
+   * caller that wants to chain one — must type-check rather than be silently narrowed.
+   */
+  handleSaveProject: () => void | Promise<void>;
+  handleLoadProject: () => void | Promise<void>;
   /** The timeline's clips: the count gates Ctrl+E, and Ctrl+B looks one up. */
   clips: Clip[];
   handleZoomIn: () => void;
