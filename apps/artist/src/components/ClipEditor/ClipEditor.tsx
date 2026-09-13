@@ -5,6 +5,8 @@ import { DEFAULT_TRANSFORM } from '../../store/types';
 import type { BlendMode, TransitionType, TextAlign, ShapeType, TextOverlayData, ShapeOverlayData, AnimationPresetType, EasingType } from '../../store/types';
 import { hasAnimation } from '../../utils/animation';
 import { hasVisibleFill } from '../../core/canvasRenderer';
+import { describeClip, relativeTimeInClip, overlayPositionValue, maxPresetDuration, fitToCanvasScale, keyframeCount } from './clipEditorModel';
+import { clampFontSize, withBackgroundAlpha, withFillRgb, toggleFill, fillAlphaPercent, withFillAlphaPercent } from './clipColorValues';
 import styles from './ClipEditor.module.css';
 
 // Collapsible section component
@@ -143,12 +145,8 @@ export function ClipEditor() {
   }, [selectedClip, tracks]);
 
   // Determine clip type
-  const isTextOverlay = selectedClip?.overlayType === 'text';
-  const isShapeOverlay = selectedClip?.overlayType === 'shape';
-  const isOverlay = isTextOverlay || isShapeOverlay;
-  const isImage = sourceVideo?.mediaType === 'image';
-  const isAudio = sourceVideo?.mediaType === 'audio';
-  const isVideo = !isOverlay && !isImage && !isAudio;
+  const { isTextOverlay, isShapeOverlay, isOverlay, isAudio, isVideo, clipTypeLabel } =
+    describeClip(selectedClip, sourceVideo);
 
   // Clip position is now stored directly on the clip
   const clipPosition = selectedClip?.timelinePosition ?? 0;
@@ -156,11 +154,7 @@ export function ClipEditor() {
   // Calculate if current time is within this clip
   const timeInClip = useMemo(() => {
     if (!selectedClip) return null;
-    const relativeTime = currentTime - clipPosition;
-    if (relativeTime >= 0 && relativeTime < selectedClip.duration) {
-      return relativeTime;
-    }
-    return null;
+    return relativeTimeInClip(currentTime, clipPosition, selectedClip.duration);
   }, [currentTime, clipPosition, selectedClip]);
 
 
@@ -312,10 +306,7 @@ export function ClipEditor() {
 
   const handleFitToCanvas = useCallback(() => {
     if (!selectedClip || !sourceVideo) return;
-    const fitScale = Math.min(
-      resolution.width / sourceVideo.width,
-      resolution.height / sourceVideo.height
-    );
+    const fitScale = fitToCanvasScale(resolution, sourceVideo);
     updateClipTransform(selectedClip.id, { scaleX: fitScale, scaleY: fitScale });
   }, [selectedClip, sourceVideo, resolution, updateClipTransform]);
 
@@ -395,13 +386,6 @@ export function ClipEditor() {
     );
   }
 
-  // Determine clip type label
-  let clipTypeLabel = 'Video Clip';
-  if (isTextOverlay) clipTypeLabel = 'Text Overlay';
-  else if (isShapeOverlay) clipTypeLabel = 'Shape Overlay';
-  else if (isImage) clipTypeLabel = 'Image';
-  else if (isAudio) clipTypeLabel = 'Audio';
-
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -480,7 +464,7 @@ export function ClipEditor() {
               type="number"
               className={styles.numberInput}
               value={selectedClip.textData.fontSize}
-              onChange={(e) => handleTextDataChange({ fontSize: Math.max(8, parseInt(e.target.value) || 48) })}
+              onChange={(e) => handleTextDataChange({ fontSize: clampFontSize(e.target.value) })}
               min={8}
               max={200}
               title="Font size"
@@ -526,7 +510,7 @@ export function ClipEditor() {
               <input
                 type="color"
                 value={selectedClip.textData.backgroundColor.substring(0, 7)}
-                onChange={(e) => handleTextDataChange({ backgroundColor: e.target.value + 'cc' })}
+                onChange={(e) => handleTextDataChange({ backgroundColor: withBackgroundAlpha(e.target.value) })}
               />
             </div>
           </div>
@@ -576,8 +560,7 @@ export function ClipEditor() {
                     onChange={(e) => {
                       // Preserve existing alpha when changing color
                       const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
-                      const currentAlpha = fillColor.length > 7 ? fillColor.substring(7) : 'ff';
-                      handleShapeDataChange({ fillColor: e.target.value + currentAlpha });
+                      handleShapeDataChange({ fillColor: withFillRgb(fillColor, e.target.value) });
                     }}
                     disabled={!hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff')}
                   />
@@ -585,13 +568,7 @@ export function ClipEditor() {
                     className={`${styles.noFillButton} ${hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? '' : styles.active}`}
                     onClick={() => {
                       const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
-                      if (hasVisibleFill(fillColor)) {
-                        // Set to no fill (0% opacity)
-                        handleShapeDataChange({ fillColor: fillColor.substring(0, 7) + '00' });
-                      } else {
-                        // Re-enable fill with 50% opacity
-                        handleShapeDataChange({ fillColor: fillColor.substring(0, 7) + '80' });
-                      }
+                      handleShapeDataChange({ fillColor: toggleFill(fillColor) });
                     }}
                     title={hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? 'No fill (transparent)' : 'Enable fill'}
                   >
@@ -616,14 +593,13 @@ export function ClipEditor() {
                     min={1}
                     max={100}
                     step={1}
-                    value={Math.round(parseInt((selectedClip.shapeData?.fillColor || '#000000ff').substring(7) || 'ff', 16) / 255 * 100)}
+                    value={fillAlphaPercent(selectedClip.shapeData?.fillColor || '#000000ff')}
                     onChange={(e) => {
                       const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
-                      const alpha = Math.round(parseInt(e.target.value) / 100 * 255).toString(16).padStart(2, '0');
-                      handleShapeDataChange({ fillColor: fillColor.substring(0, 7) + alpha });
+                      handleShapeDataChange({ fillColor: withFillAlphaPercent(fillColor, parseInt(e.target.value)) });
                     }}
                   />
-                  <span>{Math.round(parseInt((selectedClip.shapeData?.fillColor || '#000000ff').substring(7) || 'ff', 16) / 255 * 100)}%</span>
+                  <span>{fillAlphaPercent(selectedClip.shapeData?.fillColor || '#000000ff')}%</span>
                 </div>
               )}
 
@@ -716,7 +692,7 @@ export function ClipEditor() {
                 min={0}
                 max={1}
                 step={0.01}
-                value={isOverlay && selectedClip.textData ? selectedClip.textData.x : isOverlay && selectedClip.shapeData ? selectedClip.shapeData.x : selectedClip.transform.x}
+                value={overlayPositionValue(selectedClip, 'x', isOverlay)}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value);
                   if (isTextOverlay && selectedClip.textData) {
@@ -728,7 +704,7 @@ export function ClipEditor() {
                   }
                 }}
               />
-              <span>{Math.round((isOverlay && selectedClip.textData ? selectedClip.textData.x : isOverlay && selectedClip.shapeData ? selectedClip.shapeData.x : selectedClip.transform.x) * 100)}%</span>
+              <span>{Math.round(overlayPositionValue(selectedClip, 'x', isOverlay) * 100)}%</span>
             </div>
 
             <div className={styles.transformRow}>
@@ -738,7 +714,7 @@ export function ClipEditor() {
                 min={0}
                 max={1}
                 step={0.01}
-                value={isOverlay && selectedClip.textData ? selectedClip.textData.y : isOverlay && selectedClip.shapeData ? selectedClip.shapeData.y : selectedClip.transform.y}
+                value={overlayPositionValue(selectedClip, 'y', isOverlay)}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value);
                   if (isTextOverlay && selectedClip.textData) {
@@ -750,7 +726,7 @@ export function ClipEditor() {
                   }
                 }}
               />
-              <span>{Math.round((isOverlay && selectedClip.textData ? selectedClip.textData.y : isOverlay && selectedClip.shapeData ? selectedClip.shapeData.y : selectedClip.transform.y) * 100)}%</span>
+              <span>{Math.round(overlayPositionValue(selectedClip, 'y', isOverlay) * 100)}%</span>
             </div>
 
             {/* Scale controls - only for media clips */}
@@ -925,7 +901,7 @@ export function ClipEditor() {
                   <input
                     type="range"
                     min={0.1}
-                    max={Math.min(2, selectedClip.duration / 2)}
+                    max={maxPresetDuration(selectedClip.duration)}
                     step={0.1}
                     value={selectedClip.animation?.in.duration ?? 0.5}
                     onChange={(e) => handleAnimationInDurationChange(parseFloat(e.target.value))}
@@ -973,7 +949,7 @@ export function ClipEditor() {
                   <input
                     type="range"
                     min={0.1}
-                    max={Math.min(2, selectedClip.duration / 2)}
+                    max={maxPresetDuration(selectedClip.duration)}
                     step={0.1}
                     value={selectedClip.animation?.out.duration ?? 0.5}
                     onChange={(e) => handleAnimationOutDurationChange(parseFloat(e.target.value))}
@@ -1009,9 +985,7 @@ export function ClipEditor() {
             {keyframePanelOpen ? 'Close Keyframe Editor' : 'Open Keyframe Editor'}
             {hasAnimation(selectedClip.animation) && !keyframePanelOpen && (
               <span className={styles.keyframeBadge}>
-                {Object.values(selectedClip.animation?.keyframes || {}).reduce(
-                  (count, kfs) => count + (kfs?.length || 0), 0
-                )}
+                {keyframeCount(selectedClip.animation)}
               </span>
             )}
           </button>
@@ -1042,7 +1016,7 @@ export function ClipEditor() {
                 <input
                   type="range"
                   min={0.1}
-                  max={Math.min(2, selectedClip.duration / 2)}
+                  max={maxPresetDuration(selectedClip.duration)}
                   step={0.1}
                   value={selectedClip.transition?.duration ?? 0.5}
                   onChange={(e) => handleTransitionDurationChange(parseFloat(e.target.value))}
