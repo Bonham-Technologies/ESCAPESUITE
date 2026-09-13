@@ -109,6 +109,37 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`,
 - Blur uses offscreen canvas capture to avoid self-reference issues
 - Blur rotation transforms the clip region without rotating the blurred content
 
+#### Legacy overlay arrays
+Older ARTIST versions stored overlays in `timeline.textOverlays` / `timeline.shapeOverlays`
+instead of as clips. Those arrays are **input-only**: `store/legacyOverlays.ts`'s
+`convertLegacyOverlays(timeline)` folds them into ordinary overlay clips and empties them, and
+nothing in the app writes them any more. It runs on **every** load path — both return paths of
+`ensureTimelineHasTracks` (`projectStore.ts`, so every `setProject` caller: Open Project, the
+media library, session restore and the host's `LOAD_PROJECT`) and `headless/renderProject.ts`'s
+`render()`, which does not go through the store. Before this, a legacy overlay drew in the
+preview and was then silently missing from every export and every headless render, because the
+exporters only iterate `timeline.clips`.
+
+- **Pure and deterministic** — no store, no React, **no `uuid`**: ids derive from the legacy
+  ids (`legacy-text-<id>` / `legacy-shape-<id>`), so the same file always converts to the same
+  project and a headless render of it is reproducible. An entry whose derived id is already a
+  clip is skipped, which makes the function idempotent and lets a half-converted file converge.
+- **Identity on empty input** — with both arrays empty or absent it returns the *same*
+  `Timeline` object, so a modern project (the headless kit's fixture included) is provably
+  untouched.
+- **Track placement is load-bearing.** The legacy preview drew all clips by ascending track
+  index and then, on top of everything, all shapes followed by all text. So the conversion
+  processes **shapes before texts** and puts them on tracks it creates *above every existing
+  track* (`legacy-overlay-track-N`, named `Overlay`, `Overlay 2`, …), reusing one of its own
+  tracks only when the windows do not overlap. `findEmptyTrack` — what `addTextOverlayClip`
+  uses — is deliberately NOT used here: it would reuse a low-index empty track and hide the
+  overlays underneath media clips, silently changing the picture of every such project.
+- **Degenerate data is clamped, not dropped**: `endTime <= startTime` becomes a 0.1 s clip,
+  a negative `startTime` becomes position 0. `addShapeOverlayClip`'s blur special-case
+  (transparent fill, no stroke, `blurAmount: 10`) is **not** applied — a legacy blur shape
+  drew with its stored fill and stroke. The timeline `duration` is recomputed, so an overlay
+  reaching past the stored duration extends the timeline (that is what gets it exported).
+
 ### Keyframe Animation System (`src/utils/animation.ts`)
 Clips support animated properties via keyframes:
 - **Animatable properties**: `x`, `y`, `scaleX`, `scaleY`, `rotation`, `opacity`, `blur`
@@ -141,7 +172,7 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 
 | Module | Owns |
 |--------|------|
-| `drawFrame.ts` | Compositing one frame: track order, transitions, overlays, the legacy overlay arrays, and the blur scratch canvas |
+| `drawFrame.ts` | Compositing one frame: track order, transitions, overlays, the blur scratch canvas, and the legacy overlay arrays — those last loops are now a fallback no load path can feed, since `convertLegacyOverlays` empties both arrays before the store or the headless entry ever sees them |
 | `previewGeometry.ts` | Where a clip is on the canvas (`getOverlayBounds`), which clips can be manipulated, the one object-fit: contain mapping between the canvas' pixels and its element's (`contentBox`, `getCanvasPosition`), and the inverse rotation every box test shares (`toLocalPoint`) |
 | `hitTest.ts` | What is under the pointer: which clip, which handle, which drag it would start. One cascade (`hitHandlesOnClip`) serves both passes — keyframe mode asks it for the selected clip alone, body included; outside it the same cascade runs handles-only before the z-order body pass |
 | `selectionOverlay.ts` | Drawing the selection chrome — bounding box, the eight resize handles, the rotation handle, multi-select boxes |
@@ -522,6 +553,10 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   bytes — it fails instead of rendering black), seeds sources into IndexedDB via
   `seedSources.ts`, then calls the **same** `exportToMP4`/`exportToWebM` the editor
   uses. No engine fork.
+- `render()` runs the store's `convertLegacyOverlays` on the incoming timeline before anything
+  reads it, so a `project.json` carrying the legacy `textOverlays`/`shapeOverlays` arrays
+  renders and exports identically with or without the store. A project with neither array is
+  untouched (the conversion returns the same `Timeline` object).
 - `vite.config.ts` headless plugins emit workers as classic scripts and inline them
   as blob URLs, because `file://` pages cannot load module or file workers.
 - `options.resolution` defaults to `'project'`; `meta` describes the encoded output

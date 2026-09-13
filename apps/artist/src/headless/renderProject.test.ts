@@ -202,6 +202,18 @@ describe('renderProjectToFile', () => {
     expect(clicks[0].inBody).toBe(true)
   })
 
+  it('renders a legacy text overlay in the streaming path too', async () => {
+    fileInput(['source.mp4'])
+    const input = fileInputBase()
+    input.project.timeline.textOverlays = [legacyText()]
+
+    await renderProjectToFile(input)
+
+    const clips = (exportToMP4.mock.calls[0] as unknown[])[0] as Clip[]
+    expect(clips).toHaveLength(2)
+    expect(clips[1]).toMatchObject({ id: 'legacy-text-legacy1', overlayType: 'text', timelinePosition: 1, duration: 2 })
+  })
+
   it('uses the webm extension for a webm render', async () => {
     fileInput(['source.mp4'])
     const input = fileInputBase()

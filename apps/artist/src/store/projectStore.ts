@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { EditorState, Project, SourceVideo, Clip, Timeline, Track, ClipTransform, ClipEffects, BlendMode, UndoableState, TextOverlay, ShapeOverlay, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe, WaveformPeak } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA, DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { createUndoableSnapshot, cloneClip } from '../utils/deepClone';
+import { convertLegacyOverlays } from './legacyOverlays';
 
 // Legacy defaults for backwards compatibility
 const DEFAULT_TEXT_OVERLAY = {
@@ -1625,14 +1626,14 @@ function ensureTimelineHasTracks(project: Project): Project {
   }
 
   if (!needsMigration && timeline.tracks && timeline.tracks.length > 0) {
-    // Just ensure overlay arrays exist
+    // Just ensure overlay arrays exist, and fold any legacy overlay into clips
     return {
       ...project,
-      timeline: {
+      timeline: convertLegacyOverlays({
         ...timeline,
         textOverlays,
         shapeOverlays,
-      },
+      }),
     };
   }
 
@@ -1661,13 +1662,13 @@ function ensureTimelineHasTracks(project: Project): Project {
 
   return {
     ...project,
-    timeline: {
+    timeline: convertLegacyOverlays({
       tracks: timeline.tracks?.length > 0 ? timeline.tracks : [defaultTrack],
       clips: migratedClips,
       textOverlays,
       shapeOverlays,
       duration: calculateTimelineDuration(migratedClips),
-    },
+    }),
   };
 }
 

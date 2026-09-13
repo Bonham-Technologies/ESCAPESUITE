@@ -222,7 +222,13 @@ export const DEFAULT_SHAPE_OVERLAY_DATA: ShapeOverlayData = {
   blurAmount: 0,
 };
 
-// Legacy types for backwards compatibility during migration
+// Legacy overlay types, kept so an older project file can still be read.
+//
+// INPUT ONLY. `store/legacyOverlays.ts` converts both arrays into ordinary overlay
+// clips and empties them on every load path (`ensureTimelineHasTracks`, so every
+// `setProject` caller) and in the headless render entry. Nothing in the app writes
+// them, and no loaded project still carries them — treat them as a file format, not
+// as state.
 export interface TextOverlay {
   id: string;
   text: string;
@@ -240,6 +246,7 @@ export interface TextOverlay {
   opacity: number;
 }
 
+/** Input only — see `TextOverlay` above: converted to overlay clips and emptied on load. */
 export interface ShapeOverlay {
   id: string;
   type: ShapeType;
@@ -329,6 +336,9 @@ export interface Clip {
 export interface Timeline {
   tracks: Track[];
   clips: Clip[];
+  // Legacy overlays from an older ARTIST version. Input only: emptied on load and on
+  // headless render, once `convertLegacyOverlays` has turned them into overlay clips.
+  // Nothing writes them, so on a loaded project both are always [].
   textOverlays: TextOverlay[];
   shapeOverlays: ShapeOverlay[];
   duration: number;         // Max of (clip.timelinePosition + clip.duration)
