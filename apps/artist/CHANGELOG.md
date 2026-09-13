@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.6
+
+### Patch Changes
+
+- 988986e: Rotating an overlay in the preview now follows the pointer exactly on non-square projects; previously the angle was measured in stretched canvas space
+
 ## 2.2.5
 
 ### Patch Changes
