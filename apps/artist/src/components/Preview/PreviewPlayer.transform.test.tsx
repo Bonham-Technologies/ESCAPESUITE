@@ -216,9 +216,11 @@ describe('PreviewPlayer rotate drags', () => {
   })
 
   it('adds the drag to the rotation the clip already had', async () => {
-    // A square project, because the angle is measured in normalised canvas
-    // coordinates: on a 16:9 frame the same visual angle reads differently on
-    // each axis, and only a square canvas makes the arithmetic exact.
+    // A square project, so the 45° the shape starts at is a 45° step in
+    // project pixels too and the grip sits exactly on the diagonal. The angle
+    // itself is measured in project pixels either way (see the 16:9 case
+    // below), so the squareness is only what makes this test's arithmetic
+    // easy to read.
     store().setProjectResolution(1080, 1080)
     const shape = addShape({ rotation: 45 })
 

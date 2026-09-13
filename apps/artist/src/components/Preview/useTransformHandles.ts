@@ -263,13 +263,24 @@ export function useTransformHandles({
         }
       }
     } else if (dragState.mode === 'rotate') {
-      // Rotation mode - calculate angle from center to mouse
-      const centerX = dragState.startOverlayX;
-      const centerY = dragState.startOverlayY;
-      const angle = Math.atan2(pos.y - centerY, pos.x - centerX);
+      // Rotation mode - calculate angle from center to mouse.
+      //
+      // In project pixels, not in the normalised 0-1 space the positions arrive
+      // in: normalised x spans the project's width and normalised y its height,
+      // so on any non-square project an angle read off them is measured in a
+      // stretched space and the clip lags the pointer (45° on screen reads as
+      // atan(720/1280) = 29.4° on a 1280x720 frame). The preview is displayed
+      // with the project's own aspect ratio — object-fit: contain, no stretch —
+      // so a project-pixel angle *is* the angle on screen.
+      const centerX = dragState.startOverlayX * projectSize.width;
+      const centerY = dragState.startOverlayY * projectSize.height;
+      const angle = Math.atan2(
+        pos.y * projectSize.height - centerY,
+        pos.x * projectSize.width - centerX
+      );
       const startAngle = Math.atan2(
-        dragState.startMouseY - centerY,
-        dragState.startMouseX - centerX
+        dragState.startMouseY * projectSize.height - centerY,
+        dragState.startMouseX * projectSize.width - centerX
       );
       const deltaAngle = ((angle - startAngle) * 180) / Math.PI;
       const newRotation = dragState.startRotation + deltaAngle;
@@ -456,7 +467,7 @@ export function useTransformHandles({
       drawSelectionHandles(currentTime);
       drawMultiSelectHandles(currentTime);
     });
-  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, drawMultiSelectHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, canvasRef]);
+  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, drawMultiSelectHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, canvasRef, projectSize]);
 
   const handleMouseUp = useCallback((e?: MouseEvent<HTMLCanvasElement>) => {
     // Handle marquee selection completion
