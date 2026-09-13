@@ -2,7 +2,6 @@ import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import {
   useEditorStore,
   getSnapPoints,
-  findNearestSnapPoint,
   wouldOverlap,
 } from '../../store/projectStore';
 import type { Clip } from '../../store/types';
@@ -12,12 +11,23 @@ import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineTimeReadout } from './TimelineTimeReadout';
+import { TimelineMarkerLines, TimelineRuler } from './TimelineRuler';
+import {
+  clampTime,
+  clipsIntersectingRange,
+  computeTrimUpdate,
+  exceedsMarqueeThreshold,
+  getSplitOffset,
+  marqueeTimeRange,
+  marqueeYRange,
+  pointerTime,
+  snapDragPosition,
+  trackSpansMarquee,
+} from './timelineGeometry';
 import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
 
 const PIXELS_PER_SECOND_BASE = 50;
-const RULER_MAJOR_INTERVAL = 5;
-const RULER_MINOR_INTERVAL = 1;
 
 interface DragState {
   clipId: string;
@@ -54,7 +64,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const [tlMarqueeStart, setTlMarqueeStart] = useState<{x: number; y: number} | null>(null);
   const [tlMarqueeCurrent, setTlMarqueeCurrent] = useState<{x: number; y: number} | null>(null);
   const tlMarqueeActive = tlMarqueeStart !== null && tlMarqueeCurrent !== null;
-  const TL_MARQUEE_THRESHOLD = 5;
 
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -129,65 +138,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     [visibleClipsByTrack]
   );
 
-  // Generate ruler ticks
-  const renderRuler = useCallback(() => {
-    const ticks: React.ReactNode[] = [];
-    const totalTicks = Math.ceil(minTimelineDuration / RULER_MINOR_INTERVAL);
-
-    for (let i = 0; i <= totalTicks; i++) {
-      const time = i * RULER_MINOR_INTERVAL;
-      const isMajor = time % RULER_MAJOR_INTERVAL === 0;
-      const x = timeToPixels(time, pixelsPerSecond);
-
-      ticks.push(
-        <div
-          key={time}
-          className={`${styles.tick} ${isMajor ? styles.tickMajor : styles.tickMinor}`}
-          style={{ left: x }}
-        >
-          {isMajor && <span className={styles.tickLabel}>{formatTime(time)}</span>}
-        </div>
-      );
-    }
-
-    return ticks;
-  }, [minTimelineDuration, pixelsPerSecond]);
-
-  // Render markers in ruler
-  const renderMarkers = useCallback(() => {
-    return markers.map((marker) => {
-      const x = timeToPixels(marker.time, pixelsPerSecond);
-      return (
-        <div
-          key={marker.id}
-          className={styles.markerFlag}
-          style={{ left: x, '--marker-color': marker.color } as React.CSSProperties}
-          title={`${marker.label} (${formatTime(marker.time)}) - Double-click to remove`}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            removeMarker(marker.id);
-          }}
-        >
-          <div className={styles.markerFlagHead} />
-        </div>
-      );
-    });
-  }, [markers, pixelsPerSecond, removeMarker]);
-
-  // Render marker lines in track area
-  const renderMarkerLines = useCallback(() => {
-    return markers.map((marker) => {
-      const x = timeToPixels(marker.time, pixelsPerSecond);
-      return (
-        <div
-          key={marker.id}
-          className={styles.markerLine}
-          style={{ left: x, '--marker-color': marker.color } as React.CSSProperties}
-        />
-      );
-    });
-  }, [markers, pixelsPerSecond]);
-
   // Handle ruler click to seek (and pause if playing)
   const handleRulerClick = useCallback(
     (e: React.MouseEvent) => {
@@ -198,9 +148,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       }
 
       const rect = rulerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left + rulerRef.current.scrollLeft;
-      const time = pixelsToTime(x, pixelsPerSecond);
-      const clampedTime = Math.max(0, Math.min(time, timelineDuration || minTimelineDuration));
+      const time = pointerTime(e.clientX, rect.left, rulerRef.current.scrollLeft, pixelsPerSecond);
+      const clampedTime = clampTime(time, timelineDuration || minTimelineDuration);
       setCurrentTime(clampedTime);
     },
     [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying]
@@ -230,9 +179,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       }
 
       const rect = trackContainerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left + trackContainerRef.current.scrollLeft;
-      const time = pixelsToTime(x, pixelsPerSecond);
-      const clampedTime = Math.max(0, Math.min(time, timelineDuration));
+      const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
+      const clampedTime = clampTime(time, timelineDuration);
       setCurrentTime(clampedTime);
 
       // Deselect clip only when clicking on empty track space
@@ -257,9 +205,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       if (!trackContainerRef.current) return;
 
       const rect = trackContainerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left + trackContainerRef.current.scrollLeft;
-      const time = pixelsToTime(x, pixelsPerSecond);
-      const clampedTime = Math.max(0, Math.min(time, timelineDuration));
+      const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
+      const clampedTime = clampTime(time, timelineDuration);
       setCurrentTime(clampedTime);
     };
 
@@ -285,9 +232,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       if (!ref) return;
 
       const rect = ref.getBoundingClientRect();
-      const x = e.clientX - rect.left + ref.scrollLeft;
-      const time = pixelsToTime(x, pixelsPerSecond);
-      const clampedTime = Math.max(0, Math.min(time, timelineDuration));
+      const time = pointerTime(e.clientX, rect.left, ref.scrollLeft, pixelsPerSecond);
+      const clampedTime = clampTime(time, timelineDuration);
 
       if (isDraggingInPoint) {
         setInPoint(clampedTime);
@@ -362,17 +308,12 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
 
       const containerRect = trackContainerRef.current.getBoundingClientRect();
       const scrollLeft = trackContainerRef.current.scrollLeft;
-      const x = e.clientX - containerRect.left + scrollLeft;
-      const clickTime = pixelsToTime(x, pixelsPerSecond);
+      const clickTime = pointerTime(e.clientX, containerRect.left, scrollLeft, pixelsPerSecond);
 
       // Only split if click is within the clip bounds (not on edges)
-      const clipStart = clip.timelinePosition;
-      const clipEnd = clip.timelinePosition + clip.duration;
-      const minSplitDistance = 0.1; // Minimum 100ms from edges
+      const splitTimeRelative = getSplitOffset(clickTime, clip.timelinePosition, clip.duration);
 
-      if (clickTime > clipStart + minSplitDistance && clickTime < clipEnd - minSplitDistance) {
-        // Convert absolute timeline position to relative position within clip
-        const splitTimeRelative = clickTime - clip.timelinePosition;
+      if (splitTimeRelative !== null) {
         splitClip(clip.id, splitTimeRelative);
       }
     },
@@ -433,8 +374,12 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       const scrollLeft = trackContainerRef.current.scrollLeft;
 
       // Calculate new timeline position
-      const x = e.clientX - containerRect.left + scrollLeft - dragState.offsetX;
-      let newPosition = pixelsToTime(x, pixelsPerSecond);
+      let newPosition = pointerTime(
+        e.clientX - dragState.offsetX,
+        containerRect.left,
+        scrollLeft,
+        pixelsPerSecond
+      );
       newPosition = Math.max(0, newPosition);
 
       // Apply snapping if enabled
@@ -445,18 +390,9 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
         const clip = clips.find(c => c.id === dragState.clipId);
 
         if (clip) {
-          // Check clip start snap
-          const startSnap = findNearestSnapPoint(newPosition, snapPoints, threshold);
-          // Check clip end snap
-          const endSnap = findNearestSnapPoint(newPosition + clip.duration, snapPoints, threshold);
-
-          if (startSnap !== null) {
-            snappedPosition = startSnap;
-            newPosition = startSnap;
-          } else if (endSnap !== null) {
-            snappedPosition = endSnap;
-            newPosition = endSnap - clip.duration;
-          }
+          const snapped = snapDragPosition(newPosition, clip.duration, snapPoints, threshold);
+          newPosition = snapped.position;
+          snappedPosition = snapped.snappedPosition;
         }
       }
 
@@ -558,70 +494,22 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
 
       const containerRect = trackContainerRef.current.getBoundingClientRect();
       const scrollLeft = trackContainerRef.current.scrollLeft;
-      const mouseX = e.clientX - containerRect.left + scrollLeft;
-      const mouseTime = pixelsToTime(mouseX, pixelsPerSecond);
+      const mouseTime = pointerTime(e.clientX, containerRect.left, scrollLeft, pixelsPerSecond);
 
-      const minClipDuration = 0.1; // Minimum 100ms clip
+      const update = computeTrimUpdate({
+        edge: trimState.edge,
+        mouseTime,
+        clip,
+        sourceVideo,
+        origin: {
+          startTime: trimState.originalStartTime,
+          endTime: trimState.originalEndTime,
+          timelinePosition: trimState.originalTimelinePosition,
+        },
+      });
 
-      // Check if this is an overlay or image clip (no fixed source duration)
-      const isOverlay = clip.overlayType === 'text' || clip.overlayType === 'shape';
-      const isImage = sourceVideo?.mediaType === 'image';
-      const isExtendable = isOverlay || isImage;
-
-      if (trimState.edge === 'start') {
-        if (isExtendable) {
-          // For overlays/images: adjust timeline position and duration
-          let newTimelinePosition = mouseTime;
-          newTimelinePosition = Math.max(0, newTimelinePosition);
-
-          // Calculate new duration
-          const originalEnd = trimState.originalTimelinePosition + trimState.originalEndTime - trimState.originalStartTime;
-          const newDuration = originalEnd - newTimelinePosition;
-
-          if (newDuration >= minClipDuration) {
-            updateClip(trimState.clipId, {
-              timelinePosition: newTimelinePosition,
-              duration: newDuration,
-              endTime: newDuration,
-            });
-          }
-        } else if (sourceVideo) {
-          // For video/audio: trim start point within source
-          const deltaFromOriginalStart = mouseTime - trimState.originalTimelinePosition;
-          let newStartTime = trimState.originalStartTime + deltaFromOriginalStart;
-          newStartTime = Math.max(0, Math.min(newStartTime, trimState.originalEndTime - minClipDuration));
-
-          const newTimelinePosition = trimState.originalTimelinePosition + (newStartTime - trimState.originalStartTime);
-
-          updateClip(trimState.clipId, {
-            startTime: newStartTime,
-            timelinePosition: Math.max(0, newTimelinePosition),
-          });
-        }
-      } else {
-        // Trimming from the end
-        if (isExtendable) {
-          // For overlays/images: just adjust duration (no upper limit)
-          const newEndTimelinePosition = mouseTime;
-          const newDuration = newEndTimelinePosition - clip.timelinePosition;
-
-          if (newDuration >= minClipDuration) {
-            updateClip(trimState.clipId, {
-              duration: newDuration,
-              endTime: newDuration,
-            });
-          }
-        } else if (sourceVideo) {
-          // For video/audio: trim end point within source
-          const newEndTimelinePosition = mouseTime;
-          const clipPlaybackTime = newEndTimelinePosition - clip.timelinePosition;
-          let newEndTime = clip.startTime + clipPlaybackTime;
-          newEndTime = Math.max(clip.startTime + minClipDuration, Math.min(newEndTime, sourceVideo.duration));
-
-          updateClip(trimState.clipId, {
-            endTime: newEndTime,
-          });
-        }
+      if (update) {
+        updateClip(trimState.clipId, update);
       }
     };
 
@@ -768,7 +656,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       const currentY = e.clientY - rect.top;
       const dx = currentX - tlMarqueeStart.x;
       const dy = currentY - tlMarqueeStart.y;
-      if (Math.sqrt(dx * dx + dy * dy) >= TL_MARQUEE_THRESHOLD) {
+      if (exceedsMarqueeThreshold(dx, dy)) {
         setTlMarqueeCurrent({ x: currentX, y: currentY });
       }
     };
@@ -779,14 +667,15 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
         const scrollLeft = trackContainerRef.current.scrollLeft;
 
         // Convert marquee X pixel positions to time values
-        const leftPx = Math.min(tlMarqueeStart.x, current.x) + scrollLeft;
-        const rightPx = Math.max(tlMarqueeStart.x, current.x) + scrollLeft;
-        const startTime = pixelsToTime(leftPx, pixelsPerSecond);
-        const endTime = pixelsToTime(rightPx, pixelsPerSecond);
+        const { startTime, endTime } = marqueeTimeRange(
+          tlMarqueeStart.x,
+          current.x,
+          scrollLeft,
+          pixelsPerSecond
+        );
 
         // Determine which tracks the marquee spans by Y position
-        const topPx = Math.min(tlMarqueeStart.y, current.y);
-        const bottomPx = Math.max(tlMarqueeStart.y, current.y);
+        const { topPx, bottomPx } = marqueeYRange(tlMarqueeStart.y, current.y);
 
         // Find track elements and match Y ranges
         const trackElements = trackContainerRef.current.querySelectorAll('[data-track-id]');
@@ -800,19 +689,14 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
           const elTop = elRect.top - containerRect.top + scrollTop;
           const elBottom = elRect.bottom - containerRect.top + scrollTop;
           // Check if track overlaps with marquee Y range
-          if (elBottom > topPx && elTop < bottomPx) {
+          if (trackSpansMarquee(elTop, elBottom, topPx, bottomPx)) {
             const trackId = el.getAttribute('data-track-id');
             if (trackId) spannedTrackIds.add(trackId);
           }
         });
 
         // Find all clips within the time range on the spanned tracks
-        const intersecting = clips.filter(clip => {
-          if (!spannedTrackIds.has(clip.trackId)) return false;
-          const clipEnd = clip.timelinePosition + clip.duration;
-          // Clip overlaps the time range
-          return clipEnd > startTime && clip.timelinePosition < endTime;
-        }).map(c => c.id);
+        const intersecting = clipsIntersectingRange(clips, spannedTrackIds, startTime, endTime);
 
         if (e.ctrlKey || e.metaKey) {
           const existing = Array.from(selectedClipIds);
@@ -843,55 +727,19 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   return (
     <div className={styles.container} ref={containerRef}>
       {/* Ruler */}
-      <div className={styles.rulerRow}>
-        <div className={styles.trackHeaderSpacer} />
-        <div
-          className={styles.ruler}
-          ref={rulerRef}
-          onClick={handleRulerClick}
-          tabIndex={0}
-          role="group"
-          aria-label="Timeline ruler"
-        >
-          <div className={styles.rulerContent} style={{ width: timelineWidth }}>
-            {renderRuler()}
-            {renderMarkers()}
-
-            {/* In/Out point markers in ruler */}
-            {inPoint !== null && (
-              <div
-                className={styles.inOutMarker}
-                style={{ left: timeToPixels(inPoint, pixelsPerSecond) }}
-                onMouseDown={(e) => { e.stopPropagation(); setIsDraggingInPoint(true); }}
-                title={`In point: ${formatTime(inPoint)}`}
-              >
-                <div className={`${styles.inOutMarkerHead} ${styles.inMarkerHead}`}>I</div>
-              </div>
-            )}
-            {outPoint !== null && (
-              <div
-                className={styles.inOutMarker}
-                style={{ left: timeToPixels(outPoint, pixelsPerSecond) }}
-                onMouseDown={(e) => { e.stopPropagation(); setIsDraggingOutPoint(true); }}
-                title={`Out point: ${formatTime(outPoint)}`}
-              >
-                <div className={`${styles.inOutMarkerHead} ${styles.outMarkerHead}`}>O</div>
-              </div>
-            )}
-
-            {/* In/Out region highlight in ruler */}
-            {inPoint !== null && outPoint !== null && (
-              <div
-                className={styles.inOutRulerRegion}
-                style={{
-                  left: timeToPixels(inPoint, pixelsPerSecond),
-                  width: timeToPixels(outPoint - inPoint, pixelsPerSecond),
-                }}
-              />
-            )}
-          </div>
-        </div>
-      </div>
+      <TimelineRuler
+        rulerRef={rulerRef}
+        duration={minTimelineDuration}
+        pixelsPerSecond={pixelsPerSecond}
+        width={timelineWidth}
+        markers={markers}
+        inPoint={inPoint}
+        outPoint={outPoint}
+        onRulerClick={handleRulerClick}
+        onRemoveMarker={removeMarker}
+        onInPointMouseDown={(e) => { e.stopPropagation(); setIsDraggingInPoint(true); }}
+        onOutPointMouseDown={(e) => { e.stopPropagation(); setIsDraggingOutPoint(true); }}
+      />
 
       {/* Tracks area */}
       <div className={styles.tracksArea}>
@@ -1220,7 +1068,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
             )}
 
             {/* Marker lines */}
-            {renderMarkerLines()}
+            <TimelineMarkerLines markers={markers} pixelsPerSecond={pixelsPerSecond} />
 
             {/* Snap indicator */}
             {dragState && dragState.snappedPosition !== null && (
