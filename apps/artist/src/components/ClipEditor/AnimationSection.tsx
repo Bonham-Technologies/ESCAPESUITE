@@ -82,16 +82,16 @@ export function AnimationSection({
                 min={0.1}
                 max={maxPresetDuration(clipDuration)}
                 step={0.1}
-                value={animation?.in.duration ?? 0.5}
+                value={animation.in.duration}
                 onChange={(e) => onInDurationChange(parseFloat(e.target.value))}
               />
-              <span>{(animation?.in.duration ?? 0.5).toFixed(1)}s</span>
+              <span>{animation.in.duration.toFixed(1)}s</span>
             </div>
             <div className={styles.transformRow}>
               <label>Easing</label>
               <select
                 className={styles.selectSmall}
-                value={animation?.in.easing ?? 'ease-out'}
+                value={animation.in.easing}
                 onChange={(e) => onInEasingChange(e.target.value as EasingType)}
               >
                 {EASING_TYPES.map((easing) => (
@@ -130,16 +130,16 @@ export function AnimationSection({
                 min={0.1}
                 max={maxPresetDuration(clipDuration)}
                 step={0.1}
-                value={animation?.out.duration ?? 0.5}
+                value={animation.out.duration}
                 onChange={(e) => onOutDurationChange(parseFloat(e.target.value))}
               />
-              <span>{(animation?.out.duration ?? 0.5).toFixed(1)}s</span>
+              <span>{animation.out.duration.toFixed(1)}s</span>
             </div>
             <div className={styles.transformRow}>
               <label>Easing</label>
               <select
                 className={styles.selectSmall}
-                value={animation?.out.easing ?? 'ease-in'}
+                value={animation.out.easing}
                 onChange={(e) => onOutEasingChange(e.target.value as EasingType)}
               >
                 {EASING_TYPES.map((easing) => (

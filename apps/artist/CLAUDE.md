@@ -37,6 +37,7 @@ pnpm lint                # Run ESLint
 - Timeline is a flat array of `Clip` objects; each clip references a `sourceVideoId` and defines `startTime`/`endTime` within that source
 - **Track properties**: `id`, `name`, `index`, `visible`, `locked`, `muted`, `volume` (0-1), `height`
 - **Auto-track creation**: When adding clips/overlays without specifying a track, a new track is created automatically
+- **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work
 
 ### Core Modules (`src/core/`)
 - `storage.ts`: IndexedDB layer using `idb` library. Stores video blobs, thumbnails, projects, and settings in separate object stores
@@ -530,8 +531,8 @@ outcome, not on the double.
   back to a freshly loaded editor holding one source video (`resetProject()` alone leaves
   `zoom`, `activeTool`, `loopPlayback`, the keyframe panel and the history behind).
   `store()`'s action calls run inside `act()`, because a zustand change with a component
-  mounted is a React update. `animation.ts` and `exportPipeline.ts` hold the clip/transform
-  and export-pipeline shapes their suites share.
+  mounted is a React update. `animation.ts` and `clipFixtures.ts` hold the clip/transform
+  and export shapes their suites share.
 - **Render helpers** — `src/test/renderApp.tsx` exports **`renderApp()`** (mount `App` and let
   its mount-time session lookup and URL-parameter work resolve inside `act()`) and
   `settleApp()` for the same wait mid-test. `src/test/renderPreview.tsx` exports

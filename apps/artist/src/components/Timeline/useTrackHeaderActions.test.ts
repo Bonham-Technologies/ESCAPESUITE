@@ -118,20 +118,15 @@ describe('useTrackHeaderActions reordering', () => {
     expect(storeOrder()).toEqual([bottom, middle, top])
   })
 
-  it('pins a finding: lowering an unknown track loses a row', () => {
+  it('ignores lowering a track that is not on the timeline', () => {
     const { result } = mountActions()
 
     act(() => result.current.moveTrackDown('gone'))
 
-    // findIndex's -1 slips past the "already at the bottom" guard, so the swap
-    // writes the top row's id to index -1 and leaves a hole at 0;
-    // `reorderTracks` then drops the undefined id and the timeline comes back
-    // one track short. Unreachable from the UI — `TrackHeader` only ever names
-    // a track it just rendered — and left as it was found. Flip this to the
-    // assertion above (nothing called, order unchanged) when `moveTrackDown`
-    // learns to guard on -1.
-    expect(reorderTracks).toHaveBeenCalledWith([bottom, middle, undefined])
-    expect(storeOrder()).toEqual([bottom, middle])
+    // findIndex returns -1, which the guard reads as "no such row" rather than
+    // letting the swap write the top row's id to index -1 and lose a track.
+    expect(reorderTracks).not.toHaveBeenCalled()
+    expect(storeOrder()).toEqual([bottom, middle, top])
   })
 
   it('takes a track all the way up one row at a time', () => {

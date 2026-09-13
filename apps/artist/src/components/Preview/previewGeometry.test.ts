@@ -25,7 +25,7 @@ import {
   makeShapeData,
   makeSourceVideo,
   makeTextData,
-} from '../../test/fixtures/exportPipeline'
+} from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
   getCanvasContext,

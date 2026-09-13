@@ -11,7 +11,7 @@ import {
   type SelectionOverlayContext,
 } from './selectionOverlay'
 import { HANDLE_SIZE, ROTATION_HANDLE_OFFSET } from './previewGeometry'
-import { makeAnimation, makeClip, makeSourceVideo } from '../../test/fixtures/exportPipeline'
+import { makeAnimation, makeClip, makeSourceVideo } from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
   getCanvasContext,

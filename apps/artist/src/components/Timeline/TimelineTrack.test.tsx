@@ -194,9 +194,7 @@ describe('TimelineTrack clips', () => {
     const trimState: TrimState = {
       clipId: 'clip2',
       edge: 'end',
-      originalStartTime: 0,
-      originalEndTime: 2,
-      originalTimelinePosition: 4,
+      origin: { startTime: 0, endTime: 2, timelinePosition: 4 },
     }
     const { root } = renderTrack({
       clips: [makeClip('clip1', 0), makeClip('clip2', 4)],

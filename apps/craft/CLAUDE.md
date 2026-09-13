@@ -92,7 +92,12 @@ Every module below has its own test file; `App.tsx` itself is covered through
 - `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
-- `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction
+- `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction. Its size, type
+  and quality constants are **imported from `utils/previewThumbnail.ts`**, not declared here:
+  five suites (`App.settings`, `App.saving`, `App.recording`, `App.library`,
+  `hooks/useRecordingSave`) `vi.mock('./core/thumbnailGenerator')` wholesale, so a constant
+  declared in this module would vanish under the mock. `utils/previewThumbnail.ts` is never
+  mocked, which is what makes it the single definition — keep it that way
 - `converter.ts`: Video format conversion using WebCodecs + Mediabunny
 
 ### VideoPlayer Component (`src/components/VideoPlayer/`)
@@ -228,6 +233,12 @@ the outcome, not on the double.
   `installRafDouble()` family drives the PiP compositor's animation frames by hand. It also
   re-exports `installBrowserStubs()` from `doubles/browser.ts`, because every App suite reaches
   for it through this module.
+- **Semicolon dialect is mixed, deliberately.** The suites the test decomposition added
+  (`src/hooks/*.test.ts`, `src/utils/recordingFormat.test.ts`, and their siblings) omit
+  line-ending semicolons; the older files (`src/App.library.test.tsx` and friends) carry them.
+  There is no `semi` lint rule and normalising the tree is not worth burying an unrelated diff
+  in — **match the file you are editing**. Changing this is its own ticket, and it would have
+  to be decided for `apps/artist` and `packages/shared` at the same time.
 
 ## Key Constraints
 

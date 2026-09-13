@@ -16,7 +16,7 @@ describe('formatDuration', () => {
 })
 
 describe('safeFileName', () => {
-  it('replaces every non-alphanumeric run with an underscore and lowercases the result', () => {
+  it('replaces every non-alphanumeric character with an underscore and lowercases the result', () => {
     expect(safeFileName('Standup Demo: 9/9')).toBe('standup_demo__9_9')
   })
 })

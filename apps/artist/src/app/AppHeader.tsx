@@ -15,10 +15,10 @@ interface AppHeaderProps {
   onCloseFileMenu: () => void;
   /** Start a new project. */
   onNewProject: () => void;
-  /** Open a project from disk. */
-  onLoadProject: () => void;
+  /** Open a project from disk. Async at the source; the result is not awaited here. */
+  onLoadProject: () => void | Promise<void>;
   /** Save the current project to disk — both the menu item and the quick button. */
-  onSaveProject: () => void;
+  onSaveProject: () => void | Promise<void>;
   /** Open the export dialog — both the menu item and the Export button. */
   onExport: () => void;
   /** A project load is in flight. */
@@ -74,7 +74,6 @@ export function AppHeader({
       </div>
 
       <div className={styles.headerRight}>
-        {/* File Menu Dropdown */}
         <FileMenu
           isOpen={fileMenuOpen}
           onToggle={onToggleFileMenu}

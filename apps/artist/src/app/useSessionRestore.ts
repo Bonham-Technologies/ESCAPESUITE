@@ -70,7 +70,9 @@ export function useSessionRestore({
   }, [setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification]);
 
   const handleDeclineSession = useCallback(() => {
-    clearSessionState();
+    // Not awaited: the answer lands now whatever storage does about it. The
+    // catch is only so a rejection is logged rather than left unhandled.
+    clearSessionState().catch(console.error);
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);

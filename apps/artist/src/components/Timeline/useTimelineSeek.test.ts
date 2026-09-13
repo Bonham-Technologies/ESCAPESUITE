@@ -148,9 +148,8 @@ describe('useTimelineSeek on the ruler', () => {
   })
 
   it('seeks anywhere in the ruler it draws when the timeline is empty', () => {
-    // A carried quirk: with no clips the duration is 0, and the ruler alone
-    // falls back to the 60s floor it is drawn against rather than pinning the
-    // playhead at 0 the way a track click does.
+    // With no clips the duration is 0, so both surfaces fall back to the 60s
+    // floor the ruler and the track content are drawn against.
     const { result } = mountSeek()
 
     act(() => result.current.handleRulerClick(clickAt(2.5, ruler)))
@@ -226,12 +225,15 @@ describe('useTimelineSeek on the track area', () => {
     expect(actions.setIsPlaying).toHaveBeenCalledWith(false)
   })
 
-  it('pins the playhead at 0 while the timeline is empty', () => {
+  it('seeks across the whole drawn span while the timeline is empty', () => {
+    // `Timeline` draws the ruler and the track content to the same 60s floor,
+    // so a click 30s along bare track means the same time as the identical
+    // pixel on the ruler above it — not 0.
     const { result } = mountSeek()
 
-    act(() => result.current.handleTrackClick(clickAt(2.5, bare())))
+    act(() => result.current.handleTrackClick(clickAt(30, bare())))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(0)
+    expect(actions.setCurrentTime).toHaveBeenCalledWith(30)
   })
 
   it('does nothing for the click that ended a marquee, and forgets it happened', () => {

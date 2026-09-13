@@ -9,10 +9,12 @@
 // merely finished a marquee, a click that landed on the playhead itself — and,
 // when the click really did land on bare track, clears the selection too.
 //
-// A carried quirk, preserved from before this file existed: the ruler clamps to
-// `timelineDuration || minTimelineDuration`, so on an empty timeline it seeks
-// anywhere in the 60s the ruler draws, while the track area clamps to
-// `timelineDuration` and so pins the playhead at 0. Both are left as they were.
+// Both clamp the same way, to `timelineDuration || minTimelineDuration`.
+// `Timeline` draws the ruler and `div.tracksContent` to the same
+// `minTimelineDuration` (`Math.max(timelineDuration, 60)`), so the two surfaces
+// are one coordinate space and a click at a given pixel has to mean the same
+// time on either. The expressions differ only when `timelineDuration` is 0: an
+// empty project, where the 60s floor is the whole of what is drawn.
 import type * as React from 'react';
 import { useCallback, type RefObject } from 'react';
 import { clampTime, pointerTime } from './timelineGeometry';
@@ -26,9 +28,9 @@ export interface TimelineSeekDeps {
   trackContainerRef: RefObject<HTMLDivElement | null>;
   /** Horizontal scale of the timeline, in pixels per second of media. */
   pixelsPerSecond: number;
-  /** The project's duration — what a track click clamps to. */
+  /** The project's duration — what both clicks clamp to. */
   timelineDuration: number;
-  /** The ruler's span, its floor included — what a ruler click falls back to. */
+  /** The drawn span, its 60s floor included — what both clicks fall back to. */
   minTimelineDuration: number;
   /** Playback state: a seek pauses it. */
   isPlaying: boolean;
@@ -115,7 +117,7 @@ export function useTimelineSeek({
 
       const rect = trackContainerRef.current.getBoundingClientRect();
       const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
-      const clampedTime = clampTime(time, timelineDuration);
+      const clampedTime = clampTime(time, timelineDuration || minTimelineDuration);
       setCurrentTime(clampedTime);
 
       // Deselect clip only when clicking on empty track space
@@ -124,7 +126,7 @@ export function useTimelineSeek({
         setSelectedClipId(null);
       }
     },
-    [pixelsPerSecond, timelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying, trackContainerRef, marqueeJustFinishedRef]
+    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying, trackContainerRef, marqueeJustFinishedRef]
   );
 
   return { handleRulerClick, handleTrackClick };

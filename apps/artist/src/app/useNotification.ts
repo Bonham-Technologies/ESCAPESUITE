@@ -1,13 +1,20 @@
 // The editor shell's transient status toast.
 //
 // One slot, not a queue: `showNotification` overwrites whatever is showing and
-// opens a fresh three-second timer. The timer is deliberately neither stored
-// nor cleared — see the note on `showNotification` — because that is what the
-// editor has always done, and the App suite pins the behaviour.
+// opens a fresh three-second timer. The hook owns that timer — it is held in a
+// ref so that showing a second notification can cancel the first one's clear
+// (which would otherwise blank the newer message early) and so that unmounting
+// leaves nothing armed.
 //
-// Binds no effect, so it may sit anywhere in `App`'s hook order; it is second
-// because every hook after it takes `showNotification` as a parameter.
-import { useCallback, useState } from 'react';
+// The ref is what makes both of those possible without touching identity:
+// `showNotification` still depends on `[]`, which
+// `useTimelineHeight`/`useSessionRestore`/`useAppKeyboardShortcuts`/
+// `useProjectActions`/`useHostIntegration` all rely on as a stable dependency.
+//
+// Its one effect exists only to clear the timer on unmount, so it may still sit
+// anywhere in `App`'s hook order; it is second because every hook after it
+// takes `showNotification` as a parameter.
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** How a notification is styled, and how urgently it reads. */
 export type NotificationType = 'info' | 'error' | 'success';
@@ -29,16 +36,25 @@ export interface NotificationApi {
 }
 
 export function useNotification(): NotificationApi {
-  const [notification, setNotification] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
+  const [notification, setNotification] = useState<Notification | null>(null);
+  /** The pending clear, so the next notification — or unmounting — can cancel it. */
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Show notification
   //
-  // The timeout is not captured, so a second notification inside three seconds
-  // leaves the first one's timer running and it blanks the newer message early.
-  // Known, carried deliberately: `useNotification.test.ts` pins it as a finding.
-  const showNotification = useCallback((message: string, type: 'info' | 'error' | 'success' = 'info') => {
+  // The handle lives in a ref rather than in the closure, so this stays a
+  // `[]` callback with an identity that never changes while still being able
+  // to cancel the clear a previous notification armed.
+  const showNotification = useCallback((message: string, type: NotificationType = 'info') => {
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
+    clearTimerRef.current = setTimeout(() => setNotification(null), 3000);
+  }, []);
+
+  // Leave nothing armed behind: a timer that outlived the hook would set state
+  // on a component that has gone.
+  useEffect(() => () => {
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
   }, []);
 
   return { notification, showNotification };

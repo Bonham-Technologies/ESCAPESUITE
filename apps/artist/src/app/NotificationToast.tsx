@@ -1,3 +1,4 @@
+import type { Notification } from './useNotification';
 import styles from '../App.module.css';
 
 interface NotificationToastProps {
@@ -5,7 +6,7 @@ interface NotificationToastProps {
    * The notification to show. Never null — the `{notification && …}` guard
    * stays in `App`, so nothing is rendered rather than an empty live region.
    */
-  notification: { message: string; type: 'info' | 'error' | 'success' };
+  notification: Notification;
 }
 
 /** The transient status toast in the corner of the editor. */

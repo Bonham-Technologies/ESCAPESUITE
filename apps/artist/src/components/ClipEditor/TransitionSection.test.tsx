@@ -50,16 +50,13 @@ describe('TransitionSection', () => {
     )
   })
 
-  it('reads none for a clip carrying no transition at all, but still shows a duration', async () => {
-    // A finding, not a target: the type falls back to `none` while the guard
-    // below it asks whether the type *is* `none` — which undefined is not — so
-    // an older clip with no transition object shows the duration row anyway,
-    // defaulted to 0.5s. Flip the last two assertions if that is ever fixed.
+  it('hides the duration for a clip carrying no transition at all', async () => {
+    // An older clip saved without a transition object reads as `none` in the
+    // select, and must read the same way to the guard below it: no duration row.
     await renderOpen({ transition: undefined })
 
     expect(rowSelect('Type')).toHaveValue('none')
-    expect(rowControl('Duration')).toHaveValue('0.5')
-    expect(screen.getByText('0.5s')).toBeInTheDocument()
+    expect(screen.queryByText('Duration')).not.toBeInTheDocument()
   })
 
   it('reports a chosen transition', async () => {

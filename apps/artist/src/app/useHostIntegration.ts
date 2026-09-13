@@ -12,15 +12,12 @@
 // four being stable for the component's life, which they are.
 import { useEffect } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
-import { initIntegration, loadVideoFromUrl, sendMessage, type parseUrlParams } from '../utils/integration';
+import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
 import { processVideoFile } from '../core/videoProcessor';
 import { getVideo, getThumbnail } from '../core/storage';
 import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
-
-/** The URL parameters, read once at startup. */
-export type UrlParams = ReturnType<typeof parseUrlParams>;
 
 /** What the host surface needs from the editor. */
 export interface HostIntegrationDeps {
@@ -98,6 +95,11 @@ export function useHostIntegration({
     // Check for URL parameters (parsed once at startup)
     const { videos, loadVideoId, title } = urlParams;
 
+    // The ?loadVideo= thumbnail's blob URL, handed back in the cleanup below.
+    // It is handed to `addSourceVideo` and lives as long as the media library
+    // entry, so it cannot be revoked at the point it is created.
+    let thumbnailObjectUrl: string | undefined;
+
     // Load videos from URL parameters
     if (videos.length > 0) {
       videos.forEach(async (url) => {
@@ -125,7 +127,8 @@ export function useHostIntegration({
               let thumbnailUrl: string | undefined;
               const thumbnailBlob = await getThumbnail(loadVideoId);
               if (thumbnailBlob) {
-                thumbnailUrl = URL.createObjectURL(thumbnailBlob);
+                thumbnailObjectUrl = URL.createObjectURL(thumbnailBlob);
+                thumbnailUrl = thumbnailObjectUrl;
               }
 
               // Add video to source videos
@@ -159,6 +162,9 @@ export function useHostIntegration({
       }
     }
 
-    return cleanup;
+    return () => {
+      cleanup();
+      if (thumbnailObjectUrl) URL.revokeObjectURL(thumbnailObjectUrl);
+    };
   }, []);
 }

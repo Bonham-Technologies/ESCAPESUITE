@@ -18,7 +18,7 @@ import {
   makeShapeData,
   makeSourceVideo,
   makeTextData,
-} from '../../test/fixtures/exportPipeline';
+} from '../../test/fixtures/clipFixtures';
 
 describe('describeClip', () => {
   it('labels a plain video clip with no overlay type and no special source', () => {

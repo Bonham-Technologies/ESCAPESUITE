@@ -78,6 +78,18 @@ describe('createPlaceholderThumbnail', () => {
     expect(blob).toBeInstanceOf(Blob)
   })
 
+  // The label's own styling. The double keeps fillStyle/font/textAlign as plain
+  // properties, so these are the values in force when fillText ran — the last
+  // fillStyle set is the label's, not the background's.
+  it('draws the label in grey 24px sans-serif, centred', async () => {
+    await createPlaceholderThumbnail()
+
+    const ctx = getLastCanvasContext()!
+    expect(ctx.fillStyle).toBe('#666')
+    expect(ctx.font).toBe('24px sans-serif')
+    expect(ctx.textAlign).toBe('center')
+  })
+
   it('skips drawing (but still resolves) when no 2D context is available', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValueOnce(null)
 

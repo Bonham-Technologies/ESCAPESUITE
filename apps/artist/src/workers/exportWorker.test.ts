@@ -12,7 +12,7 @@ import {
   type AudioBufferDouble,
   type OfflineAudioContextDoubles,
 } from '../test/doubles/audio'
-import { makeAnimation, makeClip, makeTrack } from '../test/fixtures/exportPipeline'
+import { makeAnimation, makeClip, makeTrack } from '../test/fixtures/clipFixtures'
 import type { AnimationPresetType, Clip, EasingType, Track } from '../store/types'
 
 const SAMPLE_RATE = 48000

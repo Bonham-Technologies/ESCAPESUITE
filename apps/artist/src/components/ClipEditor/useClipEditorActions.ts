@@ -5,15 +5,15 @@
 // values the sections share (`sourceVideo`, `track`, `timeInClip`), the clip
 // classification, and one handler per control. It adds no state and no
 // subscription of its own — the hook calls below are the ones that used to sit
-// at the top of `ClipEditor`, in the same order, with the same dependency
-// arrays, so moving them here cannot change when anything re-renders.
+// at the top of `ClipEditor`, in the same order and, `handleGoToClip` aside,
+// with the same dependency arrays, so moving them here cannot change when
+// anything re-renders. `handleGoToClip` now also depends on `selectedClip`,
+// which it reads: its identity changes whenever the selected clip object does
+// rather than only when the clip's position does. Its one consumer is
+// `ActionsSection`'s unmemoised button `onClick`, which takes no identity
+// dependency, so no render count moves.
 //
-// Two of those arrays are wrong, and are kept wrong on purpose:
-//   * `handleGoToClip` reads `selectedClip` but depends only on
-//     `[clipPosition, setCurrentTime]`. It is the directory's one
-//     `exhaustive-deps` warning, and it is harmless in practice because
-//     `clipPosition` is derived from the same clip. Fixing it is a behaviour
-//     change (a new callback identity), so it is left alone.
+// One of those arrays is wrong, and is kept wrong on purpose:
 //   * `setScaleLocked` depends on `[]` and reaches for
 //     `useEditorStore.getState()` three times instead of closing over the clip
 //     it already has. That is also what keeps its identity stable across
@@ -173,7 +173,7 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleGoToClip = useCallback(() => {
     if (!selectedClip) return;
     setCurrentTime(clipPosition);
-  }, [clipPosition, setCurrentTime]);
+  }, [selectedClip, clipPosition, setCurrentTime]);
 
   const handleTransformChange = useCallback(
     (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => {

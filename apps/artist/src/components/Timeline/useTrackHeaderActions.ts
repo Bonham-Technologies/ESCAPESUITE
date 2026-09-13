@@ -61,7 +61,9 @@ export function useTrackHeaderActions({
   // Move track down (toward bottom of visual stack)
   const moveTrackDown = useCallback((trackId: string) => {
     const trackIndex = sortedTracks.findIndex(t => t.id === trackId);
-    if (trackIndex >= sortedTracks.length - 1) return; // Already at bottom
+    // -1 first: findIndex's "no such track" slips past the bottom-row test,
+    // and the swap below would then write an id to index -1 and lose a row.
+    if (trackIndex < 0 || trackIndex >= sortedTracks.length - 1) return; // Already at bottom
 
     // Swap with the track below in visual order
     const newOrder = sortedTracks.map(t => t.id);

@@ -4,11 +4,14 @@
 // plain numbers off a DOMRect — so the same maths backs the ruler's ticks, the
 // drag/trim/marquee handlers' mouse-to-time conversions and the tests, without a
 // ref, a store subscription or a React render in sight. `findNearestSnapPoint`
-// is imported rather than re-implemented: it is a pure helper that the store
-// module happens to export.
-import { findNearestSnapPoint } from '../../store/projectStore';
+// is imported rather than re-implemented, from `store/timelineSnapping` — a
+// module as free of the store as this one is.
+import { findNearestSnapPoint } from '../../store/timelineSnapping';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
 import type { Clip, SourceVideo } from '../../store/types';
+
+/** How many pixels one second of timeline occupies at zoom 1. */
+export const PIXELS_PER_SECOND_BASE = 50;
 
 /** Ruler tick spacing, in seconds: a tick every second, labelled every five. */
 export const RULER_MAJOR_INTERVAL = 5;
@@ -124,7 +127,12 @@ export function getSplitOffset(
 /**
  * Whether a clip can be trimmed past its source's length: overlays and images
  * have no fixed source duration, so trimming them changes how long they show.
- * Exported for its own tests; `computeTrimUpdate` is its only production caller.
+ *
+ * Its only production call site is `computeTrimUpdate`, forty lines below. It
+ * is `export`ed anyway so that its overlay / image / video cases can be
+ * asserted by name in `timelineGeometry.test.ts` rather than only indirectly,
+ * through whichever edge×kind branch of `computeTrimUpdate` happens to reach
+ * them — the same trade the four constants above make.
  */
 export function isExtendableClip(
   clip: Pick<Clip, 'overlayType'>,
@@ -133,6 +141,12 @@ export function isExtendableClip(
   const isOverlay = clip.overlayType === 'text' || clip.overlayType === 'shape';
   const isImage = sourceVideo?.mediaType === 'image';
   return isOverlay || isImage;
+}
+
+/** A span of timeline, in seconds. */
+export interface TimeRange {
+  start: number;
+  end: number;
 }
 
 /** What a clip looked like when the trim started. */

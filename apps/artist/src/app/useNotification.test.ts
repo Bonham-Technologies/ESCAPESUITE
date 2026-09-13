@@ -1,9 +1,11 @@
-// The status toast: one slot, a default type, and a timer that nobody owns.
+// The status toast: one slot, a default type, and a timer the hook owns.
 //
-// The three-second clear is real behaviour worth pinning, and so is the fact
-// that a second notification does not cancel the first one's timer — that is
-// a carried smell, asserted here as a *finding* rather than a target. Flip the
-// last test when the timer is ever made cancellable.
+// The three-second clear is the behaviour worth pinning, and so is the fact
+// that the hook holds on to the handle: a second notification cancels the
+// first one's timer and gets its own three seconds, and an unmounted hook's
+// pending timer writes nothing. `showNotification`'s identity has to survive
+// all of that — five other hooks take it as a dependency — so the last test
+// pins that too.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useNotification } from './useNotification'
@@ -53,7 +55,7 @@ describe('useNotification', () => {
     expect(result.current.notification).toBeNull()
   })
 
-  it('FINDING: a second notification does not cancel the first timer, so it is blanked early', () => {
+  it('gives a second notification its own three seconds', () => {
     const { result } = renderHook(() => useNotification())
     act(() => result.current.showNotification('First'))
 
@@ -61,10 +63,33 @@ describe('useNotification', () => {
     act(() => result.current.showNotification('Second'))
     expect(result.current.notification).toEqual({ message: 'Second', type: 'info' })
 
-    // The first notification's timer is still running and blanks the second
-    // message 500 ms in, instead of it getting its own three seconds.
+    // The moment the first notification's timer would have fired: the second
+    // message survives it, because showing it cancelled that timer.
     act(() => void vi.advanceTimersByTime(500))
+    expect(result.current.notification).toEqual({ message: 'Second', type: 'info' })
+
+    // And it runs its own full three seconds from when it was shown.
+    act(() => void vi.advanceTimersByTime(2499))
+    expect(result.current.notification).not.toBeNull()
+
+    act(() => void vi.advanceTimersByTime(1))
     expect(result.current.notification).toBeNull()
+  })
+
+  it('writes nothing once the hook has gone', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result, unmount } = renderHook(() => useNotification())
+    act(() => result.current.showNotification('Marker added'))
+
+    unmount()
+
+    // Nothing is left armed: unmounting cleared the pending timer.
+    expect(vi.getTimerCount()).toBe(0)
+
+    act(() => void vi.advanceTimersByTime(3000))
+    // A timer that outlived its hook would set state on an unmounted component.
+    expect(consoleError).not.toHaveBeenCalled()
+    consoleError.mockRestore()
   })
 
   it('keeps the same showNotification across renders, so it is a stable dependency', () => {

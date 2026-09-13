@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { KeyframePanel } from './KeyframePanel'
 import { useEditorStore } from '../../store/projectStore'
@@ -314,6 +314,29 @@ describe('KeyframePanel', () => {
       expect(store().history.past).toHaveLength(historyBefore + 1)
       store().undo()
       expect(keyframesOf('opacity')![1]).toEqual({ time: 1, value: 0.5, easing: 'linear' })
+    })
+
+    // The select renders from the panel's memoized clip, and the handler reads the
+    // store fresh — so a keyframe deleted between the render and the change event is
+    // still on screen when the change arrives. Both happen in one `act()` here, which
+    // is what keeps the stale select mounted long enough to fire. The handler's
+    // `if (!existingKf) return` is what stops that writing a keyframe back.
+    it('ignores an easing change for a keyframe that has just been deleted', () => {
+      render(<KeyframePanel />)
+      measureGraph()
+      fireEvent.click(graphPoints()[1])
+      const select = screen.getByLabelText('Keyframe easing')
+      const historyBefore = store().history.past.length
+
+      act(() => {
+        useEditorStore.getState().removeClipKeyframe('clip1', 'opacity', 1)
+        fireEvent.change(select, { target: { value: 'ease-in-cubic' } })
+      })
+
+      // Only the deletion reached the store: the keyframe is gone, not re-created,
+      // and the change added no second history entry.
+      expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0])
+      expect(store().history.past).toHaveLength(historyBefore + 1)
     })
 
     it('adds a keyframe where the graph is double-clicked', () => {

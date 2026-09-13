@@ -397,6 +397,26 @@ describe('useClipDrag following the pointer', () => {
 
     expect(result.current.dragState?.currentPosition).toBe(2)
   })
+
+  // The release clears the drag state, but the effect that unbinds the listeners
+  // only runs after the render that clears it — so a mousemove delivered in the
+  // same batch still reaches the old handler. Its update has to be a no-op, not a
+  // resurrection of the finished drag: hence `setDragState(prev => prev ? … : null)`
+  // rather than a plain object. Both events go through one `act()` so they land in
+  // one batch, which is what makes `prev` null by the time the updater runs.
+  it('does not revive a finished drag when a move lands in the same batch as the release', () => {
+    const { result } = mountDrag()
+    grabClip1(result)
+
+    act(() => {
+      document.dispatchEvent(new MouseEvent('mouseup'))
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: pointerFor(6), clientY: 10 }))
+    })
+
+    expect(result.current.dragState).toBeNull()
+    expect(bound()).toBe(0)
+    expect(theClip('clip1').timelinePosition).toBe(2)
+  })
 })
 
 describe('useClipDrag committing', () => {

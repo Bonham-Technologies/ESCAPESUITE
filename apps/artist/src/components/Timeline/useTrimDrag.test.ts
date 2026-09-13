@@ -133,9 +133,7 @@ describe('useTrimDrag starting a trim', () => {
     expect(result.current.trimState).toEqual({
       clipId: 'clip1',
       edge: 'start',
-      originalStartTime: 0,
-      originalEndTime: 2,
-      originalTimelinePosition: 2,
+      origin: { startTime: 0, endTime: 2, timelinePosition: 2 },
     })
     expect(stopPropagation).toHaveBeenCalled()
     expect(preventDefault).toHaveBeenCalled()

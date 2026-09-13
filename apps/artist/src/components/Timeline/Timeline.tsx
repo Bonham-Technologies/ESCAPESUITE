@@ -7,6 +7,7 @@ import { TimelineTimeReadout } from './TimelineTimeReadout';
 import { TimelineMarkerLines, TimelineRuler } from './TimelineRuler';
 import { TimelineTrack } from './TimelineTrack';
 import { TrackHeader } from './TrackHeader';
+import { PIXELS_PER_SECOND_BASE, type TimeRange } from './timelineGeometry';
 import { useClipDrag } from './useClipDrag';
 import { useInOutDrag } from './useInOutDrag';
 import { usePlayheadDrag } from './usePlayheadDrag';
@@ -18,10 +19,8 @@ import { useTrimDrag } from './useTrimDrag';
 import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
 
-const PIXELS_PER_SECOND_BASE = 50;
-
 interface TimelineProps {
-  onExportSelection?: (timeRange: { start: number; end: number }) => void;
+  onExportSelection?: (timeRange: TimeRange) => void;
 }
 
 export function Timeline({ onExportSelection }: TimelineProps = {}) {

@@ -3,6 +3,7 @@
 // `Timeline` owns the pointer gestures — dragging a clip and trimming its edges
 // — but `TimelineTrack` has to draw them, so both need to name the same thing
 // without either importing the other.
+import type { TrimOrigin } from './timelineGeometry';
 
 /** A clip being dragged: where it started, and where the pointer has taken it. */
 export interface DragState {
@@ -19,7 +20,6 @@ export interface DragState {
 export interface TrimState {
   clipId: string;
   edge: 'start' | 'end';
-  originalStartTime: number;
-  originalEndTime: number;
-  originalTimelinePosition: number;
+  /** The clip's trim and position when the gesture began — `computeTrimUpdate`'s `origin`. */
+  origin: TrimOrigin;
 }
