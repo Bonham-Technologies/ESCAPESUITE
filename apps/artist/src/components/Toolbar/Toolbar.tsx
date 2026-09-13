@@ -15,7 +15,6 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
   const setSnapEnabled = useEditorStore((state) => state.setSnapEnabled);
   const loopPlayback = useEditorStore((state) => state.loopPlayback);
   const setLoopPlayback = useEditorStore((state) => state.setLoopPlayback);
-  const currentTime = useEditorStore((state) => state.currentTime);
   const addMarker = useEditorStore((state) => state.addMarker);
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
@@ -36,9 +35,14 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
     setActiveTool(tool);
   }, [setActiveTool]);
 
+  // The playhead is read with `getState()` rather than a selector: `currentTime`
+  // is written ~5x a second while the project plays and nothing in this render
+  // uses it, so subscribing would re-render the whole toolbar on every tick for
+  // a value only these three handlers ever read. Same contract as `App.tsx` —
+  // see `apps/artist/CLAUDE.md`, and `Toolbar.rerender.test.tsx` pins it.
   const handleAddMarker = useCallback(() => {
-    addMarker(currentTime);
-  }, [addMarker, currentTime]);
+    addMarker(useEditorStore.getState().currentTime);
+  }, [addMarker]);
 
   return (
     <div className={styles.toolbar}>
@@ -178,7 +182,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
         <div className={styles.buttonGroup}>
           <button
             className={`${styles.toolButton} ${inPoint !== null ? styles.active : ''}`}
-            onClick={() => { if (inPoint === currentTime) clearInOutPoints(); else setInPoint(currentTime); }}
+            onClick={() => { const at = useEditorStore.getState().currentTime; if (inPoint === at) clearInOutPoints(); else setInPoint(at); }}
             title={`Set in point (I)${inPoint !== null ? ` — ${formatTimecode(inPoint)}` : ''}`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -187,7 +191,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
           </button>
           <button
             className={`${styles.toolButton} ${outPoint !== null ? styles.active : ''}`}
-            onClick={() => { if (outPoint === currentTime) clearInOutPoints(); else setOutPoint(currentTime); }}
+            onClick={() => { const at = useEditorStore.getState().currentTime; if (outPoint === at) clearInOutPoints(); else setOutPoint(at); }}
             title={`Set out point (O)${outPoint !== null ? ` — ${formatTimecode(outPoint)}` : ''}`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
