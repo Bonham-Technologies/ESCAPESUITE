@@ -268,7 +268,7 @@ describe('useTrimDrag following the pointer', () => {
 })
 
 describe('useTrimDrag ripple', () => {
-  it('closes the gap behind a shortened clip', () => {
+  it('pushes the clips after a lengthened clip out of its way', () => {
     store().setActiveTool('ripple')
     const { result } = mountTrim()
     grabEdge(result, 'end')

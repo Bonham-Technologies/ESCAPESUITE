@@ -13,7 +13,8 @@
 // `timelineDuration || minTimelineDuration`, so on an empty timeline it seeks
 // anywhere in the 60s the ruler draws, while the track area clamps to
 // `timelineDuration` and so pins the playhead at 0. Both are left as they were.
-import React, { useCallback, type RefObject } from 'react';
+import type * as React from 'react';
+import { useCallback, type RefObject } from 'react';
 import { clampTime, pointerTime } from './timelineGeometry';
 import type { DragState } from './types';
 

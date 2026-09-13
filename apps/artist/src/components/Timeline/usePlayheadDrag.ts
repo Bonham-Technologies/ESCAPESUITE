@@ -13,7 +13,8 @@
 // `isDraggingPlayhead` leaves the hook because two other things ask it: a
 // marquee refuses to start while a scrub is running, and the track's click
 // handler refuses to seek for the click that ends one.
-import React, { useCallback, useEffect, useState, type RefObject } from 'react';
+import type * as React from 'react';
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { clampTime, pointerTime } from './timelineGeometry';
 
 /** What a playhead scrub needs that it cannot reach on its own. */

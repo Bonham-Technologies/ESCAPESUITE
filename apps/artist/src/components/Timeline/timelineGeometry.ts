@@ -124,6 +124,7 @@ export function getSplitOffset(
 /**
  * Whether a clip can be trimmed past its source's length: overlays and images
  * have no fixed source duration, so trimming them changes how long they show.
+ * Exported for its own tests; `computeTrimUpdate` is its only production caller.
  */
 export function isExtendableClip(
   clip: Pick<Clip, 'overlayType'>,

@@ -15,7 +15,8 @@
 // and a set of tracks (found by hit-testing the `data-track-id` rows), and every
 // clip inside both is selected — added to the existing selection with ctrl/cmd
 // held, replacing it otherwise.
-import React, { useCallback, useEffect, useState, type RefObject } from 'react';
+import type * as React from 'react';
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 import type { Clip } from '../../store/types';
 import {
   clipsIntersectingRange,

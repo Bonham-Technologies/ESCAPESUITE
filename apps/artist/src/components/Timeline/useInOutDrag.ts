@@ -13,7 +13,8 @@
 //
 // Neither point is ordered against the other here: dragging the in point past
 // the out point is left to the store's own setters.
-import React, { useCallback, useEffect, useState, type RefObject } from 'react';
+import type * as React from 'react';
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { clampTime, pointerTime } from './timelineGeometry';
 
 /** What an in/out marker drag needs that it cannot reach on its own. */

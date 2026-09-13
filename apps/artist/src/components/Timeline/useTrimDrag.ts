@@ -11,7 +11,8 @@
 // Release only does something with the ripple tool out, and then the origin is
 // what makes it possible: the clips after this one shift by however much the
 // end moved over the whole gesture.
-import React, { useCallback, useEffect, useState, type RefObject } from 'react';
+import type * as React from 'react';
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 import type { Clip, SourceVideo, ToolType, Track } from '../../store/types';
 import { computeTrimUpdate, pointerTime } from './timelineGeometry';
 import type { TrimState } from './types';

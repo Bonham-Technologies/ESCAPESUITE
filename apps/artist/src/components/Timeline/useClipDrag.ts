@@ -14,7 +14,8 @@
 // preview, and `TimelineTrack` draws the clip from it. The commit happens once,
 // on mouseup: a bulk move when the dragged clip is part of a multi-selection,
 // otherwise a single move that an overlap on the target track can veto outright.
-import React, { useCallback, useEffect, useState, type RefObject } from 'react';
+import type * as React from 'react';
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { getSnapPoints, wouldOverlap } from '../../store/projectStore';
 import type { Clip, ToolType, Track } from '../../store/types';
 import { pixelsToTime } from '../../utils/timeUtils';
