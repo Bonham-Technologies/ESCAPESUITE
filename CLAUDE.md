@@ -222,7 +222,7 @@ readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is empt
 perf project's `globalSetup` first, so a stale result can never be reported as current.
 All three outputs are gitignored.
 
-Three benchmarks, each run three times and reported as the median, all against **one
+Four benchmarks, each run three times and reported as the median, all against **one
 deterministic 12-clip, 13-second scene** (14 clips over 4 tracks at 1280x720, clips
 scaled to fill the frame — scale 1 means native pixel size here) built in-test from
 `apps/e2e/fixtures/headless/source.mp4` and loaded through the documented integration
@@ -266,11 +266,16 @@ no browser) in CI's `test` job.
 Baseline numbers, the machine they came from and the launch args they used live in
 [docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md); the
 hotspot analysis those profiles produced, and the ranked fix list it argues for, in
-[docs/performance/2026-09-12-profile.md](docs/performance/2026-09-12-profile.md).
+[docs/performance/2026-09-12-profile.md](docs/performance/2026-09-12-profile.md). Round 2's
+timeline-interaction baseline (`apps/e2e/tests/perf/timeline-interaction.spec.ts`: a clip drag, a
+marquee and a playhead scrub over the same scene, reporting layouts and JS per pointer move) is in
+[docs/performance/2026-09-13-timeline-baseline.md](docs/performance/2026-09-13-timeline-baseline.md).
 
 **Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
-Four ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
-`apps/artist/src/core/exportMP4.perf.test.ts`, `apps/craft/src/core/compositor.perf.test.ts`
+Five ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
+`apps/artist/src/core/exportMP4.perf.test.ts`,
+`apps/artist/src/components/Timeline/timelineGestures.perf.test.ts` (listeners, rects, snap-point
+and render counts per pointer move), `apps/craft/src/core/compositor.perf.test.ts`
 and `apps/craft/src/core/converter.perf.test.ts` — run the same scene through the same
 doubles the behaviour tests use and count what one frame costs: 2D-context calls,
 `drawImage`/`measureText`/`save`/`restore`, animation lookups, `getContext` calls, object
