@@ -374,12 +374,11 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       const scrollLeft = trackContainerRef.current.scrollLeft;
 
       // Calculate new timeline position
-      let newPosition = pointerTime(
-        e.clientX - dragState.offsetX,
-        containerRect.left,
-        scrollLeft,
-        pixelsPerSecond
-      );
+      // Kept as the original two-step expression: `pointerTime` would sum the
+      // same terms in a different order, and the extraction promised identical
+      // floating-point results.
+      const x = e.clientX - containerRect.left + scrollLeft - dragState.offsetX;
+      let newPosition = pixelsToTime(x, pixelsPerSecond);
       newPosition = Math.max(0, newPosition);
 
       // Apply snapping if enabled
