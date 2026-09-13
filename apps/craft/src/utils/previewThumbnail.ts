@@ -6,8 +6,8 @@
 
 export const THUMBNAIL_WIDTH = 320;
 export const THUMBNAIL_HEIGHT = 180;
-const THUMBNAIL_TYPE = 'image/jpeg';
-const THUMBNAIL_QUALITY = 0.8;
+export const THUMBNAIL_TYPE = 'image/jpeg';
+export const THUMBNAIL_QUALITY = 0.8;
 
 /**
  * Draw `source` (a compositor canvas or a video element) into a

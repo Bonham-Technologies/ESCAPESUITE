@@ -16,7 +16,7 @@
 // otherwise a single move that an overlap on the target track can veto outright.
 import type * as React from 'react';
 import { useCallback, useEffect, useState, type RefObject } from 'react';
-import { getSnapPoints, wouldOverlap } from '../../store/projectStore';
+import { getSnapPoints, wouldOverlap } from '../../store/timelineSnapping';
 import type { Clip, ToolType, Track } from '../../store/types';
 import { pixelsToTime } from '../../utils/timeUtils';
 import { getSplitOffset, pointerTime, snapDragPosition } from './timelineGeometry';

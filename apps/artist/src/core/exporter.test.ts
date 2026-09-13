@@ -18,7 +18,7 @@ import {
   makeClip,
   makeExportOptions,
   makeSourceVideo,
-} from '../test/fixtures/exportPipeline'
+} from '../test/fixtures/clipFixtures'
 
 const clips = [makeClip()]
 const sourceVideos = [makeSourceVideo()]

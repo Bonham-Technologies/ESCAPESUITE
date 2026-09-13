@@ -44,7 +44,7 @@ import {
   buildSceneClips,
   sceneSource,
 } from '../test/fixtures/perfScene'
-import { makeExportOptions } from '../test/fixtures/exportPipeline'
+import { makeExportOptions } from '../test/fixtures/clipFixtures'
 import type { ExportProgress } from '../store/types'
 
 vi.mock('mediabunny', async () => {

@@ -10,7 +10,7 @@ import {
 } from '../test/doubles/canvas'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { VideoFrameDouble, resetFrameRegistry } from '../test/doubles/webcodecs'
-import { makeClip } from '../test/fixtures/exportPipeline'
+import { makeClip } from '../test/fixtures/clipFixtures'
 import type { Clip, TransitionType } from '../store/types'
 import type { DrawableMediaSource, MediaDrawOptions, TransitionInfo } from './exportTypes'
 

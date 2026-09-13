@@ -14,7 +14,7 @@ import {
   type OffscreenCanvasDouble,
   type RecordingCanvasRenderingContext2D,
 } from '../test/doubles/canvas'
-import { makeAnimated, makeShapeData, makeTextData } from '../test/fixtures/exportPipeline'
+import { makeAnimated, makeShapeData, makeTextData } from '../test/fixtures/clipFixtures'
 
 const W = 1920
 const H = 1080

@@ -1,8 +1,6 @@
 // Generate thumbnails from recorded video blobs
 
-const THUMBNAIL_WIDTH = 320;
-const THUMBNAIL_HEIGHT = 180;
-const THUMBNAIL_QUALITY = 0.8;
+import { THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, THUMBNAIL_QUALITY, THUMBNAIL_TYPE } from '../utils/previewThumbnail';
 
 /**
  * Generate a thumbnail from a video blob.
@@ -44,7 +42,7 @@ export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
               reject(new Error('Failed to create thumbnail blob'));
             }
           },
-          'image/jpeg',
+          THUMBNAIL_TYPE,
           THUMBNAIL_QUALITY
         );
       } catch {
@@ -106,7 +104,7 @@ export function generateStreamThumbnail(stream: MediaStream): Promise<Blob> {
               reject(new Error('Failed to create thumbnail blob'));
             }
           },
-          'image/jpeg',
+          THUMBNAIL_TYPE,
           THUMBNAIL_QUALITY
         );
       }, 100);

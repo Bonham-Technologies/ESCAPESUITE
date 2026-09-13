@@ -1,5 +1,7 @@
-// Shared fixtures for the export-pipeline test files (audio mixer, canvas
-// renderer, MP4/WebM exporters).
+// Shared clip, source-video and overlay fixtures — the shapes a suite needs
+// before it can assert anything about a clip. Used by the export pipeline
+// (audio mixer, canvas renderer, MP4/WebM exporters) and, in equal measure, by
+// the inspector, preview and timeline suites.
 //
 // Lives under src/test/ so neither the vitest `include` glob (which would treat
 // it as a suite containing no tests) nor the coverage `include` glob (which

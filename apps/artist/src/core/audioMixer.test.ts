@@ -25,7 +25,7 @@ import {
   makeClip,
   makeSourceVideo,
   makeTrack,
-} from '../test/fixtures/exportPipeline'
+} from '../test/fixtures/clipFixtures'
 import type { Clip } from '../store/types'
 
 vi.mock('../workers/exportWorker?worker', async () => {

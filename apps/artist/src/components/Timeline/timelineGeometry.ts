@@ -4,9 +4,9 @@
 // plain numbers off a DOMRect — so the same maths backs the ruler's ticks, the
 // drag/trim/marquee handlers' mouse-to-time conversions and the tests, without a
 // ref, a store subscription or a React render in sight. `findNearestSnapPoint`
-// is imported rather than re-implemented: it is a pure helper that the store
-// module happens to export.
-import { findNearestSnapPoint } from '../../store/projectStore';
+// is imported rather than re-implemented, from `store/timelineSnapping` — a
+// module as free of the store as this one is.
+import { findNearestSnapPoint } from '../../store/timelineSnapping';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
 import type { Clip, SourceVideo } from '../../store/types';
 
@@ -141,6 +141,12 @@ export function isExtendableClip(
   const isOverlay = clip.overlayType === 'text' || clip.overlayType === 'shape';
   const isImage = sourceVideo?.mediaType === 'image';
   return isOverlay || isImage;
+}
+
+/** A span of timeline, in seconds. */
+export interface TimeRange {
+  start: number;
+  end: number;
 }
 
 /** What a clip looked like when the trim started. */

@@ -37,7 +37,7 @@ import {
   makeSourceVideo,
   makeTextData,
   makeTrack,
-} from '../test/fixtures/exportPipeline'
+} from '../test/fixtures/clipFixtures'
 import type { Clip, ExportOptions, ExportProgress, SourceVideo, Track } from '../store/types'
 
 vi.mock('mediabunny', async () => {

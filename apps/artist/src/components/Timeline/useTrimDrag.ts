@@ -70,9 +70,11 @@ export function useTrimDrag({
       setTrimState({
         clipId: clip.id,
         edge,
-        originalStartTime: clip.startTime,
-        originalEndTime: clip.endTime,
-        originalTimelinePosition: clip.timelinePosition,
+        origin: {
+          startTime: clip.startTime,
+          endTime: clip.endTime,
+          timelinePosition: clip.timelinePosition,
+        },
       });
     },
     [tracks, setSelectedClipId]
@@ -99,11 +101,7 @@ export function useTrimDrag({
         mouseTime,
         clip,
         sourceVideo,
-        origin: {
-          startTime: trimState.originalStartTime,
-          endTime: trimState.originalEndTime,
-          timelinePosition: trimState.originalTimelinePosition,
-        },
+        origin: trimState.origin,
       });
 
       if (update) {
@@ -116,8 +114,8 @@ export function useTrimDrag({
       if (activeTool === 'ripple' && trimState) {
         const clip = clips.find((c) => c.id === trimState.clipId);
         if (clip) {
-          const originalEnd = trimState.originalTimelinePosition +
-            (trimState.originalEndTime - trimState.originalStartTime);
+          const originalEnd = trimState.origin.timelinePosition +
+            (trimState.origin.endTime - trimState.origin.startTime);
           const currentEnd = clip.timelinePosition + (clip.endTime - clip.startTime);
           const delta = currentEnd - originalEnd;
 

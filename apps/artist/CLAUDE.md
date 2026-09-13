@@ -530,8 +530,8 @@ outcome, not on the double.
   back to a freshly loaded editor holding one source video (`resetProject()` alone leaves
   `zoom`, `activeTool`, `loopPlayback`, the keyframe panel and the history behind).
   `store()`'s action calls run inside `act()`, because a zustand change with a component
-  mounted is a React update. `animation.ts` and `exportPipeline.ts` hold the clip/transform
-  and export-pipeline shapes their suites share.
+  mounted is a React update. `animation.ts` and `clipFixtures.ts` hold the clip/transform
+  and export shapes their suites share.
 - **Render helpers** — `src/test/renderApp.tsx` exports **`renderApp()`** (mount `App` and let
   its mount-time session lookup and URL-parameter work resolve inside `act()`) and
   `settleApp()` for the same wait mid-test. `src/test/renderPreview.tsx` exports

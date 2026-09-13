@@ -13,7 +13,7 @@ import {
   makeSourceVideo,
   makeTextData,
   makeTrack,
-} from '../../test/fixtures/exportPipeline'
+} from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
   installCanvasDouble,

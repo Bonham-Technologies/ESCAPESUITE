@@ -1,4 +1,5 @@
 import { Timeline } from '../components/Timeline/Timeline';
+import type { TimeRange } from '../components/Timeline/timelineGeometry';
 import styles from '../App.module.css';
 
 interface TimelinePaneProps {
@@ -13,7 +14,7 @@ interface TimelinePaneProps {
   /** Zoom the timeline out one step. */
   onZoomOut: () => void;
   /** Export just the selected range. */
-  onExportSelection: (timeRange: { start: number; end: number }) => void;
+  onExportSelection: (timeRange: TimeRange) => void;
 }
 
 /**

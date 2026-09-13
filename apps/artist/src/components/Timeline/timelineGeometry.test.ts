@@ -24,7 +24,7 @@ import {
   RULER_MAJOR_INTERVAL,
   RULER_MINOR_INTERVAL,
 } from './timelineGeometry'
-import { makeClip, makeSourceVideo } from '../../test/fixtures/exportPipeline'
+import { makeClip, makeSourceVideo } from '../../test/fixtures/clipFixtures'
 
 /** The timeline's default scale: one second is 50px at zoom 1. */
 const PPS = 50
