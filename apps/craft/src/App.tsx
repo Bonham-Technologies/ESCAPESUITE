@@ -21,6 +21,9 @@ import { analytics } from './utils/analytics';
 import { sendToEditor } from './utils/sendToEditor';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
+import { formatDuration, safeFileName } from './utils/recordingFormat';
+import { drawThumbnail, createPlaceholderThumbnail } from './utils/previewThumbnail';
+import { buildSourceVideo, buildRecordingEntry } from './utils/recordingMetadata';
 
 function App() {
   const {
@@ -75,23 +78,12 @@ function App() {
       if (compositorRef.current) {
         const srcCanvas = compositorRef.current.getCanvas();
         if (srcCanvas.width > 0) {
-          const thumbCanvas = document.createElement('canvas');
-          thumbCanvas.width = 320;
-          thumbCanvas.height = 180;
-          const ctx = thumbCanvas.getContext('2d');
-          if (ctx) {
-            try {
-              ctx.drawImage(srcCanvas, 0, 0, 320, 180);
-              thumbCanvas.toBlob(
-                (blob) => resolve(blob),
-                'image/jpeg',
-                0.8
-              );
-              return;
-            } catch {
-              // Fall through to video element
-            }
+          const result = drawThumbnail(srcCanvas);
+          if (result) {
+            result.then(resolve);
+            return;
           }
+          // Fall through to video element
         }
       }
 
@@ -102,23 +94,10 @@ function App() {
         return;
       }
 
-      const canvas = document.createElement('canvas');
-      canvas.width = 320;
-      canvas.height = 180;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        resolve(null);
-        return;
-      }
-
-      try {
-        ctx.drawImage(video, 0, 0, 320, 180);
-        canvas.toBlob(
-          (blob) => resolve(blob),
-          'image/jpeg',
-          0.8
-        );
-      } catch {
+      const result = drawThumbnail(video);
+      if (result) {
+        result.then(resolve);
+      } else {
         resolve(null);
       }
     });
@@ -276,13 +255,6 @@ function App() {
     }
   }, [capturePreviewThumbnail]);
 
-  // Format duration as MM:SS
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   // Acquire streams based on config
   const acquireStreams = useCallback(async (): Promise<{
     screen: MediaStream | null;
@@ -350,21 +322,7 @@ function App() {
           thumbnail = await generateThumbnail(blob);
         } catch {
           // Create a simple placeholder thumbnail if all else fails
-          const canvas = document.createElement('canvas');
-          canvas.width = 320;
-          canvas.height = 180;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#1a1a2e';
-            ctx.fillRect(0, 0, 320, 180);
-            ctx.fillStyle = '#666';
-            ctx.font = '24px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Recording', 160, 95);
-          }
-          thumbnail = await new Promise<Blob>((resolve) => {
-            canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.8);
-          });
+          thumbnail = await createPlaceholderThumbnail();
         }
       }
       capturedThumbnailRef.current = null; // Clear for next recording
@@ -372,33 +330,25 @@ function App() {
       // Use recorded duration if metadata extraction failed
       const duration = metadata.duration > 0 ? metadata.duration : recordedDuration;
 
-      const sourceVideo = {
+      const sourceVideo = buildSourceVideo({
         id,
-        name: `Recording ${new Date(now).toLocaleString()}`,
+        now,
+        blob,
         duration,
         width: metadata.width,
         height: metadata.height,
-        frameRate: 30,
-        mimeType: blob.type,
-        size: blob.size,
-        mediaType: 'video' as const,
-        source: 'recording' as const,
-        recordedAt: now,
-      };
+      });
 
       await storeVideo(id, blob, sourceVideo);
       await storeThumbnail(id, thumbnail);
 
-      addRecording({
-        id,
-        name: sourceVideo.name,
-        duration,
-        createdAt: now,
+      addRecording(buildRecordingEntry({
+        sourceVideo,
+        now,
         size: blob.size,
         thumbnailUrl: createBlobUrl(thumbnail),
-        hasWebcam: config.webcamEnabled,
-        hasAudio: config.microphoneEnabled || config.systemAudioEnabled,
-      });
+        config,
+      }));
     } catch (error) {
       console.error('Failed to save recording:', error);
     }
@@ -641,7 +591,7 @@ function App() {
     const url = createBlobUrl(blob);
     const a = document.createElement('a');
     a.href = url;
-    const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const safeName = safeFileName(name);
     a.download = `${safeName}.webm`;
     document.body.appendChild(a);
     a.click();
