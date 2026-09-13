@@ -19,24 +19,11 @@ import { analytics } from './utils/analytics';
 import { initTheme, cleanupTheme, setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
 import { isStandaloneMode } from '@escapesuite/shared/config';
-import { formatTime } from './utils/timeUtils';
+import { AUTO_SAVE_DELAY, DEFAULT_TIMELINE_HEIGHT } from './app/appConstants';
+import { clampTimelineHeight, heightFromPointer, readStoredTimelineHeight, storeTimelineHeight } from './app/timelineHeight';
+import { clipCountMessage, formatTimeForNotification } from './app/appFormat';
+import { buildSessionSnapshot } from './app/sessionSnapshot';
 import styles from './App.module.css';
-
-// Auto-save debounce delay (milliseconds)
-const AUTO_SAVE_DELAY = 2000;
-
-// Helper to format time for notification messages
-function formatTimeForNotification(time: number): string {
-  return formatTime(time);
-}
-
-// Timeline height constraints
-const MIN_TIMELINE_HEIGHT = 120;
-const MAX_TIMELINE_HEIGHT = 600;
-const DEFAULT_TIMELINE_HEIGHT = 320;
-
-// LocalStorage key for timeline height
-const TIMELINE_HEIGHT_KEY = 'escapeartist-timeline-height';
 
 function App() {
   const [showExport, setShowExport] = useState(false);
@@ -53,10 +40,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [timelineHeight, setTimelineHeight] = useState(() => {
-    const saved = localStorage.getItem(TIMELINE_HEIGHT_KEY);
-    return saved ? Math.min(MAX_TIMELINE_HEIGHT, Math.max(MIN_TIMELINE_HEIGHT, parseInt(saved, 10))) : DEFAULT_TIMELINE_HEIGHT;
-  });
+  const [timelineHeight, setTimelineHeight] = useState(readStoredTimelineHeight);
   const [isResizing, setIsResizing] = useState(false);
 
   // URL parameters are read once at startup; later URL changes are ignored.
@@ -279,14 +263,7 @@ function App() {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         const state = useEditorStore.getState();
-        const session: SessionState = {
-          project: state.project,
-          sourceVideos: state.sourceVideos,
-          currentTime: state.currentTime,
-          selectedClipId: state.selectedClipId,
-          zoom: state.zoom,
-          timestamp: Date.now(),
-        };
+        const session: SessionState = buildSessionSnapshot(state, Date.now());
         saveSessionState(session).catch(console.error);
       }, AUTO_SAVE_DELAY);
     };
@@ -344,7 +321,7 @@ function App() {
         if (selectedClipIds.size > 0) {
           e.preventDefault();
           deleteSelectedClips();
-          showNotification(`${selectedClipIds.size} clip${selectedClipIds.size !== 1 ? 's' : ''} deleted`, 'info');
+          showNotification(clipCountMessage(selectedClipIds.size, 'deleted'), 'info');
           return;
         } else if (selectedClipId) {
           e.preventDefault();
@@ -364,7 +341,7 @@ function App() {
         if (selectedClipIds.size > 0) {
           e.preventDefault();
           copySelectedClips();
-          showNotification(`${selectedClipIds.size} clip${selectedClipIds.size !== 1 ? 's' : ''} copied`, 'info');
+          showNotification(clipCountMessage(selectedClipIds.size, 'copied'), 'info');
           return;
         }
       }
@@ -374,7 +351,7 @@ function App() {
         if (clipboard && clipboard.length > 0) {
           e.preventDefault();
           pasteClips();
-          showNotification(`${clipboard.length} clip${clipboard.length !== 1 ? 's' : ''} pasted`, 'info');
+          showNotification(clipCountMessage(clipboard.length, 'pasted'), 'info');
           return;
         }
       }
@@ -568,7 +545,7 @@ function App() {
 
   const handleResizeDoubleClick = useCallback(() => {
     setTimelineHeight(DEFAULT_TIMELINE_HEIGHT);
-    localStorage.setItem(TIMELINE_HEIGHT_KEY, DEFAULT_TIMELINE_HEIGHT.toString());
+    storeTimelineHeight(DEFAULT_TIMELINE_HEIGHT);
     showNotification('Timeline height reset', 'info');
   }, [showNotification]);
 
@@ -577,15 +554,15 @@ function App() {
 
     const handleResizeMove = (e: MouseEvent) => {
       // Calculate new height based on mouse position from bottom of window
-      const newHeight = window.innerHeight - e.clientY;
-      const clampedHeight = Math.min(MAX_TIMELINE_HEIGHT, Math.max(MIN_TIMELINE_HEIGHT, newHeight));
+      const newHeight = heightFromPointer(e.clientY, window.innerHeight);
+      const clampedHeight = clampTimelineHeight(newHeight);
       setTimelineHeight(clampedHeight);
     };
 
     const handleResizeEnd = () => {
       setIsResizing(false);
       // Save to localStorage
-      localStorage.setItem(TIMELINE_HEIGHT_KEY, timelineHeight.toString());
+      storeTimelineHeight(timelineHeight);
     };
 
     document.addEventListener('mousemove', handleResizeMove);
