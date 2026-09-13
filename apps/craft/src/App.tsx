@@ -1,9 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import styles from './App.module.css';
-import { VideoPlayer } from './components/VideoPlayer';
 import { useRecorderStore } from './store/recorderStore';
-import type { WebcamPosition, WebcamShape } from './store/types';
 import {
   detectCapabilities,
   requestScreenCapture,
@@ -16,14 +14,21 @@ import { Compositor } from './core/compositor';
 import { storeVideo, storeThumbnail, deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from './core/storage';
 import { generateThumbnail, extractVideoMetadata } from './core/thumbnailGenerator';
 import { fixWebMMetadata } from './core/converter';
-import { isStandaloneMode, editorUrl } from '@escapesuite/shared/config';
 import { analytics } from './utils/analytics';
 import { sendToEditor } from './utils/sendToEditor';
 import { initTheme, cleanupTheme } from '@escapesuite/shared/theme';
 import { themeStorage } from './utils/themeStorage';
-import { formatDuration, safeFileName } from './utils/recordingFormat';
+import { safeFileName } from './utils/recordingFormat';
 import { drawThumbnail, createPlaceholderThumbnail } from './utils/previewThumbnail';
 import { buildSourceVideo, buildRecordingEntry } from './utils/recordingMetadata';
+import { AppHeader } from './components/AppHeader/AppHeader';
+import { SourceToggles } from './components/SourceToggles/SourceToggles';
+import { WebcamOverlaySettings } from './components/WebcamOverlaySettings/WebcamOverlaySettings';
+import { RecordingsList } from './components/RecordingsList/RecordingsList';
+import { RecordingPreview } from './components/RecordingPreview/RecordingPreview';
+import { RecorderControls } from './components/RecorderControls/RecorderControls';
+import { PlaybackDialog } from './components/PlaybackDialog/PlaybackDialog';
+import { HelpDialog } from './components/HelpDialog/HelpDialog';
 
 function App() {
   const {
@@ -622,643 +627,80 @@ function App() {
   return (
     <div className={styles.app}>
       {/* Header */}
-      <header className={styles.header}>
-        <div className={styles.headerLeft}>
-          {!isStandaloneMode() && (
-            <a href="/" className={styles.dashboardLink} title="Back to ESCAPE Suite">
-              ← ESCAPE Suite
-            </a>
-          )}
-          <h1 className={styles.logo}>ESCAPECRAFT</h1>
-        </div>
-
-        <div className={styles.headerCenter} aria-live="polite" aria-atomic="true">
-          {state === 'recording' && (
-            <span className={styles.recordingIndicator} role="status">
-              <span className={styles.recordingDot} aria-hidden="true" />
-              Recording
-            </span>
-          )}
-          {state === 'paused' && (
-            <span className={styles.pausedIndicator} role="status">Paused</span>
-          )}
-          {state === 'saving' && (
-            <span className={styles.pausedIndicator} role="status">Saving...</span>
-          )}
-        </div>
-
-        <div className={styles.headerRight}>
-          <button
-            className={styles.headerButton}
-            onClick={() => setShowHelpModal(true)}
-            title="Recording Tips"
-            aria-label="Help - Recording Tips"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            Help
-          </button>
-          <button
-            className={`${styles.headerButton} ${styles.editorButton}`}
-            onClick={() => window.open(editorUrl(), 'escapeartist')}
-            title="Open Editor"
-            aria-label="Open Editor in new window"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-            Open Editor
-          </button>
-        </div>
-      </header>
+      <AppHeader state={state} onOpenHelp={() => setShowHelpModal(true)} />
 
       {/* Main content */}
       <main className={styles.main}>
         {/* Sidebar */}
         <aside className={styles.sidebar}>
           {/* Sources */}
-          <section className={styles.sidebarSection}>
-            <h2 className={styles.sidebarTitle}>Sources</h2>
-            <div className={styles.sourceToggles}>
-              <div
-                className={`${styles.sourceToggle} ${!detailedCapabilities.screenCapture.available ? styles.sourceUnavailable : ''}`}
-                title={detailedCapabilities.screenCapture.message}
-              >
-                <span className={styles.sourceLabel}>
-                  <ScreenIcon className={styles.sourceIcon} />
-                  Screen
-                  {!detailedCapabilities.screenCapture.available && (
-                    <UnavailableIcon className={styles.unavailableIcon} />
-                  )}
-                </span>
-                <button
-                  className={`${styles.toggle} ${config.screenEnabled ? styles.active : ''}`}
-                  onClick={() => toggleSource('screen')}
-                  disabled={!capabilities.screenCapture || isRecordingActive}
-                  aria-pressed={config.screenEnabled}
-                  aria-label="Screen"
-                >
-                  <span className={styles.toggleKnob} />
-                </button>
-              </div>
-
-              <div
-                className={`${styles.sourceToggle} ${!detailedCapabilities.webcam.available ? styles.sourceUnavailable : ''}`}
-                title={detailedCapabilities.webcam.message}
-              >
-                <span className={styles.sourceLabel}>
-                  <WebcamIcon className={styles.sourceIcon} />
-                  Webcam
-                  {!detailedCapabilities.webcam.available && (
-                    <UnavailableIcon className={styles.unavailableIcon} />
-                  )}
-                </span>
-                <button
-                  className={`${styles.toggle} ${config.webcamEnabled ? styles.active : ''}`}
-                  onClick={() => toggleSource('webcam')}
-                  disabled={!capabilities.webcam || isRecordingActive}
-                  aria-pressed={config.webcamEnabled}
-                  aria-label="Webcam"
-                >
-                  <span className={styles.toggleKnob} />
-                </button>
-              </div>
-
-              <div
-                className={`${styles.sourceToggle} ${!detailedCapabilities.microphone.available ? styles.sourceUnavailable : ''}`}
-                title={detailedCapabilities.microphone.message}
-              >
-                <span className={styles.sourceLabel}>
-                  <MicIcon className={styles.sourceIcon} />
-                  Microphone
-                  {!detailedCapabilities.microphone.available && (
-                    <UnavailableIcon className={styles.unavailableIcon} />
-                  )}
-                </span>
-                <button
-                  className={`${styles.toggle} ${config.microphoneEnabled ? styles.active : ''}`}
-                  onClick={() => toggleSource('microphone')}
-                  disabled={!capabilities.microphone || isRecordingActive}
-                  aria-pressed={config.microphoneEnabled}
-                  aria-label="Microphone"
-                >
-                  <span className={styles.toggleKnob} />
-                </button>
-              </div>
-
-              <div
-                className={`${styles.sourceToggle} ${!detailedCapabilities.systemAudio.available ? styles.sourceUnavailable : ''}`}
-                title={detailedCapabilities.systemAudio.message}
-              >
-                <span className={styles.sourceLabel}>
-                  <SpeakerIcon className={styles.sourceIcon} />
-                  System Audio
-                  {!detailedCapabilities.systemAudio.available && (
-                    <UnavailableIcon className={styles.unavailableIcon} />
-                  )}
-                </span>
-                <button
-                  className={`${styles.toggle} ${config.systemAudioEnabled ? styles.active : ''}`}
-                  onClick={() => toggleSource('systemAudio')}
-                  disabled={!capabilities.systemAudio || isRecordingActive}
-                  aria-pressed={config.systemAudioEnabled}
-                  aria-label="System Audio"
-                >
-                  <span className={styles.toggleKnob} />
-                </button>
-              </div>
-            </div>
-
-            {/* Audio meters */}
-            {(config.microphoneEnabled || config.systemAudioEnabled) && isRecordingActive && (
-              <div className={styles.audioMeters}>
-                {config.microphoneEnabled && (
-                  <div className={styles.audioMeter}>
-                    <span className={styles.meterLabel}>Mic</span>
-                    <div className={styles.meterBar}>
-                      <div
-                        className={styles.meterFill}
-                        style={{ width: `${audioLevels.microphone * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {config.systemAudioEnabled && (
-                  <div className={styles.audioMeter}>
-                    <span className={styles.meterLabel}>System</span>
-                    <div className={styles.meterBar}>
-                      <div
-                        className={styles.meterFill}
-                        style={{ width: `${audioLevels.system * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
+          <SourceToggles
+            config={config}
+            capabilities={capabilities}
+            detailedCapabilities={detailedCapabilities}
+            audioLevels={audioLevels}
+            isRecordingActive={isRecordingActive}
+            onToggleSource={toggleSource}
+          />
 
           {/* Webcam overlay settings */}
           {config.screenEnabled && config.webcamEnabled && (
-            <section className={styles.sidebarSection}>
-              <h2 className={styles.sidebarTitle}>Webcam Overlay</h2>
-              <div className={styles.webcamControls}>
-                <div className={styles.positionGrid}>
-                  {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as WebcamPosition[]).map(
-                    (pos) => (
-                      <button
-                        key={pos}
-                        className={`${styles.positionButton} ${
-                          config.webcamPosition === pos ? styles.active : ''
-                        }`}
-                        onClick={() => setConfig({ webcamPosition: pos })}
-                        disabled={isRecordingActive}
-                      >
-                        {pos.replace('-', ' ')}
-                      </button>
-                    )
-                  )}
-                </div>
-
-                <div className={styles.sizeSlider}>
-                  <label htmlFor="webcam-size-slider" className={styles.meterLabel}>Size</label>
-                  <input
-                    id="webcam-size-slider"
-                    type="range"
-                    className={styles.slider}
-                    min="0.1"
-                    max="0.4"
-                    step="0.05"
-                    value={config.webcamSize}
-                    onChange={(e) => setConfig({ webcamSize: parseFloat(e.target.value) })}
-                    disabled={isRecordingActive}
-                    aria-label="Webcam overlay size"
-                  />
-                </div>
-
-                <div className={styles.shapeToggle}>
-                  {(['circle', 'rectangle'] as WebcamShape[]).map((shape) => (
-                    <button
-                      key={shape}
-                      className={`${styles.shapeButton} ${
-                        config.webcamShape === shape ? styles.active : ''
-                      }`}
-                      onClick={() => setConfig({ webcamShape: shape })}
-                      disabled={isRecordingActive}
-                    >
-                      {shape}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </section>
+            <WebcamOverlaySettings
+              config={config}
+              disabled={isRecordingActive}
+              onChange={setConfig}
+            />
           )}
 
           {/* Recordings list */}
-          <section className={styles.sidebarSection} style={{ flex: 1, overflow: 'hidden' }}>
-            <h2 className={styles.sidebarTitle}>Recordings</h2>
-            <div className={styles.recordingsList}>
-              {recordings.length === 0 ? (
-                <div className={styles.emptyState}>
-                  <RecordIcon className={styles.emptyIcon} />
-                  <p>No recordings yet</p>
-                </div>
-              ) : (
-                recordings.map((recording) => (
-                  <div key={recording.id} className={styles.recordingItem}>
-                    {recording.thumbnailUrl ? (
-                      <img
-                        src={recording.thumbnailUrl}
-                        alt=""
-                        className={styles.recordingThumbnail}
-                      />
-                    ) : (
-                      <div className={styles.recordingThumbnail} />
-                    )}
-                    <div className={styles.recordingInfo}>
-                      <div className={styles.recordingName}>{recording.name}</div>
-                      <div className={styles.recordingMeta}>
-                        {formatDuration(recording.duration)} •{' '}
-                        {(recording.size / 1024 / 1024).toFixed(1)} MB
-                      </div>
-                    </div>
-                    <div className={styles.recordingActions}>
-                      <button
-                        className={styles.iconButton}
-                        onClick={() => handlePlayRecording(recording.id, recording.name)}
-                        title="Play"
-                        aria-label={`Play ${recording.name}`}
-                      >
-                        <PlayIcon />
-                      </button>
-                      <div className={styles.downloadDropdown}>
-                        <button
-                          className={styles.iconButton}
-                          onClick={() => handleDownload(recording.id, recording.name)}
-                          title="Download WebM"
-                          aria-label={`Download ${recording.name}`}
-                        >
-                          <DownloadIcon />
-                        </button>
-                      </div>
-                      <button
-                        className={styles.iconButton}
-                        onClick={() => handleSendToEditor(recording.id)}
-                        title="Open in Editor"
-                        aria-label={`Open ${recording.name} in Editor`}
-                      >
-                        <EditIcon />
-                      </button>
-                      <button
-                        className={styles.iconButton}
-                        onClick={() => handleDeleteRecording(recording.id)}
-                        title="Delete"
-                        aria-label={`Delete ${recording.name}`}
-                      >
-                        <TrashIcon />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
+          <RecordingsList
+            recordings={recordings}
+            onPlay={handlePlayRecording}
+            onDownload={handleDownload}
+            onSendToEditor={handleSendToEditor}
+            onDelete={handleDeleteRecording}
+          />
         </aside>
 
         {/* Content area */}
         <div className={styles.content}>
           {/* Preview */}
-          <div className={styles.previewContainer}>
-            <div className={styles.preview}>
-              {isPiPActive ? (
-                // PiP mode: show compositor canvas directly — avoids encode/decode round-trip
-                <div
-                  ref={canvasPreviewRef}
-                  style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                />
-              ) : previewStream ? (
-                <video
-                  ref={previewRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                />
-              ) : (
-                <div className={styles.previewPlaceholder}>
-                  <ScreenIcon className={styles.previewIcon} />
-                  <p>Click record to start capturing</p>
-                </div>
-              )}
+          <RecordingPreview
+            isPiPActive={isPiPActive}
+            previewStream={previewStream}
+            state={state}
+            countdownValue={countdownValue}
+            previewRef={previewRef}
+            canvasPreviewRef={canvasPreviewRef}
+          />
 
-              {/* Countdown overlay */}
-              {state === 'countdown' && countdownValue > 0 && (
-                <div className={styles.countdown}>
-                  <span className={styles.countdownNumber}>{countdownValue}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Controls bar */}
-          <div className={styles.controlsBar}>
-            {/* Pause/Resume button */}
-            {(state === 'recording' || state === 'paused') && (
-              <button
-                className={styles.controlButton}
-                onClick={state === 'recording' ? handlePauseRecording : handleResumeRecording}
-                title={state === 'recording' ? 'Pause (P)' : 'Resume (P)'}
-                aria-label={state === 'recording' ? 'Pause recording' : 'Resume recording'}
-              >
-                {state === 'recording' ? <PauseIcon /> : <PlayIcon />}
-              </button>
-            )}
-
-            {/* Timer */}
-            <span className={`${styles.timer} ${isRecordingActive ? styles.recording : ''}`}>
-              {formatDuration(currentDuration)}
-            </span>
-
-            {/* Main record button */}
-            <button
-              className={`${styles.recordButton} ${isRecordingActive ? styles.recording : ''}`}
-              onClick={
-                state === 'idle'
-                  ? handleStartRecording
-                  : isRecordingActive
-                  ? handleStopRecording
-                  : undefined
-              }
-              disabled={state === 'preparing' || state === 'saving'}
-              title={state === 'idle' ? 'Record (R)' : 'Stop (S)'}
-              aria-label={state === 'idle' ? 'Start recording' : 'Stop recording'}
-            >
-              <span className={styles.recordButtonInner} aria-hidden="true" />
-            </button>
-
-            {/* Cancel button */}
-            {isRecordingActive && (
-              <button
-                className={styles.controlButton}
-                onClick={state === 'countdown' ? cancelCountdown : handleCancelRecording}
-                title="Cancel (Esc)"
-                aria-label="Cancel recording"
-              >
-                <CloseIcon />
-              </button>
-            )}
-          </div>
-
-          {/* Keyboard shortcuts hint */}
-          <div className={styles.shortcutsHint}>
-            <span className={styles.shortcut}>
-              <kbd className={styles.shortcutKey}>R</kbd> Record
-            </span>
-            <span className={styles.shortcut}>
-              <kbd className={styles.shortcutKey}>P</kbd> Pause
-            </span>
-            <span className={styles.shortcut}>
-              <kbd className={styles.shortcutKey}>S</kbd> Stop
-            </span>
-            <span className={styles.shortcut}>
-              <kbd className={styles.shortcutKey}>Esc</kbd> Cancel
-            </span>
-          </div>
+          {/* Controls bar and keyboard shortcuts hint */}
+          <RecorderControls
+            state={state}
+            isRecordingActive={isRecordingActive}
+            currentDuration={currentDuration}
+            onPause={handlePauseRecording}
+            onResume={handleResumeRecording}
+            onStart={handleStartRecording}
+            onStop={handleStopRecording}
+            onCancel={state === 'countdown' ? cancelCountdown : handleCancelRecording}
+          />
         </div>
       </main>
 
       {/* Playback Modal */}
       {playbackUrl && (
-        <div className={styles.playbackModal} onClick={handleClosePlayback} role="dialog" aria-modal="true" aria-labelledby="playback-title">
-          <div className={styles.playbackContent} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.playbackHeader}>
-              <span id="playback-title" className={styles.playbackTitle}>{playbackName}</span>
-              <button
-                className={styles.playbackClose}
-                onClick={handleClosePlayback}
-                title="Close (Esc)"
-                aria-label="Close playback"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <VideoPlayer
-              src={playbackUrl}
-              title={playbackName}
-              autoPlay
-              knownDuration={playbackDuration}
-              onClose={handleClosePlayback}
-              onError={(error) => console.error('Video playback error:', error)}
-            />
-          </div>
-        </div>
+        <PlaybackDialog
+          url={playbackUrl}
+          name={playbackName}
+          duration={playbackDuration}
+          onClose={handleClosePlayback}
+        />
       )}
 
       {/* Help Modal */}
-      {showHelpModal && (
-        <div className={styles.helpModal} onClick={() => setShowHelpModal(false)} role="dialog" aria-modal="true" aria-labelledby="help-title">
-          <div className={styles.helpContent} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.helpHeader}>
-              <h2 id="help-title" className={styles.helpTitle}>Recording Tips</h2>
-              <button
-                className={styles.helpClose}
-                onClick={() => setShowHelpModal(false)}
-                title="Close"
-                aria-label="Close help"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className={styles.helpBody}>
-              <section className={styles.helpSection}>
-                <h3>Choosing What to Record</h3>
-                <p>When you start recording, your browser will ask what you want to capture:</p>
-                <ul>
-                  <li>
-                    <strong>Entire Screen</strong> (Recommended) - Captures everything on your monitor.
-                    Best for tutorials and demos where you switch between apps.
-                  </li>
-                  <li>
-                    <strong>Window</strong> - Captures a specific application window.
-                    Note: For browser windows, only the active tab is visible.
-                  </li>
-                  <li>
-                    <strong>Browser Tab</strong> - Captures a single browser tab.
-                    Good for recording web content without distractions.
-                  </li>
-                </ul>
-              </section>
-
-              <section className={styles.helpSection}>
-                <h3>Best Practices</h3>
-                <ul>
-                  <li>
-                    <strong>Use "Entire Screen" for multi-app recordings</strong> - This ensures
-                    everything you do is captured, regardless of which window is focused.
-                  </li>
-                  <li>
-                    <strong>Keep ESCAPECRAFT in a separate window</strong> - If using window capture,
-                    run ESCAPECRAFT in its own browser window so it doesn't appear in your recording.
-                  </li>
-                  <li>
-                    <strong>Check "Share system audio"</strong> - Enable this in the capture dialog
-                    to record sounds from videos, games, and other applications.
-                  </li>
-                  <li>
-                    <strong>Use keyboard shortcuts</strong> - Press <kbd>R</kbd> to start,
-                    <kbd>P</kbd> to pause, <kbd>S</kbd> to stop, and <kbd>Esc</kbd> to cancel.
-                  </li>
-                </ul>
-              </section>
-
-              <section className={styles.helpSection}>
-                <h3>Recording Modes</h3>
-                <ul>
-                  <li><strong>Screen Only</strong> - Just your screen, no audio</li>
-                  <li><strong>Screen + Mic</strong> - Screen with your voice narration</li>
-                  <li><strong>Screen + System Audio</strong> - Screen with app sounds</li>
-                  <li><strong>Screen + Both</strong> - Screen with mic and system audio</li>
-                  <li><strong>Webcam Only</strong> - Just your camera with microphone</li>
-                  <li><strong>Picture-in-Picture</strong> - Screen with webcam overlay</li>
-                </ul>
-              </section>
-
-              <section className={styles.helpSection}>
-                <h3>Download Formats</h3>
-                <ul>
-                  <li>
-                    <strong>WebM</strong> - Native browser format. Instant download, works great
-                    in Chrome, Firefox, and most video editors.
-                  </li>
-                  <li>
-                    <strong>MP4</strong> - Universal format. Takes a moment to convert but plays
-                    everywhere including Windows Media Player and QuickTime.
-                  </li>
-                </ul>
-              </section>
-            </div>
-          </div>
-        </div>
-      )}
+      {showHelpModal && <HelpDialog onClose={() => setShowHelpModal(false)} />}
     </div>
-  );
-}
-
-// Icons
-function ScreenIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <line x1="8" y1="21" x2="16" y2="21" />
-      <line x1="12" y1="17" x2="12" y2="21" />
-    </svg>
-  );
-}
-
-function WebcamIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M23 7l-7 5 7 5V7z" />
-      <rect x="1" y="5" width="15" height="14" rx="2" />
-    </svg>
-  );
-}
-
-function MicIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" y1="19" x2="12" y2="23" />
-      <line x1="8" y1="23" x2="16" y2="23" />
-    </svg>
-  );
-}
-
-function SpeakerIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    </svg>
-  );
-}
-
-function UnavailableIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-    </svg>
-  );
-}
-
-function RecordIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <circle cx="12" cy="12" r="10" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="6" y="4" width="4" height="16" rx="1" />
-      <rect x="14" y="4" width="4" height="16" rx="1" />
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <polygon points="5 3 19 12 5 21 5 3" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  );
-}
-
-function EditIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </svg>
-  );
-}
-
-function DownloadIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
-    </svg>
   );
 }
 
