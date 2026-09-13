@@ -281,6 +281,52 @@ component.
 | `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips |
 | `useTimelineSeek.ts` | The two click-to-seek handlers — the ruler's, and the track area's with every reason it stands down (a drag, a scrub, the click that ended a marquee, a click on the playhead) and the deselection it does when the click really was on bare track |
 
+### ClipEditor (`src/components/ClipEditor/`)
+`ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
+early return, and the JSX that hands each section the handful of props it needs. It holds no
+state, subscribes to nothing directly and computes nothing; every store read and every store
+write in the panel lives in the hook, and every control lives in one of the section
+components. The guards that show and hide the sections (`!isAudio`, `!isOverlay`,
+`isTextOverlay && selectedClip.textData`, …) stay in `ClipEditor.tsx` at the positions they
+have always had — see the note on `CollapsibleSection` below for why moving one is a
+behaviour change rather than a tidy-up. Every module here has its own test file, and
+`ClipEditor.tsx` itself is covered through `ClipEditor.test.tsx` and
+`ClipEditor.overlay.test.tsx`, which drive the rendered panel.
+
+| Module | Owns |
+|--------|------|
+| `ClipEditor.tsx` | The composition: the hook call, the empty-state early return, and the per-section guards in their fixed order. Owns `div.container` itself in both the empty and selected states, so that element's identity is stable across the empty↔selected transition |
+| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`/`timeInClip`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays |
+| `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React — written to be shared with `OverlayEditor` later |
+| `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
+| `clipEditorOptions.ts` | The four `{ value, label }` option lists the dropdowns render — transitions, blend modes, animation presets, easings |
+| `CollapsibleSection.tsx` | One titled, collapsible block: its own open/closed flag, seeded from `defaultOpen` at mount and never re-read |
+| `ClipEditorEmptyState.tsx` | The panel's contents when nothing is selected: the prompt plus the five buttons that create an overlay from nothing. `ClipEditor.tsx` supplies the surrounding `div.container` |
+| `ClipEditorHeader.tsx` | The title block — clip type, name, delete button, and the duration/position/track rows underneath |
+| `TextContentSection.tsx` | "Text Content": the text, its font family and size, bold/italic/alignment, and the two colours. The textarea grows by writing `style.height` on the element, so no measured height lives in React state |
+| `ShapeSection.tsx` | "Shape": the shape type, then either the blur region's amount slider or the fill/stroke controls, plus size, rotation and blur. "No fill" is an alpha of `00` on the fill colour, not a separate flag |
+| `TransformSection.tsx` | "Transform": position, then — media clips only — scale with its aspect-ratio lock, Fit to Canvas and Reset, and opacity last |
+| `BlendModeSection.tsx` | "Blend Mode": one dropdown over `BLEND_MODES`, collapsed by default |
+| `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
+| `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
+| `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
+| `ActionsSection.tsx` | "Actions": go to, duplicate, and — video and audio only — split, which stays visible but disabled when the playhead is outside the clip or on its first frame |
+| `KeyframeEditor.tsx` | **Nothing live.** It is imported by nothing but its own `KeyframeEditor.test.tsx`; the keyframe editor the app actually renders is `src/components/KeyframePanel/`. Left in place deliberately during the decomposition — deleting it is a separate dead-code decision, not a refactor |
+
+Two things in here will surprise the next reader, and both are preserved on purpose.
+**`CollapsibleSection` owns nothing but its own open/closed flag, which it seeds from
+`defaultOpen` at mount and never re-reads** — so whether a section is open survives a
+re-render, and which section a given `{condition && <CollapsibleSection/>}` slot maps to is
+decided positionally by React. That is why the conditions that show and hide these sections
+stay where they are in `ClipEditor`, in the order they are in: moving one would hand its
+open/closed state to a different section. **And Transform has two Reset buttons that mean
+different things.** The one in the section header resets position, scale and opacity *and* an
+overlay's own coordinates, but leaves rotation alone (`handleResetTransform`); the one beside
+Fit to Canvas spreads `DEFAULT_TRANSFORM` wholesale — rotation and `scaleLocked` included —
+and only exists when the clip has a source video (`handleResetToDefaults`). The only thing
+that tells them apart in the DOM is that the second carries a `title`, which is how
+`ClipEditor.test.tsx` distinguishes them.
+
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`
 - Custom events in `src/utils/analytics.ts`:
