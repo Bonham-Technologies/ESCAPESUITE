@@ -295,7 +295,7 @@ functions). `pnpm test:coverage` (`turbo test:coverage`) runs `vitest run --cove
 in every package and fails the whole run if any package drops below its floor.
 
 **Where it stands** — measured 2026-09-10, at the end of the coverage program
-(`@escapesuite/craft` re-measured 2026-09-12, `@escapesuite/artist` 2026-09-13). Each
+(`@escapesuite/craft` re-measured 2026-09-12, `@escapesuite/artist` 2026-09-12). Each
 package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
