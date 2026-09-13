@@ -46,7 +46,7 @@ import { useEditorStore } from '../../store/projectStore'
 // itself imports from: a pass-through spy only counts calls that go through the
 // binding the caller actually holds, so if the helper is ever moved to its own
 // module this import has to follow the *import site*, not the definition.
-import * as projectStore from '../../store/projectStore'
+import * as timelineSnapping from '../../store/timelineSnapping'
 import * as timelineGeometry from './timelineGeometry'
 import * as timelineRulerModule from './TimelineRuler'
 import * as timelineTrackModule from './TimelineTrack'
@@ -161,7 +161,7 @@ beforeEach(() => {
   removeListener = vi.spyOn(document, 'removeEventListener')
   // Pass-through: no mockImplementation, so the real snap points are still
   // computed and the drag behaves exactly as it does in production.
-  getSnapPoints = vi.spyOn(projectStore, 'getSnapPoints')
+  getSnapPoints = vi.spyOn(timelineSnapping, 'getSnapPoints')
 
   rectCalls = { container: 0, rows: 0 }
   buildTrackArea()
