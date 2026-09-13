@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.9
+
+### Patch Changes
+
+- 2b7f5db: Internal: the recorder screen is split into focused modules; no behaviour change.
+
 ## 2.2.5
 
 ### Patch Changes
