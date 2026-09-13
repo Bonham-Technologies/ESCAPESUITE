@@ -37,6 +37,17 @@ export const PLAYBACK_SECONDS = 6
 export const PLAYBACK_WARMUP_SECONDS = 1
 
 /**
+ * Pointer moves inside one measured gesture window.
+ *
+ * Sixty is a second of a 60 Hz pointer, which is what a real drag across the
+ * timeline costs, and it is enough that the per-move averages (`layoutsPerFrame`,
+ * `jsMsPerFrame`) are not dominated by the one-off cost of starting the gesture.
+ * The move that starts it is driven separately and discarded — see
+ * {@link measureGesture}.
+ */
+export const GESTURE_MOVES = 60
+
+/**
  * Chromium flags every perf run launches with. Recorded here (and in the
  * baseline doc) because the numbers are only comparable between runs that
  * used the same ones.
@@ -241,6 +252,7 @@ interface PerfCounters {
   longTasks: { start: number; duration: number }[]
   encodeCount: number
   encodeQueueHighWater: number
+  mouseMoves: number
 }
 
 declare global {
@@ -263,6 +275,15 @@ declare global {
  * — the high-water mark is what the exporter's backpressure loop reacts to.
  * The MP4 path decodes in a worker but encodes on the main thread, so this
  * patch sees every encoded frame of both formats.
+ *
+ * `mouseMoves` counts the pointer moves the page actually received, which is
+ * the denominator every per-frame figure a gesture benchmark reports is divided
+ * by. Counted rather than assumed: `measureGesture` drives exactly
+ * {@link GESTURE_MOVES} moves, but only the page can say how many `mousemove`
+ * events that turned into, and a per-move average taken against a number nobody
+ * checked would be quietly wrong if that ever stopped being one-for-one. The
+ * listener is passive and on the capture phase, so it neither blocks nor
+ * perturbs the app's own handlers.
  */
 export async function installPerfInstrumentation(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -271,6 +292,7 @@ export async function installPerfInstrumentation(page: Page): Promise<void> {
       longTasks: [],
       encodeCount: 0,
       encodeQueueHighWater: 0,
+      mouseMoves: 0,
     }
     window.__perf = counters
     window.__perfReset = () => {
@@ -278,7 +300,16 @@ export async function installPerfInstrumentation(page: Page): Promise<void> {
       counters.longTasks.length = 0
       counters.encodeCount = 0
       counters.encodeQueueHighWater = 0
+      counters.mouseMoves = 0
     }
+
+    window.addEventListener(
+      'mousemove',
+      () => {
+        counters.mouseMoves++
+      },
+      { capture: true, passive: true }
+    )
 
     const nativeRaf = window.requestAnimationFrame.bind(window)
     window.requestAnimationFrame = (callback: FrameRequestCallback) =>
@@ -616,7 +647,7 @@ export async function loadPerfScene(
    * blurred overlay, say — rather than a second scene that could drift from it.
    */
   transform?: (project: SceneProject) => SceneProject
-): Promise<void> {
+): Promise<string> {
   await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
   await page.waitForLoadState('networkidle')
 
@@ -648,16 +679,7 @@ export async function loadPerfScene(
       })
   )
 
-  const built = buildPerfScene(sourceVideoId)
-  const project = transform ? transform(built) : built
-  await page.evaluate(
-    (payload) => window.postMessage({ type: 'LOAD_PROJECT', payload }, '*'),
-    project as unknown as Record<string, unknown>
-  )
-
-  await page
-    .getByText(`${SCENE_CLIP_COUNT} clips · ${SCENE_TRACK_COUNT} tracks`)
-    .waitFor({ timeout: 15_000 })
+  await postPerfScene(page, sourceVideoId, transform)
 
   // The preview cannot composite a frame until its media has decoded one, and
   // starting the clock before then turns decode latency into a low frame count.
@@ -706,6 +728,37 @@ export async function loadPerfScene(
     undefined,
     { timeout: 30_000 }
   )
+
+  return sourceVideoId
+}
+
+/**
+ * Install the generated scene over whatever the editor currently holds.
+ *
+ * Split out of {@link loadPerfScene} so a benchmark that *edits* the timeline
+ * can put it back between runs without paying for a reload and a re-import: the
+ * fixture is already in IndexedDB and the store already knows its id, so one
+ * `LOAD_PROJECT` restores every clip to its original track and position.
+ *
+ * `setProject` is a project-level replacement and does not touch the selection
+ * or the playhead, so a caller that changed either has to reset those itself
+ * (`timeline-interaction.spec.ts` does, through the app's own click handlers).
+ */
+export async function postPerfScene(
+  page: Page,
+  sourceVideoId: string,
+  transform?: (project: SceneProject) => SceneProject
+): Promise<void> {
+  const built = buildPerfScene(sourceVideoId)
+  const project = transform ? transform(built) : built
+  await page.evaluate(
+    (payload) => window.postMessage({ type: 'LOAD_PROJECT', payload }, '*'),
+    project as unknown as Record<string, unknown>
+  )
+
+  await page
+    .getByText(`${SCENE_CLIP_COUNT} clips · ${SCENE_TRACK_COUNT} tracks`)
+    .waitFor({ timeout: 15_000 })
 }
 
 // ---------------------------------------------------------------------------
@@ -885,5 +938,153 @@ export async function measureExport(
     heapDeltaBytes: heapEnd - heapStart,
     encoderQueueHighWater: counters.encoderQueueHighWater,
     bytes,
+  }
+}
+
+export interface GestureMeasurement {
+  /** `mousemove` events the page received inside the window. */
+  moveEvents: number
+  /** Wall time of the measured window, Playwright's own round trips included. */
+  wallMs: number
+  /** Renderer task time inside the window. */
+  taskDurationMs: number
+  /** Renderer task time per pointer move — what one drag frame costs the main thread. */
+  jsMsPerFrame: number
+  /** Forced layouts inside the window. */
+  layoutCount: number
+  /** Forced layouts per pointer move. The headline: it is what a slow machine feels. */
+  layoutsPerFrame: number
+  /** Style recalculations inside the window. */
+  recalcStyleCount: number
+  /** Style recalculations per pointer move. */
+  recalcsPerFrame: number
+  longTaskCount: number
+  longTaskTotalMs: number
+  heapDeltaBytes: number
+}
+
+/** One timeline gesture, as the benchmark drives and checks it. */
+export interface GestureSpec {
+  /** Name, used in the failure messages and the report. */
+  name: string
+  /** Viewport point the pointer presses at. */
+  origin: { x: number; y: number }
+  /**
+   * Where move `i` goes, `i` running 0..{@link GESTURE_MOVES}. Move 0 is driven
+   * but not measured (see {@link measureGesture}), so the measured path is
+   * 1..GESTURE_MOVES.
+   */
+  point: (i: number) => { x: number; y: number }
+  /**
+   * What the gesture is supposed to change, sampled *in the page*.
+   *
+   * Read once before the press and once after the release; the measurement
+   * throws if the two agree. A benchmark whose gesture silently did nothing —
+   * a drag the store vetoed for an overlap, a marquee that selected no clip, a
+   * scrub that missed the playhead — would otherwise report a perfectly
+   * respectable cost for doing nothing at all, which is worse than a red test.
+   * The same reasoning as `measurePlayback`'s still-playing tripwire.
+   */
+  probe: () => string
+}
+
+/**
+ * Drive one timeline gesture and measure what it cost.
+ *
+ * With a `profileName`, the moves are recorded as
+ * `perf-results/<profileName>.cpuprofile` (see {@link withCpuProfile}); the
+ * measurement it returns is then profiler-skewed and should be discarded.
+ *
+ * The window is the moves alone. The press, and the first move after it, are
+ * driven outside it: mousedown is where a gesture pays its one-off costs — the
+ * React commit that installs the drag state, the effect that binds the document
+ * listeners, the first measurement of the container — and charging those to a
+ * per-move average would flatter every later move. What is left inside the
+ * window is the steady state, which is the thing a fix has to move.
+ *
+ * Moves are `page.mouse.move` rather than a `dragTo`: Playwright's default of
+ * one step per call means one `mousemove` per call, so the frame count is the
+ * benchmark's own and not an artefact of how a helper chose to interpolate.
+ * `moveEvents` reports what the page actually received rather than what was
+ * asked for (see {@link installPerfInstrumentation}).
+ *
+ * Wall time includes Playwright's CDP round trip per move and is reported for
+ * completeness, not as the headline — `jsMsPerFrame` and `layoutsPerFrame` come
+ * from the renderer's own counters and do not.
+ */
+export async function measureGesture(
+  page: Page,
+  cdp: CDPSession,
+  gesture: GestureSpec,
+  profileName?: string
+): Promise<GestureMeasurement> {
+  const before = await page.evaluate(gesture.probe)
+
+  await page.mouse.move(gesture.origin.x, gesture.origin.y)
+  await page.mouse.down()
+  const startUp = gesture.point(0)
+  await page.mouse.move(startUp.x, startUp.y)
+
+  await page.evaluate(() => window.__perfReset())
+  const heapStart = await readHeapAfterGc(page, cdp)
+  const cdpStart = await readCdpMetrics(cdp)
+  const start = await page.evaluate(() => performance.now())
+
+  await withCpuProfile(page, cdp, profileName, async () => {
+    for (let i = 1; i <= GESTURE_MOVES; i++) {
+      const { x, y } = gesture.point(i)
+      await page.mouse.move(x, y)
+    }
+  })
+
+  const cdpEnd = await readCdpMetrics(cdp)
+  const end = await page.evaluate((windowStart: number) => {
+    // Long tasks are attributed to the window by their START time, exactly as
+    // `measurePlayback` does — see the comment there for why a task straddling
+    // a boundary is counted whole on one side rather than split across both.
+    const inWindow = window.__perf.longTasks.filter((task) => task.start >= windowStart)
+    return {
+      now: performance.now(),
+      moveEvents: window.__perf.mouseMoves,
+      longTaskCount: inWindow.length,
+      longTaskTotalMs: inWindow.reduce((total, task) => total + task.duration, 0),
+    }
+  }, start)
+
+  await page.mouse.up()
+  const heapEnd = await readHeapAfterGc(page, cdp)
+
+  // The gesture has to have done something. Checked after the release rather
+  // than after the last move, because the clip drag only commits on mouseup.
+  const after = await page.evaluate(gesture.probe)
+  expect(
+    after,
+    `the ${gesture.name} gesture changed nothing — the benchmark measured a no-op`
+  ).not.toBe(before)
+
+  // A per-move average is only meaningful if the moves arrived. Zero would make
+  // every figure below a division by zero; a surprise count would make them
+  // wrong without saying so.
+  expect(
+    end.moveEvents,
+    `the ${gesture.name} gesture drove ${GESTURE_MOVES} moves but the page saw ${end.moveEvents}`
+  ).toBe(GESTURE_MOVES)
+
+  const layoutCount = cdpEnd.LayoutCount - cdpStart.LayoutCount
+  const recalcStyleCount = cdpEnd.RecalcStyleCount - cdpStart.RecalcStyleCount
+  const taskDurationMs = (cdpEnd.TaskDuration - cdpStart.TaskDuration) * 1000
+
+  return {
+    moveEvents: end.moveEvents,
+    wallMs: round(end.now - start),
+    taskDurationMs: round(taskDurationMs),
+    jsMsPerFrame: round(taskDurationMs / end.moveEvents, 3),
+    layoutCount,
+    layoutsPerFrame: round(layoutCount / end.moveEvents),
+    recalcStyleCount,
+    recalcsPerFrame: round(recalcStyleCount / end.moveEvents),
+    longTaskCount: end.longTaskCount,
+    longTaskTotalMs: round(end.longTaskTotalMs),
+    heapDeltaBytes: heapEnd - heapStart,
   }
 }

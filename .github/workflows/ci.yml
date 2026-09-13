@@ -570,8 +570,9 @@ jobs:
   # Performance benchmarks — informational, never a gate.
   #
   # `pnpm perf` runs the Chromium benchmarks in apps/e2e/tests/perf (preview
-  # playback and 720p MP4/WebM export of a generated 12-clip scene), then the
-  # headless kit's render benchmark, then merges the three into perf-report.json
+  # playback, a clip drag / marquee / playhead scrub over the timeline, and
+  # 720p MP4/WebM export — all of one generated 12-clip scene), then the
+  # headless kit's render benchmark, then merges the four into perf-report.json
   # and the job summary.
   #
   # `continue-on-error: true` and deliberately absent from ci-status's `needs`:

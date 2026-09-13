@@ -39,7 +39,36 @@ const KIT_RESULT = path.join(REPO_ROOT, 'services/headless-artist/perf-report.js
 const OUTPUT = path.join(REPO_ROOT, 'perf-report.json')
 
 /** Order benchmarks appear in, whichever of them ran. */
-const ORDER = ['preview-playback', 'export-mp4', 'export-webm', 'headless-kit-render']
+const ORDER = [
+  'preview-playback',
+  'timeline-interaction',
+  'export-mp4',
+  'export-webm',
+  'headless-kit-render',
+]
+
+/**
+ * `timeline-interaction` reports one set of numbers per gesture, keyed
+ * `<gesture><Metric>` — it measures three gestures in one benchmark rather than
+ * running three benchmarks over three page loads of the same scene. Built here
+ * rather than written out so the eleven metrics stay in one order across all
+ * three gestures, and so adding a gesture is one line.
+ */
+function gestureMetrics(gesture, label) {
+  return {
+    [`${gesture}MoveEvents`]: { label: `${label}: pointer moves` },
+    [`${gesture}WallMs`]: { label: `${label}: wall time`, unit: 'ms' },
+    [`${gesture}TaskDurationMs`]: { label: `${label}: renderer task duration`, unit: 'ms' },
+    [`${gesture}JsMsPerFrame`]: { label: `${label}: renderer task per move`, unit: 'ms' },
+    [`${gesture}LayoutCount`]: { label: `${label}: layouts` },
+    [`${gesture}LayoutsPerFrame`]: { label: `${label}: layouts per move` },
+    [`${gesture}RecalcStyleCount`]: { label: `${label}: style recalcs` },
+    [`${gesture}RecalcsPerFrame`]: { label: `${label}: style recalcs per move` },
+    [`${gesture}LongTaskCount`]: { label: `${label}: long tasks` },
+    [`${gesture}LongTaskTotalMs`]: { label: `${label}: long-task total`, unit: 'ms' },
+    [`${gesture}HeapDeltaBytes`]: { label: `${label}: heap delta`, bytes: true },
+  }
+}
 
 /** Metric key → how the table labels and formats it. */
 const METRICS = {
@@ -47,6 +76,7 @@ const METRICS = {
   format: { label: 'Format' },
   resolution: { label: 'Resolution' },
   windowSeconds: { label: 'Measured window', unit: 's' },
+  moves: { label: 'Pointer moves per gesture' },
   renderedFps: { label: 'Rendered fps' },
   longTaskCount: { label: 'Long tasks' },
   longTaskTotalMs: { label: 'Long-task total', unit: 'ms' },
@@ -59,6 +89,9 @@ const METRICS = {
   encoderQueueHighWater: { label: 'Encoder queue high-water' },
   heapDeltaBytes: { label: 'Heap delta', bytes: true },
   outputBytes: { label: 'Output size', bytes: true },
+  ...gestureMetrics('clipDrag', 'Clip drag'),
+  ...gestureMetrics('marquee', 'Marquee'),
+  ...gestureMetrics('playheadScrub', 'Playhead scrub'),
 }
 
 function warn(message) {
@@ -108,12 +141,22 @@ function collect() {
 /** `.cpuprofile` basename → how the report heads its section. */
 const PROFILE_LABELS = {
   preview: 'Preview playback',
+  'timeline-clipDrag': 'Timeline clip drag',
+  'timeline-marquee': 'Timeline marquee',
+  'timeline-playheadScrub': 'Timeline playhead scrub',
   'export-mp4': 'MP4 export',
   'export-webm': 'WebM export',
 }
 
 /** Order profile sections appear in, whichever of them exist. */
-const PROFILE_ORDER = ['preview', 'export-mp4', 'export-webm']
+const PROFILE_ORDER = [
+  'preview',
+  'timeline-clipDrag',
+  'timeline-marquee',
+  'timeline-playheadScrub',
+  'export-mp4',
+  'export-webm',
+]
 
 /**
  * Read whatever `.cpuprofile` files this run produced.
@@ -173,6 +216,15 @@ function headline(benchmark) {
   if (typeof benchmark.renderedFps === 'number') return `${benchmark.renderedFps} rendered fps`
   if (typeof benchmark.framesPerSecond === 'number') {
     return `${benchmark.framesPerSecond} frames/s (${benchmark.wallMs} ms)`
+  }
+  // A gesture benchmark has no single rate. Its headline is what one pointer
+  // frame of a clip drag costs — the layout count first, because that is the
+  // part that does not depend on the runner's CPU.
+  if (typeof benchmark.clipDragLayoutsPerFrame === 'number') {
+    return (
+      `clip drag: ${benchmark.clipDragLayoutsPerFrame} layouts/move, ` +
+      `${benchmark.clipDragJsMsPerFrame} ms/move`
+    )
   }
   return '—'
 }
