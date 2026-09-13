@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.8
+
+### Patch Changes
+
+- b5a4f5f: Split the clip inspector into focused modules — one component per section, the value maths as pure functions, and the store wiring in a hook — with no behaviour change.
+
 ## 2.2.7
 
 ### Patch Changes
