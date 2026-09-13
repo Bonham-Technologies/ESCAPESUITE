@@ -1,52 +1,15 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useEditorStore, selectSelectedClip } from '../../store/projectStore';
-import { formatTimecode } from '../../utils/timeUtils';
 import { DEFAULT_TRANSFORM } from '../../store/types';
-import type { BlendMode, TransitionType, TextAlign, ShapeType, TextOverlayData, ShapeOverlayData, AnimationPresetType, EasingType } from '../../store/types';
+import type { BlendMode, TransitionType, ShapeType, TextOverlayData, ShapeOverlayData, AnimationPresetType, EasingType } from '../../store/types';
 import { hasAnimation } from '../../utils/animation';
-import { hasVisibleFill } from '../../core/canvasRenderer';
 import { describeClip, relativeTimeInClip, overlayPositionValue, maxPresetDuration, fitToCanvasScale, keyframeCount } from './clipEditorModel';
-import { clampFontSize, withBackgroundAlpha, withFillRgb, toggleFill, fillAlphaPercent, withFillAlphaPercent } from './clipColorValues';
+import { CollapsibleSection } from './CollapsibleSection';
+import { ClipEditorEmptyState } from './ClipEditorEmptyState';
+import { ClipEditorHeader } from './ClipEditorHeader';
+import { TextContentSection } from './TextContentSection';
+import { ShapeSection } from './ShapeSection';
 import styles from './ClipEditor.module.css';
-
-// Collapsible section component
-interface CollapsibleSectionProps {
-  title: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-  badge?: React.ReactNode;
-  headerRight?: React.ReactNode;
-}
-
-function CollapsibleSection({ title, defaultOpen = true, children, badge, headerRight }: CollapsibleSectionProps) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
-
-  return (
-    <div className={`${styles.section} ${styles.collapsible}`}>
-      <div className={styles.collapsibleHeader}>
-        <button
-          className={styles.collapsibleToggle}
-          onClick={() => setIsOpen(!isOpen)}
-          type="button"
-        >
-          <svg
-            className={`${styles.collapseIcon} ${isOpen ? styles.open : ''}`}
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-          >
-            <path d="M8 5l8 7-8 7V5z" />
-          </svg>
-          <span className={styles.sectionTitle}>{title}</span>
-          {badge}
-        </button>
-        {headerRight && <div className={styles.headerRightContent}>{headerRight}</div>}
-      </div>
-      {isOpen && <div className={styles.collapsibleContent}>{children}</div>}
-    </div>
-  );
-}
 
 const TRANSITION_TYPES: { value: TransitionType; label: string }[] = [
   { value: 'none', label: 'None' },
@@ -339,338 +302,28 @@ export function ClipEditor() {
 
   // No clip selected - show add overlay options
   if (!selectedClip) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.empty}>
-          <p>Select a clip to edit</p>
-          <p className={styles.hint}>Or add an overlay:</p>
-        </div>
-
-        <div className={styles.addOverlaySection}>
-          <button className={styles.addOverlayButton} onClick={handleAddText}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 7V4h16v3" />
-              <path d="M12 4v16" />
-              <path d="M8 20h8" />
-            </svg>
-            Add Text
-          </button>
-          <button className={styles.addOverlayButton} onClick={() => handleAddShape('rectangle')}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-            </svg>
-            Rectangle
-          </button>
-          <button className={styles.addOverlayButton} onClick={() => handleAddShape('ellipse')}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <ellipse cx="12" cy="12" rx="9" ry="7" />
-            </svg>
-            Ellipse
-          </button>
-          <button className={styles.addOverlayButton} onClick={() => handleAddShape('arrow')}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="12 5 19 12 12 19" />
-            </svg>
-            Arrow
-          </button>
-          <button className={styles.addOverlayButton} onClick={() => handleAddShape('blur')}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="12" cy="12" r="3" strokeDasharray="2 1" />
-            </svg>
-            Blur
-          </button>
-        </div>
-      </div>
-    );
+    return <ClipEditorEmptyState onAddText={handleAddText} onAddShape={handleAddShape} />;
   }
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <div className={styles.headerInfo}>
-          <span className={styles.clipType}>{clipTypeLabel}</span>
-          <h3 className={styles.title}>{selectedClip.name}</h3>
-        </div>
-        <button
-          className={styles.deleteButton}
-          onClick={handleDeleteClip}
-          title="Delete clip"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-          </svg>
-        </button>
-      </div>
-
-      <div className={styles.info}>
-        <div className={styles.infoRow}>
-          <span className={styles.label}>Duration:</span>
-          <span className={styles.value}>{formatTimecode(selectedClip.duration)}</span>
-        </div>
-        <div className={styles.infoRow}>
-          <span className={styles.label}>Position:</span>
-          <span className={styles.value}>{formatTimecode(clipPosition)}</span>
-        </div>
-        {track && (
-          <div className={styles.infoRow}>
-            <span className={styles.label}>Track:</span>
-            <span className={styles.value}>{track.name}</span>
-          </div>
-        )}
-      </div>
+      <ClipEditorHeader
+        clipTypeLabel={clipTypeLabel}
+        name={selectedClip.name}
+        duration={selectedClip.duration}
+        position={clipPosition}
+        track={track}
+        onDelete={handleDeleteClip}
+      />
 
       {/* Text Overlay Content Section */}
       {isTextOverlay && selectedClip.textData && (
-        <CollapsibleSection title="Text Content">
-          <textarea
-            className={styles.textarea}
-            value={selectedClip.textData.text}
-            onChange={(e) => {
-              handleTextDataChange({ text: e.target.value });
-              // Auto-expand: reset height then set to scrollHeight
-              const el = e.target;
-              el.style.height = 'auto';
-              el.style.height = el.scrollHeight + 'px';
-            }}
-            onFocus={(e) => {
-              // Expand on focus in case content already exceeds 2 rows
-              const el = e.target;
-              el.style.height = 'auto';
-              el.style.height = el.scrollHeight + 'px';
-            }}
-            rows={2}
-            placeholder="Enter text..."
-          />
-
-          <div className={styles.row}>
-            <select
-              className={styles.select}
-              style={{ flex: '1 1 0', width: 'auto' }}
-              value={selectedClip.textData.fontFamily}
-              onChange={(e) => handleTextDataChange({ fontFamily: e.target.value })}
-            >
-              <option value="Arial">Arial</option>
-              <option value="Helvetica">Helvetica</option>
-              <option value="Times New Roman">Times</option>
-              <option value="Georgia">Georgia</option>
-              <option value="Verdana">Verdana</option>
-              <option value="Courier New">Courier</option>
-              <option value="Impact">Impact</option>
-            </select>
-            <input
-              type="number"
-              className={styles.numberInput}
-              value={selectedClip.textData.fontSize}
-              onChange={(e) => handleTextDataChange({ fontSize: clampFontSize(e.target.value) })}
-              min={8}
-              max={200}
-              title="Font size"
-            />
-          </div>
-
-          <div className={styles.row}>
-            <button
-              className={`${styles.styleButton} ${selectedClip.textData.fontWeight === 'bold' ? styles.active : ''}`}
-              onClick={() => handleTextDataChange({ fontWeight: selectedClip.textData!.fontWeight === 'bold' ? 'normal' : 'bold' })}
-            >
-              B
-            </button>
-            <button
-              className={`${styles.styleButton} ${selectedClip.textData.fontStyle === 'italic' ? styles.active : ''}`}
-              onClick={() => handleTextDataChange({ fontStyle: selectedClip.textData!.fontStyle === 'italic' ? 'normal' : 'italic' })}
-              style={{ fontStyle: 'italic' }}
-            >
-              I
-            </button>
-            <select
-              className={styles.select}
-              value={selectedClip.textData.textAlign}
-              onChange={(e) => handleTextDataChange({ textAlign: e.target.value as TextAlign })}
-            >
-              <option value="left">Left</option>
-              <option value="center">Center</option>
-              <option value="right">Right</option>
-            </select>
-          </div>
-
-          <div className={styles.row}>
-            <div className={styles.colorInput}>
-              <span>Text</span>
-              <input
-                type="color"
-                value={selectedClip.textData.color}
-                onChange={(e) => handleTextDataChange({ color: e.target.value })}
-              />
-            </div>
-            <div className={styles.colorInput}>
-              <span>BG</span>
-              <input
-                type="color"
-                value={selectedClip.textData.backgroundColor.substring(0, 7)}
-                onChange={(e) => handleTextDataChange({ backgroundColor: withBackgroundAlpha(e.target.value) })}
-              />
-            </div>
-          </div>
-        </CollapsibleSection>
+        <TextContentSection textData={selectedClip.textData} onChange={handleTextDataChange} />
       )}
 
       {/* Shape Overlay Content Section */}
       {isShapeOverlay && selectedClip.shapeData && (
-        <CollapsibleSection title="Shape">
-          <select
-            className={styles.select}
-            value={selectedClip.shapeData.type}
-            onChange={(e) => handleShapeDataChange({ type: e.target.value as ShapeType })}
-          >
-            <option value="rectangle">Rectangle</option>
-            <option value="ellipse">Ellipse</option>
-            <option value="line">Line</option>
-            <option value="arrow">Arrow</option>
-            <option value="blur">Blur Region</option>
-          </select>
-
-          {/* Blur type shows simplified controls */}
-          {selectedClip.shapeData.type === 'blur' ? (
-            <>
-              <div className={styles.transformRow}>
-                <label>Blur Amount</label>
-                <input
-                  type="range"
-                  min={1}
-                  max={50}
-                  step={1}
-                  value={selectedClip.shapeData.blurAmount ?? 10}
-                  onChange={(e) => handleShapeDataChange({ blurAmount: parseInt(e.target.value) })}
-                />
-                <span>{selectedClip.shapeData.blurAmount ?? 10}px</span>
-              </div>
-              <p className={styles.hint}>Blurs the video underneath this region</p>
-            </>
-          ) : (
-            <>
-              <div className={styles.row}>
-                <div className={styles.colorInput}>
-                  <span>Fill</span>
-                  <input
-                    type="color"
-                    value={selectedClip.shapeData.fillColor.substring(0, 7)}
-                    onChange={(e) => {
-                      // Preserve existing alpha when changing color
-                      const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
-                      handleShapeDataChange({ fillColor: withFillRgb(fillColor, e.target.value) });
-                    }}
-                    disabled={!hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff')}
-                  />
-                  <button
-                    className={`${styles.noFillButton} ${hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? '' : styles.active}`}
-                    onClick={() => {
-                      const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
-                      handleShapeDataChange({ fillColor: toggleFill(fillColor) });
-                    }}
-                    title={hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? 'No fill (transparent)' : 'Enable fill'}
-                  >
-                    {hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') ? '⊗' : '⊘'}
-                  </button>
-                </div>
-                <div className={styles.colorInput}>
-                  <span>Stroke</span>
-                  <input
-                    type="color"
-                    value={selectedClip.shapeData.strokeColor}
-                    onChange={(e) => handleShapeDataChange({ strokeColor: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              {hasVisibleFill(selectedClip.shapeData.fillColor || '#000000ff') && (
-                <div className={styles.transformRow}>
-                  <label>Fill opacity</label>
-                  <input
-                    type="range"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={fillAlphaPercent(selectedClip.shapeData?.fillColor || '#000000ff')}
-                    onChange={(e) => {
-                      const fillColor = selectedClip.shapeData?.fillColor || '#000000ff';
-                      handleShapeDataChange({ fillColor: withFillAlphaPercent(fillColor, parseInt(e.target.value)) });
-                    }}
-                  />
-                  <span>{fillAlphaPercent(selectedClip.shapeData?.fillColor || '#000000ff')}%</span>
-                </div>
-              )}
-
-              <div className={styles.transformRow}>
-                <label>Stroke</label>
-                <input
-                  type="range"
-                  min={0}
-                  max={20}
-                  step={1}
-                  value={selectedClip.shapeData.strokeWidth}
-                  onChange={(e) => handleShapeDataChange({ strokeWidth: parseInt(e.target.value) })}
-                />
-                <span>{selectedClip.shapeData.strokeWidth}px</span>
-              </div>
-            </>
-          )}
-
-          <div className={styles.transformRow}>
-            <label>Size W</label>
-            <input
-              type="range"
-              min={0.01}
-              max={1}
-              step={0.01}
-              value={selectedClip.shapeData.width}
-              onChange={(e) => handleShapeDataChange({ width: parseFloat(e.target.value) })}
-            />
-            <span>{Math.round(selectedClip.shapeData.width * 100)}%</span>
-          </div>
-
-          <div className={styles.transformRow}>
-            <label>Size H</label>
-            <input
-              type="range"
-              min={0.01}
-              max={1}
-              step={0.01}
-              value={selectedClip.shapeData.height}
-              onChange={(e) => handleShapeDataChange({ height: parseFloat(e.target.value) })}
-            />
-            <span>{Math.round(selectedClip.shapeData.height * 100)}%</span>
-          </div>
-
-          <div className={styles.transformRow}>
-            <label>Rotation</label>
-            <input
-              type="range"
-              min={0}
-              max={360}
-              step={1}
-              value={selectedClip.shapeData.rotation}
-              onChange={(e) => handleShapeDataChange({ rotation: parseInt(e.target.value) })}
-            />
-            <span>{selectedClip.shapeData.rotation}°</span>
-          </div>
-
-          <div className={styles.transformRow}>
-            <label>Blur</label>
-            <input
-              type="range"
-              min={0}
-              max={50}
-              step={1}
-              value={selectedClip.shapeData.blurAmount ?? 0}
-              onChange={(e) => handleShapeDataChange({ blurAmount: parseInt(e.target.value) })}
-            />
-            <span>{selectedClip.shapeData.blurAmount ?? 0}px</span>
-          </div>
-          <p className={styles.hint}>Blur the region underneath (set fill to transparent)</p>
-        </CollapsibleSection>
+        <ShapeSection shapeData={selectedClip.shapeData} onChange={handleShapeDataChange} />
       )}
 
 
