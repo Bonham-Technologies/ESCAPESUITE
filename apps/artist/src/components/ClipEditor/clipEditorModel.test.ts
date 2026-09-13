@@ -94,7 +94,7 @@ describe('relativeTimeInClip', () => {
     expect(relativeTimeInClip(12, 10, 5)).toBe(2);
   });
 
-  it('returns null exactly at the clip start boundary is inside (inclusive lower bound)', () => {
+  it('returns 0 exactly at the clip start (inclusive lower bound)', () => {
     expect(relativeTimeInClip(10, 10, 5)).toBe(0);
   });
 
