@@ -9,7 +9,7 @@ import { useRecordingController } from './hooks/useRecordingController';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRecordingLibrary } from './hooks/useRecordingLibrary';
 import { AppHeader } from './components/AppHeader/AppHeader';
-import { SourceToggles } from './components/SourceToggles/SourceToggles';
+import { SourceToggles, type RecordingSource } from './components/SourceToggles/SourceToggles';
 import { WebcamOverlaySettings } from './components/WebcamOverlaySettings/WebcamOverlaySettings';
 import { RecordingsList } from './components/RecordingsList/RecordingsList';
 import { RecordingPreview } from './components/RecordingPreview/RecordingPreview';
@@ -127,7 +127,7 @@ function App() {
   } = useRecordingLibrary({ recordings, removeRecording });
 
   // Toggle source
-  const toggleSource = (source: 'screen' | 'webcam' | 'microphone' | 'systemAudio') => {
+  const toggleSource = (source: RecordingSource) => {
     switch (source) {
       case 'screen':
         setConfig({ screenEnabled: !config.screenEnabled });
