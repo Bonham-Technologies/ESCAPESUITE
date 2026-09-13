@@ -138,6 +138,48 @@ describe('projectStore remaining behaviours', () => {
       expect(timeline.shapeOverlays).toEqual([])
     })
 
+    it('converts legacy overlay arrays into overlay clips and empties the arrays', () => {
+      const legacy = {
+        id: 'p',
+        name: 'Has legacy overlays',
+        created: 1,
+        modified: 1,
+        resolution: { width: 1920, height: 1080 },
+        timeline: {
+          tracks: [
+            { id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },
+          ],
+          clips: [],
+          textOverlays: [
+            {
+              id: 'text1', text: 'Legacy', x: 0.25, y: 0.5, fontFamily: 'Arial', fontSize: 48,
+              fontWeight: 'normal', fontStyle: 'normal', color: '#ffffff',
+              backgroundColor: '#00000000', textAlign: 'center', startTime: 1, endTime: 3, opacity: 0.5,
+            },
+          ],
+          shapeOverlays: [
+            {
+              id: 'shape1', type: 'rectangle', x: 0.5, y: 0.5, width: 0.2, height: 0.2,
+              fillColor: '#ff0000ff', strokeColor: '#ffffff', strokeWidth: 2,
+              startTime: 0, endTime: 2, opacity: 1, rotation: 0,
+            },
+          ],
+          duration: 0,
+        },
+      }
+
+      store().setProject(legacy as unknown as Project)
+
+      const timeline = store().project.timeline
+      expect(timeline.clips).toHaveLength(2)
+      expect(timeline.clips.map((c) => [c.id, c.overlayType])).toEqual([
+        ['legacy-shape-shape1', 'shape'],
+        ['legacy-text-text1', 'text'],
+      ])
+      expect(timeline.textOverlays).toEqual([])
+      expect(timeline.shapeOverlays).toEqual([])
+    })
+
     it('keeps positions that legacy clips already carried', () => {
       const legacy = {
         id: 'p',
