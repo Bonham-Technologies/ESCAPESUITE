@@ -131,14 +131,26 @@ exporters only iterate `timeline.clips`.
   index and then, on top of everything, all shapes followed by all text. So the conversion
   processes **shapes before texts** and puts them on tracks it creates *above every existing
   track* (`legacy-overlay-track-N`, named `Overlay`, `Overlay 2`, …), reusing one of its own
-  tracks only when the windows do not overlap. `findEmptyTrack` — what `addTextOverlayClip`
+  tracks only when the windows do not overlap — and the reuse pool is **per kind**, so every
+  text track is created after (and indexed above) every shape track; one shared pool would let
+  a text land on a low track created for a shape while a later shape spilled above it,
+  inverting the stacking. The cost is one extra track where a shape and a non-overlapping text
+  could have shared one. `findEmptyTrack` — what `addTextOverlayClip`
   uses — is deliberately NOT used here: it would reuse a low-index empty track and hide the
   overlays underneath media clips, silently changing the picture of every such project.
+  Converted overlays are ordinary clips, so they now take part in the normal
+  clip/transition compositing order — `drawTransition` runs after the track loop — which
+  differs from the old always-on-top loop only while a transition is active: a converted
+  overlay is covered by a dissolve where the legacy one drew over it.
 - **Degenerate data is clamped, not dropped**: `endTime <= startTime` becomes a 0.1 s clip,
-  a negative `startTime` becomes position 0. `addShapeOverlayClip`'s blur special-case
-  (transparent fill, no stroke, `blurAmount: 10`) is **not** applied — a legacy blur shape
-  drew with its stored fill and stroke. The timeline `duration` is recomputed, so an overlay
-  reaching past the stored duration extends the timeline (that is what gets it exported).
+  a negative `startTime` becomes position 0. A legacy `'blur'` shape drew **nothing at all**
+  (the legacy loop passed no canvas, and `case 'blur'` draws neither fill nor stroke), so
+  rather than convert it into an invisible clip the conversion gives it `blurAmount: 10` — the
+  live default, so the inspector's slider agrees with the picture — while carrying its stored
+  fill and stroke through unchanged (`addShapeOverlayClip`'s `#00000000` fill and
+  `strokeWidth: 0` overrides are **not** applied, so they survive a later type change). The
+  timeline `duration` is recomputed, so an overlay reaching past the stored duration extends
+  the timeline (that is what gets it exported).
 
 ### Keyframe Animation System (`src/utils/animation.ts`)
 Clips support animated properties via keyframes:

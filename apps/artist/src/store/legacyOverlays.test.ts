@@ -121,18 +121,32 @@ describe('convertLegacyOverlays', () => {
       expect('animation' in result.clips[0]).toBe(false)
     })
 
-    it('keeps a blur shape\'s stored fill and stroke and leaves blurAmount at 0', () => {
-      // addShapeOverlayClip forces a transparent fill, no stroke and blurAmount 10
-      // for a NEW blur shape. A legacy blur shape drew with its stored fill and
-      // stroke, so applying those defaults here would change the picture.
+    it('gives a blur shape a working blur radius and keeps its stored fill and stroke', () => {
+      // The legacy preview's shape loop passed no canvas, so a legacy 'blur' shape
+      // drew NOTHING — no fill, no stroke, no blur. Reproducing that faithfully would
+      // mean an invisible clip wasting a track, so the conversion deliberately makes
+      // it a working blur region at the live default radius of 10 — the value the
+      // renderer substitutes for 0 anyway and the one ShapeSection's slider shows.
+      // addShapeOverlayClip's other blur overrides (fill '#00000000', strokeWidth 0)
+      // are NOT applied: fill and stroke are carried through as stored, so they
+      // survive a later type change (they are invisible while the type is 'blur').
       const result = convertLegacyOverlays(timeline({
         shapeOverlays: [shape({ type: 'blur', fillColor: '#123456ff', strokeWidth: 3 })],
       }))
 
       expect(result.clips[0].name).toBe('Blur Region')
       expect(result.clips[0].shapeData).toMatchObject({
-        type: 'blur', fillColor: '#123456ff', strokeWidth: 3, strokeColor: '#000000', blurAmount: 0,
+        type: 'blur', fillColor: '#123456ff', strokeWidth: 3, strokeColor: '#000000', blurAmount: 10,
       })
+    })
+
+    it('names a clip converted from an empty legacy text \'Text\'', () => {
+      // A nameless clip on the timeline is unclickable-looking; addTextOverlayClip
+      // falls back the same way. The stored text itself stays verbatim.
+      const result = convertLegacyOverlays(timeline({ textOverlays: [text({ text: '   ' })] }))
+
+      expect(result.clips[0].name).toBe('Text')
+      expect(result.clips[0].textData?.text).toBe('   ')
     })
 
     it('clamps a zero-or-negative window to the minimum clip duration', () => {
@@ -224,6 +238,43 @@ describe('convertLegacyOverlays', () => {
       // Touching at second 4 is not an overlap: the first clip's window is [0, 4).
       expect(result.clips.map((c) => c.trackId)).toEqual(['legacy-overlay-track-1', 'legacy-overlay-track-1'])
       expect(result.tracks).toHaveLength(2)
+    })
+
+    it('keeps every text above every shape even when a shape spills onto a higher track', () => {
+      // The inversion this pins: with one shared pool, T (whose window only touches
+      // X's) would be reused onto X's low track while S sat above it — a caption
+      // vanishing behind a blur region. Shapes and texts get separate reuse pools,
+      // so every text track is created after every shape track.
+      const result = convertLegacyOverlays(timeline({
+        shapeOverlays: [
+          shape({ id: 'X', startTime: 0, endTime: 2 }),
+          shape({ id: 'S', startTime: 1, endTime: 3 }),
+        ],
+        textOverlays: [text({ id: 'T', startTime: 2, endTime: 4 })],
+      }))
+
+      const indexOf = (trackId: string) => result.tracks.find((t) => t.id === trackId)!.index
+      const trackOf = (clipId: string) => indexOf(result.clips.find((c) => c.id === clipId)!.trackId)
+
+      expect(trackOf('legacy-shape-X')).toBe(1)
+      expect(trackOf('legacy-shape-S')).toBe(2) // overlaps X, so it spills up
+      expect(trackOf('legacy-text-T')).toBe(3)  // above BOTH shapes, not reused onto X's track
+      const shapeIndices = ['legacy-shape-X', 'legacy-shape-S'].map(trackOf)
+      expect(trackOf('legacy-text-T')).toBeGreaterThan(Math.max(...shapeIndices))
+    })
+
+    it('puts a shape and a non-overlapping text on different tracks', () => {
+      // The cost of the per-kind pools: these two could have shared one track. A
+      // guaranteed text-above-shape ordering is worth the extra track.
+      const result = convertLegacyOverlays(timeline({
+        shapeOverlays: [shape({ startTime: 0, endTime: 2 })],
+        textOverlays: [text({ startTime: 4, endTime: 6 })],
+      }))
+
+      expect(result.clips.map((c) => [c.id, c.trackId])).toEqual([
+        ['legacy-shape-shape1', 'legacy-overlay-track-1'],
+        ['legacy-text-text1', 'legacy-overlay-track-2'],
+      ])
     })
 
     it('skips a track id the timeline already uses', () => {
