@@ -1,7 +1,7 @@
 // Queries for the inspector panels' label/control rows.
 //
-// ClipEditor and OverlayEditor lay their controls out as a row that holds a
-// <label> (or a <span>) and an unlabelled <input> — the label is never wired to
+// The inspector panels lay their controls out as a row that holds a <label>
+// (or a <span>) and an unlabelled <input> — the label is never wired to
 // the input with htmlFor/id, so getByLabelText cannot reach these controls and
 // they carry no accessible name of their own. These helpers walk from the
 // visible text to the control that sits in the same row, which is the closest
@@ -34,11 +34,6 @@ export function rowControl(
 /** The <select> in the same row as the exact text `labelText`. */
 export function rowSelect(labelText: string): HTMLSelectElement {
   return rowControl(labelText, 'select') as unknown as HTMLSelectElement
-}
-
-/** The number <input> in the same row as the exact text `labelText`. */
-export function rowNumber(labelText: string): HTMLInputElement {
-  return rowControl(labelText, 'input[type="number"]')
 }
 
 /** The colour <input> in the same row as the exact text `labelText`. */

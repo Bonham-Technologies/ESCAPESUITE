@@ -34,57 +34,6 @@ const projectWithLegacyOverlays = (): Project => ({
   },
 })
 
-describe('projectStore integration', () => {
-  beforeEach(() => {
-    // Reset store to initial state before each test
-    useEditorStore.getState().resetProject()
-    // Clear history after reset
-    useEditorStore.setState({ history: { past: [], future: [] } })
-  })
-
-  describe('legacy overlays', () => {
-    it('adds and updates legacy text overlay', () => {
-      const overlay = useEditorStore.getState().addTextOverlay({
-        text: 'Legacy Text',
-      })
-
-      expect(overlay.text).toBe('Legacy Text')
-
-      useEditorStore.getState().updateTextOverlay(overlay.id, {
-        text: 'Updated Text',
-      })
-
-      const updated = useEditorStore.getState().project.timeline.textOverlays[0]
-      expect(updated.text).toBe('Updated Text')
-    })
-
-    it('removes legacy text overlay', () => {
-      const overlay = useEditorStore.getState().addTextOverlay({
-        text: 'To Remove',
-      })
-
-      useEditorStore.getState().removeTextOverlay(overlay.id)
-
-      expect(useEditorStore.getState().project.timeline.textOverlays).toHaveLength(0)
-    })
-
-    it('adds and updates legacy shape overlay', () => {
-      const overlay = useEditorStore.getState().addShapeOverlay({
-        type: 'rectangle',
-      })
-
-      expect(overlay.type).toBe('rectangle')
-
-      useEditorStore.getState().updateShapeOverlay(overlay.id, {
-        type: 'ellipse',
-      })
-
-      const updated = useEditorStore.getState().project.timeline.shapeOverlays[0]
-      expect(updated.type).toBe('ellipse')
-    })
-  })
-})
-
 describe('projectStore remaining behaviours', () => {
   beforeEach(resetStoreForTest)
 

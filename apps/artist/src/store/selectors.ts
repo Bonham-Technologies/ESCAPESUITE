@@ -26,8 +26,6 @@ export const selectSnapEnabled = (state: EditorState) => state.snapEnabled;
 export const selectClips = (state: EditorState) => state.project.timeline.clips;
 export const selectTracks = (state: EditorState) => state.project.timeline.tracks;
 export const selectTimelineDuration = (state: EditorState) => state.project.timeline.duration;
-export const selectTextOverlays = (state: EditorState) => state.project.timeline.textOverlays || [];
-export const selectShapeOverlays = (state: EditorState) => state.project.timeline.shapeOverlays || [];
 export const selectMarkers = (state: EditorState) => state.markers;
 
 // ============================================
@@ -97,8 +95,6 @@ export function usePreviewState() {
       loopPlayback: state.loopPlayback,
       selectedClipId: state.selectedClipId,
       keyframePanelOpen: state.keyframePanelState.isOpen,
-      textOverlays: state.project.timeline.textOverlays || [],
-      shapeOverlays: state.project.timeline.shapeOverlays || [],
     }))
   );
 }

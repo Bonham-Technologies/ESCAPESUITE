@@ -224,11 +224,13 @@ export const DEFAULT_SHAPE_OVERLAY_DATA: ShapeOverlayData = {
 
 // Legacy overlay types, kept so an older project file can still be read.
 //
-// INPUT ONLY. `store/legacyOverlays.ts` converts both arrays into ordinary overlay
-// clips and empties them on every load path (`ensureTimelineHasTracks`, so every
-// `setProject` caller) and in the headless render entry. Nothing in the app writes
-// them, and no loaded project still carries them — treat them as a file format, not
-// as state.
+// INPUT ONLY — write-never, read-once. Apart from `ensureTimelineHasTracks`
+// normalising a missing array to `[]` first, `store/legacyOverlays.ts` is the only
+// code that touches either array: `convertLegacyOverlays` turns them into ordinary
+// overlay clips and empties them on every load path (`ensureTimelineHasTracks`, so
+// every `setProject` caller) and in the headless render entry. Nothing in the app
+// creates, renders, edits or selects a legacy overlay, and no loaded project still
+// carries one — these types survive solely so an old file on disk still parses.
 export interface TextOverlay {
   id: string;
   text: string;
@@ -336,9 +338,10 @@ export interface Clip {
 export interface Timeline {
   tracks: Track[];
   clips: Clip[];
-  // Legacy overlays from an older ARTIST version. Input only: emptied on load and on
-  // headless render, once `convertLegacyOverlays` has turned them into overlay clips.
-  // Nothing writes them, so on a loaded project both are always [].
+  // Legacy overlays from an older ARTIST version. Input only, and read only by
+  // `convertLegacyOverlays`, which turns them into overlay clips and empties them on
+  // load and on headless render. Nothing writes them, so on a loaded project both
+  // are always [].
   textOverlays: TextOverlay[];
   shapeOverlays: ShapeOverlay[];
   duration: number;         // Max of (clip.timelinePosition + clip.duration)
@@ -403,8 +406,6 @@ export interface EditorState {
   selectedClipId: string | null;
   selectedClipIds: Set<string>;        // Multi-select set
   selectedTrackId: string | null;
-  selectedOverlayId: string | null;
-  selectedOverlayType: 'text' | 'shape' | null;
 
   // Clipboard (for copy/paste)
   clipboard: Clip[] | null;
@@ -471,14 +472,6 @@ export interface EditorState {
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => void;
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => void;
 
-  // Legacy overlay actions (for backwards compatibility)
-  addTextOverlay: (overlay?: Partial<TextOverlay>) => TextOverlay;
-  updateTextOverlay: (id: string, updates: Partial<TextOverlay>) => void;
-  removeTextOverlay: (id: string) => void;
-  addShapeOverlay: (overlay?: Partial<ShapeOverlay>) => ShapeOverlay;
-  updateShapeOverlay: (id: string, updates: Partial<ShapeOverlay>) => void;
-  removeShapeOverlay: (id: string) => void;
-
   // Actions - Playback
   setCurrentTime: (time: number) => void;
   setIsPlaying: (playing: boolean) => void;
@@ -486,7 +479,6 @@ export interface EditorState {
   // Actions - Selection
   setSelectedClipId: (id: string | null) => void;
   setSelectedTrackId: (id: string | null) => void;
-  setSelectedOverlay: (id: string | null, type: 'text' | 'shape' | null) => void;
 
   // Actions - Multi-Select
   toggleClipSelection: (clipId: string) => void;
