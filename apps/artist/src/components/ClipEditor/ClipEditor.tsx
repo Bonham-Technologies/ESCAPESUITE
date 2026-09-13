@@ -54,7 +54,11 @@ export function ClipEditor() {
 
   // No clip selected - show add overlay options
   if (!selectedClip) {
-    return <ClipEditorEmptyState onAddText={handleAddText} onAddShape={handleAddShape} />;
+    return (
+      <div className={styles.container}>
+        <ClipEditorEmptyState onAddText={handleAddText} onAddShape={handleAddShape} />
+      </div>
+    );
   }
 
   return (

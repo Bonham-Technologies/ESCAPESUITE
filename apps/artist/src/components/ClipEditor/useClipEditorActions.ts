@@ -89,7 +89,10 @@ export interface ClipEditorActions {
   handleShapeDataChange: (updates: Partial<ShapeOverlayData>) => void;
   handleAddText: () => void;
   handleAddShape: (type: ShapeType) => void;
-  /** The scale row's Reset: the whole of `DEFAULT_TRANSFORM`, rotation included. */
+  /**
+   * The scale row's Reset: the whole of `DEFAULT_TRANSFORM`, rotation included.
+   * Only valid while a clip is selected — it reads `selectedClip.id` unguarded.
+   */
   handleResetToDefaults: () => void;
   handleKeyframePanelToggle: () => void;
 }

@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ComponentProps } from 'react'
 import { ClipEditorHeader } from './ClipEditorHeader'
 import type { Track } from '../../store/types'
 
@@ -16,11 +17,11 @@ const track: Track = {
   height: 60,
 }
 
-function renderHeader(overrides: Partial<React.ComponentProps<typeof ClipEditorHeader>> = {}) {
+function renderHeader(overrides: Partial<ComponentProps<typeof ClipEditorHeader>> = {}) {
   const onDelete = vi.fn()
   render(
     <ClipEditorHeader
-      clipTypeLabel="Video"
+      clipTypeLabel="Video Clip"
       name="intro.mp4"
       duration={5.5}
       position={12.25}
@@ -36,7 +37,7 @@ describe('ClipEditorHeader', () => {
   it('names the clip and its type', () => {
     renderHeader()
 
-    expect(screen.getByText('Video')).toBeInTheDocument()
+    expect(screen.getByText('Video Clip')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'intro.mp4' })).toBeInTheDocument()
   })
 

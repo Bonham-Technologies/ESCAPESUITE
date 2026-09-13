@@ -3,7 +3,7 @@ import type { Track } from '../../store/types';
 import styles from './ClipEditor.module.css';
 
 interface ClipEditorHeaderProps {
-  /** What kind of clip this is, e.g. `Video` or `Text Overlay`. */
+  /** What kind of clip this is, e.g. `Video Clip` or `Text Overlay`. */
   clipTypeLabel: string;
   /** The clip's name. */
   name: string;

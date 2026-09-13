@@ -549,6 +549,28 @@ describe('useClipEditorActions animation', () => {
     })
   })
 
+  it('fills the in duration change from the handler\'s own fallbacks on a fresh clip', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.handleAnimationInDurationChange(1.1))
+
+    expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+      in: { type: 'none', duration: 1.1, easing: 'ease-out' },
+    })
+  })
+
+  it('fills the out duration change from the handler\'s own fallbacks on a fresh clip', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.handleAnimationOutDurationChange(1.1))
+
+    expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+      out: { type: 'none', duration: 1.1, easing: 'ease-in' },
+    })
+  })
+
   it('carries the clip\'s existing in duration and easing through a type change', () => {
     const clip = mediaClip()
     act(() => {

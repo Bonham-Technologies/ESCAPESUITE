@@ -9,8 +9,12 @@ interface ClipEditorEmptyStateProps {
 }
 
 /**
- * The whole inspector panel when no clip is selected: the "Select a clip to
- * edit" prompt plus the five buttons that create an overlay out of nothing.
+ * The inspector panel's contents when no clip is selected: the "Select a
+ * clip to edit" prompt plus the five buttons that create an overlay out of
+ * nothing. `ClipEditor` supplies the surrounding `div.container` itself —
+ * in both the empty and selected states — so that element's identity is
+ * stable across the empty↔selected transition and the scrolling container
+ * never remounts.
  *
  * It owns the prompt and the buttons' icons and labels; which shape each
  * button asks for is the only thing it tells its caller, so the store stays
@@ -18,7 +22,7 @@ interface ClipEditorEmptyStateProps {
  */
 export function ClipEditorEmptyState({ onAddText, onAddShape }: ClipEditorEmptyStateProps) {
   return (
-    <div className={styles.container}>
+    <>
       <div className={styles.empty}>
         <p>Select a clip to edit</p>
         <p className={styles.hint}>Or add an overlay:</p>
@@ -60,6 +64,6 @@ export function ClipEditorEmptyState({ onAddText, onAddShape }: ClipEditorEmptyS
           Blur
         </button>
       </div>
-    </div>
+    </>
   );
 }
