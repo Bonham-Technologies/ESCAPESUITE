@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.7
+
+### Patch Changes
+
+- 0dc5a1f: Internal: the timeline editor is split into focused modules; no behaviour change.
+
 ## 2.2.6
 
 ### Patch Changes
