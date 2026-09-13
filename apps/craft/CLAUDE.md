@@ -45,7 +45,7 @@ behaviour rather than tidiness: `useMediaStreams` registers the preview attach a
 both, and itself order-dependent (cancelled flag → duration interval → countdown interval →
 `recorder.dispose()` → `stopAllStreams()` → store reset) — reaches the live `stopAllStreams`
 through that mirror rather than through a stale closure. `useKeyboardShortcuts` binds the one
-window listener in the screen, and `useRecordingLibrary` binds nothing and comes last.
+window listener `App` itself owns, and `useRecordingLibrary` binds nothing and comes last.
 
 `recorderTypeRef` and `capturedThumbnailRef` are created in `App` and handed to two hooks by
 reference: `useRecordingController` writes them while a take runs, `useRecordingSave` reads
