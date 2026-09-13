@@ -36,7 +36,7 @@ export interface NotificationApi {
 }
 
 export function useNotification(): NotificationApi {
-  const [notification, setNotification] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
+  const [notification, setNotification] = useState<Notification | null>(null);
   /** The pending clear, so the next notification — or unmounting — can cancel it. */
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -45,7 +45,7 @@ export function useNotification(): NotificationApi {
   // The handle lives in a ref rather than in the closure, so this stays a
   // `[]` callback with an identity that never changes while still being able
   // to cancel the clear a previous notification armed.
-  const showNotification = useCallback((message: string, type: 'info' | 'error' | 'success' = 'info') => {
+  const showNotification = useCallback((message: string, type: NotificationType = 'info') => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
     setNotification({ message, type });
     clearTimerRef.current = setTimeout(() => setNotification(null), 3000);

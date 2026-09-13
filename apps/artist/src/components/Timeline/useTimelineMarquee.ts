@@ -145,8 +145,9 @@ export function useTimelineMarquee({
           const elBottom = elRect.bottom - containerRect.top + scrollTop;
           // Check if track overlaps with marquee Y range
           if (trackSpansMarquee(elTop, elBottom, topPx, bottomPx)) {
-            const trackId = el.getAttribute('data-track-id');
-            if (trackId) spannedTrackIds.add(trackId);
+            // Non-null by construction: the elements come from the
+            // `[data-track-id]` selector above, so the attribute is present.
+            spannedTrackIds.add(el.getAttribute('data-track-id')!);
           }
         });
 

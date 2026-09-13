@@ -10,6 +10,9 @@ import { findNearestSnapPoint } from '../../store/projectStore';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
 import type { Clip, SourceVideo } from '../../store/types';
 
+/** How many pixels one second of timeline occupies at zoom 1. */
+export const PIXELS_PER_SECOND_BASE = 50;
+
 /** Ruler tick spacing, in seconds: a tick every second, labelled every five. */
 export const RULER_MAJOR_INTERVAL = 5;
 export const RULER_MINOR_INTERVAL = 1;
@@ -124,7 +127,12 @@ export function getSplitOffset(
 /**
  * Whether a clip can be trimmed past its source's length: overlays and images
  * have no fixed source duration, so trimming them changes how long they show.
- * Exported for its own tests; `computeTrimUpdate` is its only production caller.
+ *
+ * Its only production call site is `computeTrimUpdate`, forty lines below. It
+ * is `export`ed anyway so that its overlay / image / video cases can be
+ * asserted by name in `timelineGeometry.test.ts` rather than only indirectly,
+ * through whichever edge×kind branch of `computeTrimUpdate` happens to reach
+ * them — the same trade the four constants above make.
  */
 export function isExtendableClip(
   clip: Pick<Clip, 'overlayType'>,

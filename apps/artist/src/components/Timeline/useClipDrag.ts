@@ -178,7 +178,9 @@ export function useClipDrag({
       trackElements.forEach((el) => {
         const rect = el.getBoundingClientRect();
         if (e.clientY >= rect.top && e.clientY < rect.bottom) {
-          targetTrackId = el.getAttribute('data-track-id') || targetTrackId;
+          // Non-null by construction: the elements come from the
+          // `[data-track-id]` selector above, so the attribute is present.
+          targetTrackId = el.getAttribute('data-track-id')!;
         }
       });
 

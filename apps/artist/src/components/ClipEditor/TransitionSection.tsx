@@ -38,9 +38,12 @@ export function TransitionSection({ transition, clipDuration, onTypeChange, onDu
             ))}
           </select>
         </div>
-        {/* Same fallback as the select above: a clip saved with no transition
-            object reads as `none` here too, so it shows no duration row. */}
-        {(transition?.type ?? 'none') !== 'none' && (
+        {/* Same reading as the select above: a clip saved with no transition
+            object shows no duration row, exactly as one set to `none` does.
+            Written as a narrowing `&&` chain rather than `(transition?.type ??
+            'none') !== 'none'` so that `transition` is a `Transition` below —
+            `duration` is required on it, so no fallback is reachable. */}
+        {transition && transition.type !== 'none' && (
           <div className={styles.transformRow}>
             <label>Duration</label>
             <input
@@ -48,10 +51,10 @@ export function TransitionSection({ transition, clipDuration, onTypeChange, onDu
               min={0.1}
               max={maxPresetDuration(clipDuration)}
               step={0.1}
-              value={transition?.duration ?? 0.5}
+              value={transition.duration}
               onChange={(e) => onDurationChange(parseFloat(e.target.value))}
             />
-            <span>{(transition?.duration ?? 0.5).toFixed(1)}s</span>
+            <span>{transition.duration.toFixed(1)}s</span>
           </div>
         )}
       </div>
