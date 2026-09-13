@@ -1,0 +1,462 @@
+// One row of the track stack, rendered from props alone.
+//
+// The row's job is to place clips: `Timeline` decides *which* clips belong to
+// it and owns the drag and trim gestures, so what is asserted here is the
+// translation from those props into DOM — the position and width a clip is
+// drawn at, the classes that mark it selected / dragging / trimming, the icon
+// its media type earns, the ghost a clip dragged in from another track leaves
+// — and that a grab of a clip or of a trim handle reaches the caller intact.
+import type React from 'react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, fireEvent } from '@testing-library/react'
+import { TimelineTrack } from './TimelineTrack'
+import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
+import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
+import { DEFAULT_SHAPE_OVERLAY_DATA } from '../../store/types'
+import type { Clip, SourceVideo, Track } from '../../store/types'
+import type { DragState, TrimState } from './types'
+import styles from './Timeline.module.css'
+
+/** The timeline's default scale: one second is 50px at zoom 1. */
+const PPS = 50
+
+const TRACK_ID = 'track-1'
+
+function makeTrack(overrides: Partial<Track> = {}): Track {
+  return {
+    id: TRACK_ID,
+    name: 'Track 1',
+    index: 0,
+    visible: true,
+    locked: false,
+    muted: false,
+    volume: 1,
+    height: 60,
+    ...overrides,
+  }
+}
+
+/** A real store-built clip, placed on this row unless told otherwise. */
+function makeClip(id: string, position: number, duration = 2, overrides: Partial<Clip> = {}): Clip {
+  return { ...addClip(id, position, duration), trackId: TRACK_ID, ...overrides }
+}
+
+function makeDrag(overrides: Partial<DragState> = {}): DragState {
+  return {
+    clipId: 'clip1',
+    originalTrackId: TRACK_ID,
+    originalPosition: 0,
+    currentTrackId: TRACK_ID,
+    currentPosition: 0,
+    snappedPosition: null,
+    offsetX: 0,
+    ...overrides,
+  }
+}
+
+function makeCallbacks() {
+  return {
+    onClipMouseDown: vi.fn<(e: React.MouseEvent, clip: Clip) => void>(),
+    onTrimMouseDown: vi.fn<(e: React.MouseEvent, clip: Clip, edge: 'start' | 'end') => void>(),
+  }
+}
+
+function renderTrack(
+  opts: {
+    track?: Track
+    clips?: Clip[]
+    allClips?: Clip[]
+    sourceVideos?: SourceVideo[]
+    selectedClipId?: string | null
+    selectedClipIds?: Set<string>
+    dragState?: DragState | null
+    trimState?: TrimState | null
+  } = {}
+): { root: HTMLElement; calls: ReturnType<typeof makeCallbacks> } {
+  const clips = opts.clips ?? []
+  const calls = makeCallbacks()
+  const { container } = render(
+    <TimelineTrack
+      track={opts.track ?? makeTrack()}
+      clips={clips}
+      allClips={opts.allClips ?? clips}
+      sourceVideos={opts.sourceVideos ?? [video]}
+      pixelsPerSecond={PPS}
+      selectedClipId={opts.selectedClipId ?? null}
+      selectedClipIds={opts.selectedClipIds ?? new Set()}
+      dragState={opts.dragState ?? null}
+      trimState={opts.trimState ?? null}
+      {...calls}
+    />
+  )
+  return { root: container.firstElementChild as HTMLElement, calls }
+}
+
+function clipEls(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-clip-id]'))
+}
+
+describe('TimelineTrack row', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  it('carries the track id the timeline hunts for, and the track height', () => {
+    const { root } = renderTrack({ track: makeTrack({ height: 72 }) })
+
+    expect(root).toHaveAttribute('data-track-id', TRACK_ID)
+    expect(root).toHaveClass(styles.track)
+    expect(root).toHaveStyle({ height: '72px' })
+    expect(root).not.toHaveClass(styles.trackHidden)
+    expect(root).not.toHaveClass(styles.trackLocked)
+  })
+
+  it('marks a hidden track and a locked track', () => {
+    const { root } = renderTrack({ track: makeTrack({ visible: false, locked: true }) })
+
+    expect(root).toHaveClass(styles.trackHidden)
+    expect(root).toHaveClass(styles.trackLocked)
+  })
+
+  it('draws nothing when the row has no clips', () => {
+    const { root } = renderTrack()
+
+    expect(root).toBeEmptyDOMElement()
+  })
+})
+
+describe('TimelineTrack clips', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  it('places each clip at its timeline position, sized by its duration', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 1, 2), makeClip('clip2', 4, 3)] })
+
+    const drawn = clipEls(root)
+    expect(drawn.map((el) => el.dataset.clipId)).toEqual(['clip1', 'clip2'])
+    expect(drawn[0]).toHaveStyle({ left: '50px', width: '100px' })
+    expect(drawn[1]).toHaveStyle({ left: '200px', width: '150px' })
+  })
+
+  it('scales with the timeline zoom', () => {
+    const clips = [makeClip('clip1', 1, 2)]
+    const { container } = render(
+      <TimelineTrack
+        track={makeTrack()}
+        clips={clips}
+        allClips={clips}
+        sourceVideos={[video]}
+        pixelsPerSecond={PPS * 4}
+        selectedClipId={null}
+        selectedClipIds={new Set()}
+        dragState={null}
+        trimState={null}
+        onClipMouseDown={vi.fn()}
+        onTrimMouseDown={vi.fn()}
+      />
+    )
+
+    expect(container.querySelector('[data-clip-id]')).toHaveStyle({ left: '200px', width: '400px' })
+  })
+
+  it('names each clip and stamps its duration', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0, 65)] })
+
+    expect(root.querySelector(`.${styles.clipName}`)).toHaveTextContent('clip1')
+    expect(root.querySelector(`.${styles.clipDuration}`)).toHaveTextContent('1:05')
+  })
+
+  it('skips a clip that belongs to another track', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { trackId: 'other-track' }), makeClip('clip2', 4)],
+    })
+
+    expect(clipEls(root).map((el) => el.dataset.clipId)).toEqual(['clip2'])
+  })
+
+  it('marks the single selection and the rest of a multi-selection differently', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0), makeClip('clip2', 4), makeClip('clip3', 8)],
+      selectedClipId: 'clip1',
+      selectedClipIds: new Set(['clip1', 'clip2']),
+    })
+
+    const [one, two, three] = clipEls(root)
+    expect(one).toHaveClass(styles.clipSelected)
+    expect(one).not.toHaveClass(styles.clipMultiSelected)
+    expect(two).toHaveClass(styles.clipMultiSelected)
+    expect(two).not.toHaveClass(styles.clipSelected)
+    expect(three).not.toHaveClass(styles.clipMultiSelected)
+  })
+
+  it('marks the clip whose edge is being trimmed', () => {
+    const trimState: TrimState = {
+      clipId: 'clip2',
+      edge: 'end',
+      originalStartTime: 0,
+      originalEndTime: 2,
+      originalTimelinePosition: 4,
+    }
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0), makeClip('clip2', 4)],
+      trimState,
+    })
+
+    const [one, two] = clipEls(root)
+    expect(one).not.toHaveClass(styles.clipTrimming)
+    expect(two).toHaveClass(styles.clipTrimming)
+  })
+
+  it('reports a grab of a clip, with the clip that was grabbed', () => {
+    const clip = makeClip('clip1', 0)
+    const { root, calls } = renderTrack({ clips: [clip] })
+
+    fireEvent.mouseDown(clipEls(root)[0])
+
+    expect(calls.onClipMouseDown).toHaveBeenCalledTimes(1)
+    expect(calls.onClipMouseDown.mock.calls[0][1]).toBe(clip)
+  })
+
+  it('reports a grab of either trim handle with the edge it sits on', () => {
+    const clip = makeClip('clip1', 0)
+    const { root, calls } = renderTrack({ clips: [clip] })
+
+    // A handle sits inside the clip, so the timeline's real handler stops the
+    // event propagating; these spies do not, hence no count on onClipMouseDown.
+    const handles = clipEls(root)[0].querySelectorAll(`.${styles.trimHandle}`)
+    expect(handles[0]).toHaveStyle({ left: '0px' })
+    expect(handles[1]).toHaveStyle({ right: '0px' })
+    fireEvent.mouseDown(handles[0])
+    fireEvent.mouseDown(handles[1])
+
+    expect(calls.onTrimMouseDown.mock.calls.map((c) => c[2])).toEqual(['start', 'end'])
+    expect(calls.onTrimMouseDown.mock.calls[0][1]).toBe(clip)
+  })
+})
+
+describe('TimelineTrack clip kinds', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  const audio: SourceVideo = { ...video, id: 'audio1', mediaType: 'audio' }
+  const image: SourceVideo = { ...video, id: 'image1', mediaType: 'image' }
+
+  it('colours an audio clip and gives it a note icon', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { sourceVideoId: audio.id })],
+      sourceVideos: [video, audio],
+    })
+
+    const [drawn] = clipEls(root)
+    expect(drawn).toHaveClass(styles.clipAudio)
+    expect(drawn.querySelector(`.${styles.clipIcon} circle`)).not.toBeNull()
+  })
+
+  it('colours an image clip', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { sourceVideoId: image.id })],
+      sourceVideos: [video, image],
+    })
+
+    expect(clipEls(root)[0]).toHaveClass(styles.clipImage)
+  })
+
+  it('leaves a video clip with no media icon at all', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)] })
+
+    const [drawn] = clipEls(root)
+    expect(drawn).not.toHaveClass(styles.clipAudio)
+    expect(drawn).not.toHaveClass(styles.clipImage)
+    expect(drawn.querySelectorAll(`.${styles.clipIcon}`)).toHaveLength(0)
+  })
+
+  it('colours a text overlay', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { overlayType: 'text' })],
+    })
+
+    expect(clipEls(root)[0]).toHaveClass(styles.clipText)
+    expect(clipEls(root)[0].querySelectorAll(`.${styles.clipIcon}`)).toHaveLength(1)
+  })
+
+  it('gives a blur shape a different icon from every other shape', () => {
+    const blur = renderTrack({
+      clips: [
+        makeClip('clip1', 0, 2, {
+          overlayType: 'shape',
+          shapeData: { ...DEFAULT_SHAPE_OVERLAY_DATA, type: 'blur' },
+        }),
+      ],
+    })
+    const rect = renderTrack({
+      clips: [
+        makeClip('clip2', 0, 2, {
+          overlayType: 'shape',
+          shapeData: { ...DEFAULT_SHAPE_OVERLAY_DATA, type: 'rectangle' },
+        }),
+      ],
+    })
+
+    expect(clipEls(blur.root)[0]).toHaveClass(styles.clipShape)
+    expect(clipEls(blur.root)[0].querySelectorAll(`.${styles.clipIcon} circle`)).toHaveLength(2)
+    expect(clipEls(rect.root)[0].querySelectorAll(`.${styles.clipIcon} rect`)).toHaveLength(1)
+  })
+})
+
+describe('TimelineTrack waveforms', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+    installCanvasDouble()
+  })
+
+  afterEach(() => {
+    uninstallCanvasDouble()
+  })
+
+  const withAudio: SourceVideo = {
+    ...video,
+    hasAudio: true,
+    waveformData: [
+      { min: -0.5, max: 0.5 },
+      { min: -0.8, max: 0.8 },
+    ],
+  }
+
+  it('draws a waveform inside a clip whose source has peaks', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [withAudio] })
+
+    const canvas = root.querySelector('canvas')
+    expect(canvas).not.toBeNull()
+    // The waveform is inset by 2px top and bottom of the 60px row.
+    expect(canvas).toHaveStyle({ height: '56px' })
+  })
+
+  it('draws no waveform when the source has audio but no peaks', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0)],
+      sourceVideos: [{ ...video, hasAudio: true, waveformData: [] }],
+    })
+
+    expect(root.querySelector('canvas')).toBeNull()
+  })
+
+  it('draws no waveform for a clip with no source media at all', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [] })
+
+    expect(root.querySelector('canvas')).toBeNull()
+  })
+})
+
+describe('TimelineTrack keyframes', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  it('shows a clip’s keyframes on the row', () => {
+    const clip = makeClip('clip1', 2, 4)
+    store().setClipKeyframe(clip.id, 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+    const animated = { ...store().project.timeline.clips[0], trackId: TRACK_ID }
+
+    const { root } = renderTrack({ clips: [animated] })
+
+    // Keyframes are placed within the clip, so their offsets are clip-relative.
+    const diamonds = root.querySelectorAll('[title^="Keyframe @"]')
+    expect([...diamonds].map((d) => (d as HTMLElement).style.left)).toEqual(['0px', '50px'])
+  })
+})
+
+describe('TimelineTrack drag', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  it('draws the dragged clip at the pointer position, not its own', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 1, 2)],
+      dragState: makeDrag({ originalPosition: 1, currentPosition: 5 }),
+    })
+
+    const [drawn] = clipEls(root)
+    expect(drawn).toHaveClass(styles.clipDragging)
+    expect(drawn).toHaveStyle({ left: '250px' })
+  })
+
+  it('drops a clip dragged off this row', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 1, 2), makeClip('clip2', 6)],
+      dragState: makeDrag({ currentTrackId: 'other-track', originalPosition: 1, currentPosition: 5 }),
+    })
+
+    expect(clipEls(root).map((el) => el.dataset.clipId)).toEqual(['clip2'])
+  })
+
+  it('carries the rest of a multi-selection along by the same delta', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 1, 2), makeClip('clip2', 6), makeClip('clip3', 10)],
+      selectedClipIds: new Set(['clip1', 'clip2']),
+      dragState: makeDrag({ originalPosition: 1, currentPosition: 3 }),
+    })
+
+    const [one, two, three] = clipEls(root)
+    expect(one).toHaveStyle({ left: '150px' })
+    // clip2 travels with it: 6s + 2s of delta.
+    expect(two).toHaveClass(styles.clipDragging)
+    expect(two).toHaveStyle({ left: '400px' })
+    // clip3 is not selected, so it stays put.
+    expect(three).not.toHaveClass(styles.clipDragging)
+    expect(three).toHaveStyle({ left: '500px' })
+  })
+
+  it('leaves a lone selected clip’s neighbours alone', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 1, 2), makeClip('clip2', 6)],
+      selectedClipIds: new Set(['clip1']),
+      dragState: makeDrag({ originalPosition: 1, currentPosition: 3 }),
+    })
+
+    expect(clipEls(root)[1]).toHaveStyle({ left: '300px' })
+  })
+
+  it('ghosts a clip being dragged in from another track', () => {
+    const incoming = makeClip('clip9', 0, 3, { trackId: 'other-track' })
+    const { root } = renderTrack({
+      clips: [],
+      allClips: [incoming],
+      dragState: makeDrag({
+        clipId: 'clip9',
+        originalTrackId: 'other-track',
+        currentTrackId: TRACK_ID,
+        currentPosition: 2,
+      }),
+    })
+
+    const preview = root.querySelector(`.${styles.clipPreview}`)
+    expect(preview).toHaveStyle({ left: '100px', width: '150px' })
+  })
+
+  it('ghosts nothing when the drag started on this very track', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 3)],
+      dragState: makeDrag({ currentPosition: 2 }),
+    })
+
+    expect(root.querySelector(`.${styles.clipPreview}`)).toBeNull()
+  })
+
+  it('gives the ghost no width when the dragged clip is gone', () => {
+    const { root } = renderTrack({
+      clips: [],
+      allClips: [],
+      dragState: makeDrag({
+        clipId: 'vanished',
+        originalTrackId: 'other-track',
+        currentTrackId: TRACK_ID,
+        currentPosition: 2,
+      }),
+    })
+
+    expect(root.querySelector(`.${styles.clipPreview}`)).toHaveStyle({ width: '0px' })
+  })
+})

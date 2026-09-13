@@ -7,8 +7,6 @@ import {
 import type { Clip } from '../../store/types';
 import { formatTime, timeToPixels, pixelsToTime } from '../../utils/timeUtils';
 import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
-import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
-import { AudioWaveform } from './AudioWaveform';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineTimeReadout } from './TimelineTimeReadout';
 import { TimelineMarkerLines, TimelineRuler } from './TimelineRuler';
@@ -24,28 +22,13 @@ import {
   snapDragPosition,
   trackSpansMarquee,
 } from './timelineGeometry';
+import { TimelineTrack } from './TimelineTrack';
+import { TrackHeader } from './TrackHeader';
+import type { DragState, TrimState } from './types';
 import { MarqueeSelection } from '../Preview/MarqueeSelection';
 import styles from './Timeline.module.css';
 
 const PIXELS_PER_SECOND_BASE = 50;
-
-interface DragState {
-  clipId: string;
-  originalTrackId: string;
-  originalPosition: number;
-  currentTrackId: string;
-  currentPosition: number;
-  snappedPosition: number | null;
-  offsetX: number; // Mouse offset from clip left edge
-}
-
-interface TrimState {
-  clipId: string;
-  edge: 'start' | 'end';
-  originalStartTime: number;
-  originalEndTime: number;
-  originalTimelinePosition: number;
-}
 
 interface TimelineProps {
   onExportSelection?: (timeRange: { start: number; end: number }) => void;
@@ -59,8 +42,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [trimState, setTrimState] = useState<TrimState | null>(null);
-  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
-  const [editingTrackName, setEditingTrackName] = useState('');
   const [tlMarqueeStart, setTlMarqueeStart] = useState<{x: number; y: number} | null>(null);
   const [tlMarqueeCurrent, setTlMarqueeCurrent] = useState<{x: number; y: number} | null>(null);
   const tlMarqueeActive = tlMarqueeStart !== null && tlMarqueeCurrent !== null;
@@ -583,45 +564,6 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     removeTrack(trackId);
   }, [tracks.length, clips, removeTrack]);
 
-  // Handle mute toggle with volume memory
-  const handleMuteToggle = useCallback((track: typeof tracks[0]) => {
-    if (track.muted) {
-      // Unmuting: restore last volume (or default to 1 if no lastVolume)
-      const restoredVolume = track.lastVolume ?? 1;
-      updateTrack(track.id, { muted: false, volume: restoredVolume });
-    } else {
-      // Muting: save current volume and set to 0
-      updateTrack(track.id, { muted: true, lastVolume: track.volume, volume: 0 });
-    }
-  }, [updateTrack]);
-
-  // Handle track name editing
-  const handleTrackNameDoubleClick = useCallback((track: typeof tracks[0]) => {
-    setEditingTrackId(track.id);
-    setEditingTrackName(track.name);
-  }, []);
-
-  const handleTrackNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setEditingTrackName(e.target.value);
-  }, []);
-
-  const handleTrackNameBlur = useCallback(() => {
-    if (editingTrackId && editingTrackName.trim()) {
-      updateTrack(editingTrackId, { name: editingTrackName.trim() });
-    }
-    setEditingTrackId(null);
-    setEditingTrackName('');
-  }, [editingTrackId, editingTrackName, updateTrack]);
-
-  const handleTrackNameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleTrackNameBlur();
-    } else if (e.key === 'Escape') {
-      setEditingTrackId(null);
-      setEditingTrackName('');
-    }
-  }, [handleTrackNameBlur]);
-
   // Track whether marquee was just completed so handleTrackClick can skip deselection
   const marqueeJustFinished = useRef(false);
 
@@ -747,147 +689,16 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
           {/* Scrollable track headers */}
           <div className={styles.trackHeaders} ref={trackHeadersRef} onScroll={handleHeadersScroll}>
             {sortedTracks.map((track, index) => (
-              <div
+              <TrackHeader
                 key={track.id}
-                className={styles.trackHeader}
-                style={{ height: track.height }}
-              >
-                {/* Left side: Vertical volume slider */}
-                <div className={styles.trackVolumeSection}>
-                  <input
-                    type="range"
-                    className={styles.trackVolumeSlider}
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={track.volume ?? 1}
-                    onChange={(e) => {
-                      const newVolume = parseFloat(e.target.value);
-                      // If adjusting volume while muted, unmute
-                      if (track.muted && newVolume > 0) {
-                        updateTrack(track.id, { volume: newVolume, muted: false });
-                      } else {
-                        updateTrack(track.id, { volume: newVolume, lastVolume: newVolume > 0 ? newVolume : track.lastVolume });
-                      }
-                    }}
-                    title={`Volume: ${Math.round((track.volume ?? 1) * 100)}%`}
-                    aria-label={`${track.name} volume`}
-                  />
-                  <button
-                    className={`${styles.trackMuteBtn} ${track.muted ? styles.active : ''}`}
-                    onClick={() => handleMuteToggle(track)}
-                    title={track.muted ? 'Unmute' : 'Mute'}
-                  >
-                    {track.muted ? (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <line x1="23" y1="9" x2="17" y2="15" />
-                        <line x1="17" y1="9" x2="23" y2="15" />
-                      </svg>
-                    ) : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-
-                {/* Right side: Track info and controls */}
-                <div className={styles.trackInfoSection}>
-                  <div className={styles.trackHeaderTop}>
-                    {editingTrackId === track.id ? (
-                      <input
-                        type="text"
-                        className={styles.trackNameInput}
-                        value={editingTrackName}
-                        onChange={handleTrackNameChange}
-                        onBlur={handleTrackNameBlur}
-                        onKeyDown={handleTrackNameKeyDown}
-                        autoFocus
-                      />
-                    ) : (
-                      <span
-                        className={styles.trackName}
-                        onDoubleClick={() => handleTrackNameDoubleClick(track)}
-                        title="Double-click to rename"
-                      >
-                        {track.name}
-                      </span>
-                    )}
-                    <div className={styles.trackReorderBtns}>
-                      <button
-                        className={styles.trackMoveBtn}
-                        onClick={() => moveTrackUp(track.id)}
-                        disabled={index === 0}
-                        title="Move track up"
-                      >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M12 4L4 14h16L12 4z" />
-                        </svg>
-                      </button>
-                      <button
-                        className={styles.trackMoveBtn}
-                        onClick={() => moveTrackDown(track.id)}
-                        disabled={index === sortedTracks.length - 1}
-                        title="Move track down"
-                      >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M12 20l8-10H4l8 10z" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div className={styles.trackControls}>
-                    <button
-                      className={`${styles.trackControlBtn} ${!track.visible ? styles.active : ''}`}
-                      onClick={() => updateTrack(track.id, { visible: !track.visible })}
-                      title={track.visible ? 'Hide track' : 'Show track'}
-                    >
-                      {track.visible ? (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                          <line x1="1" y1="1" x2="23" y2="23" />
-                        </svg>
-                      )}
-                    </button>
-                    <button
-                      className={`${styles.trackControlBtn} ${track.locked ? styles.active : ''}`}
-                      onClick={() => updateTrack(track.id, { locked: !track.locked })}
-                      title={track.locked ? 'Unlock track' : 'Lock track'}
-                    >
-                      {track.locked ? (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                        </svg>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                          <path d="M7 11V7a5 5 0 0 1 9.9-1" />
-                        </svg>
-                      )}
-                    </button>
-                    <button
-                      className={`${styles.trackControlBtn} ${styles.trackDeleteBtn}`}
-                      onClick={() => handleDeleteTrack(track.id)}
-                      disabled={tracks.length <= 1}
-                      title="Delete track"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
+                track={track}
+                index={index}
+                trackCount={sortedTracks.length}
+                onUpdateTrack={updateTrack}
+                onMoveTrackUp={moveTrackUp}
+                onMoveTrackDown={moveTrackDown}
+                onDeleteTrack={handleDeleteTrack}
+              />
             ))}
           </div>
         </div>
@@ -902,134 +713,20 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
         >
           <div className={styles.tracksContent} style={{ width: timelineWidth }}>
             {sortedTracks.map((track) => (
-              <div
+              <TimelineTrack
                 key={track.id}
-                className={`${styles.track} ${!track.visible ? styles.trackHidden : ''} ${track.locked ? styles.trackLocked : ''}`}
-                style={{ height: track.height }}
-                data-track-id={track.id}
-              >
-                {/* Clips on this track */}
-                {getTrackClips(track.id).map((clip) => {
-                  const isDragging = dragState?.clipId === clip.id;
-                  // During bulk drag, show all multi-selected clips moving together
-                  const isBulkDragging = !isDragging && dragState && selectedClipIds.has(clip.id) && selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1;
-                  const bulkDragDelta = isBulkDragging ? dragState.currentPosition - dragState.originalPosition : 0;
-                  const displayPosition = isDragging ? dragState.currentPosition : clip.timelinePosition + bulkDragDelta;
-                  const displayTrackId = isDragging ? dragState.currentTrackId : clip.trackId;
-
-                  // Only render if on this track (or being dragged to this track)
-                  if (displayTrackId !== track.id && !isDragging) return null;
-                  if (isDragging && displayTrackId !== track.id) return null;
-
-                  const clipX = timeToPixels(displayPosition, pixelsPerSecond);
-                  const clipWidth = timeToPixels(clip.duration, pixelsPerSecond);
-                  const isSelected = clip.id === selectedClipId;
-                  const isMultiSelected = selectedClipIds.has(clip.id);
-
-                  const isTrimming = trimState?.clipId === clip.id;
-
-                  // Check media type and overlay type for visual styling
-                  const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
-                  const isAudioClip = sourceMedia?.mediaType === 'audio';
-                  const isImageClip = sourceMedia?.mediaType === 'image';
-                  const isTextOverlay = clip.overlayType === 'text';
-                  const isShapeOverlay = clip.overlayType === 'shape';
-
-                  // Check if this clip has waveform data
-                  const hasWaveform = sourceMedia?.hasAudio && sourceMedia?.waveformData && sourceMedia.waveformData.length > 0;
-
-                  return (
-                    <div
-                      key={clip.id}
-                      data-clip-id={clip.id}
-                      className={`${styles.clip} ${isSelected ? styles.clipSelected : ''} ${isMultiSelected && !isSelected ? styles.clipMultiSelected : ''} ${isDragging || isBulkDragging ? styles.clipDragging : ''} ${isTrimming ? styles.clipTrimming : ''} ${isAudioClip ? styles.clipAudio : ''} ${isImageClip ? styles.clipImage : ''} ${isTextOverlay ? styles.clipText : ''} ${isShapeOverlay ? styles.clipShape : ''}`}
-                      style={{
-                        left: clipX,
-                        width: clipWidth,
-                      }}
-                      onMouseDown={(e) => handleClipMouseDown(e, clip)}
-                    >
-                      {/* Audio waveform visualization */}
-                      {hasWaveform && sourceMedia && (
-                        <AudioWaveform
-                          peaks={sourceMedia.waveformData!}
-                          sourceDuration={sourceMedia.duration}
-                          startTime={clip.startTime}
-                          endTime={clip.endTime}
-                          width={clipWidth}
-                          height={track.height - 4}
-                          isAudioClip={isAudioClip}
-                          isSelected={isSelected}
-                        />
-                      )}
-                      {/* Left trim handle */}
-                      <div
-                        className={styles.trimHandle}
-                        style={{ left: 0 }}
-                        onMouseDown={(e) => handleTrimMouseDown(e, clip, 'start')}
-                      />
-                      {/* Right trim handle */}
-                      <div
-                        className={styles.trimHandle}
-                        style={{ right: 0 }}
-                        onMouseDown={(e) => handleTrimMouseDown(e, clip, 'end')}
-                      />
-                      <div className={styles.clipContent}>
-                        {isAudioClip && (
-                          <svg className={styles.clipIcon} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M9 18V5l12-2v13" />
-                            <circle cx="6" cy="18" r="3" />
-                            <circle cx="18" cy="16" r="3" />
-                          </svg>
-                        )}
-                        {isImageClip && (
-                          <svg className={styles.clipIcon} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <polyline points="21 15 16 10 5 21" />
-                          </svg>
-                        )}
-                        {isTextOverlay && (
-                          <svg className={styles.clipIcon} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="4 7 4 4 20 4 20 7" />
-                            <line x1="9" y1="20" x2="15" y2="20" />
-                            <line x1="12" y1="4" x2="12" y2="20" />
-                          </svg>
-                        )}
-                        {isShapeOverlay && clip.shapeData?.type === 'blur' && (
-                          <svg className={styles.clipIcon} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
-                            <circle cx="12" cy="12" r="4" />
-                          </svg>
-                        )}
-                        {isShapeOverlay && clip.shapeData?.type !== 'blur' && (
-                          <svg className={styles.clipIcon} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                          </svg>
-                        )}
-                        <span className={styles.clipName}>{clip.name}</span>
-                        <span className={styles.clipDuration}>{formatTime(clip.duration)}</span>
-                      </div>
-                      {/* Keyframe diamonds */}
-                      <ClipKeyframeDiamonds clip={clip} pixelsPerSecond={pixelsPerSecond} />
-                    </div>
-                  );
-                })}
-
-                {/* Render dragged clip preview on target track */}
-                {dragState && dragState.currentTrackId === track.id && dragState.originalTrackId !== track.id && (
-                  <div
-                    className={`${styles.clip} ${styles.clipPreview}`}
-                    style={{
-                      left: timeToPixels(dragState.currentPosition, pixelsPerSecond),
-                      width: timeToPixels(
-                        clips.find(c => c.id === dragState.clipId)?.duration || 0,
-                        pixelsPerSecond
-                      ),
-                    }}
-                  />
-                )}
-              </div>
+                track={track}
+                clips={getTrackClips(track.id)}
+                allClips={clips}
+                sourceVideos={sourceVideos}
+                pixelsPerSecond={pixelsPerSecond}
+                selectedClipId={selectedClipId}
+                selectedClipIds={selectedClipIds}
+                dragState={dragState}
+                trimState={trimState}
+                onClipMouseDown={handleClipMouseDown}
+                onTrimMouseDown={handleTrimMouseDown}
+              />
             ))}
 
             {/* In/Out region highlight over tracks */}
