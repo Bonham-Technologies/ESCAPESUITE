@@ -607,9 +607,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
+      // Seed from DEFAULT_TRANSITION the way updateClipAnimation seeds from DEFAULT_ANIMATION:
+      // a clip loaded from a foreign project file can be missing `transition` entirely, and a
+      // half-written `{ type }` with no duration crashes TransitionSection's `duration.toFixed(1)`.
       return {
         ...clip,
-        transition: { ...clip.transition, ...transitionUpdates },
+        transition: { ...DEFAULT_TRANSITION, ...clip.transition, ...transitionUpdates },
       };
     });
 
