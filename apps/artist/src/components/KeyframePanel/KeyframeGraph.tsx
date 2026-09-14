@@ -500,7 +500,7 @@ export function KeyframeGraph({
           textAnchor="middle"
           aria-hidden="true"
         >
-          Double-click to add • Right-click to delete • Drag to move
+          Double-click to add • Drag to move • Arrow keys to navigate
         </text>
       </svg>
 

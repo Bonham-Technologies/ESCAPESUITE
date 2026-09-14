@@ -159,7 +159,7 @@ exporters only iterate `timeline.clips`.
 
 ### Keyframe Animation System (`src/utils/animation.ts`)
 Clips support animated properties via keyframes:
-- **Animatable properties**: `x`, `y`, `scaleX`, `scaleY`, `rotation`, `opacity`, `blur`
+- **Animatable properties**: `x`, `y`, `scaleX`, `scaleY`, `rotation`, `opacity`, `blur`, `volume` (audio clips)
 - **Easing types**: `linear`, `ease-in`, `ease-out`, `ease-in-out`, plus quadratic/cubic variants
 - **Preset animations**: Clips can have in/out presets (`fade`, `slide-*`, `scale-*`, `pop`, `blur`)
 - **Custom keyframes**: Per-property keyframe arrays override presets when present; each keyframe's
@@ -181,6 +181,65 @@ Clips support animated properties via keyframes:
   (`EASING_TYPES` from `src/utils/easingOptions.ts`, shared with the animate-in/out presets); new
   keyframes default to `ease-in-out` and a value drag preserves the stored easing
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
+- **KeyframeGraph.tsx keyboard map** — the `<svg>` is one focusable
+  `role="listbox"` (`tabIndex={0}`, `aria-activedescendant`) rather than one `tabIndex` per
+  keyframe: a single tab stop matches the APG listbox pattern, and `tabindex` on SVG *child*
+  elements has a shakier cross-browser/AT story (Safari especially) than a focusable root with
+  `aria-activedescendant`. Every keyframe — presets included — is a `role="option"` `<circle>`
+  so the whole curve is walkable and perceivable by a screen-reader user; a preset is visitable
+  but never selectable or editable, and is announced with a trailing "preset, not editable". The
+  grid, curve `<path>`, playhead line and help `<text>` are all `aria-hidden="true"` so axe's
+  `aria-required-children` rule accepts the listbox's non-option children. The hook implementing
+  all of this, `useKeyframeGraphKeyboard` (`hooks/useKeyframeGraphKeyboard.ts`), lives beside the
+  panel rather than inside the component so the graph's own render stays about drawing.
+
+  | Keys | Action | Step / unit |
+  |---|---|---|
+  | `Tab` | into the graph, then on to the easing select when one is shown | — |
+  | `ArrowLeft` / `ArrowRight` | previous / next keyframe in time; selection follows the active option; clamps at the ends (no wrap) | — |
+  | `Home` / `End` | first / last keyframe | — |
+  | `ArrowUp` / `ArrowDown` | nudge the selected keyframe's **value** | fine step (table below) |
+  | `Shift+ArrowUp` / `Shift+ArrowDown` | nudge value, coarse | coarse step |
+  | `Alt+ArrowLeft` / `Alt+ArrowRight` | nudge the selected keyframe's **time** | ∓ 0.01 s |
+  | `Alt+Shift+ArrowLeft` / `Alt+Shift+ArrowRight` | nudge time, coarse | ∓ 0.1 s |
+  | `Enter` | add a keyframe at the playhead, at the curve's value there | — |
+  | `Delete` / `Backspace` | delete the selected keyframe (custom only) | — |
+  | `Escape` | clear the graph's selection (only when one is set) | — |
+
+  `NUDGE_STEPS` (`useKeyframeGraphKeyboard.ts`), each property's own unit:
+
+  | Property | fine | coarse | unit |
+  |---|---|---|---|
+  | `x`, `y` | 0.01 | 0.1 | fraction of canvas (1% / 10%) |
+  | `scaleX`, `scaleY` | 0.01 | 0.1 | scale factor |
+  | `rotation` | 1 | 15 | degrees |
+  | `opacity` | 0.01 | 0.1 | 0–1 (1% / 10%) |
+  | `blur` | 1 | 5 | px |
+  | `volume` | 0.01 | 0.1 | 0–1 (1% / 10%) |
+
+  `TIME_NUDGE` is `{ fine: 0.01, coarse: 0.1 }` seconds for every property: 0.01 s is ten times
+  the graph's own 0.001 s "same keyframe" tolerance, so a fine nudge can never silently land on a
+  neighbour, and 0.1 s is a tenth of the graph's one-second gridlines. A nudge that *would* land
+  within 0.001 s of another keyframe (presets included) is refused rather than merging the two —
+  nothing moves, and the live region announces why. Each arrow-key nudge is its own undo step
+  (every store action pushes history), unlike a drag, which is one; that matches the inspector's
+  numeric controls and was an accepted tradeoff rather than an oversight.
+
+  **Propagation contract**: while the graph has focus it owns `ArrowLeft`/`Right`/`Up`/`Down`,
+  `Home`, `End` and `Enter` unconditionally, and claims `Delete`/`Backspace`/`Escape` only when a
+  keyframe is *active* (custom or preset) — swallowing them even for a preset so an active-but-
+  uneditable selection can't fall through and delete the whole clip. With nothing active, Delete
+  is not claimed and reaches the editor's global shortcuts as before. Everything else (`Tab`,
+  `Space`, `?`, letters) falls through untouched. The shield is React's synthetic
+  `stopPropagation()` on the root-container listener, which runs before the two `window`-level
+  cascades (`useAppKeyboardShortcuts` and `Preview/PlaybackControls.tsx`) ever see the native
+  event. Fixes a bug (ESCSUITE-49) where Delete with a keyframe selected deleted both the
+  keyframe *and* the selected clip, because the graph's old listener was itself on `window`
+  alongside the editor's.
+
+  **Known limitation**: `ExportDialog` listens on `document` in the capture phase, which runs
+  *before* the graph's handler and so can't be shielded by its `stopPropagation()`. This is moot
+  in practice — the graph can't hold focus while that dialog is open.
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin

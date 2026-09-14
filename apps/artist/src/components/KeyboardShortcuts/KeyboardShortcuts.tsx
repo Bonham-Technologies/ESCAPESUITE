@@ -64,6 +64,26 @@ const shortcutGroups: ShortcutGroup[] = [
     ],
   },
   {
+    title: 'Keyframe Graph',
+    shortcuts: [
+      { keys: ['←'], description: 'Previous Keyframe' },
+      { keys: ['→'], description: 'Next Keyframe' },
+      { keys: ['Home'], description: 'First Keyframe' },
+      { keys: ['End'], description: 'Last Keyframe' },
+      { keys: ['↑'], description: 'Nudge Value Up' },
+      { keys: ['↓'], description: 'Nudge Value Down' },
+      { keys: ['Shift', '↑'], description: 'Nudge Value Up (Coarse)' },
+      { keys: ['Shift', '↓'], description: 'Nudge Value Down (Coarse)' },
+      { keys: ['Alt', '←'], description: 'Nudge Time Back' },
+      { keys: ['Alt', '→'], description: 'Nudge Time Forward' },
+      { keys: ['Alt', 'Shift', '←'], description: 'Nudge Time Back (Coarse)' },
+      { keys: ['Alt', 'Shift', '→'], description: 'Nudge Time Forward (Coarse)' },
+      { keys: ['Enter'], description: 'Add Keyframe at Playhead' },
+      { keys: ['Delete'], description: 'Delete Keyframe' },
+      { keys: ['Escape'], description: 'Clear Keyframe Selection' },
+    ],
+  },
+  {
     title: 'File',
     shortcuts: [
       { keys: ['Ctrl', 'S'], description: 'Save Project' },

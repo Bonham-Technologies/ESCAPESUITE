@@ -14,7 +14,7 @@ describe('KeyboardShortcuts', () => {
   it('lists every shortcut group', () => {
     render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
 
-    for (const group of ['Tools', 'Playback', 'Editing', 'Timeline', 'Panels', 'File']) {
+    for (const group of ['Tools', 'Playback', 'Editing', 'Timeline', 'Panels', 'Keyframe Graph', 'File']) {
       expect(screen.getByRole('heading', { name: group, level: 3 })).toBeInTheDocument()
     }
   })
@@ -31,7 +31,7 @@ describe('KeyboardShortcuts', () => {
     const splitRow = screen.getByText('Selection Tool').closest(`.${styles.shortcutRow}`)!
     expect(Array.from(splitRow.querySelectorAll('kbd')).map((k) => k.textContent)).toEqual(['V'])
     expect(splitRow.querySelectorAll(`.${styles.plus}`)).toHaveLength(0)
-    expect(container.querySelectorAll(`.${styles.group}`)).toHaveLength(6)
+    expect(container.querySelectorAll(`.${styles.group}`)).toHaveLength(7)
   })
 
   it('closes when the close button is used', async () => {
