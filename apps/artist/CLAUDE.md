@@ -332,14 +332,14 @@ component.
 
 | Module | Owns |
 |--------|------|
-| `Timeline.tsx` | The composition: the store selectors, the container/ruler/headers/track refs, the hook calls in their fixed order, the in/out region and snap-line overlays, and the info bar |
+| `Timeline.tsx` | The composition: the store selectors, the container/ruler/headers/track refs, the hook calls in their fixed order, the in/out region and snap-line overlays, and the info bar. Also `clipsByTrack`, the memo that gives each row an identity-stable `clips` array — see the memo-boundary note below |
 | `timelineGeometry.ts` | All of the timeline's maths as pure functions — ruler tick spacing, pointer-to-time, clamping, snap resolution for a drag, the trim's re-derivation from its origin, and the marquee's time/Y ranges and hit tests. No ref, no store, no render |
 | `types.ts` | `DragState` and `TrimState` — the two gesture shapes the hooks own and `TimelineTrack` draws from, so neither has to import the other. **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
-| `TimelineRuler.tsx` | The ruler: ticks and labels, the marker flags, the in/out handles and the region they bracket. Also exports `TimelineMarkerLines`, the marker verticals drawn down over the tracks |
+| `TimelineRuler.tsx` | The ruler: ticks and labels, the marker flags, the in/out handles and the region they bracket. `React.memo`'d — nothing on it can change during a gesture. Also exports `TimelineMarkerLines`, the marker verticals drawn down over the tracks (not memo'd: it re-renders with `Timeline` and is two divs) |
 | `TimelinePlayhead.tsx` | The playhead line — `React.memo`'d and subscribing to `currentTime` itself, so a playback tick moves this element instead of re-rendering the timeline |
 | `TimelineTimeReadout.tsx` | The `current / total` readout in the info bar, split out for the same reason |
-| `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, waveform and keyframe diamonds |
-| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls |
+| `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
+| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — every prop is stable across a gesture, so the whole column sits one out |
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
 | `AudioWaveform.tsx` | The canvas waveform inside a clip, capped at 4000 CSS px of backing store and CSS-scaled beyond it, because browsers refuse a canvas much wider |
 | `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
@@ -351,6 +351,30 @@ component.
 | `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking. The rows are still walked on the release only — once per gesture, never per frame |
 | `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips |
 | `useTimelineSeek.ts` | The two click-to-seek handlers — the ruler's, and the track area's with every reason it stands down (a drag, a scrub, the click that ended a marquee, a click on the playhead) and the deselection it does when the click really was on bare track |
+
+**Three memo boundaries, and why they are where they are.** A timeline gesture's state —
+`dragState`, `trimState`, the marquee rectangle — lives in the hooks `Timeline` calls, so every
+pointer frame re-renders `Timeline` and, before this, everything under it: four rows, four
+headers and a ruler that rebuilt 61 tick objects, 20 times a drag. `TimelineRuler`,
+`TrackHeader` and `TimelineTrack` are each `React.memo`'d, and the memoisation that makes the
+third one work is `Timeline`'s own `clipsByTrack`: `getTrackClips` used to `map` a fresh array
+per track per render, and a fresh `clips` prop defeats a memo entirely. **Memoise the array
+before, or with, the row — never the row alone.** What each boundary actually catches, measured
+2026-09-13 in `timelineGestures.perf.test.ts` (renders per pointer frame, before → after):
+
+| | clip drag | marquee |
+|---|---|---|
+| `TimelineTrack` | 4 → 4 (`dragState` is its prop) | 4 → 0 |
+| `TrackHeader` | 4 → 0 | 4 → 0 |
+| `TimelineRuler` / `getRulerTicks` | 1 → 0 | 1 → 0 |
+
+In the browser (`pnpm perf`, paired alternation, three rounds per arm) that is **clipDrag
+10.91 → 8.77 ms of JS per frame (−19.6%)** and **marquee 10.39 → 5.54 ms (−46.7%)**, both with
+disjoint ranges; `playheadScrub` is unchanged, because a scrub writes `currentTime` and
+`Timeline` does not subscribe to it. Forced layouts are untouched at 0.82 and 0.98 per frame —
+those were round 2's Task 2, and this is the render half. `TimelinePane` stays **unmemoised**
+on purpose (see the App section). The three ceilings for a drag are asserted as exact zeroes,
+not at 2x: a single re-render per frame means a prop has become unstable again.
 
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`

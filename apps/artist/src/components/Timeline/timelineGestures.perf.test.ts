@@ -600,20 +600,102 @@ describe('usePlayheadDrag and useInOutDrag per-move work', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The rendered timeline: what a drag frame re-renders
+// The rendered timeline: what a gesture frame re-renders
 // ---------------------------------------------------------------------------
+
+/**
+ * Every render counter installed by the current test, drained in `afterEach`.
+ *
+ * `vi.restoreAllMocks` cannot undo the `type` swap below, and a counter left on
+ * a component would follow the module into the next test in this file. The
+ * tests call `restore()` themselves at the end of a measurement; this is the
+ * safety net for the run where an assertion throws first.
+ */
+const installedCounters: Array<() => void> = []
+
+afterEach(() => {
+  while (installedCounters.length > 0) installedCounters.pop()!()
+})
+
+/** A render counter installed on a component, and the way to take it off. */
+interface RenderCounter {
+  calls: () => number
+  /** Every props object the component has been rendered with, in order. */
+  props: () => unknown[]
+  restore: () => void
+}
+
+/**
+ * Count one `React.memo`'d component's renders.
+ *
+ * `vi.spyOn` cannot do it: `React.memo(fn)` is an *object*, and spying refuses
+ * anything that is not a function. What React actually calls on each render is
+ * that object's `type`, so the counter goes there — a pass-through `vi.fn`
+ * around the original render function, swapped back in `restore`. A memo that
+ * bails out never reaches `type`, which is exactly what these counters are for:
+ * a skipped render is a call that does not happen.
+ */
+function countMemoRenders(component: unknown): RenderCounter {
+  const memo = component as { type?: (props: never) => unknown }
+  const original = memo.type
+  // A component that is no longer memo'd has no `type`, and the counter would
+  // then sit on nothing and report a perfect zero. Refuse instead: these
+  // ceilings exist to catch a lost memo, not to be satisfied by one.
+  if (typeof original !== 'function') {
+    throw new Error('countMemoRenders: not a React.memo component')
+  }
+  const spy = vi.fn(original)
+  memo.type = spy
+  const restore = () => { memo.type = original }
+  installedCounters.push(restore)
+  return {
+    calls: () => spy.mock.calls.length,
+    props: () => spy.mock.calls.map((call) => call[0]),
+    restore,
+  }
+}
+
+/** The three memo boundaries of the track stack, counted together. */
+function countTimelineRenders() {
+  const tracks = countMemoRenders(timelineTrackModule.TimelineTrack)
+  const headers = countMemoRenders(trackHeaderModule.TrackHeader)
+  const rulers = countMemoRenders(timelineRulerModule.TimelineRuler)
+  // `getRulerTicks` is a plain function, so the ordinary pass-through spy
+  // applies. No mockImplementation: the real ticks are still built.
+  const ticks = vi.spyOn(timelineGeometry, 'getRulerTicks')
+  const read = () => ({
+    tracks: tracks.calls(),
+    headers: headers.calls(),
+    rulers: rulers.calls(),
+    ticks: ticks.mock.calls.length,
+  })
+  return {
+    read,
+    restore: () => {
+      tracks.restore()
+      headers.restore()
+      rulers.restore()
+      ticks.mockRestore()
+    },
+  }
+}
+
+/** The per-frame difference between two counter readings. */
+function perFrame(
+  before: ReturnType<ReturnType<typeof countTimelineRenders>['read']>,
+  after: ReturnType<ReturnType<typeof countTimelineRenders>['read']>
+) {
+  return {
+    tracks: (after.tracks - before.tracks) / MOVES,
+    headers: (after.headers - before.headers) / MOVES,
+    rulers: (after.rulers - before.rulers) / MOVES,
+    ticks: (after.ticks - before.ticks) / MOVES,
+  }
+}
 
 describe('the rendered timeline during a clip drag', () => {
   it('holds its renders per drag frame to their ceilings', () => {
-    // Pass-through spies, installed before the render so each component's
-    // element type identity stays stable across every commit. No
-    // mockImplementation: the real components still render, and these only
-    // count. A React `Profiler` cannot do this job — `onRender` fires per
-    // commit for a whole subtree, not per component (see App.rerender.test.tsx).
-    const trackRenders = vi.spyOn(timelineTrackModule, 'TimelineTrack')
-    const headerRenders = vi.spyOn(trackHeaderModule, 'TrackHeader')
-    const rulerRenders = vi.spyOn(timelineRulerModule, 'TimelineRuler')
-    const rulerTicks = vi.spyOn(timelineGeometry, 'getRulerTicks')
+    const counters = countTimelineRenders()
 
     const { container: root } = render(createElement(Timeline))
     const trackArea = root.querySelector('[data-track-id]')!.parentElement!
@@ -631,35 +713,21 @@ describe('the rendered timeline during a clip drag', () => {
     const clip = root.querySelector('[data-clip-id="perf-clip-0"]') as HTMLElement
     setRect(clip, { left: LEFT, top: 0, width: 2 * PPS, height: ROW_HEIGHT })
 
-    trackRenders.mockClear()
-    headerRenders.mockClear()
-    rulerRenders.mockClear()
-    rulerTicks.mockClear()
-
     act(() => {
       clip.dispatchEvent(
         new MouseEvent('mousedown', { bubbles: true, clientX: LEFT + 50, clientY: v1Y })
       )
     })
-    const afterPress = {
-      tracks: trackRenders.mock.calls.length,
-      headers: headerRenders.mock.calls.length,
-      rulers: rulerRenders.mock.calls.length,
-      ticks: rulerTicks.mock.calls.length,
-    }
+    const afterPress = counters.read()
     // Along `V1` to 14 s — past the 13 s scene, so the commit on release cannot
     // be vetoed for an overlap and the drag provably happened.
     for (let i = 1; i <= MOVES; i++) {
       move(LEFT + 50 + (i * 700) / MOVES, v1Y)
     }
 
-    const perFrame = {
-      tracks: (trackRenders.mock.calls.length - afterPress.tracks) / MOVES,
-      headers: (headerRenders.mock.calls.length - afterPress.headers) / MOVES,
-      rulers: (rulerRenders.mock.calls.length - afterPress.rulers) / MOVES,
-      ticks: (rulerTicks.mock.calls.length - afterPress.ticks) / MOVES,
-    }
+    const measured = perFrame(afterPress, counters.read())
     release()
+    counters.restore()
 
     // The drag really moved the clip, so the counts above describe a real
     // gesture rather than a mousedown the timeline ignored.
@@ -667,21 +735,127 @@ describe('the rendered timeline during a clip drag', () => {
       useEditorStore.getState().project.timeline.clips.find((c) => c.id === 'perf-clip-0')!
         .timelinePosition
     ).toBeGreaterThan(0)
-    expect(perFrame.tracks).toBeGreaterThan(0)
+    expect(measured.tracks).toBeGreaterThan(0)
 
-    // Measured 2026-09-13, per drag frame: 4 TimelineTrack renders (one per
-    // track), 4 TrackHeader renders, 1 TimelineRuler render, 1 getRulerTicks
-    // call. Ceilings at 2x.
+    // Measured 2026-09-13, per drag frame, after the three memo boundaries
+    // landed: 4 TimelineTrack renders (one per track), 0 TrackHeader renders,
+    // 0 TimelineRuler renders, 0 getRulerTicks calls. Before them it was
+    // 4 / 4 / 1 / 1.
     //
     // `dragState` lives in `useClipDrag`'s own `useState`, so every pointer
-    // move re-renders `Timeline` and everything under it — including a column
-    // of track headers and a ruler whose content cannot change during a clip
-    // drag, and whose ticks are rebuilt (61 objects at the scene's 60 s ruler
-    // floor) each time. Every number here is a count of renders, not of what a
-    // render costs; the milliseconds are in the browser benchmark.
-    expect(perFrame.tracks).toBeLessThanOrEqual(8)
-    expect(perFrame.headers).toBeLessThanOrEqual(8)
-    expect(perFrame.rulers).toBeLessThanOrEqual(2)
-    expect(perFrame.ticks).toBeLessThanOrEqual(2)
+    // move still re-renders `Timeline` itself. What changed is what that costs
+    // below it: the headers column and the ruler are `React.memo`'d and every
+    // prop they take is stable across a gesture, so neither re-renders and the
+    // ruler's 61 tick objects are no longer rebuilt 20 times a drag. The rows
+    // are memo'd too but still re-render here, because `dragState` is one of
+    // their props and any row may have to draw the ghost — see the marquee test
+    // below for the gesture where the memo does catch them.
+    //
+    // The three zeroes are asserted exactly, not at 2x: they are the memo
+    // boundaries themselves, and one re-render per frame means a prop has
+    // become unstable again. Every number here is a count of renders, not of
+    // what a render costs; the milliseconds are in the browser benchmark.
+    expect(measured.tracks).toBeLessThanOrEqual(8)
+    expect(measured.headers).toBe(0)
+    expect(measured.rulers).toBe(0)
+    expect(measured.ticks).toBe(0)
+  })
+})
+
+describe('the clips a drag frame allocates', () => {
+  it('hands each row the same clips array for the whole drag', () => {
+    const tracks = countMemoRenders(timelineTrackModule.TimelineTrack)
+
+    const { container: root } = render(createElement(Timeline))
+    const trackArea = root.querySelector('[data-track-id]')!.parentElement!
+      .parentElement as HTMLElement
+    setRect(trackArea, { left: LEFT, top: 0, width: 1000, height: ROW_HEIGHT * 4 })
+    const trackRows = [...root.querySelectorAll('[data-track-id]')] as HTMLElement[]
+    trackRows.forEach((row, i) =>
+      setRect(row, { left: LEFT, top: i * ROW_HEIGHT, width: 5000, height: ROW_HEIGHT })
+    )
+    const v1Y =
+      trackRows.findIndex((row) => row.getAttribute('data-track-id') === V1) * ROW_HEIGHT +
+      ROW_HEIGHT / 2
+    const clip = root.querySelector('[data-clip-id="perf-clip-0"]') as HTMLElement
+    setRect(clip, { left: LEFT, top: 0, width: 2 * PPS, height: ROW_HEIGHT })
+
+    act(() => {
+      clip.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, clientX: LEFT + 50, clientY: v1Y })
+      )
+    })
+    const before = tracks.calls()
+    for (let i = 1; i <= MOVES; i++) {
+      move(LEFT + 50 + (i * 700) / MOVES, v1Y)
+    }
+    const renders = tracks.calls() - before
+    const distinct = new Set(
+      tracks.props().slice(before).map((props) => (props as { clips: unknown[] }).clips)
+    )
+    release()
+    tracks.restore()
+
+    // The rows really did re-render, so the identity below is not the identity
+    // of nothing: `dragState` is one of their props and changes every frame.
+    expect(renders).toBe(MOVES * SCENE_TRACKS.length)
+
+    // Exact, not a ceiling — this is a conservation law. Four tracks, one
+    // `clips` array each, built once by `Timeline`'s `clipsByTrack` memo and
+    // handed out unchanged for all 80 renders above. A per-render
+    // `visibleClipsByTrack.get(id).map(...)` allocated a fresh array every time
+    // — 80 of them — and would have defeated `TimelineTrack`'s memo wherever
+    // the memo could otherwise hold (see the marquee test below).
+    expect(distinct.size).toBe(SCENE_TRACKS.length)
+  })
+})
+
+describe('the rendered timeline during a marquee', () => {
+  it('re-renders none of the track stack while the rectangle is dragged', () => {
+    const counters = countTimelineRenders()
+
+    const { container: root } = render(createElement(Timeline))
+    // Every ceiling below is zero, so the counters have to prove they can count
+    // before they are allowed to report none: the mount itself renders all four.
+    const mounted = counters.read()
+    expect(Math.min(mounted.tracks, mounted.headers, mounted.rulers, mounted.ticks)).toBeGreaterThan(0)
+    const trackArea = root.querySelector('[data-track-id]')!.parentElement!
+      .parentElement as HTMLElement
+    setRect(trackArea, { left: LEFT, top: 0, width: 1000, height: ROW_HEIGHT * 4 })
+    const trackRows = [...root.querySelectorAll('[data-track-id]')] as HTMLElement[]
+    trackRows.forEach((row, i) =>
+      setRect(row, { left: LEFT, top: i * ROW_HEIGHT, width: 5000, height: ROW_HEIGHT })
+    )
+
+    // Press on empty track space, well past the scene's last clip, so the
+    // gesture is unambiguously a marquee and not a clip drag.
+    act(() => {
+      trackArea.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, clientX: LEFT + 900, clientY: 8 })
+      )
+    })
+    const afterPress = counters.read()
+    for (let i = 1; i <= MOVES; i++) {
+      move(LEFT + 900 - (i * 400) / MOVES, 8 + (i * ROW_HEIGHT * 3) / MOVES)
+    }
+    const measured = perFrame(afterPress, counters.read())
+    release()
+    counters.restore()
+
+    // The rectangle really existed: a marquee that never cleared its threshold
+    // would re-render nothing for the trivial reason that nothing happened.
+    expect(useEditorStore.getState().selectedClipIds.size).toBeGreaterThan(0)
+
+    // Measured 2026-09-13, per marquee frame: 0 / 0 / 0 / 0, against
+    // 4 / 4 / 1 / 1 before the memo boundaries. A marquee changes none of the
+    // props the track stack takes — `dragState` is null throughout and the
+    // selection is only written on release — so with `Timeline`'s `clipsByTrack`
+    // memo keeping each row's `clips` array identical, the whole stack now sits
+    // out the gesture and only the rectangle itself re-renders. Asserted
+    // exactly: any number above zero means a prop has become unstable.
+    expect(measured.tracks).toBe(0)
+    expect(measured.headers).toBe(0)
+    expect(measured.rulers).toBe(0)
+    expect(measured.ticks).toBe(0)
   })
 })

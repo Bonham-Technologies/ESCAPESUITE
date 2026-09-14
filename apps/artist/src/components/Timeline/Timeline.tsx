@@ -1,5 +1,6 @@
 import React, { useRef, useCallback, useMemo } from 'react';
 import { useEditorStore } from '../../store/projectStore';
+import type { Clip } from '../../store/types';
 import { formatTime, timeToPixels } from '../../utils/timeUtils';
 import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
 import { TimelinePlayhead } from './TimelinePlayhead';
@@ -22,6 +23,14 @@ import styles from './Timeline.module.css';
 interface TimelineProps {
   onExportSelection?: (timeRange: TimeRange) => void;
 }
+
+/**
+ * The `clips` prop of a track with nothing on it.
+ *
+ * One shared array rather than a fresh `[]`, so an empty row's prop keeps its
+ * identity too and `TimelineTrack`'s memo holds for it as well.
+ */
+const NO_CLIPS: Clip[] = [];
 
 export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -90,13 +99,25 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     [visibleClips]
   );
 
+  // The clips each track draws, materialised once per virtualiser result.
+  //
+  // This has to be a memo and not a per-render `map`: `TimelineTrack` is
+  // `React.memo`'d, and a fresh array per render would change the `clips` prop's
+  // identity on every pointer frame of a drag or a marquee and defeat the memo
+  // entirely. `visibleClipsByTrack` only changes when the virtualiser's answer
+  // does — never mid-gesture, since a drag commits on release.
+  const clipsByTrack = useMemo(() => {
+    const byTrack = new Map<string, Clip[]>();
+    for (const [trackId, visible] of visibleClipsByTrack) {
+      byTrack.set(trackId, visible.map(vc => vc.clip));
+    }
+    return byTrack;
+  }, [visibleClipsByTrack]);
+
   // Get clips for a specific track (only visible clips)
   const getTrackClips = useCallback(
-    (trackId: string) => {
-      const trackClips = visibleClipsByTrack.get(trackId);
-      return trackClips ? trackClips.map(vc => vc.clip) : [];
-    },
-    [visibleClipsByTrack]
+    (trackId: string) => clipsByTrack.get(trackId) ?? NO_CLIPS,
+    [clipsByTrack]
   );
 
   // Scrubbing the playhead

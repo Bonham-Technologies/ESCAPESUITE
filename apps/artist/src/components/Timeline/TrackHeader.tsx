@@ -30,8 +30,15 @@ interface TrackHeaderProps {
  * Everything else is the caller's: reordering needs the whole stack and
  * deleting needs the clips that would go with the track, so both arrive as
  * callbacks that take a track id.
+ *
+ * `React.memo`'d: nothing a header shows can change during a timeline gesture,
+ * and `Timeline` re-renders on every pointer frame of one because the drag and
+ * marquee state live in its hooks. All six props are stable across a gesture —
+ * the three callbacks come from `useTrackHeaderActions`, whose deps are the
+ * track list and the clips — so the whole headers column now sits out a drag
+ * (`timelineGestures.perf.test.ts`).
  */
-export function TrackHeader({
+export const TrackHeader = React.memo(function TrackHeader({
   track,
   index,
   trackCount,
@@ -224,4 +231,4 @@ export function TrackHeader({
       </div>
     </div>
   );
-}
+});
