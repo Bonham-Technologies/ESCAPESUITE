@@ -462,6 +462,17 @@ a live array rather than a count: `useAppKeyboardShortcuts`' Ctrl+B (split) bran
 `clips.find(...)`, while `useProjectActions`' `clipCount` and the header's `canExport` only
 ever want `clips.length`.
 
+**The keyboard cascade's 37 deps re-bind the listener, and that is fine — measured, not
+assumed.** Every change to one of the 37 values `useAppKeyboardShortcuts` closes over tears the
+`keydown` listener off `window` and binds a fresh closure. Round 2 counted it rather than
+guessing: `useAppKeyboardShortcuts.rebinds.test.tsx` drives the hook through `App`'s own
+selectors over a scripted 20-edit burst and measures **15 re-binds** (2026-09-13) — about one
+listener swap per edit and none per frame; five edits (a playhead write, a transform, a clip
+move, a marker, a blend mode) changed nothing the cascade depends on, because `clips` is a
+dependency only through its `length`. Fifteen listener swaps spread over a minute of editing is
+not worth changing the Ctrl+B staleness semantics for, so **the array stays verbatim**. The test
+pins that finding, with the assertion to lower if the handler is ever moved into a ref.
+
 **`App` reads `currentTime` on demand and must never subscribe to it.** There is no
 `currentTime` selector anywhere in `App.tsx` or `src/app/`: the shortcut handlers that need the
 live value (razor split at the playhead, add marker, set in/out point) read
@@ -495,7 +506,7 @@ and queries `styles.menuBackdrop`.
 | `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect |
 | `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
-| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. The editor's **fourth** effect. Its deps array is the inline one character for character, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately |
+| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. The editor's **fourth** effect. Its deps array is the inline one character for character, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **37 deps, measured and left verbatim** — see below |
 | `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **fifth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
 | `AppHeader.tsx` | The top bar: the dashboard link (hidden in the standalone build, which this component asks about itself), the wordmark, the project-name field, and the File menu plus the quick Save and Export buttons |
