@@ -2,121 +2,17 @@
 
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { EditorState, Project, SourceVideo, Clip, Timeline, Track, ClipTransform, ClipEffects, BlendMode, UndoableState, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe, WaveformPeak } from './types';
+import type { EditorState, Project, SourceVideo, Clip, Track, ClipTransform, ClipEffects, BlendMode, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA, DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
-import { createUndoableSnapshot, cloneClip } from '../utils/deepClone';
-import { convertLegacyOverlays } from './legacyOverlays';
+import { cloneClip } from '../utils/deepClone';
+import { getUndoableState, pushToHistory } from './storeHistory';
+import { createEmptyProject, createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
+import { sameSourceVideo } from './sourceVideoEquality';
+import { ensureTimelineHasTracks } from './projectMigration';
 
-// Maximum history size to prevent memory issues
-const MAX_HISTORY_SIZE = 50;
-
-// Helper to get undoable state snapshot
-function getUndoableState(state: EditorState): UndoableState {
-  return createUndoableSnapshot(state.project, state.sourceVideos);
-}
-
-// Helper to push state to history (call before making changes)
-function pushToHistory(state: EditorState): { past: UndoableState[]; future: UndoableState[] } {
-  const snapshot = getUndoableState(state);
-  const newPast = [...state.history.past, snapshot];
-
-  // Limit history size
-  if (newPast.length > MAX_HISTORY_SIZE) {
-    newPast.shift();
-  }
-
-  return {
-    past: newPast,
-    future: [], // Clear future on new action
-  };
-}
-
-// Create a default track
-function createDefaultTrack(index: number = 0): Track {
-  return {
-    id: uuidv4(),
-    name: `Track ${index + 1}`,
-    index,
-    visible: true,
-    locked: false,
-    muted: false,
-    volume: 1,
-    height: 60,
-  };
-}
-
-// Create a track at the top of the stack (highest index)
-function createTrackAtTop(tracks: Track[], name?: string): Track {
-  const newIndex = tracks.length > 0 ? Math.max(...tracks.map(t => t.index)) + 1 : 0;
-  return {
-    id: uuidv4(),
-    name: name || `Track ${newIndex + 1}`,
-    index: newIndex,
-    visible: true,
-    locked: false,
-    muted: false,
-    volume: 1,
-    height: 60,
-  };
-}
-
-// Find an empty track (no clips assigned) - returns lowest index empty track
-function findEmptyTrack(tracks: Track[], clips: Clip[]): Track | null {
-  const usedTrackIds = new Set(clips.map(c => c.trackId));
-  const emptyTracks = tracks.filter(t => !usedTrackIds.has(t.id));
-  if (emptyTracks.length === 0) return null;
-  // Return the one with lowest index
-  return emptyTracks.reduce((a, b) => a.index < b.index ? a : b);
-}
-
-function createEmptyTimeline(): Timeline {
-  const defaultTrack = createDefaultTrack(0);
-  return {
-    tracks: [defaultTrack],
-    clips: [],
-    textOverlays: [],
-    shapeOverlays: [],
-    duration: 0,
-  };
-}
-
-// Name given to a project that has never been named by the user or a host.
-export const DEFAULT_PROJECT_NAME = 'Untitled Project';
-
-function createEmptyProject(): Project {
-  return {
-    id: uuidv4(),
-    name: DEFAULT_PROJECT_NAME,
-    created: Date.now(),
-    modified: Date.now(),
-    resolution: { width: 1920, height: 1080 },
-    timeline: createEmptyTimeline(),
-  };
-}
-
-// Calculate timeline duration from all clips (max end position)
-function calculateTimelineDuration(clips: Clip[]): number {
-  if (clips.length === 0) return 0;
-  return Math.max(...clips.map(c => c.timelinePosition + c.duration));
-}
-
-// SourceVideo is flat scalars plus waveformData, an array of {min,max} pairs,
-// so "the same media, unchanged" is decidable field by field without a deep
-// clone. Used to tell a no-op re-add from one carrying newer metadata.
-function sameWaveform(a: WaveformPeak[] | undefined, b: WaveformPeak[] | undefined): boolean {
-  if (a === b) return true;
-  if (!a || !b || a.length !== b.length) return false;
-  return a.every((peak, i) => peak.min === b[i].min && peak.max === b[i].max);
-}
-
-function sameSourceVideo(a: SourceVideo, b: SourceVideo): boolean {
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof SourceVideo>;
-  for (const key of keys) {
-    if (key === 'waveformData') continue;
-    if (a[key] !== b[key]) return false;
-  }
-  return sameWaveform(a.waveformData, b.waveformData);
-}
+// The pure helpers moved to their own modules — none of them reads the store —
+// and DEFAULT_PROJECT_NAME is re-exported here so every existing import path still resolves.
+export { DEFAULT_PROJECT_NAME } from './projectFactory';
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   // Initial state
@@ -1432,76 +1328,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   }),
 }));
 
-// Ensure timeline has tracks and overlays arrays (migration helper)
-function ensureTimelineHasTracks(project: Project): Project {
-  // Ensure resolution exists (migration for older projects)
-  if (!project.resolution) {
-    project = { ...project, resolution: { width: 1920, height: 1080 } };
-  }
-
-  const timeline = project.timeline;
-  let needsMigration = false;
-
-  // Check if we need to migrate
-  if (!timeline.tracks || timeline.tracks.length === 0) {
-    needsMigration = true;
-  }
-
-  // Ensure overlays arrays exist
-  const textOverlays = timeline.textOverlays || [];
-  const shapeOverlays = timeline.shapeOverlays || [];
-
-  if (!timeline.textOverlays || !timeline.shapeOverlays) {
-    needsMigration = true;
-  }
-
-  if (!needsMigration && timeline.tracks && timeline.tracks.length > 0) {
-    // Just ensure overlay arrays exist, and fold any legacy overlay into clips
-    return {
-      ...project,
-      timeline: convertLegacyOverlays({
-        ...timeline,
-        textOverlays,
-        shapeOverlays,
-      }),
-    };
-  }
-
-  // Migrate: create default track and assign clips
-  const defaultTrack = createDefaultTrack(0);
-  let position = 0;
-
-  const migratedClips = timeline.clips.map(clip => {
-    const migrated: Clip = {
-      ...clip,
-      trackId: (clip as any).trackId || defaultTrack.id,
-      timelinePosition: (clip as any).timelinePosition ?? position,
-      blendMode: (clip as any).blendMode || 'normal',
-      transform: (clip as any).transform || { ...DEFAULT_TRANSFORM },
-      effects: (clip as any).effects || { ...DEFAULT_EFFECTS },
-      transition: (clip as any).transition || { ...DEFAULT_TRANSITION },
-    };
-
-    // If no timelinePosition was set, calculate from sequential order
-    if ((clip as any).timelinePosition === undefined) {
-      position += clip.duration;
-    }
-
-    return migrated;
-  });
-
-  return {
-    ...project,
-    timeline: convertLegacyOverlays({
-      tracks: timeline.tracks?.length > 0 ? timeline.tracks : [defaultTrack],
-      clips: migratedClips,
-      textOverlays,
-      shapeOverlays,
-      duration: calculateTimelineDuration(migratedClips),
-    }),
-  };
-}
-
 // Selectors for common derived state
 export const selectTimelineDuration = (state: EditorState) => state.project.timeline.duration;
 export const selectClipCount = (state: EditorState) => state.project.timeline.clips.length;
@@ -1510,53 +1336,9 @@ export const selectSelectedClip = (state: EditorState) =>
 export const selectSelectedTrack = (state: EditorState) =>
   state.project.timeline.tracks.find((t) => t.id === state.selectedTrackId);
 
-// Get all clips at a specific timeline time, sorted by track index (for compositing)
-export function getClipsAtTime(
-  clips: Clip[],
-  tracks: Track[],
-  time: number
-): { clip: Clip; clipTime: number; track: Track }[] {
-  const results: { clip: Clip; clipTime: number; track: Track }[] = [];
-  const trackMap = new Map(tracks.map(t => [t.id, t]));
-
-  for (const clip of clips) {
-    const clipEnd = clip.timelinePosition + clip.duration;
-    if (time >= clip.timelinePosition && time < clipEnd) {
-      const track = trackMap.get(clip.trackId);
-      if (track && track.visible) {
-        results.push({
-          clip,
-          clipTime: time - clip.timelinePosition,
-          track,
-        });
-      }
-    }
-  }
-
-  // Sort by track index (lower index = rendered first/bottom)
-  results.sort((a, b) => a.track.index - b.track.index);
-  return results;
-}
-
-// Legacy helper - get single clip at time (for backwards compatibility)
-export function getClipAtTime(clips: Clip[], time: number): { clip: Clip; clipTime: number } | null {
-  for (const clip of clips) {
-    const clipEnd = clip.timelinePosition + clip.duration;
-    if (time >= clip.timelinePosition && time < clipEnd) {
-      return {
-        clip,
-        clipTime: time - clip.timelinePosition,
-      };
-    }
-  }
-  return null;
-}
-
-// Get timeline position for a clip (now just returns timelinePosition)
-export function getClipPosition(clips: Clip[], clipId: string): number {
-  const clip = clips.find(c => c.id === clipId);
-  return clip?.timelinePosition ?? -1;
-}
+// The clip queries moved to ./clipQueries — they never read the store — and are
+// re-exported here so every existing import path still resolves.
+export { getClipsAtTime, getClipAtTime, getClipPosition } from './clipQueries';
 
 // The snapping helpers moved to ./timelineSnapping — they never read the store —
 // and are re-exported here so every existing import path still resolves.
