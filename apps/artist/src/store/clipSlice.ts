@@ -1,0 +1,434 @@
+// Clip slice: everything that adds, removes, moves or restyles a timeline clip.
+// Actions that change which clips exist or where they sit recompute
+// `timeline.duration`; the ones that only restyle a clip deliberately do not.
+// `recalculateTimelineDuration` is the odd one out — it rewrites the duration
+// alone, recording no undo step and leaving `modified` untouched.
+
+import { v4 as uuidv4 } from 'uuid';
+import type { StateCreator } from 'zustand';
+import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation } from './types';
+import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATION } from './types';
+import { cloneClip } from '../utils/deepClone';
+import { pushToHistory } from './storeHistory';
+import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
+
+export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
+
+export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (set) => ({
+  // Clip actions
+  addClipToTimeline: (clipData, trackId?, position?) => set((state) => {
+    let tracks = [...state.project.timeline.tracks];
+    let targetTrackId = trackId;
+
+    // Use empty track if available, otherwise create new track at top
+    if (!targetTrackId) {
+      const emptyTrack = findEmptyTrack(tracks, state.project.timeline.clips);
+      if (emptyTrack) {
+        targetTrackId = emptyTrack.id;
+      } else {
+        const newTrack = createTrackAtTop(tracks);
+        tracks = [...tracks, newTrack];
+        targetTrackId = newTrack.id;
+      }
+    }
+
+    // Use playhead position if no position specified
+    const timelinePosition = position ?? state.currentTime;
+
+    // Import at 100% scale (native source pixels on canvas).
+    // Scale 1.0 = actual source size. Use "Fit to Canvas" to fill.
+    const initialScaleX = 1, initialScaleY = 1;
+
+    const newClip: Clip = {
+      ...clipData,
+      trackId: targetTrackId,
+      timelinePosition,
+      blendMode: 'normal',
+      transform: { ...DEFAULT_TRANSFORM, scaleX: initialScaleX, scaleY: initialScaleY },
+      effects: { ...DEFAULT_EFFECTS },
+      transition: { ...DEFAULT_TRANSITION },
+    };
+
+    const newClips = [...state.project.timeline.clips, newClip];
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          tracks,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  removeClipFromTimeline: (clipId: string) => set((state) => {
+    const newClips = state.project.timeline.clips.filter((c) => c.id !== clipId);
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+      history: pushToHistory(state),
+    };
+  }),
+
+  // Ripple delete: remove clip and shift all subsequent clips on the same track
+  rippleDeleteClip: (clipId: string) => set((state) => {
+    const clipToDelete = state.project.timeline.clips.find((c) => c.id === clipId);
+    if (!clipToDelete) return state;
+
+    const clipEnd = clipToDelete.timelinePosition + (clipToDelete.endTime - clipToDelete.startTime);
+    const clipDuration = clipToDelete.endTime - clipToDelete.startTime;
+    const trackId = clipToDelete.trackId;
+
+    const newClips = state.project.timeline.clips
+      .filter((c) => c.id !== clipId)
+      .map((clip) => {
+        // Shift clips on the same track that come after the deleted clip
+        if (clip.trackId === trackId && clip.timelinePosition >= clipEnd) {
+          return {
+            ...clip,
+            timelinePosition: Math.max(0, clip.timelinePosition - clipDuration),
+          };
+        }
+        return clip;
+      });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+      history: pushToHistory(state),
+    };
+  }),
+
+  // Shift all clips on a track that are after a certain time by a delta amount
+  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => set((state) => {
+    if (delta === 0) return state;
+
+    const newClips = state.project.timeline.clips.map((clip) => {
+      // Shift clips on the same track that start at or after the given time
+      if (clip.trackId === trackId && clip.timelinePosition >= afterTime) {
+        return {
+          ...clip,
+          timelinePosition: Math.max(0, clip.timelinePosition + delta),
+        };
+      }
+      return clip;
+    });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  updateClip: (clipId: string, updates: Partial<Clip>) => set((state) => {
+    const newClips = state.project.timeline.clips.map((clip) => {
+      if (clip.id !== clipId) return clip;
+
+      const updated = { ...clip, ...updates };
+      // Recalculate duration if start/end times changed
+      if (updates.startTime !== undefined || updates.endTime !== undefined) {
+        updated.duration = updated.endTime - updated.startTime;
+      }
+      return updated;
+    });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  splitClip: (clipId: string, splitTime: number) => set((state) => {
+    const clip = state.project.timeline.clips.find((c) => c.id === clipId);
+    if (!clip) return state;
+
+    // splitTime is relative to the clip's start on the timeline
+    const sourceTime = clip.startTime + splitTime;
+
+    // Validate split point is within clip bounds
+    if (sourceTime <= clip.startTime || sourceTime >= clip.endTime) {
+      return state;
+    }
+
+    const firstClip: Clip = {
+      ...clip,
+      id: uuidv4(),
+      endTime: sourceTime,
+      duration: sourceTime - clip.startTime,
+      name: `${clip.name} (1)`,
+    };
+
+    const secondClip: Clip = {
+      ...clip,
+      id: uuidv4(),
+      startTime: sourceTime,
+      duration: clip.endTime - sourceTime,
+      timelinePosition: clip.timelinePosition + firstClip.duration,
+      name: `${clip.name} (2)`,
+    };
+
+    const newClips = state.project.timeline.clips
+      .filter(c => c.id !== clipId)
+      .concat([firstClip, secondClip]);
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      selectedClipId: firstClip.id,
+      history: pushToHistory(state),
+    };
+  }),
+
+  moveClipToTrack: (clipId: string, trackId: string) => set((state) => {
+    const newClips = state.project.timeline.clips.map(clip =>
+      clip.id === clipId ? { ...clip, trackId } : clip
+    );
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  setClipTimelinePosition: (clipId: string, position: number) => set((state) => {
+    const newClips = state.project.timeline.clips.map(clip =>
+      clip.id === clipId ? { ...clip, timelinePosition: Math.max(0, position) } : clip
+    );
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  updateClipTransform: (clipId: string, transformUpdates: Partial<ClipTransform>, skipHistory?: boolean) => set((state) => {
+    const newClips = state.project.timeline.clips.map(clip => {
+      if (clip.id !== clipId) return clip;
+      return {
+        ...clip,
+        transform: { ...clip.transform, ...transformUpdates },
+      };
+    });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+        },
+      },
+      history: skipHistory ? state.history : pushToHistory(state),
+    };
+  }),
+
+  updateClipBlendMode: (clipId: string, blendMode: BlendMode) => set((state) => {
+    const newClips = state.project.timeline.clips.map(clip =>
+      clip.id === clipId ? { ...clip, blendMode } : clip
+    );
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  updateClipEffects: (clipId: string, effectsUpdates: Partial<ClipEffects>) => set((state) => {
+    const newClips = state.project.timeline.clips.map(clip => {
+      if (clip.id !== clipId) return clip;
+      return {
+        ...clip,
+        effects: { ...clip.effects, ...effectsUpdates },
+      };
+    });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>) => set((state) => {
+    const newClips = state.project.timeline.clips.map(clip => {
+      if (clip.id !== clipId) return clip;
+      // Seed from DEFAULT_TRANSITION the way updateClipAnimation seeds from DEFAULT_ANIMATION:
+      // a clip loaded from a foreign project file can be missing `transition` entirely, and a
+      // half-written `{ type }` with no duration crashes TransitionSection's `duration.toFixed(1)`.
+      return {
+        ...clip,
+        transition: { ...DEFAULT_TRANSITION, ...clip.transition, ...transitionUpdates },
+      };
+    });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>) => set((state) => {
+    const newClips = state.project.timeline.clips.map(clip => {
+      if (clip.id !== clipId) return clip;
+      const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION };
+      return {
+        ...clip,
+        animation: {
+          ...currentAnimation,
+          ...animationUpdates,
+          // Deep merge in/out if provided
+          in: animationUpdates.in ? { ...currentAnimation.in, ...animationUpdates.in } : currentAnimation.in,
+          out: animationUpdates.out ? { ...currentAnimation.out, ...animationUpdates.out } : currentAnimation.out,
+          keyframes: animationUpdates.keyframes !== undefined ? animationUpdates.keyframes : currentAnimation.keyframes,
+        },
+      };
+    });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  duplicateClip: (clipId: string) => set((state) => {
+    const clip = state.project.timeline.clips.find(c => c.id === clipId);
+    if (!clip) return state;
+
+    // Place duplicated clip right after the original
+    const newPosition = clip.timelinePosition + clip.duration;
+
+    // Check for overlap and find next available position
+    let position = newPosition;
+    const trackClips = state.project.timeline.clips
+      .filter(c => c.trackId === clip.trackId && c.id !== clipId)
+      .sort((a, b) => a.timelinePosition - b.timelinePosition);
+
+    for (const otherClip of trackClips) {
+      const otherEnd = otherClip.timelinePosition + otherClip.duration;
+      if (position < otherEnd && position + clip.duration > otherClip.timelinePosition) {
+        // Overlap detected, move position to after this clip
+        position = otherEnd;
+      }
+    }
+
+    const duplicatedClip: Clip = {
+      ...cloneClip(clip),
+      id: uuidv4(),
+      timelinePosition: position,
+      name: `${clip.name} (copy)`,
+    };
+
+    const newClips = [...state.project.timeline.clips, duplicatedClip];
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      selectedClipId: duplicatedClip.id,
+      history: pushToHistory(state),
+    };
+  }),
+
+  recalculateTimelineDuration: () => set((state) => ({
+    project: {
+      ...state.project,
+      timeline: {
+        ...state.project.timeline,
+        duration: calculateTimelineDuration(state.project.timeline.clips),
+      },
+    },
+  })),
+});
