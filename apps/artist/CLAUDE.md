@@ -367,7 +367,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | Module | Owns |
 |--------|------|
 | `ClipEditor.tsx` | The composition: the hook call, the empty-state early return, and the per-section guards in their fixed order. Owns `div.container` itself in both the empty and selected states, so that element's identity is stable across the empty↔selected transition |
-| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`/`timeInClip`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays |
+| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays. **No `currentTime` selector** — see the note below |
 | `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
 | `clipEditorOptions.ts` | The four `{ value, label }` option lists the dropdowns render — transitions, blend modes, animation presets, easings |
@@ -381,7 +381,23 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
-| `ActionsSection.tsx` | "Actions": go to, duplicate, and — video and audio only — split, which stays visible but disabled when the playhead is outside the clip or on its first frame |
+| `ActionsSection.tsx` | "Actions": go to, duplicate, and — video and audio only — split. Takes the clip's position and duration rather than a `timeInClip`, and hands them to `SplitButton` |
+| `SplitButton.tsx` | The Split button alone, and the only part of the panel that depends on the playhead. Subscribes to the derived *disabled boolean* itself, so a playback tick re-renders this one button only when the answer changes |
+
+**The clip inspector must never subscribe to `currentTime`.** `useClipEditorActions` used to
+hold a `useEditorStore((s) => s.currentTime)` selector feeding a `timeInClip` that only the
+Split button's `disabled` attribute read, so the whole panel — a few hundred elements — re-rendered
+five times a second while the project played; and because the hook runs *above*
+`ClipEditor.tsx`'s `!selectedClip` early return, the empty panel paid exactly the same. The
+post-round-1 CPU profile ranked `ClipEditor` #10 of the app-code frames a playback window
+executes (23.1 ms, 4.4%). `Toolbar`'s `getState()` fix is wrong here because the disabled state
+*is* rendered and a stale read would show the wrong one; the fix is `TimelinePlayhead`'s shape
+instead — `SplitButton` subscribes for itself, and to the boolean rather than to the playhead,
+so zustand's `Object.is` ends the tick and the button re-renders twice over a pass across a clip
+instead of ten times. `handleSplitAtPlayhead` reads `useEditorStore.getState().currentTime`,
+which is what a click needs and a render does not. Measured 2026-09-13 by
+`ClipEditor.rerender.test.tsx`: ten playback ticks cost the panel 0 renders, selected or not,
+against 10 before.
 
 Two things in here will surprise the next reader, and both are preserved on purpose.
 **`CollapsibleSection` owns nothing but its own open/closed flag, which it seeds from

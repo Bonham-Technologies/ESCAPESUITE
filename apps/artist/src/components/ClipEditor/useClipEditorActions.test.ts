@@ -115,7 +115,6 @@ describe('useClipEditorActions with nothing selected', () => {
     expect(result.current.sourceVideo).toBeNull()
     expect(result.current.track).toBeNull()
     expect(result.current.clipPosition).toBe(0)
-    expect(result.current.timeInClip).toBeNull()
     // The scaleLocked selector falls back to true when it finds no clip.
     expect(result.current.scaleLocked).toBe(true)
     expect(result.current.clipTypeLabel).toBe('Video Clip')
@@ -201,17 +200,22 @@ describe('useClipEditorActions derived values', () => {
     expect(result.current.clipTypeLabel).toBe('Shape Overlay')
   })
 
-  it('reports the playhead position relative to the clip, and null outside it', () => {
+  // The playhead used to be one of the hook's selectors, feeding a `timeInClip`
+  // the Split button read. It is not any more: the button subscribes to its own
+  // disabled state (`SplitButton`) so a playback tick cannot re-render the
+  // panel. The hook returns a fresh object on every render, so an unchanged
+  // identity across a seek is the whole assertion — see
+  // `ClipEditor.rerender.test.tsx` for the render counts themselves.
+  it('is not re-run by the playhead moving', () => {
     mediaClip(3, 2)
     const { result } = mount()
-
-    expect(result.current.timeInClip).toBeNull()
+    const before = result.current
 
     act(() => store().setCurrentTime(4))
-    expect(result.current.timeInClip).toBe(1)
+    expect(result.current).toBe(before)
 
     act(() => store().setCurrentTime(5))
-    expect(result.current.timeInClip).toBeNull()
+    expect(result.current).toBe(before)
   })
 
   it('reads scaleLocked off the selected clip, defaulting to true', () => {

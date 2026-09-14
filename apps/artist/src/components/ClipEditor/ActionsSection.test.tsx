@@ -1,20 +1,34 @@
 // The "Actions" section of the clip inspector, rendered on its own so the
 // Split button's visibility and disabled rule can be read directly.
-import { describe, it, expect, vi } from 'vitest'
+//
+// The section takes the clip's position and duration, not a `timeInClip`: the
+// playhead reaches the Split button through its own store subscription
+// (`SplitButton`), so these tests move the store's playhead rather than a prop.
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ActionsSection } from './ActionsSection'
+import { resetStoreForTest, store } from '../../test/fixtures/projectStore'
 
 type Props = React.ComponentProps<typeof ActionsSection>
 
-function renderSection(overrides: Partial<Props> = {}) {
+/** The section for a clip running 3–5 s, with the playhead at `playhead`. */
+function renderSection(overrides: Partial<Props> = {}, playhead = 4) {
+  store().setCurrentTime(playhead)
   const handlers = {
     onGoToClip: vi.fn(),
     onDuplicate: vi.fn(),
     onSplit: vi.fn(),
   }
   render(
-    <ActionsSection isVideo isAudio={false} timeInClip={1} {...handlers} {...overrides} />
+    <ActionsSection
+      isVideo
+      isAudio={false}
+      clipPosition={3}
+      clipDuration={2}
+      {...handlers}
+      {...overrides}
+    />
   )
   return handlers
 }
@@ -22,6 +36,10 @@ function renderSection(overrides: Partial<Props> = {}) {
 const split = () => screen.getByRole('button', { name: 'Split' })
 
 describe('ActionsSection', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
   it('is open, and moves the playhead to the clip start', async () => {
     const user = userEvent.setup()
     const { onGoToClip } = renderSection()
@@ -66,19 +84,19 @@ describe('ActionsSection', () => {
     })
 
     it('is disabled while the playhead sits outside the clip', () => {
-      renderSection({ timeInClip: null })
+      renderSection({}, 9)
 
       expect(split()).toBeDisabled()
     })
 
     it('is disabled on the clip start itself, where a split would make an empty half', () => {
-      renderSection({ timeInClip: 0 })
+      renderSection({}, 3)
 
       expect(split()).toBeDisabled()
     })
 
     it('is enabled one frame in', () => {
-      renderSection({ timeInClip: 0.04 })
+      renderSection({}, 3.04)
 
       expect(split()).toBeEnabled()
     })

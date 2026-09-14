@@ -1,17 +1,27 @@
 // Everything the clip inspector reads from the store, and everything its
 // controls write back.
 //
-// This is the whole of `ClipEditor`'s wiring: the selectors, the three derived
-// values the sections share (`sourceVideo`, `track`, `timeInClip`), the clip
-// classification, and one handler per control. It adds no state and no
-// subscription of its own — the hook calls below are the ones that used to sit
-// at the top of `ClipEditor`, in the same order and, `handleGoToClip` aside,
-// with the same dependency arrays, so moving them here cannot change when
-// anything re-renders. `handleGoToClip` now also depends on `selectedClip`,
-// which it reads: its identity changes whenever the selected clip object does
-// rather than only when the clip's position does. Its one consumer is
+// This is the whole of `ClipEditor`'s wiring: the selectors, the two derived
+// values the sections share (`sourceVideo`, `track`), the clip classification,
+// and one handler per control. It adds no state and no subscription of its own
+// — the hook calls below are the ones that used to sit at the top of
+// `ClipEditor`, in the same order and, `handleGoToClip` aside, with the same
+// dependency arrays, so moving them here cannot change when anything
+// re-renders. `handleGoToClip` now also depends on `selectedClip`, which it
+// reads: its identity changes whenever the selected clip object does rather
+// than only when the clip's position does. Its one consumer is
 // `ActionsSection`'s unmemoised button `onClick`, which takes no identity
 // dependency, so no render count moves.
+//
+// **The playhead is not among the selectors, and must not become one.** A
+// `useEditorStore((s) => s.currentTime)` here re-rendered the entire inspector
+// on every playback tick — and, because this hook runs above `ClipEditor`'s
+// `!selectedClip` early return, it did so with nothing selected too. The only
+// thing on the panel the playhead can change is whether Split is disabled, so
+// that button subscribes to the derived boolean for itself (`SplitButton`) and
+// `handleSplitAtPlayhead` reads `useEditorStore.getState().currentTime`,
+// which is what a click needs and a render does not. `ClipEditor.rerender.test.tsx`
+// holds the line.
 //
 // One of those arrays is wrong, and is kept wrong on purpose:
 //   * `setScaleLocked` depends on `[]` and reaches for
@@ -63,8 +73,6 @@ export interface ClipEditorActions {
   clipTypeLabel: string;
   /** Where the clip starts on the timeline, in seconds. */
   clipPosition: number;
-  /** How far the playhead is into the clip, or null when it is outside it. */
-  timeInClip: number | null;
   /** Whether the keyframe panel is open — the Animation section's toggle state. */
   keyframePanelOpen: boolean;
   handleSplitAtPlayhead: () => void;
@@ -116,7 +124,6 @@ export function useClipEditorActions(): ClipEditorActions {
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const resolution = useEditorStore((state) => state.project.resolution);
-  const currentTime = useEditorStore((state) => state.currentTime);
 
   const removeClipFromTimeline = useEditorStore((state) => state.removeClipFromTimeline);
   const splitClip = useEditorStore((state) => state.splitClip);
@@ -151,17 +158,18 @@ export function useClipEditorActions(): ClipEditorActions {
   // Clip position is now stored directly on the clip
   const clipPosition = selectedClip?.timelinePosition ?? 0;
 
-  // Calculate if current time is within this clip
-  const timeInClip = useMemo(() => {
-    if (!selectedClip) return null;
-    return relativeTimeInClip(currentTime, clipPosition, selectedClip.duration);
-  }, [currentTime, clipPosition, selectedClip]);
-
-
+  // Where the playhead is inside the clip, read at click time rather than
+  // subscribed to: see the note at the top of this file.
   const handleSplitAtPlayhead = useCallback(() => {
-    if (!selectedClip || timeInClip === null || timeInClip <= 0) return;
+    if (!selectedClip) return;
+    const timeInClip = relativeTimeInClip(
+      useEditorStore.getState().currentTime,
+      selectedClip.timelinePosition,
+      selectedClip.duration
+    );
+    if (timeInClip === null || timeInClip <= 0) return;
     splitClip(selectedClip.id, timeInClip);
-  }, [selectedClip, timeInClip, splitClip]);
+  }, [selectedClip, splitClip]);
 
   const handleDeleteClip = useCallback(() => {
     if (!selectedClip) return;
@@ -355,7 +363,6 @@ export function useClipEditorActions(): ClipEditorActions {
     isVideo,
     clipTypeLabel,
     clipPosition,
-    timeInClip,
     keyframePanelOpen,
     handleSplitAtPlayhead,
     handleDeleteClip,

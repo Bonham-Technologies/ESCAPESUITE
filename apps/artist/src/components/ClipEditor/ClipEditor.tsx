@@ -25,7 +25,6 @@ export function ClipEditor() {
     isVideo,
     clipTypeLabel,
     clipPosition,
-    timeInClip,
     keyframePanelOpen,
     handleSplitAtPlayhead,
     handleDeleteClip,
@@ -141,7 +140,8 @@ export function ClipEditor() {
       <ActionsSection
         isVideo={isVideo}
         isAudio={isAudio}
-        timeInClip={timeInClip}
+        clipPosition={clipPosition}
+        clipDuration={selectedClip.duration}
         onGoToClip={handleGoToClip}
         onDuplicate={handleDuplicate}
         onSplit={handleSplitAtPlayhead}
