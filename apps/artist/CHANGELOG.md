@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.4
+
+### Patch Changes
+
+- 6ad5ca0: Internal: the editor store is composed from focused slices — project, tracks, clips, keyframes, overlays, selection, playback, markers, UI and history — with no behaviour change.
+
 ## 2.3.3
 
 ### Patch Changes
