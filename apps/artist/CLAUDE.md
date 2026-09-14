@@ -266,6 +266,21 @@ depends on `currentTime` to know when to re-arm its debounce, deliberately not o
 render) now does that via a `useEditorStore.subscribe` listener added inside the effect
 rather than through a render-triggering dependency.
 
+**Two more subscriptions were found in round 2, and both are gone the same two ways.**
+`Toolbar.tsx` held a `currentTime` selector that no rendered element read — only three
+handlers (add marker, set in point, set out point) — which is `App.tsx`'s case exactly, so
+those three now read `useEditorStore.getState().currentTime` inside themselves and the
+component subscribes to nothing per tick. `useClipEditorActions` held one whose value *was*
+rendered, so it took the leaf shape instead; see the ClipEditor section. Measured on the
+`preview-playback` benchmark by paired alternation, three rounds per arm, the toolbar fix
+alone is **−9.1% of the renderer's task duration** (1037.55 → 942.62 ms, ranges disjoint)
+with the rendered fps pinned at the 60 fps vsync ceiling in both arms — after round 1 this
+scene has no frame-rate headroom left to show a win in, so anything further shows up as work
+not done, never as frames. `Toolbar.rerender.test.tsx` pins the contract at ≤1 render over ten
+ticks (it measures 0), with one `act()` per tick: batch the ten writes into one `act()` and a
+re-introduced selector costs one render and slips under the ceiling. Round 2's write-up is
+[docs/performance/2026-09-13-timeline-profile.md](../../docs/performance/2026-09-13-timeline-profile.md).
+
 A scrub's seek check in `usePreviewRenderLoop.ts` works **per `<video>` element, not
 per clip**. `usePreviewMedia` keeps one element per source, so two live clips off one
 source — a picture-in-picture arrangement, or the same clip duplicated on two tracks —
@@ -321,7 +336,14 @@ reaches a handler whose gesture is over; each one checks its ref and does nothin
 (`useClipDrag.test.ts`, `timelineGestureCaching.test.ts`). The mouseup stays a plain
 bubble-phase `document` listener — no capture, no `once` — because `marqueeJustFinished` has to
 be set before the click that follows it. `timelineGestures.perf.test.ts` asserts the counts
-exactly: 2 listeners, 1 `getSnapPoints`, one pass over the track rows, per gesture. Two things the
+exactly: 2 listeners, 1 `getSnapPoints`, one pass over the track rows, per gesture. Three of the
+five hooks used to re-bind per pointer frame — 42 adds and 42 removes over a 20-move gesture —
+and `usePlayheadDrag` and `useInOutDrag` never did; their 2/2 is pinned exactly too, so a
+refactor cannot drop them into the churn. `useDragListeners` (the other export of
+`src/hooks/useDocumentListener.ts`) is deliberately **not** what any of them use: its
+imperative start/stop would unbind the pair synchronously inside the mouseup and move
+`marqueeJustFinished` relative to the click that follows. It currently has no caller at all,
+and should be adopted across the five or deleted. Two things the
 directory uses come from outside it: `useVirtualizedTimeline` (`src/hooks`), which decides
 which clips are near enough the viewport to draw, and `MarqueeSelection`
 (`src/components/Preview/`), the rectangle the preview and the timeline share. Every module
@@ -339,11 +361,11 @@ component.
 | `TimelinePlayhead.tsx` | The playhead line — `React.memo`'d and subscribing to `currentTime` itself, so a playback tick moves this element instead of re-rendering the timeline |
 | `TimelineTimeReadout.tsx` | The `current / total` readout in the info bar, split out for the same reason |
 | `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
-| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — every prop is stable across a gesture, so the whole column sits one out |
+| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — its props are stable through a clip drag, a marquee and playback, so the whole column sits those out. **Not through a trim**: `useTrackHeaderActions`' `handleDeleteTrack` depends on `clips`, and a trim writes the store every move, so `onDeleteTrack` changes identity per frame and the column re-renders anyway |
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
 | `AudioWaveform.tsx` | The canvas waveform inside a clip, capped at 4000 CSS px of backing store and CSS-scaled beyond it, because browsers refuse a canvas much wider |
 | `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
-| `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture |
+| `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture. Invalidation is **event-based**, so a layout change that fires neither — an autosave or an undo changing a row's height mid-drag — would leave it stale where the old per-frame measurement absorbed it; unreachable through the UI today (a clip drag writes nothing until release, and no control resizes a track while a pointer is down), and if row heights ever become dynamic the hook to reach for is the `ResizeObserver` `useScrollSync` already installs on this container, not a third listener |
 | `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
 | `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point it writes |
 | `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written once, on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame |
@@ -372,9 +394,14 @@ In the browser (`pnpm perf`, paired alternation, three rounds per arm) that is *
 10.91 → 8.77 ms of JS per frame (−19.6%)** and **marquee 10.39 → 5.54 ms (−46.7%)**, both with
 disjoint ranges; `playheadScrub` is unchanged, because a scrub writes `currentTime` and
 `Timeline` does not subscribe to it. Forced layouts are untouched at 0.82 and 0.98 per frame —
-those were round 2's Task 2, and this is the render half. `TimelinePane` stays **unmemoised**
-on purpose (see the App section). The three ceilings for a drag are asserted as exact zeroes,
-not at 2x: a single re-render per frame means a prop has become unstable again.
+those were round 2's Task 2, and this is the render half. Those two gestures, plus playback,
+are what the header memo holds for; a **trim** is the gesture it does not, for the reason in
+its table row above. `TimelinePane` stays **unmemoised** on purpose (see the App section). The
+three ceilings for a drag are asserted as exact zeroes, not at 2x: a single re-render per frame
+means a prop has become unstable again. The whole round is written up in
+[docs/performance/2026-09-13-timeline-profile.md](../../docs/performance/2026-09-13-timeline-profile.md),
+including the caveat that the millisecond figures are dev-build numbers while the render
+counts are what a release build keeps.
 
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
@@ -469,7 +496,12 @@ guessing: `useAppKeyboardShortcuts.rebinds.test.tsx` drives the hook through `Ap
 selectors over a scripted 20-edit burst and measures **15 re-binds** (2026-09-13) — about one
 listener swap per edit and none per frame; five edits (a playhead write, a transform, a clip
 move, a marker, a blend mode) changed nothing the cascade depends on, because `clips` is a
-dependency only through its `length`. Fifteen listener swaps spread over a minute of editing is
+dependency only through its `length`. **15 is a lower bound, not the app's figure**: the
+harness holds `App`'s own seven callbacks at fixed identities, so the count is the store's
+contribution alone, and in the live `App` `handleSaveProject` closes over `clipCount` and the
+two zoom handlers over the zoom. The extra churn coincides with edits that already re-bind
+through `clips.length`, so it does not change the decision. Fifteen listener swaps spread over
+a minute of editing is
 not worth changing the Ctrl+B staleness semantics for, so **the array stays verbatim**. The test
 pins that finding, with the assertion to lower if the handler is ever moved into a ref.
 
