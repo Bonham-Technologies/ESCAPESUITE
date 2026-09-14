@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { VIEWPORTS } from '../../utils/viewports'
 
 test.describe('ESCAPECRAFT Mobile Layout', () => {
   test.beforeEach(async ({ page }) => {

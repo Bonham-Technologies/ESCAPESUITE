@@ -166,7 +166,7 @@ const PROFILE_ORDER = [
  * the start of every run, so a profile found here is always this run's.
  */
 function collectProfiles() {
-  let files = []
+  let files
   try {
     files = readdirSync(BROWSER_RESULTS_DIR).filter((name) => name.endsWith('.cpuprofile'))
   } catch {

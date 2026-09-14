@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { clearIndexedDB, databaseExists } from '../../utils/indexeddb'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {

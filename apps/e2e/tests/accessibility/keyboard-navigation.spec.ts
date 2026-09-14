@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { checkFocusOrder, checkFocusVisibility } from '../../utils/accessibility'
+import { checkFocusOrder } from '../../utils/accessibility'
 import { seedTextClip } from '../../utils/artist'
 
 test.describe('ESCAPEPLAN Keyboard Navigation', () => {
@@ -116,7 +116,7 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
 
     // Click on body first to ensure focus is in document
     await page.click('body')
-    const focusOrder = await checkFocusOrder(page)
+    await checkFocusOrder(page)
 
     // In headless mode, focus behavior can vary - just verify page is functional
     expect(focusableCount).toBeGreaterThan(0)
@@ -243,7 +243,7 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
 
     // Click on body first to ensure focus is in document
     await page.click('body')
-    const focusOrder = await checkFocusOrder(page)
+    await checkFocusOrder(page)
 
     // In headless mode, focus behavior can vary - just verify page is functional
     expect(focusableCount).toBeGreaterThan(0)

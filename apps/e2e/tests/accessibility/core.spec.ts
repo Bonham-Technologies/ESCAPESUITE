@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import {
   runAxeCheck,
-  assertNoA11yViolations,
   checkImageAltText,
   checkHeadingHierarchy,
   checkFormLabels,
