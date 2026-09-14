@@ -266,12 +266,11 @@ describe('KeyframeGraph keyboard access', () => {
       fireEvent.keyDown(svg, { key: 'ArrowRight' })
       await user.keyboard('{ArrowUp}{ArrowDown}{Enter}')
 
-      // The value nudge and the add land in the next commit; the keys are the
-      // graph's from here on either way, so they never reach the editor.
+      // All three act on the graph — and none of them reaches the editor's
+      // window-level cascades on the way.
       expect(seen).not.toHaveBeenCalled()
-      expect(onAddKeyframe).not.toHaveBeenCalled()
-      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
-      expect(activeDescendant(container)).toBe('kf-opacity-0')
+      expect(onKeyframeValueChanged).toHaveBeenCalledTimes(2)
+      expect(onAddKeyframe).toHaveBeenCalledTimes(1)
     })
 
     it('clears the selection on Escape', async () => {
@@ -350,6 +349,269 @@ describe('KeyframeGraph keyboard access', () => {
 
       fireEvent.click(graphSvg(container))
       expect(activeDescendant(container)).toBeNull()
+    })
+  })
+
+  describe('nudging a keyframe', () => {
+    const activeDescendant = (container: HTMLElement) =>
+      graphSvg(container).getAttribute('aria-activedescendant')
+
+    /** Focus the graph and make the user's 1s keyframe (index 1) the active option. */
+    function selectCustomKeyframe(container: HTMLElement): SVGSVGElement {
+      const svg = graphSvg(container)
+      svg.focus()
+      fireEvent.keyDown(svg, { key: 'End' })
+      return svg
+    }
+
+    it('nudges the value up and down by a fine step', () => {
+      opacityKeyframes()
+      const { container, onKeyframeValueChanged } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      fireEvent.keyDown(svg, { key: 'ArrowUp' })
+      expect(onKeyframeValueChanged.mock.calls[0][0]).toBe('opacity')
+      expect(onKeyframeValueChanged.mock.calls[0][1]).toBe(1)
+      expect(onKeyframeValueChanged.mock.calls[0][2]).toBeCloseTo(0.51, 6)
+
+      fireEvent.keyDown(svg, { key: 'ArrowDown' })
+      expect(onKeyframeValueChanged.mock.calls[1][2]).toBeCloseTo(0.49, 6)
+    })
+
+    it('nudges the value by a coarse step with Shift held', () => {
+      opacityKeyframes()
+      const { container, onKeyframeValueChanged } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      fireEvent.keyDown(svg, { key: 'ArrowUp', shiftKey: true })
+      expect(onKeyframeValueChanged.mock.calls[0][2]).toBeCloseTo(0.6, 6)
+
+      fireEvent.keyDown(svg, { key: 'ArrowDown', shiftKey: true })
+      expect(onKeyframeValueChanged.mock.calls[1][2]).toBeCloseTo(0.4, 6)
+    })
+
+    it('clamps the nudged value to the property range', () => {
+      // The store's auto-created keyframe at 0s sits at opacity 1 — the top of
+      // the range — and the user's at 1s goes to the bottom.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0, easing: 'linear' })
+      const { container, onKeyframeValueChanged } = renderGraph('opacity')
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'Home' })
+      fireEvent.keyDown(svg, { key: 'ArrowUp' })
+      expect(onKeyframeValueChanged).toHaveBeenCalledWith('opacity', 0, 1)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      fireEvent.keyDown(svg, { key: 'ArrowDown' })
+      expect(onKeyframeValueChanged).toHaveBeenLastCalledWith('opacity', 1, 0)
+    })
+
+    it('swallows the value nudge on a preset without changing anything', async () => {
+      const user = userEvent.setup()
+      const { container, onKeyframeValueChanged } = renderGraph('opacity', {
+        animation: fadeInAndCustom,
+      })
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Home' })
+      await user.keyboard('{ArrowUp}')
+
+      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
+      expect(seen).not.toHaveBeenCalled()
+    })
+
+    it('swallows the value nudge on a graph with no keyframes', async () => {
+      const user = userEvent.setup()
+      const { container, onKeyframeValueChanged } = renderGraph('opacity')
+      graphSvg(container).focus()
+
+      await user.keyboard('{ArrowUp}{ArrowDown}')
+
+      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
+      expect(seen).not.toHaveBeenCalled()
+    })
+
+    it('nudges the time with Alt, fine and coarse', () => {
+      opacityKeyframes()
+      const { container, onKeyframeMoved, refresh } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      /** One nudge, committed by the host and re-rendered the way KeyframePanel does. */
+      const nudge = (init: { key: string; shiftKey?: boolean }): number => {
+        fireEvent.keyDown(svg, { ...init, altKey: true })
+        const call = onKeyframeMoved.mock.calls[onKeyframeMoved.mock.calls.length - 1]
+        expect(call[0]).toBe('opacity')
+        store().moveClipKeyframe('clip1', 'opacity', call[1] as number, call[2] as number)
+        refresh()
+        return call[2] as number
+      }
+
+      expect(nudge({ key: 'ArrowRight' })).toBeCloseTo(1.01, 6)
+      expect(nudge({ key: 'ArrowLeft' })).toBeCloseTo(1, 6)
+      expect(nudge({ key: 'ArrowRight', shiftKey: true })).toBeCloseTo(1.1, 6)
+      expect(nudge({ key: 'ArrowLeft', shiftKey: true })).toBeCloseTo(1, 6)
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(4)
+    })
+
+    it('clamps the nudged time to the clip', () => {
+      // One keyframe hard against each end: the store's own at 0s, the user's
+      // at the very last frame of the clip.
+      store().setClipKeyframe('clip1', 'opacity', { time: CLIP_DURATION, value: 0.5, easing: 'linear' })
+      const { container, onKeyframeMoved } = renderGraph('opacity')
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'Home' })
+      fireEvent.keyDown(svg, { key: 'ArrowLeft', altKey: true })
+      expect(onKeyframeMoved).toHaveBeenCalledWith('opacity', 0, 0)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true })
+      expect(onKeyframeMoved).toHaveBeenLastCalledWith('opacity', CLIP_DURATION, CLIP_DURATION)
+    })
+
+    it('refuses a time nudge that would land on another keyframe', async () => {
+      const user = userEvent.setup()
+      // 1s and 1.01s are exactly one fine nudge apart, and moveClipKeyframe
+      // drops whatever already sits within 0.001s of the target.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 1.01, value: 0.25, easing: 'linear' })
+      const { container, onKeyframeMoved } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+      expect(activeDescendant(container)).toBe('kf-opacity-1')
+
+      await user.keyboard('{Alt>}{ArrowRight}{/Alt}')
+
+      // Refused, not merged — and still not a key the editor gets to see. The
+      // window sees the Alt press itself, which the graph has no claim on, and
+      // nothing else.
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(seen.mock.calls.map(([e]) => e.key)).toEqual(['Alt'])
+      expect(activeDescendant(container)).toBe('kf-opacity-1')
+    })
+
+    it('swallows a time nudge with no keyframe selected', async () => {
+      const user = userEvent.setup()
+      const { container, onKeyframeMoved } = renderGraph('opacity', { animation: fadeInAndCustom })
+      const svg = graphSvg(container)
+      svg.focus()
+
+      // A preset is active, so there is nothing the nudge may move.
+      fireEvent.keyDown(svg, { key: 'Home' })
+      await user.keyboard('{Alt>}{ArrowRight}{/Alt}')
+
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(seen.mock.calls.map(([e]) => e.key)).toEqual(['Alt'])
+    })
+
+    it('keeps the nudged keyframe selected once the host commits the move', () => {
+      opacityKeyframes()
+      const { container, onKeyframeMoved, refresh } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true })
+
+      const newTime = onKeyframeMoved.mock.calls[0][2] as number
+      store().moveClipKeyframe('clip1', 'opacity', 1, newTime)
+      refresh()
+
+      expect(activeDescendant(container)).toBe('kf-opacity-1')
+      // Still the same keyframe: its easing is the one it was created with, so
+      // the selection did not silently move to a different handle.
+      expect(screen.getByLabelText('Keyframe easing')).toHaveValue('linear')
+    })
+  })
+
+  describe('adding a keyframe at the playhead', () => {
+    it('adds at the value the curve has there', () => {
+      // 0.5 at 1s and 0.1 at 3s, both linear, so the curve reads 0.3 at 2s.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 3, value: 0.1, easing: 'linear' })
+      const { container, onAddKeyframe, refresh } = renderGraph('opacity', { playheadTime: 2 })
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(onAddKeyframe.mock.calls[0][0]).toBe('opacity')
+      expect(onAddKeyframe.mock.calls[0][1]).toBe(2)
+      expect(onAddKeyframe.mock.calls[0][2]).toBeCloseTo(0.3, 6)
+
+      // Once the host commits it, the new keyframe is the active option.
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.3, easing: 'ease-in-out' })
+      refresh()
+      expect(graphSvg(container).getAttribute('aria-activedescendant')).toBe('kf-opacity-2')
+      expect(screen.getByLabelText('Keyframe easing')).toBeInTheDocument()
+    })
+
+    it('adds at the property default on a graph with no keyframes', () => {
+      const { container, onAddKeyframe } = renderGraph('opacity', { playheadTime: 2 })
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(onAddKeyframe).toHaveBeenCalledWith('opacity', 2, 1)
+    })
+  })
+
+  describe('the live region', () => {
+    it('is empty on mount and announces the nudged value', () => {
+      opacityKeyframes()
+      const { container } = renderGraph('opacity')
+      const svg = graphSvg(container)
+
+      const status = screen.getByRole('status')
+      expect(status).toHaveTextContent('')
+      expect(status).toHaveAttribute('aria-live', 'polite')
+
+      // Navigation alone says nothing: aria-activedescendant already moved, and
+      // announcing here would double up.
+      fireEvent.keyDown(svg, { key: 'End' })
+      expect(status).toHaveTextContent('')
+
+      fireEvent.keyDown(svg, { key: 'ArrowDown' })
+      expect(status).toHaveTextContent('Opacity 49% at 1.00 seconds')
+    })
+
+    it('announces a deletion', async () => {
+      const user = userEvent.setup()
+      opacityKeyframes()
+      const { container } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      await user.keyboard('{Delete}')
+
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Opacity keyframe at 1.00 seconds deleted'
+      )
+    })
+
+    it('announces the time a keyframe was nudged to', () => {
+      opacityKeyframes()
+      const { container } = renderGraph('opacity')
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true, shiftKey: true })
+
+      expect(screen.getByRole('status')).toHaveTextContent('Opacity 50% at 1.10 seconds')
+    })
+
+    it('announces the keyframe added at the playhead', () => {
+      opacityKeyframes()
+      const { container } = renderGraph('opacity', { playheadTime: 2 })
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(screen.getByRole('status')).toHaveTextContent('Opacity 50% at 2.00 seconds')
     })
   })
 })

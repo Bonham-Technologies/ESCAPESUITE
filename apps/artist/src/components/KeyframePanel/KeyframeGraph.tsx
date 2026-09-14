@@ -117,12 +117,19 @@ export function KeyframeGraph({
     ? undefined
     : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
 
-  const { activeIndex, activeId, setActiveTime, onKeyDown } = useKeyframeGraphKeyboard({
+  const { activeIndex, activeId, setActiveTime, nudgeMessage, onKeyDown } = useKeyframeGraphKeyboard({
     property,
     keyframes,
     isCustomKeyframe,
     selectedKeyframe,
     setSelectedKeyframeTime,
+    clipDuration,
+    playheadTime,
+    defaultValue,
+    range,
+    onKeyframeMoved,
+    onKeyframeValueChanged,
+    onAddKeyframe,
     onDeleteKeyframe,
   });
 
@@ -496,6 +503,12 @@ export function KeyframeGraph({
           Double-click to add • Right-click to delete • Drag to move
         </text>
       </svg>
+
+      {/* Always rendered, never conditional: a live region has to exist before
+          its content changes for a screen reader to announce the change. */}
+      <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+        {nudgeMessage}
+      </span>
 
       {selectedKeyframe && onKeyframeEasingChanged && (
         <div className={styles.easingRow}>
