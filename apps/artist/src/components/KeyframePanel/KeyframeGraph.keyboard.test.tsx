@@ -492,6 +492,11 @@ describe('KeyframeGraph keyboard access', () => {
       expect(onKeyframeMoved).not.toHaveBeenCalled()
       expect(seen.mock.calls.map(([e]) => e.key)).toEqual(['Alt'])
       expect(activeDescendant(container)).toBe('kf-opacity-1')
+      // A refusal that says nothing is indistinguishable from a dead key, so
+      // the live region has to explain it.
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Opacity keyframe not moved: another keyframe is at 1.01 seconds'
+      )
     })
 
     it('swallows a time nudge with no keyframe selected', async () => {

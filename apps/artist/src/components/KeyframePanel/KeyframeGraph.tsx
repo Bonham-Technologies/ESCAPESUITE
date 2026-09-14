@@ -9,7 +9,7 @@ import {
   keyframeOptionLabel,
   PROPERTY_LABELS,
   useKeyframeGraphKeyboard,
-} from './useKeyframeGraphKeyboard';
+} from './hooks/useKeyframeGraphKeyboard';
 import styles from './KeyframeGraph.module.css';
 
 interface KeyframeGraphProps {

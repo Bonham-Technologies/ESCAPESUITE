@@ -1,7 +1,7 @@
 import { useCallback, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type SetStateAction } from 'react';
-import type { AnimatableProperty, EasingType, Keyframe } from '../../store/types';
-import { interpolateKeyframes } from '../../utils/animation';
-import { EASING_TYPES } from '../../utils/easingOptions';
+import type { AnimatableProperty, EasingType, Keyframe } from '../../../store/types';
+import { interpolateKeyframes } from '../../../utils/animation';
+import { EASING_TYPES } from '../../../utils/easingOptions';
 
 // The name each property is announced by. Deliberately a copy of the labels
 // KeyframePanel lists its property tracks with rather than an import of them:
@@ -167,12 +167,19 @@ export function useKeyframeGraphKeyboard({
     const newTime = Math.max(0, Math.min(selectedKeyframe.time + direction * step, clipDuration));
     // moveClipKeyframe deletes whatever already sits within 0.001s of the
     // target, so a nudge onto a neighbour would silently destroy it. Refuse the
-    // nudge instead — nothing moves, nothing is announced, and the key is still
-    // swallowed rather than falling through to the editor.
+    // nudge instead — nothing moves, the live region says why, and the key is
+    // still swallowed rather than falling through to the editor.
+    // `keyframes` is every handle on the graph, presets included: landing on a
+    // preset is refused too, because the store would merge the two all the same.
     const occupied = keyframes.some(kf =>
       Math.abs(kf.time - selectedKeyframe.time) >= 0.001 && Math.abs(kf.time - newTime) < 0.001
     );
-    if (occupied) return;
+    if (occupied) {
+      setNudgeMessage(
+        `${PROPERTY_LABELS[property]} keyframe not moved: another keyframe is at ${newTime.toFixed(2)} seconds`
+      );
+      return;
+    }
     onKeyframeMoved(property, selectedKeyframe.time, newTime);
     // The keyframe lives at newTime now, so the active option and the selection
     // follow it — exactly what the drag's mouseup does.
