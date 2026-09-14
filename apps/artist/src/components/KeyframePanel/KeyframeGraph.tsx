@@ -3,6 +3,13 @@ import { getAllKeyframesForProperty, interpolateKeyframes } from '../../utils/an
 import type { AnimatableProperty, Keyframe, ClipAnimation, ClipTransform, ClipEffects, EasingType } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import { EASING_TYPES } from '../../utils/easingOptions';
+import {
+  formatValue,
+  keyframeOptionId,
+  keyframeOptionLabel,
+  PROPERTY_LABELS,
+  useKeyframeGraphKeyboard,
+} from './useKeyframeGraphKeyboard';
 import styles from './KeyframeGraph.module.css';
 
 interface KeyframeGraphProps {
@@ -31,41 +38,6 @@ const PROPERTY_RANGES: Record<AnimatableProperty, { min: number; max: number; st
   blur: { min: 0, max: 50, step: 10 },
   volume: { min: 0, max: 1, step: 0.25 },
 };
-
-// The name each property is announced by. Deliberately a copy of the labels
-// KeyframePanel lists its property tracks with rather than an import of them:
-// the panel owns the graph, so importing from it would invert the dependency.
-// Not exported — react-refresh/only-export-components rejects a non-literal
-// export from a component module, and nothing outside this file needs it.
-const PROPERTY_LABELS: Record<AnimatableProperty, string> = {
-  x: 'Position X',
-  y: 'Position Y',
-  scaleX: 'Scale X',
-  scaleY: 'Scale Y',
-  rotation: 'Rotation',
-  opacity: 'Opacity',
-  blur: 'Blur',
-  volume: 'Volume',
-};
-
-/**
- * What a screen reader reads for one keyframe handle. It overrides the <title>
- * child, which stays as the pointer tooltip.
- */
-function keyframeOptionLabel(
-  value: string,
-  time: number,
-  easing: EasingType,
-  isCustom: boolean
-): string {
-  const easingLabel = EASING_TYPES.find(o => o.value === easing)?.label ?? easing;
-  return `${value} at ${time.toFixed(2)} s, ${easingLabel}${isCustom ? '' : ', preset, not editable'}`;
-}
-
-/** The DOM id of a keyframe option — what aria-activedescendant points at. */
-function keyframeOptionId(property: AnimatableProperty, index: number): string {
-  return `kf-${property}-${index}`;
-}
 
 const GRAPH_PADDING = { top: 20, right: 20, bottom: 30, left: 50 };
 const SAMPLE_INTERVAL = 4; // pixels between curve samples
@@ -104,14 +76,6 @@ export function KeyframeGraph({
   // Selected keyframe for deletion
   const [selectedKeyframeTime, setSelectedKeyframeTime] = useState<number | null>(null);
 
-  // The listbox's active descendant, tracked by time rather than by index
-  // because the keyframe array is sorted by time — a future time nudge re-sorts
-  // it and an index would then address a different keyframe. Unlike
-  // selectedKeyframeTime this may address a *preset* keyframe, so a keyboard or
-  // screen-reader user can walk the whole curve; selection still follows it only
-  // for the custom ones.
-  const [activeTime, setActiveTime] = useState<number | null>(null);
-
   // Get all keyframes for this property (filter out any with invalid values)
   const keyframes = useMemo(() => {
     const allKeyframes = getAllKeyframesForProperty(
@@ -145,6 +109,22 @@ export function KeyframeGraph({
     const val = transform?.[property as keyof ClipTransform];
     return typeof val === 'number' ? val : 0;
   }, [property, transform, effects]);
+
+  // The selected keyframe, when it is one the user can edit. Preset keyframes
+  // are never selectable (see the isCustomKeyframe guards below), so this is
+  // undefined for them and the easing control simply does not render.
+  const selectedKeyframe = selectedKeyframeTime === null
+    ? undefined
+    : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
+
+  const { activeIndex, activeId, setActiveTime, onKeyDown } = useKeyframeGraphKeyboard({
+    property,
+    keyframes,
+    isCustomKeyframe,
+    selectedKeyframe,
+    setSelectedKeyframeTime,
+    onDeleteKeyframe,
+  });
 
   // Calculate SVG dimensions and coordinate conversions
   const graphDimensions = useMemo(() => {
@@ -234,15 +214,6 @@ export function KeyframeGraph({
     return lines;
   }, [range, clipDuration, graphDimensions, property]);
 
-  // Format value for display
-  function formatValue(value: number, prop: AnimatableProperty): string {
-    if (prop === 'rotation') return `${value.toFixed(0)}°`;
-    if (prop === 'blur') return `${value.toFixed(0)}px`;
-    if (prop === 'opacity' || prop === 'volume') return `${(value * 100).toFixed(0)}%`;
-    if (prop === 'x' || prop === 'y') return `${(value * 100).toFixed(0)}%`;
-    return value.toFixed(2);
-  }
-
   // Handle mouse down on keyframe point
   const handleKeyframeMouseDown = useCallback((e: React.MouseEvent, kf: Keyframe) => {
     if (!isCustomKeyframe(kf)) return; // Can't drag preset keyframes
@@ -261,7 +232,7 @@ export function KeyframeGraph({
       currentValue: kf.value,
       dragType: e.shiftKey ? 'value' : e.altKey ? 'time' : 'both',
     });
-  }, [isCustomKeyframe, focusGraph]);
+  }, [isCustomKeyframe, focusGraph, setActiveTime]);
 
   // Handle click on keyframe to select it
   const handleKeyframeClick = useCallback((e: React.MouseEvent, kf: Keyframe) => {
@@ -271,7 +242,7 @@ export function KeyframeGraph({
     if (isCustomKeyframe(kf)) {
       setSelectedKeyframeTime(kf.time);
     }
-  }, [isCustomKeyframe, focusGraph]);
+  }, [isCustomKeyframe, focusGraph, setActiveTime]);
 
   // Handle right-click on keyframe to delete
   const handleKeyframeContextMenu = useCallback((e: React.MouseEvent, kf: Keyframe) => {
@@ -380,13 +351,13 @@ export function KeyframeGraph({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords]);
+  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime]);
 
   // Click on graph background to deselect
   const handleGraphClick = useCallback(() => {
     setActiveTime(null);
     setSelectedKeyframeTime(null);
-  }, []);
+  }, [setActiveTime]);
 
   // Handle double-click on graph to add keyframe
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -410,95 +381,6 @@ export function KeyframeGraph({
     ? graphDimensions.timeToX(playheadTime)
     : null;
 
-  // The selected keyframe, when it is one the user can edit. Preset keyframes
-  // are never selectable (see the isCustomKeyframe guards above), so this is
-  // undefined for them and the easing control simply does not render.
-  const selectedKeyframe = selectedKeyframeTime === null
-    ? undefined
-    : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
-
-  // The active descendant, resolved back to a position in the sorted array.
-  // -1 means "no active option", which is also what the arrow keys step from.
-  const activeIndex = activeTime === null
-    ? -1
-    : keyframes.findIndex(kf => Math.abs(kf.time - activeTime) < 0.001);
-  const activeId = activeIndex === -1 ? undefined : keyframeOptionId(property, activeIndex);
-
-  // Move the active option, and take the selection with it when the keyframe is
-  // one the user can edit — single-select follow-focus, the APG listbox default
-  // and the model the easing control below already assumes. Landing on a preset
-  // clears the selection instead, because a preset is never editable.
-  const activateIndex = useCallback((index: number) => {
-    const kf = keyframes[index];
-    if (!kf) return;
-    setActiveTime(kf.time);
-    setSelectedKeyframeTime(isCustomKeyframe(kf) ? kf.time : null);
-  }, [keyframes, isCustomKeyframe]);
-
-  // The propagation contract, in one place.
-  //
-  // While the graph has focus it owns its own keys. React attaches its listener
-  // at the root container, which sits *below* `window`, so stopPropagation() on
-  // the synthetic event stops the native one before either of the editor's
-  // window-level cascades (app/useAppKeyboardShortcuts.ts and
-  // Preview/PlaybackControls.tsx) can see it.
-  //
-  //   * ArrowLeft/Right/Up/Down, Home, End and Enter are claimed
-  //     unconditionally — a focused listbox owning its arrows is what a user
-  //     expects, and an unconditional claim is one fewer branch to get wrong.
-  //   * Delete/Backspace and Escape are claimed whenever an option is active —
-  //     including a preset, which is announced as the selected option and would
-  //     otherwise let the editor delete the whole clip two keystrokes into the
-  //     graph. They only *act* on a custom keyframe. With nothing active they
-  //     are not claimed at all, so Delete still reaches the editor's "delete the
-  //     selected clip" shortcut: the bug (ESCSUITE-49) was that both fired at
-  //     once, not that the editor's one fires at all.
-  //   * Everything else — Tab, Space, '?', letters — falls through untouched, so
-  //     the shortcut sheet, play/pause and tool switching still work from here.
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<SVGSVGElement>) => {
-    const key = e.key;
-
-    if (
-      key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' ||
-      key === 'ArrowDown' || key === 'Home' || key === 'End' || key === 'Enter'
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
-      const last = keyframes.length - 1;
-      if (key === 'ArrowLeft' || key === 'ArrowRight') {
-        // Neither arrow wraps; from -1 ("nothing active") either lands on the
-        // first keyframe.
-        const next = activeIndex + (key === 'ArrowRight' ? 1 : -1);
-        activateIndex(Math.max(0, Math.min(next, last)));
-      } else if (key === 'Home') {
-        activateIndex(0);
-      } else if (key === 'End') {
-        activateIndex(last);
-      }
-      return;
-    }
-
-    if ((key === 'Delete' || key === 'Backspace') && activeTime !== null) {
-      e.preventDefault();
-      e.stopPropagation();
-      // Only a custom keyframe can be deleted; on a preset the key is swallowed
-      // and nothing happens.
-      if (selectedKeyframe && onDeleteKeyframe) {
-        onDeleteKeyframe(property, selectedKeyframe.time);
-        setActiveTime(null);
-        setSelectedKeyframeTime(null);
-      }
-      return;
-    }
-
-    if (key === 'Escape' && activeTime !== null) {
-      e.preventDefault();
-      e.stopPropagation();
-      setActiveTime(null);
-      setSelectedKeyframeTime(null);
-    }
-  }, [keyframes.length, activeIndex, activateIndex, activeTime, selectedKeyframe, onDeleteKeyframe, property]);
-
   return (
     <div className={styles.graphWrap}>
       <svg
@@ -513,7 +395,7 @@ export function KeyframeGraph({
         aria-activedescendant={activeId}
         onClick={handleGraphClick}
         onDoubleClick={handleDoubleClick}
-        onKeyDown={handleKeyDown}
+        onKeyDown={onKeyDown}
       >
         {/* Grid lines */}
         <g className={styles.grid} aria-hidden="true">
