@@ -32,6 +32,41 @@ const PROPERTY_RANGES: Record<AnimatableProperty, { min: number; max: number; st
   volume: { min: 0, max: 1, step: 0.25 },
 };
 
+// The name each property is announced by. Deliberately a copy of the labels
+// KeyframePanel lists its property tracks with rather than an import of them:
+// the panel owns the graph, so importing from it would invert the dependency.
+// Not exported — react-refresh/only-export-components rejects a non-literal
+// export from a component module, and nothing outside this file needs it.
+const PROPERTY_LABELS: Record<AnimatableProperty, string> = {
+  x: 'Position X',
+  y: 'Position Y',
+  scaleX: 'Scale X',
+  scaleY: 'Scale Y',
+  rotation: 'Rotation',
+  opacity: 'Opacity',
+  blur: 'Blur',
+  volume: 'Volume',
+};
+
+/**
+ * What a screen reader reads for one keyframe handle. It overrides the <title>
+ * child, which stays as the pointer tooltip.
+ */
+function keyframeOptionLabel(
+  value: string,
+  time: number,
+  easing: EasingType,
+  isCustom: boolean
+): string {
+  const easingLabel = EASING_TYPES.find(o => o.value === easing)?.label ?? easing;
+  return `${value} at ${time.toFixed(2)} s, ${easingLabel}${isCustom ? '' : ', preset, not editable'}`;
+}
+
+/** The DOM id of a keyframe option — what aria-activedescendant points at. */
+function keyframeOptionId(property: AnimatableProperty, index: number): string {
+  return `kf-${property}-${index}`;
+}
+
 const GRAPH_PADDING = { top: 20, right: 20, bottom: 30, left: 50 };
 const SAMPLE_INTERVAL = 4; // pixels between curve samples
 
@@ -50,6 +85,12 @@ export function KeyframeGraph({
 }: KeyframeGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
+  // Safari does not focus a tabindex element on mousedown, so the pointer
+  // handlers take focus explicitly — click-then-Delete has to keep working there.
+  const focusGraph = useCallback(() => {
+    svgRef.current?.focus();
+  }, []);
+
   // Track drag state with refs to avoid re-render issues during drag
   const [dragState, setDragState] = useState<{
     isDragging: boolean;
@@ -62,6 +103,14 @@ export function KeyframeGraph({
 
   // Selected keyframe for deletion
   const [selectedKeyframeTime, setSelectedKeyframeTime] = useState<number | null>(null);
+
+  // The listbox's active descendant, tracked by time rather than by index
+  // because the keyframe array is sorted by time — a future time nudge re-sorts
+  // it and an index would then address a different keyframe. Unlike
+  // selectedKeyframeTime this may address a *preset* keyframe, so a keyboard or
+  // screen-reader user can walk the whole curve; selection still follows it only
+  // for the custom ones.
+  const [activeTime, setActiveTime] = useState<number | null>(null);
 
   // Get all keyframes for this property (filter out any with invalid values)
   const keyframes = useMemo(() => {
@@ -201,6 +250,8 @@ export function KeyframeGraph({
     e.preventDefault();
     e.stopPropagation();
 
+    focusGraph();
+    setActiveTime(kf.time);
     setSelectedKeyframeTime(kf.time);
     setDragState({
       isDragging: true,
@@ -210,15 +261,17 @@ export function KeyframeGraph({
       currentValue: kf.value,
       dragType: e.shiftKey ? 'value' : e.altKey ? 'time' : 'both',
     });
-  }, [isCustomKeyframe]);
+  }, [isCustomKeyframe, focusGraph]);
 
   // Handle click on keyframe to select it
   const handleKeyframeClick = useCallback((e: React.MouseEvent, kf: Keyframe) => {
     e.stopPropagation();
+    focusGraph();
+    setActiveTime(kf.time);
     if (isCustomKeyframe(kf)) {
       setSelectedKeyframeTime(kf.time);
     }
-  }, [isCustomKeyframe]);
+  }, [isCustomKeyframe, focusGraph]);
 
   // Handle right-click on keyframe to delete
   const handleKeyframeContextMenu = useCallback((e: React.MouseEvent, kf: Keyframe) => {
@@ -228,20 +281,6 @@ export function KeyframeGraph({
       onDeleteKeyframe(property, kf.time);
     }
   }, [isCustomKeyframe, onDeleteKeyframe, property]);
-
-  // Handle keyboard events for deletion
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedKeyframeTime !== null && onDeleteKeyframe) {
-        e.preventDefault();
-        onDeleteKeyframe(property, selectedKeyframeTime);
-        setSelectedKeyframeTime(null);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedKeyframeTime, onDeleteKeyframe, property]);
 
   // Convert screen coordinates to SVG viewBox coordinates
   // Must account for preserveAspectRatio="xMidYMid meet" which centers content
@@ -325,6 +364,10 @@ export function KeyframeGraph({
           onKeyframeValueChanged(property, currentDrag.originalTime, currentDrag.currentValue);
         }
 
+        // Both, and for the same reason: after a time change the keyframe lives
+        // at currentTime, so an activeTime left on the original would resolve to
+        // "no active option" and send the next arrow key back to the first.
+        setActiveTime(currentDrag.currentTime);
         setSelectedKeyframeTime(currentDrag.currentTime);
       }
       setDragState(null);
@@ -341,6 +384,7 @@ export function KeyframeGraph({
 
   // Click on graph background to deselect
   const handleGraphClick = useCallback(() => {
+    setActiveTime(null);
     setSelectedKeyframeTime(null);
   }, []);
 
@@ -373,6 +417,88 @@ export function KeyframeGraph({
     ? undefined
     : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
 
+  // The active descendant, resolved back to a position in the sorted array.
+  // -1 means "no active option", which is also what the arrow keys step from.
+  const activeIndex = activeTime === null
+    ? -1
+    : keyframes.findIndex(kf => Math.abs(kf.time - activeTime) < 0.001);
+  const activeId = activeIndex === -1 ? undefined : keyframeOptionId(property, activeIndex);
+
+  // Move the active option, and take the selection with it when the keyframe is
+  // one the user can edit — single-select follow-focus, the APG listbox default
+  // and the model the easing control below already assumes. Landing on a preset
+  // clears the selection instead, because a preset is never editable.
+  const activateIndex = useCallback((index: number) => {
+    const kf = keyframes[index];
+    if (!kf) return;
+    setActiveTime(kf.time);
+    setSelectedKeyframeTime(isCustomKeyframe(kf) ? kf.time : null);
+  }, [keyframes, isCustomKeyframe]);
+
+  // The propagation contract, in one place.
+  //
+  // While the graph has focus it owns its own keys. React attaches its listener
+  // at the root container, which sits *below* `window`, so stopPropagation() on
+  // the synthetic event stops the native one before either of the editor's
+  // window-level cascades (app/useAppKeyboardShortcuts.ts and
+  // Preview/PlaybackControls.tsx) can see it.
+  //
+  //   * ArrowLeft/Right/Up/Down, Home, End and Enter are claimed
+  //     unconditionally — a focused listbox owning its arrows is what a user
+  //     expects, and an unconditional claim is one fewer branch to get wrong.
+  //   * Delete/Backspace and Escape are claimed whenever an option is active —
+  //     including a preset, which is announced as the selected option and would
+  //     otherwise let the editor delete the whole clip two keystrokes into the
+  //     graph. They only *act* on a custom keyframe. With nothing active they
+  //     are not claimed at all, so Delete still reaches the editor's "delete the
+  //     selected clip" shortcut: the bug (ESCSUITE-49) was that both fired at
+  //     once, not that the editor's one fires at all.
+  //   * Everything else — Tab, Space, '?', letters — falls through untouched, so
+  //     the shortcut sheet, play/pause and tool switching still work from here.
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<SVGSVGElement>) => {
+    const key = e.key;
+
+    if (
+      key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' ||
+      key === 'ArrowDown' || key === 'Home' || key === 'End' || key === 'Enter'
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      const last = keyframes.length - 1;
+      if (key === 'ArrowLeft' || key === 'ArrowRight') {
+        // Neither arrow wraps; from -1 ("nothing active") either lands on the
+        // first keyframe.
+        const next = activeIndex + (key === 'ArrowRight' ? 1 : -1);
+        activateIndex(Math.max(0, Math.min(next, last)));
+      } else if (key === 'Home') {
+        activateIndex(0);
+      } else if (key === 'End') {
+        activateIndex(last);
+      }
+      return;
+    }
+
+    if ((key === 'Delete' || key === 'Backspace') && activeTime !== null) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Only a custom keyframe can be deleted; on a preset the key is swallowed
+      // and nothing happens.
+      if (selectedKeyframe && onDeleteKeyframe) {
+        onDeleteKeyframe(property, selectedKeyframe.time);
+        setActiveTime(null);
+        setSelectedKeyframeTime(null);
+      }
+      return;
+    }
+
+    if (key === 'Escape' && activeTime !== null) {
+      e.preventDefault();
+      e.stopPropagation();
+      setActiveTime(null);
+      setSelectedKeyframeTime(null);
+    }
+  }, [keyframes.length, activeIndex, activateIndex, activeTime, selectedKeyframe, onDeleteKeyframe, property]);
+
   return (
     <div className={styles.graphWrap}>
       <svg
@@ -380,11 +506,17 @@ export function KeyframeGraph({
         className={styles.graph}
         viewBox={`0 0 ${graphDimensions.width} ${graphDimensions.height}`}
         preserveAspectRatio="xMidYMid meet"
+        tabIndex={0}
+        role="listbox"
+        aria-orientation="horizontal"
+        aria-label={`Keyframes for ${PROPERTY_LABELS[property]}`}
+        aria-activedescendant={activeId}
         onClick={handleGraphClick}
         onDoubleClick={handleDoubleClick}
+        onKeyDown={handleKeyDown}
       >
         {/* Grid lines */}
-        <g className={styles.grid}>
+        <g className={styles.grid} aria-hidden="true">
           {gridLines.map((line, i) => (
             <g key={i}>
               <line
@@ -421,7 +553,7 @@ export function KeyframeGraph({
         </g>
 
         {/* Value curve */}
-        <path d={curvePath} className={styles.curve} />
+        <path d={curvePath} className={styles.curve} aria-hidden="true" />
 
         {/* Playhead */}
         {playheadX !== null && (
@@ -431,6 +563,7 @@ export function KeyframeGraph({
             x2={playheadX}
             y2={GRAPH_PADDING.top + graphDimensions.innerHeight}
             className={styles.playhead}
+            aria-hidden="true"
           />
         )}
 
@@ -439,6 +572,7 @@ export function KeyframeGraph({
           const isCustom = isCustomKeyframe(kf);
           const isDragging = dragState?.isDragging && Math.abs(dragState.originalTime - kf.time) < 0.001;
           const isSelected = selectedKeyframeTime !== null && Math.abs(selectedKeyframeTime - kf.time) < 0.001;
+          const isActive = i === activeIndex;
 
           // Use drag state position if this keyframe is being dragged
           const displayTime = isDragging ? dragState.currentTime : kf.time;
@@ -452,7 +586,11 @@ export function KeyframeGraph({
               cx={cx}
               cy={cy}
               r={isDragging ? 8 : isSelected ? 7 : 6}
-              className={`${styles.keyframePoint} ${isCustom ? styles.custom : styles.preset} ${isDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''}`}
+              className={`${styles.keyframePoint} ${isCustom ? styles.custom : styles.preset} ${isDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isActive ? styles.active : ''}`}
+              id={keyframeOptionId(property, i)}
+              role="option"
+              aria-selected={isActive}
+              aria-label={keyframeOptionLabel(formatValue(displayValue, property), displayTime, kf.easing, isCustom)}
               onMouseDown={(e) => handleKeyframeMouseDown(e, kf)}
               onClick={(e) => handleKeyframeClick(e, kf)}
               onContextMenu={(e) => handleKeyframeContextMenu(e, kf)}
@@ -471,6 +609,7 @@ export function KeyframeGraph({
           y={graphDimensions.height - 2}
           className={styles.helpLabel}
           textAnchor="middle"
+          aria-hidden="true"
         >
           Double-click to add • Right-click to delete • Drag to move
         </text>

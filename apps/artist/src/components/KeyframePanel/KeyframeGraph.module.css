@@ -6,6 +6,13 @@
   cursor: crosshair;
 }
 
+/* The graph is a single tab stop (role="listbox"), so it needs a focus ring of
+   its own — the same one the easing select below it uses. */
+.graph:focus-visible {
+  outline: 1px solid #4a9eff;
+  outline-offset: 1px;
+}
+
 .grid {
   pointer-events: none;
 }
@@ -65,9 +72,23 @@
   filter: drop-shadow(0 0 4px rgba(245, 166, 35, 0.6));
 }
 
+/* The active descendant: where the keyboard is. Declared before .selected, at
+   equal specificity, so a custom keyframe that is both still shows the stronger
+   selected ring — and a preset, which can be active but never selected, has
+   this as the only thing marking it. */
+.keyframePoint.active {
+  stroke: #4a9eff;
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
+}
+
 .keyframePoint.selected {
   stroke: #fff;
   stroke-width: 3;
+  /* .active's dashes would otherwise survive into .selected — nothing else here
+     sets stroke-dasharray, so a mouse-selected or dragged keyframe would render
+     dashed where it never used to. */
+  stroke-dasharray: none;
   filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.4));
 }
 
