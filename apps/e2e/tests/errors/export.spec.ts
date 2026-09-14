@@ -164,7 +164,6 @@ test.describe('Storage Quota Exceeded', () => {
       await saveButton.click()
       await page.waitForTimeout(500)
 
-      // Should show storage error
       // App should still function
       const html = await page.content()
       expect(html).toContain('<div id="root">')

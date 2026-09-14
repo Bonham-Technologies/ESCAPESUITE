@@ -27,12 +27,20 @@ pnpm test:production     # Production single-origin layout (needs pnpm build:dep
 pnpm test:perf           # Performance benchmarks (prefer `pnpm perf` from the root)
 ```
 
-## Type Checking
+## Linting & Type Checking
 
 ```bash
+pnpm lint                # from this directory
+pnpm --filter=@escapesuite/e2e run lint        # from the monorepo root (or `pnpm lint` for every package)
+
 pnpm typecheck           # from this directory
 pnpm --filter=@escapesuite/e2e run typecheck   # from the monorepo root
 ```
+
+`eslint.config.js` lints `tests/`, `utils/`, `scripts/*.mjs` and the
+`playwright*.config.ts` files — Node and browser globals are both available,
+since specs run `page.evaluate`/`addInitScript` callbacks against the DOM. It
+is part of the root `pnpm lint` and CI's `lint-and-typecheck` job.
 
 `tsconfig.json` type-checks `tests/`, `utils/`, `scripts/*.ts` and the
 `playwright*.config.ts` files under `strict`, so a type error in a spec that no
