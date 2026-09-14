@@ -317,8 +317,10 @@ cheap coverage gaps; `@escapesuite/artist` again at the end of performance round
 new tests moved statements and branches up a hundredth of a percent each and no floor,
 and once more at the end of the keyframe-graph keyboard work — which moved all four
 figures up and, again, no floor; and finally after the store decomposition into slices,
-a pure move that left the branch denominator at 4,100 and nudged statements and branches
-up a hundredth of a percent each as the composition's dead type-level scaffolding went).
+a pure move that left the branch denominator at 4,100 and every uncovered count unchanged —
+the statements figure rose a hundredth as the ten covered slice creators enlarged the
+denominator, and the branches entry was corrected from a stale 93.16 to the 93.17 the
+numbers had already been).
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
