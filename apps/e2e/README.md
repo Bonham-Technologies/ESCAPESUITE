@@ -27,6 +27,19 @@ pnpm test:production     # Production single-origin layout (needs pnpm build:dep
 pnpm test:perf           # Performance benchmarks (prefer `pnpm perf` from the root)
 ```
 
+## Type Checking
+
+```bash
+pnpm typecheck           # from this directory
+pnpm --filter=@escapesuite/e2e run typecheck   # from the monorepo root
+```
+
+`tsconfig.json` type-checks `tests/`, `utils/`, `scripts/*.ts` and the
+`playwright*.config.ts` files under `strict`, so a type error in a spec that no
+one selected still fails the build. It is part of the root `pnpm -r run
+typecheck` and CI's `lint-and-typecheck` job. The `.mjs` scripts are not in it —
+they are plain JavaScript and `pnpm test:scripts` covers the one with logic.
+
 ## Test Structure
 
 ```

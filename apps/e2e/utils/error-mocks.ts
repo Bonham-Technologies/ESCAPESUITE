@@ -236,14 +236,14 @@ export async function mockCodecNotSupported(page: Page): Promise<void> {
     if (typeof VideoEncoder !== 'undefined') {
       VideoEncoder.isConfigSupported = async () => ({
         supported: false,
-        config: null,
+        config: undefined,
       })
     }
 
     if (typeof VideoDecoder !== 'undefined') {
       VideoDecoder.isConfigSupported = async () => ({
         supported: false,
-        config: null,
+        config: undefined,
       })
     }
   })

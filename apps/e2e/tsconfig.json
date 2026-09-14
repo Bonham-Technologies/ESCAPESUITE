@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    /* Specs run page.evaluate callbacks that are typed against the browser's
+       DOM, so DOM and DOM.Iterable have to be in lib even though the suite
+       itself executes in Node. */
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true
+  },
+  /* .mjs scripts are out of scope — they have node:test coverage
+     (scripts/profile-top.test.mjs, run by `pnpm test:scripts`). */
+  "include": [
+    "tests/**/*.ts",
+    "utils/**/*.ts",
+    "scripts/**/*.ts",
+    "playwright*.config.ts"
+  ]
+}

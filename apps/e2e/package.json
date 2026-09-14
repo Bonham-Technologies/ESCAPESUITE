@@ -26,13 +26,15 @@
     "report": "playwright show-report",
     "report:standalone": "playwright show-report playwright-report-standalone",
     "report:production": "playwright show-report playwright-report-production",
-    "report:journeys": "playwright show-report playwright-report-journeys"
+    "report:journeys": "playwright show-report playwright-report-journeys",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.4.1",
     "serve": "^14.2.6",
+    "typescript": "~5.9.3",
     "wait-on": "^9.1.0"
   }
 }
