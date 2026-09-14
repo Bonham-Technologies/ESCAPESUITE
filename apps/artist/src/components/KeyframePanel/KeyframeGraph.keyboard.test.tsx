@@ -263,6 +263,10 @@ describe('KeyframeGraph keyboard access', () => {
       const svg = graphSvg(container)
       svg.focus()
 
+      // Twice: onto the user's own 0.5 keyframe at 1s rather than the store's
+      // auto-created one at 0s, which sits at opacity 1 and so has nowhere to
+      // go up — a clamped nudge is a no-op and would not call back at all.
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
       fireEvent.keyDown(svg, { key: 'ArrowRight' })
       await user.keyboard('{ArrowUp}{ArrowDown}{Enter}')
 
@@ -391,9 +395,11 @@ describe('KeyframeGraph keyboard access', () => {
     })
 
     it('clamps the nudged value to the property range', () => {
-      // The store's auto-created keyframe at 0s sits at opacity 1 — the top of
-      // the range — and the user's at 1s goes to the bottom.
-      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0, easing: 'linear' })
+      // Half a fine step inside each end of the range, so an unclamped nudge
+      // would overshoot to 1.005 and to -0.005: the clamp is what the call
+      // proves, not the fact that a call happened.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.005, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 0, value: 0.995, easing: 'linear' })
       const { container, onKeyframeValueChanged } = renderGraph('opacity')
       const svg = graphSvg(container)
 
@@ -404,6 +410,35 @@ describe('KeyframeGraph keyboard access', () => {
       fireEvent.keyDown(svg, { key: 'End' })
       fireEvent.keyDown(svg, { key: 'ArrowDown' })
       expect(onKeyframeValueChanged).toHaveBeenLastCalledWith('opacity', 1, 0)
+    })
+
+    it('writes nothing when a value nudge lands on the value the keyframe already has', async () => {
+      const user = userEvent.setup()
+      // One fine step above the floor of the range.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.01, easing: 'linear' })
+      const { container, onKeyframeValueChanged, refresh } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      // One real nudge onto the floor, committed the way KeyframePanel does.
+      fireEvent.keyDown(svg, { key: 'ArrowDown' })
+      const first = onKeyframeValueChanged.mock.calls[0]
+      store().setClipKeyframe('clip1', 'opacity', {
+        time: first[1] as number,
+        value: first[2] as number,
+        easing: 'linear',
+      })
+      refresh()
+      expect(screen.getByRole('status')).toHaveTextContent('Opacity 0% at 1.00 seconds')
+
+      await user.keyboard('{ArrowDown}')
+
+      // The clamp puts the nudge back on the value it started from, and a write
+      // that changes nothing is not an edit: no store call, so no undo entry
+      // that undoes nothing, and the live region is left exactly as it was.
+      expect(onKeyframeValueChanged).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('status')).toHaveTextContent('Opacity 0% at 1.00 seconds')
+      // Still swallowed, though — the key is the graph's either way.
+      expect(seen).not.toHaveBeenCalled()
     })
 
     it('swallows the value nudge on a preset without changing anything', async () => {
@@ -455,19 +490,44 @@ describe('KeyframeGraph keyboard access', () => {
     })
 
     it('clamps the nudged time to the clip', () => {
-      // One keyframe hard against each end: the store's own at 0s, the user's
-      // at the very last frame of the clip.
-      store().setClipKeyframe('clip1', 'opacity', { time: CLIP_DURATION, value: 0.5, easing: 'linear' })
+      // Half a fine step inside each end of the clip, so an unclamped nudge
+      // would overshoot to -0.005s and past the clip's last frame.
+      store().setClipKeyframe('clip1', 'opacity', { time: CLIP_DURATION - 0.005, value: 0.5, easing: 'linear' })
+      // The store auto-creates its own keyframe at 0s; move it half a step in
+      // so the low clamp has something to clamp and nothing to collide with.
+      store().moveClipKeyframe('clip1', 'opacity', 0, 0.005)
       const { container, onKeyframeMoved } = renderGraph('opacity')
       const svg = graphSvg(container)
 
       fireEvent.keyDown(svg, { key: 'Home' })
       fireEvent.keyDown(svg, { key: 'ArrowLeft', altKey: true })
-      expect(onKeyframeMoved).toHaveBeenCalledWith('opacity', 0, 0)
+      expect(onKeyframeMoved).toHaveBeenCalledWith('opacity', 0.005, 0)
 
       fireEvent.keyDown(svg, { key: 'End' })
       fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true })
-      expect(onKeyframeMoved).toHaveBeenLastCalledWith('opacity', CLIP_DURATION, CLIP_DURATION)
+      expect(onKeyframeMoved).toHaveBeenLastCalledWith('opacity', CLIP_DURATION - 0.005, CLIP_DURATION)
+    })
+
+    it('writes nothing when a time nudge lands on the time the keyframe already has', async () => {
+      const user = userEvent.setup()
+      // The user's keyframe is already on the clip's last frame.
+      store().setClipKeyframe('clip1', 'opacity', { time: CLIP_DURATION, value: 0.5, easing: 'linear' })
+      const { container, onKeyframeMoved } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      // A value nudge first, purely to put something in the live region that
+      // the refused time nudge then has to leave alone.
+      fireEvent.keyDown(svg, { key: 'ArrowDown' })
+      expect(screen.getByRole('status')).toHaveTextContent('Opacity 49% at 4.30 seconds')
+
+      await user.keyboard('{Alt>}{ArrowRight}{/Alt}')
+
+      // Clamped back onto its own time: no move, no undo entry, and nothing
+      // said — this is not the occupancy refusal, which does announce.
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent('Opacity 49% at 4.30 seconds')
+      // The window sees only the Alt press, which the graph has no claim on.
+      expect(seen.mock.calls.map(([e]) => e.key)).toEqual(['Alt'])
     })
 
     it('refuses a time nudge that would land on another keyframe', async () => {
@@ -511,6 +571,34 @@ describe('KeyframeGraph keyboard access', () => {
 
       expect(onKeyframeMoved).not.toHaveBeenCalled()
       expect(seen.mock.calls.map(([e]) => e.key)).toEqual(['Alt'])
+    })
+
+    it('follows the nudged keyframe when the move re-sorts the array', () => {
+      // Three handles: the store's own at 0s, then 1s and 1.05s. A coarse
+      // nudge is 0.1s, so the 1.05s one jumps clean over its neighbour — the
+      // case the whole "track the active option by time, not by index" design
+      // exists for, and the only one where the index actually changes.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 1.05, value: 0.25, easing: 'ease-in' })
+      const { container, onKeyframeMoved, refresh } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      expect(activeDescendant(container)).toBe('kf-opacity-2')
+
+      fireEvent.keyDown(svg, { key: 'ArrowLeft', altKey: true, shiftKey: true })
+      const call = onKeyframeMoved.mock.calls[0]
+      expect(call[1]).toBeCloseTo(1.05, 6)
+      expect(call[2]).toBeCloseTo(0.95, 6)
+      store().moveClipKeyframe('clip1', 'opacity', call[1] as number, call[2] as number)
+      refresh()
+
+      // It is index 1 now, between 0s and 1s — and it is still the same
+      // keyframe, which its own easing is the proof of: the 1s keyframe it
+      // passed is 'linear'.
+      expect(activeDescendant(container)).toBe('kf-opacity-1')
+      expect(screen.getByLabelText('Keyframe easing')).toHaveValue('ease-in')
     })
 
     it('keeps the nudged keyframe selected once the host commits the move', () => {

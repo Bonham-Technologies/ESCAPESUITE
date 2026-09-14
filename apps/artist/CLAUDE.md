@@ -204,7 +204,7 @@ Clips support animated properties via keyframes:
   | `Alt+Shift+ArrowLeft` / `Alt+Shift+ArrowRight` | nudge time, coarse | ∓ 0.1 s |
   | `Enter` | add a keyframe at the playhead, at the curve's value there | — |
   | `Delete` / `Backspace` | delete the selected keyframe (custom only) | — |
-  | `Escape` | clear the graph's selection (only when one is set) | — |
+  | `Escape` | clear the active keyframe and the selection; passes through when nothing is active | — |
 
   `NUDGE_STEPS` (`useKeyframeGraphKeyboard.ts`), each property's own unit:
 
@@ -221,7 +221,10 @@ Clips support animated properties via keyframes:
   the graph's own 0.001 s "same keyframe" tolerance, so a fine nudge can never silently land on a
   neighbour, and 0.1 s is a tenth of the graph's one-second gridlines. A nudge that *would* land
   within 0.001 s of another keyframe (presets included) is refused rather than merging the two —
-  nothing moves, and the live region announces why. Each arrow-key nudge is its own undo step
+  nothing moves, and the live region announces why. A nudge the clamp puts back on the value or
+  the time the keyframe already holds writes nothing either — no store call, so no undo entry
+  that undoes nothing, and no announcement, since the string would be identical — though the key
+  is still swallowed. Each arrow-key nudge that *does* change something is its own undo step
   (every store action pushes history), unlike a drag, which is one; that matches the inspector's
   numeric controls and was an accepted tradeoff rather than an oversight.
 

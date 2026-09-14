@@ -34,6 +34,19 @@ describe('KeyboardShortcuts', () => {
     expect(container.querySelectorAll(`.${styles.group}`)).toHaveLength(7)
   })
 
+  it('lists both keys the keyframe graph deletes with', () => {
+    render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
+
+    // The graph claims Delete *and* Backspace (see apps/artist/CLAUDE.md's key
+    // map); a sheet that only names one of them is a sheet that disagrees with
+    // the code. Two rows rather than one, because the renderer joins the keys
+    // of a row with '+' — these are alternatives, not a chord.
+    const rows = screen.getAllByText('Delete Keyframe')
+      .map((label) => label.closest(`.${styles.shortcutRow}`)!)
+    expect(rows.map((row) => Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent)))
+      .toEqual([['Delete'], ['Backspace']])
+  })
+
   it('closes when the close button is used', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()

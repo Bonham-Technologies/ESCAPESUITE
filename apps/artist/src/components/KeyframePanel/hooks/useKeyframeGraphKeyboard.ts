@@ -155,6 +155,14 @@ export function useKeyframeGraphKeyboard({
       range.min,
       Math.min(selectedKeyframe.value + direction * step, range.max)
     );
+    // At the top or the bottom of the range the clamp puts the nudge back on
+    // the value the keyframe already holds. That is not an edit: the store
+    // actions push history unconditionally, so writing it would spend an undo
+    // slot on a change of nothing (MAX_HISTORY_SIZE is 50, and key auto-repeat
+    // would empty the real stack in under two seconds). Nothing is announced
+    // either — the string would be identical, which no live region re-reads.
+    // The key stays swallowed: the caller has already claimed it.
+    if (newValue === selectedKeyframe.value) return;
     onKeyframeValueChanged(property, selectedKeyframe.time, newValue);
     setNudgeMessage(nudgeAnnouncement(property, newValue, selectedKeyframe.time));
   }, [selectedKeyframe, property, range, onKeyframeValueChanged]);
@@ -165,6 +173,12 @@ export function useKeyframeGraphKeyboard({
     const step = coarse ? TIME_NUDGE.coarse : TIME_NUDGE.fine;
     // Again the drag's clamp: a keyframe never leaves the clip.
     const newTime = Math.max(0, Math.min(selectedKeyframe.time + direction * step, clipDuration));
+    // Same as the value nudge: clamped against 0 or the clip's end, the nudge
+    // lands on the time the keyframe already has, and a move of nothing is not
+    // an edit. Checked with the same 0.001s tolerance the rest of the graph
+    // treats as "the same keyframe", and checked before the occupancy test,
+    // which deliberately excludes the keyframe being moved.
+    if (Math.abs(newTime - selectedKeyframe.time) < 0.001) return;
     // moveClipKeyframe deletes whatever already sits within 0.001s of the
     // target, so a nudge onto a neighbour would silently destroy it. Refuse the
     // nudge instead — nothing moves, the live region says why, and the key is

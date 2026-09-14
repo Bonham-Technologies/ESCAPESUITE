@@ -80,6 +80,7 @@ const shortcutGroups: ShortcutGroup[] = [
       { keys: ['Alt', 'Shift', '→'], description: 'Nudge Time Forward (Coarse)' },
       { keys: ['Enter'], description: 'Add Keyframe at Playhead' },
       { keys: ['Delete'], description: 'Delete Keyframe' },
+      { keys: ['Backspace'], description: 'Delete Keyframe' },
       { keys: ['Escape'], description: 'Clear Keyframe Selection' },
     ],
   },
