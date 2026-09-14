@@ -316,14 +316,17 @@ in every package and fails the whole run if any package drops below its floor.
 cheap coverage gaps; `@escapesuite/artist` again at the end of performance round 2, whose
 new tests moved statements and branches up a hundredth of a percent each and no floor,
 and once more at the end of the keyframe-graph keyboard work — which moved all four
-figures up and, again, no floor). Each package's floors are these numbers rounded down to
-a whole percent, so the floor is never above what the suite actually achieves:
+figures up and, again, no floor; and finally after the store decomposition into slices,
+a pure move that left the branch denominator at 4,100 and nudged statements and branches
+up a hundredth of a percent each as the composition's dead type-level scaffolding went).
+Each package's floors are these numbers rounded down to a whole percent, so the floor is
+never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.20 | 95.78 | 99.67 |
-| `@escapesuite/artist` | 99.34 | 98.61 | 93.16 | 98.87 |
+| `@escapesuite/artist` | 99.34 | 98.62 | 93.17 | 98.87 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

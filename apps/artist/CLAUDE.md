@@ -32,12 +32,37 @@ pnpm lint                # Run ESLint
 ## Architecture
 
 ### State Management
-- **Zustand store** (`src/store/projectStore.ts`): Single source of truth for all editor state
+- **Zustand store** (`src/store/projectStore.ts`): single source of truth for all editor state, **composed from ten slices** — `create<EditorState>((...a) => ({ ...createHistorySlice(...a), ...createProjectSlice(...a), … }))`. `projectStore.ts` is the **only entry point**, and its surface is exactly `useEditorStore`, the four `select*` selectors and the re-exports; every slice and helper module below is **internal to `src/store/`** and imported by nothing outside it. `create<EditorState>` refuses to compile when the composition misses a field, so the ten slices provably cover the whole interface with no cast. Two invariants hold the split together. **Every mutating slice pushes history through `storeHistory.ts`'s `pushToHistory`, and nothing re-implements it** — one module decides what an undo snapshot contains and how deep the stack goes. And **cross-slice reads go through `get()` or the `state` argument of `set`, never through an import**, so the slice graph has no edges between slices at all: a slice's only imports are `zustand`, `./types`, the pure helper modules, `utils/deepClone` and `uuid`. Zustand keeps one flat state object, which is what makes that import-free — `clipSlice.addClipToTimeline` reads `state.currentTime` (playback's field) and writes `project` and `history` (project's and history's) without knowing those slices exist. Each slice declares its own shape as `Pick<EditorState, …>`, so `src/store/types.ts` stays the single declaration of the interface
 - Core types defined in `src/store/types.ts`: `Project`, `Timeline`, `Clip`, `SourceVideo`, `EditorState`, `Track`
 - Timeline is a flat array of `Clip` objects; each clip references a `sourceVideoId` and defines `startTime`/`endTime` within that source
 - **Track properties**: `id`, `name`, `index`, `visible`, `locked`, `muted`, `volume` (0-1), `height`
 - **Auto-track creation**: When adding clips/overlays without specifying a track, a new track is created automatically
 - **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work
+
+**Pure helpers** — no zustand, no React, no store access:
+
+| Module | Owns |
+|--------|------|
+| `storeHistory.ts` | The undo mechanism: `getUndoableState` (what one snapshot holds), `pushToHistory` (push it and drop the redo stack) and the module-private `MAX_HISTORY_SIZE` of 50 that caps the past. The single definition of an undo step — every mutating action in every slice goes through it |
+| `projectFactory.ts` | The empty shapes and the duration sum: `createDefaultTrack`, `createTrackAtTop`, `findEmptyTrack`, `createEmptyTimeline`, `createEmptyProject`, `calculateTimelineDuration`, and `DEFAULT_PROJECT_NAME`, which `projectStore.ts` re-exports so the old import path still resolves |
+| `sourceVideoEquality.ts` | `sameSourceVideo` (and the `sameWaveform` it needs) — the field-by-field comparison that lets `addSourceVideo` treat a re-add of identical metadata as no change at all, rather than as an undo step that restores an identical library |
+| `projectMigration.ts` | `ensureTimelineHasTracks` — normalising a loaded project onto the current timeline shape: missing resolution, missing tracks, missing overlay arrays, clips without a `trackId`, and the `convertLegacyOverlays` call on **both** return paths. Runs on every `setProject` |
+| `clipQueries.ts` | `getClipsAtTime`, `getClipAtTime`, `getClipPosition` — reads over a clips array they are handed, never over the store. Re-exported by `projectStore.ts` |
+
+**Slices** — each one `export const createXSlice: StateCreator<EditorState, [], [], XSlice>`, composed in this order:
+
+| Module | Owns |
+|--------|------|
+| `historySlice.ts` | `history`, and `undo`/`redo`/`canUndo`/`canRedo`/`clearHistory`. The only slice that reads the history stacks, and the only one whose actions restore state instead of recording it |
+| `projectSlice.ts` | `project` and `sourceVideos`: `setProject` (through `ensureTimelineHasTracks`), `resetProject`, `setProjectResolution`, `addSourceVideo`, `removeSourceVideo` |
+| `trackSlice.ts` | The four track actions — `addTrack` (returns the new track, so it reads through `get`), `removeTrack`, `updateTrack`, `reorderTracks`. Declares no state of its own; tracks live inside `project.timeline` |
+| `clipSlice.ts` | The thirteen clip actions (`addClipToTimeline`, `removeClipFromTimeline`, `rippleDeleteClip`, `shiftClipsAfter`, `updateClip`, `splitClip`, `moveClipToTrack`, `setClipTimelinePosition`, `updateClipTransform`, `updateClipBlendMode`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`), plus `duplicateClip` and `recalculateTimelineDuration` — the one mutating action that touches neither `history` nor `modified` |
+| `keyframeSlice.ts` | Keyframe data (`setClipKeyframe`, `removeClipKeyframe`, `moveClipKeyframe`, `clearClipKeyframes`) **and** the keyframe panel's own UI state: `keyframePanelState` with its five `setKeyframePanel*` setters. Panel UI, but *keyframe* panel UI, so it sits beside the data it edits rather than in `uiSlice` |
+| `overlaySlice.ts` | The overlay clip actions: `addTextOverlayClip` and `addShapeOverlayClip` (both return the new clip, so both read through `get`), `updateTextOverlayData`, `updateShapeOverlayData`. Overlay *clips* only — the legacy overlay arrays are `legacyOverlays.ts`'s business and are already folded into clips by the time a project reaches here |
+| `selectionSlice.ts` | `selectedClipId`, `selectedClipIds`, `selectedTrackId`, `clipboard`, and the eleven actions over them: `setSelectedClipId`, `setSelectedTrackId`, `toggleClipSelection`, `selectClipsInRange`, `clearMultiSelection`, `moveSelectedClips`, `deleteSelectedClips`, `copySelectedClips`, `pasteClips`, `muteSelectedClips`, `unmuteSelectedClips` |
+| `playbackSlice.ts` | `currentTime`, `isPlaying`, `inPoint`, `outPoint` and their five setters. No history: moving the playhead is not an undoable edit |
+| `markerSlice.ts` | `markers` and the six marker actions, `goToNextMarker`/`goToPreviousMarker` included — which write `currentTime`, playback's field, off the `state` argument rather than importing anything |
+| `uiSlice.ts` | The five shell preferences the store carries — `zoom` (clamped to 0.1–10 by `setZoom`), `snapEnabled`, `snapThreshold`, `activeTool`, `loopPlayback` — and their four setters. Twenty-one lines, no history, no `get` |
 
 ### Core Modules (`src/core/`)
 - `storage.ts`: IndexedDB layer using `idb` library. Stores video blobs, thumbnails, projects, and settings in separate object stores
@@ -119,7 +144,7 @@ normalising a missing array to `[]` first, the only code that touches either arr
 `ShapeOverlay` types survive in `store/types.ts` solely so an old file on disk still parses.
 The conversion folds them into ordinary overlay clips and empties them. It runs on **every**
 load path — both return paths of
-`ensureTimelineHasTracks` (`projectStore.ts`, so every `setProject` caller: Open Project, the
+`ensureTimelineHasTracks` (`projectMigration.ts`, so every `setProject` caller: Open Project, the
 media library, session restore and the host's `LOAD_PROJECT`) and `headless/renderProject.ts`'s
 `render()`, which does not go through the store. Before this, a legacy overlay drew in the
 preview and was then silently missing from every export and every headless render, because the
