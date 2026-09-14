@@ -301,7 +301,6 @@ test.describe('Audio Controls', () => {
     const isVisible = await micToggle.isVisible().catch(() => false)
 
     if (isVisible) {
-      const initialState = await micToggle.getAttribute('aria-pressed')
       await micToggle.click()
       await page.waitForTimeout(100)
 

@@ -98,7 +98,6 @@ export function buildSourceMapIndex(map) {
   const index = []
   let sourceIndex = 0
   let sourceLine = 0
-  let sourceColumn = 0
 
   for (const group of map.mappings.split(';')) {
     const segments = []
@@ -112,7 +111,6 @@ export function buildSourceMapIndex(map) {
         if (fields.length >= 4) {
           sourceIndex += fields[1]
           sourceLine += fields[2]
-          sourceColumn += fields[3]
           segments.push([generatedColumn, sourceIndex, sourceLine])
         } else {
           segments.push([generatedColumn, -1, -1])

@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { VIEWPORTS, BREAKPOINTS } from '../../utils/viewports'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 
 test.describe('ESCAPEARTIST Mobile Layout', () => {

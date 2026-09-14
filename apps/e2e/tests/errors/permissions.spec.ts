@@ -130,10 +130,6 @@ test.describe('Screen Share Permission Denied', () => {
       await screenButton.click()
       await page.waitForTimeout(500)
 
-      // Should show error or return to initial state
-      const errorMessage = page.getByText(/denied|cancelled|permission|blocked/i).first()
-      const errorVisible = await errorMessage.isVisible().catch(() => false)
-
       // App should still be functional
       const html = await page.content()
       expect(html).toContain('<div id="root">')
@@ -213,10 +209,6 @@ test.describe('Device Not Found', () => {
       await webcamToggle.click()
       await page.waitForTimeout(500)
 
-      // Should indicate device issue
-      const errorMessage = page.getByText(/not found|no device|unavailable/i).first()
-      const hasError = await errorMessage.isVisible().catch(() => false)
-
       // App should remain functional
       const html = await page.content()
       expect(html).toContain('<div id="root">')
@@ -243,10 +235,6 @@ test.describe('Device In Use', () => {
     if (isVisible) {
       await webcamToggle.click()
       await page.waitForTimeout(500)
-
-      // Should indicate device is busy
-      const errorMessage = page.getByText(/in use|busy|another|could not/i).first()
-      const hasError = await errorMessage.isVisible().catch(() => false)
 
       // App should remain functional
       const html = await page.content()

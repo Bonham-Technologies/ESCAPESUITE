@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { checkAriaLiveRegions } from '../../utils/accessibility'
 import { seedTextClip } from '../../utils/artist'
 
 test.describe('ARIA Live Regions', () => {

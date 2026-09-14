@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { clearIndexedDB, databaseExists, getRecordCount } from '../../utils/indexeddb'
+import { clearIndexedDB, databaseExists } from '../../utils/indexeddb'
 
 /**
  * Integration tests for the ESCAPECRAFT -> ESCAPEARTIST workflow

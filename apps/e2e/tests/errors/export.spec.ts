@@ -37,7 +37,6 @@ test.describe('Export With No Clips', () => {
 
     if (isVisible) {
       const isDisabled = await exportButton.isDisabled().catch(() => false)
-      const ariaDisabled = await exportButton.getAttribute('aria-disabled')
 
       // Export may be disabled for empty projects
       expect(typeof isDisabled).toBe('boolean')
@@ -164,10 +163,6 @@ test.describe('Storage Quota Exceeded', () => {
     if (isVisible) {
       await saveButton.click()
       await page.waitForTimeout(500)
-
-      // Should show storage error
-      const storageMessage = page.getByText(/storage|space|quota|full/i).first()
-      const hasMessage = await storageMessage.isVisible().catch(() => false)
 
       // App should still function
       const html = await page.content()

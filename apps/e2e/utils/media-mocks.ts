@@ -70,11 +70,11 @@ export async function mockMediaRecorder(page: Page) {
       onstop: (() => void) | null = null
       onerror: ((error: Error) => void) | null = null
 
-      constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+      constructor(_stream: MediaStream, _options?: MediaRecorderOptions) {
         // Mock constructor
       }
 
-      start(timeslice?: number) {
+      start(_timeslice?: number) {
         this.state = 'recording'
       }
 
@@ -102,7 +102,7 @@ export async function mockMediaRecorder(page: Page) {
       }
     }
 
-    // @ts-ignore
+    // @ts-expect-error — a deliberately partial stand-in for the real MediaRecorder class
     window.MediaRecorder = MockMediaRecorder
   })
 }

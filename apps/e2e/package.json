@@ -27,14 +27,19 @@
     "report:standalone": "playwright show-report playwright-report-standalone",
     "report:production": "playwright show-report playwright-report-production",
     "report:journeys": "playwright show-report playwright-report-journeys",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.4.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
     "serve": "^14.2.6",
     "typescript": "~5.9.3",
+    "typescript-eslint": "^8.69.0",
     "wait-on": "^9.1.0"
   }
 }

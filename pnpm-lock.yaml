@@ -225,18 +225,30 @@ importers:
       '@axe-core/playwright':
         specifier: ^4.13.0
         version: 4.13.0(playwright-core@1.63.0)
+      '@eslint/js':
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@10.10.0)
       '@playwright/test':
         specifier: ^1.63.0
         version: 1.63.0
       '@types/node':
         specifier: ^26.4.1
         version: 26.4.1
+      eslint:
+        specifier: ^10.10.0
+        version: 10.10.0
+      globals:
+        specifier: ^17.12.0
+        version: 17.12.0
       serve:
         specifier: ^14.2.6
         version: 14.2.6
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.69.0
+        version: 8.70.0(eslint@10.10.0)(typescript@5.9.3)
       wait-on:
         specifier: ^9.1.0
         version: 9.1.0

@@ -356,11 +356,9 @@ type CdpSnapshot = Record<CdpMetricName, number>
 export async function readCdpMetrics(cdp: CDPSession): Promise<CdpSnapshot> {
   const { metrics } = await cdp.send('Performance.getMetrics')
   const byName = new Map(metrics.map((m) => [m.name, m.value]))
-  return {
-    TaskDuration: byName.get('TaskDuration') ?? 0,
-    LayoutCount: byName.get('LayoutCount') ?? 0,
-    RecalcStyleCount: byName.get('RecalcStyleCount') ?? 0,
-  }
+  return Object.fromEntries(
+    CDP_METRICS.map((name) => [name, byName.get(name) ?? 0])
+  ) as CdpSnapshot
 }
 
 /**

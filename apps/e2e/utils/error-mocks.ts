@@ -1,4 +1,4 @@
-import { Page, Route } from '@playwright/test'
+import { Page } from '@playwright/test'
 
 /**
  * Utilities for mocking error scenarios in E2E tests
@@ -157,8 +157,7 @@ export async function mockStorageQuotaExceeded(page: Page): Promise<void> {
     // Override IndexedDB put to throw quota exceeded
     const originalOpen = indexedDB.open.bind(indexedDB)
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    indexedDB.open = function (name: string, version?: number): any {
+    indexedDB.open = function (name: string, version?: number): IDBOpenDBRequest {
       const request = originalOpen(name, version)
 
       const originalResult = Object.getOwnPropertyDescriptor(
@@ -183,7 +182,6 @@ export async function mockStorageQuotaExceeded(page: Page): Promise<void> {
               const originalObjectStore = tx.objectStore.bind(tx)
               tx.objectStore = function (name: string) {
                 const store = originalObjectStore(name)
-                const originalPut = store.put.bind(store)
 
                 store.put = function () {
                   throw new DOMException('QuotaExceededError', 'QuotaExceededError')
@@ -211,19 +209,19 @@ export async function mockStorageQuotaExceeded(page: Page): Promise<void> {
 export async function mockWebCodecsUnavailable(page: Page): Promise<void> {
   await page.addInitScript(() => {
     // Remove WebCodecs APIs
-    // @ts-ignore
+    // @ts-expect-error — deleting a non-optional global property
     delete window.VideoEncoder
-    // @ts-ignore
+    // @ts-expect-error — deleting a non-optional global property
     delete window.VideoDecoder
-    // @ts-ignore
+    // @ts-expect-error — deleting a non-optional global property
     delete window.AudioEncoder
-    // @ts-ignore
+    // @ts-expect-error — deleting a non-optional global property
     delete window.AudioDecoder
-    // @ts-ignore
+    // @ts-expect-error — deleting a non-optional global property
     delete window.VideoFrame
-    // @ts-ignore
+    // @ts-expect-error — deleting a non-optional global property
     delete window.EncodedVideoChunk
-    // @ts-ignore
+    // @ts-expect-error — deleting a non-optional global property
     delete window.EncodedAudioChunk
   })
 }
@@ -284,23 +282,22 @@ export async function mockExportFailure(page: Page): Promise<void> {
     if (typeof VideoEncoder !== 'undefined') {
       const OriginalVideoEncoder = VideoEncoder
 
-      // @ts-ignore
+      // @ts-expect-error — a deliberately partial stand-in for the real VideoEncoder class
       window.VideoEncoder = class MockVideoEncoder {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        constructor(init: any) {
+        constructor(init: VideoEncoderInit) {
           // Call the original constructor pattern but throw during encode
           this._init = init
           this.state = 'unconfigured'
         }
 
-        _init: any
+        _init: VideoEncoderInit
         state: string
 
-        configure(config: any) {
+        configure(_config: VideoEncoderConfig) {
           this.state = 'configured'
         }
 
-        encode(frame: any) {
+        encode(_frame: VideoFrame) {
           // Simulate error during encoding
           if (this._init.error) {
             this._init.error(new DOMException('Encoding failed', 'EncodingError'))
