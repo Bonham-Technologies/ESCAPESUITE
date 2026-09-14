@@ -3,17 +3,17 @@
 import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { EditorState, Project, SourceVideo, Clip, Track, ClipTransform, ClipEffects, BlendMode, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe } from './types';
+import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA, DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { cloneClip } from '../utils/deepClone';
 import { pushToHistory } from './storeHistory';
-import { createEmptyProject, createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
-import { sameSourceVideo } from './sourceVideoEquality';
-import { ensureTimelineHasTracks } from './projectMigration';
+import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { createHistorySlice, type HistorySlice } from './historySlice';
 import { createPlaybackSlice, type PlaybackSlice } from './playbackSlice';
 import { createMarkerSlice, type MarkerSlice } from './markerSlice';
 import { createUiSlice, type UiSlice } from './uiSlice';
+import { createProjectSlice, type ProjectSlice } from './projectSlice';
+import { createTrackSlice, type TrackSlice } from './trackSlice';
 
 // The pure helpers moved to their own modules — none of them reads the store —
 // and DEFAULT_PROJECT_NAME is re-exported here so every existing import path still resolves.
@@ -22,172 +22,15 @@ export { DEFAULT_PROJECT_NAME } from './projectFactory';
 // Everything the slices have not claimed yet, kept inline and byte-unchanged so
 // the split stays a provable move. Tasks 3-5 empty it slice by slice; Task 6
 // deletes it and composes the store from slices alone.
-type RemainingSlice = Omit<EditorState, keyof HistorySlice | keyof PlaybackSlice | keyof MarkerSlice | keyof UiSlice>;
+type RemainingSlice = Omit<EditorState, keyof HistorySlice | keyof PlaybackSlice | keyof MarkerSlice | keyof UiSlice | keyof ProjectSlice | keyof TrackSlice>;
 
 const createRemainingSlice: StateCreator<EditorState, [], [], RemainingSlice> = (set, get) => ({
   // Initial state
-  project: createEmptyProject(),
-  sourceVideos: [],
   selectedClipId: null,
   selectedClipIds: new Set<string>(),
   selectedTrackId: null,
   clipboard: null,
   keyframePanelState: DEFAULT_KEYFRAME_PANEL_STATE,
-
-  // Project actions
-  setProject: (project: Project) => set((state) => ({
-    project: ensureTimelineHasTracks(project),
-    history: pushToHistory(state),
-  })),
-
-  resetProject: () => set((state) => ({
-    project: createEmptyProject(),
-    sourceVideos: [],
-    currentTime: 0,
-    isPlaying: false,
-    selectedClipId: null,
-    selectedClipIds: new Set<string>(),
-    selectedTrackId: null,
-    clipboard: null,
-    inPoint: null,
-    outPoint: null,
-    markers: [],
-    history: pushToHistory(state),
-  })),
-
-  setProjectResolution: (width: number, height: number) => set((state) => ({
-    project: {
-      ...state.project,
-      modified: Date.now(),
-      resolution: { width, height },
-    },
-    history: pushToHistory(state),
-  })),
-
-  // Source video actions
-  // Idempotent by id. Source videos are keyed by id everywhere downstream — the media
-  // library renders one element per id, and every clip names the source it plays by id —
-  // so a second entry under an id already held is never new media, it is the same media
-  // seen again (a restored session overlapping the library, the same URL loaded twice).
-  // Replaced in place rather than ignored, so the newer metadata (a fresh thumbnail URL,
-  // above all) wins, and rather than appended, so the library order does not shuffle.
-  // A re-add carrying identical metadata changes nothing, so it records nothing:
-  // an undo step that restores an identical library reads to the user as an undo
-  // that did nothing.
-  addSourceVideo: (video: SourceVideo) => set((state) => {
-    const existing = state.sourceVideos.findIndex((v) => v.id === video.id)
-    if (existing !== -1 && sameSourceVideo(state.sourceVideos[existing], video)) return state
-    const sourceVideos = existing === -1
-      ? [...state.sourceVideos, video]
-      : state.sourceVideos.map((v, i) => (i === existing ? video : v))
-    return { sourceVideos, history: pushToHistory(state) }
-  }),
-
-  removeSourceVideo: (id: string) => set((state) => ({
-    sourceVideos: state.sourceVideos.filter((v) => v.id !== id),
-    project: {
-      ...state.project,
-      modified: Date.now(),
-      timeline: {
-        ...state.project.timeline,
-        clips: state.project.timeline.clips.filter((c) => c.sourceVideoId !== id),
-        duration: calculateTimelineDuration(
-          state.project.timeline.clips.filter((c) => c.sourceVideoId !== id)
-        ),
-      },
-    },
-    history: pushToHistory(state),
-  })),
-
-  // Track actions
-  addTrack: (name?: string) => {
-    const state = get();
-    const tracks = state.project.timeline.tracks;
-    const newIndex = tracks.length > 0 ? Math.max(...tracks.map(t => t.index)) + 1 : 0;
-    const newTrack: Track = {
-      id: uuidv4(),
-      name: name || `Track ${newIndex + 1}`,
-      index: newIndex,
-      visible: true,
-      locked: false,
-      muted: false,
-      volume: 1,
-      height: 60,
-    };
-
-    set({
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          tracks: [...tracks, newTrack],
-        },
-      },
-      history: pushToHistory(state),
-    });
-
-    return newTrack;
-  },
-
-  removeTrack: (trackId: string) => set((state) => {
-    const tracks = state.project.timeline.tracks;
-    if (tracks.length <= 1) return state; // Keep at least one track
-
-    const newTracks = tracks.filter(t => t.id !== trackId);
-    const newClips = state.project.timeline.clips.filter(c => c.trackId !== trackId);
-
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          tracks: newTracks,
-          clips: newClips,
-          duration: calculateTimelineDuration(newClips),
-        },
-      },
-      selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
-      history: pushToHistory(state),
-    };
-  }),
-
-  updateTrack: (trackId: string, updates: Partial<Track>) => set((state) => ({
-    project: {
-      ...state.project,
-      modified: Date.now(),
-      timeline: {
-        ...state.project.timeline,
-        tracks: state.project.timeline.tracks.map(track =>
-          track.id === trackId ? { ...track, ...updates } : track
-        ),
-      },
-    },
-    history: pushToHistory(state),
-  })),
-
-  reorderTracks: (trackIds: string[]) => set((state) => {
-    const trackMap = new Map(state.project.timeline.tracks.map(t => [t.id, t]));
-    const newTracks = trackIds
-      .map((id, index) => {
-        const track = trackMap.get(id);
-        return track ? { ...track, index } : null;
-      })
-      .filter((t): t is Track => t !== null);
-
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          tracks: newTracks,
-        },
-      },
-      history: pushToHistory(state),
-    };
-  }),
 
   // Clip actions
   addClipToTimeline: (clipData, trackId?, position?) => set((state) => {
@@ -1211,6 +1054,8 @@ export const useEditorStore = create<EditorState>((...a) => ({
   ...createPlaybackSlice(...a),
   ...createMarkerSlice(...a),
   ...createUiSlice(...a),
+  ...createProjectSlice(...a),
+  ...createTrackSlice(...a),
   ...createRemainingSlice(...a),
 }));
 
