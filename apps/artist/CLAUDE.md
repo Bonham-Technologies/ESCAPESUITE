@@ -301,9 +301,27 @@ Interactive overlay manipulation in the preview canvas:
 `Timeline.tsx` is wiring only — the store selectors, the refs for the three scrolling panes,
 one call per module below, and the JSX around them. It owns no gesture state and binds no
 document listeners itself. The hooks are called in a fixed order — playhead, in/out, scroll
-sync, clip drag, trim, track actions, marquee, seek — and the order matters for the four that
-bind listeners or observers: it is the order the effects ran in when they all lived inline,
-and a re-ordering would change which one re-binds first on a re-render. Two things the
+sync, clip drag, trim, track actions, marquee, seek — and the order is the one the effects ran
+in when they all lived inline, kept so that the hooks that bind listeners or observers still
+mount and clean up in that sequence. It is a weaker constraint than it used to be: since the
+gesture hooks stopped re-binding per pointer frame (below), the only ordered events are each
+gesture's own bind and unbind, so a re-ordering would change which hook binds first at a
+gesture boundary rather than on every render.
+
+**One listener pair, one measurement, one snap array — per gesture, not per pointer frame.**
+All five gesture hooks bind their `document` pair through `src/hooks/useDocumentListener.ts`
+(or an effect shaped like it) on a **boolean** that flips twice a gesture — `dragState !== null`,
+`trimState !== null`, `tlMarqueeStart !== null` — so nothing the moves write can re-bind them.
+The live gesture is held in a ref beside its `useState` value: the state drives the render (the
+ghost clip, the live trim, the rectangle), the ref is what the handlers read, and the handler
+itself is still rebuilt every render and swapped in through `useDocumentListener`'s own ref, so
+the moves and the release see exactly the props the old deps arrays gave them. Because the pair
+is unbound by an effect rather than synchronously, a mousemove batched with the mouseup still
+reaches a handler whose gesture is over; each one checks its ref and does nothing
+(`useClipDrag.test.ts`, `timelineGestureCaching.test.ts`). The mouseup stays a plain
+bubble-phase `document` listener — no capture, no `once` — because `marqueeJustFinished` has to
+be set before the click that follows it. `timelineGestures.perf.test.ts` asserts the counts
+exactly: 2 listeners, 1 `getSnapPoints`, one pass over the track rows, per gesture. Two things the
 directory uses come from outside it: `useVirtualizedTimeline` (`src/hooks`), which decides
 which clips are near enough the viewport to draw, and `MarqueeSelection`
 (`src/components/Preview/`), the rectangle the preview and the timeline share. Every module
@@ -325,11 +343,12 @@ component.
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
 | `AudioWaveform.tsx` | The canvas waveform inside a clip, capped at 4000 CSS px of backing store and CSS-scaled beyond it, because browsers refuse a canvas much wider |
 | `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
+| `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture |
 | `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
 | `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point it writes |
-| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written once, on release |
-| `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it |
-| `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking |
+| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written once, on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame |
+| `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it. The per-move write makes `clips` a fresh array every frame, which is exactly why the listeners hang off `trimState` and not off the clips |
+| `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking. The rows are still walked on the release only — once per gesture, never per frame |
 | `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips |
 | `useTimelineSeek.ts` | The two click-to-seek handlers — the ruler's, and the track area's with every reason it stands down (a drag, a scrub, the click that ended a marquee, a click on the playhead) and the deselection it does when the click really was on bare track |
 

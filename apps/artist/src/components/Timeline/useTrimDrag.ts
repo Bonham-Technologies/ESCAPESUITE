@@ -11,11 +11,22 @@
 // Release only does something with the ripple tool out, and then the origin is
 // what makes it possible: the clips after this one shift by however much the
 // end moved over the whole gesture.
+//
+// **One listener pair per gesture, and one measurement.** The per-move store
+// write used to be what re-bound the listeners: `clips` is a fresh array after
+// every `updateClip`, and it was in the effect's deps. The listeners now go
+// through `useDocumentListener`, whose `enabled` flag is `trimState !== null` —
+// a boolean that flips twice a gesture — while the handler it holds in a ref
+// is still rebuilt on every render, so the moves and the release read exactly
+// the clips they always did. The track area is measured once on mousedown
+// (`useTrackAreaCache`); a move reads only `scrollLeft`.
 import type * as React from 'react';
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useRef, useState, type RefObject } from 'react';
+import { useDocumentListener } from '../../hooks/useDocumentListener';
 import type { Clip, SourceVideo, ToolType, Track } from '../../store/types';
 import { computeTrimUpdate, pointerTime } from './timelineGeometry';
 import type { TrimState } from './types';
+import { useTrackAreaCache } from './useTrackAreaCache';
 
 /** What a trim gesture needs that it cannot reach on its own. */
 export interface TrimDragDeps {
@@ -56,6 +67,62 @@ export function useTrimDrag({
   shiftClipsAfter,
 }: TrimDragDeps): TrimDrag {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
+  /** The same gesture, for handlers that must not wait on a render. */
+  const trimRef = useRef<TrimState | null>(null);
+  const trackArea = useTrackAreaCache();
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!trackContainerRef.current) return;
+    const container = trackContainerRef.current;
+
+    const trim = trimRef.current;
+    if (!trim) return;
+
+    const clip = clips.find(c => c.id === trim.clipId);
+    if (!clip) return;
+
+    const sourceVideo = sourceVideos.find(v => v.id === clip.sourceVideoId);
+
+    const area = trackArea.read(container);
+    const mouseTime = pointerTime(e.clientX, area.left, container.scrollLeft, pixelsPerSecond);
+
+    const update = computeTrimUpdate({
+      edge: trim.edge,
+      mouseTime,
+      clip,
+      sourceVideo,
+      origin: trim.origin,
+    });
+
+    if (update) {
+      updateClip(trim.clipId, update);
+    }
+  };
+
+  const handleMouseUp = () => {
+    const trim = trimRef.current;
+    // If ripple tool is active, shift subsequent clips
+    if (activeTool === 'ripple' && trim) {
+      const clip = clips.find((c) => c.id === trim.clipId);
+      if (clip) {
+        const originalEnd = trim.origin.timelinePosition +
+          (trim.origin.endTime - trim.origin.startTime);
+        const currentEnd = clip.timelinePosition + (clip.endTime - clip.startTime);
+        const delta = currentEnd - originalEnd;
+
+        if (delta !== 0) {
+          // Shift all clips after the original end position
+          shiftClipsAfter(clip.trackId, originalEnd, delta);
+        }
+      }
+    }
+    trimRef.current = null;
+    trackArea.end();
+    setTrimState(null);
+  };
+
+  useDocumentListener('mousemove', handleMouseMove, trimState !== null);
+  useDocumentListener('mouseup', handleMouseUp, trimState !== null);
 
   // Handle trim edge mouse down
   const handleTrimMouseDown = useCallback(
@@ -67,7 +134,10 @@ export function useTrimDrag({
       if (!track || track.locked) return;
 
       setSelectedClipId(clip.id);
-      setTrimState({
+      // Where the track area is, taken once: a trim reads only `scrollLeft`
+      // per move after this.
+      trackArea.begin(trackContainerRef.current, false);
+      const initial: TrimState = {
         clipId: clip.id,
         edge,
         origin: {
@@ -75,67 +145,12 @@ export function useTrimDrag({
           endTime: clip.endTime,
           timelinePosition: clip.timelinePosition,
         },
-      });
+      };
+      trimRef.current = initial;
+      setTrimState(initial);
     },
-    [tracks, setSelectedClipId]
+    [tracks, setSelectedClipId, trackArea, trackContainerRef]
   );
-
-  // Handle trim drag
-  useEffect(() => {
-    if (!trimState) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!trackContainerRef.current) return;
-
-      const clip = clips.find(c => c.id === trimState.clipId);
-      if (!clip) return;
-
-      const sourceVideo = sourceVideos.find(v => v.id === clip.sourceVideoId);
-
-      const containerRect = trackContainerRef.current.getBoundingClientRect();
-      const scrollLeft = trackContainerRef.current.scrollLeft;
-      const mouseTime = pointerTime(e.clientX, containerRect.left, scrollLeft, pixelsPerSecond);
-
-      const update = computeTrimUpdate({
-        edge: trimState.edge,
-        mouseTime,
-        clip,
-        sourceVideo,
-        origin: trimState.origin,
-      });
-
-      if (update) {
-        updateClip(trimState.clipId, update);
-      }
-    };
-
-    const handleMouseUp = () => {
-      // If ripple tool is active, shift subsequent clips
-      if (activeTool === 'ripple' && trimState) {
-        const clip = clips.find((c) => c.id === trimState.clipId);
-        if (clip) {
-          const originalEnd = trimState.origin.timelinePosition +
-            (trimState.origin.endTime - trimState.origin.startTime);
-          const currentEnd = clip.timelinePosition + (clip.endTime - clip.startTime);
-          const delta = currentEnd - originalEnd;
-
-          if (delta !== 0) {
-            // Shift all clips after the original end position
-            shiftClipsAfter(clip.trackId, originalEnd, delta);
-          }
-        }
-      }
-      setTrimState(null);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [trimState, clips, sourceVideos, pixelsPerSecond, updateClip, activeTool, shiftClipsAfter, trackContainerRef]);
 
   return { trimState, handleTrimMouseDown };
 }

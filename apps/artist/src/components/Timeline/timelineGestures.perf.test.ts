@@ -28,9 +28,17 @@
 // How a ceiling is chosen: measure once, set the ceiling at 2x the measurement
 // rounded up, and write the measured value and the date beside it. Counts that
 // are exact properties rather than budgets — every listener added is given back,
-// one pass over the track rows per marquee — are asserted exactly. Two counts
-// are labelled FINDING: they pin what the code does *today*, not what it should
-// do, and each says which assertion to flip when it is fixed.
+// one pass over the track rows per gesture — are asserted exactly.
+//
+// **2026-09-13, after the one-pair-per-gesture change.** The three FINDING pins
+// this file carried on its first day are gone: `useClipDrag`, `useTrimDrag` and
+// `useTimelineMarquee` each bound and gave back 2 * (MOVES + 1) document
+// listeners per gesture, and now bind exactly one pair, like the two hooks that
+// always did. What used to be per-move work — the container rect, the walk over
+// the `[data-track-id]` rows, the snap-point array — is now per *gesture*, taken
+// on the mousedown, so almost every count below has stopped being a budget and
+// become a property. They are asserted exactly for that reason: 2 is not a
+// ceiling on the listeners, it is how many there are.
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 import { createElement } from 'react'
 import { act, cleanup, render, renderHook } from '@testing-library/react'
@@ -305,33 +313,38 @@ describe('useClipDrag per-move work', () => {
     // budget — an unbalanced count is a leak whatever its size.
     expect(final.listenerAdds).toBe(final.listenerRemoves)
 
-    // FINDING, not a target. `dragState` is in the effect's deps and every move
-    // rewrites it, so the pair of document listeners is torn down and re-added
-    // on every pointer frame: 2 * (MOVES + 1) adds for one gesture.
-    // Flip to `expect(final.listenerAdds).toBe(2)` — one pair for the whole
-    // gesture — when the drag stops re-binding per frame.
-    expect(final.listenerAdds).toBe(2 * (MOVES + 1))
+    // Exact, measured 2026-09-13 (was 2 * (MOVES + 1) = 42 before the
+    // one-pair-per-gesture change): the pair is bound by the mousedown and
+    // given back by the mouseup, and nothing in between touches it.
+    expect(final.listenerAdds).toBe(2)
 
-    // Measured 2026-09-13 over 20 moves: 20 container rects (1 per move), 80
-    // track-row rects (4 per move, one per track in the scene), 20
-    // querySelectorAll, 20 getSnapPoints. Ceilings at 2x.
+    // Measured 2026-09-13 over 20 moves, all on the mousedown and none per
+    // move: 1 container rect, 4 track-row rects (one per track in the scene),
+    // 1 querySelectorAll, 1 getSnapPoints. Was 20 / 80 / 20 / 20 — one of
+    // each per move, and the row rects scaling with the track count.
     //
-    // The row rects are the one that scales: it is 1 per track per pointer
-    // frame, so a project with twice the tracks pays twice as much for the same
-    // drag. The browser benchmark puts a number on what that actually costs —
-    // 0.82 forced layouts per move, because nothing dirties layout between the
-    // five reads, so they collapse into one pass (docs/performance/
-    // 2026-09-13-timeline-baseline.md).
-    expect(measured.containerRects / MOVES).toBeLessThanOrEqual(2)
-    expect(measured.rowRects / MOVES).toBeLessThanOrEqual(8)
-    expect(measured.querySelectorAlls / MOVES).toBeLessThanOrEqual(2)
-    expect(measured.snapPoints / MOVES).toBeLessThanOrEqual(2)
+    // Exact rather than 2x, because these are no longer budgets: a clip drag
+    // writes nothing to the store until release, so there is nothing that can
+    // legitimately make it measure the track area twice. The one thing that
+    // can — a scroll or a resize mid-gesture — is covered by
+    // `timelineGestureCaching.test.ts`, which is where the re-measure lives.
+    //
+    // What this does *not* claim is a 5x cut in forced layouts: Chromium
+    // reported 0.82 layouts per move for the whole frame, because nothing
+    // dirtied layout between the five reads and they collapsed into one pass
+    // (docs/performance/2026-09-13-timeline-baseline.md). What stops is the
+    // scaling with track count, and the churn.
+    expect(measured.containerRects).toBe(1)
+    expect(measured.rowRects).toBe(rows.length)
+    expect(measured.querySelectorAlls).toBe(1)
+    expect(measured.snapPoints).toBe(1)
   })
 
-  it('measures every track row on a single move', () => {
-    // The per-move ceiling above divides by MOVES and so would also be met by a
-    // drag that measured 80 rows on one move and none on the rest. This pins
-    // the shape: one move, one pass over every row.
+  it('measures every track row once, on the mousedown', () => {
+    // The whole-gesture counts above would also be met by a drag that measured
+    // the rows lazily on its first move. This pins the shape the brief asks
+    // for: the cache is built by the press, so the move handler allocates
+    // nothing and a drag that never moves has already paid for the rows.
     const querySelectorAll = vi.spyOn(container, 'querySelectorAll')
     const { result } = renderHook(() => {
       useEditorStore((state) => state.project.timeline.clips)
@@ -346,12 +359,19 @@ describe('useClipDrag per-move work', () => {
         theClip('perf-clip-0')
       )
     })
+    const afterPress = counts(querySelectorAll)
     move(LEFT + 200, rowY(V1))
     const measured = counts(querySelectorAll)
     release()
 
-    // Measured 2026-09-13: one move measures all 4 rows.
-    expect(measured.rowRects).toBe(rows.length)
+    // Measured 2026-09-13: the press measures all 4 rows and the move measures
+    // none. Before the change the press measured none and every move measured
+    // all four.
+    expect(afterPress.rowRects).toBe(rows.length)
+    expect(afterPress.containerRects).toBe(1)
+    expect(afterPress.snapPoints).toBe(1)
+    expect(measured.rowRects).toBe(afterPress.rowRects)
+    expect(measured.containerRects).toBe(afterPress.containerRects)
   })
 })
 
@@ -404,17 +424,17 @@ describe('useTrimDrag per-move work', () => {
     // Exact: balanced, as above.
     expect(final.listenerAdds).toBe(final.listenerRemoves)
 
-    // FINDING, not a target. A trim writes the store on every move, so `clips`
-    // is a fresh array every frame and the effect's deps change with it —
-    // the same per-frame re-bind as the clip drag, by a different route.
-    // Flip to `expect(final.listenerAdds).toBe(2)` when it stops.
-    expect(final.listenerAdds).toBe(2 * (MOVES + 1))
+    // Exact, measured 2026-09-13 (was 2 * (MOVES + 1) = 42): a trim still
+    // writes the store on every move, so `clips` is still a fresh array every
+    // frame — it just no longer re-binds anything, because the listeners hang
+    // off `trimState !== null` rather than off the clips.
+    expect(final.listenerAdds).toBe(2)
 
-    // Measured 2026-09-13 over 20 moves: 20 container rects (1 per move), no
-    // row rects, no querySelectorAll. Exact for the last two — a trim has no
-    // reason to walk the track rows, and starting to would be a regression
-    // rather than a budget overrun.
-    expect(measured.containerRects / MOVES).toBeLessThanOrEqual(2)
+    // Measured 2026-09-13 over 20 moves: 1 container rect for the whole
+    // gesture (was 20, one per move), no row rects, no querySelectorAll. All
+    // three exact — a trim has no reason to walk the track rows, and no reason
+    // to measure the container more than once.
+    expect(measured.containerRects).toBe(1)
     expect(measured.rowRects).toBe(0)
     expect(measured.querySelectorAlls).toBe(0)
   })
@@ -465,18 +485,17 @@ describe('useTimelineMarquee per-move work', () => {
     // Exact: balanced, as above.
     expect(final.listenerAdds).toBe(final.listenerRemoves)
 
-    // FINDING, not a target. `tlMarqueeCurrent` is in the effect's deps and
-    // every move past the drag threshold rewrites it, so the listeners are
-    // re-bound per frame — for the moves that moved the rectangle, which is
-    // every move here.
-    // Flip to `expect(final.listenerAdds).toBe(2)` when it stops.
-    expect(final.listenerAdds).toBe(2 * (MOVES + 1))
+    // Exact, measured 2026-09-13 (was 2 * (MOVES + 1) = 42): the rectangle's
+    // corners moved out of the effect's deps and into refs, so rewriting them
+    // no longer rebinds anything.
+    expect(final.listenerAdds).toBe(2)
 
-    // Measured 2026-09-13: 21 container rects for the press plus 20 moves —
-    // one on the mousedown that records the origin, then one per move — and
-    // one more on the release, 22 in all. Ceilings at 2x.
-    expect(measured.containerRects / MOVES).toBeLessThanOrEqual(2)
-    expect(final.containerRects - measured.containerRects).toBeLessThanOrEqual(2)
+    // Measured 2026-09-13: 1 container rect for the whole gesture — taken by
+    // the mousedown that records the origin — and none on the moves or the
+    // release. Was 21 across the press and the moves, and 22 including the
+    // release. Exact, as above.
+    expect(measured.containerRects).toBe(1)
+    expect(final.containerRects - measured.containerRects).toBe(0)
 
     // Exact, and the correction this file exists to record: the marquee's
     // `querySelectorAll` and its walk over the track rows are on the **mouseup
