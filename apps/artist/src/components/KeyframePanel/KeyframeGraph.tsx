@@ -3,6 +3,13 @@ import { getAllKeyframesForProperty, interpolateKeyframes } from '../../utils/an
 import type { AnimatableProperty, Keyframe, ClipAnimation, ClipTransform, ClipEffects, EasingType } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import { EASING_TYPES } from '../../utils/easingOptions';
+import {
+  formatValue,
+  keyframeOptionId,
+  keyframeOptionLabel,
+  PROPERTY_LABELS,
+  useKeyframeGraphKeyboard,
+} from './hooks/useKeyframeGraphKeyboard';
 import styles from './KeyframeGraph.module.css';
 
 interface KeyframeGraphProps {
@@ -50,6 +57,12 @@ export function KeyframeGraph({
 }: KeyframeGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
+  // Safari does not focus a tabindex element on mousedown, so the pointer
+  // handlers take focus explicitly — click-then-Delete has to keep working there.
+  const focusGraph = useCallback(() => {
+    svgRef.current?.focus();
+  }, []);
+
   // Track drag state with refs to avoid re-render issues during drag
   const [dragState, setDragState] = useState<{
     isDragging: boolean;
@@ -96,6 +109,29 @@ export function KeyframeGraph({
     const val = transform?.[property as keyof ClipTransform];
     return typeof val === 'number' ? val : 0;
   }, [property, transform, effects]);
+
+  // The selected keyframe, when it is one the user can edit. Preset keyframes
+  // are never selectable (see the isCustomKeyframe guards below), so this is
+  // undefined for them and the easing control simply does not render.
+  const selectedKeyframe = selectedKeyframeTime === null
+    ? undefined
+    : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
+
+  const { activeIndex, activeId, setActiveTime, nudgeMessage, onKeyDown } = useKeyframeGraphKeyboard({
+    property,
+    keyframes,
+    isCustomKeyframe,
+    selectedKeyframe,
+    setSelectedKeyframeTime,
+    clipDuration,
+    playheadTime,
+    defaultValue,
+    range,
+    onKeyframeMoved,
+    onKeyframeValueChanged,
+    onAddKeyframe,
+    onDeleteKeyframe,
+  });
 
   // Calculate SVG dimensions and coordinate conversions
   const graphDimensions = useMemo(() => {
@@ -185,15 +221,6 @@ export function KeyframeGraph({
     return lines;
   }, [range, clipDuration, graphDimensions, property]);
 
-  // Format value for display
-  function formatValue(value: number, prop: AnimatableProperty): string {
-    if (prop === 'rotation') return `${value.toFixed(0)}°`;
-    if (prop === 'blur') return `${value.toFixed(0)}px`;
-    if (prop === 'opacity' || prop === 'volume') return `${(value * 100).toFixed(0)}%`;
-    if (prop === 'x' || prop === 'y') return `${(value * 100).toFixed(0)}%`;
-    return value.toFixed(2);
-  }
-
   // Handle mouse down on keyframe point
   const handleKeyframeMouseDown = useCallback((e: React.MouseEvent, kf: Keyframe) => {
     if (!isCustomKeyframe(kf)) return; // Can't drag preset keyframes
@@ -201,6 +228,8 @@ export function KeyframeGraph({
     e.preventDefault();
     e.stopPropagation();
 
+    focusGraph();
+    setActiveTime(kf.time);
     setSelectedKeyframeTime(kf.time);
     setDragState({
       isDragging: true,
@@ -210,15 +239,17 @@ export function KeyframeGraph({
       currentValue: kf.value,
       dragType: e.shiftKey ? 'value' : e.altKey ? 'time' : 'both',
     });
-  }, [isCustomKeyframe]);
+  }, [isCustomKeyframe, focusGraph, setActiveTime]);
 
   // Handle click on keyframe to select it
   const handleKeyframeClick = useCallback((e: React.MouseEvent, kf: Keyframe) => {
     e.stopPropagation();
+    focusGraph();
+    setActiveTime(kf.time);
     if (isCustomKeyframe(kf)) {
       setSelectedKeyframeTime(kf.time);
     }
-  }, [isCustomKeyframe]);
+  }, [isCustomKeyframe, focusGraph, setActiveTime]);
 
   // Handle right-click on keyframe to delete
   const handleKeyframeContextMenu = useCallback((e: React.MouseEvent, kf: Keyframe) => {
@@ -228,20 +259,6 @@ export function KeyframeGraph({
       onDeleteKeyframe(property, kf.time);
     }
   }, [isCustomKeyframe, onDeleteKeyframe, property]);
-
-  // Handle keyboard events for deletion
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedKeyframeTime !== null && onDeleteKeyframe) {
-        e.preventDefault();
-        onDeleteKeyframe(property, selectedKeyframeTime);
-        setSelectedKeyframeTime(null);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedKeyframeTime, onDeleteKeyframe, property]);
 
   // Convert screen coordinates to SVG viewBox coordinates
   // Must account for preserveAspectRatio="xMidYMid meet" which centers content
@@ -325,6 +342,10 @@ export function KeyframeGraph({
           onKeyframeValueChanged(property, currentDrag.originalTime, currentDrag.currentValue);
         }
 
+        // Both, and for the same reason: after a time change the keyframe lives
+        // at currentTime, so an activeTime left on the original would resolve to
+        // "no active option" and send the next arrow key back to the first.
+        setActiveTime(currentDrag.currentTime);
         setSelectedKeyframeTime(currentDrag.currentTime);
       }
       setDragState(null);
@@ -337,12 +358,13 @@ export function KeyframeGraph({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords]);
+  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime]);
 
   // Click on graph background to deselect
   const handleGraphClick = useCallback(() => {
+    setActiveTime(null);
     setSelectedKeyframeTime(null);
-  }, []);
+  }, [setActiveTime]);
 
   // Handle double-click on graph to add keyframe
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -366,13 +388,6 @@ export function KeyframeGraph({
     ? graphDimensions.timeToX(playheadTime)
     : null;
 
-  // The selected keyframe, when it is one the user can edit. Preset keyframes
-  // are never selectable (see the isCustomKeyframe guards above), so this is
-  // undefined for them and the easing control simply does not render.
-  const selectedKeyframe = selectedKeyframeTime === null
-    ? undefined
-    : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
-
   return (
     <div className={styles.graphWrap}>
       <svg
@@ -380,11 +395,17 @@ export function KeyframeGraph({
         className={styles.graph}
         viewBox={`0 0 ${graphDimensions.width} ${graphDimensions.height}`}
         preserveAspectRatio="xMidYMid meet"
+        tabIndex={0}
+        role="listbox"
+        aria-orientation="horizontal"
+        aria-label={`Keyframes for ${PROPERTY_LABELS[property]}`}
+        aria-activedescendant={activeId}
         onClick={handleGraphClick}
         onDoubleClick={handleDoubleClick}
+        onKeyDown={onKeyDown}
       >
         {/* Grid lines */}
-        <g className={styles.grid}>
+        <g className={styles.grid} aria-hidden="true">
           {gridLines.map((line, i) => (
             <g key={i}>
               <line
@@ -421,7 +442,7 @@ export function KeyframeGraph({
         </g>
 
         {/* Value curve */}
-        <path d={curvePath} className={styles.curve} />
+        <path d={curvePath} className={styles.curve} aria-hidden="true" />
 
         {/* Playhead */}
         {playheadX !== null && (
@@ -431,6 +452,7 @@ export function KeyframeGraph({
             x2={playheadX}
             y2={GRAPH_PADDING.top + graphDimensions.innerHeight}
             className={styles.playhead}
+            aria-hidden="true"
           />
         )}
 
@@ -439,6 +461,7 @@ export function KeyframeGraph({
           const isCustom = isCustomKeyframe(kf);
           const isDragging = dragState?.isDragging && Math.abs(dragState.originalTime - kf.time) < 0.001;
           const isSelected = selectedKeyframeTime !== null && Math.abs(selectedKeyframeTime - kf.time) < 0.001;
+          const isActive = i === activeIndex;
 
           // Use drag state position if this keyframe is being dragged
           const displayTime = isDragging ? dragState.currentTime : kf.time;
@@ -452,7 +475,11 @@ export function KeyframeGraph({
               cx={cx}
               cy={cy}
               r={isDragging ? 8 : isSelected ? 7 : 6}
-              className={`${styles.keyframePoint} ${isCustom ? styles.custom : styles.preset} ${isDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''}`}
+              className={`${styles.keyframePoint} ${isCustom ? styles.custom : styles.preset} ${isDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isActive ? styles.active : ''}`}
+              id={keyframeOptionId(property, i)}
+              role="option"
+              aria-selected={isActive}
+              aria-label={keyframeOptionLabel(formatValue(displayValue, property), displayTime, kf.easing, isCustom)}
               onMouseDown={(e) => handleKeyframeMouseDown(e, kf)}
               onClick={(e) => handleKeyframeClick(e, kf)}
               onContextMenu={(e) => handleKeyframeContextMenu(e, kf)}
@@ -471,10 +498,17 @@ export function KeyframeGraph({
           y={graphDimensions.height - 2}
           className={styles.helpLabel}
           textAnchor="middle"
+          aria-hidden="true"
         >
-          Double-click to add • Right-click to delete • Drag to move
+          Double-click to add • Drag to move • Arrow keys to navigate
         </text>
       </svg>
+
+      {/* Always rendered, never conditional: a live region has to exist before
+          its content changes for a screen reader to announce the change. */}
+      <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+        {nudgeMessage}
+      </span>
 
       {selectedKeyframe && onKeyframeEasingChanged && (
         <div className={styles.easingRow}>

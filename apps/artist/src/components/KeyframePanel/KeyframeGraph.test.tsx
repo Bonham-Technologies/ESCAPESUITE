@@ -217,13 +217,14 @@ describe('KeyframeGraph', () => {
 
     it('deletes the selected keyframe on Delete', () => {
       const { container, onDeleteKeyframe } = renderGraph('opacity')
+      const svg = container.querySelector('svg')!
 
       fireEvent.click(points(container)[1])
-      fireEvent.keyDown(window, { key: 'Delete' })
+      fireEvent.keyDown(svg, { key: 'Delete' })
 
       expect(onDeleteKeyframe).toHaveBeenCalledWith('opacity', 1)
       // The selection is dropped, so a second press does nothing.
-      fireEvent.keyDown(window, { key: 'Delete' })
+      fireEvent.keyDown(svg, { key: 'Delete' })
       expect(onDeleteKeyframe).toHaveBeenCalledTimes(1)
     })
 
@@ -231,7 +232,7 @@ describe('KeyframeGraph', () => {
       const { container, onDeleteKeyframe } = renderGraph('opacity')
 
       fireEvent.click(points(container)[1])
-      fireEvent.keyDown(window, { key: 'Backspace' })
+      fireEvent.keyDown(container.querySelector('svg')!, { key: 'Backspace' })
 
       expect(onDeleteKeyframe).toHaveBeenCalledWith('opacity', 1)
     })
@@ -240,7 +241,7 @@ describe('KeyframeGraph', () => {
       const { container, onDeleteKeyframe } = renderGraph('opacity')
 
       fireEvent.click(points(container)[1])
-      fireEvent.keyDown(window, { key: 'a' })
+      fireEvent.keyDown(container.querySelector('svg')!, { key: 'a' })
 
       expect(onDeleteKeyframe).not.toHaveBeenCalled()
     })
@@ -250,7 +251,7 @@ describe('KeyframeGraph', () => {
 
       fireEvent.click(points(container)[1])
       fireEvent.click(container.querySelector('svg')!)
-      fireEvent.keyDown(window, { key: 'Delete' })
+      fireEvent.keyDown(container.querySelector('svg')!, { key: 'Delete' })
 
       expect(points(container)[1]).not.toHaveClass(styles.selected)
       expect(onDeleteKeyframe).not.toHaveBeenCalled()
@@ -272,7 +273,7 @@ describe('KeyframeGraph', () => {
 
       fireEvent.click(points(container)[0])
       fireEvent.contextMenu(points(container)[0])
-      fireEvent.keyDown(window, { key: 'Delete' })
+      fireEvent.keyDown(container.querySelector('svg')!, { key: 'Delete' })
 
       expect(points(container)[0]).not.toHaveClass(styles.selected)
       expect(onDeleteKeyframe).not.toHaveBeenCalled()
@@ -283,7 +284,9 @@ describe('KeyframeGraph', () => {
 
       fireEvent.click(points(container)[1])
       expect(() => fireEvent.contextMenu(points(container)[1])).not.toThrow()
-      expect(() => fireEvent.keyDown(window, { key: 'Delete' })).not.toThrow()
+      expect(() =>
+        fireEvent.keyDown(container.querySelector('svg')!, { key: 'Delete' })
+      ).not.toThrow()
     })
   })
 
@@ -371,7 +374,7 @@ describe('KeyframeGraph', () => {
       const { container } = renderGraph('opacity')
 
       fireEvent.click(points(container)[1])
-      fireEvent.keyDown(window, { key: 'Delete' })
+      fireEvent.keyDown(container.querySelector('svg')!, { key: 'Delete' })
 
       expect(easingSelect()).toBeNull()
     })

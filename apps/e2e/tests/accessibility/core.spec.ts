@@ -182,6 +182,57 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     const { unlabeled } = await checkFormLabels(page)
     expect(unlabeled).toHaveLength(0)
   })
+
+  test('keyframe graph passes axe-core audit and is keyboard reachable', async ({ page }) => {
+    // The graph only exists inside the keyframe panel, which only draws one for
+    // a selected clip — so seed a clip (it is selected on creation), open the
+    // panel with `k`, and click the Opacity track to open its curve.
+    await seedTextClip(page)
+    await page.keyboard.press('k')
+    // The panel is a portal on document.body, so it is a sibling of #root —
+    // which has a "Keyframe Editor" button of its own, hence the :not().
+    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    await expect(panel).toBeVisible()
+    await panel.getByText('Opacity', { exact: true }).click()
+
+    const graph = page.getByRole('listbox', { name: 'Keyframes for Opacity' })
+    await expect(graph).toBeVisible()
+
+    // A text clip has no opacity keyframes, and an empty listbox makes axe
+    // report `aria-required-children` as *incomplete* rather than auditing it.
+    // Double-clicking the graph adds one at the pointer, and the store adds its
+    // own at 0s, so the audited listbox holds two real options.
+    await graph.dblclick()
+    await expect(graph.getByRole('option')).toHaveCount(2)
+
+    const results = await runAxeCheck(page, {
+      includeSelector: '[role="listbox"]',
+      // Same carve-out the editor audit above makes: the graph is drawn in SVG
+      // over the app's dark chrome and axe cannot compute its contrast.
+      disableRules: ['color-contrast'],
+    })
+    const seriousViolations = results.violations.filter(
+      (v) => v.impact === 'serious' || v.impact === 'critical'
+    )
+    expect(seriousViolations).toHaveLength(0)
+    // An `include` that matched nothing would also report zero violations, so
+    // prove the audit actually had the listbox in front of it.
+    expect(results.passes).toBeGreaterThan(0)
+
+    // Reachable by Tab from inside the panel — not just focusable by script.
+    await panel.getByRole('button', { name: '×' }).first().focus()
+    let reached = false
+    for (let i = 0; i < 20 && !reached; i++) {
+      await page.keyboard.press('Tab')
+      reached = await graph.evaluate((el) => el === document.activeElement)
+    }
+    expect(reached).toBe(true)
+
+    // ...and once there, the arrows move the active option.
+    await expect(graph).not.toHaveAttribute('aria-activedescendant', /.+/)
+    await page.keyboard.press('ArrowRight')
+    await expect(graph).toHaveAttribute('aria-activedescendant', 'kf-opacity-0')
+  })
 })
 
 test.describe('Color Contrast', () => {

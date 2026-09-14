@@ -14,7 +14,7 @@ describe('KeyboardShortcuts', () => {
   it('lists every shortcut group', () => {
     render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
 
-    for (const group of ['Tools', 'Playback', 'Editing', 'Timeline', 'Panels', 'File']) {
+    for (const group of ['Tools', 'Playback', 'Editing', 'Timeline', 'Panels', 'Keyframe Graph', 'File']) {
       expect(screen.getByRole('heading', { name: group, level: 3 })).toBeInTheDocument()
     }
   })
@@ -31,7 +31,20 @@ describe('KeyboardShortcuts', () => {
     const splitRow = screen.getByText('Selection Tool').closest(`.${styles.shortcutRow}`)!
     expect(Array.from(splitRow.querySelectorAll('kbd')).map((k) => k.textContent)).toEqual(['V'])
     expect(splitRow.querySelectorAll(`.${styles.plus}`)).toHaveLength(0)
-    expect(container.querySelectorAll(`.${styles.group}`)).toHaveLength(6)
+    expect(container.querySelectorAll(`.${styles.group}`)).toHaveLength(7)
+  })
+
+  it('lists both keys the keyframe graph deletes with', () => {
+    render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
+
+    // The graph claims Delete *and* Backspace (see apps/artist/CLAUDE.md's key
+    // map); a sheet that only names one of them is a sheet that disagrees with
+    // the code. Two rows rather than one, because the renderer joins the keys
+    // of a row with '+' — these are alternatives, not a chord.
+    const rows = screen.getAllByText('Delete Keyframe')
+      .map((label) => label.closest(`.${styles.shortcutRow}`)!)
+    expect(rows.map((row) => Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent)))
+      .toEqual([['Delete'], ['Backspace']])
   })
 
   it('closes when the close button is used', async () => {

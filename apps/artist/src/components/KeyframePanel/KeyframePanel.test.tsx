@@ -278,6 +278,22 @@ describe('KeyframePanel', () => {
       expect(keyframesOf('opacity')![1]).toEqual({ time: 1, value: 0, easing: 'linear' })
     })
 
+    it('changes a keyframe value, keeping its easing, when it is nudged from the keyboard', () => {
+      render(<KeyframePanel />)
+      const svg = measureGraph()
+      svg.focus()
+
+      // Two keyframes: the store's own at 0s, then the user's at 1s.
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+      fireEvent.keyDown(svg, { key: 'ArrowUp' })
+
+      const nudged = keyframesOf('opacity')![1]
+      expect(nudged.time).toBe(1)
+      expect(nudged.value).toBeCloseTo(0.51, 6)
+      expect(nudged.easing).toBe('linear')
+    })
+
     it('deletes a keyframe on right-click', () => {
       render(<KeyframePanel />)
       measureGraph()
