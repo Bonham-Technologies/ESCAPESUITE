@@ -266,6 +266,21 @@ depends on `currentTime` to know when to re-arm its debounce, deliberately not o
 render) now does that via a `useEditorStore.subscribe` listener added inside the effect
 rather than through a render-triggering dependency.
 
+**Two more subscriptions were found in round 2, and both are gone the same two ways.**
+`Toolbar.tsx` held a `currentTime` selector that no rendered element read — only three
+handlers (add marker, set in point, set out point) — which is `App.tsx`'s case exactly, so
+those three now read `useEditorStore.getState().currentTime` inside themselves and the
+component subscribes to nothing per tick. `useClipEditorActions` held one whose value *was*
+rendered, so it took the leaf shape instead; see the ClipEditor section. Measured on the
+`preview-playback` benchmark by paired alternation, three rounds per arm, the toolbar fix
+alone is **−9.1% of the renderer's task duration** (1037.55 → 942.62 ms, ranges disjoint)
+with the rendered fps pinned at the 60 fps vsync ceiling in both arms — after round 1 this
+scene has no frame-rate headroom left to show a win in, so anything further shows up as work
+not done, never as frames. `Toolbar.rerender.test.tsx` pins the contract at ≤1 render over ten
+ticks (it measures 0), with one `act()` per tick: batch the ten writes into one `act()` and a
+re-introduced selector costs one render and slips under the ceiling. Round 2's write-up is
+[docs/performance/2026-09-13-timeline-profile.md](../../docs/performance/2026-09-13-timeline-profile.md).
+
 A scrub's seek check in `usePreviewRenderLoop.ts` works **per `<video>` element, not
 per clip**. `usePreviewMedia` keeps one element per source, so two live clips off one
 source — a picture-in-picture arrangement, or the same clip duplicated on two tracks —
@@ -301,9 +316,34 @@ Interactive overlay manipulation in the preview canvas:
 `Timeline.tsx` is wiring only — the store selectors, the refs for the three scrolling panes,
 one call per module below, and the JSX around them. It owns no gesture state and binds no
 document listeners itself. The hooks are called in a fixed order — playhead, in/out, scroll
-sync, clip drag, trim, track actions, marquee, seek — and the order matters for the four that
-bind listeners or observers: it is the order the effects ran in when they all lived inline,
-and a re-ordering would change which one re-binds first on a re-render. Two things the
+sync, clip drag, trim, track actions, marquee, seek — and the order is the one the effects ran
+in when they all lived inline, kept so that the hooks that bind listeners or observers still
+mount and clean up in that sequence. It is a weaker constraint than it used to be: since the
+gesture hooks stopped re-binding per pointer frame (below), the only ordered events are each
+gesture's own bind and unbind, so a re-ordering would change which hook binds first at a
+gesture boundary rather than on every render.
+
+**One listener pair, one measurement, one snap array — per gesture, not per pointer frame.**
+All five gesture hooks bind their `document` pair through `src/hooks/useDocumentListener.ts`
+(or an effect shaped like it) on a **boolean** that flips twice a gesture — `dragState !== null`,
+`trimState !== null`, `tlMarqueeStart !== null` — so nothing the moves write can re-bind them.
+The live gesture is held in a ref beside its `useState` value: the state drives the render (the
+ghost clip, the live trim, the rectangle), the ref is what the handlers read, and the handler
+itself is still rebuilt every render and swapped in through `useDocumentListener`'s own ref, so
+the moves and the release see exactly the props the old deps arrays gave them. Because the pair
+is unbound by an effect rather than synchronously, a mousemove batched with the mouseup still
+reaches a handler whose gesture is over; each one checks its ref and does nothing
+(`useClipDrag.test.ts`, `timelineGestureCaching.test.ts`). The mouseup stays a plain
+bubble-phase `document` listener — no capture, no `once` — because `marqueeJustFinished` has to
+be set before the click that follows it. `timelineGestures.perf.test.ts` asserts the counts
+exactly: 2 listeners, 1 `getSnapPoints`, one pass over the track rows, per gesture. Three of the
+five hooks used to re-bind per pointer frame — 42 adds and 42 removes over a 20-move gesture —
+and `usePlayheadDrag` and `useInOutDrag` never did; their 2/2 is pinned exactly too, so a
+refactor cannot drop them into the churn. `useDragListeners` (the other export of
+`src/hooks/useDocumentListener.ts`) is deliberately **not** what any of them use: its
+imperative start/stop would unbind the pair synchronously inside the mouseup and move
+`marqueeJustFinished` relative to the click that follows. It currently has no caller at all,
+and should be adopted across the five or deleted. Two things the
 directory uses come from outside it: `useVirtualizedTimeline` (`src/hooks`), which decides
 which clips are near enough the viewport to draw, and `MarqueeSelection`
 (`src/components/Preview/`), the rectangle the preview and the timeline share. Every module
@@ -314,24 +354,54 @@ component.
 
 | Module | Owns |
 |--------|------|
-| `Timeline.tsx` | The composition: the store selectors, the container/ruler/headers/track refs, the hook calls in their fixed order, the in/out region and snap-line overlays, and the info bar |
+| `Timeline.tsx` | The composition: the store selectors, the container/ruler/headers/track refs, the hook calls in their fixed order, the in/out region and snap-line overlays, and the info bar. Also `clipsByTrack`, the memo that gives each row an identity-stable `clips` array — see the memo-boundary note below |
 | `timelineGeometry.ts` | All of the timeline's maths as pure functions — ruler tick spacing, pointer-to-time, clamping, snap resolution for a drag, the trim's re-derivation from its origin, and the marquee's time/Y ranges and hit tests. No ref, no store, no render |
 | `types.ts` | `DragState` and `TrimState` — the two gesture shapes the hooks own and `TimelineTrack` draws from, so neither has to import the other. **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
-| `TimelineRuler.tsx` | The ruler: ticks and labels, the marker flags, the in/out handles and the region they bracket. Also exports `TimelineMarkerLines`, the marker verticals drawn down over the tracks |
+| `TimelineRuler.tsx` | The ruler: ticks and labels, the marker flags, the in/out handles and the region they bracket. `React.memo`'d — nothing on it can change during a gesture. Also exports `TimelineMarkerLines`, the marker verticals drawn down over the tracks (not memo'd: it re-renders with `Timeline` and is two divs) |
 | `TimelinePlayhead.tsx` | The playhead line — `React.memo`'d and subscribing to `currentTime` itself, so a playback tick moves this element instead of re-rendering the timeline |
 | `TimelineTimeReadout.tsx` | The `current / total` readout in the info bar, split out for the same reason |
-| `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, waveform and keyframe diamonds |
-| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls |
+| `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
+| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — its props are stable through a clip drag, a marquee and playback, so the whole column sits those out. **Not through a trim**: `useTrackHeaderActions`' `handleDeleteTrack` depends on `clips`, and a trim writes the store every move, so `onDeleteTrack` changes identity per frame and the column re-renders anyway |
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
 | `AudioWaveform.tsx` | The canvas waveform inside a clip, capped at 4000 CSS px of backing store and CSS-scaled beyond it, because browsers refuse a canvas much wider |
 | `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
+| `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture. Invalidation is **event-based**, so a layout change that fires neither — an autosave or an undo changing a row's height mid-drag — would leave it stale where the old per-frame measurement absorbed it; unreachable through the UI today (a clip drag writes nothing until release, and no control resizes a track while a pointer is down), and if row heights ever become dynamic the hook to reach for is the `ResizeObserver` `useScrollSync` already installs on this container, not a third listener |
 | `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
 | `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point it writes |
-| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written once, on release |
-| `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it |
-| `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking |
+| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written once, on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame |
+| `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it. The per-move write makes `clips` a fresh array every frame, which is exactly why the listeners hang off `trimState` and not off the clips |
+| `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking. The rows are still walked on the release only — once per gesture, never per frame |
 | `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips |
 | `useTimelineSeek.ts` | The two click-to-seek handlers — the ruler's, and the track area's with every reason it stands down (a drag, a scrub, the click that ended a marquee, a click on the playhead) and the deselection it does when the click really was on bare track |
+
+**Three memo boundaries, and why they are where they are.** A timeline gesture's state —
+`dragState`, `trimState`, the marquee rectangle — lives in the hooks `Timeline` calls, so every
+pointer frame re-renders `Timeline` and, before this, everything under it: four rows, four
+headers and a ruler that rebuilt 61 tick objects, 20 times a drag. `TimelineRuler`,
+`TrackHeader` and `TimelineTrack` are each `React.memo`'d, and the memoisation that makes the
+third one work is `Timeline`'s own `clipsByTrack`: `getTrackClips` used to `map` a fresh array
+per track per render, and a fresh `clips` prop defeats a memo entirely. **Memoise the array
+before, or with, the row — never the row alone.** What each boundary actually catches, measured
+2026-09-13 in `timelineGestures.perf.test.ts` (renders per pointer frame, before → after):
+
+| | clip drag | marquee |
+|---|---|---|
+| `TimelineTrack` | 4 → 4 (`dragState` is its prop) | 4 → 0 |
+| `TrackHeader` | 4 → 0 | 4 → 0 |
+| `TimelineRuler` / `getRulerTicks` | 1 → 0 | 1 → 0 |
+
+In the browser (`pnpm perf`, paired alternation, three rounds per arm) that is **clipDrag
+10.91 → 8.77 ms of JS per frame (−19.6%)** and **marquee 10.39 → 5.54 ms (−46.7%)**, both with
+disjoint ranges; `playheadScrub` is unchanged, because a scrub writes `currentTime` and
+`Timeline` does not subscribe to it. Forced layouts are untouched at 0.82 and 0.98 per frame —
+those were round 2's Task 2, and this is the render half. Those two gestures, plus playback,
+are what the header memo holds for; a **trim** is the gesture it does not, for the reason in
+its table row above. `TimelinePane` stays **unmemoised** on purpose (see the App section). The
+three ceilings for a drag are asserted as exact zeroes, not at 2x: a single re-render per frame
+means a prop has become unstable again. The whole round is written up in
+[docs/performance/2026-09-13-timeline-profile.md](../../docs/performance/2026-09-13-timeline-profile.md),
+including the caveat that the millisecond figures are dev-build numbers while the render
+counts are what a release build keeps.
 
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
@@ -348,7 +418,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | Module | Owns |
 |--------|------|
 | `ClipEditor.tsx` | The composition: the hook call, the empty-state early return, and the per-section guards in their fixed order. Owns `div.container` itself in both the empty and selected states, so that element's identity is stable across the empty↔selected transition |
-| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`/`timeInClip`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays |
+| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays. **No `currentTime` selector** — see the note below |
 | `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
 | `clipEditorOptions.ts` | The four `{ value, label }` option lists the dropdowns render — transitions, blend modes, animation presets, easings |
@@ -362,7 +432,23 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
-| `ActionsSection.tsx` | "Actions": go to, duplicate, and — video and audio only — split, which stays visible but disabled when the playhead is outside the clip or on its first frame |
+| `ActionsSection.tsx` | "Actions": go to, duplicate, and — video and audio only — split. Takes the clip's position and duration rather than a `timeInClip`, and hands them to `SplitButton` |
+| `SplitButton.tsx` | The Split button alone, and the only part of the panel that depends on the playhead. Subscribes to the derived *disabled boolean* itself, so a playback tick re-renders this one button only when the answer changes |
+
+**The clip inspector must never subscribe to `currentTime`.** `useClipEditorActions` used to
+hold a `useEditorStore((s) => s.currentTime)` selector feeding a `timeInClip` that only the
+Split button's `disabled` attribute read, so the whole panel — a few hundred elements — re-rendered
+five times a second while the project played; and because the hook runs *above*
+`ClipEditor.tsx`'s `!selectedClip` early return, the empty panel paid exactly the same. The
+post-round-1 CPU profile ranked `ClipEditor` #10 of the app-code frames a playback window
+executes (23.1 ms, 4.4%). `Toolbar`'s `getState()` fix is wrong here because the disabled state
+*is* rendered and a stale read would show the wrong one; the fix is `TimelinePlayhead`'s shape
+instead — `SplitButton` subscribes for itself, and to the boolean rather than to the playhead,
+so zustand's `Object.is` ends the tick and the button re-renders twice over a pass across a clip
+instead of ten times. `handleSplitAtPlayhead` reads `useEditorStore.getState().currentTime`,
+which is what a click needs and a render does not. Measured 2026-09-13 by
+`ClipEditor.rerender.test.tsx`: ten playback ticks cost the panel 0 renders, selected or not,
+against 10 before.
 
 Two things in here will surprise the next reader, and both are preserved on purpose.
 **`CollapsibleSection` owns nothing but its own open/closed flag, which it seeds from
@@ -403,6 +489,22 @@ a live array rather than a count: `useAppKeyboardShortcuts`' Ctrl+B (split) bran
 `clips.find(...)`, while `useProjectActions`' `clipCount` and the header's `canExport` only
 ever want `clips.length`.
 
+**The keyboard cascade's 37 deps re-bind the listener, and that is fine — measured, not
+assumed.** Every change to one of the 37 values `useAppKeyboardShortcuts` closes over tears the
+`keydown` listener off `window` and binds a fresh closure. Round 2 counted it rather than
+guessing: `useAppKeyboardShortcuts.rebinds.test.tsx` drives the hook through `App`'s own
+selectors over a scripted 20-edit burst and measures **15 re-binds** (2026-09-13) — about one
+listener swap per edit and none per frame; five edits (a playhead write, a transform, a clip
+move, a marker, a blend mode) changed nothing the cascade depends on, because `clips` is a
+dependency only through its `length`. **15 is a lower bound, not the app's figure**: the
+harness holds `App`'s own seven callbacks at fixed identities, so the count is the store's
+contribution alone, and in the live `App` `handleSaveProject` closes over `clipCount` and the
+two zoom handlers over the zoom. The extra churn coincides with edits that already re-bind
+through `clips.length`, so it does not change the decision. Fifteen listener swaps spread over
+a minute of editing is
+not worth changing the Ctrl+B staleness semantics for, so **the array stays verbatim**. The test
+pins that finding, with the assertion to lower if the handler is ever moved into a ref.
+
 **`App` reads `currentTime` on demand and must never subscribe to it.** There is no
 `currentTime` selector anywhere in `App.tsx` or `src/app/`: the shortcut handlers that need the
 live value (razor split at the playhead, add marker, set in/out point) read
@@ -436,7 +538,7 @@ and queries `styles.menuBackdrop`.
 | `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect |
 | `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
-| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. The editor's **fourth** effect. Its deps array is the inline one character for character, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately |
+| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. The editor's **fourth** effect. Its deps array is the inline one character for character, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **37 deps, measured and left verbatim** — see below |
 | `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **fifth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
 | `AppHeader.tsx` | The top bar: the dashboard link (hidden in the standalone build, which this component asks about itself), the wordmark, the project-name field, and the File menu plus the quick Save and Export buttons |

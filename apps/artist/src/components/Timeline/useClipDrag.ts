@@ -14,13 +14,27 @@
 // preview, and `TimelineTrack` draws the clip from it. The commit happens once,
 // on mouseup: a bulk move when the dragged clip is part of a multi-selection,
 // otherwise a single move that an overlap on the target track can veto outright.
+//
+// **One listener pair, one measurement, one snap array — per gesture, not per
+// pointer frame.** The listeners go through `useDocumentListener`, whose
+// `enabled` flag is `dragState !== null`: a boolean that flips twice a gesture,
+// so the pair is bound by the mousedown and given back by the mouseup, while
+// the handlers themselves stay as fresh as they ever were (the hook holds the
+// current one in a ref). `dragState` is still `useState`, because the ghost
+// clip and the snap line are drawn from it; `dragRef` carries the same value
+// for the handlers, written synchronously so a mouseup never waits on a
+// render. The track rows are measured once (`useTrackAreaCache`) and the snap
+// points computed once, both on mousedown — a clip drag writes nothing to the
+// store until release, so neither can change while it runs.
 import type * as React from 'react';
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useRef, useState, type RefObject } from 'react';
+import { useDocumentListener } from '../../hooks/useDocumentListener';
 import { getSnapPoints, wouldOverlap } from '../../store/timelineSnapping';
 import type { Clip, ToolType, Track } from '../../store/types';
 import { pixelsToTime } from '../../utils/timeUtils';
 import { getSplitOffset, pointerTime, snapDragPosition } from './timelineGeometry';
 import type { DragState } from './types';
+import { useTrackAreaCache } from './useTrackAreaCache';
 
 /** What a clip drag needs that it cannot reach on its own. */
 export interface ClipDragDeps {
@@ -73,6 +87,114 @@ export function useClipDrag({
   splitClip,
 }: ClipDragDeps): ClipDrag {
   const [dragState, setDragState] = useState<DragState | null>(null);
+  /**
+   * The same gesture the state above holds, written before React re-renders so
+   * the document handlers never read a frame-old value.
+   */
+  const dragRef = useRef<DragState | null>(null);
+  /** The snap targets, taken once on mousedown. */
+  const snapPointsRef = useRef<number[]>([]);
+  const trackArea = useTrackAreaCache();
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!trackContainerRef.current) return;
+    const container = trackContainerRef.current;
+
+    // The release clears the drag, but the effect that unbinds the listeners
+    // only runs after the render that clears it — so a mousemove delivered in
+    // the same batch still reaches this handler, and has to be a no-op rather
+    // than a resurrection of the finished drag.
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const area = trackArea.read(container);
+
+    // Calculate new timeline position
+    // Kept as the original two-step expression: `pointerTime` would sum the
+    // same terms in a different order, and the extraction promised identical
+    // floating-point results.
+    const x = e.clientX - area.left + container.scrollLeft - drag.offsetX;
+    let newPosition = pixelsToTime(x, pixelsPerSecond);
+    newPosition = Math.max(0, newPosition);
+
+    // Apply snapping if enabled
+    let snappedPosition: number | null = null;
+    if (snapEnabled) {
+      const threshold = pixelsToTime(snapThreshold, pixelsPerSecond);
+      const clip = clips.find(c => c.id === drag.clipId);
+
+      if (clip) {
+        const snapped = snapDragPosition(
+          newPosition,
+          clip.duration,
+          snapPointsRef.current,
+          threshold
+        );
+        newPosition = snapped.position;
+        snappedPosition = snapped.snappedPosition;
+      }
+    }
+
+    // Determine target track based on mouse Y position, against the rows this
+    // gesture measured when it began. Only the scroll offset is read per move.
+    const pointerY = e.clientY - area.top + container.scrollTop;
+    let targetTrackId = drag.currentTrackId;
+    for (const row of trackArea.readRows(container)) {
+      if (pointerY >= row.top && pointerY < row.top + row.height) {
+        targetTrackId = row.id;
+      }
+    }
+
+    const next: DragState = {
+      ...drag,
+      currentTrackId: targetTrackId,
+      currentPosition: newPosition,
+      snappedPosition,
+    };
+    dragRef.current = next;
+    setDragState(next);
+  };
+
+  const handleMouseUp = () => {
+    const drag = dragRef.current;
+    if (drag) {
+      const clip = clips.find(c => c.id === drag.clipId);
+      if (clip) {
+        const deltaTime = drag.currentPosition - drag.originalPosition;
+
+        // Bulk drag: if dragged clip is part of multi-selection, move all selected clips
+        if (selectedClipIds.has(drag.clipId) && selectedClipIds.size > 1 && deltaTime !== 0) {
+          moveSelectedClips(deltaTime, 0);
+        } else {
+          // Single clip move
+          // Check for overlaps before committing
+          const overlap = wouldOverlap(
+            clips,
+            drag.currentTrackId,
+            drag.currentPosition,
+            clip.duration,
+            drag.clipId
+          );
+
+          if (!overlap) {
+            // Commit the move
+            if (drag.currentTrackId !== drag.originalTrackId) {
+              moveClipToTrack(drag.clipId, drag.currentTrackId);
+            }
+            if (deltaTime !== 0) {
+              setClipTimelinePosition(drag.clipId, drag.currentPosition);
+            }
+          }
+        }
+      }
+    }
+    dragRef.current = null;
+    trackArea.end();
+    setDragState(null);
+  };
+
+  useDocumentListener('mousemove', handleMouseMove, dragState !== null);
+  useDocumentListener('mouseup', handleMouseUp, dragState !== null);
 
   // Handle razor tool click on clip
   const handleRazorClick = useCallback(
@@ -126,7 +248,13 @@ export function useClipDrag({
       const clipRect = clipElement.getBoundingClientRect();
       const offsetX = e.clientX - clipRect.left;
 
-      setDragState({
+      // Everything the moves will need, taken once: where the track area and
+      // its rows are, and what the drag may snap to. Neither can change while
+      // the drag runs, which is why neither is re-taken per frame.
+      trackArea.begin(trackContainerRef.current, true);
+      snapPointsRef.current = getSnapPoints(clips, clip.id);
+
+      const initial: DragState = {
         clipId: clip.id,
         originalTrackId: clip.trackId,
         originalPosition: clip.timelinePosition,
@@ -134,107 +262,22 @@ export function useClipDrag({
         currentPosition: clip.timelinePosition,
         snappedPosition: null,
         offsetX,
-      });
+      };
+      dragRef.current = initial;
+      setDragState(initial);
     },
-    [tracks, setSelectedClipId, toggleClipSelection, selectedClipIds, activeTool, handleRazorClick]
+    [
+      tracks,
+      setSelectedClipId,
+      toggleClipSelection,
+      selectedClipIds,
+      activeTool,
+      handleRazorClick,
+      clips,
+      trackArea,
+      trackContainerRef,
+    ]
   );
-
-  // Handle drag movement
-  useEffect(() => {
-    if (!dragState) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!trackContainerRef.current) return;
-
-      const containerRect = trackContainerRef.current.getBoundingClientRect();
-      const scrollLeft = trackContainerRef.current.scrollLeft;
-
-      // Calculate new timeline position
-      // Kept as the original two-step expression: `pointerTime` would sum the
-      // same terms in a different order, and the extraction promised identical
-      // floating-point results.
-      const x = e.clientX - containerRect.left + scrollLeft - dragState.offsetX;
-      let newPosition = pixelsToTime(x, pixelsPerSecond);
-      newPosition = Math.max(0, newPosition);
-
-      // Apply snapping if enabled
-      let snappedPosition: number | null = null;
-      if (snapEnabled) {
-        const snapPoints = getSnapPoints(clips, dragState.clipId);
-        const threshold = pixelsToTime(snapThreshold, pixelsPerSecond);
-        const clip = clips.find(c => c.id === dragState.clipId);
-
-        if (clip) {
-          const snapped = snapDragPosition(newPosition, clip.duration, snapPoints, threshold);
-          newPosition = snapped.position;
-          snappedPosition = snapped.snappedPosition;
-        }
-      }
-
-      // Determine target track based on mouse Y position
-      const trackElements = trackContainerRef.current.querySelectorAll('[data-track-id]');
-      let targetTrackId = dragState.currentTrackId;
-
-      trackElements.forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        if (e.clientY >= rect.top && e.clientY < rect.bottom) {
-          // Non-null by construction: the elements come from the
-          // `[data-track-id]` selector above, so the attribute is present.
-          targetTrackId = el.getAttribute('data-track-id')!;
-        }
-      });
-
-      setDragState(prev => prev ? {
-        ...prev,
-        currentTrackId: targetTrackId,
-        currentPosition: newPosition,
-        snappedPosition,
-      } : null);
-    };
-
-    const handleMouseUp = () => {
-      if (dragState) {
-        const clip = clips.find(c => c.id === dragState.clipId);
-        if (clip) {
-          const deltaTime = dragState.currentPosition - dragState.originalPosition;
-
-          // Bulk drag: if dragged clip is part of multi-selection, move all selected clips
-          if (selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1 && deltaTime !== 0) {
-            moveSelectedClips(deltaTime, 0);
-          } else {
-            // Single clip move
-            // Check for overlaps before committing
-            const overlap = wouldOverlap(
-              clips,
-              dragState.currentTrackId,
-              dragState.currentPosition,
-              clip.duration,
-              dragState.clipId
-            );
-
-            if (!overlap) {
-              // Commit the move
-              if (dragState.currentTrackId !== dragState.originalTrackId) {
-                moveClipToTrack(dragState.clipId, dragState.currentTrackId);
-              }
-              if (deltaTime !== 0) {
-                setClipTimelinePosition(dragState.clipId, dragState.currentPosition);
-              }
-            }
-          }
-        }
-      }
-      setDragState(null);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [dragState, clips, snapEnabled, snapThreshold, pixelsPerSecond, moveClipToTrack, setClipTimelinePosition, selectedClipIds, moveSelectedClips, trackContainerRef]);
 
   return { dragState, handleClipMouseDown };
 }

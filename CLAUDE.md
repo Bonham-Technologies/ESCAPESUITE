@@ -222,7 +222,7 @@ readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is empt
 perf project's `globalSetup` first, so a stale result can never be reported as current.
 All three outputs are gitignored.
 
-Three benchmarks, each run three times and reported as the median, all against **one
+Four benchmarks, each run three times and reported as the median, all against **one
 deterministic 12-clip, 13-second scene** (14 clips over 4 tracks at 1280x720, clips
 scaled to fill the frame — scale 1 means native pixel size here) built in-test from
 `apps/e2e/fixtures/headless/source.mp4` and loaded through the documented integration
@@ -232,6 +232,14 @@ code for the benchmarks' sake:
 - **`preview-playback`** — 6 s of playback, first second discarded: rendered fps (counted
   by wrapping `requestAnimationFrame`), long tasks, JS heap delta after a CDP-forced GC,
   and CDP `TaskDuration` / `LayoutCount` / `RecalcStyleCount`.
+- **`timeline-interaction`** — three pointer gestures over the same scene, 60 synthetic
+  `mousemove`s each, with the press and the first move outside the measured window: a clip
+  drag, a marquee selection and a playhead scrub. Per gesture: pointer moves, wall time,
+  renderer `TaskDuration` and **JS ms per move**, **layouts and style recalcs per move**,
+  long tasks and heap delta. Each gesture asserts it actually did something (the clip's
+  track and offset, the clips' class lists, the playhead's offset are sampled before the
+  press and after the release), so a vetoed drag cannot report a respectable cost for doing
+  nothing.
 - **`export-mp4` / `export-webm`** — one 720p export of the same scene through the export
   dialog: wall time, frames encoded and encoder queue high-water (both from a wrapper on
   `VideoEncoder.prototype.encode`), heap delta.
@@ -266,11 +274,19 @@ no browser) in CI's `test` job.
 Baseline numbers, the machine they came from and the launch args they used live in
 [docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md); the
 hotspot analysis those profiles produced, and the ranked fix list it argues for, in
-[docs/performance/2026-09-12-profile.md](docs/performance/2026-09-12-profile.md).
+[docs/performance/2026-09-12-profile.md](docs/performance/2026-09-12-profile.md). Round 2's
+timeline-interaction baseline (`apps/e2e/tests/perf/timeline-interaction.spec.ts`: a clip drag, a
+marquee and a playhead scrub over the same scene, reporting layouts and JS per pointer move) is in
+[docs/performance/2026-09-13-timeline-baseline.md](docs/performance/2026-09-13-timeline-baseline.md),
+and round 2's before/after — what each fix moved, what is a dev-build artefact, the ranked
+candidates with their status and the open follow-ups — in
+[docs/performance/2026-09-13-timeline-profile.md](docs/performance/2026-09-13-timeline-profile.md).
 
 **Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
-Four ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
-`apps/artist/src/core/exportMP4.perf.test.ts`, `apps/craft/src/core/compositor.perf.test.ts`
+Five ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
+`apps/artist/src/core/exportMP4.perf.test.ts`,
+`apps/artist/src/components/Timeline/timelineGestures.perf.test.ts` (listeners, rects, snap-point
+and render counts per pointer move), `apps/craft/src/core/compositor.perf.test.ts`
 and `apps/craft/src/core/converter.perf.test.ts` — run the same scene through the same
 doubles the behaviour tests use and count what one frame costs: 2D-context calls,
 `drawImage`/`measureText`/`save`/`restore`, animation lookups, `getContext` calls, object
@@ -297,14 +313,16 @@ in every package and fails the whole run if any package drops below its floor.
 **Where it stands** — measured 2026-09-10, at the end of the coverage program
 (`@escapesuite/craft` and `@escapesuite/artist` re-measured 2026-09-12; both again
 2026-09-13, after the review follow-ups removed the dead overlay editors and closed the
-cheap coverage gaps). Each package's floors are these numbers rounded down to a whole
-percent, so the floor is never above what the suite actually achieves:
+cheap coverage gaps; `@escapesuite/artist` again at the end of performance round 2, whose
+new tests moved statements and branches up a hundredth of a percent each and no floor).
+Each package's floors are these numbers rounded down to a whole percent, so the floor is
+never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.20 | 95.78 | 99.67 |
-| `@escapesuite/artist` | 99.33 | 98.58 | 93.02 | 98.86 |
+| `@escapesuite/artist` | 99.33 | 98.60 | 93.06 | 98.86 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

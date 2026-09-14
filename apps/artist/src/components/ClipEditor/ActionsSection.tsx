@@ -1,4 +1,5 @@
 import { CollapsibleSection } from './CollapsibleSection';
+import { SplitButton } from './SplitButton';
 import styles from './ClipEditor.module.css';
 
 interface ActionsSectionProps {
@@ -6,8 +7,10 @@ interface ActionsSectionProps {
   isVideo: boolean;
   /** Whether the clip is an audio clip. */
   isAudio: boolean;
-  /** How far the playhead sits into the clip, or null when it is outside it. */
-  timeInClip: number | null;
+  /** Where the clip starts on the timeline, in seconds — for the Split button. */
+  clipPosition: number;
+  /** How long the clip runs, in seconds — for the Split button. */
+  clipDuration: number;
   /** Move the playhead to the clip's start. */
   onGoToClip: () => void;
   /** Duplicate the clip. */
@@ -20,11 +23,12 @@ interface ActionsSectionProps {
  * The "Actions" section of the clip inspector: go to, duplicate, and — only
  * for video and audio clips — split.
  *
- * Split stays visible but disabled when the playhead is outside the clip or
- * exactly on its first frame, since splitting there would produce an
- * empty first half.
+ * Split is the one control here that depends on the playhead, so it is its own
+ * component and subscribes for itself — see `SplitButton`. This section takes
+ * the clip's position and duration rather than a `timeInClip` its parent would
+ * have had to recompute on every playback tick.
  */
-export function ActionsSection({ isVideo, isAudio, timeInClip, onGoToClip, onDuplicate, onSplit }: ActionsSectionProps) {
+export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit }: ActionsSectionProps) {
   return (
     <CollapsibleSection title="Actions">
       <div className={styles.actions}>
@@ -53,18 +57,7 @@ export function ActionsSection({ isVideo, isAudio, timeInClip, onGoToClip, onDup
         </button>
 
         {(isVideo || isAudio) && (
-          <button
-            className={styles.actionButton}
-            onClick={onSplit}
-            disabled={timeInClip === null || timeInClip <= 0}
-            title="Split clip at playhead position"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="2" x2="12" y2="22" />
-              <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
-            </svg>
-            Split
-          </button>
+          <SplitButton clipPosition={clipPosition} clipDuration={clipDuration} onSplit={onSplit} />
         )}
       </div>
     </CollapsibleSection>

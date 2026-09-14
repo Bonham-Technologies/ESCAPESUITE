@@ -28,8 +28,15 @@ interface TimelineRulerProps {
  *
  * Where a tick goes is `timelineGeometry.getRulerTicks`, so the spacing is
  * testable without a render; this component is the DOM around those numbers.
+ *
+ * `React.memo`'d, and the strongest of the timeline's three memo boundaries:
+ * nothing on the ruler can change during a clip drag or a marquee, yet
+ * `Timeline` re-rendered it on every pointer frame — rebuilding 61 tick objects
+ * each time at the scene's 60 s ruler floor. Every prop is stable across a
+ * gesture; `onRulerClick` in particular does not depend on `dragState`
+ * (`useTimelineSeek`), so the memo actually holds.
  */
-export function TimelineRuler({
+export const TimelineRuler = React.memo(function TimelineRuler({
   rulerRef,
   duration,
   pixelsPerSecond,
@@ -114,7 +121,7 @@ export function TimelineRuler({
       </div>
     </div>
   );
-}
+});
 
 interface TimelineMarkerLinesProps {
   markers: Marker[];

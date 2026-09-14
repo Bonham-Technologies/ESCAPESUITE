@@ -43,8 +43,15 @@ interface TimelineTrackProps {
  *
  * `data-track-id` is load-bearing: `Timeline`'s drag and marquee handlers find
  * the row under the pointer by querying for it.
+ *
+ * `React.memo`'d, and only useful while `Timeline` hands it the *same* `clips`
+ * array — which is why `Timeline`'s `clipsByTrack` memo exists. A clip drag
+ * still re-renders every row, because `dragState` changes on every pointer
+ * frame and any row may have to draw the ghost; a marquee changes none of these
+ * props, so the rows now sit out the whole gesture
+ * (`timelineGestures.perf.test.ts`).
  */
-export function TimelineTrack({
+export const TimelineTrack = React.memo(function TimelineTrack({
   track,
   clips,
   allClips,
@@ -186,4 +193,4 @@ export function TimelineTrack({
       )}
     </div>
   );
-}
+});
