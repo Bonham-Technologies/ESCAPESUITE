@@ -314,15 +314,16 @@ in every package and fails the whole run if any package drops below its floor.
 (`@escapesuite/craft` and `@escapesuite/artist` re-measured 2026-09-12; both again
 2026-09-13, after the review follow-ups removed the dead overlay editors and closed the
 cheap coverage gaps; `@escapesuite/artist` again at the end of performance round 2, whose
-new tests moved statements and branches up a hundredth of a percent each and no floor).
-Each package's floors are these numbers rounded down to a whole percent, so the floor is
-never above what the suite actually achieves:
+new tests moved statements and branches up a hundredth of a percent each and no floor,
+and once more at the end of the keyframe-graph keyboard work — which moved all four
+figures up and, again, no floor). Each package's floors are these numbers rounded down to
+a whole percent, so the floor is never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.20 | 95.78 | 99.67 |
-| `@escapesuite/artist` | 99.33 | 98.60 | 93.06 | 98.86 |
+| `@escapesuite/artist` | 99.34 | 98.61 | 93.16 | 98.87 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

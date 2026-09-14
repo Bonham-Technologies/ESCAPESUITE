@@ -564,6 +564,107 @@ describe('KeyframeGraph keyboard access', () => {
     })
   })
 
+  // The contract the whole design rests on, stated once as a table rather than
+  // left implicit in the behaviour tests above. React attaches its listener at
+  // the root container, below `window`, so a stopPropagation() in the graph's
+  // onKeyDown stops the native event before either of the editor's window-level
+  // cascades (app/useAppKeyboardShortcuts.ts, Preview/PlaybackControls.tsx) can
+  // see it. `seen` is those cascades' stand-in.
+  describe('the propagation contract', () => {
+    /** Claimed the moment the graph has focus, whatever is or is not active. */
+    const ALWAYS_OWNED = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter']
+
+    /** Claimed only when there is an active option for them to act on. */
+    const OWNED_WHEN_ACTIVE = ['Delete', 'Backspace', 'Escape']
+
+    /**
+     * Keys the graph must never claim, each with the `key` the editor's window
+     * listeners switch on: the shortcut sheet ('?'), the tools ('k', 's', 'v')
+     * and play/pause (Space) all have to keep working from inside the graph,
+     * and Tab has to keep leaving it.
+     */
+    const NOT_OWNED: [name: string, keystroke: string, key: string][] = [
+      ['Tab', '{Tab}', 'Tab'],
+      ['?', '?', '?'],
+      ['k', 'k', 'k'],
+      ['s', 's', 's'],
+      ['v', 'v', 'v'],
+      ['Space', ' ', ' '],
+    ]
+
+    const keysSeen = () => seen.mock.calls.map(([e]) => e.key)
+
+    it.each(ALWAYS_OWNED)('swallows %s while the graph is focused', async (key) => {
+      const user = userEvent.setup()
+      opacityKeyframes()
+      const { container } = renderGraph('opacity')
+      graphSvg(container).focus()
+
+      await user.keyboard(`{${key}}`)
+
+      expect(keysSeen()).toEqual([])
+    })
+
+    it.each(OWNED_WHEN_ACTIVE)('swallows %s while a custom keyframe is active', async (key) => {
+      const user = userEvent.setup()
+      opacityKeyframes()
+      const { container } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      svg.focus()
+
+      // The user's own keyframe at 1s — editable, so these keys also act.
+      fireEvent.keyDown(svg, { key: 'End' })
+      await user.keyboard(`{${key}}`)
+
+      expect(keysSeen()).toEqual([])
+    })
+
+    it.each(OWNED_WHEN_ACTIVE)('swallows %s while a preset keyframe is active', async (key) => {
+      const user = userEvent.setup()
+      const { container } = renderGraph('opacity', { animation: fadeInAndCustom })
+      const svg = graphSvg(container)
+      svg.focus()
+
+      // A preset is announced as the selected option but is not editable, so
+      // these keys are claimed and then do nothing — falling through from here
+      // would delete the whole clip (ESCSUITE-49).
+      fireEvent.keyDown(svg, { key: 'Home' })
+      await user.keyboard(`{${key}}`)
+
+      expect(keysSeen()).toEqual([])
+    })
+
+    it.each(OWNED_WHEN_ACTIVE)('lets %s reach the editor when nothing is active', async (key) => {
+      const user = userEvent.setup()
+      opacityKeyframes()
+      const { container } = renderGraph('opacity')
+      graphSvg(container).focus()
+
+      await user.keyboard(`{${key}}`)
+
+      // Deliberate (plan ruling 4): with no active option the graph has nothing
+      // to act on, so the editor's own deselect/delete cascade still runs.
+      expect(keysSeen()).toEqual([key])
+    })
+
+    it.each(NOT_OWNED)('lets %s through to the editor', async (_name, keystroke, key) => {
+      const user = userEvent.setup()
+      opacityKeyframes()
+      const { container } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      svg.focus()
+      // Something is active, so even the conditional claims are in force —
+      // these keys are still none of the graph's business.
+      fireEvent.keyDown(svg, { key: 'End' })
+
+      await user.keyboard(keystroke)
+
+      // Positively: the window really did see this key. An assertion that the
+      // spy stayed empty would pass just as well if the keystroke never fired.
+      expect(keysSeen()).toContain(key)
+    })
+  })
+
   describe('the live region', () => {
     it('is empty on mount and announces the nudged value', () => {
       opacityKeyframes()
