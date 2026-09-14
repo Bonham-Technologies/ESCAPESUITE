@@ -86,6 +86,9 @@ jobs:
       - name: TypeScript check (headless-artist)
         run: pnpm --filter=@escapesuite/headless-artist run typecheck
 
+      - name: TypeScript check (e2e)
+        run: pnpm --filter=@escapesuite/e2e run typecheck
+
   # Entry point 2 — unit tests with coverage. Runs in parallel with
   # lint-and-typecheck, so it carries the same pull_request_target filter.
   test:
