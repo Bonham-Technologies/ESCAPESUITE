@@ -134,6 +134,51 @@ describe('KeyframeGraph keyboard access', () => {
     expect(seen).toHaveBeenCalledTimes(1)
   })
 
+  it('lets Delete through when the active keyframe is no longer on the graph', async () => {
+    const user = userEvent.setup()
+    opacityKeyframes()
+    const { container, onDeleteKeyframe, refresh } = renderGraph('opacity')
+    const svg = graphSvg(container)
+    svg.focus()
+
+    fireEvent.click(points(container)[1])
+    expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-1')
+
+    // The keyframe goes away behind the graph's back — an undo, a right-click
+    // delete, or the store being edited from anywhere else. The remembered
+    // active *time* still points at 1s, but nothing on the graph is rendered
+    // active any more, and the two must not disagree.
+    store().removeClipKeyframe('clip1', 'opacity', 1)
+    refresh()
+    expect(svg.getAttribute('aria-activedescendant')).toBeNull()
+
+    await user.keyboard('{Delete}')
+
+    // Nothing to delete and nothing announced as selected, so the key is not
+    // the graph's: it falls through to the editor rather than being swallowed
+    // into doing nothing at all.
+    expect(onDeleteKeyframe).not.toHaveBeenCalled()
+    expect(seen).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets Escape through when the active keyframe is no longer on the graph', async () => {
+    const user = userEvent.setup()
+    opacityKeyframes()
+    const { container, refresh } = renderGraph('opacity')
+    const svg = graphSvg(container)
+    svg.focus()
+
+    fireEvent.click(points(container)[1])
+    store().removeClipKeyframe('clip1', 'opacity', 1)
+    refresh()
+
+    await user.keyboard('{Escape}')
+
+    // Same rule as Delete: with no rendered active option there is nothing for
+    // Escape to clear, so the editor's own deselect still runs.
+    expect(seen.mock.calls.map(([e]) => e.key)).toEqual(['Escape'])
+  })
+
   it('swallows Delete on an active preset rather than deleting the clip', async () => {
     const user = userEvent.setup()
     const { container, onDeleteKeyframe } = renderGraph('opacity', { animation: fadeInAndCustom })
@@ -151,6 +196,28 @@ describe('KeyframeGraph keyboard access', () => {
     expect(onDeleteKeyframe).not.toHaveBeenCalled()
     expect(seen).not.toHaveBeenCalled()
     expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-0')
+  })
+
+  it('drops the selection when a preset is clicked after a custom keyframe', async () => {
+    const user = userEvent.setup()
+    const { container, onDeleteKeyframe } = renderGraph('opacity', { animation: fadeInAndCustom })
+    const svg = graphSvg(container)
+
+    // The user's own keyframe at 2s, then one of the fade-in presets.
+    fireEvent.click(points(container)[2])
+    expect(screen.getByLabelText('Keyframe easing')).toBeInTheDocument()
+    fireEvent.click(points(container)[0])
+
+    // A preset is never selectable, so clicking one has to clear the selection
+    // the way the arrow keys do — otherwise the keys act on a keyframe that is
+    // not the one the graph draws as active.
+    expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-0')
+    expect(screen.queryByLabelText('Keyframe easing')).not.toBeInTheDocument()
+
+    await user.keyboard('{Delete}')
+
+    expect(onDeleteKeyframe).not.toHaveBeenCalled()
+    expect(seen).not.toHaveBeenCalled()
   })
 
   it('puts the graph in the tab order and names it for the property', async () => {
@@ -641,6 +708,35 @@ describe('KeyframeGraph keyboard access', () => {
       expect(screen.getByLabelText('Keyframe easing')).toBeInTheDocument()
     })
 
+    it('interpolates at the clamped time rather than at the playhead', () => {
+      // A clip trimmed shorter than its keyframes: 0.5 at 1s and 0 at 6s on a
+      // 4.3s clip, with the playhead past the end. The keyframe is placed at
+      // the clip's last frame, so it has to take the value the curve holds
+      // *there* — 0.17 — and not the 0 the curve holds at the playhead, which
+      // would visibly move the curve the moment it lands.
+      const trimmed: ClipAnimation = {
+        in: { type: 'none', duration: 0, easing: 'linear' },
+        out: { type: 'none', duration: 0, easing: 'linear' },
+        keyframes: {
+          opacity: [
+            { time: 1, value: 0.5, easing: 'linear' },
+            { time: 6, value: 0, easing: 'linear' },
+          ],
+        },
+      }
+      const { container, onAddKeyframe } = renderGraph('opacity', {
+        animation: trimmed,
+        playheadTime: 6,
+      })
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(onAddKeyframe.mock.calls[0][1]).toBe(CLIP_DURATION)
+      expect(onAddKeyframe.mock.calls[0][2]).toBeCloseTo(0.17, 6)
+    })
+
     it('adds at the property default on a graph with no keyframes', () => {
       const { container, onAddKeyframe } = renderGraph('opacity', { playheadTime: 2 })
       const svg = graphSvg(container)
@@ -806,6 +902,28 @@ describe('KeyframeGraph keyboard access', () => {
       fireEvent.keyDown(svg, { key: 'Enter' })
 
       expect(screen.getByRole('status')).toHaveTextContent('Opacity 50% at 2.00 seconds')
+    })
+
+    it('says an identical message differently the second time', () => {
+      // The region is aria-atomic, and an assistive technology does not
+      // re-read an atomic region whose text did not change: two identical
+      // edits in a row would be announced once. A zero-width space on
+      // alternate announcements makes the string differ without changing a
+      // character of what is read out.
+      opacityKeyframes()
+      const { container } = renderGraph('opacity', { playheadTime: 2 })
+      const svg = graphSvg(container)
+      const status = screen.getByRole('status')
+      const spoken = (text: string) => text.replace(/\u200B/g, '')
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+      const first = status.textContent
+      fireEvent.keyDown(svg, { key: 'Enter' })
+      const second = status.textContent
+
+      expect(first).not.toBe(second)
+      expect(spoken(first!)).toBe('Opacity 50% at 2.00 seconds')
+      expect(spoken(second!)).toBe('Opacity 50% at 2.00 seconds')
     })
   })
 })

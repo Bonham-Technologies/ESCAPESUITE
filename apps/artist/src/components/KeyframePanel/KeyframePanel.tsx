@@ -257,6 +257,12 @@ export function KeyframePanel() {
                   </button>
                 </div>
                 <KeyframeGraph
+                  // Keyed on the clip and the property so switching either
+                  // mounts a fresh graph: the active option and the selection
+                  // are the graph's own state, and a keyframe at the same time
+                  // on the next property — or the next clip — would otherwise
+                  // inherit them.
+                  key={`${selectedClip.id}:${selectedProperty}`}
                   property={selectedProperty}
                   clipDuration={selectedClip.duration}
                   animation={selectedClip.animation}

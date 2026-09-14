@@ -227,7 +227,7 @@ Clips support animated properties via keyframes:
   | `Shift+ArrowUp` / `Shift+ArrowDown` | nudge value, coarse | coarse step |
   | `Alt+ArrowLeft` / `Alt+ArrowRight` | nudge the selected keyframe's **time** | ∓ 0.01 s |
   | `Alt+Shift+ArrowLeft` / `Alt+Shift+ArrowRight` | nudge time, coarse | ∓ 0.1 s |
-  | `Enter` | add a keyframe at the playhead, at the curve's value there | — |
+  | `Enter` | add a keyframe at the playhead, clamped to the clip, at the curve's value *there* | — |
   | `Delete` / `Backspace` | delete the selected keyframe (custom only) | — |
   | `Escape` | clear the active keyframe and the selection; passes through when nothing is active | — |
 
@@ -248,8 +248,8 @@ Clips support animated properties via keyframes:
   within 0.001 s of another keyframe (presets included) is refused rather than merging the two —
   nothing moves, and the live region announces why. A nudge the clamp puts back on the value or
   the time the keyframe already holds writes nothing either — no store call, so no undo entry
-  that undoes nothing, and no announcement, since the string would be identical — though the key
-  is still swallowed. Each arrow-key nudge that *does* change something is its own undo step
+  that undoes nothing, and no announcement, since nothing changed — though the key is still
+  swallowed. Each arrow-key nudge that *does* change something is its own undo step
   (every store action pushes history), unlike a drag, which is one; that matches the inspector's
   numeric controls and was an accepted tradeoff rather than an oversight.
 
@@ -264,6 +264,31 @@ Clips support animated properties via keyframes:
   event. Fixes a bug (ESCSUITE-49) where Delete with a keyframe selected deleted both the
   keyframe *and* the selected clip, because the graph's old listener was itself on `window`
   alongside the editor's.
+
+  **What counts as active**: every key that acts on "the active keyframe" — `Delete`,
+  `Backspace`, `Escape` — is gated on the *rendered* active option (`activeIndex !== -1`), not on
+  the remembered active time, so the keyboard can never disagree with what the graph draws; an
+  edit from outside the graph (an undo, a right-click delete) can leave that time pointing at a
+  keyframe that is gone, and a stale active time is treated as nothing active, falling the key
+  through to the editor's cascade — including to its "delete the selected clip" shortcut, and
+  leaving the stale time in state until the next click or arrow key replaces it. The selection is
+  the other half of the same rule: it follows the active option and never rests on a preset, in
+  `activateIndex` and in the pointer's `handleKeyframeClick` alike, so clicking a preset after a
+  custom keyframe clears the selection rather than leaving `Delete` and the value nudges pointed
+  at a keyframe that is not the active option. `KeyframePanel` also gives `<KeyframeGraph>` a
+  ``key={`${selectedClip.id}:${selectedProperty}`}``, so choosing another property — or another
+  clip — mounts a fresh graph and the active option and selection cannot bleed across two
+  properties, or two clips, that happen to hold a keyframe at the same time.
+
+  **Re-announcing an identical edit**: the graph's live region is `aria-atomic`, and an atomic
+  region whose text does not change is not re-read — two identical edits in a row (the same nudge
+  repeated, the same add) would be announced once. Every announcement therefore goes through the
+  hook's `announce()`, which appends a zero-width space (`ANNOUNCE_MARK`, `\u200B`) to alternate
+  announcements — the previous message's own last character decides — so consecutive identical
+  messages differ as strings while reading out the same and looking the same. The suffix is
+  applied in `announce` rather than on the way out because the graph re-renders every animation
+  frame while the clip preview plays. Tests that compare the live region's text exactly strip
+  `\u200B` first.
 
   **Known limitation**: `ExportDialog` listens on `document` in the capture phase, which runs
   *before* the graph's handler and so can't be shielded by its `stopPropagation()`. This is moot

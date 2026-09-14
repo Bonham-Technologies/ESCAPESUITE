@@ -200,6 +200,50 @@ describe('KeyframePanel', () => {
 
       expect(store().keyframePanelState.selectedProperty).toBeNull()
     })
+
+    it('starts the graph fresh when another clip is selected', () => {
+      openPanelWithClip()
+      addClip('clip2', 10, CLIP_DURATION)
+      // Again a keyframe at the same time on both, so an active option carried
+      // over from the first clip would land on the second clip's keyframe.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip2', 'opacity', { time: 1, value: 0.25, easing: 'linear' })
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+
+      const svg = measureGraph()
+      svg.focus()
+      fireEvent.keyDown(svg, { key: 'End' })
+      expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-1')
+
+      store().setSelectedClipId('clip2')
+
+      expect(measureGraph().getAttribute('aria-activedescendant')).toBeNull()
+      expect(screen.queryByLabelText('Keyframe easing')).not.toBeInTheDocument()
+    })
+
+    it('starts the graph fresh when another property is chosen', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      // A keyframe at the same time on both properties: an active time carried
+      // over from the opacity graph would land on the rotation keyframe and
+      // select a keyframe the user never touched.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'rotation', { time: 1, value: 45, easing: 'linear' })
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+
+      const svg = measureGraph()
+      svg.focus()
+      fireEvent.keyDown(svg, { key: 'End' })
+      expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-1')
+      expect(screen.getByLabelText('Keyframe easing')).toBeInTheDocument()
+
+      await user.click(trackFor('Rotation'))
+
+      expect(measureGraph().getAttribute('aria-activedescendant')).toBeNull()
+      expect(screen.queryByLabelText('Keyframe easing')).not.toBeInTheDocument()
+    })
   })
 
   describe('adding keyframes from a track', () => {
