@@ -1,42 +1,38 @@
 // Zustand store for project state management
 
 import { create } from 'zustand';
+import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { EditorState, Project, SourceVideo, Clip, Track, ClipTransform, ClipEffects, BlendMode, Transition, TextOverlayData, ShapeOverlayData, ClipAnimation, AnimatableProperty, Keyframe } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA, DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { cloneClip } from '../utils/deepClone';
-import { getUndoableState, pushToHistory } from './storeHistory';
+import { pushToHistory } from './storeHistory';
 import { createEmptyProject, createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
+import { createHistorySlice, type HistorySlice } from './historySlice';
+import { createPlaybackSlice, type PlaybackSlice } from './playbackSlice';
+import { createMarkerSlice, type MarkerSlice } from './markerSlice';
+import { createUiSlice, type UiSlice } from './uiSlice';
 
 // The pure helpers moved to their own modules — none of them reads the store —
 // and DEFAULT_PROJECT_NAME is re-exported here so every existing import path still resolves.
 export { DEFAULT_PROJECT_NAME } from './projectFactory';
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+// Everything the slices have not claimed yet, kept inline and byte-unchanged so
+// the split stays a provable move. Tasks 3-5 empty it slice by slice; Task 6
+// deletes it and composes the store from slices alone.
+type RemainingSlice = Omit<EditorState, keyof HistorySlice | keyof PlaybackSlice | keyof MarkerSlice | keyof UiSlice>;
+
+const createRemainingSlice: StateCreator<EditorState, [], [], RemainingSlice> = (set, get) => ({
   // Initial state
   project: createEmptyProject(),
   sourceVideos: [],
-  currentTime: 0,
-  isPlaying: false,
   selectedClipId: null,
   selectedClipIds: new Set<string>(),
   selectedTrackId: null,
   clipboard: null,
-  inPoint: null,
-  outPoint: null,
-  zoom: 1,
-  snapEnabled: true,
-  snapThreshold: 10, // pixels
-  activeTool: 'select',
-  loopPlayback: false,
-  markers: [],
   keyframePanelState: DEFAULT_KEYFRAME_PANEL_STATE,
-  history: {
-    past: [],
-    future: [],
-  },
 
   // Project actions
   setProject: (project: Project) => set((state) => ({
@@ -976,10 +972,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  // Playback actions
-  setCurrentTime: (time: number) => set({ currentTime: time }),
-  setIsPlaying: (playing: boolean) => set({ isPlaying: playing }),
-
   // Selection actions
   setSelectedClipId: (id: string | null) => set({
     selectedClipId: id,
@@ -1182,31 +1174,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  // UI actions
-  setZoom: (zoom: number) => set({ zoom: Math.max(0.1, Math.min(10, zoom)) }),
-  setSnapEnabled: (enabled: boolean) => set({ snapEnabled: enabled }),
-  setActiveTool: (tool) => set({ activeTool: tool }),
-  setLoopPlayback: (enabled: boolean) => set({ loopPlayback: enabled }),
-
-  // In/Out point actions
-  setInPoint: (time: number) => set((state) => {
-    if (state.outPoint !== null && time > state.outPoint) {
-      // Swap: in becomes out, out becomes in
-      return { inPoint: state.outPoint, outPoint: time };
-    }
-    return { inPoint: time };
-  }),
-
-  setOutPoint: (time: number) => set((state) => {
-    if (state.inPoint !== null && time < state.inPoint) {
-      // Swap: out becomes in, in becomes out
-      return { outPoint: state.inPoint, inPoint: time };
-    }
-    return { outPoint: time };
-  }),
-
-  clearInOutPoints: () => set({ inPoint: null, outPoint: null }),
-
   recalculateTimelineDuration: () => set((state) => ({
     project: {
       ...state.project,
@@ -1216,49 +1183,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       },
     },
   })),
-
-  // Marker actions
-  addMarker: (time: number, label?: string, color?: string) => {
-    const marker = {
-      id: uuidv4(),
-      time,
-      label: label || '',
-      color: color || '#ffcc00',
-    };
-    set((state) => ({
-      markers: [...state.markers, marker].sort((a, b) => a.time - b.time),
-    }));
-    return marker;
-  },
-
-  removeMarker: (markerId: string) => set((state) => ({
-    markers: state.markers.filter((m) => m.id !== markerId),
-  })),
-
-  updateMarker: (markerId: string, updates: Partial<{ time: number; label: string; color: string }>) => set((state) => ({
-    markers: state.markers
-      .map((m) => (m.id === markerId ? { ...m, ...updates } : m))
-      .sort((a, b) => a.time - b.time),
-  })),
-
-  clearMarkers: () => set({ markers: [] }),
-
-  goToNextMarker: () => set((state) => {
-    const nextMarker = state.markers.find((m) => m.time > state.currentTime);
-    if (nextMarker) {
-      return { currentTime: nextMarker.time };
-    }
-    return {};
-  }),
-
-  goToPreviousMarker: () => set((state) => {
-    const previousMarkers = state.markers.filter((m) => m.time < state.currentTime);
-    if (previousMarkers.length > 0) {
-      const prevMarker = previousMarkers[previousMarkers.length - 1];
-      return { currentTime: prevMarker.time };
-    }
-    return {};
-  }),
 
   // Keyframe panel actions
   setKeyframePanelOpen: (open: boolean) => set((state) => ({
@@ -1280,52 +1204,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setKeyframePanelZoom: (zoom: number) => set((state) => ({
     keyframePanelState: { ...state.keyframePanelState, graphZoom: Math.max(0.5, Math.min(4, zoom)) },
   })),
+});
 
-  // Undo/Redo actions
-  undo: () => set((state) => {
-    if (state.history.past.length === 0) return state;
-
-    const previous = state.history.past[state.history.past.length - 1];
-    const newPast = state.history.past.slice(0, -1);
-
-    // Save current state to future
-    const currentSnapshot = getUndoableState(state);
-
-    return {
-      project: previous.project,
-      sourceVideos: previous.sourceVideos,
-      history: {
-        past: newPast,
-        future: [currentSnapshot, ...state.history.future],
-      },
-    };
-  }),
-
-  redo: () => set((state) => {
-    if (state.history.future.length === 0) return state;
-
-    const next = state.history.future[0];
-    const newFuture = state.history.future.slice(1);
-
-    // Save current state to past
-    const currentSnapshot = getUndoableState(state);
-
-    return {
-      project: next.project,
-      sourceVideos: next.sourceVideos,
-      history: {
-        past: [...state.history.past, currentSnapshot],
-        future: newFuture,
-      },
-    };
-  }),
-
-  canUndo: () => get().history.past.length > 0,
-  canRedo: () => get().history.future.length > 0,
-
-  clearHistory: () => set({
-    history: { past: [], future: [] },
-  }),
+export const useEditorStore = create<EditorState>((...a) => ({
+  ...createHistorySlice(...a),
+  ...createPlaybackSlice(...a),
+  ...createMarkerSlice(...a),
+  ...createUiSlice(...a),
+  ...createRemainingSlice(...a),
 }));
 
 // Selectors for common derived state
