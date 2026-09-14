@@ -67,6 +67,10 @@ export function keyframeOptionId(property: AnimatableProperty, index: number): s
   return `kf-${property}-${index}`;
 }
 
+// Appended to alternate announcements so two identical ones in a row are two
+// different strings; see the live region's comment in the hook below.
+const ANNOUNCE_MARK = '\u200B';
+
 /** What the live region says after a nudge or an add. */
 function nudgeAnnouncement(property: AnimatableProperty, value: number, time: number): string {
   return `${PROPERTY_LABELS[property]} ${formatValue(value, property)} at ${time.toFixed(2)} seconds`;
@@ -123,7 +127,21 @@ export function useKeyframeGraphKeyboard({
   // What the graph's live region is saying. Empty until the first edit: moving
   // the active option writes nothing here, because aria-activedescendant
   // already makes the AT read the option and announcing both double-speaks.
+  //
+  // Every announcement goes through `announce`, which is what makes two
+  // identical messages in a row audible: the region is aria-atomic, and an
+  // atomic region whose text does not change is not re-read, so a second
+  // "Opacity 50% at 2.00 seconds" would be silent — exactly the case a user
+  // repeating one edit lands in. Alternate announcements therefore carry a
+  // trailing zero-width space, which the previous message's own last character
+  // decides. The string differs, so the AT reads it again; the character itself
+  // is neither spoken nor visible. Applied here rather than on the way out
+  // because the graph re-renders every animation frame while the clip preview
+  // plays, and this way no render allocates a string.
   const [nudgeMessage, setNudgeMessage] = useState('');
+  const announce = useCallback((text: string) => {
+    setNudgeMessage(prev => (prev.slice(-1) === ANNOUNCE_MARK ? text : text + ANNOUNCE_MARK));
+  }, []);
 
   // The active descendant, resolved back to a position in the sorted array.
   // -1 means "no active option", which is also what the arrow keys step from.
@@ -131,6 +149,12 @@ export function useKeyframeGraphKeyboard({
     ? -1
     : keyframes.findIndex(kf => Math.abs(kf.time - activeTime) < 0.001);
   const activeId = activeIndex === -1 ? undefined : keyframeOptionId(property, activeIndex);
+  // Everything that acts on "the active keyframe" is gated on this rather than
+  // on activeTime, so the keys can never disagree with what is rendered: an
+  // undo, a right-click delete or any other edit from outside the graph can
+  // leave activeTime pointing at a keyframe that is no longer there, and a
+  // stale active time is treated as nothing active.
+  const hasActive = activeIndex !== -1;
 
   // Move the active option, and take the selection with it when the keyframe is
   // one the user can edit — single-select follow-focus, the APG listbox default
@@ -160,12 +184,12 @@ export function useKeyframeGraphKeyboard({
     // actions push history unconditionally, so writing it would spend an undo
     // slot on a change of nothing (MAX_HISTORY_SIZE is 50, and key auto-repeat
     // would empty the real stack in under two seconds). Nothing is announced
-    // either — the string would be identical, which no live region re-reads.
-    // The key stays swallowed: the caller has already claimed it.
+    // either — nothing changed, so there is nothing to say. The key stays
+    // swallowed: the caller has already claimed it.
     if (newValue === selectedKeyframe.value) return;
     onKeyframeValueChanged(property, selectedKeyframe.time, newValue);
-    setNudgeMessage(nudgeAnnouncement(property, newValue, selectedKeyframe.time));
-  }, [selectedKeyframe, property, range, onKeyframeValueChanged]);
+    announce(nudgeAnnouncement(property, newValue, selectedKeyframe.time));
+  }, [selectedKeyframe, property, range, onKeyframeValueChanged, announce]);
 
   // Nudge the selected keyframe along the time axis.
   const nudgeTime = useCallback((direction: 1 | -1, coarse: boolean) => {
@@ -189,7 +213,7 @@ export function useKeyframeGraphKeyboard({
       Math.abs(kf.time - selectedKeyframe.time) >= 0.001 && Math.abs(kf.time - newTime) < 0.001
     );
     if (occupied) {
-      setNudgeMessage(
+      announce(
         `${PROPERTY_LABELS[property]} keyframe not moved: another keyframe is at ${newTime.toFixed(2)} seconds`
       );
       return;
@@ -199,19 +223,22 @@ export function useKeyframeGraphKeyboard({
     // follow it — exactly what the drag's mouseup does.
     setActiveTime(newTime);
     setSelectedKeyframeTime(newTime);
-    setNudgeMessage(nudgeAnnouncement(property, selectedKeyframe.value, newTime));
-  }, [selectedKeyframe, keyframes, clipDuration, property, onKeyframeMoved, setSelectedKeyframeTime]);
+    announce(nudgeAnnouncement(property, selectedKeyframe.value, newTime));
+  }, [selectedKeyframe, keyframes, clipDuration, property, onKeyframeMoved, setSelectedKeyframeTime, announce]);
 
   // Add a keyframe where the playhead is, at the value the curve already has
   // there, so the shape the user can see does not jump when they add to it.
   const addAtPlayhead = useCallback(() => {
     const time = Math.max(0, Math.min(playheadTime, clipDuration));
-    const value = interpolateKeyframes(keyframes, playheadTime, defaultValue);
+    // Interpolated at `time`, not at playheadTime: a playhead outside the clip
+    // is clamped to the clip's edge, and reading the curve anywhere other than
+    // where the keyframe lands would make the curve jump when it does.
+    const value = interpolateKeyframes(keyframes, time, defaultValue);
     onAddKeyframe(property, time, value);
     setActiveTime(time);
     setSelectedKeyframeTime(time);
-    setNudgeMessage(nudgeAnnouncement(property, value, time));
-  }, [playheadTime, clipDuration, keyframes, defaultValue, property, onAddKeyframe, setSelectedKeyframeTime]);
+    announce(nudgeAnnouncement(property, value, time));
+  }, [playheadTime, clipDuration, keyframes, defaultValue, property, onAddKeyframe, setSelectedKeyframeTime, announce]);
 
   // The propagation contract, in one place.
   //
@@ -268,7 +295,7 @@ export function useKeyframeGraphKeyboard({
       return;
     }
 
-    if ((key === 'Delete' || key === 'Backspace') && activeTime !== null) {
+    if ((key === 'Delete' || key === 'Backspace') && hasActive) {
       e.preventDefault();
       e.stopPropagation();
       // Only a custom keyframe can be deleted; on a preset the key is swallowed
@@ -277,14 +304,14 @@ export function useKeyframeGraphKeyboard({
         onDeleteKeyframe(property, selectedKeyframe.time);
         setActiveTime(null);
         setSelectedKeyframeTime(null);
-        setNudgeMessage(
+        announce(
           `${PROPERTY_LABELS[property]} keyframe at ${selectedKeyframe.time.toFixed(2)} seconds deleted`
         );
       }
       return;
     }
 
-    if (key === 'Escape' && activeTime !== null) {
+    if (key === 'Escape' && hasActive) {
       e.preventDefault();
       e.stopPropagation();
       setActiveTime(null);
@@ -297,7 +324,8 @@ export function useKeyframeGraphKeyboard({
     nudgeValue,
     nudgeTime,
     addAtPlayhead,
-    activeTime,
+    hasActive,
+    announce,
     selectedKeyframe,
     setSelectedKeyframeTime,
     onDeleteKeyframe,

@@ -246,9 +246,11 @@ export function KeyframeGraph({
     e.stopPropagation();
     focusGraph();
     setActiveTime(kf.time);
-    if (isCustomKeyframe(kf)) {
-      setSelectedKeyframeTime(kf.time);
-    }
+    // The selection follows the active option and a preset is never selectable
+    // — the same rule the keyboard's activateIndex follows. Leaving the
+    // previously clicked custom keyframe selected here would let Delete and the
+    // value nudges act on a keyframe that is not the one drawn as active.
+    setSelectedKeyframeTime(isCustomKeyframe(kf) ? kf.time : null);
   }, [isCustomKeyframe, focusGraph, setActiveTime]);
 
   // Handle right-click on keyframe to delete
