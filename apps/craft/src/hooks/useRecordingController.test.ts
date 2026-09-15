@@ -216,11 +216,16 @@ describe('useRecordingController countdown', () => {
   it('drops the countdown and releases the capture when it is cancelled', async () => {
     const { result } = mountController({ countdownSeconds: 3 })
     await startTake(result)
+    const recorder = recorderFactory.last()
 
     act(() => { result.current.cancelCountdown() })
 
     expect(state()).toBe('idle')
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+    // The recorder is already initialize()d by the time the countdown starts —
+    // AudioContext, level monitor and, on the fallback path, a <video>. Esc has
+    // to hand all of that back, or six cancelled takes exhaust the AudioContexts.
+    expect(recorder.dispose).toHaveBeenCalledTimes(1)
     expect(vi.getTimerCount()).toBe(0)
 
     act(() => { vi.advanceTimersByTime(5000) })

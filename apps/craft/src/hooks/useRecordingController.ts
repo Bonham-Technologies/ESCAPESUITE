@@ -117,20 +117,33 @@ export function useRecordingController({
     });
   }, [compositorRef, previewRef]);
 
+  // The recorder is built and initialize()d before the countdown even starts,
+  // so by then it already owns an AudioContext, a level monitor looping on rAF
+  // and — on the fallback capture path — a <video> in the document. Every exit
+  // from a take has to give those back, which is why disposal lives in one
+  // place that cancel, error and teardown all call.
+  const disposeRecorder = useCallback(() => {
+    if (recorderRef.current) {
+      recorderRef.current.dispose();
+      recorderRef.current = null;
+    }
+  }, []);
+
+  const clearCountdownTicker = useCallback(() => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+  }, []);
+
   useEffect(() => () => {
     cancelledRef.current = true;
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-      countdownIntervalRef.current = null;
-    }
-    if (recorderRef.current) {
-      recorderRef.current.dispose();
-      recorderRef.current = null;
-    }
+    clearCountdownTicker();
+    disposeRecorder();
     stopAllStreamsRef.current();
 
     // The store is a module singleton: it outlives this component. Left as it
@@ -140,17 +153,15 @@ export function useRecordingController({
     recorder.setState('idle');
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
-  }, [stopAllStreamsRef]);
+  }, [clearCountdownTicker, disposeRecorder, stopAllStreamsRef]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-      countdownIntervalRef.current = null;
-    }
+    clearCountdownTicker();
+    disposeRecorder();
     setState('idle');
     stopAllStreams();
-  }, [setState, stopAllStreams]);
+  }, [clearCountdownTicker, disposeRecorder, setState, stopAllStreams]);
 
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
@@ -160,15 +171,12 @@ export function useRecordingController({
       durationIntervalRef.current = null;
     }
 
-    if (recorderRef.current) {
-      recorderRef.current.dispose();
-      recorderRef.current = null;
-    }
+    disposeRecorder();
 
     setState('idle');
     setCurrentDuration(0);
     stopAllStreams();
-  }, [setState, setCurrentDuration, stopAllStreams]);
+  }, [disposeRecorder, setState, setCurrentDuration, stopAllStreams]);
 
   // Pause recording
   const handlePauseRecording = useCallback(() => {
@@ -214,16 +222,13 @@ export function useRecordingController({
     countdownIntervalRef.current = window.setInterval(() => {
       const currentValue = useRecorderStore.getState().countdownValue;
       if (currentValue <= 1) {
-        if (countdownIntervalRef.current) {
-          clearInterval(countdownIntervalRef.current);
-          countdownIntervalRef.current = null;
-        }
+        clearCountdownTicker();
         startRecording();
       } else {
         setCountdown(currentValue - 1);
       }
     }, 1000);
-  }, [config.countdownSeconds, setState, setCountdown, startRecording]);
+  }, [clearCountdownTicker, config.countdownSeconds, setState, setCountdown, startRecording]);
 
   // Handle start recording button
   const handleStartRecording = useCallback(async () => {
