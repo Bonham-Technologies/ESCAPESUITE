@@ -32,6 +32,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   capabilitiesReady: false,
   recordings: [],
   notice: null,
+  systemAudioShared: true,
 
   // Current recording data
   currentDuration: 0,
@@ -59,6 +60,9 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   setNotice: (notice: string | null) =>
     set({ notice }),
+
+  setSystemAudioShared: (systemAudioShared: boolean) =>
+    set({ systemAudioShared }),
 
   setState: (newState: RecordingState) =>
     set({ state: newState }),

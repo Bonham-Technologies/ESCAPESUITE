@@ -65,6 +65,14 @@ function screenStream(): MediaStream {
   return createStreamDouble([createTrackDouble('video', { id: 'screen-video' })])
 }
 
+/** A display capture that came back with the system-audio track ticked on. */
+function screenStreamWithAudio(): MediaStream {
+  return createStreamDouble([
+    createTrackDouble('video', { id: 'screen-video' }),
+    createTrackDouble('audio', { id: 'screen-audio' }),
+  ])
+}
+
 function webcamStream(): MediaStream {
   return createStreamDouble([createTrackDouble('video', { id: 'webcam-video' })])
 }
@@ -82,6 +90,7 @@ function resetStore(config: Partial<RecordingConfig> = {}): void {
     screenStream: null,
     webcamStream: null,
     notice: null,
+    systemAudioShared: true,
   })
 }
 
@@ -114,6 +123,7 @@ function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<A
     capturedThumbnailRef: { current: null },
     saveRecording: saveRecording as unknown as RecordingControllerDeps['saveRecording'],
     setNotice: store.setNotice,
+    setSystemAudioShared: store.setSystemAudioShared,
   }
 
   return { deps, streams, acquireStreams, stopAllStreams, saveRecording, setPreviewStream, setIsPiPActive }
@@ -200,6 +210,52 @@ describe('useRecordingController notices', () => {
     await startTake(result)
 
     expect(useRecorderStore.getState().notice).toBeNull()
+  })
+})
+
+describe('useRecordingController system audio', () => {
+  it('warns, and greys the meter, when the display capture carried no audio track', async () => {
+    const { result } = mountController({ systemAudioEnabled: true, countdownSeconds: 0 })
+
+    await startTake(result)
+
+    expect(state()).toBe('recording')
+    expect(useRecorderStore.getState().systemAudioShared).toBe(false)
+    expect(useRecorderStore.getState().notice).toBe(
+      "System audio was not shared — tick 'Share system audio' in the browser dialog."
+    )
+  })
+
+  it('says nothing when the audio track did arrive', async () => {
+    const { result } = mountController(
+      { systemAudioEnabled: true, countdownSeconds: 0 },
+      { screen: screenStreamWithAudio() }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(true)
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('does not blame the share dialog when there was no display capture at all', async () => {
+    const { result } = mountController(
+      { screenEnabled: false, webcamEnabled: true, systemAudioEnabled: true, countdownSeconds: 0 },
+      { screen: null, webcam: webcamStream() }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(false)
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('leaves the meter live for a take with system audio switched off', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(true)
   })
 })
 

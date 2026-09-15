@@ -27,6 +27,7 @@ function App() {
     capabilitiesReady,
     recordings,
     notice,
+    systemAudioShared,
     currentDuration,
     countdownValue,
     audioLevels,
@@ -35,6 +36,7 @@ function App() {
     setDetailedCapabilities,
     setCapabilitiesReady,
     setNotice,
+    setSystemAudioShared,
     setState,
     setCountdown,
     setCurrentDuration,
@@ -119,6 +121,7 @@ function App() {
     capturedThumbnailRef,
     saveRecording,
     setNotice,
+    setSystemAudioShared,
   });
 
   useKeyboardShortcuts({
@@ -179,6 +182,7 @@ function App() {
             detailedCapabilities={detailedCapabilities}
             audioLevels={audioLevels}
             isRecordingActive={isRecordingActive}
+            systemAudioShared={systemAudioShared}
             onToggleSource={toggleSource}
           />
 

@@ -96,6 +96,13 @@ export interface RecorderStore {
    * `utils/notices.ts`; there is deliberately no second channel.
    */
   notice: string | null;
+  /**
+   * Whether the take actually got a system-audio track. Enabling "System
+   * Audio" only *asks* for it — the browser's share dialog has its own tick
+   * box — so this is false whenever the capture came back without one, and it
+   * is what greys the System meter.
+   */
+  systemAudioShared: boolean;
 
   // Current recording data
   currentDuration: number;
@@ -112,6 +119,7 @@ export interface RecorderStore {
   setDetailedCapabilities: (caps: DetailedCapabilities) => void;
   setCapabilitiesReady: (ready: boolean) => void;
   setNotice: (notice: string | null) => void;
+  setSystemAudioShared: (shared: boolean) => void;
   setState: (state: RecordingState) => void;
   setCountdown: (value: number) => void;
   setCurrentDuration: (duration: number) => void;

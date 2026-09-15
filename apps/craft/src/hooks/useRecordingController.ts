@@ -18,8 +18,9 @@
 // kept up to date when the teardown reaches for it.
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { createRecorder, getRecorderType, type AnyRecorder } from '../core/recorder-factory';
+import { hasSystemAudio } from '../core/permissions';
 import { hasSpaceForRecording } from '../core/storage';
-import { NO_STORAGE_SPACE, SAVE_FAILED } from '../utils/notices';
+import { NO_STORAGE_SPACE, NO_SYSTEM_AUDIO, SAVE_FAILED } from '../utils/notices';
 import { Compositor } from '../core/compositor';
 import { analytics } from '../utils/analytics';
 import { drawThumbnail } from '../utils/previewThumbnail';
@@ -51,6 +52,8 @@ export interface RecordingControllerDeps {
   saveRecording: SaveRecording;
   /** The one notice channel — see utils/notices.ts. Cleared when a take starts. */
   setNotice: (notice: string | null) => void;
+  /** Whether a system-audio track actually arrived; greys the System meter. */
+  setSystemAudioShared: (shared: boolean) => void;
 }
 
 /**
@@ -90,6 +93,7 @@ export function useRecordingController({
   capturedThumbnailRef,
   saveRecording,
   setNotice,
+  setSystemAudioShared,
 }: RecordingControllerDeps): RecordingController {
   const recorderRef = useRef<AnyRecorder | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
@@ -262,6 +266,19 @@ export function useRecordingController({
       setStreams(screen, webcam);
       micStreamRef.current = mic;
 
+      // Ticking "System Audio" only *asks* for it: getDisplayMedia's own
+      // dialog carries the tick box, and the stream comes back with no audio
+      // track when the user leaves it clear. Nothing used to notice, so the
+      // System meter sat at 0 whether the audio was there or not.
+      const systemAudioShared =
+        !config.systemAudioEnabled || (screen !== null && hasSystemAudio(screen));
+      setSystemAudioShared(systemAudioShared);
+      // Only a display capture can carry system audio, so only a display
+      // capture that came back without it means the tick box was missed.
+      if (!systemAudioShared && screen !== null) {
+        setNotice(NO_SYSTEM_AUDIO);
+      }
+
       // Set up preview
       // This avoids canvas.captureStream() issues with hidden video elements
 
@@ -406,6 +423,7 @@ export function useRecordingController({
     setPreviewStream,
     setIsPiPActive,
     setNotice,
+    setSystemAudioShared,
   ]);
 
   return {

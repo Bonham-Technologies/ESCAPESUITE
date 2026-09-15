@@ -635,6 +635,15 @@
   width: 50px;
 }
 
+/* A meter for audio that was asked for but never arrived */
+.meterUnavailable .meterLabel {
+  color: var(--text-muted);
+}
+
+.meterUnavailable .meterBar {
+  opacity: 0.4;
+}
+
 .meterBar {
   flex: 1;
   height: 6px;
