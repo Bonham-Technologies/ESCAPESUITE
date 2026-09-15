@@ -6,6 +6,7 @@ import { useRecorderStore } from './store/recorderStore';
 import { themeStorage } from './utils/themeStorage';
 import {
   permissionsOverrides,
+  recorderFactory,
   detectionResult,
   resetAppDoubles,
 } from './test/appDoubles';
@@ -13,8 +14,10 @@ import {
   renderApp,
   resetRecorderStore,
   installBrowserStubs,
+  flush,
   type BrowserStubs,
 } from './test/appHarness';
+import { installOffsetParentStub } from './test/doubles/browser';
 
 // Screen/camera capture, WebCodecs muxing, thumbnail decoding, editor
 // navigation and analytics delivery are all browser boundaries jsdom does not
@@ -343,6 +346,41 @@ describe('App help modal', () => {
 
     await user.click(screen.getByRole('dialog'));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('closes on Escape, and hands focus back to the Help button', async () => {
+    const restoreOffsetParent = installOffsetParentStub();
+    const user = userEvent.setup();
+    await renderApp();
+
+    const trigger = screen.getByRole('button', { name: 'Help - Recording Tips' });
+    trigger.focus();
+    await user.click(trigger);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(trigger.contains(document.activeElement)).toBe(false);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    restoreOffsetParent();
+  });
+
+  it('does not let the recorder shortcuts fire behind it', async () => {
+    const restoreOffsetParent = installOffsetParentStub();
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole('button', { name: 'Help - Recording Tips' }));
+
+    // R is the one that costs something: behind an open dialog it used to reach
+    // handleStartRecording and put a screen-capture prompt up unasked.
+    fireEvent.keyDown(window, { key: 'r' });
+    await flush();
+
+    expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
+    expect(useRecorderStore.getState().state).toBe('idle');
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    restoreOffsetParent();
   });
 });
 

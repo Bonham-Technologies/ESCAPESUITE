@@ -217,6 +217,25 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
       expect(html).toContain('<!DOCTYPE html>')
     }
   })
+
+  test('the help dialog opens, traps Tab and gives focus back on Escape', async ({ page }) => {
+    const trigger = page.getByRole('button', { name: /help - recording tips/i })
+    await trigger.focus()
+    await page.keyboard.press('Enter')
+
+    const dialog = page.getByRole('dialog', { name: 'Recording Tips' })
+    await expect(dialog).toBeVisible()
+
+    // Focus is inside the dialog, and stays there however far Tab is pressed.
+    expect(await dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Tab')
+    expect(await dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+
+    await page.keyboard.press('Escape')
+
+    await expect(dialog).toBeHidden()
+    await expect(trigger).toBeFocused()
+  })
 })
 
 test.describe('ESCAPEARTIST Keyboard Navigation', () => {

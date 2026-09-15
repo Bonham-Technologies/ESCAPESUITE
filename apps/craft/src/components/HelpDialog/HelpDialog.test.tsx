@@ -4,11 +4,23 @@
 // the accessible name the App suite queries, the four sections in order, and
 // the three dismissal paths — backdrop yes, close button yes, a click inside
 // the panel no.
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HelpDialog } from './HelpDialog'
+import { installOffsetParentStub } from '../../test/doubles/browser'
 import styles from '../../App.module.css'
+
+let restoreOffsetParent: () => void
+
+beforeEach(() => {
+  restoreOffsetParent = installOffsetParentStub()
+})
+
+afterEach(() => {
+  restoreOffsetParent()
+  document.body.innerHTML = ''
+})
 
 function renderDialog() {
   const onClose = vi.fn()
@@ -92,5 +104,61 @@ describe('HelpDialog dismissal', () => {
     await user.click(close)
 
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('HelpDialog keyboard and focus', () => {
+  it('closes on Escape', () => {
+    const { onClose } = renderDialog()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves focus into the dialog when it opens', () => {
+    renderDialog()
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close help' }))
+  })
+
+  it('keeps Tab inside the dialog', () => {
+    const { container } = renderDialog()
+
+    const focusable = [
+      ...container.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])'),
+    ]
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    expect(focusable.length).toBeGreaterThan(1)
+
+    last.focus()
+    fireEvent.keyDown(document, { key: 'Tab' })
+    expect(document.activeElement).toBe(first)
+
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('returns focus to whatever opened it', () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const { unmount } = render(<HelpDialog onClose={vi.fn()} />)
+    expect(document.activeElement).not.toBe(trigger)
+
+    unmount()
+
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('gives its scrolling body keyboard access', () => {
+    const { container } = renderDialog()
+
+    // axe's `scrollable-region-focusable`: the tips are a scrolling region with
+    // no controls of its own, so it has to be reachable by Tab to be scrollable
+    // from the keyboard at all.
+    expect(container.querySelector(`.${styles.helpBody}`)).toHaveAttribute('tabindex', '0')
   })
 })

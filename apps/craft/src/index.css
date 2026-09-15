@@ -25,6 +25,11 @@
   --success: #4ade80;
   --warning: #fbbf24;
   --error: #ef4444;
+  /* --error as *text* on --bg-secondary is 4.22:1 — under WCAG AA. This is the
+     same colour lifted until it clears 4.5:1 (5.7:1 on #16213e), for the live
+     recording label and timer. Non-text uses of --error (the pulsing dot, the
+     record button) are unaffected by the rule and keep the brand red. */
+  --error-text: #f87171;
 
   --border: #2a2a4a;
   --border-color: #2a2a4a;

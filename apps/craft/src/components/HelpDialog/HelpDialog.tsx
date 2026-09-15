@@ -1,3 +1,4 @@
+import { useDialogBehaviour } from '../../hooks/useDialogBehaviour';
 import { CloseIcon } from '../icons';
 import styles from '../../App.module.css';
 
@@ -12,10 +13,23 @@ interface HelpDialogProps {
  * Like the playback dialog, the backdrop closes it and the panel swallows the
  * click, and it is named through `aria-labelledby="help-title"`. Whether it is
  * open is the App's state; this component is the contents.
+ *
+ * `useDialogBehaviour` supplies the rest of what a modal owes the keyboard —
+ * Escape, the focus trap, and focus back to the Help button on close.
  */
 export function HelpDialog({ onClose }: HelpDialogProps) {
+  const dialogRef = useDialogBehaviour(onClose);
+
   return (
-    <div className={styles.helpModal} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={styles.helpModal}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="help-title"
+    >
       <div className={styles.helpContent} onClick={(e) => e.stopPropagation()}>
         <div className={styles.helpHeader}>
           <h2 id="help-title" className={styles.helpTitle}>Recording Tips</h2>
@@ -29,7 +43,10 @@ export function HelpDialog({ onClose }: HelpDialogProps) {
           </button>
         </div>
 
-        <div className={styles.helpBody}>
+        {/* The tips scroll and hold no controls of their own, so the region
+            itself has to be in the tab order for a keyboard to scroll it
+            (axe: scrollable-region-focusable). */}
+        <div className={styles.helpBody} tabIndex={0}>
           <section className={styles.helpSection}>
             <h3>Choosing What to Record</h3>
             <p>When you start recording, your browser will ask what you want to capture:</p>

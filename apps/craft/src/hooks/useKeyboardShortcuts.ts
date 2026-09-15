@@ -13,6 +13,14 @@ export interface KeyboardShortcutsDeps {
   state: RecordingState;
   /** False while the Record button itself is disabled; R must agree with it. */
   canRecord: boolean;
+  /**
+   * True while either modal is on screen. A dialog is modal, so nothing behind
+   * it may act on a key — R in particular used to put a screen-capture prompt
+   * up from inside the Help dialog. The dialog's own keys (Escape, Tab) never
+   * reach this listener at all: `useDialogBehaviour` stops them in the capture
+   * phase, above the window.
+   */
+  modalOpen: boolean;
   handleStartRecording: () => void;
   handlePauseRecording: () => void;
   handleResumeRecording: () => void;
@@ -24,6 +32,7 @@ export interface KeyboardShortcutsDeps {
 export function useKeyboardShortcuts({
   state,
   canRecord,
+  modalOpen,
   handleStartRecording,
   handlePauseRecording,
   handleResumeRecording,
@@ -36,6 +45,11 @@ export function useKeyboardShortcuts({
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // A modal is in front; the app behind it is not taking keys.
+      if (modalOpen) {
         return;
       }
 
@@ -69,5 +83,5 @@ export function useKeyboardShortcuts({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [state, canRecord, handleStartRecording, handlePauseRecording, handleResumeRecording, handleStopRecording, cancelCountdown, handleCancelRecording]);
+  }, [state, canRecord, modalOpen, handleStartRecording, handlePauseRecording, handleResumeRecording, handleStopRecording, cancelCountdown, handleCancelRecording]);
 }

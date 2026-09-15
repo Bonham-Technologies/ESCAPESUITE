@@ -9,18 +9,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PlaybackDialog } from './PlaybackDialog'
-import { installBrowserStubs, type BrowserStubs } from '../../test/doubles/browser'
+import {
+  installBrowserStubs,
+  installOffsetParentStub,
+  type BrowserStubs,
+} from '../../test/doubles/browser'
 import styles from '../../App.module.css'
 
 let browser: BrowserStubs
+let restoreOffsetParent: () => void
 
 beforeEach(() => {
   browser = installBrowserStubs()
+  restoreOffsetParent = installOffsetParentStub()
 })
 
 afterEach(() => {
+  restoreOffsetParent()
   browser.restore()
   vi.restoreAllMocks()
+  document.body.innerHTML = ''
 })
 
 function renderDialog(options: { name?: string; url?: string; duration?: number } = {}) {
@@ -117,5 +125,71 @@ describe('PlaybackDialog errors', () => {
     expect(consoleError.mock.calls[0][1]).toHaveProperty('message', 'Failed to load video')
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('PlaybackDialog keyboard and focus', () => {
+  it('closes on Escape before the window-level shortcuts see it', () => {
+    const globalShortcut = vi.fn()
+    window.addEventListener('keydown', globalShortcut)
+    const { onClose } = renderDialog()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(globalShortcut).not.toHaveBeenCalled()
+    window.removeEventListener('keydown', globalShortcut)
+  })
+
+  it('moves focus into the dialog when it opens', () => {
+    renderDialog()
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close playback' }))
+  })
+
+  it('keeps Tab inside the dialog', () => {
+    const { container } = renderDialog()
+
+    const focusable = [
+      ...container.querySelectorAll<HTMLElement>(
+        'button, input:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      ),
+    ]
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    expect(focusable.length).toBeGreaterThan(1)
+
+    last.focus()
+    fireEvent.keyDown(document, { key: 'Tab' })
+    expect(document.activeElement).toBe(first)
+
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('leaves the player its own keys', () => {
+    const playerShortcut = vi.fn()
+    window.addEventListener('keydown', playerShortcut)
+    renderDialog()
+
+    fireEvent.keyDown(document, { key: ' ' })
+
+    expect(playerShortcut).toHaveBeenCalledTimes(1)
+    window.removeEventListener('keydown', playerShortcut)
+  })
+
+  it('returns focus to whatever opened it', () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const { unmount } = render(
+      <PlaybackDialog url="blob:take-7" name="Standup Demo" duration={65.9} onClose={vi.fn()} />
+    )
+    expect(document.activeElement).not.toBe(trigger)
+
+    unmount()
+
+    expect(document.activeElement).toBe(trigger)
   })
 })

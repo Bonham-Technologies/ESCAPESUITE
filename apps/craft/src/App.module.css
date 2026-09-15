@@ -93,7 +93,7 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  color: var(--error);
+  color: var(--error-text);
   font-size: 13px;
   font-weight: 500;
 }
@@ -123,7 +123,8 @@
 
 /* The app's one notice channel — see src/utils/notices.ts */
 .noticeIndicator {
-  color: var(--error, #ef4444);
+  /* Text on the header, so the AA-safe red rather than the brand one. */
+  color: var(--error-text, #f87171);
   font-size: 13px;
   font-weight: 500;
   margin-left: var(--spacing-sm);
@@ -270,7 +271,7 @@
 }
 
 .timer.recording {
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .controlButton {
