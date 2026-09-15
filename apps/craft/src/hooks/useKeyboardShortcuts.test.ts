@@ -34,13 +34,13 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function deps(state: RecordingState): KeyboardShortcutsDeps {
-  return { state, ...handlers }
+function deps(state: RecordingState, canRecord = true): KeyboardShortcutsDeps {
+  return { state, canRecord, ...handlers }
 }
 
-function mountShortcuts(state: RecordingState) {
+function mountShortcuts(state: RecordingState, canRecord = true) {
   return renderHook((props: KeyboardShortcutsDeps) => useKeyboardShortcuts(props), {
-    initialProps: deps(state),
+    initialProps: deps(state, canRecord),
   })
 }
 
@@ -76,6 +76,14 @@ describe('useKeyboardShortcuts R', () => {
 
   it('does nothing while a recording is already running', () => {
     mountShortcuts('recording')
+
+    press('r')
+
+    expect(handlers.handleStartRecording).not.toHaveBeenCalled()
+  })
+
+  it('does nothing while the record button itself is blocked', () => {
+    mountShortcuts('idle', false)
 
     press('r')
 

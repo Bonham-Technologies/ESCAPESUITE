@@ -64,23 +64,120 @@ Every module below has its own test file; `App.tsx` itself is covered through
 | `App.tsx` | The composition: the store destructure, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
 | `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
+| `utils/notices.ts` | The app's whole vocabulary of notices — six strings, one per thing that can go wrong. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
+| `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace`. Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
 | `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. No store, and no blob-URL creation |
 | `components/icons.tsx` | The inline SVG icon set, every path drawn in `currentColor`. The source icons take a `className` because their size is per call site; the action icons are `aria-hidden` and sized entirely by their button |
-| `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
+| `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region — carrying both the recorder state and the app's one `notice` — and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
 | `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
 | `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, every control reporting a config patch. It draws unconditionally; whether the panel exists at all is the caller's decision |
 | `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its four action buttons, each labelled with the recording's own name. It touches no storage — it hands ids and names back up |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
-| `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, and the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`) |
+| `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`), and the `blockedReason` that sits in front of that ladder |
 | `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for |
 | `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby` |
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
-| `hooks/useCapabilityBootstrap.ts` | The way in: capability detection and the initial `loadRecordings()`, both in one effect as they were inline — splitting them would change the order the store is written on mount |
+| `hooks/useCapabilityBootstrap.ts` | The way in: capability detection and the initial `loadRecordings()`, both in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
 | `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
-| `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
-| `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete, and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
+| `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
+| `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete (re-reading the storage headroom after it), and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
+
+### Errors and notices
+
+**One store field, one live region, cleared by the next take.** `notice: string | null`
+in `recorderStore` is the whole notification surface: `AppHeader` renders it inside the
+header's existing `aria-live="polite" aria-atomic="true"` region, and
+`handleStartRecording` clears it when the next take begins. Every string lives in
+`src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`, `START_FAILED`,
+`LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO` — so the vocabulary is
+readable in one place. **Do not add a second channel**: no toasts, no per-component error
+state, no notification framework. A new thing to say is a new string in that file and one
+call to `setNotice`.
+
+The notice span deliberately carries **no `role` of its own**. The region's `aria-live` is
+what announces it; a second `role="status"` would break the "at most one `role='status'`"
+promise `AppHeader` makes, and would have an `aria-atomic` region read two independent
+things as one phrase. A notice and a running take are on screen together in the ordinary
+case — "System audio was not shared" during a recording is exactly that.
+
+The price of sharing one region is that a notice raised *while* the state is changing can
+be announced twice: `NOT_SEEKABLE` is set during `'saving'`, so the region reads
+"Saving… + notice", and reads the notice alone again when the state clears to `'idle'`.
+That is accepted — a second live region to avoid it would cost more than the repetition
+does. (`SAVE_FAILED` is unaffected: the notice and the state land in one batch.)
+
+Two related rules follow from it:
+
+- **Failures travel up, not into a `console.error`.** `useRecordingSave` rejects rather
+  than swallowing, so the controller can tell an unsaved take from a saved one;
+  `loadRecordings()` is caught in the bootstrap; a start that throws raises
+  `CAPTURE_REFUSED` (the browser said no — a cancelled picker, a denied permission, an
+  expired user activation) or `START_FAILED`; `fixWebMMetadata()` failing still keeps the
+  raw blob, but it now warns *and* raises `NOT_SEEKABLE` — an unrepaired MediaRecorder
+  WebM plays and refuses to scrub, and saving it with no trace is how ESCSUITE-2 comes
+  back.
+- **`systemAudioShared`** is the one other honesty flag: enabling "System Audio" only
+  *asks* for it (the browser's share dialog carries the tick box), so the controller
+  checks `hasSystemAudio(screen)` after acquisition, raises `NO_SYSTEM_AUDIO` when a
+  display capture came back without an audio track, and `SourceToggles` greys the System
+  meter for the take. The notice is withheld when there was no display capture at all
+  (system audio on, screen off) — there was no dialog to miss a tick box in — so the
+  greyed meter carries its own, weaker wording (`NO_SYSTEM_AUDIO_HINT`, "No system audio
+  arrived for this take") rather than the notice's. The flag is display-only and the meter
+  is drawn only while a take runs, so `handleStartRecording` resetting it to `true` is its
+  whole lifecycle.
+
+### The record button only offers what it can deliver
+
+`RecorderControls` takes a `blockedReason: string | null`. Non-null and the record button
+loses its handler, goes `disabled`, puts the reason in its `title`, and prints it under the
+bar as the button's `aria-describedby` target — the same "say why" shape the Sources rows
+already use. `App` computes it once with `recordBlockedReason()`
+(`src/utils/recordReadiness.ts`) and hands the same answer to `useKeyboardShortcuts` as
+`canRecord`, so **R and the button always agree**.
+
+It blocks for three reasons:
+
+1. **Capability detection has not landed.** The store's `capabilities` start all-false
+   while `detectCapabilities()` resolves, so an early click used to reach
+   `acquireStreams()`, take no branch, hand the recorder nothing and die in a
+   `console.error`. `capabilitiesReady` is false until detection answers — and is raised
+   on a detection *failure* too, so the button never sits on "Checking…" forever. (With
+   the capabilities left all-false it stays disabled, but for reason 2, with a sentence
+   that says what is actually wrong.)
+2. **Nothing enabled is actually capturable** — every toggle off, or every enabled toggle
+   pointing at a capability this browser lacks. The three sources counted are exactly the
+   three `acquireStreams()` asks for, each gated on "the toggle AND the capability".
+   **System audio is deliberately not one of them**: it is not requested separately, it
+   rides on the screen capture, so a "system audio only" take captures nothing at all.
+3. **There is nowhere to put the take** — `hasStorageSpace` in the store.
+
+**Nothing may be awaited between the click and `getDisplayMedia`.** That is why reason 3
+is a store flag rather than a check inside `handleStartRecording`: the capture request
+needs the click's user activation, an `await` in front of it can spend that activation
+(WebKit forwards a gesture across promises only briefly), and the `NotAllowedError` that
+follows would be a failure the user never caused. `refreshStorageSpace()` — a store action
+that never rejects — measures it **off** the click path: on mount
+(`useCapabilityBootstrap`), after every save (`.finally` on the save chain, since a take
+that failed took no room either), and after every delete (`useRecordingLibrary`, because
+deleting is the remedy the blocked button recommends). The comment in
+`handleStartRecording` marking the no-await stretch is load-bearing; keep it.
+
+`hasSpaceForRecording()` itself (`core/storage.ts`) **errs toward letting you record**, in
+both directions it can be wrong:
+
+- a quota of `0` is *unknown*, not *full* — reading it as full refused every take in any
+  browser without `navigator.storage`, jsdom included, which is why the helper was dead
+  code for so long;
+- the bar is the **lower** of `estimate + 50MB buffer` and a quarter of the reported quota,
+  so a private or ephemeral profile with an 80MB quota is not told to "delete a recording"
+  in a window that has nothing stored.
+
+A missed warning ends with IndexedDB reporting its own quota error at save time, which the
+save path already surfaces; a false "no space" refuses the take outright with advice the
+user cannot act on. Only the first of those is recoverable.
 
 ### State Management
 - **Zustand store** (`src/store/recorderStore.ts`): Single source of truth for recorder state

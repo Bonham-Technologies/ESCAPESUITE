@@ -17,6 +17,7 @@ vi.mock('../utils/sendToEditor', async () => (await import('../test/appDoubles')
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
 
 let removeRecording: ReturnType<typeof vi.fn<(id: string) => void>>
+let refreshStorageSpace: ReturnType<typeof vi.fn>
 let clicks: Array<{ href: string; download: string }>
 
 function listed(id: string, name: string, duration: number): Recording {
@@ -46,6 +47,7 @@ async function seed(id: string, name: string): Promise<void> {
 beforeEach(async () => {
   resetAppDoubles()
   removeRecording = vi.fn<(id: string) => void>()
+  refreshStorageSpace = vi.fn(async () => {})
   clicks = []
   vi.mocked(URL.createObjectURL).mockClear()
   vi.mocked(URL.revokeObjectURL).mockClear()
@@ -60,7 +62,13 @@ afterEach(() => {
 })
 
 function mountLibrary(recordings: Recording[] = []) {
-  return renderHook(() => useRecordingLibrary({ recordings, removeRecording }))
+  return renderHook(() =>
+    useRecordingLibrary({
+      recordings,
+      removeRecording,
+      refreshStorageSpace: refreshStorageSpace as unknown as () => Promise<void>,
+    })
+  )
 }
 
 describe('useRecordingLibrary playback', () => {
@@ -117,7 +125,10 @@ describe('useRecordingLibrary playback', () => {
     expect(result.current.playbackName).toBe('')
   })
 
-  it('revokes and clears on close, leaving the duration standing for the next play', async () => {
+  // Changed assertion: closing used to leave playbackDuration standing, so a
+  // recording opened straight afterwards whose own duration could not be found
+  // was handed the *previous* one's.
+  it('revokes and clears all three of url, name and duration on close', async () => {
     await seed('take-1', 'First')
     const { result } = mountLibrary([listed('take-1', 'First', 42)])
     await act(async () => {
@@ -131,8 +142,7 @@ describe('useRecordingLibrary playback', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
     expect(result.current.playbackUrl).toBeNull()
     expect(result.current.playbackName).toBe('')
-    // Deliberate: playbackDuration is left as it was until the next play.
-    expect(result.current.playbackDuration).toBe(42)
+    expect(result.current.playbackDuration).toBe(0)
   })
 
   it('has nothing to revoke when closing a dialog that was never opened', () => {
@@ -148,6 +158,9 @@ describe('useRecordingLibrary playback', () => {
 })
 
 describe('useRecordingLibrary downloading', () => {
+  // Changed assertion: the revoke used to happen in the same tick as click(),
+  // which cancels the download outside Chrome. It is deferred by one turn now,
+  // so this test has to let that turn run.
   it('clicks an anchor with a file-safe name and cleans the URL up after it', async () => {
     await seed('take-1', 'Standup Demo: 9/9')
     const { result } = mountLibrary([listed('take-1', 'Standup Demo: 9/9', 12)])
@@ -158,8 +171,17 @@ describe('useRecordingLibrary downloading', () => {
 
     expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.webm' }])
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
     expect(document.querySelector('a[download]')).toBeNull()
+    // The browser has not necessarily started reading the blob yet, so the URL
+    // must still be live when click() returns.
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+    // Timers stay real here: fake-indexeddb is what getVideoBlob runs on, and
+    // the App suites fake setInterval only for exactly that reason. One
+    // macrotask is all the deferred revoke needs.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
   })
 
   it('downloads nothing when the blob has gone missing', async () => {
@@ -186,6 +208,9 @@ describe('useRecordingLibrary list actions', () => {
 
     await expect(getVideoBlob('take-1')).resolves.toBeUndefined()
     expect(removeRecording).toHaveBeenCalledWith('take-1')
+    // Deleting is the remedy the blocked Record button recommends, so the
+    // headroom has to be re-read or the button stays disabled afterwards.
+    expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
   })
 
   it('hands a recording to the editor by id', () => {

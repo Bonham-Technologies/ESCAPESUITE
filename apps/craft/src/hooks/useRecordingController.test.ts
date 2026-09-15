@@ -32,6 +32,18 @@ import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastre
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
 
+// Storage headroom is a browser fact (navigator.storage), so it is doubled.
+// The controller must not touch it on the click path — see the "no await
+// before getDisplayMedia" test — so this double is here to prove it is never
+// awaited, not to steer a decision.
+const { hasSpaceForRecording } = vi.hoisted(() => ({
+  hasSpaceForRecording: vi.fn(async () => true),
+}))
+vi.mock('../core/storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../core/storage')>()),
+  hasSpaceForRecording,
+}))
+
 interface AcquiredDoubles {
   screen: MediaStream | null
   webcam: MediaStream | null
@@ -47,12 +59,21 @@ interface Harness {
   saveRecording: ReturnType<typeof vi.fn>
   setPreviewStream: ReturnType<typeof vi.fn>
   setIsPiPActive: ReturnType<typeof vi.fn>
+  refreshStorageSpace: ReturnType<typeof vi.fn>
 }
 
 let harness: Harness
 
 function screenStream(): MediaStream {
   return createStreamDouble([createTrackDouble('video', { id: 'screen-video' })])
+}
+
+/** A display capture that came back with the system-audio track ticked on. */
+function screenStreamWithAudio(): MediaStream {
+  return createStreamDouble([
+    createTrackDouble('video', { id: 'screen-video' }),
+    createTrackDouble('audio', { id: 'screen-audio' }),
+  ])
 }
 
 function webcamStream(): MediaStream {
@@ -71,6 +92,9 @@ function resetStore(config: Partial<RecordingConfig> = {}): void {
     audioLevels: { microphone: 0, system: 0 },
     screenStream: null,
     webcamStream: null,
+    notice: null,
+    systemAudioShared: true,
+    hasStorageSpace: true,
   })
 }
 
@@ -82,6 +106,7 @@ function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<A
   const saveRecording = vi.fn(async () => {})
   const setPreviewStream = vi.fn()
   const setIsPiPActive = vi.fn()
+  const refreshStorageSpace = vi.fn(async () => {})
   const store = useRecorderStore.getState()
 
   const deps: RecordingControllerDeps = {
@@ -102,9 +127,21 @@ function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<A
     recorderTypeRef: { current: 'mediarecorder' },
     capturedThumbnailRef: { current: null },
     saveRecording: saveRecording as unknown as RecordingControllerDeps['saveRecording'],
+    setNotice: store.setNotice,
+    setSystemAudioShared: store.setSystemAudioShared,
+    refreshStorageSpace,
   }
 
-  return { deps, streams, acquireStreams, stopAllStreams, saveRecording, setPreviewStream, setIsPiPActive }
+  return {
+    deps,
+    streams,
+    acquireStreams,
+    stopAllStreams,
+    saveRecording,
+    setPreviewStream,
+    setIsPiPActive,
+    refreshStorageSpace,
+  }
 }
 
 function mountController(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquiredDoubles>) {
@@ -117,6 +154,13 @@ async function startTake(result: { current: ReturnType<typeof useRecordingContro
   await act(async () => {
     await result.current.handleStartRecording()
   })
+}
+
+/** Mount, start with no countdown, and hand back the recorder now running. */
+async function startLiveTake() {
+  const view = mountController({ countdownSeconds: 0 })
+  await startTake(view.result)
+  return { ...view, recorder: recorderFactory.last() }
 }
 
 function state(): string {
@@ -134,12 +178,161 @@ function previewWithFrames(): HTMLVideoElement {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
   resetAppDoubles()
+  hasSpaceForRecording.mockReset()
+  hasSpaceForRecording.mockResolvedValue(true)
   resetStore()
 })
 
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+})
+
+describe('useRecordingController the click path', () => {
+  // getDisplayMedia needs the click's user activation. Anything awaited
+  // between the click and the capture request can spend it — WebKit forwards
+  // a gesture across promises only briefly — and the rejection that follows
+  // lands in the outer catch, which is exactly the silent failure this work
+  // exists to delete. So: nothing is awaited in front of acquireStreams().
+  it('reaches the capture request without awaiting the storage estimate', async () => {
+    hasSpaceForRecording.mockImplementation(() => new Promise<boolean>(() => {}))
+    const { result } = mountController({ countdownSeconds: 0 })
+
+    await startTake(result)
+
+    expect(harness.acquireStreams).toHaveBeenCalledTimes(1)
+    expect(state()).toBe('recording')
+    expect(hasSpaceForRecording).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the storage headroom after a take is saved, not before one starts', async () => {
+    const { recorder } = await startLiveTake()
+
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob) })
+
+    expect(harness.refreshStorageSpace).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes it after a save that failed too — the take took no room', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { recorder } = await startLiveTake()
+    harness.saveRecording.mockRejectedValue(new Error('QuotaExceededError'))
+
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob) })
+
+    expect(harness.refreshStorageSpace).toHaveBeenCalledTimes(1)
+    expect(consoleError).toHaveBeenCalled()
+  })
+
+  it('says something when the browser refuses the capture outright', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    const refused = new Error('Permission denied')
+    refused.name = 'NotAllowedError'
+    harness.acquireStreams.mockRejectedValue(refused)
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error))
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).toBe(
+      'The browser refused the capture — nothing was recorded.'
+    )
+  })
+
+  it('says something when a take fails for any other reason', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    harness.acquireStreams.mockRejectedValue(new Error('Camera in use'))
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalled()
+    expect(useRecorderStore.getState().notice).toBe('The recording could not be started.')
+  })
+})
+
+describe('useRecordingController notices', () => {
+  it('reports a save that failed instead of returning to idle as if it had worked', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { recorder } = await startLiveTake()
+    // Set after the mount: startLiveTake builds the harness this reaches for.
+    harness.saveRecording.mockRejectedValue(new Error('QuotaExceededError'))
+
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob) })
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to save recording:', expect.any(Error))
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).toBe(
+      'The recording could not be saved — it is not in your library.'
+    )
+  })
+
+  it('clears the standing notice when the next take starts', async () => {
+    useRecorderStore.getState().setNotice('something went wrong last time')
+    const { result } = mountController({ countdownSeconds: 0 })
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('puts the System meter back before it can be seen again', async () => {
+    useRecorderStore.getState().setSystemAudioShared(false)
+    // System audio off, so nothing recomputes the flag after acquisition: the
+    // reset at the start of the take is the only thing that can clear it.
+    const { result } = mountController({ countdownSeconds: 0 })
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(true)
+  })
+})
+
+describe('useRecordingController system audio', () => {
+  it('warns, and greys the meter, when the display capture carried no audio track', async () => {
+    const { result } = mountController({ systemAudioEnabled: true, countdownSeconds: 0 })
+
+    await startTake(result)
+
+    expect(state()).toBe('recording')
+    expect(useRecorderStore.getState().systemAudioShared).toBe(false)
+    expect(useRecorderStore.getState().notice).toBe(
+      "System audio was not shared — tick 'Share system audio' in the browser dialog."
+    )
+  })
+
+  it('says nothing when the audio track did arrive', async () => {
+    const { result } = mountController(
+      { systemAudioEnabled: true, countdownSeconds: 0 },
+      { screen: screenStreamWithAudio() }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(true)
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('does not blame the share dialog when there was no display capture at all', async () => {
+    const { result } = mountController(
+      { screenEnabled: false, webcamEnabled: true, systemAudioEnabled: true, countdownSeconds: 0 },
+      { screen: null, webcam: webcamStream() }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(false)
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('leaves the meter live for a take with system audio switched off', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(true)
+  })
 })
 
 describe('useRecordingController starting a take', () => {
@@ -303,12 +496,6 @@ describe('useRecordingController countdown', () => {
 })
 
 describe('useRecordingController running a take', () => {
-  async function startLiveTake() {
-    const view = mountController({ countdownSeconds: 0 })
-    await startTake(view.result)
-    return { ...view, recorder: recorderFactory.last() }
-  }
-
   it('ticks the elapsed time from the recorder every tenth of a second', async () => {
     const { recorder } = await startLiveTake()
 

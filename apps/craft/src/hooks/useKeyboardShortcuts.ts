@@ -11,6 +11,8 @@ import type { RecordingState } from '../store/types';
 
 export interface KeyboardShortcutsDeps {
   state: RecordingState;
+  /** False while the Record button itself is disabled; R must agree with it. */
+  canRecord: boolean;
   handleStartRecording: () => void;
   handlePauseRecording: () => void;
   handleResumeRecording: () => void;
@@ -21,6 +23,7 @@ export interface KeyboardShortcutsDeps {
 
 export function useKeyboardShortcuts({
   state,
+  canRecord,
   handleStartRecording,
   handlePauseRecording,
   handleResumeRecording,
@@ -38,7 +41,7 @@ export function useKeyboardShortcuts({
 
       switch (e.key.toLowerCase()) {
         case 'r':
-          if (state === 'idle') {
+          if (state === 'idle' && canRecord) {
             handleStartRecording();
           }
           break;
@@ -66,5 +69,5 @@ export function useKeyboardShortcuts({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [state, handleStartRecording, handlePauseRecording, handleResumeRecording, handleStopRecording, cancelCountdown, handleCancelRecording]);
+  }, [state, canRecord, handleStartRecording, handlePauseRecording, handleResumeRecording, handleStopRecording, cancelCountdown, handleCancelRecording]);
 }

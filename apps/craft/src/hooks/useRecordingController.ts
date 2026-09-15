@@ -18,6 +18,8 @@
 // kept up to date when the teardown reaches for it.
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { createRecorder, getRecorderType, type AnyRecorder } from '../core/recorder-factory';
+import { hasSystemAudio } from '../core/permissions';
+import { CAPTURE_REFUSED, NO_SYSTEM_AUDIO, SAVE_FAILED, START_FAILED } from '../utils/notices';
 import { Compositor } from '../core/compositor';
 import { analytics } from '../utils/analytics';
 import { drawThumbnail } from '../utils/previewThumbnail';
@@ -47,6 +49,29 @@ export interface RecordingControllerDeps {
   /** Written by handleStopRecording, read and cleared by saveRecording. */
   capturedThumbnailRef: RefObject<Blob | null>;
   saveRecording: SaveRecording;
+  /** The one notice channel — see utils/notices.ts. Cleared when a take starts. */
+  setNotice: (notice: string | null) => void;
+  /** Whether a system-audio track actually arrived; greys the System meter. */
+  setSystemAudioShared: (shared: boolean) => void;
+  /**
+   * Re-read the storage headroom. Called *after* a take, never before one:
+   * see the comment on the acquisition below.
+   */
+  refreshStorageSpace: () => Promise<void>;
+}
+
+/**
+ * Why a take never started, as far as the user needs to know.
+ *
+ * `NotAllowedError` is the browser refusing the capture — the picker was
+ * cancelled, the permission is denied, or the click's user activation had
+ * expired by the time `getDisplayMedia` ran. It is worth its own sentence
+ * because "nothing happened" is otherwise indistinguishable from a bug.
+ */
+function startFailureNotice(error: unknown): string {
+  return (error as { name?: string } | null)?.name === 'NotAllowedError'
+    ? CAPTURE_REFUSED
+    : START_FAILED;
 }
 
 export interface RecordingController {
@@ -76,6 +101,9 @@ export function useRecordingController({
   recorderTypeRef,
   capturedThumbnailRef,
   saveRecording,
+  setNotice,
+  setSystemAudioShared,
+  refreshStorageSpace,
 }: RecordingControllerDeps): RecordingController {
   const recorderRef = useRef<AnyRecorder | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
@@ -231,11 +259,39 @@ export function useRecordingController({
   const handleStartRecording = useCallback(async () => {
     try {
       cancelledRef.current = false;
+      // Starting a take is the "next successful action" that clears whatever
+      // the last one had to report. The System meter goes back with it: the
+      // flag is display-only and the meter is drawn only while a take runs,
+      // so resetting it here is the whole of its lifecycle.
+      setNotice(null);
+      setSystemAudioShared(true);
       setState('preparing');
 
+      // NOTHING MAY BE AWAITED BETWEEN HERE AND acquireStreams(). It calls
+      // requestScreenCapture -> getDisplayMedia, which needs the click's user
+      // activation; an await in front of it can spend that activation (WebKit
+      // forwards a gesture across promises only briefly), and the
+      // NotAllowedError that follows is a failure the user never asked for.
+      // Storage headroom is measured off this path instead — on mount, after
+      // each save, after each delete — and read back through
+      // `recordBlockedReason`, so a take with nowhere to go is refused by a
+      // disabled button before the click ever happens.
       const { screen, webcam, mic } = await acquireStreams();
       setStreams(screen, webcam);
       micStreamRef.current = mic;
+
+      // Ticking "System Audio" only *asks* for it: getDisplayMedia's own
+      // dialog carries the tick box, and the stream comes back with no audio
+      // track when the user leaves it clear. Nothing used to notice, so the
+      // System meter sat at 0 whether the audio was there or not.
+      const systemAudioShared =
+        !config.systemAudioEnabled || (screen !== null && hasSystemAudio(screen));
+      setSystemAudioShared(systemAudioShared);
+      // Only a display capture can carry system audio, so only a display
+      // capture that came back without it means the tick box was missed.
+      if (!systemAudioShared && screen !== null) {
+        setNotice(NO_SYSTEM_AUDIO);
+      }
 
       // Set up preview
       // This avoids canvas.captureStream() issues with hidden video elements
@@ -302,8 +358,16 @@ export function useRecordingController({
           saveRecording(blob, recordedDuration).then(() => {
             setState('idle');
           }).catch((err) => {
+            // The save hook rejects rather than swallowing: without this the
+            // take would land back at 'idle' looking exactly like one that
+            // had been stored.
             console.error('Failed to save recording:', err);
+            setNotice(SAVE_FAILED);
             setState('idle');
+          }).finally(() => {
+            // Either way the library has changed size — re-read the headroom
+            // so the Record button reflects it before the next click.
+            void refreshStorageSpace();
           });
         },
         onError: (error) => {
@@ -349,6 +413,9 @@ export function useRecordingController({
       }
     } catch (error) {
       console.error('Failed to start recording:', error);
+      // A start that died here used to leave the app back at idle with
+      // nothing said — the same silence this work exists to delete.
+      setNotice(startFailureNotice(error));
       // initialize() can throw after the recorder has already built its audio
       // graph — an all-sources-off take reaches MediaRecorder, which creates
       // the AudioContext before discovering it has no tracks — so a failed
@@ -376,6 +443,9 @@ export function useRecordingController({
     recorderTypeRef,
     setPreviewStream,
     setIsPiPActive,
+    setNotice,
+    setSystemAudioShared,
+    refreshStorageSpace,
   ]);
 
   return {

@@ -44,6 +44,7 @@ interface Options {
   detailedCapabilities?: Partial<DetailedCapabilities>
   audioLevels?: AudioLevels
   isRecordingActive?: boolean
+  systemAudioShared?: boolean
 }
 
 function renderToggles(options: Options = {}) {
@@ -55,6 +56,7 @@ function renderToggles(options: Options = {}) {
       detailedCapabilities={{ ...allDetailed(), ...options.detailedCapabilities }}
       audioLevels={options.audioLevels ?? { microphone: 0, system: 0 }}
       isRecordingActive={options.isRecordingActive ?? false}
+      systemAudioShared={options.systemAudioShared ?? true}
       onToggleSource={onToggleSource}
     />
   )
@@ -222,5 +224,37 @@ describe('SourceToggles audio meters', () => {
     const [mic, system] = fills(container)
     expect(mic).toHaveStyle({ width: '10%' })
     expect(system).toHaveStyle({ width: '100%' })
+  })
+})
+
+describe('SourceToggles system audio that never arrived', () => {
+  it('greys the System meter and says why when the browser shared no audio', () => {
+    const { container } = renderToggles({
+      config: { systemAudioEnabled: true },
+      isRecordingActive: true,
+      systemAudioShared: false,
+    })
+
+    const meter = screen.getByText('System').closest(`.${styles.audioMeter}`) as HTMLElement
+    expect(meter).toHaveClass(styles.meterUnavailable)
+    // Not the notice's wording: the meter greys for a webcam-only take too,
+    // where there was no share dialog to miss a tick box in.
+    expect(meter).toHaveAttribute('title', 'No system audio arrived for this take.')
+    // The microphone meter beside it is untouched.
+    const mic = screen.getByText('Mic').closest(`.${styles.audioMeter}`) as HTMLElement
+    expect(mic).not.toHaveClass(styles.meterUnavailable)
+    expect(container.querySelectorAll(`.${styles.meterUnavailable}`)).toHaveLength(1)
+  })
+
+  it('leaves the System meter alone when the audio did arrive', () => {
+    renderToggles({
+      config: { systemAudioEnabled: true },
+      isRecordingActive: true,
+      systemAudioShared: true,
+    })
+
+    const meter = screen.getByText('System').closest(`.${styles.audioMeter}`) as HTMLElement
+    expect(meter).not.toHaveClass(styles.meterUnavailable)
+    expect(meter).not.toHaveAttribute('title')
   })
 })

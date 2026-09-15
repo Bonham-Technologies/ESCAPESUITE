@@ -8,6 +8,7 @@ import { useRecordingSave } from './hooks/useRecordingSave';
 import { useRecordingController } from './hooks/useRecordingController';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRecordingLibrary } from './hooks/useRecordingLibrary';
+import { recordBlockedReason } from './utils/recordReadiness';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import { SourceToggles, type RecordingSource } from './components/SourceToggles/SourceToggles';
 import { WebcamOverlaySettings } from './components/WebcamOverlaySettings/WebcamOverlaySettings';
@@ -23,13 +24,20 @@ function App() {
     config,
     capabilities,
     detailedCapabilities,
+    capabilitiesReady,
     recordings,
+    notice,
+    systemAudioShared,
+    hasStorageSpace,
     currentDuration,
     countdownValue,
     audioLevels,
     setConfig,
     setCapabilities,
     setDetailedCapabilities,
+    setCapabilitiesReady,
+    setNotice,
+    setSystemAudioShared,
     setState,
     setCountdown,
     setCurrentDuration,
@@ -38,6 +46,7 @@ function App() {
     addRecording,
     removeRecording,
     loadRecordings,
+    refreshStorageSpace,
   } = useRecorderStore();
 
   // The two refs the take and the save share. They are created here, once, and
@@ -54,7 +63,14 @@ function App() {
   // teardown that reaches stopAllStreams through that mirror, then the
   // keyboard listener. useRecordingLibrary binds nothing and comes last.
   useThemeLifecycle();
-  useCapabilityBootstrap({ setCapabilities, setDetailedCapabilities, loadRecordings });
+  useCapabilityBootstrap({
+    setCapabilities,
+    setDetailedCapabilities,
+    setCapabilitiesReady,
+    setNotice,
+    loadRecordings,
+    refreshStorageSpace,
+  });
 
   const {
     previewStream,
@@ -76,7 +92,12 @@ function App() {
     config,
     setState,
     addRecording,
+    setNotice,
   });
+
+  // Why the Record button (and the R shortcut with it) cannot start a take.
+  // Computed here because it is a fact about the store, not about the bar.
+  const blockedReason = recordBlockedReason(capabilitiesReady, config, capabilities, hasStorageSpace);
 
   const {
     cancelCountdown,
@@ -103,10 +124,14 @@ function App() {
     recorderTypeRef,
     capturedThumbnailRef,
     saveRecording,
+    setNotice,
+    setSystemAudioShared,
+    refreshStorageSpace,
   });
 
   useKeyboardShortcuts({
     state,
+    canRecord: blockedReason === null,
     handleStartRecording,
     handlePauseRecording,
     handleResumeRecording,
@@ -124,7 +149,7 @@ function App() {
     handlePlayRecording,
     handleClosePlayback,
     handleDownload,
-  } = useRecordingLibrary({ recordings, removeRecording });
+  } = useRecordingLibrary({ recordings, removeRecording, refreshStorageSpace });
 
   // Toggle source
   const toggleSource = (source: RecordingSource) => {
@@ -149,7 +174,7 @@ function App() {
   return (
     <div className={styles.app}>
       {/* Header */}
-      <AppHeader state={state} onOpenHelp={() => setShowHelpModal(true)} />
+      <AppHeader state={state} notice={notice} onOpenHelp={() => setShowHelpModal(true)} />
 
       {/* Main content */}
       <main className={styles.main}>
@@ -162,6 +187,7 @@ function App() {
             detailedCapabilities={detailedCapabilities}
             audioLevels={audioLevels}
             isRecordingActive={isRecordingActive}
+            systemAudioShared={systemAudioShared}
             onToggleSource={toggleSource}
           />
 
@@ -206,6 +232,7 @@ function App() {
             onStart={handleStartRecording}
             onStop={handleStopRecording}
             onCancel={state === 'countdown' ? cancelCountdown : handleCancelRecording}
+            blockedReason={blockedReason}
           />
         </div>
       </main>

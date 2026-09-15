@@ -19,7 +19,16 @@ interface RecorderControlsProps {
    * a recording — so the choice stays with the App.
    */
   onCancel: () => void;
+  /**
+   * Why a take cannot be started right now, or null when one can. Non-null
+   * disables the record button, titles it with the reason, and prints the
+   * reason under the bar as the button's accessible description.
+   */
+  blockedReason: string | null;
 }
+
+/** The id `aria-describedby` points at; there is only ever one of these. */
+const BLOCKED_REASON_ID = 'record-blocked-reason';
 
 /**
  * The transport bar and the keyboard-shortcut legend underneath it.
@@ -32,6 +41,13 @@ interface RecorderControlsProps {
  * same two states set `disabled`, so the `undefined` arm and the disabled
  * attribute say the same thing twice; both are kept, because the button's
  * label and title still read "Stop" there and a handler would be a lie.
+ *
+ * `blockedReason` sits in front of that ladder: while it is set there is
+ * nothing the button could usefully do, so it loses its handler, goes
+ * disabled, and says why — in its `title`, and in a line under the bar that
+ * `aria-describedby` points at. The reason is computed by the App (see
+ * `utils/recordReadiness.ts`), because it is a fact about the store's
+ * capabilities and config rather than about this bar.
  */
 export function RecorderControls({
   state,
@@ -42,7 +58,10 @@ export function RecorderControls({
   onStart,
   onStop,
   onCancel,
+  blockedReason,
 }: RecorderControlsProps) {
+  const blocked = blockedReason !== null;
+
   return (
     <>
       <div className={styles.controlsBar}>
@@ -67,15 +86,18 @@ export function RecorderControls({
         <button
           className={`${styles.recordButton} ${isRecordingActive ? styles.recording : ''}`}
           onClick={
-            state === 'idle'
+            blocked
+              ? undefined
+              : state === 'idle'
               ? onStart
               : isRecordingActive
               ? onStop
               : undefined
           }
-          disabled={state === 'preparing' || state === 'saving'}
-          title={state === 'idle' ? 'Record (R)' : 'Stop (S)'}
+          disabled={blocked || state === 'preparing' || state === 'saving'}
+          title={blockedReason ?? (state === 'idle' ? 'Record (R)' : 'Stop (S)')}
           aria-label={state === 'idle' ? 'Start recording' : 'Stop recording'}
+          aria-describedby={blocked ? BLOCKED_REASON_ID : undefined}
         >
           <span className={styles.recordButtonInner} aria-hidden="true" />
         </button>
@@ -92,6 +114,13 @@ export function RecorderControls({
           </button>
         )}
       </div>
+
+      {/* Why the record button is dead, when it is */}
+      {blockedReason && (
+        <p className={styles.recordBlockedReason} id={BLOCKED_REASON_ID}>
+          {blockedReason}
+        </p>
+      )}
 
       {/* Keyboard shortcuts hint */}
       <div className={styles.shortcutsHint}>

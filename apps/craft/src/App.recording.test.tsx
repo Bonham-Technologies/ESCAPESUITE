@@ -194,6 +194,84 @@ describe('App start recording', () => {
   });
 });
 
+describe('App record button readiness', () => {
+  it('stays disabled, with the reason on show, until capability detection lands', async () => {
+    armScreenCapture();
+    let answer: (result: ReturnType<typeof detectionResult>) => void = () => {};
+    permissionsOverrides.detectCapabilities.mockImplementation(
+      () => new Promise((resolve) => { answer = resolve; })
+    );
+    await renderApp();
+
+    expect(recordButton()).toBeDisabled();
+    expect(recordButton()).toHaveAccessibleDescription('Checking what this browser can capture…');
+    expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
+
+    await act(async () => { answer(detectionResult()); });
+    await flush();
+
+    expect(recordButton()).toBeEnabled();
+    expect(recordButton()).toHaveAttribute('title', 'Record (R)');
+  });
+
+  it('refuses a take, and says why, when every source is switched off', async () => {
+    armScreenCapture();
+    resetRecorderStore({ screenEnabled: false, webcamEnabled: false, microphoneEnabled: false });
+    await renderApp();
+
+    expect(recordButton()).toBeDisabled();
+    expect(recordButton()).toHaveAccessibleDescription('Turn on a source before recording');
+
+    await startRecordingViaButton();
+
+    expect(state()).toBe('idle');
+    expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
+  });
+
+  it('refuses a take when the only source left on is one the browser cannot capture', async () => {
+    armScreenCapture();
+    resetRecorderStore({ screenEnabled: true, webcamEnabled: false, microphoneEnabled: false });
+    permissionsOverrides.detectCapabilities.mockResolvedValue(
+      detectionResult({ screenCapture: false, webcam: false, microphone: false })
+    );
+    await renderApp();
+
+    expect(recordButton()).toBeDisabled();
+    expect(recordButton()).toHaveAccessibleDescription(
+      'None of the sources you turned on are available in this browser'
+    );
+  });
+
+  it('refuses a take, before the click, when there is nowhere to put it', async () => {
+    armScreenCapture();
+    await renderApp();
+    expect(recordButton()).toBeEnabled();
+
+    await act(async () => {
+      useRecorderStore.setState({ hasStorageSpace: false });
+    });
+
+    expect(recordButton()).toBeDisabled();
+    expect(recordButton()).toHaveAccessibleDescription(
+      'Not enough storage space left for a new recording — delete a recording and try again.'
+    );
+  });
+
+  it('ignores R while the record button is blocked', async () => {
+    armScreenCapture();
+    resetRecorderStore({ screenEnabled: false, webcamEnabled: false, microphoneEnabled: false });
+    await renderApp();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }));
+    });
+    await flush();
+
+    expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
+    expect(state()).toBe('idle');
+  });
+});
+
 describe('App countdown', () => {
   it('counts down to the recorder start, one second at a time', async () => {
     armScreenCapture();

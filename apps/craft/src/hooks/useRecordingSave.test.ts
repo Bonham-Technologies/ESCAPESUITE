@@ -24,6 +24,7 @@ let recorderTypeRef: { current: 'webcodecs' | 'mediarecorder' }
 let capturedThumbnailRef: { current: Blob | null }
 let states: RecordingState[]
 let added: Recording[]
+let notices: Array<string | null>
 
 beforeEach(async () => {
   resetAppDoubles()
@@ -32,6 +33,7 @@ beforeEach(async () => {
   capturedThumbnailRef = { current: null }
   states = []
   added = []
+  notices = []
   await clearAllRecordings()
 })
 
@@ -46,6 +48,7 @@ function mountSave(config: Partial<RecordingConfig> = {}) {
     config: { ...defaultConfig, ...config },
     setState: (state) => { states.push(state) },
     addRecording: (recording) => { added.push(recording) },
+    setNotice: (notice) => { notices.push(notice) },
   }
   return renderHook(() => useRecordingSave(deps))
 }
@@ -76,7 +79,8 @@ describe('useRecordingSave containers', () => {
     expect(thumbnailModule.extractVideoMetadata).toHaveBeenCalledWith(RAW, 5)
   })
 
-  it('keeps the raw take when the repair fails', async () => {
+  it('keeps the raw take when the repair fails, and says the file may not seek', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     converterModule.fixWebMMetadata.mockRejectedValue(new Error('remux failed'))
     const { result } = mountSave()
 
@@ -84,6 +88,18 @@ describe('useRecordingSave containers', () => {
 
     expect(thumbnailModule.extractVideoMetadata).toHaveBeenCalledWith(RAW, 3)
     expect(added).toHaveLength(1)
+    expect(consoleWarn).toHaveBeenCalledWith('WebM metadata repair failed:', expect.any(Error))
+    expect(notices).toEqual([
+      'Saved, but the recording may not be seekable — the container repair failed.',
+    ])
+  })
+
+  it('says nothing about seeking when the repair worked', async () => {
+    const { result } = mountSave()
+
+    await result.current(RAW, 3)
+
+    expect(notices).toEqual([])
   })
 
   it('falls back to the timed duration when the file reports none', async () => {
@@ -149,14 +165,15 @@ describe('useRecordingSave list entry', () => {
     expect(added[0]).toMatchObject({ hasAudio: false, hasWebcam: true })
   })
 
-  it('reports a failure and lists nothing', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  // Changed assertion: the hook used to swallow the failure into a
+  // console.error, which left its caller setting 'idle' as if the take had
+  // been saved. It now rejects, and reporting the failure is the caller's job.
+  it('rejects rather than swallowing a failure, and lists nothing', async () => {
     thumbnailModule.extractVideoMetadata.mockRejectedValue(new Error('cannot decode'))
     const { result } = mountSave()
 
-    await result.current(RAW, 4)
+    await expect(result.current(RAW, 4)).rejects.toThrow('cannot decode')
 
-    expect(consoleError).toHaveBeenCalledWith('Failed to save recording:', expect.any(Error))
     expect(added).toEqual([])
     expect(await getRecordingsMetadata()).toEqual([])
   })

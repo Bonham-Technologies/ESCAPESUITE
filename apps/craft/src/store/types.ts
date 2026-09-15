@@ -86,7 +86,30 @@ export interface RecorderStore {
   config: RecordingConfig;
   capabilities: EnvironmentCapabilities;
   detailedCapabilities: DetailedCapabilities;
+  /** False until capability detection has answered — the Record button waits on it. */
+  capabilitiesReady: boolean;
   recordings: Recording[];
+  /**
+   * The one thing the app has to say that is not a state change — a failed
+   * save, an unreadable library, a source that did not arrive. Rendered in the
+   * header's live region and cleared when the next take starts. See
+   * `utils/notices.ts`; there is deliberately no second channel.
+   */
+  notice: string | null;
+  /**
+   * Whether the take actually got a system-audio track. Enabling "System
+   * Audio" only *asks* for it — the browser's share dialog has its own tick
+   * box — so this is false whenever the capture came back without one, and it
+   * is what greys the System meter.
+   */
+  systemAudioShared: boolean;
+  /**
+   * Whether the browser says there is room for another take. Measured off the
+   * click path — on mount, after each save, after each delete — so the Record
+   * button can refuse *before* the click rather than awaiting an estimate
+   * between the click and `getDisplayMedia`.
+   */
+  hasStorageSpace: boolean;
 
   // Current recording data
   currentDuration: number;
@@ -101,6 +124,11 @@ export interface RecorderStore {
   setConfig: (config: Partial<RecordingConfig>) => void;
   setCapabilities: (caps: EnvironmentCapabilities) => void;
   setDetailedCapabilities: (caps: DetailedCapabilities) => void;
+  setCapabilitiesReady: (ready: boolean) => void;
+  setNotice: (notice: string | null) => void;
+  setSystemAudioShared: (shared: boolean) => void;
+  /** Re-read the storage headroom into `hasStorageSpace`. Never rejects. */
+  refreshStorageSpace: () => Promise<void>;
   setState: (state: RecordingState) => void;
   setCountdown: (value: number) => void;
   setCurrentDuration: (duration: number) => void;

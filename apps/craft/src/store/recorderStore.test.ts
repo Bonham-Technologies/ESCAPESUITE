@@ -10,9 +10,15 @@ vi.mock('../core/storage', () => ({
   getRecordingsMetadata: vi.fn(),
   getThumbnail: vi.fn(),
   createBlobUrl: vi.fn(),
+  hasSpaceForRecording: vi.fn(),
 }))
 
-import { getRecordingsMetadata, getThumbnail, createBlobUrl } from '../core/storage'
+import {
+  getRecordingsMetadata,
+  getThumbnail,
+  createBlobUrl,
+  hasSpaceForRecording,
+} from '../core/storage'
 
 describe('recorderStore', () => {
   beforeEach(() => {
@@ -33,6 +39,7 @@ describe('recorderStore', () => {
       audioLevels: { microphone: 0, system: 0 },
       screenStream: null,
       webcamStream: null,
+      hasStorageSpace: true,
     })
   })
 
@@ -292,6 +299,34 @@ describe('recorderStore', () => {
       await useRecorderStore.getState().loadRecordings()
 
       expect(useRecorderStore.getState().recordings).toEqual([])
+    })
+  })
+
+  describe('refreshStorageSpace', () => {
+    it('records that there is no room, so the Record button can say so before the click', async () => {
+      vi.mocked(hasSpaceForRecording).mockResolvedValue(false)
+
+      await useRecorderStore.getState().refreshStorageSpace()
+
+      expect(useRecorderStore.getState().hasStorageSpace).toBe(false)
+    })
+
+    it('records that there is room', async () => {
+      useRecorderStore.setState({ hasStorageSpace: false })
+      vi.mocked(hasSpaceForRecording).mockResolvedValue(true)
+
+      await useRecorderStore.getState().refreshStorageSpace()
+
+      expect(useRecorderStore.getState().hasStorageSpace).toBe(true)
+    })
+
+    it('treats an estimate that threw as unknown rather than full', async () => {
+      useRecorderStore.setState({ hasStorageSpace: false })
+      vi.mocked(hasSpaceForRecording).mockRejectedValue(new Error('quota manager unavailable'))
+
+      await useRecorderStore.getState().refreshStorageSpace()
+
+      expect(useRecorderStore.getState().hasStorageSpace).toBe(true)
     })
   })
 })

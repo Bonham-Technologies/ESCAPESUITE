@@ -146,12 +146,18 @@ describe('App saving a recording', () => {
     expect(thumbnailModule.extractVideoMetadata).toHaveBeenCalledWith(recorder.stopBlob, 8);
   });
 
-  it('keeps the raw take when the metadata repair fails', async () => {
+  it('keeps the raw take when the metadata repair fails, and warns that it may not seek', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     converterModule.fixWebMMetadata.mockRejectedValue(new Error('remux failed'));
     const { recorder } = await recordATake();
 
     expect(thumbnailModule.extractVideoMetadata).toHaveBeenCalledWith(recorder.stopBlob, 8);
     expect(listedRecording()).toBeTruthy();
+    expect(consoleWarn).toHaveBeenCalledWith('WebM metadata repair failed:', expect.any(Error));
+    const liveRegion = document.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(liveRegion).toHaveTextContent(
+      'Saved, but the recording may not be seekable — the container repair failed.'
+    );
   });
 
   it('falls back to the timed duration when the file reports none', async () => {
@@ -194,6 +200,10 @@ describe('App saving a recording', () => {
     expect(consoleError).toHaveBeenCalledWith('Failed to save recording:', expect.any(Error));
     expect(useRecorderStore.getState().state).toBe('idle');
     expect(screen.getByText('No recordings yet')).toBeTruthy();
+    // ...and the header's live region says so, rather than the failure being
+    // indistinguishable from a save that worked.
+    const liveRegion = document.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(liveRegion).toHaveTextContent('The recording could not be saved — it is not in your library.');
   });
 
   it('marks a system-audio-only take as having audio', async () => {

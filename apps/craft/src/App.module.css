@@ -121,6 +121,15 @@
   font-weight: 500;
 }
 
+/* The app's one notice channel — see src/utils/notices.ts */
+.noticeIndicator {
+  color: var(--error, #ef4444);
+  font-size: 13px;
+  font-weight: 500;
+  margin-left: var(--spacing-sm);
+  text-align: center;
+}
+
 .main {
   display: flex;
   flex: 1;
@@ -626,6 +635,15 @@
   width: 50px;
 }
 
+/* A meter for audio that was asked for but never arrived */
+.meterUnavailable .meterLabel {
+  color: var(--text-muted);
+}
+
+.meterUnavailable .meterBar {
+  opacity: 0.4;
+}
+
 .meterBar {
   flex: 1;
   height: 6px;
@@ -737,6 +755,15 @@
 .shapeButton.active {
   background-color: var(--accent);
   border-color: var(--accent);
+}
+
+/* Why the record button is dead, when it is */
+.recordBlockedReason {
+  margin: 0;
+  padding: 0 0.5rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
 }
 
 /* Keyboard shortcuts hint */
