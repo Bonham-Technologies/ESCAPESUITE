@@ -10,14 +10,19 @@
 //  - empty canvas, released without moving → deselect.
 //
 // A drag writes through the throttled updaters, one store write per animation
-// frame rather than one per mouse event, and commits once — the history entry —
-// on release. With the keyframe panel open, the same gesture sets keyframes at
-// the playhead instead of moving the clip outright.
+// frame rather than one per mouse event. With the keyframe panel open, the same
+// gesture sets keyframes at the playhead instead of moving the clip outright.
+//
+// Either way the gesture is ONE undo entry, and it is the gesture's *first*
+// store write that pushes it: `pushToHistory` snapshots the state it is handed,
+// so only a write that has not happened yet leaves the pre-drag state on the
+// stack. Every write after the first passes `skipHistory: true`, and release
+// writes nothing at all — see `skipHistoryForWrite` and `handleMouseUp`.
 //
 // The store is read here with the same selectors the preview component uses,
 // so the caller hands over only what a hook cannot reach: the canvas, the
 // redraw functions, and the way in to inline text editing.
-import { useCallback, useEffect, useMemo, useState, type MouseEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react';
 import { useEditorStore } from '../../store/projectStore';
 import { useThrottledDragUpdate } from '../../hooks';
 import type { ClipTransform, TextOverlayData, ShapeOverlayData } from '../../store/types';
@@ -105,6 +110,27 @@ export function useTransformHandles({
   // Drag state for overlay manipulation
   const [dragState, setDragState] = useState<DragState | null>(null);
 
+  // Whether the gesture under way has already pushed its undo entry. A ref, not
+  // state: it is read and written inside the throttled updaters' callbacks,
+  // which run after the render that scheduled them.
+  const historyPushedRef = useRef(false);
+
+  /**
+   * The `skipHistory` flag for the store write that is about to happen: `false`
+   * for the first write of a gesture — which therefore snapshots the state as
+   * it was before the drag — and `true` for every write after it.
+   *
+   * Call it *inside* the updater the throttler runs, never at the mousemove
+   * that schedules one: the throttler coalesces a frame's moves into a single
+   * write, so "first" has to mean the first write that actually reaches the
+   * store, not the first move that asked for one.
+   */
+  const skipHistoryForWrite = useCallback((): boolean => {
+    if (historyPushedRef.current) return true;
+    historyPushedRef.current = true;
+    return false;
+  }, []);
+
   // Marquee selection state
   const [marqueeStart, setMarqueeStart] = useState<{x: number; y: number} | null>(null);
   const [marqueeCurrent, setMarqueeCurrent] = useState<{x: number; y: number} | null>(null);
@@ -162,6 +188,11 @@ export function useTransformHandles({
       } = measureDragStart(
         clip, hit.clipType, canvas, currentTime, isKeyframeMode, sourceVideos, projectSize
       );
+
+      // A fresh gesture owes the undo stack one entry, which its first store
+      // write will push. A press released without a move writes nothing and so
+      // pushes nothing.
+      historyPushedRef.current = false;
 
       setDragState({
         clipId: hit.clipId,
@@ -229,7 +260,7 @@ export function useTransformHandles({
           time: keyframeTime,
           value,
           easing: 'ease-in-out',
-        });
+        }, skipHistoryForWrite());
       }
     };
 
@@ -247,17 +278,17 @@ export function useTransformHandles({
         // Use throttled updates for smoother drag performance
         if (dragState.clipType === 'text') {
           throttledTextUpdate.scheduleUpdate(
-            ({ id, data }) => updateTextOverlayData(id, data, true),
+            ({ id, data }) => updateTextOverlayData(id, data, skipHistoryForWrite()),
             { id: dragState.clipId, data: { x: newX, y: newY } }
           );
         } else if (dragState.clipType === 'shape') {
           throttledShapeUpdate.scheduleUpdate(
-            ({ id, data }) => updateShapeOverlayData(id, data, true),
+            ({ id, data }) => updateShapeOverlayData(id, data, skipHistoryForWrite()),
             { id: dragState.clipId, data: { x: newX, y: newY } }
           );
         } else if (dragState.clipType === 'image' || dragState.clipType === 'video') {
           throttledTransformUpdate.scheduleUpdate(
-            ({ id, transform }) => updateClipTransform(id, transform, true),
+            ({ id, transform }) => updateClipTransform(id, transform, skipHistoryForWrite()),
             { id: dragState.clipId, transform: { x: newX, y: newY } }
           );
         }
@@ -291,17 +322,17 @@ export function useTransformHandles({
         // Use throttled updates for smoother drag performance
         if (dragState.clipType === 'text') {
           throttledTextUpdate.scheduleUpdate(
-            ({ id, data }) => updateTextOverlayData(id, data, true),
+            ({ id, data }) => updateTextOverlayData(id, data, skipHistoryForWrite()),
             { id: dragState.clipId, data: { rotation: newRotation } }
           );
         } else if (dragState.clipType === 'shape') {
           throttledShapeUpdate.scheduleUpdate(
-            ({ id, data }) => updateShapeOverlayData(id, data, true),
+            ({ id, data }) => updateShapeOverlayData(id, data, skipHistoryForWrite()),
             { id: dragState.clipId, data: { rotation: newRotation } }
           );
         } else if (dragState.clipType === 'image' || dragState.clipType === 'video') {
           throttledTransformUpdate.scheduleUpdate(
-            ({ id, transform }) => updateClipTransform(id, transform, true),
+            ({ id, transform }) => updateClipTransform(id, transform, skipHistoryForWrite()),
             { id: dragState.clipId, transform: { rotation: newRotation } }
           );
         }
@@ -371,7 +402,7 @@ export function useTransformHandles({
             // Calculate scale based on the larger dimension change
             const newScale = Math.max(0.1, dragState.startScaleX * Math.max(widthRatio, heightRatio));
             throttledTextUpdate.scheduleUpdate(
-              ({ id, data }) => updateTextOverlayData(id, data, true),
+              ({ id, data }) => updateTextOverlayData(id, data, skipHistoryForWrite()),
               { id: dragState.clipId, data: { scale: newScale, x: newX, y: newY } }
             );
           } else if (dragState.clipType === 'shape') {
@@ -381,12 +412,12 @@ export function useTransformHandles({
               const uniformWidth = Math.max(0.02, dragState.startWidth * uniformRatio);
               const uniformHeight = Math.max(0.02, dragState.startHeight * uniformRatio);
               throttledShapeUpdate.scheduleUpdate(
-                ({ id, data }) => updateShapeOverlayData(id, data, true),
+                ({ id, data }) => updateShapeOverlayData(id, data, skipHistoryForWrite()),
                 { id: dragState.clipId, data: { width: uniformWidth, height: uniformHeight, x: newX, y: newY } }
               );
             } else {
               throttledShapeUpdate.scheduleUpdate(
-                ({ id, data }) => updateShapeOverlayData(id, data, true),
+                ({ id, data }) => updateShapeOverlayData(id, data, skipHistoryForWrite()),
                 { id: dragState.clipId, data: { width: newWidth, height: newHeight, x: newX, y: newY } }
               );
             }
@@ -398,14 +429,14 @@ export function useTransformHandles({
               const newScaleX = Math.max(0.1, dragState.startScaleX * uniformRatio);
               const newScaleY = Math.max(0.1, dragState.startScaleY * uniformRatio);
               throttledTransformUpdate.scheduleUpdate(
-                ({ id, transform }) => updateClipTransform(id, transform, true),
+                ({ id, transform }) => updateClipTransform(id, transform, skipHistoryForWrite()),
                 { id: dragState.clipId, transform: { scaleX: newScaleX, scaleY: newScaleY, x: newX, y: newY } }
               );
             } else {
               const newScaleX = Math.max(0.1, dragState.startScaleX * widthRatio);
               const newScaleY = Math.max(0.1, dragState.startScaleY * heightRatio);
               throttledTransformUpdate.scheduleUpdate(
-                ({ id, transform }) => updateClipTransform(id, transform, true),
+                ({ id, transform }) => updateClipTransform(id, transform, skipHistoryForWrite()),
                 { id: dragState.clipId, transform: { scaleX: newScaleX, scaleY: newScaleY, x: newX, y: newY } }
               );
             }
@@ -433,12 +464,12 @@ export function useTransformHandles({
             const scaleRatio = direction.includes('e') || direction.includes('w') ? widthRatio : heightRatio;
             const newScale = Math.max(0.1, dragState.startScaleX * scaleRatio);
             throttledTextUpdate.scheduleUpdate(
-              ({ id, data }) => updateTextOverlayData(id, data, true),
+              ({ id, data }) => updateTextOverlayData(id, data, skipHistoryForWrite()),
               { id: dragState.clipId, data: { scale: newScale, x: newX, y: newY } }
             );
           } else if (dragState.clipType === 'shape') {
             throttledShapeUpdate.scheduleUpdate(
-              ({ id, data }) => updateShapeOverlayData(id, data, true),
+              ({ id, data }) => updateShapeOverlayData(id, data, skipHistoryForWrite()),
               { id: dragState.clipId, data: { width: newWidth, height: newHeight, x: newX, y: newY } }
             );
           } else if (dragState.clipType === 'image' || dragState.clipType === 'video') {
@@ -453,7 +484,7 @@ export function useTransformHandles({
               newScaleY = Math.max(0.1, dragState.startScaleY * heightRatio);
             }
             throttledTransformUpdate.scheduleUpdate(
-              ({ id, transform }) => updateClipTransform(id, transform, true),
+              ({ id, transform }) => updateClipTransform(id, transform, skipHistoryForWrite()),
               { id: dragState.clipId, transform: { scaleX: newScaleX, scaleY: newScaleY, x: newX, y: newY } }
             );
           }
@@ -467,7 +498,7 @@ export function useTransformHandles({
       drawSelectionHandles(currentTime);
       drawMultiSelectHandles(currentTime);
     });
-  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, drawMultiSelectHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, canvasRef, projectSize]);
+  }, [dragState, getCanvasPosition, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, currentTime, drawFrame, drawSelectionHandles, drawMultiSelectHandles, keyframePanelOpen, selectedClipId, clips, setClipKeyframe, skipHistoryForWrite, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, canvasRef, projectSize]);
 
   const handleMouseUp = useCallback((e?: MouseEvent<HTMLCanvasElement>) => {
     // Handle marquee selection completion
@@ -501,45 +532,26 @@ export function useTransformHandles({
     }
 
     if (dragState) {
-      // Flush any pending throttled updates to ensure state is current
+      // Land the last move, if a frame was still owed one. That flush is the
+      // gesture's final store write; release makes none of its own.
+      //
+      // It used to re-write the clip's current values here without a
+      // `skipHistory` flag, as the gesture's one history push. That is exactly
+      // backwards: `pushToHistory` snapshots the state it is given, so a push
+      // at release recorded the *moved* clip, and undo after a drag landed on
+      // the position the drag had just produced. The push now rides the
+      // gesture's first write instead — see `skipHistoryForWrite`.
       throttledTextUpdate.flush();
       throttledShapeUpdate.flush();
       throttledTransformUpdate.flush();
-
-      const clip = clips.find(c => c.id === dragState.clipId);
-      const isKeyframeMode = keyframePanelOpen && clip && clip.id === selectedClipId;
-
-      // Only commit changes to history when NOT in keyframe mode
-      // (In keyframe mode, we're creating keyframes instead)
-      if (!isKeyframeMode && clip) {
-        if (dragState.clipType === 'text' && clip.textData) {
-          updateTextOverlayData(dragState.clipId, {
-            x: clip.textData.x,
-            y: clip.textData.y,
-            rotation: clip.textData.rotation,
-            scale: clip.textData.scale,
-          });
-        } else if (dragState.clipType === 'shape' && clip.shapeData) {
-          updateShapeOverlayData(dragState.clipId, {
-            x: clip.shapeData.x,
-            y: clip.shapeData.y,
-            width: clip.shapeData.width,
-            height: clip.shapeData.height,
-            rotation: clip.shapeData.rotation,
-          });
-        } else if ((dragState.clipType === 'image' || dragState.clipType === 'video') && clip.transform) {
-          updateClipTransform(dragState.clipId, {
-            x: clip.transform.x,
-            y: clip.transform.y,
-            scaleX: clip.transform.scaleX,
-            scaleY: clip.transform.scaleY,
-            rotation: clip.transform.rotation,
-          });
-        }
-      }
     }
+    // Belt and braces with the reset in `handleMouseDown`: every one of the 15
+    // write sites is gated on a `dragState` only that branch creates, so the
+    // flag cannot be read stale today. Clearing it here too keeps the invariant
+    // local to the gesture, for whatever writes this hook grows next.
+    historyPushedRef.current = false;
     setDragState(null);
-  }, [dragState, clips, updateTextOverlayData, updateShapeOverlayData, updateClipTransform, keyframePanelOpen, selectedClipId, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef, projectSize]);
+  }, [dragState, clips, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef, projectSize]);
 
   const handleMouseLeave = useCallback(() => {
     // Don't cancel drag when mouse leaves canvas — window listeners handle it

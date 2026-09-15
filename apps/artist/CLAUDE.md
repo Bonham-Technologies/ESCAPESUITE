@@ -428,6 +428,21 @@ Interactive overlay manipulation in the preview canvas:
 - **Keyframe mode**: When keyframe panel is open, transforms create keyframes at current playhead time
 - Selection handles follow animated values during playback
 
+**One undo entry per gesture, captured before the first write.** A drag makes many store
+writes — one per animation frame through the throttled updaters, or two to four per mousemove
+when the keyframe panel is open — and all of them belong to one edit. `useTransformHandles`
+gives the gesture a single history entry by passing the store actions' `skipHistory` flag
+(`updateClipTransform`, `updateTextOverlayData`, `updateShapeOverlayData`, `setClipKeyframe`)
+on every write **except the first**: `skipHistoryForWrite()` returns `false` once per gesture
+and `true` thereafter, and it is called inside the updater the throttler runs — not at the
+mousemove that scheduled one — because a frame's moves coalesce into a single write and
+"first" has to mean the first write that actually reaches the store. `handleMouseUp` only
+flushes the pending update and clears the drag state; it must not write anything of its own.
+It used to, un-flagged, as the gesture's one push — but `pushToHistory` snapshots the state it
+is *handed*, so a push at release recorded the already-moved clip and undo after a drag landed
+back on the position the drag had just produced. A press released without a move writes
+nothing and so pushes nothing.
+
 ### Timeline (`src/components/Timeline/`)
 `Timeline.tsx` is wiring only — the store selectors, the refs for the three scrolling panes,
 one call per module below, and the JSX around them. It owns no gesture state and binds no
