@@ -45,7 +45,8 @@ behaviour rather than tidiness: `useMediaStreams` registers the preview attach a
 both, and itself order-dependent (cancelled flag → duration interval → countdown interval →
 `recorder.dispose()` → `stopAllStreams()` → store reset) — reaches the live `stopAllStreams`
 through that mirror rather than through a stale closure. `useKeyboardShortcuts` binds the one
-window listener `App` itself owns, and `useRecordingLibrary` binds nothing and comes last.
+window listener `App` itself owns. `useRecordingLibrary` binds nothing, so its position is free
+— it is called just *before* the shortcuts, because `modalOpen` needs its `playbackUrl`.
 
 `recorderTypeRef` and `capturedThumbnailRef` are created in `App` and handed to two hooks by
 reference: `useRecordingController` writes them while a take runs, `useRecordingSave` reads
@@ -61,7 +62,7 @@ Every module below has its own test file; `App.tsx` itself is covered through
 
 | Module | Owns |
 |--------|------|
-| `App.tsx` | The composition: the store destructure, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
+| `App.tsx` | The composition: the store destructure, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, `modalOpen` (`showHelpModal \|\| playbackUrl !== null`), the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
 | `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
 | `utils/notices.ts` | The app's whole vocabulary of notices — six strings, one per thing that can go wrong. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
@@ -74,14 +75,15 @@ Every module below has its own test file; `App.tsx` itself is covered through
 | `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its four action buttons, each labelled with the recording's own name. It touches no storage — it hands ids and names back up |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
 | `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`), and the `blockedReason` that sits in front of that ladder |
-| `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for |
-| `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby` |
+| `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for. Calls `useDialogBehaviour` for the keyboard half |
+| `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby`, and the `tabIndex={0}` that makes its scrolling body keyboard-reachable. Calls `useDialogBehaviour` too |
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
 | `hooks/useCapabilityBootstrap.ts` | The way in: capability detection and the initial `loadRecordings()`, both in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
 | `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
-| `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
+| `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
+| `hooks/useDialogBehaviour.ts` | The modal keyboard contract both dialogs share: initial focus, the Tab trap, Escape-to-close, and focus restored to the opener. Returns the ref to put on the dialog element. See "Dialogs" below |
 | `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete (re-reading the storage headroom after it), and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
 
 ### Errors and notices
@@ -178,6 +180,45 @@ both directions it can be wrong:
 A missed warning ends with IndexedDB reporting its own quota error at save time, which the
 save path already surfaces; a false "no space" refuses the take outright with advice the
 user cannot act on. Only the first of those is recoverable.
+
+### Dialogs
+
+Both modals — Recording Tips and playback — get their keyboard behaviour from one hook,
+`src/hooks/useDialogBehaviour.ts`. It takes the `onClose` the dialog already has and returns
+the ref to put on the dialog element; on mount it remembers what was focused, moves focus to
+the first focusable control inside (or, if there is none, to the dialog itself, which is why
+both carry `tabIndex={-1}`), and on unmount it puts focus back where it found it. While it is
+mounted it holds one `keydown` listener on `document` **in the capture phase**:
+
+- **Escape** closes the dialog and is stopped there.
+- **Tab / Shift+Tab** wrap at the ends of the dialog, and pull focus back in if it has strayed
+  outside.
+- **everything else passes straight through**, which is how the playback dialog's `VideoPlayer`
+  keeps Space, M, F and the arrows — it binds its own `window` listener, and `window`'s bubble
+  phase is below `document`'s capture phase.
+
+The hook is ESCAPEARTIST's `ExportDialog` focus trap, lifted rather than re-invented — same
+focusable-element selector, same capture listener, same restore. It lives in CRAFT because CRAFT
+has two dialogs; folding ARTIST's copy onto it means moving the hook into `packages/shared`,
+which is a change to two more packages and has not been done.
+
+Stopping Escape is not enough on its own, because R, P and S never reach the dialog at all.
+`useKeyboardShortcuts` therefore takes **`modalOpen`** and ignores every key while it is true —
+`App` computes it as `showHelpModal || playbackUrl !== null`. Before that gate, pressing R inside
+the Help dialog put a screen-capture prompt up from behind it.
+
+**What axe covers.** `apps/e2e/tests/accessibility/core.spec.ts` audits CRAFT in four states,
+not one: idle, Help open, the playback dialog open over a real saved take, and a take in
+progress. The last two need `mockSyntheticMedia` (the inert `mockGetUserMedia` stub has no
+tracks, so a take never reaches `recording`). Adding the last two found a WCAG AA contrast
+failure as well: `--error` as *text* on `--bg-secondary` is 4.22:1, which is what the live
+"Recording" label, the running timer and the notice line were drawn in. They use
+**`--error-text`** (#f87171, 5.7:1) now; non-text uses of `--error` — the pulsing dot, the record
+button — keep the brand red, since the rule does not apply to them.
+
+`apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` proves the round trip in a real
+browser: open Help from the keyboard, Tab six times without leaving it, Escape, focus back on
+the Help button.
 
 ### State Management
 - **Zustand store** (`src/store/recorderStore.ts`): Single source of truth for recorder state
@@ -399,7 +440,8 @@ the outcome, not on the double.
 ## Keyboard Shortcuts
 
 Bound by `src/hooks/useKeyboardShortcuts.ts` — the only window listener `App` itself binds; `VideoPlayer` binds its own while the playback dialog is open — and listed
-for the user by `src/components/RecorderControls/RecorderControls.tsx`.
+for the user by `src/components/RecorderControls/RecorderControls.tsx`. None of them fire while
+a dialog is open; see "Dialogs".
 
 | Key | Action |
 |-----|--------|
