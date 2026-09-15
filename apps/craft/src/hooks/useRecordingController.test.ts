@@ -251,6 +251,27 @@ describe('useRecordingController countdown', () => {
     expect(recorderFactory.last().start).not.toHaveBeenCalled()
   })
 
+  it('abandons the countdown when the capture dies before the take starts', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 3 })
+    await startTake(result)
+    const recorder = recorderFactory.last()
+
+    // The user stops sharing while the countdown is on screen. The recorder
+    // reports it on the only channel it has — onError.
+    act(() => { recorder.failWith(new Error('Capture ended before recording started')) })
+
+    expect(consoleError).toHaveBeenCalledWith('Recording error:', expect.any(Error))
+    expect(state()).toBe('idle')
+    expect(recorder.dispose).toHaveBeenCalledTimes(1)
+    expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+    // The ticker must be gone too, or it reaches zero and starts a take with
+    // no source behind it.
+    expect(vi.getTimerCount()).toBe(0)
+    act(() => { vi.advanceTimersByTime(5000) })
+    expect(recorder.start).not.toHaveBeenCalled()
+  })
+
   it('is a no-op when there is no countdown to cancel', () => {
     const { result } = mountController({ countdownSeconds: 0 })
 

@@ -307,6 +307,13 @@ export function useRecordingController({
         },
         onError: (error) => {
           console.error('Recording error:', error);
+          // The capture can die before start() — the user stops sharing while
+          // the countdown is on screen, and the recorder reports it here. A
+          // ticker left running would reach zero and start a sourceless take,
+          // and the recorder itself still holds an AudioContext and a level
+          // monitor, so both go with the failed take.
+          clearCountdownTicker();
+          disposeRecorder();
           setState('idle');
           setCurrentDuration(0);
           stopAllStreams();
@@ -346,7 +353,9 @@ export function useRecordingController({
     }
   }, [
     acquireStreams,
+    clearCountdownTicker,
     config,
+    disposeRecorder,
     setState,
     setStreams,
     setCurrentDuration,

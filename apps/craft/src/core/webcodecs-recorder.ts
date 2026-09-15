@@ -196,8 +196,15 @@ export class WebCodecsRecorder {
     const handler = () => {
       console.warn(`Video track ended: ${this.videoTrack?.label}`);
       if (this.isRecordingActive) {
+        // isRecordingActive stays true across pause(), so a take that was
+        // paused when the capture died is finalized and delivered here too.
         console.warn('Video track ended during recording, stopping...');
         this.stop();
+      } else {
+        // Between initialize() and start() — the countdown. Nothing has been
+        // encoded, so there is no take to deliver; tell the caller instead, or
+        // it starts a recording with no source behind it.
+        this.callbacks.onError?.(new Error('Capture ended before recording started'));
       }
     };
     this.videoTrack.addEventListener('ended', handler);

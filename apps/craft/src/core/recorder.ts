@@ -105,10 +105,21 @@ export class Recorder {
     for (const track of tracks) {
       const handler = () => {
         console.warn(`Track ended: ${track.kind} - ${track.label}`);
-        // If a video track ends while recording, stop the recording gracefully
-        if (track.kind === 'video' && this.mediaRecorder?.state === 'recording') {
+        if (track.kind !== 'video') return;
+        const state = this.mediaRecorder?.state;
+        if (state === 'recording' || state === 'paused') {
+          // Paused counts as well as recording: the capture is dead and can
+          // never be resumed, so leaving the UI in Paused only guarantees a
+          // truncated file when the user finally presses Stop. Stopping from
+          // 'paused' still fires onstop, so the take is delivered as usual.
           console.warn('Video track ended during recording, stopping...');
           this.stop();
+        } else {
+          // 'inactive' — the capture went away between initialize() and
+          // start(), i.e. during the countdown. Nothing has been recorded, so
+          // there is no take to deliver; tell the caller instead, or it starts
+          // a recording with no source behind it.
+          this.callbacks.onError?.(new Error('Capture ended before recording started'));
         }
       };
       track.addEventListener('ended', handler);
