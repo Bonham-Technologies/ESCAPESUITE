@@ -460,9 +460,9 @@ export interface EditorState {
   updateClipEffects: (clipId: string, effects: Partial<ClipEffects>) => void;
   updateClipTransition: (clipId: string, transition: Partial<Transition>) => void;
   updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>) => void;
-  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe) => void;
+  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => void;
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => void;
-  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number) => void;
+  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => void;
   clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => void;
   duplicateClip: (clipId: string) => void;
 

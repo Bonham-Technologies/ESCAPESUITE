@@ -249,9 +249,13 @@ Clips support animated properties via keyframes:
   nothing moves, and the live region announces why. A nudge the clamp puts back on the value or
   the time the keyframe already holds writes nothing either — no store call, so no undo entry
   that undoes nothing, and no announcement, since nothing changed — though the key is still
-  swallowed. Each arrow-key nudge that *does* change something is its own undo step
-  (every store action pushes history), unlike a drag, which is one; that matches the inspector's
-  numeric controls and was an accepted tradeoff rather than an oversight.
+  swallowed. A **held** arrow key is one undo step, not one per key-repeat: the hook passes each
+  keydown's own `repeat` flag to the panel, which passes it to `setClipKeyframe` /
+  `moveClipKeyframe` as their trailing `skipHistory` — so the first press pushes the snapshot
+  taken before the run, every auto-repeat edits in place, and releasing and pressing again starts
+  a new step. It is the same `skipHistory` mechanism `updateClipTransform` uses to keep a preview
+  drag to one entry. Separate presses are still separate steps, which matches the inspector's
+  numeric controls.
 
   **Propagation contract**: while the graph has focus it owns `ArrowLeft`/`Right`/`Up`/`Down`,
   `Home`, `End` and `Enter` unconditionally, and claims `Delete`/`Backspace`/`Escape` only when a

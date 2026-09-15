@@ -3,6 +3,12 @@
 // it is given — the first keyframe a property gets away from time 0 also seeds a
 // keyframe AT 0 holding that property's current base value, so there is always a
 // "from" value to animate out of.
+//
+// `setClipKeyframe` and `moveClipKeyframe` also take a trailing `skipHistory`,
+// exactly as `clipSlice`'s `updateClipTransform` does: the edit lands, but no
+// undo entry is pushed. The keyframe graph's keyboard passes the keydown's own
+// `repeat` flag there, which makes a held arrow key one undo step rather than
+// one per auto-repeat.
 
 import type { StateCreator } from 'zustand';
 import type { EditorState, ClipTransform, AnimatableProperty, Keyframe } from './types';
@@ -14,7 +20,7 @@ export type KeyframeSlice = Pick<EditorState, 'keyframePanelState' | 'setClipKey
 export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlice> = (set) => ({
   keyframePanelState: DEFAULT_KEYFRAME_PANEL_STATE,
 
-  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe) => set((state) => {
+  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION, keyframes: {} };
@@ -89,7 +95,9 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
           clips: newClips,
         },
       },
-      history: pushToHistory(state),
+      // Same flag, and the same shape, as updateClipTransform's: a run of edits
+      // the caller wants collapsed pushes on its first call and skips the rest.
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 
@@ -129,7 +137,7 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
     };
   }),
 
-  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number) => set((state) => {
+  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation;
@@ -169,7 +177,9 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
           clips: newClips,
         },
       },
-      history: pushToHistory(state),
+      // Same skipHistory contract as setClipKeyframe above: an Alt+Arrow run
+      // held down is one undo step, not one per auto-repeat.
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 

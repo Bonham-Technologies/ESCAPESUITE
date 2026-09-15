@@ -19,8 +19,9 @@ interface KeyframeGraphProps {
   transform: ClipTransform;
   effects: ClipEffects;
   playheadTime: number;
-  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
-  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number) => void;
+  /** `skipHistory` folds an auto-repeated key's edit into the previous undo step. */
+  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => void;
+  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory?: boolean) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
   onDeleteKeyframe?: (property: AnimatableProperty, time: number) => void;
   /** Omit to hide the per-keyframe easing control entirely. */

@@ -116,14 +116,19 @@ export function KeyframePanel() {
     );
   }, [selectedProperty, setKeyframePanelSelectedProperty]);
 
-  // Handle keyframe moved
+  // Handle keyframe moved.
+  //
+  // `skipHistory` comes from the graph's keyboard, which sets it on an
+  // auto-repeated keydown, so one held Alt+Arrow is one undo step. A drag omits
+  // it and gets the entry it has always had.
   const handleKeyframeMoved = useCallback((
     property: AnimatableProperty,
     originalTime: number,
-    newTime: number
+    newTime: number,
+    skipHistory?: boolean
   ) => {
     if (selectedClipId) {
-      moveClipKeyframe(selectedClipId, property, originalTime, newTime);
+      moveClipKeyframe(selectedClipId, property, originalTime, newTime, skipHistory);
     }
   }, [selectedClipId, moveClipKeyframe]);
 
@@ -154,11 +159,13 @@ export function KeyframePanel() {
     });
   }, [selectedClip, selectedClipId, setClipKeyframe]);
 
-  // Handle keyframe value changed (from graph drag)
+  // Handle keyframe value changed (from a graph drag or an arrow-key nudge).
+  // `skipHistory` as above: set on a held key's auto-repeats only.
   const handleKeyframeValueChanged = useCallback((
     property: AnimatableProperty,
     time: number,
-    newValue: number
+    newValue: number,
+    skipHistory?: boolean
   ) => {
     if (!selectedClipId) return;
 
@@ -173,7 +180,7 @@ export function KeyframePanel() {
       time: time,
       value: newValue,
       easing: existingKf?.easing || 'ease-in-out',
-    });
+    }, skipHistory);
   }, [selectedClipId, setClipKeyframe]);
 
   // Handle keyframe easing changed (from the graph's easing select)
