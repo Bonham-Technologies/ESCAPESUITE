@@ -90,8 +90,13 @@ interface KeyframeGraphKeyboardOptions {
   defaultValue: number;
   /** The property's value range — the same one the drag clamps to. */
   range: { min: number; max: number };
-  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
-  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number) => void;
+  /**
+   * `skipHistory` is the keydown's own `repeat` flag: false for the first press
+   * of a key, true for every auto-repeat while it is held. The host passes it
+   * straight to the store, which makes one held key one undo step.
+   */
+  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory: boolean) => void;
+  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory: boolean) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
   onDeleteKeyframe?: (property: AnimatableProperty, time: number) => void;
 }
@@ -169,7 +174,12 @@ export function useKeyframeGraphKeyboard({
 
   // Nudge the selected keyframe's value. A preset is never selected, so this is
   // a no-op there and on an empty graph — the key is still the graph's.
-  const nudgeValue = useCallback((direction: 1 | -1, coarse: boolean) => {
+  //
+  // `repeat` is the keydown's own auto-repeat flag, passed on to the host as
+  // its `skipHistory`: the first press of a held key pushes the undo snapshot
+  // and every repeat after it edits in place, so one held key is one undo step
+  // rather than the 50-deep stack a second of auto-repeat would otherwise fill.
+  const nudgeValue = useCallback((direction: 1 | -1, coarse: boolean, repeat: boolean) => {
     if (!selectedKeyframe) return;
     const steps = NUDGE_STEPS[property];
     const step = coarse ? steps.coarse : steps.fine;
@@ -180,19 +190,18 @@ export function useKeyframeGraphKeyboard({
       Math.min(selectedKeyframe.value + direction * step, range.max)
     );
     // At the top or the bottom of the range the clamp puts the nudge back on
-    // the value the keyframe already holds. That is not an edit: the store
-    // actions push history unconditionally, so writing it would spend an undo
-    // slot on a change of nothing (MAX_HISTORY_SIZE is 50, and key auto-repeat
-    // would empty the real stack in under two seconds). Nothing is announced
-    // either — nothing changed, so there is nothing to say. The key stays
-    // swallowed: the caller has already claimed it.
+    // the value the keyframe already holds. That is not an edit: a first press
+    // still pushes history, so writing it would spend an undo slot on a change
+    // of nothing. Nothing is announced either — nothing changed, so there is
+    // nothing to say. The key stays swallowed: the caller has already claimed
+    // it.
     if (newValue === selectedKeyframe.value) return;
-    onKeyframeValueChanged(property, selectedKeyframe.time, newValue);
+    onKeyframeValueChanged(property, selectedKeyframe.time, newValue, repeat);
     announce(nudgeAnnouncement(property, newValue, selectedKeyframe.time));
   }, [selectedKeyframe, property, range, onKeyframeValueChanged, announce]);
 
-  // Nudge the selected keyframe along the time axis.
-  const nudgeTime = useCallback((direction: 1 | -1, coarse: boolean) => {
+  // Nudge the selected keyframe along the time axis. `repeat` as above.
+  const nudgeTime = useCallback((direction: 1 | -1, coarse: boolean, repeat: boolean) => {
     if (!selectedKeyframe) return;
     const step = coarse ? TIME_NUDGE.coarse : TIME_NUDGE.fine;
     // Again the drag's clamp: a keyframe never leaves the clip.
@@ -218,7 +227,7 @@ export function useKeyframeGraphKeyboard({
       );
       return;
     }
-    onKeyframeMoved(property, selectedKeyframe.time, newTime);
+    onKeyframeMoved(property, selectedKeyframe.time, newTime, repeat);
     // The keyframe lives at newTime now, so the active option and the selection
     // follow it — exactly what the drag's mouseup does.
     setActiveTime(newTime);
@@ -275,14 +284,14 @@ export function useKeyframeGraphKeyboard({
         if (e.altKey) {
           // Alt is the time modifier because the drag already means exactly
           // that (KeyframeGraph's mousedown reads e.altKey as 'time').
-          nudgeTime(direction, e.shiftKey);
+          nudgeTime(direction, e.shiftKey, e.repeat);
         } else {
           // Neither arrow wraps; from -1 ("nothing active") either lands on the
           // first keyframe.
           activateIndex(Math.max(0, Math.min(activeIndex + direction, last)));
         }
       } else if (key === 'ArrowUp' || key === 'ArrowDown') {
-        nudgeValue(key === 'ArrowUp' ? 1 : -1, e.shiftKey);
+        nudgeValue(key === 'ArrowUp' ? 1 : -1, e.shiftKey, e.repeat);
       } else if (key === 'Home') {
         activateIndex(0);
       } else if (key === 'End') {

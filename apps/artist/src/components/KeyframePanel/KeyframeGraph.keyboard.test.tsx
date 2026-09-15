@@ -472,11 +472,39 @@ describe('KeyframeGraph keyboard access', () => {
 
       fireEvent.keyDown(svg, { key: 'Home' })
       fireEvent.keyDown(svg, { key: 'ArrowUp' })
-      expect(onKeyframeValueChanged).toHaveBeenCalledWith('opacity', 0, 1)
+      // The trailing `false` is the skipHistory flag, always passed: see
+      // "passes the keydown's repeat flag through" below.
+      expect(onKeyframeValueChanged).toHaveBeenCalledWith('opacity', 0, 1, false)
 
       fireEvent.keyDown(svg, { key: 'End' })
       fireEvent.keyDown(svg, { key: 'ArrowDown' })
-      expect(onKeyframeValueChanged).toHaveBeenLastCalledWith('opacity', 1, 0)
+      expect(onKeyframeValueChanged).toHaveBeenLastCalledWith('opacity', 1, 0, false)
+    })
+
+    // A held arrow key must be ONE undo step, not one per auto-repeat. The hook
+    // does not track the run itself: it hands the keydown's own `repeat` flag
+    // to the host as `skipHistory`, so the first press snapshots and every
+    // repeat after it edits in place. The flag is passed on every nudge —
+    // `false` on a first press rather than omitted — so the callback's arity
+    // never depends on how the key was pressed and the host has one signature
+    // to implement.
+    it('passes the keydown repeat flag through as the value nudge skipHistory', () => {
+      opacityKeyframes()
+      const { container, onKeyframeValueChanged } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      fireEvent.keyDown(svg, { key: 'ArrowUp' })
+      expect(onKeyframeValueChanged).toHaveBeenLastCalledWith(
+        'opacity', 1, expect.closeTo(0.51, 6), false
+      )
+
+      // The host has committed nothing, so the keyframe is still at 0.5 and the
+      // repeat computes the same value — only the flag differs.
+      fireEvent.keyDown(svg, { key: 'ArrowUp', repeat: true })
+      expect(onKeyframeValueChanged).toHaveBeenLastCalledWith(
+        'opacity', 1, expect.closeTo(0.51, 6), true
+      )
+      expect(onKeyframeValueChanged).toHaveBeenCalledTimes(2)
     })
 
     it('writes nothing when a value nudge lands on the value the keyframe already has', async () => {
@@ -556,6 +584,31 @@ describe('KeyframeGraph keyboard access', () => {
       expect(onKeyframeMoved).toHaveBeenCalledTimes(4)
     })
 
+    // The time nudge's half of the held-key contract; see the value nudge's.
+    it('passes the keydown repeat flag through as the time nudge skipHistory', () => {
+      opacityKeyframes()
+      const { container, onKeyframeMoved, refresh } = renderGraph('opacity')
+      const svg = selectCustomKeyframe(container)
+
+      fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true })
+      expect(onKeyframeMoved).toHaveBeenLastCalledWith(
+        'opacity', 1, expect.closeTo(1.01, 6), false
+      )
+
+      // Unlike the value nudge this one has to be committed between presses:
+      // the nudge moves the selection to the new time, and a selection with no
+      // keyframe under it would make the repeat a no-op.
+      const newTime = onKeyframeMoved.mock.calls[0][2] as number
+      store().moveClipKeyframe('clip1', 'opacity', 1, newTime)
+      refresh()
+
+      fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true, repeat: true })
+      expect(onKeyframeMoved).toHaveBeenLastCalledWith(
+        'opacity', expect.closeTo(1.01, 6), expect.closeTo(1.02, 6), true
+      )
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(2)
+    })
+
     it('clamps the nudged time to the clip', () => {
       // Half a fine step inside each end of the clip, so an unclamped nudge
       // would overshoot to -0.005s and past the clip's last frame.
@@ -568,11 +621,11 @@ describe('KeyframeGraph keyboard access', () => {
 
       fireEvent.keyDown(svg, { key: 'Home' })
       fireEvent.keyDown(svg, { key: 'ArrowLeft', altKey: true })
-      expect(onKeyframeMoved).toHaveBeenCalledWith('opacity', 0.005, 0)
+      expect(onKeyframeMoved).toHaveBeenCalledWith('opacity', 0.005, 0, false)
 
       fireEvent.keyDown(svg, { key: 'End' })
       fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true })
-      expect(onKeyframeMoved).toHaveBeenLastCalledWith('opacity', CLIP_DURATION - 0.005, CLIP_DURATION)
+      expect(onKeyframeMoved).toHaveBeenLastCalledWith('opacity', CLIP_DURATION - 0.005, CLIP_DURATION, false)
     })
 
     it('writes nothing when a time nudge lands on the time the keyframe already has', async () => {

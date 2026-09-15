@@ -338,6 +338,44 @@ describe('KeyframePanel', () => {
       expect(nudged.easing).toBe('linear')
     })
 
+    // Auto-repeat, end to end: the keydown's `repeat` flag reaches the store as
+    // `skipHistory`, so one held key spends one undo slot instead of one per
+    // repeat (MAX_HISTORY_SIZE is 50, which a held key would empty in about a
+    // second). `userEvent.keyboard` never sets `repeat`, so the repeats have to
+    // be fireEvent.
+    it('makes a held arrow key a single undo step', () => {
+      render(<KeyframePanel />)
+      const svg = measureGraph()
+      svg.focus()
+      const historyBefore = store().history.past.length
+
+      // Two keyframes: the store's own at 0s, then the user's at 1s.
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+
+      // One press and three auto-repeats — what the browser sends for one held
+      // key: four fine steps of the value, one entry on the undo stack.
+      fireEvent.keyDown(svg, { key: 'ArrowUp' })
+      fireEvent.keyDown(svg, { key: 'ArrowUp', repeat: true })
+      fireEvent.keyDown(svg, { key: 'ArrowUp', repeat: true })
+      fireEvent.keyDown(svg, { key: 'ArrowUp', repeat: true })
+
+      expect(keyframesOf('opacity')![1].value).toBeCloseTo(0.54, 6)
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+
+      // Releasing and pressing again starts a new step.
+      fireEvent.keyDown(svg, { key: 'ArrowUp' })
+      expect(keyframesOf('opacity')![1].value).toBeCloseTo(0.55, 6)
+      expect(store().history.past).toHaveLength(historyBefore + 2)
+
+      // And the two steps undo to the two boundaries, not to the individual
+      // repeats in between.
+      store().undo()
+      expect(keyframesOf('opacity')![1].value).toBeCloseTo(0.54, 6)
+      store().undo()
+      expect(keyframesOf('opacity')![1].value).toBeCloseTo(0.5, 6)
+    })
+
     it('deletes a keyframe on right-click', () => {
       render(<KeyframePanel />)
       measureGraph()
