@@ -256,11 +256,15 @@ describe('storage', () => {
       expect(result).toBe(false)
     })
 
-    it('returns false when the Storage API is unavailable', async () => {
+    // Changed assertion: this used to expect false. A browser that reports no
+    // quota is saying "I do not know", and reading that as "full" refused
+    // every take in every browser without navigator.storage — including jsdom,
+    // which is why nothing could call this helper before.
+    it('returns true when the Storage API is unavailable — unknown is not full', async () => {
       Object.defineProperty(navigator, 'storage', { value: undefined, configurable: true })
 
       const result = await storage.hasSpaceForRecording(1024)
-      expect(result).toBe(false)
+      expect(result).toBe(true)
     })
   })
 

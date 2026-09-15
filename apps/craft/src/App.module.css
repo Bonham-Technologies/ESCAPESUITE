@@ -121,6 +121,15 @@
   font-weight: 500;
 }
 
+/* The app's one notice channel — see src/utils/notices.ts */
+.noticeIndicator {
+  color: var(--error, #ef4444);
+  font-size: 13px;
+  font-weight: 500;
+  margin-left: var(--spacing-sm);
+  text-align: center;
+}
+
 .main {
   display: flex;
   flex: 1;

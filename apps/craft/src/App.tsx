@@ -26,6 +26,7 @@ function App() {
     detailedCapabilities,
     capabilitiesReady,
     recordings,
+    notice,
     currentDuration,
     countdownValue,
     audioLevels,
@@ -33,6 +34,7 @@ function App() {
     setCapabilities,
     setDetailedCapabilities,
     setCapabilitiesReady,
+    setNotice,
     setState,
     setCountdown,
     setCurrentDuration,
@@ -61,6 +63,7 @@ function App() {
     setCapabilities,
     setDetailedCapabilities,
     setCapabilitiesReady,
+    setNotice,
     loadRecordings,
   });
 
@@ -115,6 +118,7 @@ function App() {
     recorderTypeRef,
     capturedThumbnailRef,
     saveRecording,
+    setNotice,
   });
 
   useKeyboardShortcuts({
@@ -162,7 +166,7 @@ function App() {
   return (
     <div className={styles.app}>
       {/* Header */}
-      <AppHeader state={state} onOpenHelp={() => setShowHelpModal(true)} />
+      <AppHeader state={state} notice={notice} onOpenHelp={() => setShowHelpModal(true)} />
 
       {/* Main content */}
       <main className={styles.main}>

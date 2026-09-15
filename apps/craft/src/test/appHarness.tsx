@@ -69,6 +69,7 @@ export function resetRecorderStore(config: Partial<RecordingConfig> = {}): void 
     audioLevels: { microphone: 0, system: 0 },
     screenStream: null,
     webcamStream: null,
+    notice: null,
   })
 }
 

@@ -29,10 +29,17 @@ export async function getRecordingsMetadata() {
   return all.filter(v => v.source === 'recording')
 }
 
+/** Headroom kept free on top of whatever the take itself is expected to need. */
+export const RECORDING_SPACE_BUFFER = 50 * 1024 * 1024
+
 export async function hasSpaceForRecording(estimatedSize: number): Promise<boolean> {
-  const { available } = await getStorageEstimate()
-  // Leave 50MB buffer for recordings
-  return available > estimatedSize + 50 * 1024 * 1024
+  const { quota, available } = await getStorageEstimate()
+  // A quota of zero means the browser has no Storage API, or declined to
+  // answer — "unknown", not "full". Reading it as "full" would refuse every
+  // take in any browser without navigator.storage, which is a far worse
+  // failure than letting IndexedDB report the quota error itself.
+  if (quota === 0) return true
+  return available > estimatedSize + RECORDING_SPACE_BUFFER
 }
 
 export async function getTotalRecordingsSize(): Promise<number> {

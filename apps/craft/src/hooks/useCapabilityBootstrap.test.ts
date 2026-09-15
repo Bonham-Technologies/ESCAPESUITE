@@ -21,16 +21,22 @@ let loadRecordings: ReturnType<typeof vi.fn>
 beforeEach(() => {
   resetAppDoubles()
   loadRecordings = vi.fn(async () => {})
-  useRecorderStore.setState({ capabilitiesReady: false })
+  useRecorderStore.setState({ capabilitiesReady: false, notice: null })
 })
 
 function mountBootstrap() {
-  const { setCapabilities, setDetailedCapabilities, setCapabilitiesReady } = useRecorderStore.getState()
+  const {
+    setCapabilities,
+    setDetailedCapabilities,
+    setCapabilitiesReady,
+    setNotice,
+  } = useRecorderStore.getState()
   return renderHook(() =>
     useCapabilityBootstrap({
       setCapabilities,
       setDetailedCapabilities,
       setCapabilitiesReady,
+      setNotice,
       loadRecordings: loadRecordings as unknown as () => Promise<void>,
     })
   )
@@ -87,6 +93,35 @@ describe('useCapabilityBootstrap', () => {
       expect(useRecorderStore.getState().capabilitiesReady).toBe(true)
     })
     expect(consoleError).toHaveBeenCalledWith('Capability detection failed:', expect.any(Error))
+    expect(useRecorderStore.getState().notice).toBe(
+      'This browser would not say what it can capture — some sources may be unavailable.'
+    )
+    consoleError.mockRestore()
+  })
+
+  it('surfaces a library that could not be read, rather than showing an empty one', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Typed by hand rather than through @types/node, which craft does not pull in.
+    const { process: proc } = globalThis as unknown as {
+      process: {
+        on: (event: string, handler: () => void) => void
+        off: (event: string, handler: () => void) => void
+      }
+    }
+    const rejection = vi.fn()
+    proc.on('unhandledRejection', rejection)
+    loadRecordings.mockRejectedValue(new Error('storage blocked'))
+
+    mountBootstrap()
+
+    await waitFor(() => {
+      expect(useRecorderStore.getState().notice).toBe(
+        'Your saved recordings could not be loaded — storage may be blocked in this browser.'
+      )
+    })
+    expect(consoleError).toHaveBeenCalledWith('Failed to load recordings:', expect.any(Error))
+    expect(rejection).not.toHaveBeenCalled()
+    proc.off('unhandledRejection', rejection)
     consoleError.mockRestore()
   })
 

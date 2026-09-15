@@ -5,6 +5,11 @@ import styles from '../../App.module.css';
 interface AppHeaderProps {
   /** The recorder's state machine — the only thing the status region reports. */
   state: RecordingState;
+  /**
+   * The app's one notice — a failed save, an unreadable library, a source that
+   * did not arrive — or null. Announced through the same live region.
+   */
+  notice: string | null;
   /** Opens the recording-tips dialog; the dialog itself is the App's state. */
   onOpenHelp: () => void;
 }
@@ -23,8 +28,15 @@ interface AppHeaderProps {
  * The status region is `aria-live="polite" aria-atomic="true"` and holds at
  * most one `role="status"` span, so a screen reader hears the whole phrase
  * ("Recording", "Paused", "Saving...") each time the state changes.
+ *
+ * A `notice` is announced through that same region, and deliberately carries
+ * **no** `role` of its own: the region's `aria-live` is what announces it, and
+ * a second `role="status"` would both break the one-status promise above and
+ * make an atomic region announce two independent things as one phrase. A
+ * notice and a running take can be on screen at once — "System audio was not
+ * shared" during a recording is exactly that case.
  */
-export function AppHeader({ state, onOpenHelp }: AppHeaderProps) {
+export function AppHeader({ state, notice, onOpenHelp }: AppHeaderProps) {
   return (
     <header className={styles.header}>
       <div className={styles.headerLeft}>
@@ -49,6 +61,7 @@ export function AppHeader({ state, onOpenHelp }: AppHeaderProps) {
         {state === 'saving' && (
           <span className={styles.pausedIndicator} role="status">Saving...</span>
         )}
+        {notice && <span className={styles.noticeIndicator}>{notice}</span>}
       </div>
 
       <div className={styles.headerRight}>

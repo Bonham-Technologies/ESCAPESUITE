@@ -149,14 +149,15 @@ describe('useRecordingSave list entry', () => {
     expect(added[0]).toMatchObject({ hasAudio: false, hasWebcam: true })
   })
 
-  it('reports a failure and lists nothing', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  // Changed assertion: the hook used to swallow the failure into a
+  // console.error, which left its caller setting 'idle' as if the take had
+  // been saved. It now rejects, and reporting the failure is the caller's job.
+  it('rejects rather than swallowing a failure, and lists nothing', async () => {
     thumbnailModule.extractVideoMetadata.mockRejectedValue(new Error('cannot decode'))
     const { result } = mountSave()
 
-    await result.current(RAW, 4)
+    await expect(result.current(RAW, 4)).rejects.toThrow('cannot decode')
 
-    expect(consoleError).toHaveBeenCalledWith('Failed to save recording:', expect.any(Error))
     expect(added).toEqual([])
     expect(await getRecordingsMetadata()).toEqual([])
   })

@@ -18,6 +18,8 @@
 // kept up to date when the teardown reaches for it.
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { createRecorder, getRecorderType, type AnyRecorder } from '../core/recorder-factory';
+import { hasSpaceForRecording } from '../core/storage';
+import { NO_STORAGE_SPACE, SAVE_FAILED } from '../utils/notices';
 import { Compositor } from '../core/compositor';
 import { analytics } from '../utils/analytics';
 import { drawThumbnail } from '../utils/previewThumbnail';
@@ -47,7 +49,18 @@ export interface RecordingControllerDeps {
   /** Written by handleStopRecording, read and cleared by saveRecording. */
   capturedThumbnailRef: RefObject<Blob | null>;
   saveRecording: SaveRecording;
+  /** The one notice channel — see utils/notices.ts. Cleared when a take starts. */
+  setNotice: (notice: string | null) => void;
 }
+
+/**
+ * What one take is assumed to cost, for the pre-flight storage check.
+ *
+ * There is no way to know before the fact, and `hasSpaceForRecording` keeps a
+ * 50MB buffer of its own on top, so this is a floor rather than an estimate:
+ * refuse a take when there is not comfortably 100MB to put it in.
+ */
+const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
 
 export interface RecordingController {
   cancelCountdown: () => void;
@@ -76,6 +89,7 @@ export function useRecordingController({
   recorderTypeRef,
   capturedThumbnailRef,
   saveRecording,
+  setNotice,
 }: RecordingControllerDeps): RecordingController {
   const recorderRef = useRef<AnyRecorder | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
@@ -231,7 +245,18 @@ export function useRecordingController({
   const handleStartRecording = useCallback(async () => {
     try {
       cancelledRef.current = false;
+      // Starting a take is the "next successful action" that clears whatever
+      // the last one had to report.
+      setNotice(null);
       setState('preparing');
+
+      // Ask before capturing anything: a take that cannot be stored is worse
+      // than one that never started, and the user can act on this one.
+      if (!(await hasSpaceForRecording(ESTIMATED_RECORDING_BYTES))) {
+        setNotice(NO_STORAGE_SPACE);
+        setState('idle');
+        return;
+      }
 
       const { screen, webcam, mic } = await acquireStreams();
       setStreams(screen, webcam);
@@ -302,7 +327,11 @@ export function useRecordingController({
           saveRecording(blob, recordedDuration).then(() => {
             setState('idle');
           }).catch((err) => {
+            // The save hook rejects rather than swallowing: without this the
+            // take would land back at 'idle' looking exactly like one that
+            // had been stored.
             console.error('Failed to save recording:', err);
+            setNotice(SAVE_FAILED);
             setState('idle');
           });
         },
@@ -376,6 +405,7 @@ export function useRecordingController({
     recorderTypeRef,
     setPreviewStream,
     setIsPiPActive,
+    setNotice,
   ]);
 
   return {

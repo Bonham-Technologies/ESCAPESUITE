@@ -89,6 +89,13 @@ export interface RecorderStore {
   /** False until capability detection has answered — the Record button waits on it. */
   capabilitiesReady: boolean;
   recordings: Recording[];
+  /**
+   * The one thing the app has to say that is not a state change — a failed
+   * save, an unreadable library, a source that did not arrive. Rendered in the
+   * header's live region and cleared when the next take starts. See
+   * `utils/notices.ts`; there is deliberately no second channel.
+   */
+  notice: string | null;
 
   // Current recording data
   currentDuration: number;
@@ -104,6 +111,7 @@ export interface RecorderStore {
   setCapabilities: (caps: EnvironmentCapabilities) => void;
   setDetailedCapabilities: (caps: DetailedCapabilities) => void;
   setCapabilitiesReady: (ready: boolean) => void;
+  setNotice: (notice: string | null) => void;
   setState: (state: RecordingState) => void;
   setCountdown: (value: number) => void;
   setCurrentDuration: (duration: number) => void;

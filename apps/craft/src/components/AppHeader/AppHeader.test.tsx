@@ -28,9 +28,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderHeader(state: RecordingState = 'idle') {
+function renderHeader(state: RecordingState = 'idle', notice: string | null = null) {
   const onOpenHelp = vi.fn()
-  const { container } = render(<AppHeader state={state} onOpenHelp={onOpenHelp} />)
+  const { container } = render(<AppHeader state={state} notice={notice} onOpenHelp={onOpenHelp} />)
   return { onOpenHelp, container }
 }
 
@@ -93,6 +93,32 @@ describe('AppHeader status region', () => {
       expect(screen.queryByRole('status')).not.toBeInTheDocument()
     }
   )
+})
+
+describe('AppHeader notices', () => {
+  it('carries an error through the same live region the state uses', () => {
+    const { container } = renderHeader('idle', 'The recording could not be saved.')
+
+    const region = container.querySelector(`.${styles.headerCenter}`) as HTMLElement
+    expect(region).toHaveAttribute('aria-live', 'polite')
+    expect(region).toHaveTextContent('The recording could not be saved.')
+  })
+
+  it('leaves the region with exactly one role="status" when a take is running too', () => {
+    renderHeader('recording', 'System audio was not shared.')
+
+    // The notice is announced by the region's own aria-live rather than by a
+    // second role="status": the promise this header makes is one status node.
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(screen.getByRole('status')).toHaveTextContent('Recording')
+    expect(screen.getByText('System audio was not shared.')).toBeTruthy()
+  })
+
+  it('says nothing when there is no notice', () => {
+    const { container } = renderHeader('idle', null)
+
+    expect(container.querySelector(`.${styles.headerCenter}`)).toBeEmptyDOMElement()
+  })
 })
 
 describe('AppHeader buttons', () => {

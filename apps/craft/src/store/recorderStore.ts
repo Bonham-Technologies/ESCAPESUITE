@@ -31,6 +31,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   },
   capabilitiesReady: false,
   recordings: [],
+  notice: null,
 
   // Current recording data
   currentDuration: 0,
@@ -55,6 +56,9 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   setCapabilitiesReady: (capabilitiesReady: boolean) =>
     set({ capabilitiesReady }),
+
+  setNotice: (notice: string | null) =>
+    set({ notice }),
 
   setState: (newState: RecordingState) =>
     set({ state: newState }),

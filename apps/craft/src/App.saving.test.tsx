@@ -194,6 +194,10 @@ describe('App saving a recording', () => {
     expect(consoleError).toHaveBeenCalledWith('Failed to save recording:', expect.any(Error));
     expect(useRecorderStore.getState().state).toBe('idle');
     expect(screen.getByText('No recordings yet')).toBeTruthy();
+    // ...and the header's live region says so, rather than the failure being
+    // indistinguishable from a save that worked.
+    const liveRegion = document.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(liveRegion).toHaveTextContent('The recording could not be saved — it is not in your library.');
   });
 
   it('marks a system-audio-only take as having audio', async () => {

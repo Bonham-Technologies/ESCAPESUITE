@@ -6,6 +6,7 @@
 // rows and the recordings list both read.
 import { useEffect } from 'react';
 import { detectCapabilities } from '../core/permissions';
+import { DETECTION_FAILED, LIBRARY_UNREADABLE } from '../utils/notices';
 import type { DetailedCapabilities, EnvironmentCapabilities } from '../store/types';
 
 /** The store actions the bootstrap writes through — App's, not a second subscription. */
@@ -14,6 +15,8 @@ export interface CapabilityBootstrapDeps {
   setDetailedCapabilities: (capabilities: DetailedCapabilities) => void;
   /** Raised once detection has answered — the Record button is dead until then. */
   setCapabilitiesReady: (ready: boolean) => void;
+  /** The one notice channel — see utils/notices.ts. */
+  setNotice: (notice: string | null) => void;
   loadRecordings: () => Promise<void>;
 }
 
@@ -21,6 +24,7 @@ export function useCapabilityBootstrap({
   setCapabilities,
   setDetailedCapabilities,
   setCapabilitiesReady,
+  setNotice,
   loadRecordings,
 }: CapabilityBootstrapDeps): void {
   // Detect capabilities on mount
@@ -35,8 +39,15 @@ export function useCapabilityBootstrap({
       // still refuses a take it cannot serve, but it refuses with a reason
       // rather than with "Checking...".
       console.error('Capability detection failed:', error);
+      setNotice(DETECTION_FAILED);
       setCapabilitiesReady(true);
     });
-    loadRecordings();
-  }, [setCapabilities, setDetailedCapabilities, setCapabilitiesReady, loadRecordings]);
+    // An unhandled rejection here — private mode, blocked storage — used to
+    // leave the library silently empty, indistinguishable from "no recordings
+    // yet".
+    loadRecordings().catch((error: unknown) => {
+      console.error('Failed to load recordings:', error);
+      setNotice(LIBRARY_UNREADABLE);
+    });
+  }, [setCapabilities, setDetailedCapabilities, setCapabilitiesReady, setNotice, loadRecordings]);
 }
