@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.3.8
+
+### Patch Changes
+
+- e66fb39: Dialogs behave like dialogs, for the keyboard and for a screen reader.
+  
+  - **Escape closes them.** The Recording Tips dialog had no way out but the mouse; it now
+    closes on Escape, as the playback dialog already did.
+  - **Focus goes in, stays in, and comes back.** Opening either dialog moves focus into it,
+    Tab and Shift+Tab cycle within it instead of wandering onto the app behind, and closing it
+    puts focus back on the button that opened it.
+  - **The recorder's shortcuts no longer fire from inside a dialog.** Pressing R while the
+    Recording Tips dialog was open started a screen recording behind it, complete with the
+    browser's capture prompt; P, S and Escape reached the recorder the same way. Nothing
+    behind a dialog takes keys now. Inside the playback dialog, the player keeps its own keys
+    — Space, M and the arrows still work.
+  - **The Recording Tips can be scrolled from the keyboard.** The tips scroll and hold no
+    controls of their own, so there was nothing to Tab to and no way to reach the text below
+    the fold without a mouse.
+  - **The live recording label, the timer and the notice line are readable.** Their red was
+    4.2:1 against the app's background, under the WCAG AA minimum; it has been lifted to
+    5.7:1. The record button and the recording dot keep the original brand red.
+- ee3d206: The record button tells the truth, and a failure is no longer silent.
+  
+  - **Record is disabled until it can actually record.** It used to be live from the first
+    paint, while the browser was still being asked what it can capture — an early click did
+    nothing at all, with no explanation. It now waits for that answer, and stays disabled
+    with the reason on screen when nothing you have switched on can be captured in this
+    browser, or when there is no storage space left for another take. The R shortcut follows
+    the same rule.
+  - **A recording that failed to save says so.** A failed save used to look exactly like a
+    successful one: nothing in the library and nothing to explain it. Failures — a save that
+    did not complete, a recordings list that could not be read, a capture the browser
+    refused — are now announced in the header.
+  - **You are told when system audio was not shared.** Switching on "System Audio" only asks
+    for it; the browser's own share dialog has a separate tick box. If it was left clear, the
+    app now says so and greys the System meter instead of leaving it sitting at zero.
+  - **A recording that may not scrub says so.** When the container repair fails the take is
+    still saved, as before, but you are told it may not be seekable rather than discovering
+    it later.
+  - **Downloads no longer get cancelled in some browsers**, and re-opening a recording no
+    longer shows the previous one's duration.
+- 5da3ddc: Three recorder fixes:
+  
+  - Pressing Escape during the countdown now releases the recorder along with the capture. It used to leave the audio graph and level monitor running, so a handful of cancelled takes in a row would exhaust the browser's audio contexts and stop recording from starting at all.
+  - Microphone-only recordings work again. With both Screen and Webcam switched off, starting a take failed outright in Chrome; audio-only takes now record through the MediaRecorder path.
+  - Stopping the screen share at an awkward moment is handled properly for screen-only and webcam-only takes. If the recording is paused, it now finishes and saves what was captured instead of sitting in Paused over a dead capture and producing a truncated file; if it happens during the countdown, the take is abandoned and the app returns to idle instead of starting a recording with no source; and if it happens just after you press Stop, the recording is still saved rather than being reported as a failure. Picture-in-Picture takes still cannot detect the share ending — the recorder there sees the composited canvas, not the screen itself.
+
 ## 2.3.1
 
 ### Patch Changes
