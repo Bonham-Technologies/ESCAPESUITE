@@ -13,6 +13,7 @@ import { generateThumbnail, extractVideoMetadata } from '../core/thumbnailGenera
 import { fixWebMMetadata } from '../core/converter';
 import { createPlaceholderThumbnail } from '../utils/previewThumbnail';
 import { buildSourceVideo, buildRecordingEntry } from '../utils/recordingMetadata';
+import { NOT_SEEKABLE } from '../utils/notices';
 import type { Recording, RecordingConfig, RecordingState } from '../store/types';
 
 export interface RecordingSaveDeps {
@@ -23,6 +24,8 @@ export interface RecordingSaveDeps {
   config: RecordingConfig;
   setState: (state: RecordingState) => void;
   addRecording: (recording: Recording) => void;
+  /** The one notice channel — see utils/notices.ts. */
+  setNotice: (notice: string | null) => void;
 }
 
 /** Save a finished take. `recordedDuration` is what the recorder timed. */
@@ -34,6 +37,7 @@ export function useRecordingSave({
   config,
   setState,
   addRecording,
+  setNotice,
 }: RecordingSaveDeps): SaveRecording {
   // Save recording to storage
   const saveRecording = useCallback(async (rawBlob: Blob, recordedDuration: number) => {
@@ -49,7 +53,13 @@ export function useRecordingSave({
       // MediaRecorder output needs duration/Cues metadata fix
       try {
         blob = await fixWebMMetadata(rawBlob);
-      } catch {
+      } catch (error) {
+        // An unrepaired MediaRecorder WebM plays but does not seek: it has no
+        // Duration and no Cues. Keeping it is still better than losing the
+        // take — but saving it with no trace at all is how ESCSUITE-2 came
+        // back as "my recording won't scrub".
+        console.warn('WebM metadata repair failed:', error);
+        setNotice(NOT_SEEKABLE);
         blob = rawBlob;
       }
     }
@@ -94,7 +104,7 @@ export function useRecordingSave({
       thumbnailUrl: createBlobUrl(thumbnail),
       config,
     }));
-  }, [setState, addRecording, config, recorderTypeRef, capturedThumbnailRef]);
+  }, [setState, addRecording, setNotice, config, recorderTypeRef, capturedThumbnailRef]);
 
   return saveRecording;
 }

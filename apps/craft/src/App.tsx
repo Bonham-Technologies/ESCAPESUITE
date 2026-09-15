@@ -89,6 +89,7 @@ function App() {
     config,
     setState,
     addRecording,
+    setNotice,
   });
 
   // Why the Record button (and the R shortcut with it) cannot start a take.
