@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.6
+
+### Patch Changes
+
+- b014350: Headless render bundle: worker scripts are inlined again under Vite 8.3 (the kit could not start its decode/export workers from file://)
+- 77c4a08: Holding an arrow key to nudge a keyframe now undoes as a single step, instead of filling the undo history with one entry per key repeat.
+
 ## 2.3.5
 
 ### Patch Changes
