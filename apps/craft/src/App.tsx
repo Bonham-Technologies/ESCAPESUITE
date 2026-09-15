@@ -8,6 +8,7 @@ import { useRecordingSave } from './hooks/useRecordingSave';
 import { useRecordingController } from './hooks/useRecordingController';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRecordingLibrary } from './hooks/useRecordingLibrary';
+import { recordBlockedReason } from './utils/recordReadiness';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import { SourceToggles, type RecordingSource } from './components/SourceToggles/SourceToggles';
 import { WebcamOverlaySettings } from './components/WebcamOverlaySettings/WebcamOverlaySettings';
@@ -23,6 +24,7 @@ function App() {
     config,
     capabilities,
     detailedCapabilities,
+    capabilitiesReady,
     recordings,
     currentDuration,
     countdownValue,
@@ -30,6 +32,7 @@ function App() {
     setConfig,
     setCapabilities,
     setDetailedCapabilities,
+    setCapabilitiesReady,
     setState,
     setCountdown,
     setCurrentDuration,
@@ -54,7 +57,12 @@ function App() {
   // teardown that reaches stopAllStreams through that mirror, then the
   // keyboard listener. useRecordingLibrary binds nothing and comes last.
   useThemeLifecycle();
-  useCapabilityBootstrap({ setCapabilities, setDetailedCapabilities, loadRecordings });
+  useCapabilityBootstrap({
+    setCapabilities,
+    setDetailedCapabilities,
+    setCapabilitiesReady,
+    loadRecordings,
+  });
 
   const {
     previewStream,
@@ -77,6 +85,10 @@ function App() {
     setState,
     addRecording,
   });
+
+  // Why the Record button (and the R shortcut with it) cannot start a take.
+  // Computed here because it is a fact about the store, not about the bar.
+  const blockedReason = recordBlockedReason(capabilitiesReady, config, capabilities);
 
   const {
     cancelCountdown,
@@ -107,6 +119,7 @@ function App() {
 
   useKeyboardShortcuts({
     state,
+    canRecord: blockedReason === null,
     handleStartRecording,
     handlePauseRecording,
     handleResumeRecording,
@@ -206,6 +219,7 @@ function App() {
             onStart={handleStartRecording}
             onStop={handleStopRecording}
             onCancel={state === 'countdown' ? cancelCountdown : handleCancelRecording}
+            blockedReason={blockedReason}
           />
         </div>
       </main>

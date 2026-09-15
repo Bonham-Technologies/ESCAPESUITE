@@ -59,6 +59,10 @@ export function resetRecorderStore(config: Partial<RecordingConfig> = {}): void 
     config: { ...defaultConfig, ...config },
     capabilities: allCapabilities(),
     detailedCapabilities: allDetailedCapabilities(),
+    // The real store starts "not ready" and renderApp() settles the detection
+    // that raises it, so a test that wants the pre-detection app leaves
+    // detectCapabilities() pending rather than reaching in here.
+    capabilitiesReady: false,
     recordings: [],
     currentDuration: 0,
     countdownValue: 0,

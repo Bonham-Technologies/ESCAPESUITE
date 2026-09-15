@@ -5,7 +5,7 @@
 // third call — loading what is already in storage — is counted rather than
 // re-tested, because the store's own suite covers it.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useCapabilityBootstrap } from './useCapabilityBootstrap'
 import { useRecorderStore } from '../store/recorderStore'
 import { permissionsOverrides, detectionResult, resetAppDoubles } from '../test/appDoubles'
@@ -21,14 +21,16 @@ let loadRecordings: ReturnType<typeof vi.fn>
 beforeEach(() => {
   resetAppDoubles()
   loadRecordings = vi.fn(async () => {})
+  useRecorderStore.setState({ capabilitiesReady: false })
 })
 
 function mountBootstrap() {
-  const { setCapabilities, setDetailedCapabilities } = useRecorderStore.getState()
+  const { setCapabilities, setDetailedCapabilities, setCapabilitiesReady } = useRecorderStore.getState()
   return renderHook(() =>
     useCapabilityBootstrap({
       setCapabilities,
       setDetailedCapabilities,
+      setCapabilitiesReady,
       loadRecordings: loadRecordings as unknown as () => Promise<void>,
     })
   )
@@ -58,6 +60,34 @@ describe('useCapabilityBootstrap', () => {
     await waitFor(() => {
       expect(permissionsOverrides.detectCapabilities).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('holds the capabilities "not ready" until the detection answers', async () => {
+    let answer: (result: ReturnType<typeof detectionResult>) => void = () => {}
+    permissionsOverrides.detectCapabilities.mockImplementation(
+      () => new Promise((resolve) => { answer = resolve })
+    )
+
+    mountBootstrap()
+
+    expect(useRecorderStore.getState().capabilitiesReady).toBe(false)
+
+    await act(async () => { answer(detectionResult()) })
+
+    expect(useRecorderStore.getState().capabilitiesReady).toBe(true)
+  })
+
+  it('marks them ready even when detection fails, so the app is never stuck', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    permissionsOverrides.detectCapabilities.mockRejectedValue(new Error('policy blocked'))
+
+    mountBootstrap()
+
+    await waitFor(() => {
+      expect(useRecorderStore.getState().capabilitiesReady).toBe(true)
+    })
+    expect(consoleError).toHaveBeenCalledWith('Capability detection failed:', expect.any(Error))
+    consoleError.mockRestore()
   })
 
   it('does not run again on a re-render: the store actions keep their identity', async () => {

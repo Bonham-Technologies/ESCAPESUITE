@@ -29,6 +29,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
     systemAudio: { available: false, reason: 'api_not_supported', message: 'Checking...' },
     mediaRecorder: { available: false, reason: 'api_not_supported', message: 'Checking...' },
   },
+  capabilitiesReady: false,
   recordings: [],
 
   // Current recording data
@@ -51,6 +52,9 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   setDetailedCapabilities: (detailedCapabilities: DetailedCapabilities) =>
     set({ detailedCapabilities }),
+
+  setCapabilitiesReady: (capabilitiesReady: boolean) =>
+    set({ capabilitiesReady }),
 
   setState: (newState: RecordingState) =>
     set({ state: newState }),

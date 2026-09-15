@@ -12,12 +12,15 @@ import type { DetailedCapabilities, EnvironmentCapabilities } from '../store/typ
 export interface CapabilityBootstrapDeps {
   setCapabilities: (capabilities: EnvironmentCapabilities) => void;
   setDetailedCapabilities: (capabilities: DetailedCapabilities) => void;
+  /** Raised once detection has answered — the Record button is dead until then. */
+  setCapabilitiesReady: (ready: boolean) => void;
   loadRecordings: () => Promise<void>;
 }
 
 export function useCapabilityBootstrap({
   setCapabilities,
   setDetailedCapabilities,
+  setCapabilitiesReady,
   loadRecordings,
 }: CapabilityBootstrapDeps): void {
   // Detect capabilities on mount
@@ -25,7 +28,15 @@ export function useCapabilityBootstrap({
     detectCapabilities().then((result) => {
       setCapabilities(result.capabilities);
       setDetailedCapabilities(result.detailed);
+      setCapabilitiesReady(true);
+    }).catch((error: unknown) => {
+      // Detection itself failing must not strand the app with a permanently
+      // dead Record button: the capabilities stay all-false, so the button
+      // still refuses a take it cannot serve, but it refuses with a reason
+      // rather than with "Checking...".
+      console.error('Capability detection failed:', error);
+      setCapabilitiesReady(true);
     });
     loadRecordings();
-  }, [setCapabilities, setDetailedCapabilities, loadRecordings]);
+  }, [setCapabilities, setDetailedCapabilities, setCapabilitiesReady, loadRecordings]);
 }

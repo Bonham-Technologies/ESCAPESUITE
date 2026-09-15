@@ -26,7 +26,7 @@ function makeCallbacks() {
 const activeStates: RecordingState[] = ['countdown', 'recording', 'paused']
 
 function renderControls(
-  options: { state?: RecordingState; currentDuration?: number } = {}
+  options: { state?: RecordingState; currentDuration?: number; blockedReason?: string | null } = {}
 ) {
   const state = options.state ?? 'idle'
   const calls = makeCallbacks()
@@ -35,6 +35,7 @@ function renderControls(
       state={state}
       isRecordingActive={activeStates.includes(state)}
       currentDuration={options.currentDuration ?? 0}
+      blockedReason={options.blockedReason ?? null}
       {...calls}
     />
   )
@@ -165,6 +166,31 @@ describe('RecorderControls between states', () => {
       expect(recordButton()).toBeEnabled()
     }
   )
+})
+
+describe('RecorderControls when recording is blocked', () => {
+  it('disables the button, names the reason, and refuses to start a take', async () => {
+    const user = userEvent.setup()
+    const { calls, container } = renderControls({ blockedReason: 'Checking what this browser can capture…' })
+
+    const record = recordButton()
+    expect(record).toBeDisabled()
+    expect(record).toHaveAttribute('title', 'Checking what this browser can capture…')
+    expect(record).toHaveAccessibleDescription('Checking what this browser can capture…')
+    expect(container.querySelector(`.${styles.recordBlockedReason}`))
+      .toHaveTextContent('Checking what this browser can capture…')
+
+    await user.click(record)
+    expect(calls.onStart).not.toHaveBeenCalled()
+  })
+
+  it('says nothing extra, and describes nothing, when there is no reason to block', () => {
+    const { container } = renderControls()
+
+    expect(recordButton()).not.toHaveAttribute('aria-describedby')
+    expect(recordButton()).toHaveAttribute('title', 'Record (R)')
+    expect(container.querySelector(`.${styles.recordBlockedReason}`)).toBeNull()
+  })
 })
 
 describe('RecorderControls shortcuts hint', () => {

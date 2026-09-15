@@ -86,6 +86,8 @@ export interface RecorderStore {
   config: RecordingConfig;
   capabilities: EnvironmentCapabilities;
   detailedCapabilities: DetailedCapabilities;
+  /** False until capability detection has answered — the Record button waits on it. */
+  capabilitiesReady: boolean;
   recordings: Recording[];
 
   // Current recording data
@@ -101,6 +103,7 @@ export interface RecorderStore {
   setConfig: (config: Partial<RecordingConfig>) => void;
   setCapabilities: (caps: EnvironmentCapabilities) => void;
   setDetailedCapabilities: (caps: DetailedCapabilities) => void;
+  setCapabilitiesReady: (ready: boolean) => void;
   setState: (state: RecordingState) => void;
   setCountdown: (value: number) => void;
   setCurrentDuration: (duration: number) => void;
