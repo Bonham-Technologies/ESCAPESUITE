@@ -259,9 +259,8 @@ Reusable video player with full playback controls:
 - **Play/Pause**: Toggle playback with button or spacebar
 - **Seeking**: Click progress bar or use arrow keys (±5s), with Shift for ±10s
 - **Volume**: Adjustable with mute toggle (M key)
-- **Fullscreen**: Toggle with F key or button
 - **Loop detection**: Automatically resets to beginning when video ends
-- **Keyboard shortcuts**: Space (play/pause), M (mute), F (fullscreen), arrows (seek)
+- **Keyboard shortcuts**: Space (play/pause), M (mute), arrows (seek)
 
 ### Capability Detection (`src/core/permissions.ts`)
 Enhanced capability detection with detailed unavailability reasons:
