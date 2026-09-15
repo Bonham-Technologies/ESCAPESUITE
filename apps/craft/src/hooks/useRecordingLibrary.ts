@@ -71,6 +71,9 @@ export function useRecordingLibrary({ recordings, removeRecording }: RecordingLi
     }
     setPlaybackUrl(null);
     setPlaybackName('');
+    // The duration goes with the other two. Left standing, it was handed to
+    // the *next* recording opened whose own duration could not be found.
+    setPlaybackDuration(0);
   };
 
   // Download a recording as WebM (instant — blob is already fixed during save)
@@ -87,7 +90,10 @@ export function useRecordingLibrary({ recordings, removeRecording }: RecordingLi
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    revokeBlobUrl(url);
+    // Revoking in the same tick as click() cancels the download outside
+    // Chrome: the browser has not necessarily started reading the blob yet.
+    // One turn of the event loop is enough for it to have taken hold.
+    setTimeout(() => revokeBlobUrl(url), 0);
   };
 
   return {
