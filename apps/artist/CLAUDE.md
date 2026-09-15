@@ -793,6 +793,23 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   untouched (the conversion returns the same `Timeline` object).
 - `vite.config.ts` headless plugins emit workers as classic scripts and inline them
   as blob URLs, because `file://` pages cannot load module or file workers.
+- **The two call-site shapes, and the fail-loud contract.** `headlessInlineWorkersPlugin`
+  reads each emitted worker `.js`, embeds it as a blob URL in `window.__wb`, deletes the file
+  and rewrites the `new Worker(...)` call sites to read that map. Vite has emitted two
+  different URL expressions for the same source, so the rewrite treats the leading ` ``+ `
+  and the trailing `.href` as optional and handles both — `` new Worker(``+new URL(`w.js`,
+  import.meta.url).href, …) `` (vite ≤ 8.2) and `` new Worker(new URL(`w.js`,import.meta.url)
+  .href, …) `` (vite ≥ 8.3) — then collapses the decode worker's doubled
+  `` new URL(window.__wb[K],[``+]import.meta.url) `` wrapper. Replacements are scoped to the
+  filenames actually inlined, never a blanket rewrite of other `new URL(...)` uses. Because
+  the files are deleted, a rewrite that silently stops matching is a broken bundle, so the
+  plugin **throws** rather than warning: if a discovered worker file is missing on disk, if
+  any inlined filename survives inside a `new URL(...)`/`new Worker(...)` expression after the
+  rewrite, or if any `.js` file is left behind in `dist-headless/`. That turns a future
+  emission change red in CI's `build` job (which runs for Dependabot PRs) instead of only in
+  `e2e`/`kit-docker`, which Dependabot skips. Vite 8.3 broke exactly this and shipped a
+  headless bundle whose workers 404'd from `file://` with
+  `SecurityError: Failed to construct 'Worker'`.
 - `options.resolution` defaults to `'project'`; `meta` describes the encoded output
   (honours `resolution` and `timeRange`).
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
