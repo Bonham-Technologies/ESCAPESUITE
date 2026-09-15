@@ -63,3 +63,25 @@ export function installBrowserStubs(): BrowserStubs {
     },
   }
 }
+
+/**
+ * jsdom performs no layout, so `HTMLElement.offsetParent` is `null` on every
+ * element — including elements that are plainly on screen. The dialog focus
+ * trap (`hooks/useDialogBehaviour.ts`) uses `offsetParent !== null` to skip
+ * controls CSS has hidden, so under jsdom it would otherwise find nothing
+ * focusable at all.
+ *
+ * Report `document.body` for every element instead, which is what a rendered
+ * element's offsetParent would be, and hand back the undo.
+ */
+export function installOffsetParentStub(): () => void {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+    configurable: true,
+    get: () => document.body,
+  })
+  return () => {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
+  }
+}

@@ -1,3 +1,4 @@
+import { useDialogBehaviour } from '../../hooks/useDialogBehaviour';
 import { VideoPlayer } from '../VideoPlayer';
 import { CloseIcon } from '../icons';
 import styles from '../../App.module.css';
@@ -25,10 +26,25 @@ interface PlaybackDialogProps {
  *
  * Whether the dialog exists at all is the caller's business — it renders only
  * when there is a URL to play — so this component draws unconditionally.
+ *
+ * `useDialogBehaviour` adds the modal keyboard behaviour: focus starts on the
+ * close button, Tab cycles between it and the player's controls, Escape closes,
+ * and focus returns to the library row that opened it. Escape and Tab are the
+ * only keys it claims, so the player keeps Space, M and the arrows.
  */
 export function PlaybackDialog({ url, name, duration, onClose }: PlaybackDialogProps) {
+  const dialogRef = useDialogBehaviour(onClose);
+
   return (
-    <div className={styles.playbackModal} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="playback-title">
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={styles.playbackModal}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="playback-title"
+    >
       <div className={styles.playbackContent} onClick={(e) => e.stopPropagation()}>
         <div className={styles.playbackHeader}>
           <span id="playback-title" className={styles.playbackTitle}>{name}</span>

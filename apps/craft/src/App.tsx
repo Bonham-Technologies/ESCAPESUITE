@@ -61,7 +61,9 @@ function App() {
   // inline, because that order is the behaviour: theme, capability bootstrap,
   // the preview attach and the stopAllStreams mirror, then the unmount
   // teardown that reaches stopAllStreams through that mirror, then the
-  // keyboard listener. useRecordingLibrary binds nothing and comes last.
+  // keyboard listener. useRecordingLibrary binds nothing, so where it sits
+  // among the others is free — it is called just before the shortcuts because
+  // they need its playbackUrl.
   useThemeLifecycle();
   useCapabilityBootstrap({
     setCapabilities,
@@ -129,17 +131,6 @@ function App() {
     refreshStorageSpace,
   });
 
-  useKeyboardShortcuts({
-    state,
-    canRecord: blockedReason === null,
-    handleStartRecording,
-    handlePauseRecording,
-    handleResumeRecording,
-    handleStopRecording,
-    cancelCountdown,
-    handleCancelRecording,
-  });
-
   const {
     playbackUrl,
     playbackName,
@@ -150,6 +141,22 @@ function App() {
     handleClosePlayback,
     handleDownload,
   } = useRecordingLibrary({ recordings, removeRecording, refreshStorageSpace });
+
+  useKeyboardShortcuts({
+    state,
+    canRecord: blockedReason === null,
+    // Either dialog makes the app behind it deaf to R / P / S / Escape.
+    // useRecordingLibrary owns playbackUrl, which is why it is called above
+    // rather than last; it registers no effect, so the effect order the
+    // comment above describes is unchanged.
+    modalOpen: showHelpModal || playbackUrl !== null,
+    handleStartRecording,
+    handlePauseRecording,
+    handleResumeRecording,
+    handleStopRecording,
+    cancelCountdown,
+    handleCancelRecording,
+  });
 
   // Toggle source
   const toggleSource = (source: RecordingSource) => {

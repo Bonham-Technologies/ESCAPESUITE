@@ -25,6 +25,13 @@
   --success: #4ade80;
   --warning: #fbbf24;
   --error: #ef4444;
+  /* --error as *text* on --bg-secondary is 4.22:1 — under WCAG AA. This is the
+     same colour lifted until it clears 4.5:1 (5.7:1 on #16213e), for the live
+     recording label, the timer and the notice line. Non-text uses of --error
+     (the pulsing dot, the record button) are unaffected by the rule and keep
+     the brand red. Every colour token here MUST also be given a value in the
+     light block below — src/themeTokens.test.ts enforces it. */
+  --error-text: #f87171;
 
   --border: #2a2a4a;
   --border-color: #2a2a4a;
@@ -99,6 +106,10 @@
   --success: #22c55e;
   --warning: #f59e0b;
   --error: #dc2626;
+  /* The light counterpart of --error-text. --error is exactly 4.50:1 on
+     --bg-secondary (#f5f7fa) — on the line with no headroom — so red text gets
+     a darker one here just as it gets a lighter one in the dark palette. */
+  --error-text: #b91c1c;
 
   --border: #d1d5db;
   --border-color: #d1d5db;

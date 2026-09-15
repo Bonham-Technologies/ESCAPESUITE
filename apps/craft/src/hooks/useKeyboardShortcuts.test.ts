@@ -34,13 +34,13 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function deps(state: RecordingState, canRecord = true): KeyboardShortcutsDeps {
-  return { state, canRecord, ...handlers }
+function deps(state: RecordingState, canRecord = true, modalOpen = false): KeyboardShortcutsDeps {
+  return { state, canRecord, modalOpen, ...handlers }
 }
 
-function mountShortcuts(state: RecordingState, canRecord = true) {
+function mountShortcuts(state: RecordingState, canRecord = true, modalOpen = false) {
   return renderHook((props: KeyboardShortcutsDeps) => useKeyboardShortcuts(props), {
-    initialProps: deps(state, canRecord),
+    initialProps: deps(state, canRecord, modalOpen),
   })
 }
 
@@ -206,5 +206,38 @@ describe('useKeyboardShortcuts binding', () => {
     press('r')
     expect(replacement).toHaveBeenCalledTimes(1)
     expect(handlers.handleStartRecording).not.toHaveBeenCalled()
+  })
+})
+
+describe('useKeyboardShortcuts while a modal is open', () => {
+  it('lets no shortcut through', () => {
+    const { rerender } = mountShortcuts('idle', true, true)
+
+    press('r')
+    rerender(deps('recording', true, true))
+    press('p')
+    press('s')
+    press('Escape')
+    rerender(deps('countdown', true, true))
+    press('Escape')
+
+    expect(handlers.handleStartRecording).not.toHaveBeenCalled()
+    expect(handlers.handlePauseRecording).not.toHaveBeenCalled()
+    expect(handlers.handleStopRecording).not.toHaveBeenCalled()
+    expect(handlers.handleCancelRecording).not.toHaveBeenCalled()
+    expect(handlers.cancelCountdown).not.toHaveBeenCalled()
+  })
+
+  it('goes back to listening once the modal closes', () => {
+    const { rerender } = mountShortcuts('idle', true, true)
+
+    press('r')
+    expect(handlers.handleStartRecording).not.toHaveBeenCalled()
+
+    rerender(deps('idle', true, false))
+    press('r')
+
+    expect(handlers.handleStartRecording).toHaveBeenCalledTimes(1)
+    expect(keydownBindings()).toBe(1)
   })
 })

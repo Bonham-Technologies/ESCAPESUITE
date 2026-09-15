@@ -1,5 +1,10 @@
-import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { test, expect, type Page } from '@playwright/test'
+import {
+  mockGetUserMedia,
+  mockMediaRecorder,
+  mockSyntheticMedia,
+  grantMediaPermissions,
+} from '../../utils/media-mocks'
 import {
   runAxeCheck,
   checkImageAltText,
@@ -116,6 +121,109 @@ test.describe('ESCAPECRAFT Accessibility', () => {
       expect(hasState).toBe(true)
     }
   })
+})
+
+/**
+ * ESCAPECRAFT beyond the idle page.
+ *
+ * The audit above only ever sees the recorder sitting still. These three runs
+ * cover the states a user actually spends time in — the Recording Tips modal,
+ * the playback modal over a saved take, and a take in progress — in the same
+ * shape as the ESCAPEARTIST Export-dialog audit: open the thing, prove it is on
+ * screen, then count serious/critical violations.
+ *
+ * The playback and mid-recording runs need capture that produces real frames,
+ * so they install `mockSyntheticMedia` rather than the inert `mockGetUserMedia`
+ * stub the block above uses — an empty stream never reaches `recording`.
+ */
+test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
+  /** Wait for capability detection: the source toggles are dead until it lands. */
+  async function waitForCapabilities(page: Page) {
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+  }
+
+  async function seriousViolations(page: Page) {
+    const results = await runAxeCheck(page)
+    return results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+  }
+
+  test('help dialog passes axe-core audit', async ({ page }) => {
+    await mockGetUserMedia(page)
+    await mockMediaRecorder(page)
+    await grantMediaPermissions(page)
+    await page.goto('http://localhost:5174')
+    await page.waitForLoadState('networkidle')
+
+    await page.getByRole('button', { name: /help - recording tips/i }).click()
+    await expect(page.getByRole('dialog', { name: 'Recording Tips' })).toBeVisible()
+
+    expect(await seriousViolations(page)).toHaveLength(0)
+  })
+
+  test('playback dialog passes axe-core audit', async ({ page }) => {
+    test.setTimeout(120_000)
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto('http://localhost:5174')
+    await page.waitForLoadState('networkidle')
+    await waitForCapabilities(page)
+
+    // A take has to exist before there is anything to play back.
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+      timeout: 30_000,
+    })
+    await page.waitForTimeout(2000)
+    await page.getByRole('button', { name: 'Stop recording' }).click()
+
+    const play = page.getByRole('button', { name: /^Play / })
+    await expect(play).toBeVisible({ timeout: 30_000 })
+    await play.click()
+
+    await expect(page.getByRole('dialog')).toBeVisible()
+
+    expect(await seriousViolations(page)).toHaveLength(0)
+  })
+
+  // Both themes, because a take in progress is where the app draws its one red
+  // text — the "Recording" label and the running timer — and a colour token
+  // tuned for one palette is a contrast failure in the other. `?theme=` is the
+  // app's own override (`parseThemeFromUrl` in @escapesuite/shared/theme) and
+  // does not persist, so each run is independent.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`a take in progress passes axe-core audit (${theme} theme)`, async ({ page }) => {
+      test.setTimeout(120_000)
+
+      await mockSyntheticMedia(page)
+      await grantMediaPermissions(page)
+      await page.goto(`http://localhost:5174/?theme=${theme}`)
+      await page.waitForLoadState('networkidle')
+      // applyTheme sets data-theme for light and *removes* it for dark, so the
+      // two assertions are not symmetrical.
+      if (theme === 'light') {
+        await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+      } else {
+        await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/)
+      }
+      await waitForCapabilities(page)
+
+      await page.getByRole('button', { name: 'Start recording' }).click()
+      await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+        timeout: 30_000,
+      })
+
+      expect(await seriousViolations(page)).toHaveLength(0)
+
+      // Leave the app idle rather than mid-capture, so teardown is not racing an
+      // encoder that is still writing.
+      await page.getByRole('button', { name: 'Stop recording' }).click()
+    })
+  }
 })
 
 test.describe('ESCAPEARTIST Accessibility', () => {
