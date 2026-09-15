@@ -321,14 +321,17 @@ a pure move that left the branch denominator at 4,100 and every uncovered count 
 the statements figure rose a hundredth as the ten covered slice creators enlarged the
 denominator, and the branches entry was corrected from a stale 93.16 to the 93.17 the
 numbers had already been). `@escapesuite/craft` was re-measured again 2026-09-15, after
-the recorder-lifecycle fixes, which raised its branches floor 95 → 96.
+the recorder-lifecycle fixes, which raised its branches floor 95 → 96, and once more the
+same day after the record-button-truth fixes (the notice channel, the readiness gate and
+the system-audio check), which moved statements, branches and functions up a fraction and
+no floor.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.21 | 96.25 | 99.67 |
+| `@escapesuite/craft` | 100.00 | 99.22 | 96.43 | 99.68 |
 | `@escapesuite/artist` | 99.34 | 98.62 | 93.17 | 98.87 |
 | `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
