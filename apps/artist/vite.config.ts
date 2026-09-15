@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import { visualizer } from 'rollup-plugin-visualizer'
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -31,17 +31,37 @@ function headlessClassicWorkersPlugin() {
   }
 }
 
+/** Escape a literal string for embedding in a RegExp. */
+function escapeRegExp(literal: string) {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /**
  * Headless-build Vite plugin: inline worker .js files into the HTML as blob URLs.
  *
  * Chrome blocks file:// pages from loading file:// workers (null origin). The only
  * way to create workers from a file:// page is via URL.createObjectURL(blob). This
- * plugin post-processes the built headless.html to replace each
- *   new Worker(``+new URL(`workerName.js`,import.meta.url).href,...)
- * with a blob-URL worker created from the inlined worker script text.
+ * plugin post-processes the built headless.html to replace each worker URL
+ * expression with a blob URL created from the inlined worker script text.
  *
- * The worker .js files are read, base64-encoded, and embedded as a <script> block
- * that defines window.__workerBlobs. The Worker call sites then use that map.
+ * Two call-site shapes are handled, because Vite has emitted both:
+ *   - vite <= 8.2:  new Worker(``+new URL(`w.js`,import.meta.url).href, ...)
+ *   - vite >= 8.3:  new Worker(new URL(`w.js`,import.meta.url).href, ...)
+ * and, for the decode worker, the doubled form
+ *   new Worker(new URL(<either of the above>,``+import.meta.url))
+ * So the rewrite treats the leading ``+ and the trailing .href as optional, and
+ * then collapses the outer `new URL(window.__wb[K], [``+]import.meta.url)` wrapper.
+ *
+ * The worker .js files are read, embedded as a <script> block that defines
+ * window.__wb, and deleted from the output directory. The Worker call sites then
+ * use that map.
+ *
+ * Fail-loud contract: this plugin must never leave a call site pointing at a file
+ * it has deleted. If a discovered worker file is missing on disk, if any inlined
+ * worker's filename survives inside a `new URL(...)`/`new Worker(...)` expression
+ * after the rewrite, or if any .js file is left behind in the output directory,
+ * it throws and fails the build — so a future change to Vite's emitted shape turns
+ * the `build` job red instead of only the e2e/kit-docker jobs (which Dependabot skips).
  */
 function headlessInlineWorkersPlugin() {
   return {
@@ -56,19 +76,23 @@ function headlessInlineWorkersPlugin() {
 
       // Find all worker files referenced in the HTML
       const workerFiles: string[] = []
-      const workerFileRegex = /new URL\(`([^`]+Worker[^`]*\.js)`,import\.meta\.url\)/g
+      const workerFileRegex = /new URL\(`([^`]+Worker[^`]*\.js)`,\s*import\.meta\.url\)/g
       let m: RegExpExecArray | null
       while ((m = workerFileRegex.exec(html)) !== null) {
         if (!workerFiles.includes(m[1])) workerFiles.push(m[1])
       }
 
-      if (workerFiles.length === 0) return
-
       // Build the inline blob map
       const blobEntries: string[] = []
       for (const wf of workerFiles) {
         const wfPath = join(outDir, wf)
-        if (!existsSync(wfPath)) continue
+        if (!existsSync(wfPath)) {
+          throw new Error(
+            `[headless-inline-workers] ${htmlPath} references worker "${wf}", but ` +
+            `${wfPath} does not exist — it cannot be inlined, and the headless bundle ` +
+            `would fail to construct that worker from file://.`
+          )
+        }
         const content = readFileSync(wfPath, 'utf8')
         // Escape backticks and template literal delimiters for embedding
         const escaped = content.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')
@@ -77,23 +101,57 @@ function headlessInlineWorkersPlugin() {
         unlinkSync(wfPath)
       }
 
-      if (blobEntries.length === 0) return
+      // Anything still emitted as a separate .js chunk would be loaded over file://
+      // and blocked. If discovery above missed a worker (e.g. Vite changed the URL
+      // expression again), this is where we find out.
+      const leftovers = readdirSync(outDir).filter((f) => f.endsWith('.js'))
+      if (leftovers.length > 0) {
+        throw new Error(
+          `[headless-inline-workers] ${outDir} still contains separate script file(s) ` +
+          `after inlining: ${leftovers.join(', ')}. The headless bundle must be a single ` +
+          `HTML file; these would be blocked when loaded from file:// (null origin).`
+        )
+      }
 
-      const blobScript = `<script>(function(){window.__wb={${blobEntries.join(',')}};})();</script>`
+      if (workerFiles.length === 0) return
 
-      // Replace each worker instantiation to use the blob URL map
-      // Pattern: new URL(`workerName.js`,import.meta.url).href  →  window.__wb['workerName.js']
+      // Replace each worker instantiation to use the blob URL map. Scoped to the
+      // files actually inlined — never a blanket rewrite of other new URL(...) uses.
+      // [``+]new URL(`workerName.js`,import.meta.url)[.href] → window.__wb['workerName.js']
+      for (const wf of workerFiles) {
+        const inner = new RegExp(
+          '(?:``\\+)?new URL\\(`' + escapeRegExp(wf) + '`,\\s*import\\.meta\\.url\\)(?:\\.href)?',
+          'g'
+        )
+        html = html.replace(inner, `window.__wb[${JSON.stringify(wf)}]`)
+      }
+      // Also handle the decode worker's double-URL pattern, now that the inner URL
+      // is a blob-URL string:
+      //   new URL(window.__wb['decodeWorker.js'],[``+]import.meta.url) → window.__wb[...]
       html = html.replace(
-        /``\+new URL\(`([^`]+\.js)`,import\.meta\.url\)\.href/g,
-        (_match, wf) => `window.__wb[${JSON.stringify(wf)}]`
-      )
-      // Also handle the decode worker's double-URL pattern:
-      // new URL(``+new URL(`decodeWorker.js`,import.meta.url).href,``+import.meta.url)
-      // → just the blob URL string
-      html = html.replace(
-        /new URL\(window\.__wb\[([^\]]+)\],``\+import\.meta\.url\)/g,
+        /new URL\(window\.__wb\[([^\]]+)\],\s*(?:``\+)?import\.meta\.url\)/g,
         (_match, key) => `window.__wb[${key}]`
       )
+
+      // Fail loudly if any call site survived the rewrite. Legitimate references are
+      // now `window.__wb["<file>"]`, so blank those out before looking; [^()] keeps the
+      // search inside a single (innermost) call expression.
+      const scrubbed = html.replace(/window\.__wb\[[^\]]*\]/g, 'window.__wb[0]')
+      for (const wf of workerFiles) {
+        const survivor = new RegExp(
+          'new (?:URL|Worker)\\([^()]{0,200}' + escapeRegExp(wf)
+        ).exec(scrubbed)
+        if (survivor) {
+          throw new Error(
+            `[headless-inline-workers] worker "${wf}" was inlined and its file deleted, but a ` +
+            `call site still loads it from a separate file — Vite's emitted URL expression ` +
+            `changed and the rewrite no longer matches it. Offending snippet:\n` +
+            `  ${scrubbed.slice(survivor.index, survivor.index + 200)}`
+          )
+        }
+      }
+
+      const blobScript = `<script>(function(){window.__wb={${blobEntries.join(',')}};})();</script>`
 
       // Inject blob script right before the first <script> tag
       html = html.replace('<script', blobScript + '\n  <script')
