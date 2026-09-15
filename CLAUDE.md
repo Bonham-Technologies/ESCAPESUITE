@@ -283,11 +283,15 @@ candidates with their status and the open follow-ups — in
 [docs/performance/2026-09-13-timeline-profile.md](docs/performance/2026-09-13-timeline-profile.md).
 
 **Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
-Five ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
+Seven ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
 `apps/artist/src/core/exportMP4.perf.test.ts`,
 `apps/artist/src/components/Timeline/timelineGestures.perf.test.ts` (listeners, rects, snap-point
-and render counts per pointer move), `apps/craft/src/core/compositor.perf.test.ts`
-and `apps/craft/src/core/converter.perf.test.ts` — run the same scene through the same
+and render counts per pointer move), `apps/craft/src/core/compositor.perf.test.ts`,
+`apps/craft/src/core/converter.perf.test.ts`,
+`apps/craft/src/core/webcodecsRecorder.perf.test.ts` (level-monitor emissions, analyser and
+planar buffers, frame/encode/flush and AudioContext lifecycles for one take) and its mirror
+`apps/craft/src/core/recorder.perf.test.ts` (the same emission rate for the MediaRecorder
+path, so the two recorders' monitors cannot drift apart) — run the same scene through the same
 doubles the behaviour tests use and count what one frame costs: 2D-context calls,
 `drawImage`/`measureText`/`save`/`restore`, animation lookups, `getContext` calls, object
 URLs, `VideoFrame`s created versus closed, `encode`/`flush` calls. They are `*.perf.test.ts`
