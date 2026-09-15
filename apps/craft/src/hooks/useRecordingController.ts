@@ -136,12 +136,16 @@ export function useRecordingController({
     }
   }, []);
 
-  useEffect(() => () => {
-    cancelledRef.current = true;
+  const clearDurationTicker = useCallback(() => {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
+  }, []);
+
+  useEffect(() => () => {
+    cancelledRef.current = true;
+    clearDurationTicker();
     clearCountdownTicker();
     disposeRecorder();
     stopAllStreamsRef.current();
@@ -153,7 +157,7 @@ export function useRecordingController({
     recorder.setState('idle');
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
-  }, [clearCountdownTicker, disposeRecorder, stopAllStreamsRef]);
+  }, [clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
@@ -166,17 +170,13 @@ export function useRecordingController({
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
     cancelledRef.current = true;
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
-    }
-
+    clearDurationTicker();
     disposeRecorder();
 
     setState('idle');
     setCurrentDuration(0);
     stopAllStreams();
-  }, [disposeRecorder, setState, setCurrentDuration, stopAllStreams]);
+  }, [clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams]);
 
   // Pause recording
   const handlePauseRecording = useCallback(() => {
@@ -194,10 +194,7 @@ export function useRecordingController({
 
   // Stop recording
   const handleStopRecording = useCallback(async () => {
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
-    }
+    clearDurationTicker();
 
     // Capture thumbnail from live preview BEFORE stopping (more reliable than from blob)
     capturedThumbnailRef.current = await capturePreviewThumbnail();
@@ -205,7 +202,7 @@ export function useRecordingController({
     if (recorderRef.current) {
       await recorderRef.current.stop();
     }
-  }, [capturePreviewThumbnail, capturedThumbnailRef]);
+  }, [capturePreviewThumbnail, capturedThumbnailRef, clearDurationTicker]);
 
   // Start the actual recording
   const startRecording = useCallback(() => {
@@ -268,9 +265,10 @@ export function useRecordingController({
 
       // Determine if we're in PiP mode (screen + webcam with compositor)
       const isPiP = config.screenEnabled && config.webcamEnabled && !!compositorRef.current;
-      // With both video sources off the take is audio only, and the WebCodecs
-      // recorder — which needs a video track — cannot serve it.
-      const hasVideoSource = config.screenEnabled || config.webcamEnabled;
+      // Whether there is a video track to encode at all — the same test both
+      // recorders apply when they pick one (a stream AND its toggle). Without
+      // one the take is audio only, which the WebCodecs recorder cannot serve.
+      const hasVideoSource = (config.screenEnabled && !!screen) || (config.webcamEnabled && !!webcam);
 
       // Initialize recorder (uses WebCodecs for non-PiP if available)
       recorderRef.current = createRecorder({
@@ -290,6 +288,9 @@ export function useRecordingController({
           // A stop that lands after the take was cancelled or the screen went
           // away is a chunk nobody asked for: drop it rather than save it.
           if (cancelledRef.current) return;
+          // The recorder can finish a take on its own — the capture ended — so
+          // nobody has been through handleStopRecording to stop the ticker.
+          clearDurationTicker();
           // Capture duration before resetting
           const recordedDuration = recorderRef.current?.getDuration() || useRecorderStore.getState().currentDuration;
           analytics.recordingCompleted(recordedDuration);
@@ -348,12 +349,18 @@ export function useRecordingController({
       }
     } catch (error) {
       console.error('Failed to start recording:', error);
+      // initialize() can throw after the recorder has already built its audio
+      // graph — an all-sources-off take reaches MediaRecorder, which creates
+      // the AudioContext before discovering it has no tracks — so a failed
+      // start leaks exactly what a cancelled countdown used to.
+      disposeRecorder();
       setState('idle');
       stopAllStreams();
     }
   }, [
     acquireStreams,
     clearCountdownTicker,
+    clearDurationTicker,
     config,
     disposeRecorder,
     setState,

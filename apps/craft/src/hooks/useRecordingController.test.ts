@@ -178,11 +178,15 @@ describe('useRecordingController starting a take', () => {
       { screenEnabled: false, webcamEnabled: false, microphoneEnabled: true, countdownSeconds: 0 },
       { screen: null, webcam: null, mic }
     )
+    recorderFactory.recorderType = 'webcodecs'
 
     await startTake(result)
 
     expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, false)
     expect(recorderFactory.last().hasVideoSource).toBe(false)
+    // The label useRecordingSave keys the WebM metadata repair off: a
+    // MediaRecorder take needs it even on a WebCodecs-capable machine.
+    expect(harness.deps.recorderTypeRef.current).toBe('mediarecorder')
     expect(recorderFactory.last().initializeCalls[0]).toMatchObject({ screen: null, webcam: null, mic })
     expect(harness.setPreviewStream).not.toHaveBeenCalled()
     expect(state()).toBe('recording')
@@ -195,6 +199,22 @@ describe('useRecordingController starting a take', () => {
     await startTake(result)
 
     expect(harness.deps.micStreamRef.current).toBe(mic)
+  })
+
+  it('disposes the recorder when the take fails to initialize', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    // A take with every source switched off reaches the MediaRecorder path,
+    // which builds its AudioContext before discovering it has no tracks. The
+    // failed attempt has to hand that back like any other exit.
+    recorderFactory.nextInitializeError = new Error('No tracks available for recording')
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error))
+    expect(recorderFactory.last().dispose).toHaveBeenCalledTimes(1)
+    expect(state()).toBe('idle')
+    expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
   })
 
   it('reports a refused capture and goes back to idle', async () => {
@@ -324,6 +344,21 @@ describe('useRecordingController running a take', () => {
 
     expect(recorderFactory.recorders).toHaveLength(0)
     expect(state()).toBe('idle')
+  })
+
+  it('stops the elapsed-time ticker when the recorder stops on its own', async () => {
+    const { recorder } = await startLiveTake()
+    recorder.duration = 9
+    act(() => { vi.advanceTimersByTime(100) })
+    expect(vi.getTimerCount()).toBe(1)
+
+    // The capture died and the recorder finished the take itself — nobody went
+    // through handleStopRecording, so nothing else clears the ticker.
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob) })
+
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 9)
+    expect(useRecorderStore.getState().currentDuration).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('feeds the audio meters straight through to the store', async () => {
