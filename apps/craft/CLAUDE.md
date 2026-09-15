@@ -194,7 +194,7 @@ mounted it holds one `keydown` listener on `document` **in the capture phase**:
 - **Tab / Shift+Tab** wrap at the ends of the dialog, and pull focus back in if it has strayed
   outside.
 - **everything else passes straight through**, which is how the playback dialog's `VideoPlayer`
-  keeps Space, M, F and the arrows — it binds its own `window` listener, and `window`'s bubble
+  keeps Space, M and the arrows — it binds its own `window` listener, and `window`'s bubble
   phase is below `document`'s capture phase.
 
 The hook is ESCAPEARTIST's `ExportDialog` focus trap, lifted rather than re-invented — same
@@ -207,14 +207,30 @@ Stopping Escape is not enough on its own, because R, P and S never reach the dia
 `App` computes it as `showHelpModal || playbackUrl !== null`. Before that gate, pressing R inside
 the Help dialog put a screen-capture prompt up from behind it.
 
+**The hook assumes one dialog at a time**, and today that holds: each backdrop is
+`position: fixed; inset: 0` at `z-index: 1000`, so a click aimed at the Help button while
+playback is open lands on the playback backdrop and closes it instead, and the focus trap keeps
+that button out of Tab's reach. Two mounted at once would bind two capture listeners, and one
+Escape would close both and fire two focus restores. A third dialog, or a dialog opened from
+inside another, has to keep that property or the hook needs a stack.
+
 **What axe covers.** `apps/e2e/tests/accessibility/core.spec.ts` audits CRAFT in four states,
 not one: idle, Help open, the playback dialog open over a real saved take, and a take in
 progress. The last two need `mockSyntheticMedia` (the inert `mockGetUserMedia` stub has no
 tracks, so a take never reaches `recording`). Adding the last two found a WCAG AA contrast
 failure as well: `--error` as *text* on `--bg-secondary` is 4.22:1, which is what the live
 "Recording" label, the running timer and the notice line were drawn in. They use
-**`--error-text`** (#f87171, 5.7:1) now; non-text uses of `--error` — the pulsing dot, the record
-button — keep the brand red, since the rule does not apply to them.
+**`--error-text`** now; non-text uses of `--error` — the pulsing dot, the record button — keep
+the brand red, since the rule does not apply to them.
+
+`--error-text` has a value in **both** palettes — `#f87171` (5.7:1 on `#16213e`) for the dark
+`:root` and `#b91c1c` (6.0:1 on `#f5f7fa`) for `:root[data-theme="light"]` — because a token
+defined on `:root` alone is inherited by the light theme, where a red tuned for navy lands at
+2.6:1. Two things stop that recurring: the take-in-progress axe run is executed **in both
+themes** (`?theme=dark` / `?theme=light`, the shared theme module's own URL override), and
+`src/themeTokens.test.ts` reads `index.css` and fails if any colour token in `:root` has no
+counterpart in the light block. Add a colour to one palette and you are made to add it to the
+other.
 
 `apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` proves the round trip in a real
 browser: open Help from the keyboard, Tab six times without leaving it, Escape, focus back on

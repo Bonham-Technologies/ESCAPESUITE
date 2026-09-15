@@ -13,7 +13,7 @@ Dialogs behave like dialogs, for the keyboard and for a screen reader.
   Recording Tips dialog was open started a screen recording behind it, complete with the
   browser's capture prompt; P, S and Escape reached the recorder the same way. Nothing
   behind a dialog takes keys now. Inside the playback dialog, the player keeps its own keys
-  — Space, M, F and the arrows still work.
+  — Space, M and the arrows still work.
 - **The Recording Tips can be scrolled from the keyboard.** The tips scroll and hold no
   controls of their own, so there was nothing to Tab to and no way to reach the text below
   the fold without a mouse.

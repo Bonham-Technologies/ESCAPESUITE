@@ -140,6 +140,21 @@ describe('useDialogBehaviour focus trap', () => {
     expect(document.activeElement).toBe(buttons[1])
   })
 
+  it('wraps backwards from the dialog container itself', () => {
+    // The container is `tabIndex={-1}`, so it is not in the tab order but a
+    // click can land on it — which is what clicking the playback dialog's
+    // <video> does. Shift+Tab from there used to walk backwards *out* of the
+    // modal, onto whatever was behind it.
+    const { view, buttons } = renderDialog()
+    const dialog = view.container.querySelector('[role="dialog"]') as HTMLElement
+    dialog.focus()
+    expect(document.activeElement).toBe(dialog)
+
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+
+    expect(document.activeElement).toBe(buttons[2])
+  })
+
   it('pulls focus back in when it has strayed outside', () => {
     const outside = document.createElement('button')
     document.body.appendChild(outside)

@@ -324,6 +324,17 @@ describe('App header', () => {
 });
 
 describe('App help modal', () => {
+  let restoreOffsetParent: (() => void) | null = null;
+
+  // Two of these tests patch HTMLElement.prototype.offsetParent (jsdom does no
+  // layout, and the focus trap filters on it). Undo it here rather than at the
+  // end of the test body: an assertion that throws would otherwise leak the
+  // patch into every later test in the file.
+  afterEach(() => {
+    restoreOffsetParent?.();
+    restoreOffsetParent = null;
+  });
+
   it('opens from the header and closes from its own button', async () => {
     const user = userEvent.setup();
     await renderApp();
@@ -349,7 +360,7 @@ describe('App help modal', () => {
   });
 
   it('closes on Escape, and hands focus back to the Help button', async () => {
-    const restoreOffsetParent = installOffsetParentStub();
+    restoreOffsetParent = installOffsetParentStub();
     const user = userEvent.setup();
     await renderApp();
 
@@ -363,11 +374,10 @@ describe('App help modal', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(trigger);
-    restoreOffsetParent();
   });
 
   it('does not let the recorder shortcuts fire behind it', async () => {
-    const restoreOffsetParent = installOffsetParentStub();
+    restoreOffsetParent = installOffsetParentStub();
     const user = userEvent.setup();
     await renderApp();
     await user.click(screen.getByRole('button', { name: 'Help - Recording Tips' }));
@@ -380,7 +390,6 @@ describe('App help modal', () => {
     expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
     expect(useRecorderStore.getState().state).toBe('idle');
     expect(screen.getByRole('dialog')).toBeTruthy();
-    restoreOffsetParent();
   });
 });
 
