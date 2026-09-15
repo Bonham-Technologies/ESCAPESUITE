@@ -232,28 +232,47 @@ describe('storage', () => {
       expect(result).toBe(true)
     })
 
+    // Adjusted numbers: the requirement is now the *lower* of "estimate +
+    // buffer" and a quarter of the quota, so a roomy quota has to be nearly
+    // full for the absolute term to be the binding one.
     it('returns false when available space is within the 50MB buffer', async () => {
-      const quota = 60 * 1024 * 1024 // 60MB quota, no usage
+      const quota = 1024 * 1024 * 1024 // 1GB quota…
       Object.defineProperty(navigator, 'storage', {
-        value: { estimate: vi.fn().mockResolvedValue({ usage: 0, quota }) },
+        value: { estimate: vi.fn().mockResolvedValue({ usage: quota - 64 * 1024 * 1024, quota }) },
         configurable: true,
       })
 
-      // 20MB recording + 50MB buffer > 60MB available
+      // …with 64MB left: 20MB recording + 50MB buffer is the binding limit
       const result = await storage.hasSpaceForRecording(20 * 1024 * 1024)
       expect(result).toBe(false)
     })
 
     it('returns false exactly at the buffer boundary', async () => {
       const estimatedSize = 10 * 1024 * 1024
-      const quota = estimatedSize + 50 * 1024 * 1024 // available === estimatedSize + buffer
+      const quota = 1024 * 1024 * 1024
+      const required = estimatedSize + 50 * 1024 * 1024 // below quota * 0.25
       Object.defineProperty(navigator, 'storage', {
-        value: { estimate: vi.fn().mockResolvedValue({ usage: 0, quota }) },
+        value: { estimate: vi.fn().mockResolvedValue({ usage: quota - required, quota }) },
         configurable: true,
       })
 
       const result = await storage.hasSpaceForRecording(estimatedSize)
       expect(result).toBe(false)
+    })
+
+    it('allows a take on a small quota, where a fixed 100MB floor would refuse every one', async () => {
+      // A private/ephemeral profile: 80MB total, 10MB used. A 10-second webcam
+      // clip fits comfortably; the old fixed floor said "delete a recording"
+      // in a window with nothing stored to delete.
+      Object.defineProperty(navigator, 'storage', {
+        value: {
+          estimate: vi.fn().mockResolvedValue({ usage: 10 * 1024 * 1024, quota: 80 * 1024 * 1024 }),
+        },
+        configurable: true,
+      })
+
+      const result = await storage.hasSpaceForRecording(50 * 1024 * 1024)
+      expect(result).toBe(true)
     })
 
     // Changed assertion: this used to expect false. A browser that reports no

@@ -12,8 +12,10 @@ export const SAVE_FAILED =
 export const NOT_SEEKABLE =
   'Saved, but the recording may not be seekable — the container repair failed.'
 
-export const NO_STORAGE_SPACE =
-  'Not enough storage space left for a new recording — delete a recording and try again.'
+export const CAPTURE_REFUSED =
+  'The browser refused the capture — nothing was recorded.'
+
+export const START_FAILED = 'The recording could not be started.'
 
 export const LIBRARY_UNREADABLE =
   'Your saved recordings could not be loaded — storage may be blocked in this browser.'

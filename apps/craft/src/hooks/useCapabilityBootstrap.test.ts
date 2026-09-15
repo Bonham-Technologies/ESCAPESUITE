@@ -17,10 +17,12 @@ vi.mock('../core/permissions', async (importOriginal) => {
 })
 
 let loadRecordings: ReturnType<typeof vi.fn>
+let refreshStorageSpace: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   resetAppDoubles()
   loadRecordings = vi.fn(async () => {})
+  refreshStorageSpace = vi.fn(async () => {})
   useRecorderStore.setState({ capabilitiesReady: false, notice: null })
 })
 
@@ -38,6 +40,7 @@ function mountBootstrap() {
       setCapabilitiesReady,
       setNotice,
       loadRecordings: loadRecordings as unknown as () => Promise<void>,
+      refreshStorageSpace: refreshStorageSpace as unknown as () => Promise<void>,
     })
   )
 }
@@ -66,6 +69,12 @@ describe('useCapabilityBootstrap', () => {
     await waitFor(() => {
       expect(permissionsOverrides.detectCapabilities).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('measures the storage headroom on the way in, so the button knows before the click', async () => {
+    mountBootstrap()
+
+    expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
   })
 
   it('holds the capabilities "not ready" until the detection answers', async () => {

@@ -13,17 +13,27 @@
 // The three sources counted here are exactly the three `acquireStreams()` asks
 // for, each gated on "the toggle AND the capability", which is the same test
 // the acquisition itself applies.
+//
+// Storage headroom is the fourth reason, and it is *here* rather than inside
+// `handleStartRecording` on purpose: `getDisplayMedia` needs the click's user
+// activation, so nothing may be awaited between the click and the capture
+// request. The headroom is measured on mount, after every save and after every
+// delete, and read from the store — so the button is already disabled, with
+// the reason on screen, before the user clicks.
 import type { EnvironmentCapabilities, RecordingConfig } from '../store/types'
 
 export const CHECKING_CAPABILITIES = 'Checking what this browser can capture…'
 export const NO_SOURCE_ENABLED = 'Turn on a source before recording'
 export const NO_SOURCE_AVAILABLE = 'None of the sources you turned on are available in this browser'
+export const NO_STORAGE_SPACE =
+  'Not enough storage space left for a new recording — delete a recording and try again.'
 
 /** The reason the Record button must not start a take, or null if it may. */
 export function recordBlockedReason(
   capabilitiesReady: boolean,
   config: RecordingConfig,
-  capabilities: EnvironmentCapabilities
+  capabilities: EnvironmentCapabilities,
+  hasStorageSpace: boolean
 ): string | null {
   if (!capabilitiesReady) {
     return CHECKING_CAPABILITIES
@@ -38,5 +48,11 @@ export function recordBlockedReason(
     (config.webcamEnabled && capabilities.webcam) ||
     (config.microphoneEnabled && capabilities.microphone)
 
-  return anyAvailable ? null : NO_SOURCE_AVAILABLE
+  if (!anyAvailable) {
+    return NO_SOURCE_AVAILABLE
+  }
+
+  // Last, because the source reasons are about the toggle the user just
+  // touched and this one is a background fact they did not.
+  return hasStorageSpace ? null : NO_STORAGE_SPACE
 }

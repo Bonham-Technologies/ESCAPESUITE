@@ -71,6 +71,7 @@ export function resetRecorderStore(config: Partial<RecordingConfig> = {}): void 
     webcamStream: null,
     notice: null,
     systemAudioShared: true,
+    hasStorageSpace: true,
   })
 }
 

@@ -28,6 +28,7 @@ function App() {
     recordings,
     notice,
     systemAudioShared,
+    hasStorageSpace,
     currentDuration,
     countdownValue,
     audioLevels,
@@ -45,6 +46,7 @@ function App() {
     addRecording,
     removeRecording,
     loadRecordings,
+    refreshStorageSpace,
   } = useRecorderStore();
 
   // The two refs the take and the save share. They are created here, once, and
@@ -67,6 +69,7 @@ function App() {
     setCapabilitiesReady,
     setNotice,
     loadRecordings,
+    refreshStorageSpace,
   });
 
   const {
@@ -94,7 +97,7 @@ function App() {
 
   // Why the Record button (and the R shortcut with it) cannot start a take.
   // Computed here because it is a fact about the store, not about the bar.
-  const blockedReason = recordBlockedReason(capabilitiesReady, config, capabilities);
+  const blockedReason = recordBlockedReason(capabilitiesReady, config, capabilities, hasStorageSpace);
 
   const {
     cancelCountdown,
@@ -123,6 +126,7 @@ function App() {
     saveRecording,
     setNotice,
     setSystemAudioShared,
+    refreshStorageSpace,
   });
 
   useKeyboardShortcuts({
@@ -145,7 +149,7 @@ function App() {
     handlePlayRecording,
     handleClosePlayback,
     handleDownload,
-  } = useRecordingLibrary({ recordings, removeRecording });
+  } = useRecordingLibrary({ recordings, removeRecording, refreshStorageSpace });
 
   // Toggle source
   const toggleSource = (source: RecordingSource) => {

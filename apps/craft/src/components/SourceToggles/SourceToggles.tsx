@@ -5,8 +5,17 @@ import type {
   RecordingConfig,
 } from '../../store/types';
 import { MicIcon, ScreenIcon, SpeakerIcon, UnavailableIcon, WebcamIcon } from '../icons';
-import { NO_SYSTEM_AUDIO } from '../../utils/notices';
 import styles from '../../App.module.css';
+
+/**
+ * Why the System meter is greyed.
+ *
+ * Deliberately *not* the `NO_SYSTEM_AUDIO` notice: that one tells the user to
+ * tick a box in the share dialog, and the meter also greys for a take that
+ * never opened one (system audio on, screen off). This says only what is true
+ * in both cases; the actionable version reaches the header when it applies.
+ */
+const NO_SYSTEM_AUDIO_HINT = 'No system audio arrived for this take.';
 
 /** The four capture sources the sidebar can switch on and off. */
 export type RecordingSource = 'screen' | 'webcam' | 'microphone' | 'systemAudio';
@@ -164,7 +173,7 @@ export function SourceToggles({
           {config.systemAudioEnabled && (
             <div
               className={`${styles.audioMeter} ${!systemAudioShared ? styles.meterUnavailable : ''}`}
-              title={systemAudioShared ? undefined : NO_SYSTEM_AUDIO}
+              title={systemAudioShared ? undefined : NO_SYSTEM_AUDIO_HINT}
             >
               <span className={styles.meterLabel}>System</span>
               <div className={styles.meterBar}>

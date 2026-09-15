@@ -16,6 +16,12 @@ export interface RecordingLibraryDeps {
   /** The list as the store holds it — read for the played recording's duration. */
   recordings: Recording[];
   removeRecording: (id: string) => void;
+  /**
+   * Re-read the storage headroom. Deleting is the remedy a storage-blocked
+   * Record button recommends, so it has to be re-measured here or the button
+   * stays disabled after the user has done what it asked.
+   */
+  refreshStorageSpace: () => Promise<void>;
 }
 
 export interface RecordingLibrary {
@@ -30,7 +36,11 @@ export interface RecordingLibrary {
   handleDownload: (id: string, name: string) => Promise<void>;
 }
 
-export function useRecordingLibrary({ recordings, removeRecording }: RecordingLibraryDeps): RecordingLibrary {
+export function useRecordingLibrary({
+  recordings,
+  removeRecording,
+  refreshStorageSpace,
+}: RecordingLibraryDeps): RecordingLibrary {
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
   const [playbackDuration, setPlaybackDuration] = useState<number>(0);
@@ -39,6 +49,8 @@ export function useRecordingLibrary({ recordings, removeRecording }: RecordingLi
   const handleDeleteRecording = async (id: string) => {
     await deleteVideo(id);
     removeRecording(id);
+    // Never rejects — see the store action.
+    void refreshStorageSpace();
   };
 
   // Send recording to ESCAPEARTIST (or the host, when embedded)

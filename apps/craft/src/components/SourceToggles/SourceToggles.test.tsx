@@ -237,10 +237,9 @@ describe('SourceToggles system audio that never arrived', () => {
 
     const meter = screen.getByText('System').closest(`.${styles.audioMeter}`) as HTMLElement
     expect(meter).toHaveClass(styles.meterUnavailable)
-    expect(meter).toHaveAttribute(
-      'title',
-      "System audio was not shared — tick 'Share system audio' in the browser dialog."
-    )
+    // Not the notice's wording: the meter greys for a webcam-only take too,
+    // where there was no share dialog to miss a tick box in.
+    expect(meter).toHaveAttribute('title', 'No system audio arrived for this take.')
     // The microphone meter beside it is untouched.
     const mic = screen.getByText('Mic').closest(`.${styles.audioMeter}`) as HTMLElement
     expect(mic).not.toHaveClass(styles.meterUnavailable)

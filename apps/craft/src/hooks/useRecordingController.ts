@@ -19,8 +19,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { createRecorder, getRecorderType, type AnyRecorder } from '../core/recorder-factory';
 import { hasSystemAudio } from '../core/permissions';
-import { hasSpaceForRecording } from '../core/storage';
-import { NO_STORAGE_SPACE, NO_SYSTEM_AUDIO, SAVE_FAILED } from '../utils/notices';
+import { CAPTURE_REFUSED, NO_SYSTEM_AUDIO, SAVE_FAILED, START_FAILED } from '../utils/notices';
 import { Compositor } from '../core/compositor';
 import { analytics } from '../utils/analytics';
 import { drawThumbnail } from '../utils/previewThumbnail';
@@ -54,16 +53,26 @@ export interface RecordingControllerDeps {
   setNotice: (notice: string | null) => void;
   /** Whether a system-audio track actually arrived; greys the System meter. */
   setSystemAudioShared: (shared: boolean) => void;
+  /**
+   * Re-read the storage headroom. Called *after* a take, never before one:
+   * see the comment on the acquisition below.
+   */
+  refreshStorageSpace: () => Promise<void>;
 }
 
 /**
- * What one take is assumed to cost, for the pre-flight storage check.
+ * Why a take never started, as far as the user needs to know.
  *
- * There is no way to know before the fact, and `hasSpaceForRecording` keeps a
- * 50MB buffer of its own on top, so this is a floor rather than an estimate:
- * refuse a take when there is not comfortably 100MB to put it in.
+ * `NotAllowedError` is the browser refusing the capture — the picker was
+ * cancelled, the permission is denied, or the click's user activation had
+ * expired by the time `getDisplayMedia` ran. It is worth its own sentence
+ * because "nothing happened" is otherwise indistinguishable from a bug.
  */
-const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
+function startFailureNotice(error: unknown): string {
+  return (error as { name?: string } | null)?.name === 'NotAllowedError'
+    ? CAPTURE_REFUSED
+    : START_FAILED;
+}
 
 export interface RecordingController {
   cancelCountdown: () => void;
@@ -94,6 +103,7 @@ export function useRecordingController({
   saveRecording,
   setNotice,
   setSystemAudioShared,
+  refreshStorageSpace,
 }: RecordingControllerDeps): RecordingController {
   const recorderRef = useRef<AnyRecorder | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
@@ -250,18 +260,22 @@ export function useRecordingController({
     try {
       cancelledRef.current = false;
       // Starting a take is the "next successful action" that clears whatever
-      // the last one had to report.
+      // the last one had to report. The System meter goes back with it: the
+      // flag is display-only and the meter is drawn only while a take runs,
+      // so resetting it here is the whole of its lifecycle.
       setNotice(null);
+      setSystemAudioShared(true);
       setState('preparing');
 
-      // Ask before capturing anything: a take that cannot be stored is worse
-      // than one that never started, and the user can act on this one.
-      if (!(await hasSpaceForRecording(ESTIMATED_RECORDING_BYTES))) {
-        setNotice(NO_STORAGE_SPACE);
-        setState('idle');
-        return;
-      }
-
+      // NOTHING MAY BE AWAITED BETWEEN HERE AND acquireStreams(). It calls
+      // requestScreenCapture -> getDisplayMedia, which needs the click's user
+      // activation; an await in front of it can spend that activation (WebKit
+      // forwards a gesture across promises only briefly), and the
+      // NotAllowedError that follows is a failure the user never asked for.
+      // Storage headroom is measured off this path instead — on mount, after
+      // each save, after each delete — and read back through
+      // `recordBlockedReason`, so a take with nowhere to go is refused by a
+      // disabled button before the click ever happens.
       const { screen, webcam, mic } = await acquireStreams();
       setStreams(screen, webcam);
       micStreamRef.current = mic;
@@ -350,6 +364,10 @@ export function useRecordingController({
             console.error('Failed to save recording:', err);
             setNotice(SAVE_FAILED);
             setState('idle');
+          }).finally(() => {
+            // Either way the library has changed size — re-read the headroom
+            // so the Record button reflects it before the next click.
+            void refreshStorageSpace();
           });
         },
         onError: (error) => {
@@ -395,6 +413,9 @@ export function useRecordingController({
       }
     } catch (error) {
       console.error('Failed to start recording:', error);
+      // A start that died here used to leave the app back at idle with
+      // nothing said — the same silence this work exists to delete.
+      setNotice(startFailureNotice(error));
       // initialize() can throw after the recorder has already built its audio
       // graph — an all-sources-off take reaches MediaRecorder, which creates
       // the AudioContext before discovering it has no tracks — so a failed
@@ -424,6 +445,7 @@ export function useRecordingController({
     setIsPiPActive,
     setNotice,
     setSystemAudioShared,
+    refreshStorageSpace,
   ]);
 
   return {

@@ -9,7 +9,21 @@ import type {
   Recording,
 } from './types';
 import { defaultConfig } from './types';
-import { getRecordingsMetadata, getThumbnail, createBlobUrl } from '../core/storage';
+import {
+  getRecordingsMetadata,
+  getThumbnail,
+  createBlobUrl,
+  hasSpaceForRecording,
+} from '../core/storage';
+
+/**
+ * What one take is assumed to cost, for the storage headroom check.
+ *
+ * There is no way to know before the fact, and `hasSpaceForRecording` applies
+ * its own buffer and its own relative floor on top, so this is a working
+ * figure rather than an estimate.
+ */
+const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
 
 export const useRecorderStore = create<RecorderStore>((set) => ({
   // Initial state
@@ -33,6 +47,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   recordings: [],
   notice: null,
   systemAudioShared: true,
+  hasStorageSpace: true,
 
   // Current recording data
   currentDuration: 0,
@@ -63,6 +78,16 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   setSystemAudioShared: (systemAudioShared: boolean) =>
     set({ systemAudioShared }),
+
+  refreshStorageSpace: async () => {
+    try {
+      set({ hasStorageSpace: await hasSpaceForRecording(ESTIMATED_RECORDING_BYTES) });
+    } catch {
+      // An estimate that threw is "unknown", and unknown is not full — the
+      // same call this whole check errs toward everywhere else.
+      set({ hasStorageSpace: true });
+    }
+  },
 
   setState: (newState: RecordingState) =>
     set({ state: newState }),

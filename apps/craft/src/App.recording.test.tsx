@@ -242,6 +242,21 @@ describe('App record button readiness', () => {
     );
   });
 
+  it('refuses a take, before the click, when there is nowhere to put it', async () => {
+    armScreenCapture();
+    await renderApp();
+    expect(recordButton()).toBeEnabled();
+
+    await act(async () => {
+      useRecorderStore.setState({ hasStorageSpace: false });
+    });
+
+    expect(recordButton()).toBeDisabled();
+    expect(recordButton()).toHaveAccessibleDescription(
+      'Not enough storage space left for a new recording — delete a recording and try again.'
+    );
+  });
+
   it('ignores R while the record button is blocked', async () => {
     armScreenCapture();
     resetRecorderStore({ screenEnabled: false, webcamEnabled: false, microphoneEnabled: false });

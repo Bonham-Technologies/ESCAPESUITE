@@ -17,6 +17,7 @@ vi.mock('../utils/sendToEditor', async () => (await import('../test/appDoubles')
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
 
 let removeRecording: ReturnType<typeof vi.fn<(id: string) => void>>
+let refreshStorageSpace: ReturnType<typeof vi.fn>
 let clicks: Array<{ href: string; download: string }>
 
 function listed(id: string, name: string, duration: number): Recording {
@@ -46,6 +47,7 @@ async function seed(id: string, name: string): Promise<void> {
 beforeEach(async () => {
   resetAppDoubles()
   removeRecording = vi.fn<(id: string) => void>()
+  refreshStorageSpace = vi.fn(async () => {})
   clicks = []
   vi.mocked(URL.createObjectURL).mockClear()
   vi.mocked(URL.revokeObjectURL).mockClear()
@@ -60,7 +62,13 @@ afterEach(() => {
 })
 
 function mountLibrary(recordings: Recording[] = []) {
-  return renderHook(() => useRecordingLibrary({ recordings, removeRecording }))
+  return renderHook(() =>
+    useRecordingLibrary({
+      recordings,
+      removeRecording,
+      refreshStorageSpace: refreshStorageSpace as unknown as () => Promise<void>,
+    })
+  )
 }
 
 describe('useRecordingLibrary playback', () => {
@@ -200,6 +208,9 @@ describe('useRecordingLibrary list actions', () => {
 
     await expect(getVideoBlob('take-1')).resolves.toBeUndefined()
     expect(removeRecording).toHaveBeenCalledWith('take-1')
+    // Deleting is the remedy the blocked Record button recommends, so the
+    // headroom has to be re-read or the button stays disabled afterwards.
+    expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
   })
 
   it('hands a recording to the editor by id', () => {

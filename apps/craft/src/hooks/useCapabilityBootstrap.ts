@@ -18,6 +18,11 @@ export interface CapabilityBootstrapDeps {
   /** The one notice channel — see utils/notices.ts. */
   setNotice: (notice: string | null) => void;
   loadRecordings: () => Promise<void>;
+  /**
+   * Measure the storage headroom into the store. Done here, on the way in,
+   * precisely so the Record button never has to await it on the click path.
+   */
+  refreshStorageSpace: () => Promise<void>;
 }
 
 export function useCapabilityBootstrap({
@@ -26,6 +31,7 @@ export function useCapabilityBootstrap({
   setCapabilitiesReady,
   setNotice,
   loadRecordings,
+  refreshStorageSpace,
 }: CapabilityBootstrapDeps): void {
   // Detect capabilities on mount
   useEffect(() => {
@@ -49,5 +55,14 @@ export function useCapabilityBootstrap({
       console.error('Failed to load recordings:', error);
       setNotice(LIBRARY_UNREADABLE);
     });
-  }, [setCapabilities, setDetailedCapabilities, setCapabilitiesReady, setNotice, loadRecordings]);
+    // Never rejects — see the store action.
+    void refreshStorageSpace();
+  }, [
+    setCapabilities,
+    setDetailedCapabilities,
+    setCapabilitiesReady,
+    setNotice,
+    loadRecordings,
+    refreshStorageSpace,
+  ]);
 }
