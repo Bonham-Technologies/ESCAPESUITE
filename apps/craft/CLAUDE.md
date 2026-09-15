@@ -127,6 +127,38 @@ Enhanced capability detection with detailed unavailability reasons:
 Which sources are captured is `src/hooks/useMediaStreams.ts`; what is done with them — countdown,
 start, pause, resume, stop, cancel and teardown — is `src/hooks/useRecordingController.ts`.
 
+### Recorder lifecycle
+
+The recorder is created **and `initialize()`d before the countdown starts**, so from that moment
+it already owns an AudioContext, a ScriptProcessorNode, an rAF audio-level monitor that loops
+forever and — on the WebCodecs fallback capture path — a `<video>` appended to the document.
+**Every exit from a take therefore has to `dispose()` it**: cancelling the countdown, cancelling
+the recording, a recorder error, and the unmount teardown. `useRecordingController` funnels all
+four through one `disposeRecorder()` helper (and the countdown ticker through
+`clearCountdownTicker()`) so a new exit path cannot quietly skip it. Skipping it leaks one
+AudioContext per attempt, and Chrome refuses to create more after about six.
+
+The capture can also die on its own — the user hits the browser's "Stop sharing" — and the take
+is not always mid-recording when it does. Both recorders handle the video track's `ended` event
+in all three states:
+
+- **recording** → stop and deliver the blob (unchanged)
+- **paused** → also stop and deliver. A paused take over a dead capture can never be resumed, so
+  leaving the UI in Paused only guarantees a truncated file when Stop is finally pressed.
+  `MediaRecorder.stop()` from `'paused'` still fires `onstop`; WebCodecs keeps `isRecordingActive`
+  true across `pause()`, so its `stop()` finalizes normally
+- **before `start()`** (i.e. during the countdown) → nothing was captured, so there is no blob to
+  deliver. Both recorders call `onError` with `'Capture ended before recording started'`, which is
+  the only channel they have back to the controller; `onError` there clears the countdown ticker,
+  disposes the recorder and returns to idle. ESCAPECRAFT has no in-app notification surface, so the
+  user sees the console warning and the app back at idle rather than a toast
+
+**Audio-only takes use the MediaRecorder path.** `SourceToggles` lets both video sources be switched
+off; `WebCodecsRecorder` is built around a video track and throws
+`'No video track available for recording'` without one. `createRecorder` / `canUseWebCodecsRecorder`
+/ `getRecorderType` take `hasVideoSource` alongside `isPiP` for exactly this, and the controller
+passes `config.screenEnabled || config.webcamEnabled`.
+
 ### Integration with ESCAPEARTIST
 - Both apps share `video-editor-db` IndexedDB database
 - Recordings stored with `source: 'recording'` and `recordedAt` timestamp
