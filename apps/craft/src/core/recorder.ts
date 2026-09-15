@@ -21,6 +21,10 @@ export class Recorder {
   private systemAnalyser: AnalyserNode | null = null;
   private animationFrameId: number | null = null;
   private callbacks: RecorderCallbacks = {};
+  // Distinguishes "never started" from "already finished": mediaRecorder.state
+  // is 'inactive' in both, but only the first means the capture died during the
+  // countdown. Never reset — a Recorder records one take.
+  private hasStarted = false;
   private startTime: number = 0;
   private pausedDuration: number = 0;
   private pauseStartTime: number = 0;
@@ -105,10 +109,24 @@ export class Recorder {
     for (const track of tracks) {
       const handler = () => {
         console.warn(`Track ended: ${track.kind} - ${track.label}`);
-        // If a video track ends while recording, stop the recording gracefully
-        if (track.kind === 'video' && this.mediaRecorder?.state === 'recording') {
+        if (track.kind !== 'video') return;
+        const state = this.mediaRecorder?.state;
+        if (state === 'recording' || state === 'paused') {
+          // Paused counts as well as recording: the capture is dead and can
+          // never be resumed, so leaving the UI in Paused only guarantees a
+          // truncated file when the user finally presses Stop. Stopping from
+          // 'paused' still fires onstop, so the take is delivered as usual.
           console.warn('Video track ended during recording, stopping...');
           this.stop();
+        } else if (!this.hasStarted) {
+          // The capture went away between initialize() and start(), i.e.
+          // during the countdown. Nothing has been recorded, so there is no
+          // take to deliver; tell the caller instead, or it starts a recording
+          // with no source behind it. An 'inactive' recorder that HAS started
+          // is a take being finalized — pressing Stop and then clicking the
+          // browser's "Stop sharing" bar lands there, and reporting that as a
+          // failure would throw the finished recording away.
+          this.callbacks.onError?.(new Error('Capture ended before recording started'));
         }
       };
       track.addEventListener('ended', handler);
@@ -156,6 +174,7 @@ export class Recorder {
     }
 
     this.chunks = [];
+    this.hasStarted = true;
     this.startTime = Date.now();
     this.pausedDuration = 0;
     this.mediaRecorder.start(1000); // Collect data every second

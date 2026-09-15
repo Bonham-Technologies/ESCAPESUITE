@@ -27,6 +27,8 @@ export interface InitializeCall {
 export interface RecorderDouble {
   readonly callbacks: RecorderCallbacksLike
   readonly isPiP: boolean
+  /** Whether the take had a video source at all (false = audio-only). */
+  readonly hasVideoSource: boolean
   /** Arguments of every initialize() call, oldest first. */
   readonly initializeCalls: InitializeCall[]
   readonly initialize: ReturnType<typeof vi.fn>
@@ -50,13 +52,18 @@ export interface RecorderDouble {
   emitAudioLevels(levels: { microphone: number; system: number }): void
 }
 
-function createRecorderDouble(callbacks: RecorderCallbacksLike, isPiP: boolean): RecorderDouble {
+function createRecorderDouble(
+  callbacks: RecorderCallbacksLike,
+  isPiP: boolean,
+  hasVideoSource: boolean
+): RecorderDouble {
   let recording = false
   let paused = false
 
   const double: RecorderDouble = {
     callbacks,
     isPiP,
+    hasVideoSource,
     initializeCalls: [],
     stopBlob: new Blob(['recorded-bytes'], { type: 'video/webm' }),
     duration: 0,
@@ -129,8 +136,10 @@ export interface RecorderFactoryDouble {
   readonly recorders: RecorderDouble[]
   /** The recorder most recently handed out. Throws if there is none. */
   last(): RecorderDouble
-  /** What getRecorderType() reports; also decides the recorder's own label. */
+  /** What getRecorderType() reports for a take that can use WebCodecs. */
   recorderType: 'webcodecs' | 'mediarecorder'
+  /** When set, the next recorder handed out rejects its first initialize(). */
+  nextInitializeError: Error | null
   readonly createRecorder: ReturnType<typeof vi.fn>
   readonly getRecorderType: ReturnType<typeof vi.fn>
   readonly canUseWebCodecsRecorder: ReturnType<typeof vi.fn>
@@ -147,6 +156,7 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
   const factory: RecorderFactoryDouble = {
     recorders,
     recorderType: 'mediarecorder',
+    nextInitializeError: null,
 
     last() {
       const recorder = recorders[recorders.length - 1]
@@ -154,19 +164,32 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
       return recorder
     },
 
-    createRecorder: vi.fn((callbacks: RecorderCallbacksLike, isPiP: boolean = false) => {
-      const recorder = createRecorderDouble(callbacks, isPiP)
+    createRecorder: vi.fn((
+      callbacks: RecorderCallbacksLike,
+      isPiP: boolean = false,
+      hasVideoSource: boolean = true
+    ) => {
+      const recorder = createRecorderDouble(callbacks, isPiP, hasVideoSource)
+      recorder.initializeError = factory.nextInitializeError
+      factory.nextInitializeError = null
       recorders.push(recorder)
       return recorder
     }),
 
-    getRecorderType: vi.fn(() => factory.recorderType),
+    // Honours its arguments the way the real factory does, so a test can prove
+    // that an audio-only or PiP take is labelled 'mediarecorder' — the label
+    // useRecordingSave keys the fixWebMMetadata repair off — even on a machine
+    // (or in a test) where WebCodecs is otherwise available.
+    getRecorderType: vi.fn((isPiP: boolean = false, hasVideoSource: boolean = true) =>
+      isPiP || !hasVideoSource ? 'mediarecorder' : factory.recorderType
+    ),
 
     canUseWebCodecsRecorder: vi.fn(() => factory.recorderType === 'webcodecs'),
 
     reset() {
       recorders.length = 0
       factory.recorderType = 'mediarecorder'
+      factory.nextInitializeError = null
       factory.createRecorder.mockClear()
       factory.getRecorderType.mockClear()
       factory.canUseWebCodecsRecorder.mockClear()

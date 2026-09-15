@@ -489,7 +489,7 @@ describe('App picture-in-picture', () => {
     expect(canvas.style.objectFit).toBe('contain');
     expect(pendingAnimationFrames()).toBeGreaterThan(0);
 
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true);
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true, true);
     expect(recorderFactory.last().isPiP).toBe(true);
 
     // The recorder gets the composited video plus the screen's own audio —

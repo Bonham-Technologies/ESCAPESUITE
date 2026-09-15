@@ -828,7 +828,22 @@ describe('WebCodecsRecorder', () => {
       expect(callbacks.onStop).toHaveBeenCalled()
     })
 
-    it('only warns when the track ends before recording starts', async () => {
+    it('stops and delivers the take when sharing stops while paused', async () => {
+      await recorder.initialize(screenStream, null, null, defaultConfig)
+      recorder.start()
+      recorder.pause()
+
+      videoTrack.end()
+      await flush()
+
+      // Paused is still an active take: the capture is dead and cannot be
+      // resumed, so what has been encoded so far has to be finalized.
+      expect(consoleWarn).toHaveBeenCalledWith('Video track ended during recording, stopping...')
+      expect(callbacks.onStop).toHaveBeenCalledWith(expect.any(Blob))
+      expect(recorder.isPaused()).toBe(false)
+    })
+
+    it('reports an error when the track ends before recording starts', async () => {
       await recorder.initialize(screenStream, null, null, defaultConfig)
 
       videoTrack.end()
@@ -837,6 +852,39 @@ describe('WebCodecsRecorder', () => {
       expect(consoleWarn).toHaveBeenCalledWith('Video track ended: Screen 1')
       expect(consoleWarn).not.toHaveBeenCalledWith('Video track ended during recording, stopping...')
       expect(callbacks.onStop).not.toHaveBeenCalled()
+      // Nothing was captured — but the countdown is still running upstream and
+      // must be told, or it starts a take with no source.
+      expect(callbacks.onError).toHaveBeenCalledWith(
+        new Error('Capture ended before recording started')
+      )
+    })
+
+    it('ignores the track ending after the take has already been stopped', async () => {
+      await recorder.initialize(screenStream, null, null, defaultConfig)
+      recorder.start()
+
+      const stopping = recorder.stop()
+      // stop() drops isRecordingActive on its first line but then awaits the
+      // reader cancel, both encoder flushes and output.finalize(); the 'ended'
+      // listener is only removed by the finally. A user who presses Stop and
+      // then clicks "Stop sharing" fires the event inside that window — and an
+      // onError there would dispose the muxer mid-finalize and lose the take.
+      videoTrack.end()
+      await stopping
+      await flush()
+
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      expect(callbacks.onStop).toHaveBeenCalledWith(expect.any(Blob))
+    })
+
+    it('survives the track ending before start with no callbacks registered', async () => {
+      const bare = new WebCodecsRecorder()
+      await bare.initialize(screenStream, null, null, defaultConfig)
+
+      expect(() => videoTrack.end()).not.toThrow()
+      await flush()
+
+      bare.dispose()
     })
   })
 

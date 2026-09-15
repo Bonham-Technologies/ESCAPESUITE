@@ -152,7 +152,7 @@ describe('useRecordingController starting a take', () => {
     expect(useRecorderStore.getState().screenStream).toBe(harness.streams.screen)
     expect(harness.setPreviewStream).toHaveBeenCalledWith(harness.streams.screen)
     expect(harness.setIsPiPActive).not.toHaveBeenCalled()
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true)
     expect(recorderFactory.last().start).toHaveBeenCalledTimes(1)
     expect(state()).toBe('recording')
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Started', undefined)
@@ -169,6 +169,29 @@ describe('useRecordingController starting a take', () => {
     expect(recorderFactory.last().initializeCalls[0]).toMatchObject({ screen: null, webcam })
   })
 
+  it('records an audio-only take through the MediaRecorder path', async () => {
+    // Both video sources off is a shape SourceToggles allows. The WebCodecs
+    // recorder has no video track to encode and would throw, so the factory
+    // must be told there is no video source and hand back a MediaRecorder.
+    const mic = createStreamDouble([createTrackDouble('audio', { id: 'mic-audio' })])
+    const { result } = mountController(
+      { screenEnabled: false, webcamEnabled: false, microphoneEnabled: true, countdownSeconds: 0 },
+      { screen: null, webcam: null, mic }
+    )
+    recorderFactory.recorderType = 'webcodecs'
+
+    await startTake(result)
+
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, false)
+    expect(recorderFactory.last().hasVideoSource).toBe(false)
+    // The label useRecordingSave keys the WebM metadata repair off: a
+    // MediaRecorder take needs it even on a WebCodecs-capable machine.
+    expect(harness.deps.recorderTypeRef.current).toBe('mediarecorder')
+    expect(recorderFactory.last().initializeCalls[0]).toMatchObject({ screen: null, webcam: null, mic })
+    expect(harness.setPreviewStream).not.toHaveBeenCalled()
+    expect(state()).toBe('recording')
+  })
+
   it('holds the microphone stream in the ref the release path reads', async () => {
     const mic = createStreamDouble([createTrackDouble('audio', { id: 'mic-audio' })])
     const { result } = mountController({ countdownSeconds: 0 }, { mic })
@@ -176,6 +199,22 @@ describe('useRecordingController starting a take', () => {
     await startTake(result)
 
     expect(harness.deps.micStreamRef.current).toBe(mic)
+  })
+
+  it('disposes the recorder when the take fails to initialize', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    // A take with every source switched off reaches the MediaRecorder path,
+    // which builds its AudioContext before discovering it has no tracks. The
+    // failed attempt has to hand that back like any other exit.
+    recorderFactory.nextInitializeError = new Error('No tracks available for recording')
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error))
+    expect(recorderFactory.last().dispose).toHaveBeenCalledTimes(1)
+    expect(state()).toBe('idle')
+    expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
   })
 
   it('reports a refused capture and goes back to idle', async () => {
@@ -216,15 +255,41 @@ describe('useRecordingController countdown', () => {
   it('drops the countdown and releases the capture when it is cancelled', async () => {
     const { result } = mountController({ countdownSeconds: 3 })
     await startTake(result)
+    const recorder = recorderFactory.last()
 
     act(() => { result.current.cancelCountdown() })
 
     expect(state()).toBe('idle')
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+    // The recorder is already initialize()d by the time the countdown starts —
+    // AudioContext, level monitor and, on the fallback path, a <video>. Esc has
+    // to hand all of that back, or six cancelled takes exhaust the AudioContexts.
+    expect(recorder.dispose).toHaveBeenCalledTimes(1)
     expect(vi.getTimerCount()).toBe(0)
 
     act(() => { vi.advanceTimersByTime(5000) })
     expect(recorderFactory.last().start).not.toHaveBeenCalled()
+  })
+
+  it('abandons the countdown when the capture dies before the take starts', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 3 })
+    await startTake(result)
+    const recorder = recorderFactory.last()
+
+    // The user stops sharing while the countdown is on screen. The recorder
+    // reports it on the only channel it has — onError.
+    act(() => { recorder.failWith(new Error('Capture ended before recording started')) })
+
+    expect(consoleError).toHaveBeenCalledWith('Recording error:', expect.any(Error))
+    expect(state()).toBe('idle')
+    expect(recorder.dispose).toHaveBeenCalledTimes(1)
+    expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+    // The ticker must be gone too, or it reaches zero and starts a take with
+    // no source behind it.
+    expect(vi.getTimerCount()).toBe(0)
+    act(() => { vi.advanceTimersByTime(5000) })
+    expect(recorder.start).not.toHaveBeenCalled()
   })
 
   it('is a no-op when there is no countdown to cancel', () => {
@@ -279,6 +344,21 @@ describe('useRecordingController running a take', () => {
 
     expect(recorderFactory.recorders).toHaveLength(0)
     expect(state()).toBe('idle')
+  })
+
+  it('stops the elapsed-time ticker when the recorder stops on its own', async () => {
+    const { recorder } = await startLiveTake()
+    recorder.duration = 9
+    act(() => { vi.advanceTimersByTime(100) })
+    expect(vi.getTimerCount()).toBe(1)
+
+    // The capture died and the recorder finished the take itself — nobody went
+    // through handleStopRecording, so nothing else clears the ticker.
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob) })
+
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 9)
+    expect(useRecorderStore.getState().currentDuration).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('feeds the audio meters straight through to the store', async () => {
@@ -498,7 +578,7 @@ describe('useRecordingController picture-in-picture', () => {
     expect(compositor).toBeTruthy()
     expect(compositor.getCanvas().width).toBe(1280)
     expect(harness.setIsPiPActive).toHaveBeenCalledWith(true)
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true, true)
 
     // The recorder gets the composited video plus the screen's own audio.
     const initialized = recorderFactory.last().initializeCalls[0]

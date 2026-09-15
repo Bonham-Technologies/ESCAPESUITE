@@ -47,6 +47,17 @@ function getMediaRecorder(recorder: Recorder): MediaRecorder {
   return mediaRecorder
 }
 
+// The 'ended' listener the Recorder attaches to a track during initialize().
+// The track doubles are plain objects with a vi.fn() addEventListener, so the
+// only way to fire the event is to pull the handler back out of the spy.
+function endedHandlerFor(track: MediaStreamTrack): () => void {
+  const handler = vi.mocked(track.addEventListener).mock.calls.find(
+    ([event]) => event === 'ended'
+  )?.[1] as (() => void) | undefined
+  if (!handler) throw new Error('No ended listener was registered on the track')
+  return handler
+}
+
 // Same rationale as getMediaRecorder(): micAnalyser/systemAnalyser are only
 // ever set inside the microphone/system-audio branches of initialize(), so
 // asserting they are (or stay) null is a direct, private-field-backed proof
@@ -814,33 +825,82 @@ describe('Recorder', () => {
       recorder.start()
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      const handler = vi.mocked(videoTrack.addEventListener).mock.calls.find(
-        ([event]) => event === 'ended'
-      )?.[1] as (() => void) | undefined
-      expect(handler).toBeDefined()
+      const handler = endedHandlerFor(videoTrack)
 
-      handler!()
+      handler()
 
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Track ended'))
       expect(warnSpy).toHaveBeenCalledWith('Video track ended during recording, stopping...')
       await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalled())
     })
 
-    it('does not stop when the video track ends while not recording', async () => {
+    it('stops and delivers the take when the video track ends while paused', async () => {
       const videoTrack = mockScreenStream.getVideoTracks()[0]
       await recorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
-      // Not started — mediaRecorder.state is 'inactive'
+      recorder.start()
+      getMediaRecorder(recorder).ondataavailable?.({ data: new Blob(['paused-bytes']) } as BlobEvent)
+      recorder.pause()
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      const handler = vi.mocked(videoTrack.addEventListener).mock.calls.find(
-        ([event]) => event === 'ended'
-      )?.[1] as (() => void) | undefined
-      expect(handler).toBeDefined()
+      const handler = endedHandlerFor(videoTrack)
 
-      handler!()
+      handler()
+
+      // A paused take over a dead capture can never be resumed; leaving the UI
+      // in Paused means Stop later yields a truncated or empty file. Deliver
+      // what was already recorded instead.
+      expect(warnSpy).toHaveBeenCalledWith('Video track ended during recording, stopping...')
+      await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalled())
+      const [blob] = vi.mocked(callbacks.onStop).mock.calls[0]
+      expect(blob.size).toBeGreaterThan(0)
+    })
+
+    it('reports an error when the video track ends before recording starts', async () => {
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+      await recorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+      // Not started — mediaRecorder.state is 'inactive'. This is the countdown.
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const handler = endedHandlerFor(videoTrack)
+
+      handler()
 
       expect(warnSpy).toHaveBeenCalledTimes(1)
       expect(callbacks.onStop).not.toHaveBeenCalled()
+      // Nothing has been captured, so there is no take to deliver — but the
+      // caller must hear about it, or the countdown starts a sourceless take.
+      expect(callbacks.onError).toHaveBeenCalledWith(
+        new Error('Capture ended before recording started')
+      )
+    })
+
+    it('ignores the track ending after the take has already been stopped', async () => {
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+      await recorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+      recorder.start()
+      const handler = endedHandlerFor(videoTrack)
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      recorder.stop()
+
+      // Pressing Stop in the app and then clicking Chrome's "Stop sharing" bar
+      // is an ordinary sequence, and it lands between stop() and cleanup().
+      // 'inactive' there means "already finished", not "never started" — the
+      // take must not be reported as a failure and thrown away.
+      handler()
+
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalledTimes(1))
+    })
+
+    it('survives the track ending before start with no callbacks registered', async () => {
+      const bare = new Recorder()
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await bare.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+
+      expect(() => endedHandlerFor(videoTrack)()).not.toThrow()
+
+      bare.dispose()
     })
 
     it('does not stop recording when a non-video track ends', async () => {
@@ -869,12 +929,8 @@ describe('Recorder', () => {
         testRecorder.start()
 
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-        const handler = vi.mocked(audioTrack.addEventListener).mock.calls.find(
-          ([event]) => event === 'ended'
-        )?.[1] as (() => void) | undefined
-        expect(handler).toBeDefined()
 
-        handler!()
+        endedHandlerFor(audioTrack)()
 
         expect(warnSpy).toHaveBeenCalledTimes(1)
         expect(callbacks.onStop).not.toHaveBeenCalled()

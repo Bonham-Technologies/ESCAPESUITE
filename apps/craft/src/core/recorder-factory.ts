@@ -14,9 +14,18 @@ export type AnyRecorderCallbacks = RecorderCallbacks | WebCodecsRecorderCallback
  * PiP mode uses MediaRecorder because the compositor's hidden video elements
  * cause frame capture issues with WebCodecs (browsers optimize away decoding
  * for non-visible elements).
+ *
+ * An audio-only take (both video sources switched off, which SourceToggles
+ * allows) also uses MediaRecorder: WebCodecsRecorder is built around a video
+ * track and throws 'No video track available for recording' without one, while
+ * MediaRecorder records the mixed audio track perfectly well on its own.
+ *
+ * @param isPiP - Whether PiP mode is active
+ * @param hasVideoSource - Whether the take captures screen or webcam at all
  */
-export function canUseWebCodecsRecorder(isPiP: boolean = false): boolean {
+export function canUseWebCodecsRecorder(isPiP: boolean = false, hasVideoSource: boolean = true): boolean {
   if (isPiP) return false;
+  if (!hasVideoSource) return false;
   return isWebCodecsRecordingSupported();
 }
 
@@ -24,9 +33,15 @@ export function canUseWebCodecsRecorder(isPiP: boolean = false): boolean {
  * Create the best available recorder for the given mode.
  * @param callbacks - Recorder event callbacks
  * @param isPiP - Whether PiP mode is active (forces MediaRecorder)
+ * @param hasVideoSource - Whether the take captures screen or webcam at all
+ *   (an audio-only take forces MediaRecorder)
  */
-export function createRecorder(callbacks: AnyRecorderCallbacks, isPiP: boolean = false): AnyRecorder {
-  if (canUseWebCodecsRecorder(isPiP)) {
+export function createRecorder(
+  callbacks: AnyRecorderCallbacks,
+  isPiP: boolean = false,
+  hasVideoSource: boolean = true
+): AnyRecorder {
+  if (canUseWebCodecsRecorder(isPiP, hasVideoSource)) {
     console.log('Using WebCodecs-based recorder (seekable output)');
     return new WebCodecsRecorder(callbacks);
   } else {
@@ -35,6 +50,9 @@ export function createRecorder(callbacks: AnyRecorderCallbacks, isPiP: boolean =
   }
 }
 
-export function getRecorderType(isPiP: boolean = false): 'webcodecs' | 'mediarecorder' {
-  return canUseWebCodecsRecorder(isPiP) ? 'webcodecs' : 'mediarecorder';
+export function getRecorderType(
+  isPiP: boolean = false,
+  hasVideoSource: boolean = true
+): 'webcodecs' | 'mediarecorder' {
+  return canUseWebCodecsRecorder(isPiP, hasVideoSource) ? 'webcodecs' : 'mediarecorder';
 }
