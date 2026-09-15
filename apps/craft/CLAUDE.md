@@ -133,10 +133,14 @@ The recorder is created **and `initialize()`d before the countdown starts**, so 
 it already owns an AudioContext, a ScriptProcessorNode, an rAF audio-level monitor that loops
 forever and — on the WebCodecs fallback capture path — a `<video>` appended to the document.
 **Every exit from a take therefore has to `dispose()` it**: cancelling the countdown, cancelling
-the recording, a recorder error, and the unmount teardown. `useRecordingController` funnels all
-four through one `disposeRecorder()` helper (and the countdown ticker through
-`clearCountdownTicker()`) so a new exit path cannot quietly skip it. Skipping it leaks one
-AudioContext per attempt, and Chrome refuses to create more after about six.
+the recording, a recorder error, a start that failed (`initialize()` can throw *after* the audio
+graph exists — an all-sources-off take reaches MediaRecorder, which builds the AudioContext before
+discovering it has no tracks), and the unmount teardown. `useRecordingController` funnels all five
+through one `disposeRecorder()` helper — and the two interval tickers through
+`clearCountdownTicker()` / `clearDurationTicker()` — so a new exit path cannot quietly skip them.
+Skipping disposal leaks one AudioContext per attempt, and Chrome refuses to create more after
+about six. The duration ticker is cleared in `onStop` as well, because a recorder can finish a
+take on its own (the capture ended) with nobody having gone through `handleStopRecording`.
 
 The capture can also die on its own — the user hits the browser's "Stop sharing" — and the take
 is not always mid-recording when it does. Both recorders handle the video track's `ended` event
@@ -152,12 +156,27 @@ in all three states:
   the only channel they have back to the controller; `onError` there clears the countdown ticker,
   disposes the recorder and returns to idle. ESCAPECRAFT has no in-app notification surface, so the
   user sees the console warning and the app back at idle rather than a toast
+- **after `stop()`** → ignored. Both classes keep a `hasStarted` flag precisely because "not
+  recording right now" is *also* true while a stopped take is being finalized: `MediaRecorder.stop()`
+  flips `state` to `'inactive'` synchronously and `WebCodecsRecorder.stop()` drops
+  `isRecordingActive` before awaiting the encoder flushes and `output.finalize()`, while the `ended`
+  listener lives until `cleanup()`. Pressing Stop and then clicking the browser's "Stop sharing" bar
+  lands in that window, and reporting it as an error would have the controller dispose the muxer
+  mid-finalize and lose the recording
+
+**Picture-in-Picture is the gap**: the stream handed to the recorder there is the compositor's
+canvas track, not the screen track, so none of the above fires when the user stops sharing during a
+PiP take. Fixing that means watching the source tracks in `compositor.ts`.
 
 **Audio-only takes use the MediaRecorder path.** `SourceToggles` lets both video sources be switched
 off; `WebCodecsRecorder` is built around a video track and throws
 `'No video track available for recording'` without one. `createRecorder` / `canUseWebCodecsRecorder`
 / `getRecorderType` take `hasVideoSource` alongside `isPiP` for exactly this, and the controller
-passes `config.screenEnabled || config.webcamEnabled`.
+computes it as `(config.screenEnabled && !!screen) || (config.webcamEnabled && !!webcam)` — the same
+"a stream AND its toggle" test both recorders apply when they pick a video track, since a capability
+the browser lacks yields a `null` stream with the toggle still on. `getRecorderType` gets it too:
+its answer is what `useRecordingSave` keys the `fixWebMMetadata` repair off, so an audio-only take
+would otherwise be saved as unseekable WebM.
 
 ### Integration with ESCAPEARTIST
 - Both apps share `video-editor-db` IndexedDB database
