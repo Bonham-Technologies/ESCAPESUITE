@@ -697,9 +697,25 @@ describe('WebCodecsRecorder', () => {
   // --- audio level monitoring ---------------------------------------------
 
   describe('audio level monitoring', () => {
-    it('reports zero for absent analysers', async () => {
+    it('does not run at all for a take with no audio', async () => {
+      // Previously this reported { microphone: 0, system: 0 } on every
+      // animation frame. With no analyser wired up there is nothing to
+      // measure, so the monitor never starts: no callback, and no rAF left
+      // scheduled to fire one.
       await recorder.initialize(screenStream, null, null, defaultConfig)
-      expect(callbacks.onAudioLevels).toHaveBeenLastCalledWith({ microphone: 0, system: 0 })
+
+      expect(callbacks.onAudioLevels).not.toHaveBeenCalled()
+      expect(rafCallbacks.size).toBe(0)
+    })
+
+    it('reports zero for the source that is absent', async () => {
+      audio.analyserLevel = 128
+      await recorder.initialize(screenStream, null, micStream, {
+        ...defaultConfig,
+        microphoneEnabled: true,
+      })
+
+      expect(callbacks.onAudioLevels).toHaveBeenLastCalledWith({ microphone: 1, system: 0 })
     })
 
     it('normalises analyser RMS into a 0-1 level for each source', async () => {

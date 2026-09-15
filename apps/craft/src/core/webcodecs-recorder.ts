@@ -44,12 +44,35 @@ interface MediaStreamTrackProcessorConstructor {
 }
 declare const MediaStreamTrackProcessor: MediaStreamTrackProcessorConstructor | undefined;
 
+/**
+ * An analyser and the byte buffer its FFT is copied into. The buffer's size is
+ * `frequencyBinCount`, which never changes, so it is allocated once when the
+ * analyser is wired up and refilled in place for the rest of the take — rather
+ * than a fresh Uint8Array per sample, per source, thrown away immediately.
+ */
+interface LevelMeter {
+  analyser: AnalyserNode;
+  // Uint8Array<ArrayBuffer>, not the default Uint8Array<ArrayBufferLike>:
+  // getByteFrequencyData() will not write into a view that might be backed by
+  // a SharedArrayBuffer.
+  data: Uint8Array<ArrayBuffer>;
+}
+
+/**
+ * How often the level meters are pushed to the UI. ~12.5 Hz: fast enough that
+ * a meter looks live, slow enough that it costs nothing — each sample is a
+ * store write, and in ESCAPECRAFT a store write re-renders the app. Mirrors
+ * `Recorder`'s gate in recorder.ts; the two are held to the same rate by
+ * `recorder.perf.test.ts` and `webcodecsRecorder.perf.test.ts`.
+ */
+const AUDIO_LEVEL_INTERVAL_MS = 80;
+
 export class WebCodecsRecorder {
   private callbacks: WebCodecsRecorderCallbacks = {};
   private videoTrack: MediaStreamTrack | null = null;
   private audioContext: AudioContext | null = null;
-  private micAnalyser: AnalyserNode | null = null;
-  private systemAnalyser: AnalyserNode | null = null;
+  private micMeter: LevelMeter | null = null;
+  private systemMeter: LevelMeter | null = null;
   private animationFrameId: number | null = null;
 
   // Encoding state
@@ -176,9 +199,7 @@ export class WebCodecsRecorder {
         systemSource.connect(destination);
 
         // Set up analyser for system audio
-        this.systemAnalyser = this.audioContext.createAnalyser();
-        this.systemAnalyser.fftSize = 256;
-        systemSource.connect(this.systemAnalyser);
+        this.systemMeter = this.createLevelMeter(this.audioContext, systemSource);
       }
     }
 
@@ -188,9 +209,7 @@ export class WebCodecsRecorder {
       micSource.connect(destination);
 
       // Set up analyser for microphone
-      this.micAnalyser = this.audioContext.createAnalyser();
-      this.micAnalyser.fftSize = 256;
-      micSource.connect(this.micAnalyser);
+      this.micMeter = this.createLevelMeter(this.audioContext, micSource);
     }
 
     // Store mixed audio stream
@@ -634,16 +653,38 @@ export class WebCodecsRecorder {
   }
 
   /**
+   * Wire an analyser onto an audio source and give it the buffer it will read
+   * into for the rest of the take.
+   */
+  private createLevelMeter(context: AudioContext, source: AudioNode): LevelMeter {
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    return { analyser, data: new Uint8Array(analyser.frequencyBinCount) };
+  }
+
+  /**
    * Start monitoring audio levels.
    */
   private startAudioLevelMonitoring(): void {
-    const monitor = () => {
-      const levels: AudioLevels = {
-        microphone: this.getAudioLevel(this.micAnalyser),
-        system: this.getAudioLevel(this.systemAnalyser),
-      };
+    // A take with no microphone and no system audio has nothing to measure.
+    // Running the loop anyway would push a hard-coded { 0, 0 } into the store
+    // on every animation frame — a re-render of the whole app, for a meter
+    // that cannot move.
+    if (!this.micMeter && !this.systemMeter) return;
 
-      this.callbacks.onAudioLevels?.(levels);
+    let lastUpdate = 0;
+
+    const monitor = () => {
+      const now = performance.now();
+      if (now - lastUpdate >= AUDIO_LEVEL_INTERVAL_MS) {
+        lastUpdate = now;
+        const levels: AudioLevels = {
+          microphone: this.getAudioLevel(this.micMeter),
+          system: this.getAudioLevel(this.systemMeter),
+        };
+        this.callbacks.onAudioLevels?.(levels);
+      }
       this.animationFrameId = requestAnimationFrame(monitor);
     };
 
@@ -651,20 +692,20 @@ export class WebCodecsRecorder {
   }
 
   /**
-   * Get audio level from an analyser node (0-1).
+   * Get audio level from a meter (0-1). An absent source reads as silence.
    */
-  private getAudioLevel(analyser: AnalyserNode | null): number {
-    if (!analyser) return 0;
+  private getAudioLevel(meter: LevelMeter | null): number {
+    if (!meter) return 0;
 
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(dataArray);
+    const { analyser, data } = meter;
+    analyser.getByteFrequencyData(data);
 
     // Calculate RMS
     let sum = 0;
-    for (let i = 0; i < dataArray.length; i++) {
-      sum += dataArray[i] * dataArray[i];
+    for (let i = 0; i < data.length; i++) {
+      sum += data[i] * data[i];
     }
-    const rms = Math.sqrt(sum / dataArray.length);
+    const rms = Math.sqrt(sum / data.length);
 
     // Normalize to 0-1 range
     return Math.min(1, rms / 128);
@@ -731,8 +772,8 @@ export class WebCodecsRecorder {
     this.audioSource = null;
     this.canvas = null;
     this.ctx = null;
-    this.micAnalyser = null;
-    this.systemAnalyser = null;
+    this.micMeter = null;
+    this.systemMeter = null;
     this.videoTrack = null;
     this.mixedAudioStream = null;
   }
