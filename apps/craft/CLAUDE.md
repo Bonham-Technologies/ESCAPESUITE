@@ -243,7 +243,9 @@ the Help button.
 
 ### Core Modules (`src/core/`)
 - `storage.ts`: Shared IndexedDB layer (same database as ESCAPEARTIST: `video-editor-db`)
-- `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring
+- `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring (see
+  "Audio level meters" for the 80 ms gate both recorders apply)
+- `webcodecs-recorder.ts`: VideoEncoder/AudioEncoder + Mediabunny recorder for non-PiP takes
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction. Its size, type
@@ -330,6 +332,41 @@ computes it as `(config.screenEnabled && !!screen) || (config.webcamEnabled && !
 the browser lacks yields a `null` stream with the toggle still on. `getRecorderType` gets it too:
 its answer is what `useRecordingSave` keys the `fixWebMMetadata` repair off, so an audio-only take
 would otherwise be saved as unseekable WebM.
+
+### Audio level meters
+
+Both recorders read their analysers on `requestAnimationFrame` and push an `AudioLevels` to the
+store through `onAudioLevels`; `SourceToggles` draws the meters. **Both gate that to one sample
+every 80 ms** (`AUDIO_LEVEL_INTERVAL_MS` in `webcodecs-recorder.ts`, `updateInterval` in
+`recorder.ts`) — ~12.5 Hz, which is plenty for a meter and a twelfth of the cost. The gate
+matters more than it looks: `App` subscribes to the Zustand store with no selector, so **one
+level push re-renders App and its whole tree** (measured 2026-09-15: exactly one commit per
+`setAudioLevels`). Ungated that was 60 whole-tree renders a second for the length of a take.
+
+Two more rules the WebCodecs recorder follows and `Recorder` does not yet:
+
+- Each analyser is paired with the `Uint8Array` it reads into (`LevelMeter`), allocated once
+  from `frequencyBinCount` — which never changes — and refilled in place, instead of a fresh
+  typed array per source per sample.
+- A take with **no** microphone and no system audio starts no monitor at all — there is no
+  analyser to read, so the loop would only write a hard-coded `{ microphone: 0, system: 0 }`
+  into the store for a meter that cannot move. It does send that value **once**, before
+  returning: nothing resets `audioLevels` between takes, and `SourceToggles` draws a meter
+  whenever the *toggle* is on rather than whenever an analyser exists, so a take that asked
+  for system audio and was not given it would otherwise show the previous take's bar frozen
+  at its last value. One store write per take, not per frame.
+
+**Follow-up, deliberately not done here:** the remaining cost is the whole-tree render, and
+selecting `audioLevels` inside `SourceToggles` would not remove it — `App` calls
+`useRecorderStore()` with no selector, so it re-renders on *every* store write whatever its
+children subscribe to (measured 2026-09-15: one App commit per `setAudioLevels`, with
+`audioLevels` reaching only `SourceToggles`). Cutting it to the meters means moving `App` to
+per-field selectors, which is its own ticket.
+
+`webcodecsRecorder.perf.test.ts` and `recorder.perf.test.ts` assert all of this as counts —
+at most 13 emissions per 60 animation frames in *both* files, so the two monitors cannot drift
+apart again. `Recorder`'s per-sample analyser buffer is pinned there as a finding, with the
+assertion to flip when it is hoisted.
 
 ### Integration with ESCAPEARTIST
 - Both apps share `video-editor-db` IndexedDB database
@@ -437,6 +474,14 @@ the outcome, not on the double.
   `installRafDouble()` family drives the PiP compositor's animation frames by hand. It also
   re-exports `installBrowserStubs()` from `doubles/browser.ts`, because every App suite reaches
   for it through this module.
+- **`*.perf.test.ts` files are ceilings, not benchmarks.** `core/compositor.perf.test.ts`,
+  `core/converter.perf.test.ts`, `core/webcodecsRecorder.perf.test.ts` and
+  `core/recorder.perf.test.ts` count what a frame, a take or a second of monitoring costs —
+  canvas calls, emissions, typed arrays, `VideoFrame`s created versus closed, `encode`/`flush`
+  calls — through the same doubles the behaviour tests use. Counts, not milliseconds, so they
+  are enforced in CI like any other test. The rule (2x the measured value rounded up, the
+  measurement and its date in a comment, conservation laws exact, ceilings only ever lowered)
+  is in the root `CLAUDE.md`.
 - **Semicolon dialect is mixed, deliberately.** The suites the test decomposition added
   (`src/hooks/*.test.ts`, `src/utils/recordingFormat.test.ts`, and their siblings) omit
   line-ending semicolons; the older files (`src/App.library.test.tsx` and friends) carry them.

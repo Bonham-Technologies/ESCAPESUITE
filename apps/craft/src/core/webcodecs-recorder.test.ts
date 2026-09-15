@@ -142,6 +142,13 @@ describe('WebCodecsRecorder', () => {
     installVideoElementDouble()
     audio = installAudioContextDouble()
 
+    // The clock is FROZEN: `now` is never advanced in this file. The audio
+    // level monitor gates itself to one sample per 80ms of `performance.now()`,
+    // so exactly one sample is emitted per take here — the immediate one
+    // `startAudioLevelMonitoring()` takes before the first frame — and
+    // `tickAnimationFrames()` will never produce another. A test that wants
+    // repeated emissions has to advance `now` between ticks; the per-second
+    // rates live in core/webcodecsRecorder.perf.test.ts, which does exactly that.
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
     consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -697,9 +704,31 @@ describe('WebCodecsRecorder', () => {
   // --- audio level monitoring ---------------------------------------------
 
   describe('audio level monitoring', () => {
-    it('reports zero for absent analysers', async () => {
+    it('zeroes the meters once for a take with no audio, then runs no loop', async () => {
+      // Previously this reported { microphone: 0, system: 0 } on every
+      // animation frame. With no analyser wired up there is nothing to
+      // measure, so there is no loop — but the one sample still has to be
+      // sent: the store keeps the last take's levels, and a take that asked
+      // for system audio and did not get it would otherwise show the previous
+      // take's bar, frozen.
       await recorder.initialize(screenStream, null, null, defaultConfig)
-      expect(callbacks.onAudioLevels).toHaveBeenLastCalledWith({ microphone: 0, system: 0 })
+
+      expect(callbacks.onAudioLevels).toHaveBeenCalledTimes(1)
+      expect(callbacks.onAudioLevels).toHaveBeenCalledWith({ microphone: 0, system: 0 })
+      expect(rafCallbacks.size).toBe(0)
+
+      tickAnimationFrames()
+      expect(callbacks.onAudioLevels).toHaveBeenCalledTimes(1)
+    })
+
+    it('reports zero for the source that is absent', async () => {
+      audio.analyserLevel = 128
+      await recorder.initialize(screenStream, null, micStream, {
+        ...defaultConfig,
+        microphoneEnabled: true,
+      })
+
+      expect(callbacks.onAudioLevels).toHaveBeenLastCalledWith({ microphone: 1, system: 0 })
     })
 
     it('normalises analyser RMS into a 0-1 level for each source', async () => {
@@ -717,12 +746,22 @@ describe('WebCodecsRecorder', () => {
     })
 
     it('stops the monitor loop on dispose', async () => {
-      await recorder.initialize(screenStream, null, null, defaultConfig)
+      // A take with a microphone, so there is a loop to stop: initialised with
+      // no audio at all the monitor never starts, and this test would pass
+      // whether dispose() cancelled anything or not.
+      await recorder.initialize(screenStream, null, micStream, {
+        ...defaultConfig,
+        microphoneEnabled: true,
+      })
+      tickAnimationFrames()
+      expect(rafCallbacks.size).toBe(1)
       const before = callbacks.onAudioLevels.mock.calls.length
 
       recorder.dispose()
-      tickAnimationFrames()
 
+      // Nothing left scheduled — and so nothing left to emit.
+      expect(rafCallbacks.size).toBe(0)
+      tickAnimationFrames()
       expect(callbacks.onAudioLevels.mock.calls).toHaveLength(before)
     })
   })
