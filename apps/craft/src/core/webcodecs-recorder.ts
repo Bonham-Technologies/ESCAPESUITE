@@ -667,11 +667,18 @@ export class WebCodecsRecorder {
    * Start monitoring audio levels.
    */
   private startAudioLevelMonitoring(): void {
-    // A take with no microphone and no system audio has nothing to measure.
-    // Running the loop anyway would push a hard-coded { 0, 0 } into the store
-    // on every animation frame — a re-render of the whole app, for a meter
-    // that cannot move.
-    if (!this.micMeter && !this.systemMeter) return;
+    // A take with no microphone and no system audio has nothing to measure, so
+    // there is no loop to run: pushing a hard-coded { 0, 0 } into the store on
+    // every animation frame is a re-render of the whole app for a meter that
+    // cannot move. Send that value exactly once, though — the store keeps the
+    // previous take's levels (nothing resets them between takes) and
+    // SourceToggles draws a meter whenever the *toggle* is on, so a take that
+    // asked for system audio and was not given it would otherwise show the
+    // last take's bar, frozen at whatever it was.
+    if (!this.micMeter && !this.systemMeter) {
+      this.callbacks.onAudioLevels?.({ microphone: 0, system: 0 });
+      return;
+    }
 
     let lastUpdate = 0;
 

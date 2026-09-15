@@ -348,9 +348,13 @@ Two more rules the WebCodecs recorder follows and `Recorder` does not yet:
 - Each analyser is paired with the `Uint8Array` it reads into (`LevelMeter`), allocated once
   from `frequencyBinCount` — which never changes — and refilled in place, instead of a fresh
   typed array per source per sample.
-- A take with **no** microphone and no system audio starts no monitor at all. There is no
+- A take with **no** microphone and no system audio starts no monitor at all — there is no
   analyser to read, so the loop would only write a hard-coded `{ microphone: 0, system: 0 }`
-  into the store for a meter that cannot move.
+  into the store for a meter that cannot move. It does send that value **once**, before
+  returning: nothing resets `audioLevels` between takes, and `SourceToggles` draws a meter
+  whenever the *toggle* is on rather than whenever an analyser exists, so a take that asked
+  for system audio and was not given it would otherwise show the previous take's bar frozen
+  at its last value. One store write per take, not per frame.
 
 **Follow-up, deliberately not done here:** the remaining cost is the whole-tree render, and
 selecting `audioLevels` inside `SourceToggles` would not remove it — `App` calls

@@ -199,16 +199,21 @@ describe('WebCodecsRecorder work ceilings', () => {
       expect(buffers.size).toBeLessThanOrEqual(emissions)
     })
 
-    it('costs a silent take nothing at all', async () => {
+    it('costs a silent take one sample and nothing more', async () => {
       // No microphone, no system audio: there is no analyser to read, so every
       // sample would be a hard-coded {microphone: 0, system: 0} written to the
       // store 60 times a second, re-rendering the app for a meter that cannot
-      // move.
+      // move. Exactly one of those is worth sending — it zeroes whatever the
+      // previous take left in the store — and it is sent per take, not per
+      // frame.
       await recorder.initialize(screenStream, null, null, baseConfig)
 
-      expect(onAudioLevels).not.toHaveBeenCalled()
+      expect(onAudioLevels).toHaveBeenCalledTimes(1)
+      expect(onAudioLevels).toHaveBeenCalledWith({ microphone: 0, system: 0 })
       // Exact: nothing scheduled means nothing to run, and nothing to cancel.
       expect(raf.pending()).toBe(0)
+      // Measured 2026-09-15: 0 further emissions per 60 frames, for the rest
+      // of the take, however long it runs (60 before).
       expect(playOneSecond()).toBe(0)
     })
   })
