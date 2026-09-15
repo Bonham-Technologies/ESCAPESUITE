@@ -80,6 +80,10 @@ describe('recorder-factory', () => {
     it('should return true by default (non-PiP)', () => {
       expect(canUseWebCodecsRecorder()).toBe(true)
     })
+
+    it('should return false for an audio-only take, even with WebCodecs present', () => {
+      expect(canUseWebCodecsRecorder(false, false)).toBe(false)
+    })
   })
 
   describe('getRecorderType', () => {
@@ -89,6 +93,10 @@ describe('recorder-factory', () => {
 
     it('should return mediarecorder for PiP mode', () => {
       expect(getRecorderType(true)).toBe('mediarecorder')
+    })
+
+    it('should return mediarecorder for an audio-only take', () => {
+      expect(getRecorderType(false, false)).toBe('mediarecorder')
     })
   })
 
@@ -111,6 +119,15 @@ describe('recorder-factory', () => {
 
     it('should create Recorder (MediaRecorder-based) for PiP mode', () => {
       const recorder = createRecorder(callbacks, true)
+      expect(recorder).toBeInstanceOf(Recorder)
+      recorder.dispose()
+    })
+
+    it('should create Recorder for an audio-only take', () => {
+      // Both video sources off: WebCodecsRecorder.initialize() would throw
+      // 'No video track available for recording', while MediaRecorder happily
+      // records the mixed audio track on its own.
+      const recorder = createRecorder(callbacks, false, false)
       expect(recorder).toBeInstanceOf(Recorder)
       recorder.dispose()
     })

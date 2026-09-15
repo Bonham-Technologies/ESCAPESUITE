@@ -268,6 +268,9 @@ export function useRecordingController({
 
       // Determine if we're in PiP mode (screen + webcam with compositor)
       const isPiP = config.screenEnabled && config.webcamEnabled && !!compositorRef.current;
+      // With both video sources off the take is audio only, and the WebCodecs
+      // recorder — which needs a video track — cannot serve it.
+      const hasVideoSource = config.screenEnabled || config.webcamEnabled;
 
       // Initialize recorder (uses WebCodecs for non-PiP if available)
       recorderRef.current = createRecorder({
@@ -309,8 +312,8 @@ export function useRecordingController({
           stopAllStreams();
         },
         onAudioLevels: setAudioLevels,
-      }, isPiP);
-      recorderTypeRef.current = getRecorderType(isPiP);
+      }, isPiP, hasVideoSource);
+      recorderTypeRef.current = getRecorderType(isPiP, hasVideoSource);
 
       // This avoids canvas.captureStream() issues with hidden video elements
       let recordingScreen: MediaStream | null = screen;

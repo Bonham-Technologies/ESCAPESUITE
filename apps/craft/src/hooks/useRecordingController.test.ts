@@ -152,7 +152,7 @@ describe('useRecordingController starting a take', () => {
     expect(useRecorderStore.getState().screenStream).toBe(harness.streams.screen)
     expect(harness.setPreviewStream).toHaveBeenCalledWith(harness.streams.screen)
     expect(harness.setIsPiPActive).not.toHaveBeenCalled()
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true)
     expect(recorderFactory.last().start).toHaveBeenCalledTimes(1)
     expect(state()).toBe('recording')
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Started', undefined)
@@ -167,6 +167,25 @@ describe('useRecordingController starting a take', () => {
 
     expect(harness.setPreviewStream).toHaveBeenCalledWith(webcam)
     expect(recorderFactory.last().initializeCalls[0]).toMatchObject({ screen: null, webcam })
+  })
+
+  it('records an audio-only take through the MediaRecorder path', async () => {
+    // Both video sources off is a shape SourceToggles allows. The WebCodecs
+    // recorder has no video track to encode and would throw, so the factory
+    // must be told there is no video source and hand back a MediaRecorder.
+    const mic = createStreamDouble([createTrackDouble('audio', { id: 'mic-audio' })])
+    const { result } = mountController(
+      { screenEnabled: false, webcamEnabled: false, microphoneEnabled: true, countdownSeconds: 0 },
+      { screen: null, webcam: null, mic }
+    )
+
+    await startTake(result)
+
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, false)
+    expect(recorderFactory.last().hasVideoSource).toBe(false)
+    expect(recorderFactory.last().initializeCalls[0]).toMatchObject({ screen: null, webcam: null, mic })
+    expect(harness.setPreviewStream).not.toHaveBeenCalled()
+    expect(state()).toBe('recording')
   })
 
   it('holds the microphone stream in the ref the release path reads', async () => {
@@ -503,7 +522,7 @@ describe('useRecordingController picture-in-picture', () => {
     expect(compositor).toBeTruthy()
     expect(compositor.getCanvas().width).toBe(1280)
     expect(harness.setIsPiPActive).toHaveBeenCalledWith(true)
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true, true)
 
     // The recorder gets the composited video plus the screen's own audio.
     const initialized = recorderFactory.last().initializeCalls[0]

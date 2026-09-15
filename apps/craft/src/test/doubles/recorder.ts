@@ -27,6 +27,8 @@ export interface InitializeCall {
 export interface RecorderDouble {
   readonly callbacks: RecorderCallbacksLike
   readonly isPiP: boolean
+  /** Whether the take had a video source at all (false = audio-only). */
+  readonly hasVideoSource: boolean
   /** Arguments of every initialize() call, oldest first. */
   readonly initializeCalls: InitializeCall[]
   readonly initialize: ReturnType<typeof vi.fn>
@@ -50,13 +52,18 @@ export interface RecorderDouble {
   emitAudioLevels(levels: { microphone: number; system: number }): void
 }
 
-function createRecorderDouble(callbacks: RecorderCallbacksLike, isPiP: boolean): RecorderDouble {
+function createRecorderDouble(
+  callbacks: RecorderCallbacksLike,
+  isPiP: boolean,
+  hasVideoSource: boolean
+): RecorderDouble {
   let recording = false
   let paused = false
 
   const double: RecorderDouble = {
     callbacks,
     isPiP,
+    hasVideoSource,
     initializeCalls: [],
     stopBlob: new Blob(['recorded-bytes'], { type: 'video/webm' }),
     duration: 0,
@@ -154,8 +161,12 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
       return recorder
     },
 
-    createRecorder: vi.fn((callbacks: RecorderCallbacksLike, isPiP: boolean = false) => {
-      const recorder = createRecorderDouble(callbacks, isPiP)
+    createRecorder: vi.fn((
+      callbacks: RecorderCallbacksLike,
+      isPiP: boolean = false,
+      hasVideoSource: boolean = true
+    ) => {
+      const recorder = createRecorderDouble(callbacks, isPiP, hasVideoSource)
       recorders.push(recorder)
       return recorder
     }),
