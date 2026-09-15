@@ -62,6 +62,10 @@ export class WebCodecsRecorder {
 
   // Recording state
   private isRecordingActive = false;
+  // Distinguishes "never started" from "already finished": isRecordingActive is
+  // false in both, but only the first means the capture died during the
+  // countdown. Never reset — a WebCodecsRecorder records one take.
+  private hasStarted = false;
   private isPausedState = false;
   private startTime = 0;
   private pausedDuration = 0;
@@ -200,10 +204,14 @@ export class WebCodecsRecorder {
         // paused when the capture died is finalized and delivered here too.
         console.warn('Video track ended during recording, stopping...');
         this.stop();
-      } else {
+      } else if (!this.hasStarted) {
         // Between initialize() and start() — the countdown. Nothing has been
         // encoded, so there is no take to deliver; tell the caller instead, or
-        // it starts a recording with no source behind it.
+        // it starts a recording with no source behind it. After stop() the flag
+        // is still set, and deliberately so: stop() drops isRecordingActive
+        // before awaiting the encoder flushes and output.finalize(), and an
+        // onError in that window would dispose the muxer mid-finalize and lose
+        // the recording.
         this.callbacks.onError?.(new Error('Capture ended before recording started'));
       }
     };
@@ -353,6 +361,7 @@ export class WebCodecsRecorder {
     }
 
     this.isRecordingActive = true;
+    this.hasStarted = true;
     this.isPausedState = false;
     this.startTime = Date.now();
     this.pausedDuration = 0;

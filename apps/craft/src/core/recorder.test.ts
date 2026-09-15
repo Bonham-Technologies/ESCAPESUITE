@@ -874,6 +874,24 @@ describe('Recorder', () => {
       )
     })
 
+    it('ignores the track ending after the take has already been stopped', async () => {
+      const videoTrack = mockScreenStream.getVideoTracks()[0]
+      await recorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+      recorder.start()
+      const handler = endedHandlerFor(videoTrack)
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      recorder.stop()
+
+      // Pressing Stop in the app and then clicking Chrome's "Stop sharing" bar
+      // is an ordinary sequence, and it lands between stop() and cleanup().
+      // 'inactive' there means "already finished", not "never started" — the
+      // take must not be reported as a failure and thrown away.
+      handler()
+
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalledTimes(1))
+    })
+
     it('survives the track ending before start with no callbacks registered', async () => {
       const bare = new Recorder()
       const videoTrack = mockScreenStream.getVideoTracks()[0]
