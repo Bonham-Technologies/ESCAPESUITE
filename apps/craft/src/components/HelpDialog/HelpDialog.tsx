@@ -1,4 +1,4 @@
-import { useDialogBehaviour } from '../../hooks/useDialogBehaviour';
+import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { CloseIcon } from '../icons';
 import styles from '../../App.module.css';
 
