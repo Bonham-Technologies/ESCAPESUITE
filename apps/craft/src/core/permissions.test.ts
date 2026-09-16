@@ -285,7 +285,6 @@ describe('permissions', () => {
     })
   })
 
-
   describe('requestScreenCapture', () => {
     it('resolves with the captured stream and passes capture-friendly constraints', async () => {
       const stream = new MediaStream()

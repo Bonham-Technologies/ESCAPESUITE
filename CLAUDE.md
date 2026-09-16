@@ -110,7 +110,7 @@ dist/
 - Core modules in `src/core/`: `recorder.ts`, `webcodecs-recorder.ts`, `recorder-factory.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
 - Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for PiP, audio-only takes and browsers without it
-- Outputs WebM (requires `webm-duration-fix` for proper seek metadata, applied once at save time)
+- Outputs WebM either way, but only the MediaRecorder path needs repairing: `useRecordingSave` runs `webm-duration-fix` over MediaRecorder output at save time, and writes WebCodecs output through untouched (Mediabunny already emits Duration and Cues)
 - Recordings download as WebM, and only as WebM — the stored blob, no conversion step
 - `converter.ts` also holds MP4 (H.264+AAC) and compatible-WebM (VP9+Opus) conversion via WebCodecs + Mediabunny, with cancellation, background-tab yielding and progress reporting. **The UI has reached none of it since #209** — only `fixWebMMetadata()` is called. Present, tested and unwired, pending a product decision; see `apps/craft/CLAUDE.md`'s "Download Formats"
 
@@ -457,9 +457,20 @@ Nine jobs, with `ci-status` as the single required check (`perf` is informationa
 
 ## Vercel Analytics
 
-All apps use `@vercel/analytics` for pageview and custom event tracking:
-- `<Analytics />` component in each app's `main.tsx`
-- Custom events via `track()` in `*/analytics.ts` files
+**Hosted (`saas`) builds only.** All three apps use `@vercel/analytics` for pageview and
+custom event tracking:
+- `<Analytics />` is mounted by `bootstrapApp()` (`packages/shared/src/bootstrap`) for
+  ESCAPECRAFT and ESCAPEARTIST; ESCAPEPLAN still mounts it directly in its own `main.tsx`
+- Custom events via `trackEvent()` in `*/analytics.ts` files, which re-export the shared
+  `packages/shared/src/analytics` wrapper
+- **A standalone build ships no analytics runtime at all.** `BUILD_MODE === 'saas'` gates
+  both `trackEvent()` and the `<Analytics />` mount, and because `BUILD_MODE` folds to a
+  literal at build time the bundler drops `@vercel/analytics` from the offline bundle
+  rather than shipping it inert — `va.vercel-scripts.com` appears 0 times in the
+  ESCAPECRAFT and ESCAPEARTIST standalone builds and once in the hosted one. Held at
+  runtime by `apps/e2e/tests/standalone/craft.spec.ts` ("makes no requests off the local
+  origin"), which records a real take and then asserts there is no `window.va`, no queue
+  and no injected script
 
 ## Issue Tracking
 

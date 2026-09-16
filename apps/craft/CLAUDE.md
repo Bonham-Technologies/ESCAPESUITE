@@ -246,10 +246,13 @@ the Help button.
 - `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring (see
   "Audio level meters" for the 80 ms gate both recorders apply)
 - `webcodecs-recorder.ts`: VideoEncoder/AudioEncoder + Mediabunny recorder for non-PiP takes
-- `recorder-factory.ts`: `createRecorder()` / `canUseWebCodecsRecorder()` — picks between the
-  two recorders for a take. WebCodecs unless the take is PiP (the compositor's hidden video
-  elements break its frame capture) or has no video track at all (an audio-only take, which
-  `WebCodecsRecorder` cannot serve); MediaRecorder otherwise
+- `recorder-factory.ts`: `createRecorder()` / `canUseWebCodecsRecorder()` /
+  `getRecorderType()` — picks between the two recorders for a take. WebCodecs unless the
+  take is PiP (the compositor's hidden video elements break its frame capture) or has no
+  video track at all (an audio-only take, which `WebCodecsRecorder` cannot serve);
+  MediaRecorder otherwise. `getRecorderType()` returns that same decision as
+  `'webcodecs' | 'mediarecorder'`, which is what the controller puts in `recorderTypeRef`
+  and what the save path branches on to decide whether the blob needs repairing
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction. Its size, type
@@ -258,8 +261,9 @@ the Help button.
   `hooks/useRecordingSave`) `vi.mock('./core/thumbnailGenerator')` wholesale, so a constant
   declared in this module would vanish under the mock. `utils/previewThumbnail.ts` is never
   mocked, which is what makes it the single definition — keep it that way
-- `converter.ts`: `fixWebMMetadata()` — the WebM container repair every saved take goes
-  through, and **the only export of this module the app reaches**. The rest of the file
+- `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
+  goes through at save time (a WebCodecs take needs none; see "WebM Handling"), and **the
+  only export of this module the app reaches**. The rest of the file
   (`convertToMP4`, `remuxToWebM`, their support checks, and the progress/abort machinery)
   is WebCodecs + Mediabunny conversion that nothing calls; see "Download Formats"
 
@@ -271,8 +275,9 @@ Reusable video player with full playback controls:
 - **Volume**: a slider with a mute toggle (M); Up/Down move it in 0.1 steps
 - **Restart**: its own transport button — seek to 0 and play
 - **At the end of the video** it resets to the beginning and stops. It does not loop
-- **Duration**: `knownDuration` is used in place of `video.duration`, which a MediaRecorder
-  WebM does not report reliably — the playback dialog passes the saved recording's duration
+- **Duration**: `video.duration` is used when it is finite and above 0, and `knownDuration`
+  is the fallback for when it is not — a MediaRecorder WebM often reports `Infinity` or 0.
+  The playback dialog passes the saved recording's duration as that fallback
 - **Keyboard**: Space/K, Left/Right, Up/Down, M, 0/Home, End, Escape. It binds these on
   `window`; `useDialogBehaviour` binds Escape and Tab on `document` in the capture phase, so
   while the playback dialog is open the dialog's Escape runs first and the player's does not
@@ -426,8 +431,9 @@ message and navigate to its own editor itself.
 ### Download Formats
 
 **One option: "Download WebM".** The library row's download button hands back the stored
-blob as `<name>.webm`, with no conversion step — the container was already repaired when
-the take was saved (see "WebM Handling"), so the download is instant.
+blob as `<name>.webm`, with no conversion step — what is in storage is already seekable,
+either because the recorder wrote it that way or because it was repaired at save time (see
+"WebM Handling"), so the download is instant.
 
 `core/converter.ts` still holds the MP4 (H.264 + AAC) and compatible-WebM (VP9 + Opus
 re-encode) conversion paths, and everything that was built around them: support checks,
@@ -445,14 +451,27 @@ MP4 download to the user; that copy is part of the same open decision.
 - `webm-duration-fix` library adds Duration, SeekHead, and Cues elements
 - Thumbnails captured from live preview (more reliable than from blob)
 - Metadata extraction has fallbacks for problematic WebM files
-- The repair happens **once, at save time** — `useRecordingSave` runs `fixWebMMetadata()`
-  before the blob is written, so what is in storage is already seekable. The playback
-  dialog fixes nothing; it passes the saved duration to `VideoPlayer` as `knownDuration`,
-  because even a repaired WebM can report `video.duration` as `Infinity` on first load
-- A repair that fails still saves the raw blob, and raises the `NOT_SEEKABLE` notice
+- **The repair runs on MediaRecorder output only**, once, at save time.
+  `useRecordingSave` branches on `recorderTypeRef`: a `'webcodecs'` take is written through
+  untouched, because `WebCodecsRecorder` muxes with Mediabunny, which already emits Duration
+  and Cues. Everything else — PiP takes, audio-only takes, and any browser without WebCodecs
+  — goes through `fixWebMMetadata()` first. Either way what reaches storage is seekable, but
+  only one of the two paths repairs anything; a take that will not scrub is a question about
+  *which recorder produced it* before it is a question about the repair
+- The playback dialog fixes nothing either. It passes the saved duration to `VideoPlayer` as
+  `knownDuration`, which the player falls back to when `video.duration` is `Infinity` or 0
+- A repair that fails still saves the raw blob, and raises the `NOT_SEEKABLE` notice. That
+  path exists only for MediaRecorder takes, for the same reason
 
 ### Analytics
-- Vercel Analytics via `@vercel/analytics`
+- Vercel Analytics via `@vercel/analytics`, **in the hosted build only**. The standalone
+  build ships no analytics runtime at all: `BUILD_MODE === 'saas'` gates both `trackEvent()`
+  and the `<Analytics />` mount in `packages/shared`, and since `BUILD_MODE` folds to a
+  literal at build time the bundler drops `@vercel/analytics` from the offline bundle
+  instead of shipping it inert. `apps/e2e/tests/standalone/craft.spec.ts` holds it: it
+  records a real take — so `Recording Started` and `Recording Completed` genuinely reach
+  `trackEvent()` — and then asserts no `window.va`, no queue and no injected script
+- `<Analytics />` is mounted by `bootstrapApp()`, not by `src/main.tsx` directly
 - Custom events in `src/utils/analytics.ts`:
   - `Recording Started`
   - `Recording Completed` (with duration)
