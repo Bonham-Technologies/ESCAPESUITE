@@ -294,9 +294,10 @@ Clips support animated properties via keyframes:
   frame while the clip preview plays. Tests that compare the live region's text exactly strip
   `\u200B` first.
 
-  **Known limitation**: `ExportDialog` listens on `document` in the capture phase, which runs
-  *before* the graph's handler and so can't be shielded by its `stopPropagation()`. This is moot
-  in practice — the graph can't hold focus while that dialog is open.
+  **Known limitation**: `ExportDialog`'s `useDialogBehaviour` listens on `document` in the
+  capture phase, which runs *before* the graph's handler and so can't be shielded by its
+  `stopPropagation()`. This is moot in practice — the graph can't hold focus while that dialog
+  is open. See "Dialogs" below.
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
@@ -697,6 +698,39 @@ and queries `styles.menuBackdrop`.
   - `Overlay Added` (with type: text/shape/blur)
   - `Export Started` (with format)
   - `Export Completed` (with format and duration)
+
+### Dialogs
+
+`ExportDialog` is the editor's only modal with keyboard behaviour of its own, and it gets
+all of it from **`useDialogBehaviour`** in `packages/shared/src/hooks`, imported as
+`@escapesuite/shared/hooks`. ESCAPECRAFT's two modals use the same hook; it is the one
+implementation for every dialog in the suite, and the place to change any of this.
+
+The hook started life *here*, as an inline effect in `ExportDialog`, and was lifted into
+CRAFT and then into `packages/shared`. The copy that stayed here had drifted in one way:
+its Shift+Tab trap had arms for focus on the first control, focus null and focus outside
+the dialog, but none for focus parked on the dialog **container** — which is where a click
+on the dialog's own padding lands. Shift+Tab from there walked backwards out of an
+`aria-modal` dialog. The shared hook treats the container as "at the start" and wraps to
+the last control; `ExportDialog` carries `tabIndex={-1}` so the container is a focus target
+at all.
+
+Two things about the adoption are worth knowing:
+
+- **`isOpen` is passed.** The hook's second argument defaults to `true`, which suits a
+  dialog rendered only while open (both CRAFT modals). `ExportDialog` is mounted for the
+  life of the editor and returns `null` when closed, so it passes `isOpen` and the effect
+  opens and closes with the flag.
+- **Escape still leaves through `handleCancel`**, the same path as the × and Cancel
+  buttons, so an in-progress export is aborted exactly as they abort it.
+
+`useAppKeyboardShortcuts` has **no `modalOpen` gate** — CRAFT's equivalent does — so
+nothing but the hook's own `stopPropagation()` keeps the editor's shortcuts off a key the
+dialog has claimed. That works because the hook listens on `document` in the **capture**
+phase and the shortcut cascade listens on `window` in the bubble phase, and because Escape
+is the only key it stops. It is also the reason for the keyframe graph's known limitation
+above. `LoadingOverlay` and `SessionRestorePrompt` are `role="dialog" aria-modal="true"`
+but have no trap or Escape handling of their own and do not use the hook.
 
 ### Export Performance Optimizations (`src/core/exporter.ts`)
 The export pipeline includes several optimizations to improve performance:

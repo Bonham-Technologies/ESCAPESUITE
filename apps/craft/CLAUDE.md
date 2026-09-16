@@ -75,15 +75,14 @@ Every module below has its own test file; `App.tsx` itself is covered through
 | `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its four action buttons, each labelled with the recording's own name. It touches no storage — it hands ids and names back up |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
 | `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`), and the `blockedReason` that sits in front of that ladder |
-| `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for. Calls `useDialogBehaviour` for the keyboard half |
-| `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby`, and the `tabIndex={0}` that makes its scrolling body keyboard-reachable. Calls `useDialogBehaviour` too |
+| `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for. Calls the shared `useDialogBehaviour` for the keyboard half |
+| `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby`, and the `tabIndex={0}` that makes its scrolling body keyboard-reachable. Calls the shared `useDialogBehaviour` too |
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
 | `hooks/useCapabilityBootstrap.ts` | The way in: capability detection and the initial `loadRecordings()`, both in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
 | `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
-| `hooks/useDialogBehaviour.ts` | The modal keyboard contract both dialogs share: initial focus, the Tab trap, Escape-to-close, and focus restored to the opener. Returns the ref to put on the dialog element. See "Dialogs" below |
 | `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete (re-reading the storage headroom after it), and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
 
 ### Errors and notices
@@ -184,11 +183,18 @@ user cannot act on. Only the first of those is recoverable.
 ### Dialogs
 
 Both modals — Recording Tips and playback — get their keyboard behaviour from one hook,
-`src/hooks/useDialogBehaviour.ts`. It takes the `onClose` the dialog already has and returns
-the ref to put on the dialog element; on mount it remembers what was focused, moves focus to
-the first focusable control inside (or, if there is none, to the dialog itself, which is why
-both carry `tabIndex={-1}`), and on unmount it puts focus back where it found it. While it is
-mounted it holds one `keydown` listener on `document` **in the capture phase**:
+`useDialogBehaviour`, which lives in **`packages/shared/src/hooks`** and is imported as
+`@escapesuite/shared/hooks`. ESCAPEARTIST's export dialog uses the same hook; it is the one
+implementation for all three dialogs in the suite, and the place to change any of this.
+
+It takes the `onClose` the dialog already has and returns the ref to put on the dialog
+element; on mount it remembers what was focused, moves focus to the first focusable control
+inside (or, if there is none, to the dialog itself, which is why both carry `tabIndex={-1}`),
+and on unmount it puts focus back where it found it. Both CRAFT dialogs render only while
+they are open, so they pass `onClose` and nothing else — the hook's second argument,
+`isOpen`, defaults to `true` and exists for ARTIST's export dialog, which stays mounted and
+returns `null` when closed. While it is open it holds one `keydown` listener on `document`
+**in the capture phase**:
 
 - **Escape** closes the dialog and is stopped there.
 - **Tab / Shift+Tab** wrap at the ends of the dialog, and pull focus back in if it has strayed
@@ -197,10 +203,13 @@ mounted it holds one `keydown` listener on `document` **in the capture phase**:
   keeps Space, M and the arrows — it binds its own `window` listener, and `window`'s bubble
   phase is below `document`'s capture phase.
 
-The hook is ESCAPEARTIST's `ExportDialog` focus trap, lifted rather than re-invented — same
-focusable-element selector, same capture listener, same restore. It lives in CRAFT because CRAFT
-has two dialogs; folding ARTIST's copy onto it means moving the hook into `packages/shared`,
-which is a change to two more packages and has not been done.
+The hook began as ESCAPEARTIST's `ExportDialog` focus trap, lifted rather than re-invented —
+same focusable-element selector, same capture listener, same restore — then lived in CRAFT for
+as long as CRAFT was the only app with two dialogs. It moved into `packages/shared` when
+ARTIST adopted it, which is also what fixed the one way the two copies had diverged: CRAFT's
+Shift+Tab arm treats focus parked on the dialog **container** as "at the start" and wraps to
+the last control, where ARTIST's copy let it walk backwards out of an `aria-modal` dialog.
+Its own tests moved with it (`packages/shared/src/hooks/useDialogBehaviour.test.tsx`).
 
 Stopping Escape is not enough on its own, because R, P and S never reach the dialog at all.
 `useKeyboardShortcuts` therefore takes **`modalOpen`** and ignores every key while it is true —
@@ -279,8 +288,9 @@ Reusable video player with full playback controls:
   is the fallback for when it is not — a MediaRecorder WebM often reports `Infinity` or 0.
   The playback dialog passes the saved recording's duration as that fallback
 - **Keyboard**: Space/K, Left/Right, Up/Down, M, 0/Home, End, Escape. It binds these on
-  `window`; `useDialogBehaviour` binds Escape and Tab on `document` in the capture phase, so
-  while the playback dialog is open the dialog's Escape runs first and the player's does not
+  `window`; the shared `useDialogBehaviour` binds Escape and Tab on `document` in the capture
+  phase, so while the playback dialog is open the dialog's Escape runs first and the player's
+  does not
 
 ### Capability Detection (`src/core/permissions.ts`)
 Enhanced capability detection with detailed unavailability reasons:
