@@ -32,10 +32,24 @@ pnpm lint                # Run ESLint
 ## Architecture
 
 ### App (`src/App.tsx`)
-`App.tsx` is wiring only — the single `useRecorderStore()` destructure, the two refs the take
-and the save share, the `showHelpModal` flag, the `isRecordingActive` derivation and
+`App.tsx` is wiring only — one store selector per field it reads, the two refs the take and
+the save share, the `showHelpModal` flag, the `isRecordingActive` derivation and
 `toggleSource`, one call per hook below, and the JSX that composes the components. It registers
 no effect of its own and binds no listener.
+
+**`App` selects each field; it must never call `useRecorderStore()` with no selector.** A
+whole-store subscription re-renders `App`, every component below it and every hook it calls on
+*every* store write — including the ~12 audio levels a second a running take pushes for a value
+that moves two meter bars. The three fields nothing outside the Sources panel reads
+(`detailedCapabilities`, `audioLevels`, `systemAudioShared`) are not in `App` at all:
+`SourceTogglesPanel` subscribes to them and renders the props-only `SourceToggles`, because a
+field `App` merely passes through still re-renders `App`. `App.rerender.test.tsx` is the net,
+and nothing else is: it counts each component's renders across 12 level pushes and asserts the
+five non-subscribers at exactly 0 (measured 2026-09-16, before → after: `App` 12 → 0,
+`AppHeader` 12 → 0, `RecordingsList` 12 → 0, `RecorderControls` 12 → 0, `RecordingPreview`
+12 → 0, `SourceToggles` 12 → 12), plus exactly one `App` render per recorder-state change.
+Restoring the destructure, or threading `audioLevels` back through `App`, passes every other
+App test and fails only that file.
 
 The hooks are called in a fixed order — theme, capability bootstrap, media streams, recording
 save, recording controller, keyboard shortcuts, recording library — because that order is the
@@ -58,11 +72,12 @@ thumbnail nobody wrote. The same rule puts `compositorRef`, `micStreamRef`, `pre
 
 Every module below has its own test file; `App.tsx` itself is covered through
 `App.recording.test.tsx`, `App.saving.test.tsx`, `App.library.test.tsx` and
-`App.settings.test.tsx`, which drive the rendered app.
+`App.settings.test.tsx`, which drive the rendered app, plus `App.rerender.test.tsx` for the
+selector contract above.
 
 | Module | Owns |
 |--------|------|
-| `App.tsx` | The composition: the store destructure, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, `modalOpen` (`showHelpModal \|\| playbackUrl !== null`), the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
+| `App.tsx` | The composition: the per-field store selectors, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, `modalOpen` (`showHelpModal \|\| playbackUrl !== null`), the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
 | `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
 | `utils/notices.ts` | The app's whole vocabulary of notices — six strings, one per thing that can go wrong. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
@@ -71,6 +86,7 @@ Every module below has its own test file; `App.tsx` itself is covered through
 | `components/icons.tsx` | The inline SVG icon set, every path drawn in `currentColor`. The source icons take a `className` because their size is per call site; the action icons are `aria-hidden` and sized entirely by their button |
 | `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region — carrying both the recorder state and the app's one `notice` — and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
 | `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
+| `components/SourceToggles/SourceTogglesPanel.tsx` | The Sources panel's subscription: the five store fields `SourceToggles` draws, selected here rather than in `App` so the ~12-a-second `audioLevels` push redraws this panel and nothing else. Takes only `isRecordingActive` and `onToggleSource` as props. `SourceToggles` itself stays driven by props alone, which is what its own test asserts |
 | `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, every control reporting a config patch. It draws unconditionally; whether the panel exists at all is the caller's decision |
 | `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its four action buttons, each labelled with the recording's own name. It touches no storage — it hands ids and names back up |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
@@ -356,10 +372,9 @@ would otherwise be saved as unseekable WebM.
 Both recorders read their analysers on `requestAnimationFrame` and push an `AudioLevels` to the
 store through `onAudioLevels`; `SourceToggles` draws the meters. **Both gate that to one sample
 every 80 ms** (`AUDIO_LEVEL_INTERVAL_MS` in `webcodecs-recorder.ts`, `updateInterval` in
-`recorder.ts`) — ~12.5 Hz, which is plenty for a meter and a twelfth of the cost. The gate
-matters more than it looks: `App` subscribes to the Zustand store with no selector, so **one
-level push re-renders App and its whole tree** (measured 2026-09-15: exactly one commit per
-`setAudioLevels`). Ungated that was 60 whole-tree renders a second for the length of a take.
+`recorder.ts`) — ~12.5 Hz, which is plenty for a meter and a twelfth of the cost. Ungated,
+and back when `App` subscribed to the whole store, that was 60 whole-tree renders a second for
+the length of a take.
 
 Two more rules the WebCodecs recorder follows and `Recorder` does not yet:
 
@@ -374,12 +389,15 @@ Two more rules the WebCodecs recorder follows and `Recorder` does not yet:
   for system audio and was not given it would otherwise show the previous take's bar frozen
   at its last value. One store write per take, not per frame.
 
-**Follow-up, deliberately not done here:** the remaining cost is the whole-tree render, and
-selecting `audioLevels` inside `SourceToggles` would not remove it — `App` calls
-`useRecorderStore()` with no selector, so it re-renders on *every* store write whatever its
-children subscribe to (measured 2026-09-15: one App commit per `setAudioLevels`, with
-`audioLevels` reaching only `SourceToggles`). Cutting it to the meters means moving `App` to
-per-field selectors, which is its own ticket.
+**A level push now costs the Sources panel and nothing else.** `App` selects each field it
+reads and does not read `audioLevels` at all; `SourceTogglesPanel` owns the subscription and
+hands the value to the props-only `SourceToggles` (see the App section above). Measured
+2026-09-16 over 12 pushes, before → after: `App` 12 → 0 renders, `AppHeader` 12 → 0,
+`RecordingsList` 12 → 0, `RecorderControls` 12 → 0, `RecordingPreview` 12 → 0, `SourceToggles`
+12 → 12. `App.rerender.test.tsx` asserts those five as exact zeros — conservation, not a
+ceiling: a component that does not subscribe re-renders never — and asserts that the meters
+still draw the level `App` never handed them, so a panel that subscribed to nothing could not
+pass by rendering zero times.
 
 `webcodecsRecorder.perf.test.ts` and `recorder.perf.test.ts` assert all of this as counts —
 at most 13 emissions per 60 animation frames in *both* files, so the two monitors cannot drift
