@@ -60,7 +60,7 @@ cd apps/e2e && pnpm exec playwright test --config=playwright.standalone.config.t
 - [ ] Source selection (screen/webcam) works
 - [ ] Start/stop a recording and confirm it plays back
 - [ ] Theme toggle works
-- [ ] Download produces a valid WebM/MP4 file
+- [ ] Download produces a valid WebM file (WebM is the only download the UI offers)
 
 #### ESCAPEARTIST (http://localhost:5185/ or file://)
 - [ ] App loads with no network requests (check DevTools Network tab)

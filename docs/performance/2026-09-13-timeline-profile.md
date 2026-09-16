@@ -469,7 +469,7 @@ against its comment:
 cd apps/artist && npx vitest run \
   src/components/Timeline/timelineGestures.perf.test.ts \
   src/components/Preview/drawFrame.perf.test.ts src/core/exportMP4.perf.test.ts
-cd apps/craft && npx vitest run \
+cd ../craft && npx vitest run \
   src/core/compositor.perf.test.ts src/core/converter.perf.test.ts
 ```
 

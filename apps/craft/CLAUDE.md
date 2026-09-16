@@ -246,6 +246,10 @@ the Help button.
 - `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring (see
   "Audio level meters" for the 80 ms gate both recorders apply)
 - `webcodecs-recorder.ts`: VideoEncoder/AudioEncoder + Mediabunny recorder for non-PiP takes
+- `recorder-factory.ts`: `createRecorder()` / `canUseWebCodecsRecorder()` — picks between the
+  two recorders for a take. WebCodecs unless the take is PiP (the compositor's hidden video
+  elements break its frame capture) or has no video track at all (an audio-only take, which
+  `WebCodecsRecorder` cannot serve); MediaRecorder otherwise
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction. Its size, type
@@ -254,15 +258,24 @@ the Help button.
   `hooks/useRecordingSave`) `vi.mock('./core/thumbnailGenerator')` wholesale, so a constant
   declared in this module would vanish under the mock. `utils/previewThumbnail.ts` is never
   mocked, which is what makes it the single definition — keep it that way
-- `converter.ts`: Video format conversion using WebCodecs + Mediabunny
+- `converter.ts`: `fixWebMMetadata()` — the WebM container repair every saved take goes
+  through, and **the only export of this module the app reaches**. The rest of the file
+  (`convertToMP4`, `remuxToWebM`, their support checks, and the progress/abort machinery)
+  is WebCodecs + Mediabunny conversion that nothing calls; see "Download Formats"
 
 ### VideoPlayer Component (`src/components/VideoPlayer/`)
 Reusable video player with full playback controls:
-- **Play/Pause**: Toggle playback with button or spacebar
-- **Seeking**: Click progress bar or use arrow keys (±5s), with Shift for ±10s
-- **Volume**: Adjustable with mute toggle (M key)
-- **Loop detection**: Automatically resets to beginning when video ends
-- **Keyboard shortcuts**: Space (play/pause), M (mute), arrows (seek)
+- **Play/Pause**: the transport button, Space or K, or a click on the video itself
+- **Seeking**: click or drag the progress bar; Left/Right skip ±5s; 0 or Home jumps to the
+  start and End to the end. There is no Shift modifier
+- **Volume**: a slider with a mute toggle (M); Up/Down move it in 0.1 steps
+- **Restart**: its own transport button — seek to 0 and play
+- **At the end of the video** it resets to the beginning and stops. It does not loop
+- **Duration**: `knownDuration` is used in place of `video.duration`, which a MediaRecorder
+  WebM does not report reliably — the playback dialog passes the saved recording's duration
+- **Keyboard**: Space/K, Left/Right, Up/Down, M, 0/Home, End, Escape. It binds these on
+  `window`; `useDialogBehaviour` binds Escape and Tab on `document` in the capture phase, so
+  while the playback dialog is open the dialog's Escape runs first and the player's does not
 
 ### Capability Detection (`src/core/permissions.ts`)
 Enhanced capability detection with detailed unavailability reasons:
@@ -411,24 +424,32 @@ message and navigate to its own editor itself.
 - `build:standalone` produces an offline single-file build for air-gapped use
 
 ### Download Formats
-Three download options with different speed/compatibility trade-offs:
-- **WebM (Instant)**: Fast metadata fix using `webm-duration-fix`, works in browsers/VLC
-- **WebM (Compatible)**: Re-encoded with WebCodecs + Mediabunny for Windows Media Player
-- **MP4 (Universal)**: H.264 + AAC conversion for maximum compatibility
 
-### Export Features
-- **Cancellation**: All exports can be cancelled mid-conversion via AbortController
-- **Background Tab Support**: Uses MessageChannel for yielding instead of setTimeout to avoid browser throttling
-- **Play-based Frame Capture**: Uses `requestVideoFrameCallback` for fast encoding (~real-time speed vs minutes with seek-based approach)
-- **Progress Tracking**: Real-time progress updates during conversion
+**One option: "Download WebM".** The library row's download button hands back the stored
+blob as `<name>.webm`, with no conversion step — the container was already repaired when
+the take was saved (see "WebM Handling"), so the download is instant.
+
+`core/converter.ts` still holds the MP4 (H.264 + AAC) and compatible-WebM (VP9 + Opus
+re-encode) conversion paths, and everything that was built around them: support checks,
+progress reporting, `AbortSignal` cancellation, `requestVideoFrameCallback` frame capture
+(~real-time rather than the minutes a seek-based loop takes) and `MessageChannel` yielding
+so a conversion is not throttled in a background tab. **None of it has been reachable from
+the UI since #209** — that PR deleted the download-conversion handlers outright;
+only `fixWebMMetadata()` is called. The code is kept, tested and unwired pending a product
+decision on whether ESCAPECRAFT should offer format conversion at all — the editor
+(ESCAPEARTIST) exports MP4 already. Note that `components/HelpDialog` still describes an
+MP4 download to the user; that copy is part of the same open decision.
 
 ### WebM Handling
 - MediaRecorder produces WebM without proper seek metadata
 - `webm-duration-fix` library adds Duration, SeekHead, and Cues elements
 - Thumbnails captured from live preview (more reliable than from blob)
 - Metadata extraction has fallbacks for problematic WebM files
-- Compatible WebM option re-encodes with VP9 + Opus via Mediabunny
-- Playback viewer fixes metadata before playback for proper scrubbing
+- The repair happens **once, at save time** — `useRecordingSave` runs `fixWebMMetadata()`
+  before the blob is written, so what is in storage is already seekable. The playback
+  dialog fixes nothing; it passes the saved duration to `VideoPlayer` as `knownDuration`,
+  because even a repaired WebM can report `video.duration` as `Infinity` on first load
+- A repair that fails still saves the raw blob, and raises the `NOT_SEEKABLE` notice
 
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`
@@ -495,7 +516,9 @@ the outcome, not on the double.
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
 - AudioContext needs resume() call due to Chrome autoplay policy
 - WebM from MediaRecorder needs post-processing for proper scrubbing
-- WebCodecs API (MP4/Compatible WebM conversion) only works in Chrome/Edge
+- WebCodecs API only works in Chrome/Edge. Where it is missing, `recorder-factory.ts` falls
+  back to MediaRecorder, so recording still works — it is the WebCodecs recorder and the
+  (currently unwired) conversion paths in `converter.ts` that are Chrome/Edge only
 
 ## Keyboard Shortcuts
 
@@ -503,9 +526,19 @@ Bound by `src/hooks/useKeyboardShortcuts.ts` — the only window listener `App` 
 for the user by `src/components/RecorderControls/RecorderControls.tsx`. None of them fire while
 a dialog is open; see "Dialogs".
 
-| Key | Action |
-|-----|--------|
-| R | Start recording |
-| P | Pause/Resume |
-| S | Stop recording |
-| Esc | Cancel |
+Every one of them is gated on the state the app is in, so a key that has nothing to do is
+inert rather than wrong — there is no "else" branch anywhere in the switch. Two gates are
+worth naming: **R also checks `canRecord`**, the same `recordBlockedReason()` answer that
+disables the Record button, so the keyboard can never start a take the button refuses; and
+**Escape does nothing at all in `idle`** — there is no take to cancel, and it must not
+reach past the recorder.
+
+| Key | Action | Fires in |
+|-----|--------|----------|
+| R | Start recording | `idle`, and only when `canRecord` |
+| P | Pause / Resume | `recording` / `paused` |
+| S | Stop recording | `recording`, `paused` |
+| Esc | Cancel the countdown, else cancel the take | `countdown`; any state but `idle` |
+
+Typing is never interrupted either: a keydown whose target is an `<input>` or `<textarea>`
+returns before the switch.

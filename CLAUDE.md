@@ -107,11 +107,12 @@ dist/
 
 ### ESCAPECRAFT (apps/craft)
 - Zustand store in `src/store/recorderStore.ts`
-- Core modules in `src/core/`: `recorder.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
+- Core modules in `src/core/`: `recorder.ts`, `webcodecs-recorder.ts`, `recorder-factory.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
-- Outputs WebM (requires `webm-duration-fix` for proper seek metadata)
-- Export to MP4 (H.264+AAC) or WebM (VP9+Opus) via WebCodecs + Mediabunny
-- Export features: cancellation support, background tab support, ~real-time encoding speed
+- Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for PiP, audio-only takes and browsers without it
+- Outputs WebM (requires `webm-duration-fix` for proper seek metadata, applied once at save time)
+- Recordings download as WebM, and only as WebM — the stored blob, no conversion step
+- `converter.ts` also holds MP4 (H.264+AAC) and compatible-WebM (VP9+Opus) conversion via WebCodecs + Mediabunny, with cancellation, background-tab yielding and progress reporting. **The UI has reached none of it since #209** — only `fixWebMMetadata()` is called. Present, tested and unwired, pending a product decision; see `apps/craft/CLAUDE.md`'s "Download Formats"
 
 ### ESCAPEARTIST (apps/artist)
 - Zustand store in `src/store/projectStore.ts`
