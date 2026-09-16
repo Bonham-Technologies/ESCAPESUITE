@@ -4,16 +4,17 @@
 // `AudioLevels` into the store ~12 times a second for the whole length of a
 // take (see "Audio level meters" in `apps/craft/CLAUDE.md`). The only pixels
 // that value moves are the two meter bars inside the Sources panel, so a level
-// push should cost the Sources panel a render and cost the rest of the screen —
-// the header, the library, the preview stage, the transport bar, and `App`
-// itself with the seven hooks it calls — nothing at all.
+// push costs the Sources panel a render and costs the rest of the screen — the
+// header, the library, the preview stage, the transport bar, and `App` itself
+// with the seven hooks it calls — nothing at all.
 //
-// **This file currently pins the finding, not the target.** `App` subscribes to
-// the store with no selector, so every `setAudioLevels` re-renders `App` and
-// with it every component below: measured 2026-09-16, 12 renders each for 12
-// pushes. The assertion in the first test is written as the numbers that are
-// true today, and is the one to flip — to 0 everywhere but the Sources panel —
-// when `App` moves to per-field selectors.
+// That is the contract, and it is a conservation law rather than a ceiling: a
+// component that does not subscribe to `audioLevels` re-renders exactly never,
+// so the numbers below are exact. It holds because `App` selects each field it
+// reads (`App.tsx`) and `SourceTogglesPanel` owns the subscription to the three
+// fields only the Sources panel draws. Before that — measured 2026-09-16 with
+// this same file — `App`'s whole-store `useRecorderStore()` made it 12 renders
+// each, for all six.
 //
 // How the counts are taken: a pass-through `vi.spyOn` on each module namespace
 // (no `mockImplementation` — the real component still runs), installed *before*
@@ -25,8 +26,9 @@
 // is which individual components re-ran.
 //
 // The other half of the contract is that the meters must still draw the level
-// the recorder pushed, whichever route it travels, so the meter width is
-// asserted from the DOM in the same file.
+// they are no longer handed by `App` — a render counter alone would pass on a
+// panel that subscribed to nothing — so the meter width is asserted from the
+// DOM in the same file.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import { act } from '@testing-library/react';
@@ -143,27 +145,28 @@ function pushLevels(count: number): void {
 }
 
 describe('an audio-level push and the React tree', () => {
-  it('re-renders the whole tree, not only the Sources panel that draws the meters', async () => {
+  it('re-renders only the Sources panel that draws the meters', async () => {
     const { counters, mounted } = await renderCountingApp();
 
     pushLevels(LEVEL_PUSHES);
 
-    // The finding, measured 2026-09-16: one commit per push, and `App`'s
-    // no-selector store subscription drags every component below it along for
-    // a value only the two meter bars read. Flip the five zeros in when `App`
-    // selects what it reads; `sourceToggles` stays at LEVEL_PUSHES either way,
-    // because the panel is the one part of the screen that must redraw.
+    // Measured 2026-09-16, before and after: App 12 → 0, AppHeader 12 → 0,
+    // RecordingsList 12 → 0, RecorderControls 12 → 0, RecordingPreview 12 → 0,
+    // SourceToggles 12 → 12. Exact rather than a 2x ceiling, because "does not
+    // subscribe" has no spread: a re-introduced `useRecorderStore()` in `App`,
+    // or an `audioLevels` prop threaded back down through it, puts all five
+    // back to LEVEL_PUSHES and fails here.
     expect(since(counters, mounted)).toEqual({
-      app: LEVEL_PUSHES,
-      appHeader: LEVEL_PUSHES,
-      recordingsList: LEVEL_PUSHES,
-      recorderControls: LEVEL_PUSHES,
-      recordingPreview: LEVEL_PUSHES,
+      app: 0,
+      appHeader: 0,
+      recordingsList: 0,
+      recorderControls: 0,
+      recordingPreview: 0,
       sourceToggles: LEVEL_PUSHES,
     });
   });
 
-  it('draws the level the recorder pushed into the store', async () => {
+  it('draws the level App never handed it', async () => {
     const { container } = await renderApp();
     act(() => {
       useRecorderStore.setState({ state: 'recording' });

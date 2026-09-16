@@ -10,7 +10,8 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRecordingLibrary } from './hooks/useRecordingLibrary';
 import { recordBlockedReason } from './utils/recordReadiness';
 import { AppHeader } from './components/AppHeader/AppHeader';
-import { SourceToggles, type RecordingSource } from './components/SourceToggles/SourceToggles';
+import type { RecordingSource } from './components/SourceToggles/SourceToggles';
+import { SourceTogglesPanel } from './components/SourceToggles/SourceTogglesPanel';
 import { WebcamOverlaySettings } from './components/WebcamOverlaySettings/WebcamOverlaySettings';
 import { RecordingsList } from './components/RecordingsList/RecordingsList';
 import { RecordingPreview } from './components/RecordingPreview/RecordingPreview';
@@ -19,35 +20,42 @@ import { PlaybackDialog } from './components/PlaybackDialog/PlaybackDialog';
 import { HelpDialog } from './components/HelpDialog/HelpDialog';
 
 function App() {
-  const {
-    state,
-    config,
-    capabilities,
-    detailedCapabilities,
-    capabilitiesReady,
-    recordings,
-    notice,
-    systemAudioShared,
-    hasStorageSpace,
-    currentDuration,
-    countdownValue,
-    audioLevels,
-    setConfig,
-    setCapabilities,
-    setDetailedCapabilities,
-    setCapabilitiesReady,
-    setNotice,
-    setSystemAudioShared,
-    setState,
-    setCountdown,
-    setCurrentDuration,
-    setAudioLevels,
-    setStreams,
-    addRecording,
-    removeRecording,
-    loadRecordings,
-    refreshStorageSpace,
-  } = useRecorderStore();
+  // One selector per field, not a whole-store `useRecorderStore()`: a
+  // subscription with no selector re-renders App — and with it every component
+  // below and every hook it calls — on *every* store write, including the ~12
+  // audio levels a second a running take pushes. The fields only the Sources
+  // panel draws (`detailedCapabilities`, `audioLevels`, `systemAudioShared`)
+  // are deliberately absent: `SourceTogglesPanel` subscribes to those itself,
+  // so a level push redraws the meters and nothing else. `App.rerender.test.tsx`
+  // counts it.
+  //
+  // The actions are selected the same way and cost nothing: zustand creates
+  // them once, and `set` only ever merges state over them, so each is a stable
+  // reference and no hook's dependency array changes identity because of this.
+  const state = useRecorderStore((s) => s.state);
+  const config = useRecorderStore((s) => s.config);
+  const capabilities = useRecorderStore((s) => s.capabilities);
+  const capabilitiesReady = useRecorderStore((s) => s.capabilitiesReady);
+  const recordings = useRecorderStore((s) => s.recordings);
+  const notice = useRecorderStore((s) => s.notice);
+  const hasStorageSpace = useRecorderStore((s) => s.hasStorageSpace);
+  const currentDuration = useRecorderStore((s) => s.currentDuration);
+  const countdownValue = useRecorderStore((s) => s.countdownValue);
+  const setConfig = useRecorderStore((s) => s.setConfig);
+  const setCapabilities = useRecorderStore((s) => s.setCapabilities);
+  const setDetailedCapabilities = useRecorderStore((s) => s.setDetailedCapabilities);
+  const setCapabilitiesReady = useRecorderStore((s) => s.setCapabilitiesReady);
+  const setNotice = useRecorderStore((s) => s.setNotice);
+  const setSystemAudioShared = useRecorderStore((s) => s.setSystemAudioShared);
+  const setState = useRecorderStore((s) => s.setState);
+  const setCountdown = useRecorderStore((s) => s.setCountdown);
+  const setCurrentDuration = useRecorderStore((s) => s.setCurrentDuration);
+  const setAudioLevels = useRecorderStore((s) => s.setAudioLevels);
+  const setStreams = useRecorderStore((s) => s.setStreams);
+  const addRecording = useRecorderStore((s) => s.addRecording);
+  const removeRecording = useRecorderStore((s) => s.removeRecording);
+  const loadRecordings = useRecorderStore((s) => s.loadRecordings);
+  const refreshStorageSpace = useRecorderStore((s) => s.refreshStorageSpace);
 
   // The two refs the take and the save share. They are created here, once, and
   // handed to both hooks: useRecordingSave is called before the controller
@@ -188,13 +196,8 @@ function App() {
         {/* Sidebar */}
         <aside className={styles.sidebar}>
           {/* Sources */}
-          <SourceToggles
-            config={config}
-            capabilities={capabilities}
-            detailedCapabilities={detailedCapabilities}
-            audioLevels={audioLevels}
+          <SourceTogglesPanel
             isRecordingActive={isRecordingActive}
-            systemAudioShared={systemAudioShared}
             onToggleSource={toggleSource}
           />
 
