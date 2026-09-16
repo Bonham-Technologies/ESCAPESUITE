@@ -303,6 +303,23 @@ describe('ExportDialog', () => {
       expect(screen.getByRole('button', { name: /cancel/i })).toHaveFocus()
     })
 
+    it('cycles focus backwards from the dialog container itself', () => {
+      // The container is `tabIndex={-1}`: not in the tab order, but a click on
+      // the dialog's own padding — or on any of the non-focusable content
+      // inside it — parks focus here. Shift+Tab from that position used to fall
+      // through every arm of the trap (`active` is neither the first control
+      // nor outside the dialog), so the browser walked focus backwards *out* of
+      // an `aria-modal` dialog and onto the editor behind it.
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      const dialog = screen.getByRole('dialog')
+      dialog.focus()
+      expect(dialog).toHaveFocus()
+
+      fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+
+      expect(screen.getByRole('button', { name: /cancel/i })).toHaveFocus()
+    })
+
     it('leaves Tab alone in the middle of the dialog', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       const middle = primaryExport()

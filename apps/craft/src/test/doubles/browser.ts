@@ -67,7 +67,7 @@ export function installBrowserStubs(): BrowserStubs {
 /**
  * jsdom performs no layout, so `HTMLElement.offsetParent` is `null` on every
  * element — including elements that are plainly on screen. The dialog focus
- * trap (`hooks/useDialogBehaviour.ts`) uses `offsetParent !== null` to skip
+ * trap (`useDialogBehaviour` in `@escapesuite/shared/hooks`) uses `offsetParent !== null` to skip
  * controls CSS has hidden, so under jsdom it would otherwise find nothing
  * focusable at all.
  *

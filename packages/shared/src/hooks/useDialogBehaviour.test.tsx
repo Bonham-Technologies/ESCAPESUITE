@@ -1,14 +1,35 @@
-// The shared modal keyboard behaviour, driven directly rather than through
-// either dialog, so the edges each of them only has one of are covered here:
-// a dialog with nothing focusable in it, a dialog whose ref was never attached,
-// focus parked outside the trap, and an opener that has gone away.
+// The shared modal keyboard behaviour, driven directly rather than through any
+// of the three dialogs that use it, so the edges each of them only has one of
+// are covered here: a dialog with nothing focusable in it, a dialog whose ref
+// was never attached, a dialog that opens and closes without unmounting, focus
+// parked outside the trap, and an opener that has gone away.
 //
 // Nothing is mocked. The one stand-in is `installOffsetParentStub`, because
 // jsdom performs no layout and would otherwise report every element hidden.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, renderHook, fireEvent } from '@testing-library/react'
 import { useDialogBehaviour } from './useDialogBehaviour'
-import { installOffsetParentStub } from '../test/doubles/browser'
+
+/**
+ * jsdom performs no layout, so `HTMLElement.offsetParent` is `null` on every
+ * element — including elements that are plainly on screen. The focus trap uses
+ * `offsetParent !== null` to skip controls CSS has hidden, so under jsdom it
+ * would otherwise find nothing focusable at all.
+ *
+ * Report `document.body` for every element instead, which is what a rendered
+ * element's offsetParent would be, and hand back the undo.
+ */
+function installOffsetParentStub(): () => void {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+    configurable: true,
+    get: () => document.body,
+  })
+  return () => {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
+  }
+}
 
 let restoreOffsetParent: () => void
 
@@ -21,7 +42,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-/** A dialog with three focusable controls: the shape both real dialogs have. */
+/** A dialog with three focusable controls: the shape all three real dialogs have. */
 function Dialog({ onClose, empty = false }: { onClose: () => void; empty?: boolean }) {
   const dialogRef = useDialogBehaviour(onClose)
   return (
@@ -215,5 +236,57 @@ describe('useDialogBehaviour closing', () => {
 
     Reflect.deleteProperty(document, 'activeElement')
     expect(activeElement).toBeDefined()
+  })
+})
+
+describe('useDialogBehaviour on an always-mounted dialog', () => {
+  // ARTIST's export dialog is mounted for the life of the editor and returns
+  // null when closed, so it passes `isOpen` and the effect opens and closes
+  // with the flag rather than with the component.
+  function ToggleDialog({ onClose, isOpen }: { onClose: () => void; isOpen: boolean }) {
+    const dialogRef = useDialogBehaviour(onClose, isOpen)
+    if (!isOpen) return null
+    return (
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-label="Toggle dialog">
+        <button>first</button>
+        <button>last</button>
+      </div>
+    )
+  }
+
+  it('does nothing while it is closed', () => {
+    const onClose = vi.fn()
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    outside.focus()
+
+    render(<ToggleDialog onClose={onClose} isOpen={false} />)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(outside)
+  })
+
+  it('takes focus when it opens and gives it back when it closes', () => {
+    const onClose = vi.fn()
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+
+    const { rerender, container } = render(<ToggleDialog onClose={onClose} isOpen={false} />)
+    expect(document.activeElement).toBe(opener)
+
+    rerender(<ToggleDialog onClose={onClose} isOpen={true} />)
+    expect(document.activeElement).toBe(container.querySelector('button'))
+
+    // Still trapping while open.
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(container.querySelectorAll('button')[1])
+
+    rerender(<ToggleDialog onClose={onClose} isOpen={false} />)
+    expect(document.activeElement).toBe(opener)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
   })
 })
