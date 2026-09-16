@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.11
+
+### Patch Changes
+
+- 7609a12: Lower CPU use while recording: only the audio meters redraw when levels change. The rest of the recorder — the header, the recordings list, the preview stage and the transport bar — is no longer redrawn a dozen times a second for the length of a take.
+- Updated dependencies [236a7dc]
+  - @escapesuite/shared@1.3.2
+
 ## 2.3.10
 
 ### Patch Changes
