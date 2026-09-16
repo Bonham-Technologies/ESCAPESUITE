@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
 import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError, ExportError } from '../../core/exporter';
 import { getSetting, setSetting } from '../../core/storage';
@@ -46,11 +47,6 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
   // AbortController for cancelling exports
   const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Dialog element, plus a stable handle on the current cancel handler so the
-  // focus-trap effect only ever runs on open/close.
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const cancelRef = useRef<() => void>(() => {});
 
   const mp4Supported = isMP4ExportSupported();
 
@@ -207,68 +203,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     handleExport('webm', true);
   }, [handleExport]);
 
-  cancelRef.current = handleCancel;
-
-  // Modal keyboard behaviour: focus starts inside the dialog, Tab cycles within
-  // it, and Escape leaves through the same cancel path as the × and Cancel
-  // buttons (aborting an in-progress export exactly as they do). Focus returns
-  // to whatever opened the dialog when it closes.
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-
-    const getFocusable = () =>
-      Array.from(
-        dialog.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
-        )
-      ).filter((el) => el.offsetParent !== null);
-
-    getFocusable()[0]?.focus();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        // The dialog owns Escape while it is open; editor shortcuts must not
-        // also fire.
-        e.preventDefault();
-        e.stopPropagation();
-        cancelRef.current();
-        return;
-      }
-
-      if (e.key !== 'Tab') return;
-
-      const focusable = getFocusable();
-      if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-
-      if (e.shiftKey) {
-        if (active === first || !active || !dialog.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last || !active || !dialog.contains(active)) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown, true);
-      previouslyFocused?.focus?.();
-    };
-  }, [isOpen]);
+  // Modal keyboard behaviour — initial focus, the Tab trap, Escape-to-close and
+  // focus restored to the opener — comes from the shared hook, which is this
+  // dialog's own effect lifted into `packages/shared` and then fixed: its
+  // Shift+Tab trap has an arm for focus parked on the dialog container, which
+  // the copy that lived here did not. Escape still leaves through the same
+  // cancel path as the × and Cancel buttons (aborting an in-progress export
+  // exactly as they do), and is still stopped in the capture phase so the
+  // editor's shortcuts do not also see it.
+  const dialogRef = useDialogBehaviour(handleCancel, isOpen);
 
   if (!isOpen) return null;
 
