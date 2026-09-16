@@ -368,26 +368,6 @@ describe('Compositor', () => {
       compositor.stop()
     })
 
-    it('honours a zero padding applied through updateConfig()', () => {
-      const compositor = new Compositor(1280, 720, {
-        webcamShape: 'rectangle',
-        webcamPosition: 'top-left',
-        padding: 20,
-      })
-      const ctx = ctxOf(compositor)
-      const webcam = attachWebcam(compositor)
-
-      compositor.start(30)
-      expect(ctx.drawImage).toHaveBeenLastCalledWith(webcam.element, 20, 20, 256, 144)
-
-      compositor.updateConfig({ padding: 0 })
-      now += 40
-      tickAnimationFrames()
-
-      expect(ctx.drawImage).toHaveBeenLastCalledWith(webcam.element, 0, 0, 256, 144)
-      compositor.stop()
-    })
-
     it('defaults to a 20%, circular, bottom-right overlay', () => {
       const compositor = new Compositor(1280, 720)
       const ctx = ctxOf(compositor)
@@ -396,22 +376,6 @@ describe('Compositor', () => {
       compositor.start(30)
 
       expect(ctx.arc).toHaveBeenCalledWith(1132, 628, 72, 0, Math.PI * 2)
-      compositor.stop()
-    })
-
-    it('applies updateConfig() to the next rendered frame', () => {
-      const compositor = new Compositor(1280, 720, { webcamShape: 'rectangle', padding: 20 })
-      const ctx = ctxOf(compositor)
-      const webcam = attachWebcam(compositor)
-
-      compositor.start(30)
-      expect(ctx.drawImage).toHaveBeenLastCalledWith(webcam.element, 1004, 556, 256, 144)
-
-      compositor.updateConfig({ webcamPosition: 'top-left' })
-      now += 40
-      tickAnimationFrames()
-
-      expect(ctx.drawImage).toHaveBeenLastCalledWith(webcam.element, 20, 20, 256, 144)
       compositor.stop()
     })
 

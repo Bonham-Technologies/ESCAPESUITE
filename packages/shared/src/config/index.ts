@@ -1,6 +1,13 @@
 // Build-time configuration.
 // 'saas' (default) = hosted at escapesuite.io (Vercel Analytics enabled).
 // 'standalone' = offline single-file build (no analytics, no network).
+//
+// Vite inlines `import.meta.env.VITE_BUILD_MODE`, so `BUILD_MODE` is a string
+// literal by the time the bundler sees it. Code that must *disappear* from a
+// build rather than merely not run — the analytics runtime, see `../analytics`
+// and `../bootstrap` — therefore compares `BUILD_MODE` directly, which the
+// bundler can fold; the two predicates below are function calls and are opaque
+// to that analysis, so they are for ordinary runtime branching only.
 export const BUILD_MODE = import.meta.env.VITE_BUILD_MODE || 'saas'
 
 export const isSaaSMode = (): boolean => BUILD_MODE === 'saas'

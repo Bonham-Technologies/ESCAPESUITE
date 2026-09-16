@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   detectCapabilities,
-  detectCapabilitiesSimple,
   requestScreenCapture,
   requestWebcam,
   requestMicrophone,
@@ -283,28 +282,6 @@ describe('permissions', () => {
       expect(result.detailed.microphone.reason).toBe('policy_blocked')
       expect(result.capabilities.webcam).toBe(false)
       expect(result.capabilities.microphone).toBe(false)
-    })
-  })
-
-  describe('detectCapabilitiesSimple', () => {
-    it('returns just the boolean capabilities', async () => {
-      vi.mocked(navigator.mediaDevices.enumerateDevices).mockResolvedValue([
-        { kind: 'videoinput', deviceId: '1', groupId: '1', label: 'Cam', toJSON: () => ({}) },
-        { kind: 'audioinput', deviceId: '2', groupId: '2', label: 'Mic', toJSON: () => ({}) },
-      ] as MediaDeviceInfo[])
-
-      const result = await detectCapabilitiesSimple()
-
-      // Default test-environment userAgent doesn't match any known browser,
-      // so systemAudio is deterministically false (see the browser-sniffing
-      // test above for the chrome/edge/firefox/safari/other matrix).
-      expect(result).toEqual({
-        screenCapture: true,
-        webcam: true,
-        microphone: true,
-        systemAudio: false,
-        mediaRecorder: true,
-      })
     })
   })
 

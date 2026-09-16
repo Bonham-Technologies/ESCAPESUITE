@@ -211,12 +211,6 @@ export async function detectCapabilities(): Promise<CapabilityDetectionResult> {
   return { capabilities, detailed };
 }
 
-// Legacy function for backward compatibility
-export async function detectCapabilitiesSimple(): Promise<EnvironmentCapabilities> {
-  const result = await detectCapabilities();
-  return result.capabilities;
-}
-
 /**
  * Request screen capture with optional system audio.
  * Returns the MediaStream or throws an error.

@@ -684,7 +684,12 @@ and queries `styles.menuBackdrop`.
 | `SessionRestorePrompt.tsx` | The "Resume Previous Session?" modal and its two buttons. The `{showSessionPrompt && pendingSession && …}` guard stays in `App`, so `session` is always present here |
 
 ### Analytics
-- Vercel Analytics via `@vercel/analytics`
+- Vercel Analytics via `@vercel/analytics`, **in the hosted build only**. The standalone
+  build ships no analytics runtime at all: `BUILD_MODE === 'saas'` gates both `trackEvent()`
+  and the `<Analytics />` mount in `packages/shared`, and because `BUILD_MODE` folds to a
+  literal at build time the bundler drops `@vercel/analytics` from the offline bundle
+  rather than shipping it inert. See the root `CLAUDE.md`'s "Vercel Analytics"
+- `<Analytics />` is mounted by `bootstrapApp()`, not by `src/main.tsx` directly
 - Custom events in `src/utils/analytics.ts`:
   - `Video Imported` (with type: video/image/audio)
   - `Project Created`

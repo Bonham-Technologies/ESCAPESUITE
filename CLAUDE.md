@@ -107,11 +107,12 @@ dist/
 
 ### ESCAPECRAFT (apps/craft)
 - Zustand store in `src/store/recorderStore.ts`
-- Core modules in `src/core/`: `recorder.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
+- Core modules in `src/core/`: `recorder.ts`, `webcodecs-recorder.ts`, `recorder-factory.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
-- Outputs WebM (requires `webm-duration-fix` for proper seek metadata)
-- Export to MP4 (H.264+AAC) or WebM (VP9+Opus) via WebCodecs + Mediabunny
-- Export features: cancellation support, background tab support, ~real-time encoding speed
+- Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for PiP, audio-only takes and browsers without it
+- Outputs WebM either way, but only the MediaRecorder path needs repairing: `useRecordingSave` runs `webm-duration-fix` over MediaRecorder output at save time, and writes WebCodecs output through untouched (Mediabunny already emits Duration and Cues)
+- Recordings download as WebM, and only as WebM — the stored blob, no conversion step
+- `converter.ts` also holds MP4 (H.264+AAC) and compatible-WebM (VP9+Opus) conversion via WebCodecs + Mediabunny, with cancellation, background-tab yielding and progress reporting. **The UI has reached none of it since #209** — only `fixWebMMetadata()` is called. Present, tested and unwired, pending a product decision; see `apps/craft/CLAUDE.md`'s "Download Formats"
 
 ### ESCAPEARTIST (apps/artist)
 - Zustand store in `src/store/projectStore.ts`
@@ -328,16 +329,18 @@ numbers had already been). `@escapesuite/craft` was re-measured again 2026-09-15
 the recorder-lifecycle fixes, which raised its branches floor 95 → 96, and once more the
 same day after the record-button-truth fixes (the notice channel, the readiness gate, the
 system-audio check and the storage-headroom flag), which moved statements, branches and
-functions up a fraction and no floor.
+functions up a fraction and no floor. `@escapesuite/shared` was re-measured 2026-09-15
+when the analytics gate added direct tests for `isSaaSMode()` / `isStandaloneMode()`,
+raising its statements floor 97 → 98 and its functions floor 98 → 100.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.23 | 96.44 | 99.68 |
+| `@escapesuite/craft` | 100.00 | 99.25 | 96.54 | 99.68 |
 | `@escapesuite/artist` | 99.34 | 98.62 | 93.17 | 98.87 |
-| `@escapesuite/shared` | 100.00 | 97.78 | 88.69 | 98.38 |
+| `@escapesuite/shared` | 100.00 | 98.24 | 88.88 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
@@ -454,9 +457,20 @@ Nine jobs, with `ci-status` as the single required check (`perf` is informationa
 
 ## Vercel Analytics
 
-All apps use `@vercel/analytics` for pageview and custom event tracking:
-- `<Analytics />` component in each app's `main.tsx`
-- Custom events via `track()` in `*/analytics.ts` files
+**Hosted (`saas`) builds only.** All three apps use `@vercel/analytics` for pageview and
+custom event tracking:
+- `<Analytics />` is mounted by `bootstrapApp()` (`packages/shared/src/bootstrap`) for
+  ESCAPECRAFT and ESCAPEARTIST; ESCAPEPLAN still mounts it directly in its own `main.tsx`
+- Custom events via `trackEvent()` in `*/analytics.ts` files, which re-export the shared
+  `packages/shared/src/analytics` wrapper
+- **A standalone build ships no analytics runtime at all.** `BUILD_MODE === 'saas'` gates
+  both `trackEvent()` and the `<Analytics />` mount, and because `BUILD_MODE` folds to a
+  literal at build time the bundler drops `@vercel/analytics` from the offline bundle
+  rather than shipping it inert — `va.vercel-scripts.com` appears 0 times in the
+  ESCAPECRAFT and ESCAPEARTIST standalone builds and once in the hosted one. Held at
+  runtime by `apps/e2e/tests/standalone/craft.spec.ts` ("makes no requests off the local
+  origin"), which records a real take and then asserts there is no `window.va`, no queue
+  and no injected script
 
 ## Issue Tracking
 

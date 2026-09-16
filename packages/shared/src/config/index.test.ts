@@ -1,11 +1,37 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import {
   isEmbedded,
+  BUILD_MODE,
+  isSaaSMode,
+  isStandaloneMode,
   EDITOR_URL,
   editorUrl,
   parseHostOrigin,
   resetHostOriginWarning,
 } from './index'
+
+describe('build mode', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('defaults to saas when VITE_BUILD_MODE is unset', () => {
+    expect(BUILD_MODE).toBe('saas')
+    expect(isSaaSMode()).toBe(true)
+    expect(isStandaloneMode()).toBe(false)
+  })
+
+  it('reads standalone from VITE_BUILD_MODE', async () => {
+    vi.stubEnv('VITE_BUILD_MODE', 'standalone')
+    vi.resetModules()
+    const config = await import('./index')
+
+    expect(config.BUILD_MODE).toBe('standalone')
+    expect(config.isSaaSMode()).toBe(false)
+    expect(config.isStandaloneMode()).toBe(true)
+  })
+})
 
 describe('isEmbedded', () => {
   afterEach(() => {
