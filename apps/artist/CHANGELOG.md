@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.11
+
+### Patch Changes
+
+- 236a7dc: Export dialog: Shift+Tab can no longer move focus out of the dialog.
+- Updated dependencies [236a7dc]
+  - @escapesuite/shared@1.3.2
+
 ## 2.3.10
 
 ### Patch Changes
