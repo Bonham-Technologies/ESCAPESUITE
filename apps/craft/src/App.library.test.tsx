@@ -4,12 +4,12 @@ import { act, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRecorderStore } from './store/recorderStore';
 import {
-  clearAllRecordings,
   storeVideo,
   storeThumbnail,
   deleteVideo,
   getRecordingsMetadata,
 } from './core/storage';
+import { clearAllRecordings } from './test/recordingsDb';
 import type { SourceVideo } from './store/types';
 import {
   sendToEditorModule,

@@ -92,13 +92,6 @@ export class Compositor {
   }
 
   /**
-   * Update compositor configuration.
-   */
-  updateConfig(config: Partial<CompositorConfig>): void {
-    this.config = { ...this.config, ...config };
-  }
-
-  /**
    * Start compositing and return the output stream.
    */
   start(frameRate: number = 30): MediaStream {

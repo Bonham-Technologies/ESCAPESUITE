@@ -337,7 +337,7 @@ never above what the suite actually achieves:
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.23 | 96.44 | 99.68 |
+| `@escapesuite/craft` | 100.00 | 99.25 | 96.54 | 99.68 |
 | `@escapesuite/artist` | 99.34 | 98.62 | 93.17 | 98.87 |
 | `@escapesuite/shared` | 100.00 | 98.24 | 88.88 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |

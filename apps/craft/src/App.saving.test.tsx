@@ -3,7 +3,8 @@ import 'fake-indexeddb/auto';
 import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRecorderStore } from './store/recorderStore';
-import { clearAllRecordings, getVideoBlob, getThumbnail, getRecordingsMetadata } from './core/storage';
+import { getVideoBlob, getThumbnail, getRecordingsMetadata } from './core/storage';
+import { clearAllRecordings } from './test/recordingsDb';
 import {
   permissionsOverrides,
   recorderFactory,
