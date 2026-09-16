@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.10
+
+### Patch Changes
+
+- Updated dependencies [50491ce]
+  - @escapesuite/shared@1.3.1
+
 ## 2.3.9
 
 ### Patch Changes
