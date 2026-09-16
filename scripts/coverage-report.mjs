@@ -34,7 +34,7 @@ const packages = [
   {
     name: '@escapesuite/shared',
     dir: 'packages/shared',
-    thresholds: { lines: 100, statements: 97, branches: 88, functions: 98 },
+    thresholds: { lines: 100, statements: 98, branches: 88, functions: 100 },
   },
   {
     name: '@escapesuite/headless-artist',

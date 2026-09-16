@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import {
+  mockGetUserMedia,
+  mockMediaRecorder,
+  mockSyntheticMedia,
+  grantMediaPermissions,
+} from '../../utils/media-mocks'
 
 /**
  * Smoke tests for the ESCAPECRAFT offline build.
@@ -154,12 +159,48 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
       }
     })
 
+    // Real synthetic capture, so a take actually starts and the app runs its
+    // own `analytics.recordingStarted()` — an idle page proves only that
+    // nothing fires on load, not that a tracked action stays silent.
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+
     await page.goto(CRAFT_URL)
     await page.waitForLoadState('networkidle')
+
+    // Capability detection is async; the toggles stay disabled until it lands
+    // and a take started before then acquires no stream.
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+      timeout: 30_000,
+    })
+    await page.getByRole('button', { name: 'Stop recording' }).click()
+    // The saved take: `Recording Started` and `Recording Completed` have both
+    // been through trackEvent by now.
+    await expect(page.getByRole('button', { name: /Open .+ in Editor/ })).toBeVisible({
+      timeout: 30_000,
+    })
+
     await page.waitForTimeout(2000)
 
     // The offline build is air-gapped: no auth, no analytics, no phoning home
     expect(externalCalls).toHaveLength(0)
+
+    // And the reason is stronger than "the call was made and went nowhere":
+    // the analytics runtime is not in the bundle at all, so there is no queue
+    // for an event to sit in and no injected script to drain it.
+    const analyticsRuntime = await page.evaluate(() => ({
+      va: typeof (window as unknown as { va?: unknown }).va,
+      queue: typeof (window as unknown as { vaq?: unknown }).vaq,
+      scripts: document.querySelectorAll('script[src*="vercel"]').length,
+    }))
+    expect(analyticsRuntime).toEqual({ va: 'undefined', queue: 'undefined', scripts: 0 })
   })
 
   test('single HTML file contains all assets', async ({ page }) => {
