@@ -281,6 +281,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         role="dialog"
         aria-modal="true"
         aria-labelledby="export-dialog-title"
+        tabIndex={-1}
       >
         <div className={styles.header}>
           <h2 className={styles.title} id="export-dialog-title">Export Video</h2>
