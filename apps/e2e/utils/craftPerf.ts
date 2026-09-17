@@ -365,7 +365,7 @@ export interface TakeMeasurement {
  *   `drawWebcamOverlay` draws the webcam video, both inside **one synchronous
  *   rAF callback**, so no `page.evaluate` can ever observe a half-drawn frame.
  *   But each draw is guarded on its element's `readyState >= 2`
- *   (`core/compositor.ts:169`, `:174`), so a frame composited while a capture
+ *   (`core/compositor.ts:170`, `:175`), so a frame composited while a capture
  *   element has no decoded frame yields **one** draw, or none. The divisor is
  *   therefore exact whenever both tracks are live and silently wrong — it
  *   understates `compositedFps` and overstates `taskMsPerFrame` by the same

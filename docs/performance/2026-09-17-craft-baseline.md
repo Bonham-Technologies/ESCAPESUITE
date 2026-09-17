@@ -57,10 +57,18 @@ click Stop, wait for the new row. Every number comes from outside the page:
 - a CDP session for `TaskDuration` / `LayoutCount` / `RecalcStyleCount` and for the
   `HeapProfiler.collectGarbage` that anchors each heap reading.
 
-They assert nothing about speed. The only `expect`s are tripwires that say the benchmark
-measured the wrong thing: the take was still recording when the window closed, a
-"WebCodecs" take encoded more than zero frames, a PiP take composited more than zero
-frames, a conversion encoded more than zero frames.
+They assert nothing about speed. The only `expect`s are the six tripwires that say the
+benchmark measured the wrong thing — each one pins an invariant the numbers rest on, in
+code rather than in prose:
+
+| Arm | Tripwire | What a failure means |
+|---|---|---|
+| both takes | still "Pause recording" when the window closed | the take died mid-window; every rate is an average over a stretch that was not capturing |
+| screen | `framesEncoded > 0` | the take did not go through `WebCodecsRecorder` — nothing encoded on the main thread |
+| screen | `videoDraws === 0` | `WebCodecsRecorder` is on its `startVideoElementCapture` fallback (no `MediaStreamTrackProcessor`), which is a different pipeline reported under this one's name |
+| PiP | `videoDraws > 0` | the take did not composite — the webcam never arrived |
+| PiP | `videoDraws % 2 === 0` | a capture track was not ready for some frames, so the two-draws-per-composited-frame divisor is wrong (see the compositor finding below) |
+| conversion | `framesEncoded > 0` | `convertToMP4` resolved past its capture phase with nothing encoded — there is no video in the MP4 to have measured |
 
 ### Capture devices
 
@@ -198,10 +206,24 @@ not a measurement artefact and not a slow machine; it is the throttle's arithmet
 `Compositor.render` (`apps/craft/src/core/compositor.ts:148-157`) requests an animation
 frame every frame and then returns early unless
 `performance.now() - lastFrameTime >= 1000 / 30`, setting `lastFrameTime` to the *actual*
-draw time rather than to an ideal schedule. The gate is therefore **33.3333 ms**, and two
-animation frames on a 60 Hz display are **33.3334 ms** — a margin of about **0.1 µs**. Any
-negative jitter at all pushes a pair onto the wrong side of the comparison, and that frame
-waits for a third animation frame and lands at 50 ms instead of 33 ms.
+draw time rather than to an ideal schedule.
+
+**There is no margin at all.** The gate is `1000 / 30` and two animation frames on a 60 Hz
+display are `2 * (1000 / 60)`, and those are not merely close — they are the *same* IEEE 754
+double, `33.333333333333336`:
+
+```
+$ node -e "console.log((1000/30) === 2*(1000/60))"
+true
+```
+
+So `now - lastFrameTime >= 1000 / 30` passes after two frames only if those two frames
+measured at or *above* the ideal 16.6667 ms each, and fails the moment they measure a
+nanosecond below it. Nothing about that is a close call the machine usually wins: the
+comparison is decided entirely by dispatch jitter, and `lastFrameTime` is snapped to the
+callback's own `performance.now()` (`compositor.ts:153-154`) rather than to vsync, so the
+error does not cancel between frames. A pair that lands below waits for a **third** animation
+frame and that composited frame arrives at 50 ms instead of 33 ms.
 
 That is arithmetic off the source, and the benchmark's own published figures confirm the
 consequence: `rafPerSecond` of 119.88 is two loops, so 59.94 animation frames per second,
@@ -218,14 +240,14 @@ Two consequences:
   enforced rather than asserted in prose.** `drawFrame` draws the screen video and
   `drawWebcamOverlay` draws the webcam video, one `drawImage` each, **inside one synchronous
   rAF callback** — so a counter snapshot can never land between them. Each draw is guarded
-  on its element's `readyState >= 2` (`compositor.ts:169`, `:174`), so a frame composited
+  on its element's `readyState >= 2` (`compositor.ts:170`, `:175`), so a frame composited
   while a capture element has no decoded frame yields one draw or none, which would
   understate `compositedFps` and overstate `taskMsPerFrame` by the same factor. The PiP arm
   therefore asserts `videoDraws % 2 === 0`, and the screen arm asserts `videoDraws === 0`
   (which also catches `WebCodecsRecorder` silently taking its `startVideoElementCapture`
   fallback). Observed even in every run measured: 224, 226, 228, 230, 236.
 - **A fix here is a real user-visible win** — a PiP recording is losing roughly a quarter of
-  its frames to a comparison that is 33 µs on the wrong side — and it would move
+  its frames to a comparison that has no margin to lose — and it would move
   `compositedFps` without moving `taskMsPerFrame`, which is precisely why both are reported.
   A deadline-based gate (advance `lastFrameTime` by the frame interval rather than snapping
   it to `now`, with a catch-up clamp) is the obvious shape. **No app code was changed for
@@ -338,7 +360,8 @@ other number in the tables is definitionally unchanged.
 ## Follow-ups this baseline opens
 
 1. **The compositor's frame gate** (see the finding above): ~23 fps where 30 is intended, on
-   a comparison with 33 µs of margin. A user-visible frame loss in every PiP recording.
+   a throttle whose gate is bit-for-bit two 60 Hz frame intervals, so any dispatch jitter
+   costs a whole frame. A user-visible frame loss in every PiP recording.
 2. **The first-take step**: the first take of a session costs ~0.9 s of renderer task in a
    5 s window and every later take ~4.1 s, once, permanently, and not because of the
    recordings list or the harness. Not root-caused.

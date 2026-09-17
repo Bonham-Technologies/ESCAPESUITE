@@ -272,10 +272,14 @@ There is no app code for the benchmarks' sake in either app:
 - **`headless-kit-render`** — `services/headless-artist` rendering
   `fixtures/headless/project.json`, Chromium launch included.
 
-The ESCAPECRAFT benchmarks assert nothing about speed either; their only `expect`s are
-tripwires saying the benchmark measured the wrong thing — a take that stopped mid-window,
-a "WebCodecs" take that encoded nothing, a PiP take that composited nothing, a conversion
-that encoded no frames.
+The ESCAPECRAFT benchmarks assert nothing about speed either; their only `expect`s are the
+six tripwires saying the benchmark measured the wrong thing — a take that stopped
+mid-window; a "WebCodecs" take that encoded nothing, or that drew video into a canvas at all
+(which would mean `WebCodecsRecorder` had taken its `startVideoElementCapture` fallback, a
+different pipeline under the same name); a PiP take that composited nothing, or whose
+`drawImage` count came out odd (which would mean a capture track was not ready for some
+frames, so the two-draws-per-composited-frame divisor is wrong); and a conversion that
+encoded no frames.
 
 `PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
 project resolution for `preview-playback` only — the export benchmarks always render 720p

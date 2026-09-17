@@ -363,7 +363,7 @@ export async function readCdpMetrics(cdp: CDPSession): Promise<CdpSnapshot> {
 
 /** The same counters plus the clock they were sampled against. */
 export type CdpTimedSnapshot = CdpSnapshot & {
-  /** `Performance.getMetrics`' own `Timestamp`, in seconds, or 0 if absent. */
+  /** `Performance.getMetrics`' own `Timestamp`, in seconds. Never defaulted. */
   Timestamp: number
 }
 
@@ -382,15 +382,30 @@ export type CdpTimedSnapshot = CdpSnapshot & {
  *
  * A pure addition: `readCdpMetrics` is unchanged and every existing benchmark
  * still calls that one, so no existing number moves.
+ *
+ * A missing `Timestamp` **throws**, where the counters above default to 0. The
+ * asymmetry is deliberate: a counter this build does not emit is a metric the
+ * report simply has nothing to say about, but the clock is a *denominator* — a
+ * zero there makes every rate taken against it `Infinity`, which
+ * `JSON.stringify` writes as `null` and the report renders as the string
+ * "null". A broken measurement has to look broken, not quietly become a number
+ * nobody can tell is wrong.
  */
 export async function readCdpTimedMetrics(cdp: CDPSession): Promise<CdpTimedSnapshot> {
   const { metrics } = await cdp.send('Performance.getMetrics')
   const byName = new Map(metrics.map((m) => [m.name, m.value]))
+  const timestamp = byName.get('Timestamp')
+  if (typeof timestamp !== 'number') {
+    throw new Error(
+      "Performance.getMetrics returned no 'Timestamp' — the renderer clock every rate is " +
+        'measured against is missing, so the benchmark cannot report one'
+    )
+  }
   return {
     ...(Object.fromEntries(
       CDP_METRICS.map((name) => [name, byName.get(name) ?? 0])
     ) as CdpSnapshot),
-    Timestamp: byName.get('Timestamp') ?? 0,
+    Timestamp: timestamp,
   }
 }
 
