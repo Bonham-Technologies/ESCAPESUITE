@@ -15,7 +15,7 @@ import { convertToMP4, ConversionAbortedError } from '../core/converter'
 import { getVideoBlob } from '../core/storage'
 import { analytics } from '../utils/analytics'
 import { downloadBlob } from '../utils/downloadBlob'
-import { mp4ConversionFailed } from '../utils/notices'
+import { mp4ConversionFailed, MP4_SAVED_WITHOUT_AUDIO } from '../utils/notices'
 import { safeFileName } from '../utils/recordingFormat'
 import type { Mp4Support } from '../store/types'
 
@@ -57,6 +57,13 @@ export interface Mp4Download {
   converting: Mp4Conversion | null
   /** Non-null when no conversion may be started, and why. */
   blockedReason: string | null
+  /**
+   * What the library should say out loud, or null. Usually the blocked reason,
+   * but not always either way: "still checking" is true for a moment on every
+   * load and is not worth a paragraph that appears and vanishes, while "this
+   * MP4 will be silent" is worth saying even though nothing is blocked.
+   */
+  note: string | null
   startMp4Download: (id: string, name: string) => Promise<void>
   cancelMp4Download: () => void
 }
@@ -116,8 +123,10 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
       // A conversion that worked makes any earlier "MP4 conversion failed"
       // untrue, and this is the one channel, so it is cleared here. It clears
       // whatever is in the region, not only an MP4 notice — the price of
-      // having exactly one.
-      setNotice(null)
+      // having exactly one. Where the browser had no AAC encoder the file that
+      // just landed is silent, and that is what the channel says instead: the
+      // same fact the note said beforehand, now about a file they have.
+      setNotice(mp4Support.audio ? null : MP4_SAVED_WITHOUT_AUDIO)
       downloadBlob(mp4, `${safeFileName(name)}.mp4`)
     } catch (error) {
       // Cancelling is not a failure — the user asked for it, and there is
@@ -142,16 +151,28 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
   if (mp4Support.state === 'checking') {
     blockedReason = MP4_CHECKING_REASON
   } else if (!mp4Support.supported) {
-    // The probe names what is missing (H.264, AAC, WebCodecs itself); the
-    // constant is the fallback for a refusal that came without a reason.
+    // The probe names what is missing (H.264, WebCodecs itself, or that it
+    // could not tell); the constant is the fallback for a refusal that came
+    // without a reason. A missing AAC encoder is NOT here — it does not block.
     blockedReason = mp4Support.reason ?? MP4_UNSUPPORTED_REASON
   } else if (converting) {
     blockedReason = MP4_BUSY_REASON
   }
 
+  // And what the library says out loud. Everything blocking is said, except
+  // "still checking": that one is true for a moment on every load, and a
+  // paragraph that appears and vanishes moves the page for nothing. What is
+  // said while nothing is blocked is the silent-MP4 warning, so it arrives
+  // before the minutes are spent rather than after.
+  let note: string | null = null
+  if (mp4Support.state === 'ready') {
+    note = blockedReason ?? (mp4Support.audio ? null : mp4Support.reason ?? null)
+  }
+
   return {
     converting,
     blockedReason,
+    note,
     startMp4Download,
     cancelMp4Download,
   }

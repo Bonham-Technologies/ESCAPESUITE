@@ -80,7 +80,7 @@ selector contract above.
 | `App.tsx` | The composition: the per-field store selectors, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, `modalOpen` (`showHelpModal \|\| playbackUrl !== null`), the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
 | `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
-| `utils/notices.ts` | The app's whole vocabulary of notices — seven strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
+| `utils/notices.ts` | The app's whole vocabulary of notices — eight strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
 | `utils/downloadBlob.ts` | The anchor both downloads share: object URL, `<a download>`, click, remove, deferred revoke. No naming logic of its own — the caller hands it a finished filename |
 | `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace`. Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
 | `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. No store, and no blob-URL creation |
@@ -89,7 +89,7 @@ selector contract above.
 | `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
 | `components/SourceToggles/SourceTogglesPanel.tsx` | The Sources panel's subscription: the five store fields `SourceToggles` draws, selected here rather than in `App` so the ~12-a-second `audioLevels` push redraws this panel and nothing else. Takes only `isRecordingActive` and `onToggleSource` as props. `SourceToggles` itself stays driven by props alone, which is what its own test asserts |
 | `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, every control reporting a config patch. It draws unconditionally; whether the panel exists at all is the caller's decision |
-| `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its five action buttons, each labelled with the recording's own name — plus the MP4 conversion's progress row and the one visible reason a blocked MP4 button is described by. Props only; it touches no storage and holds no state |
+| `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its five action buttons, each labelled with the recording's own name — plus the MP4 conversion's progress row and the one visible note the MP4 buttons are described by (`mp4Note`, which is not the same thing as `mp4BlockedReason` — see "Download Formats"). Props only; it touches no storage and holds no state |
 | `components/RecordingsList/RecordingsListPanel.tsx` | The library's own subscription and state: `useMp4Download` lives here rather than in `App`, so a progress report redraws the list and nothing else. Selects only `setNotice`, which is a stable action. The other four handlers still come down from `App`, because `useRecordingLibrary` owns the playback dialog the shortcuts need |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
 | `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`), and the `blockedReason` that sits in front of that ladder |
@@ -101,7 +101,7 @@ selector contract above.
 | `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
-| `hooks/useMp4Download.ts` | One MP4 conversion at a time: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the three button reasons (still checking, cannot, busy), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App` |
+| `hooks/useMp4Download.ts` | One MP4 conversion at a time: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the three button reasons (still checking, cannot, busy), the separate visible `note` (the silent-MP4 warning, or the blocking reason when there is one worth saying), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App` |
 | `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete (re-reading the storage headroom after it), and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
 
 ### Errors and notices
@@ -111,7 +111,8 @@ in `recorderStore` is the whole notification surface: `AppHeader` renders it ins
 header's existing `aria-live="polite" aria-atomic="true"` region, and
 `handleStartRecording` clears it when the next take begins. Every string lives in
 `src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`, `START_FAILED`,
-`LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO` and `mp4ConversionFailed()` —
+`LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO` and
+`mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
 is still one string through the same `setNotice`. **Do not add a second channel**: no toasts, no per-component error
@@ -293,7 +294,8 @@ the Help button.
   mocked, which is what makes it the single definition — keep it that way
 - `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
   goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus
-  `convertToMP4()`, the `probeMP4Support()` codec probe the MP4 button is gated on, and the
+  `convertToMP4()`, the `probeMP4Support()` codec probe the MP4 button is gated on (H.264
+  fatal, AAC only silencing), and the
   `isMP4ConversionSupported()` presence check the conversion guards itself with. The library
   row's MP4 download reaches them through `hooks/useMp4Download.ts`. `remuxToWebM()` / `isWebMRemuxSupported()` (the
   compatible-WebM VP9 + Opus re-encode) are the one part of this module nothing calls; see
@@ -485,7 +487,7 @@ message and navigate to its own editor itself.
   other row's MP4 button goes `disabled` with `MP4_BUSY_REASON`.
 - **Say why, do not hide.** Where the codec probe says this browser cannot encode MP4, the
   button stays on screen, `disabled`, with the probe's own sentence in its `title` and in
-  the one visible note every blocked button's `aria-describedby` points at. That is the
+  the one visible note the MP4 buttons' `aria-describedby` points at. That is the
   record button's shape (see "The record button only offers what it can deliver"), and the
   reasons live beside their gate rather than in `utils/notices.ts` for the same reason
   `NO_STORAGE_SPACE` lives in `recordReadiness.ts`: nothing has gone wrong yet.
@@ -499,20 +501,45 @@ message and navigate to its own editor itself.
   drift into asking a different question than the button is gating on; the unit test "asks
   about the same H.264 and AAC configuration the conversion configures" pins that. It never
   rejects — a probe that could not answer is a `{ supported: false }` with a reason — and it
-  memoises for the life of the page, so the UI asks once. Its four reasons
-  (`MP4_NO_WEBCODECS_REASON`, `MP4_NO_H264_REASON`, `MP4_NO_AAC_REASON`,
-  `MP4_PROBE_FAILED_REASON`) name what is missing.
+  memoises for the life of the page, so the UI asks once.
+- **No AAC encoder is not a refusal, because the conversion does not treat it as one.**
+  `convertToMP4` asks about AAC itself, and where the answer is no it drops the audio and
+  muxes the video anyway — a working, silent MP4 (`converter.test.ts`, "drops audio and
+  warns when AAC is unsupported"). The probe therefore answers
+  `{ supported: true, audio: false, reason: MP4_NO_AUDIO_REASON }` there: the button stays
+  **enabled**, and the missing sound is said as a *note* rather than as a blocked reason —
+  "MP4 will have no audio in this browser (no AAC encoder)" — before the minutes are spent,
+  and again afterwards through the one notice channel as `MP4_SAVED_WITHOUT_AUDIO` ("Saved
+  as MP4 — without audio: this browser has no AAC encoder"). Told twice, because the first
+  telling is a choice and the second is about a file they now have. Only
+  `MP4_NO_WEBCODECS_REASON`, `MP4_NO_H264_REASON` and `MP4_PROBE_FAILED_REASON` disable.
+- **A blocked reason and a note are two different props.** `useMp4Download` returns both,
+  and `RecordingsList` takes both (`mp4BlockedReason`, `mp4Note`): the reason disables the
+  button and fills its `title`, the note is the paragraph under the library that the
+  buttons' `aria-describedby` points at. They differ in two places — "still checking" blocks
+  without being said out loud (a paragraph that appeared and vanished on every load would
+  move the page for nothing; the button still carries it in `title`), and the silent-MP4
+  warning is said out loud without blocking anything.
 - **"Checking..." rather than a flash.** Because the answer is asynchronous it is asked at
   capability bootstrap (`useCapabilityBootstrap`, alongside capability detection and the
   storage estimate — never on the click path) and lands in `store.mp4Support`
-  (`{ state: 'checking' | 'ready', supported, reason? }`). While it is `checking` the button
-  is `disabled` with `MP4_CHECKING_REASON`; it then goes enabled, or disabled with the
-  probe's reason. It is never enabled first and taken away: offering a conversion and
+  (`{ state: 'checking' | 'ready', supported, audio, reason? }`). While it is `checking` the
+  button is `disabled` with `MP4_CHECKING_REASON`; it then goes enabled, or disabled with
+  the probe's reason. It is never enabled first and taken away: offering a conversion and
   withdrawing it a tick later is worse than waiting a tick to offer it.
   `RecordingsListPanel` selects `mp4Support` and hands it to the hook, so `App` never
   subscribes to it and the render contract below is unchanged.
   `isMP4ConversionSupported()` remains as the cheap synchronous presence check, and
   `convertToMP4` keeps guarding itself with it — that guard is a defence, not the UI's gate.
+- **The probe is necessary, not sufficient — it only asks about 720p.** It asks about one
+  representative 1280x720 frame, while `convertToMP4` configures the recording's real width
+  and height, and `avc1.640028` is High profile **Level 4.0** — good to 1080p30 and not to
+  4K. So a browser that encodes 720p but not a 3840x2160 screen capture still gets an
+  enabled button and a failure part-way, landing in the notice channel as
+  `mp4ConversionFailed(...)` exactly as before this gate existed. That is strictly better
+  than the old presence check and is not a complete answer; the real fix is a
+  profile-fallback chain like ARTIST's (`apps/artist/src/core/exportMP4.ts` tries High, then
+  Main, then Baseline), which CRAFT does not have yet.
 - **Cancelling is not failing.** Cancel aborts through an `AbortSignal`; the converter
   rejects with `ConversionAbortedError`, the row returns to idle, no file is written and
   **no notice is raised**. Any other rejection becomes `mp4ConversionFailed(message)` in

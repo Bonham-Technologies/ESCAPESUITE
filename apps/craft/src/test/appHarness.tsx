@@ -74,7 +74,7 @@ export function resetRecorderStore(config: Partial<RecordingConfig> = {}): void 
     hasStorageSpace: true,
     // Same shape as `capabilitiesReady`: the real store starts out not
     // knowing, and renderApp() settles the probe that answers.
-    mp4Support: { state: 'checking', supported: false },
+    mp4Support: { state: 'checking', supported: false, audio: false },
   })
 }
 

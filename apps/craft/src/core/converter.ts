@@ -315,10 +315,21 @@ const MP4_AUDIO_ENCODER_CONFIG: AudioEncoderConfig = {
 const PROBE_WIDTH = 1280;
 const PROBE_HEIGHT = 720;
 
-/** What the codec probe found: whether MP4 can be offered, and if not, why. */
+/**
+ * What the codec probe found: whether an MP4 can be offered at all, whether it
+ * will have sound, and the one sentence that says what is missing.
+ *
+ * `supported` and `audio` are separate because `convertToMP4` treats them
+ * separately: no H.264 encoder is fatal, but no AAC encoder is not — the
+ * conversion drops the audio and produces a working silent MP4. A probe that
+ * refused there would disable a button that works.
+ */
 export interface MP4SupportProbe {
+  /** Whether a conversion can be run at all. */
   supported: boolean;
-  /** One user-facing sentence naming what is missing. Absent when supported. */
+  /** Whether that conversion will have sound. */
+  audio: boolean;
+  /** One user-facing sentence naming what is missing. Absent when all is well. */
   reason?: string;
 }
 
@@ -326,8 +337,13 @@ export const MP4_NO_WEBCODECS_REASON =
   'This browser cannot convert to MP4 — it needs the WebCodecs API (Chrome or Edge).';
 export const MP4_NO_H264_REASON =
   'This browser cannot encode H.264 video, which an MP4 needs.';
-export const MP4_NO_AAC_REASON =
-  'This browser cannot encode AAC audio, which an MP4 needs.';
+/**
+ * Not a refusal: the conversion still runs, and the file it writes plays. This
+ * is said under the library *before* the conversion, and again as
+ * `MP4_SAVED_WITHOUT_AUDIO` (`utils/notices.ts`) after it.
+ */
+export const MP4_NO_AUDIO_REASON =
+  'MP4 will have no audio in this browser (no AAC encoder)';
 export const MP4_PROBE_FAILED_REASON =
   'This browser could not say whether it can encode MP4, so the conversion is not offered.';
 
@@ -346,6 +362,16 @@ let mp4SupportProbe: Promise<MP4SupportProbe> | null = null;
  * without an H.264 encoder would otherwise be offered a conversion that fails
  * part-way. Never rejects — a probe that could not answer is an answer of
  * "no", with a reason, rather than an exception on a capability path.
+ *
+ * It answers the same way `convertToMP4` behaves, which is not symmetrical: no
+ * H.264 encoder is fatal, no AAC encoder is `{ supported: true, audio: false }`
+ * — the conversion drops the audio and the file still plays.
+ *
+ * What it cannot answer is *this* recording: it asks about a representative
+ * 720p frame (see `PROBE_WIDTH`), so on a source larger than the level the
+ * codec string allows, `configure()` can still fail and the conversion falls
+ * back to the notice channel. Necessary, not sufficient — see "Download
+ * Formats" in `apps/craft/CLAUDE.md`.
  */
 export function probeMP4Support(): Promise<MP4SupportProbe> {
   mp4SupportProbe ??= askMP4Support();
@@ -354,7 +380,7 @@ export function probeMP4Support(): Promise<MP4SupportProbe> {
 
 async function askMP4Support(): Promise<MP4SupportProbe> {
   if (!isMP4ConversionSupported()) {
-    return { supported: false, reason: MP4_NO_WEBCODECS_REASON };
+    return { supported: false, audio: false, reason: MP4_NO_WEBCODECS_REASON };
   }
 
   try {
@@ -364,15 +390,17 @@ async function askMP4Support(): Promise<MP4SupportProbe> {
     ]);
 
     if (!video.supported) {
-      return { supported: false, reason: MP4_NO_H264_REASON };
+      return { supported: false, audio: false, reason: MP4_NO_H264_REASON };
     }
     if (!audio.supported) {
-      return { supported: false, reason: MP4_NO_AAC_REASON };
+      // What `convertToMP4` does with this same answer, a few hundred lines
+      // below: drop the audio and mux the video anyway.
+      return { supported: true, audio: false, reason: MP4_NO_AUDIO_REASON };
     }
-    return { supported: true };
+    return { supported: true, audio: true };
   } catch (error) {
     console.warn('MP4 codec probe failed:', error);
-    return { supported: false, reason: MP4_PROBE_FAILED_REASON };
+    return { supported: false, audio: false, reason: MP4_PROBE_FAILED_REASON };
   }
 }
 

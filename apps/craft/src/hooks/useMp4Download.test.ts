@@ -13,6 +13,7 @@ import {
   MP4_CHECKING_REASON,
   MP4_UNSUPPORTED_REASON,
 } from './useMp4Download'
+import { MP4_SAVED_WITHOUT_AUDIO } from '../utils/notices'
 import { storeVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import {
@@ -101,8 +102,16 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** What the store holds once the codec probe has said yes. */
-const MP4_SUPPORTED: Mp4Support = { state: 'ready', supported: true }
+/** What the store holds once the codec probe has said yes, sound included. */
+const MP4_SUPPORTED: Mp4Support = { state: 'ready', supported: true, audio: true }
+
+/** …and what it holds where there is no AAC encoder: offered, but silent. */
+const MP4_SILENT: Mp4Support = {
+  state: 'ready',
+  supported: true,
+  audio: false,
+  reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+}
 
 /**
  * The hook is handed the probe's answer rather than asking for it: the field
@@ -372,9 +381,12 @@ describe('useMp4Download gating', () => {
     // an enabled-to-disabled flash offers a conversion this browser may not be
     // able to do.
     await seed('take-1', 'Take One')
-    const { result } = renderMp4Download({ state: 'checking', supported: false })
+    const { result } = renderMp4Download({ state: 'checking', supported: false, audio: false })
 
     expect(result.current.blockedReason).toBe(MP4_CHECKING_REASON)
+    // …but it is not said out loud under the library: the note would appear
+    // and vanish on every load, on browsers that can convert perfectly well.
+    expect(result.current.note).toBeNull()
 
     await act(async () => {
       await result.current.startMp4Download('take-1', 'Take One')
@@ -386,10 +398,15 @@ describe('useMp4Download gating', () => {
 
   it('is offered once the probe says this browser can encode it', async () => {
     await seed('take-1', 'Take One')
-    const { result, rerender } = renderMp4Download({ state: 'checking', supported: false })
+    const { result, rerender } = renderMp4Download({
+      state: 'checking',
+      supported: false,
+      audio: false,
+    })
 
     rerender(MP4_SUPPORTED)
     expect(result.current.blockedReason).toBeNull()
+    expect(result.current.note).toBeNull()
 
     await act(async () => {
       await result.current.startMp4Download('take-1', 'Take One')
@@ -401,15 +418,24 @@ describe('useMp4Download gating', () => {
 
   it('is blocked with the probe\'s own reason once it says it cannot', async () => {
     await seed('take-1', 'Take One')
-    const { result, rerender } = renderMp4Download({ state: 'checking', supported: false })
+    const { result, rerender } = renderMp4Download({
+      state: 'checking',
+      supported: false,
+      audio: false,
+    })
 
     rerender({
       state: 'ready',
       supported: false,
+      audio: false,
       reason: 'This browser cannot encode H.264 video, which an MP4 needs.',
     })
 
     expect(result.current.blockedReason).toBe(
+      'This browser cannot encode H.264 video, which an MP4 needs.'
+    )
+    // A refusal is said out loud, as it always was.
+    expect(result.current.note).toBe(
       'This browser cannot encode H.264 video, which an MP4 needs.'
     )
 
@@ -423,7 +449,7 @@ describe('useMp4Download gating', () => {
 
   it('falls back to the general reason when the refusal came with none', async () => {
     await seed('take-1', 'Take One')
-    const { result } = renderMp4Download({ state: 'ready', supported: false })
+    const { result } = renderMp4Download({ state: 'ready', supported: false, audio: false })
 
     expect(result.current.blockedReason).toBe(MP4_UNSUPPORTED_REASON)
 
@@ -432,6 +458,43 @@ describe('useMp4Download gating', () => {
     })
 
     expect(converterModule.convertToMP4).not.toHaveBeenCalled()
+
+    // …and a silent answer that came without a sentence says nothing at all,
+    // rather than putting an empty paragraph under the library.
+    const silent = renderMp4Download({ state: 'ready', supported: true, audio: false })
+    expect(silent.result.current.blockedReason).toBeNull()
+    expect(silent.result.current.note).toBeNull()
+  })
+
+  it('still offers the conversion where there is no AAC encoder, and says it will be silent', async () => {
+    // `convertToMP4` drops the audio and produces a working MP4 in this
+    // browser, so the button must stay enabled — with the warning said out
+    // loud under the library rather than hidden in a disabled title.
+    await seed('take-1', 'Take One')
+    const { result } = renderMp4Download(MP4_SILENT)
+
+    expect(result.current.blockedReason).toBeNull()
+    expect(result.current.note).toBe('MP4 will have no audio in this browser (no AAC encoder)')
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    // Told twice: before, in the note, and after, in the one notice channel.
+    expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_AUDIO)
+  })
+
+  it('says nothing after a conversion that did have sound', async () => {
+    await seed('take-1', 'Take One')
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    expect(setNotice.mock.calls).toEqual([[null]])
   })
 
   it('runs one conversion at a time, and says why the others are blocked', async () => {

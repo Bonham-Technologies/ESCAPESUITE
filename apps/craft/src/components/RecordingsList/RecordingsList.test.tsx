@@ -29,7 +29,11 @@ function makeRecording(overrides: Partial<Recording> = {}): Recording {
 
 function renderList(
   recordings: Recording[] = [makeRecording()],
-  mp4: { mp4Converting?: Mp4Conversion | null; mp4BlockedReason?: string | null } = {}
+  mp4: {
+    mp4Converting?: Mp4Conversion | null
+    mp4BlockedReason?: string | null
+    mp4Note?: string | null
+  } = {}
 ) {
   const calls = {
     onPlay: vi.fn<(id: string, name: string) => void>(),
@@ -44,6 +48,7 @@ function renderList(
       recordings={recordings}
       mp4Converting={mp4.mp4Converting ?? null}
       mp4BlockedReason={mp4.mp4BlockedReason ?? null}
+      mp4Note={mp4.mp4Note ?? null}
       {...calls}
     />
   )
@@ -188,6 +193,7 @@ describe('RecordingsList MP4 downloads', () => {
     const reason = 'This browser cannot convert to MP4.'
     const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
       mp4BlockedReason: reason,
+      mp4Note: reason,
     })
 
     const mp4 = screen.getByRole('button', { name: 'Download Take Seven as MP4' })
@@ -197,6 +203,38 @@ describe('RecordingsList MP4 downloads', () => {
     expect(container.querySelector(`#${describedBy}`)).toHaveTextContent(reason)
     // The WebM download is never affected by an MP4 problem.
     expect(screen.getByRole('button', { name: 'Download Take Seven' })).toBeEnabled()
+  })
+
+  it('keeps a reason with no note to the button itself', () => {
+    // "Checking whether this browser can convert to MP4…" is true for a moment
+    // on every load. Said out loud under the library it would appear and
+    // vanish each time, moving the page; the button still carries it.
+    const checking = 'Checking whether this browser can convert to MP4…'
+    const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
+      mp4BlockedReason: checking,
+    })
+
+    const mp4 = screen.getByRole('button', { name: 'Download Take Seven as MP4' })
+    expect(mp4).toBeDisabled()
+    expect(mp4).toHaveAttribute('title', checking)
+    expect(mp4).not.toHaveAttribute('aria-describedby')
+    expect(container.querySelector(`.${styles.mp4BlockedReason}`)).toBeNull()
+    expect(screen.queryByText(checking)).toBeNull()
+  })
+
+  it('offers the conversion with a note where the MP4 will be silent', () => {
+    // Not a blocked reason: nothing is disabled, but the row says what the
+    // file will be missing before the user spends the minutes on it.
+    const silent = 'MP4 will have no audio in this browser (no AAC encoder)'
+    const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
+      mp4Note: silent,
+    })
+
+    const mp4 = screen.getByRole('button', { name: 'Download Take Seven as MP4' })
+    expect(mp4).toBeEnabled()
+    expect(mp4).toHaveAttribute('title', 'Download MP4')
+    const describedBy = mp4.getAttribute('aria-describedby')!
+    expect(container.querySelector(`#${describedBy}`)).toHaveTextContent(silent)
   })
 
   it('shows what the converter is doing, and how far, on the row being converted', () => {
@@ -231,7 +269,11 @@ describe('RecordingsList MP4 downloads', () => {
     const busy = 'One conversion at a time.'
     const { container } = renderList(
       [makeRecording({ id: 'r1', name: 'First' }), makeRecording({ id: 'r2', name: 'Second' })],
-      { mp4Converting: { id: 'r1', message: 'Preparing conversion...', progress: 0 }, mp4BlockedReason: busy }
+      {
+        mp4Converting: { id: 'r1', message: 'Preparing conversion...', progress: 0 },
+        mp4BlockedReason: busy,
+        mp4Note: busy,
+      }
     )
 
     expect(container.querySelectorAll(`.${styles.conversionProgress}`)).toHaveLength(1)

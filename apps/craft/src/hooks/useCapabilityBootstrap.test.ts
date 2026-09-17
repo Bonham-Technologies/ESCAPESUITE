@@ -35,7 +35,7 @@ beforeEach(() => {
   useRecorderStore.setState({
     capabilitiesReady: false,
     notice: null,
-    mp4Support: { state: 'checking', supported: false },
+    mp4Support: { state: 'checking', supported: false, audio: false },
   })
 })
 
@@ -84,6 +84,7 @@ describe('useCapabilityBootstrap', () => {
       expect(useRecorderStore.getState().mp4Support).toEqual({
         state: 'ready',
         supported: true,
+        audio: true,
       })
     })
     expect(converterModule.probeMP4Support).toHaveBeenCalledTimes(1)
@@ -92,9 +93,10 @@ describe('useCapabilityBootstrap', () => {
   it('holds the MP4 answer at "checking" until the probe answers', async () => {
     // The button is disabled while this holds, so it never flashes from
     // enabled to disabled when the answer turns out to be no.
-    let answer: (support: { supported: boolean; reason?: string }) => void = () => {}
+    let answer: (support: { supported: boolean; audio: boolean; reason?: string }) => void =
+      () => {}
     converterModule.probeMP4Support.mockReturnValue(
-      new Promise<{ supported: boolean; reason?: string }>(resolve => {
+      new Promise<{ supported: boolean; audio: boolean; reason?: string }>(resolve => {
         answer = resolve
       })
     )
@@ -107,16 +109,37 @@ describe('useCapabilityBootstrap', () => {
     expect(useRecorderStore.getState().mp4Support).toEqual({
       state: 'checking',
       supported: false,
+      audio: false,
     })
 
     await act(async () => {
-      answer({ supported: false, reason: 'This browser cannot encode H.264 video.' })
+      answer({ supported: false, audio: false, reason: 'This browser cannot encode H.264 video.' })
     })
 
     expect(useRecorderStore.getState().mp4Support).toEqual({
       state: 'ready',
       supported: false,
+      audio: false,
       reason: 'This browser cannot encode H.264 video.',
+    })
+  })
+
+  it('carries a silent-MP4 answer through intact, audio flag and reason', async () => {
+    converterModule.probeMP4Support.mockResolvedValue({
+      supported: true,
+      audio: false,
+      reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+    })
+
+    mountBootstrap()
+
+    await waitFor(() => {
+      expect(useRecorderStore.getState().mp4Support).toEqual({
+        state: 'ready',
+        supported: true,
+        audio: false,
+        reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+      })
     })
   })
 

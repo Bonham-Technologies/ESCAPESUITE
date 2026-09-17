@@ -6,10 +6,15 @@ import type { Page } from '@playwright/test'
  *
  * `probeMP4Support()` (`apps/craft/src/core/converter.ts`) checks the four
  * WebCodecs globals are there and then asks `VideoEncoder.isConfigSupported()`
- * and `AudioEncoder.isConfigSupported()` about the exact H.264 and AAC
- * configurations `convertToMP4` will configure. Presence alone is not the
- * question: a browser can have WebCodecs and no H.264 encoder, and it is the
- * app's disabled-with-a-reason path that such a browser must get.
+ * about the exact H.264 configuration `convertToMP4` will configure. Presence
+ * alone is not the question: a browser can have WebCodecs and no H.264
+ * encoder, and it is the app's disabled-with-a-reason path that such a browser
+ * must get.
+ *
+ * AAC is deliberately NOT part of this answer, for the same reason it does not
+ * disable the button: `convertToMP4` drops the audio and writes a working
+ * silent MP4 when there is no AAC encoder, so a browser in that state still
+ * takes the enabled path — with a note saying the file will be silent.
  *
  * One copy, because the question belongs to the app rather than to a browser
  * name: WebCodecs has been arriving outside Chromium, so a spec that skipped on
@@ -33,22 +38,14 @@ export async function canConvertToMp4(page: Page): Promise<boolean> {
     }
 
     try {
-      const [video, audio] = await Promise.all([
-        VideoEncoder.isConfigSupported({
-          codec: 'avc1.640028',
-          width: 1280,
-          height: 720,
-          bitrate: 5_000_000,
-          framerate: 30,
-        }),
-        AudioEncoder.isConfigSupported({
-          codec: 'mp4a.40.2',
-          sampleRate: 48000,
-          numberOfChannels: 2,
-          bitrate: 128000,
-        }),
-      ])
-      return Boolean(video.supported && audio.supported)
+      const video = await VideoEncoder.isConfigSupported({
+        codec: 'avc1.640028',
+        width: 1280,
+        height: 720,
+        bitrate: 5_000_000,
+        framerate: 30,
+      })
+      return Boolean(video.supported)
     } catch {
       return false
     }

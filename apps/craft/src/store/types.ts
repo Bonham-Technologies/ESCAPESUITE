@@ -76,8 +76,16 @@ export interface DetailedCapabilities {
 export interface Mp4Support {
   /** 'checking' until the codec probe has answered. */
   state: 'checking' | 'ready';
+  /** Whether a conversion may be offered at all — no H.264 encoder is fatal. */
   supported: boolean;
-  /** The probe's own sentence for why not. Absent when supported. */
+  /**
+   * Whether that conversion will have sound. False where the browser has no
+   * AAC encoder: the conversion still runs and the file still plays, silent,
+   * which is what `convertToMP4` does with the same answer — so this does not
+   * disable the button, it only adds a note.
+   */
+  audio: boolean;
+  /** The probe's own sentence for what is missing. Absent when all is well. */
   reason?: string;
 }
 

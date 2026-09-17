@@ -292,13 +292,46 @@ describe('App MP4 downloads', () => {
     const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
     expect(mp4).toBeDisabled();
     expect(mp4.getAttribute('title')).toContain('Checking');
+    // …and says nothing under the library while it waits: a note that appears
+    // and vanishes on every load would move the page for no reason.
+    expect(screen.queryByText(/Checking whether this browser/)).toBeNull();
     // The instant WebM download never waits on the MP4 question.
     expect(screen.getByRole('button', { name: 'Download Standup Demo' })).toBeEnabled();
+  });
+
+  it('offers MP4 without sound, saying so before and after, where there is no AAC encoder', async () => {
+    // `convertToMP4` drops the audio and produces a working MP4 here, so the
+    // button stays enabled — and the user is told twice: the note under the
+    // library before the minutes are spent, the live region after.
+    converterModule.probeMP4Support.mockResolvedValue({
+      supported: true,
+      audio: false,
+      reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+    });
+    await seedRecording({ id: 'take-1', name: 'Standup Demo' });
+    await renderApp();
+
+    const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
+    expect(mp4).toBeEnabled();
+    expect(
+      screen.getByText('MP4 will have no audio in this browser (no AAC encoder)')
+    ).toBeTruthy();
+
+    await user().click(mp4);
+    await flush();
+
+    expect(browser.downloads).toEqual([
+      { href: 'blob:mock-url', download: 'standup_demo.mp4' },
+    ]);
+    expect(
+      screen.getByText('Saved as MP4 — without audio: this browser has no AAC encoder')
+    ).toBeTruthy();
   });
 
   it('offers MP4 disabled, with the probe\'s reason, where the browser cannot encode it', async () => {
     converterModule.probeMP4Support.mockResolvedValue({
       supported: false,
+      audio: false,
       reason: 'This browser cannot encode H.264 video, which an MP4 needs.',
     });
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });

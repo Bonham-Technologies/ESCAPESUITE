@@ -9,7 +9,7 @@ import {
   ConversionAbortedError,
   MP4_NO_WEBCODECS_REASON,
   MP4_NO_H264_REASON,
-  MP4_NO_AAC_REASON,
+  MP4_NO_AUDIO_REASON,
   MP4_PROBE_FAILED_REASON,
   type ConversionProgress,
 } from './converter'
@@ -217,10 +217,10 @@ describe('converter', () => {
       return (await import('./converter')).probeMP4Support
     }
 
-    it('reports support when the browser can encode both H.264 and AAC', async () => {
+    it('reports support, audio included, when the browser can encode both H.264 and AAC', async () => {
       const probe = await freshProbe()
 
-      await expect(probe()).resolves.toEqual({ supported: true })
+      await expect(probe()).resolves.toEqual({ supported: true, audio: true })
     })
 
     it('asks about the same H.264 and AAC configuration the conversion configures', async () => {
@@ -250,17 +250,23 @@ describe('converter', () => {
 
       await expect(probe()).resolves.toEqual({
         supported: false,
+        audio: false,
         reason: MP4_NO_H264_REASON,
       })
     })
 
-    it('refuses, naming AAC, when the audio encoder will not take that config', async () => {
+    it('still offers the conversion, warning it will be silent, when only AAC is missing', async () => {
+      // `convertToMP4` treats a missing AAC encoder as non-fatal — it drops the
+      // audio and produces a working silent MP4 ("drops audio and warns when
+      // AAC is unsupported", below). The probe has to agree with it: refusing
+      // here would disable a button that works.
       AudioEncoderDouble.supportPlan = false
       const probe = await freshProbe()
 
       await expect(probe()).resolves.toEqual({
-        supported: false,
-        reason: MP4_NO_AAC_REASON,
+        supported: true,
+        audio: false,
+        reason: MP4_NO_AUDIO_REASON,
       })
     })
 
@@ -271,6 +277,7 @@ describe('converter', () => {
 
       await expect(probe()).resolves.toEqual({
         supported: false,
+        audio: false,
         reason: MP4_PROBE_FAILED_REASON,
       })
     })
@@ -284,6 +291,7 @@ describe('converter', () => {
 
         await expect(probe()).resolves.toEqual({
           supported: false,
+          audio: false,
           reason: MP4_NO_WEBCODECS_REASON,
         })
       } finally {
@@ -299,7 +307,7 @@ describe('converter', () => {
       const second = probe()
 
       expect(second).toBe(first)
-      await expect(second).resolves.toEqual({ supported: true })
+      await expect(second).resolves.toEqual({ supported: true, audio: true })
       await probe()
       expect(videoAsked).toHaveBeenCalledTimes(1)
     })

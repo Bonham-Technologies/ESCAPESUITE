@@ -11,6 +11,12 @@ interface RecordingsListProps {
   mp4Converting: Mp4Conversion | null;
   /** Why no MP4 conversion may be started, or null when one may. */
   mp4BlockedReason: string | null;
+  /**
+   * What to say out loud under the library, or null. Not the same thing as
+   * `mp4BlockedReason`: "still checking" blocks without being worth a
+   * paragraph, and "this MP4 will be silent" is worth one without blocking.
+   */
+  mp4Note: string | null;
   onPlay: (id: string, name: string) => void;
   onDownload: (id: string, name: string) => void;
   onDownloadMp4: (id: string, name: string) => void;
@@ -20,12 +26,14 @@ interface RecordingsListProps {
 }
 
 /**
- * The id every blocked MP4 button's `aria-describedby` points at. One note for
- * the whole list rather than one per row: the reason is a fact about the app
- * (no WebCodecs, or a conversion already running), not about the recording, so
- * repeating it under every row would say the same sentence five times.
+ * The id the MP4 buttons' `aria-describedby` points at. One note for the whole
+ * list rather than one per row: what it says is a fact about the app (no H.264
+ * encoder, no AAC encoder, a conversion already running), not about the
+ * recording, so repeating it under every row would say the same sentence five
+ * times. It exists only while `mp4Note` is non-null, which is why the buttons
+ * point at it only then.
  */
-const MP4_BLOCKED_REASON_ID = 'mp4-blocked-reason';
+const MP4_NOTE_ID = 'mp4-note';
 
 /**
  * The library panel: every saved take with its thumbnail, duration and size,
@@ -46,13 +54,22 @@ const MP4_BLOCKED_REASON_ID = 'mp4-blocked-reason';
  * time: the row it runs on shows the converter's progress message, its percentage and a Cancel
  * button, and every other row's MP4 button goes disabled with the reason in
  * `title` and in the visible note its `aria-describedby` points at — the same
- * "say why" shape the record button uses. Where the browser has no WebCodecs
- * at all, the button is disabled with that reason rather than hidden.
+ * "say why" shape the record button uses. Where the browser cannot encode
+ * H.264 at all, the button is disabled with that reason rather than hidden.
+ *
+ * The note and the blocked reason are two props because they are two
+ * questions. A button can be blocked by something not worth saying out loud
+ * ("checking whether this browser can convert", true for a moment on every
+ * load), and the library can have something to say while nothing is blocked
+ * ("this MP4 will have no audio"). `mp4BlockedReason` disables and titles;
+ * `mp4Note` is the paragraph, and the buttons are described by it when it is
+ * there.
  */
 export function RecordingsList({
   recordings,
   mp4Converting,
   mp4BlockedReason,
+  mp4Note,
   onPlay,
   onDownload,
   onDownloadMp4,
@@ -117,7 +134,7 @@ export function RecordingsList({
                     onClick={() => onDownloadMp4(recording.id, recording.name)}
                     title={blockedReason ?? (converting ? 'Converting to MP4…' : 'Download MP4')}
                     aria-label={`Download ${recording.name} as MP4`}
-                    aria-describedby={blockedReason ? MP4_BLOCKED_REASON_ID : undefined}
+                    aria-describedby={mp4Note && !converting ? MP4_NOTE_ID : undefined}
                     disabled={converting !== null || blockedReason !== null}
                   >
                     MP4
@@ -173,9 +190,9 @@ export function RecordingsList({
           })
         )}
       </div>
-      {mp4BlockedReason && recordings.length > 0 && (
-        <p className={styles.mp4BlockedReason} id={MP4_BLOCKED_REASON_ID}>
-          {mp4BlockedReason}
+      {mp4Note && recordings.length > 0 && (
+        <p className={styles.mp4BlockedReason} id={MP4_NOTE_ID}>
+          {mp4Note}
         </p>
       )}
     </section>

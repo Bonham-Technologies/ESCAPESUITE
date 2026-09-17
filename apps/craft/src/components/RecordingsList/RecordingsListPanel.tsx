@@ -45,7 +45,7 @@ export function RecordingsListPanel({
   // It is written once, by the capability bootstrap, so this panel re-renders
   // once when the probe answers and never again.
   const mp4Support = useRecorderStore((s) => s.mp4Support);
-  const { converting, blockedReason, startMp4Download, cancelMp4Download } = useMp4Download({
+  const { converting, blockedReason, note, startMp4Download, cancelMp4Download } = useMp4Download({
     setNotice,
     mp4Support,
   });
@@ -55,6 +55,7 @@ export function RecordingsListPanel({
       recordings={recordings}
       mp4Converting={converting}
       mp4BlockedReason={blockedReason}
+      mp4Note={note}
       onPlay={onPlay}
       onDownload={onDownload}
       onDownloadMp4={(id, name) => void startMp4Download(id, name)}

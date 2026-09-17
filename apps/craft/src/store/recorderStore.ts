@@ -46,7 +46,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   },
   capabilitiesReady: false,
   // Nothing is claimed about MP4 until the codec probe has answered.
-  mp4Support: { state: 'checking', supported: false },
+  mp4Support: { state: 'checking', supported: false, audio: false },
   recordings: [],
   notice: null,
   systemAudioShared: true,

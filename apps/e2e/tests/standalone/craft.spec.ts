@@ -220,11 +220,11 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     await page.goto(CRAFT_URL)
     await page.waitForLoadState('networkidle')
 
-    // MP4 conversion needs an H.264 and an AAC encoder behind WebCodecs; a
-    // browser without them shows the button disabled with its reason, which
+    // MP4 conversion needs an H.264 encoder behind WebCodecs; a browser
+    // without one shows the button disabled with its reason, which
     // `tests/escapecraft/mp4-download.spec.ts` covers. What is being asserted
     // here is that converting needs no network.
-    test.skip(!(await canConvertToMp4(page)), 'This browser cannot encode H.264 + AAC')
+    test.skip(!(await canConvertToMp4(page)), 'This browser cannot encode H.264')
 
     const screenSource = page
       .locator('[class*="sourceToggle"]')
