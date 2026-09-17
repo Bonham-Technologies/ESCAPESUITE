@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.2
+
+### Patch Changes
+
+- Updated dependencies [3b0fe5f]
+  - @escapesuite/shared@1.3.3
+
 ## 2.4.1
 
 ### Patch Changes

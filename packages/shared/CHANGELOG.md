@@ -1,5 +1,11 @@
 # @escapesuite/shared
 
+## 1.3.3
+
+### Patch Changes
+
+- 3b0fe5f: packaging: React is a peer dependency; the package type-checks itself
+
 ## 1.3.2
 
 ### Patch Changes
