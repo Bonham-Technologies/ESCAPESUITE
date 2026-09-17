@@ -13,7 +13,7 @@ import { AppHeader } from './components/AppHeader/AppHeader';
 import type { RecordingSource } from './components/SourceToggles/SourceToggles';
 import { SourceTogglesPanel } from './components/SourceToggles/SourceTogglesPanel';
 import { WebcamOverlaySettings } from './components/WebcamOverlaySettings/WebcamOverlaySettings';
-import { RecordingsList } from './components/RecordingsList/RecordingsList';
+import { RecordingsListPanel } from './components/RecordingsList/RecordingsListPanel';
 import { RecordingPreview } from './components/RecordingPreview/RecordingPreview';
 import { RecorderControls } from './components/RecorderControls/RecorderControls';
 import { PlaybackDialog } from './components/PlaybackDialog/PlaybackDialog';
@@ -210,8 +210,9 @@ function App() {
             />
           )}
 
-          {/* Recordings list */}
-          <RecordingsList
+          {/* Recordings list — the panel owns the MP4 conversion state, so a
+              progress report redraws the library and not this whole tree. */}
+          <RecordingsListPanel
             recordings={recordings}
             onPlay={handlePlayRecording}
             onDownload={handleDownload}

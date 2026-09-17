@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from '../core/storage';
 import { analytics } from '../utils/analytics';
+import { downloadBlob } from '../utils/downloadBlob';
 import { sendToEditor } from '../utils/sendToEditor';
 import { safeFileName } from '../utils/recordingFormat';
 import type { Recording } from '../store/types';
@@ -94,18 +95,8 @@ export function useRecordingLibrary({
     if (!blob) return;
 
     analytics.recordingDownloaded();
-    const url = createBlobUrl(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const safeName = safeFileName(name);
-    a.download = `${safeName}.webm`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    // Revoking in the same tick as click() cancels the download outside
-    // Chrome: the browser has not necessarily started reading the blob yet.
-    // One turn of the event loop is enough for it to have taken hold.
-    setTimeout(() => revokeBlobUrl(url), 0);
+    // The same anchor the MP4 path uses, deferred revoke included.
+    downloadBlob(blob, `${safeFileName(name)}.webm`);
   };
 
   return {

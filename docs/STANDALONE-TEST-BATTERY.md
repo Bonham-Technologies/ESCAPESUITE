@@ -60,7 +60,12 @@ cd apps/e2e && pnpm exec playwright test --config=playwright.standalone.config.t
 - [ ] Source selection (screen/webcam) works
 - [ ] Start/stop a recording and confirm it plays back
 - [ ] Theme toggle works
-- [ ] Download produces a valid WebM file (WebM is the only download the UI offers)
+- [ ] "Download WebM" produces a valid WebM file, instantly (no progress, no conversion)
+- [ ] "MP4" converts in the page: the row shows a phase and a percentage while it runs, and the file that lands is a playable `.mp4` (H.264 + AAC)
+- [ ] Cancelling a conversion returns the row to idle, writes no file, and says nothing in the header
+- [ ] While one conversion runs, every other row's MP4 button is disabled and says why
+- [ ] Switching to another tab mid-conversion does not stall or cancel it
+- [ ] In a browser without WebCodecs the MP4 button is visible, disabled, and gives its reason; the WebM download still works
 
 #### ESCAPEARTIST (http://localhost:5185/ or file://)
 - [ ] App loads with no network requests (check DevTools Network tab)

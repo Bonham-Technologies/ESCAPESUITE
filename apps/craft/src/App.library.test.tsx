@@ -14,6 +14,7 @@ import type { SourceVideo } from './store/types';
 import {
   sendToEditorModule,
   analyticsModule,
+  converterModule,
   resetAppDoubles,
 } from './test/appDoubles';
 import {
@@ -249,5 +250,50 @@ describe('App recording hand-off and deletion', () => {
     await flush();
 
     expect(screen.getByText('No recordings yet')).toBeTruthy();
+  });
+});
+
+describe('App MP4 downloads', () => {
+  it('converts the stored recording and downloads it as MP4', async () => {
+    await seedRecording({ id: 'take-1', name: 'Standup Demo: 9/9' });
+    await renderApp();
+
+    await user().click(
+      screen.getByRole('button', { name: 'Download Standup Demo: 9/9 as MP4' })
+    );
+    await flush();
+
+    expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1);
+    expect(browser.downloads).toEqual([
+      { href: 'blob:mock-url', download: 'standup_demo__9_9.mp4' },
+    ]);
+    expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined);
+  });
+
+  it('reports a failed conversion through the header live region', async () => {
+    converterModule.convertToMP4.mockRejectedValue(new Error('No H.264 encoder'));
+    await seedRecording({ id: 'take-1', name: 'Standup Demo' });
+    await renderApp();
+
+    await user().click(screen.getByRole('button', { name: 'Download Standup Demo as MP4' }));
+    await flush();
+
+    expect(screen.getByText('MP4 conversion failed: No H.264 encoder')).toBeTruthy();
+    expect(browser.downloads).toEqual([]);
+  });
+
+  it('offers MP4 disabled, with a reason, where the browser cannot encode it', async () => {
+    converterModule.isMP4ConversionSupported.mockReturnValue(false);
+    await seedRecording({ id: 'take-1', name: 'Standup Demo' });
+    await renderApp();
+
+    const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
+    expect(mp4).toBeDisabled();
+    expect(mp4.getAttribute('title')).toContain('WebCodecs');
+    // The instant WebM download is unaffected.
+    await user().click(screen.getByRole('button', { name: 'Download Standup Demo' }));
+    expect(browser.downloads).toEqual([
+      { href: 'blob:mock-url', download: 'standup_demo.webm' },
+    ]);
   });
 });

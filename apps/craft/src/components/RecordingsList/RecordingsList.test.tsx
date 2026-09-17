@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RecordingsList } from './RecordingsList'
+import type { Mp4Conversion } from '../../hooks/useMp4Download'
 import type { Recording } from '../../store/types'
 import styles from '../../App.module.css'
 
@@ -26,14 +27,26 @@ function makeRecording(overrides: Partial<Recording> = {}): Recording {
   }
 }
 
-function renderList(recordings: Recording[] = [makeRecording()]) {
+function renderList(
+  recordings: Recording[] = [makeRecording()],
+  mp4: { mp4Converting?: Mp4Conversion | null; mp4BlockedReason?: string | null } = {}
+) {
   const calls = {
     onPlay: vi.fn<(id: string, name: string) => void>(),
     onDownload: vi.fn<(id: string, name: string) => void>(),
+    onDownloadMp4: vi.fn<(id: string, name: string) => void>(),
+    onCancelMp4: vi.fn<() => void>(),
     onSendToEditor: vi.fn<(id: string) => void>(),
     onDelete: vi.fn<(id: string) => void>(),
   }
-  const { container } = render(<RecordingsList recordings={recordings} {...calls} />)
+  const { container } = render(
+    <RecordingsList
+      recordings={recordings}
+      mp4Converting={mp4.mp4Converting ?? null}
+      mp4BlockedReason={mp4.mp4BlockedReason ?? null}
+      {...calls}
+    />
+  )
   return { calls, container }
 }
 
@@ -146,5 +159,92 @@ describe('RecordingsList actions', () => {
     await user.click(screen.getByRole('button', { name: 'Delete Second' }))
 
     expect(calls.onDelete).toHaveBeenCalledWith('r2')
+  })
+})
+
+describe('RecordingsList MP4 downloads', () => {
+  it('offers MP4 beside WebM, named after its recording', () => {
+    renderList([makeRecording({ name: 'Standup Demo' })])
+
+    const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' })
+    expect(mp4).toHaveAttribute('title', 'Download MP4')
+    expect(mp4).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Standup Demo' })).toHaveAttribute(
+      'title',
+      'Download WebM'
+    )
+  })
+
+  it('converts by id and name, so the file can be named after the take', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })])
+
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as MP4' }))
+
+    expect(calls.onDownloadMp4).toHaveBeenCalledWith('r7', 'Take Seven')
+  })
+
+  it('says why MP4 is unavailable rather than hiding the button', () => {
+    const reason = 'This browser cannot convert to MP4.'
+    const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
+      mp4BlockedReason: reason,
+    })
+
+    const mp4 = screen.getByRole('button', { name: 'Download Take Seven as MP4' })
+    expect(mp4).toBeDisabled()
+    expect(mp4).toHaveAttribute('title', reason)
+    const describedBy = mp4.getAttribute('aria-describedby')!
+    expect(container.querySelector(`#${describedBy}`)).toHaveTextContent(reason)
+    // The WebM download is never affected by an MP4 problem.
+    expect(screen.getByRole('button', { name: 'Download Take Seven' })).toBeEnabled()
+  })
+
+  it('shows what the converter is doing, and how far, on the row being converted', () => {
+    const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
+      mp4Converting: { id: 'r7', message: 'Encoding frames (playing video)...', progress: 42 },
+    })
+
+    const progress = screen.getByRole('progressbar', { name: 'Converting Take Seven to MP4' })
+    expect(progress).toHaveAttribute('aria-valuenow', '42')
+    // The converter's own sentence, not its coarser lower-case phase name.
+    expect(container.querySelector(`.${styles.conversionProgress}`)).toHaveTextContent(
+      'Encoding frames (playing video)...'
+    )
+    expect(container.querySelector(`.${styles.conversionProgress}`)).toHaveTextContent('42%')
+    expect(container.querySelector<HTMLElement>(`.${styles.conversionProgressFill}`)).toHaveStyle({
+      width: '42%',
+    })
+  })
+
+  it('cancels the conversion from the row it is running on', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
+      mp4Converting: { id: 'r7', message: 'Encoding frames...', progress: 42 },
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Cancel MP4 conversion of Take Seven' }))
+
+    expect(calls.onCancelMp4).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks the other rows while one conversion runs, and shows no progress on them', () => {
+    const busy = 'One conversion at a time.'
+    const { container } = renderList(
+      [makeRecording({ id: 'r1', name: 'First' }), makeRecording({ id: 'r2', name: 'Second' })],
+      { mp4Converting: { id: 'r1', message: 'Preparing conversion...', progress: 0 }, mp4BlockedReason: busy }
+    )
+
+    expect(container.querySelectorAll(`.${styles.conversionProgress}`)).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Download Second as MP4' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Download Second as MP4' })).toHaveAttribute(
+      'title',
+      busy
+    )
+    // The converting row's own button is disabled too — it is already running.
+    expect(screen.getByRole('button', { name: 'Download First as MP4' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Download First as MP4' })).toHaveAttribute(
+      'title',
+      'Converting to MP4…'
+    )
   })
 })

@@ -5,6 +5,7 @@ import {
   mockSyntheticMedia,
   grantMediaPermissions,
 } from '../../utils/media-mocks'
+import { hasWebCodecs } from '../../utils/webcodecs'
 
 /**
  * Smoke tests for the ESCAPECRAFT offline build.
@@ -201,6 +202,54 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
       scripts: document.querySelectorAll('script[src*="vercel"]').length,
     }))
     expect(analyticsRuntime).toEqual({ va: 'undefined', queue: 'undefined', scripts: 0 })
+  })
+
+  test('converts a recording to MP4 without leaving the page', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    const externalCalls: string[] = []
+    page.on('request', (request) => {
+      const url = request.url()
+      if (!url.startsWith('data:') && !url.startsWith('blob:') && !url.includes('localhost:5184')) {
+        externalCalls.push(url)
+      }
+    })
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto(CRAFT_URL)
+    await page.waitForLoadState('networkidle')
+
+    // MP4 conversion needs WebCodecs; a browser without it shows the button
+    // disabled with its reason, which `tests/escapecraft/mp4-download.spec.ts`
+    // covers. What is being asserted here is that converting needs no network.
+    test.skip(!(await hasWebCodecs(page)), 'MP4 conversion needs WebCodecs')
+
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+      timeout: 30_000,
+    })
+    await page.waitForTimeout(2000)
+    await page.getByRole('button', { name: 'Stop recording' }).click()
+    await expect(page.getByRole('button', { name: /Open .+ in Editor/ })).toBeVisible({
+      timeout: 30_000,
+    })
+
+    // MP4 conversion is WebCodecs + Mediabunny, both inlined in this one file.
+    // The download proves it produced a file; the empty request list proves it
+    // did so without a server.
+    const downloadPromise = page.waitForEvent('download', { timeout: 150_000 })
+    await page.getByRole('button', { name: /Download .+ as MP4/ }).click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toMatch(/\.mp4$/)
+
+    expect(externalCalls).toHaveLength(0)
   })
 
   test('single HTML file contains all assets', async ({ page }) => {
