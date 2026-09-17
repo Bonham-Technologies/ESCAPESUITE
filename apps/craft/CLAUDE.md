@@ -96,12 +96,12 @@ selector contract above.
 | `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for. Calls the shared `useDialogBehaviour` for the keyboard half |
 | `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby`, and the `tabIndex={0}` that makes its scrolling body keyboard-reachable. Calls the shared `useDialogBehaviour` too |
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
-| `hooks/useCapabilityBootstrap.ts` | The way in: capability detection and the initial `loadRecordings()`, both in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
+| `hooks/useCapabilityBootstrap.ts` | The way in: capability detection, the MP4 codec probe (`probeMP4Support()` → `store.mp4Support`) and the initial `loadRecordings()`, all in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
 | `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
-| `hooks/useMp4Download.ts` | One MP4 conversion at a time: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the two button reasons, and the failure that becomes a notice. Called by `RecordingsListPanel`, never by `App` |
+| `hooks/useMp4Download.ts` | One MP4 conversion at a time: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the three button reasons (still checking, cannot, busy), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App` |
 | `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete (re-reading the storage headroom after it), and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
 
 ### Errors and notices
@@ -268,7 +268,7 @@ the Help button.
 
 ### State Management
 - **Zustand store** (`src/store/recorderStore.ts`): Single source of truth for recorder state
-- Core types defined in `src/store/types.ts`: `RecordingState`, `RecordingConfig`, `Recording`, `EnvironmentCapabilities`, `DetailedCapabilities`, `CapabilityInfo`
+- Core types defined in `src/store/types.ts`: `RecordingState`, `RecordingConfig`, `Recording`, `EnvironmentCapabilities`, `DetailedCapabilities`, `CapabilityInfo`, `Mp4Support`
 - Recordings stored in shared IndexedDB with ESCAPEARTIST
 
 ### Core Modules (`src/core/`)
@@ -293,8 +293,9 @@ the Help button.
   mocked, which is what makes it the single definition — keep it that way
 - `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
   goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus
-  `convertToMP4()` and `isMP4ConversionSupported()`, which the library row's MP4 download
-  reaches through `hooks/useMp4Download.ts`. `remuxToWebM()` / `isWebMRemuxSupported()` (the
+  `convertToMP4()`, the `probeMP4Support()` codec probe the MP4 button is gated on, and the
+  `isMP4ConversionSupported()` presence check the conversion guards itself with. The library
+  row's MP4 download reaches them through `hooks/useMp4Download.ts`. `remuxToWebM()` / `isWebMRemuxSupported()` (the
   compatible-WebM VP9 + Opus re-encode) are the one part of this module nothing calls; see
   "Download Formats"
 
@@ -482,13 +483,36 @@ message and navigate to its own editor itself.
 
 - **One at a time.** It is CPU-bound, so a second start is refused while one runs and every
   other row's MP4 button goes `disabled` with `MP4_BUSY_REASON`.
-- **Say why, do not hide.** Where `isMP4ConversionSupported()` is false — no WebCodecs, no
-  H.264 encoder — the button stays on screen, `disabled`, with `MP4_UNSUPPORTED_REASON` in
-  its `title` and in the one visible note every blocked button's `aria-describedby` points
-  at. That is the record button's shape (see "The record button only offers what it can
-  deliver"), and the two reasons live beside their gate rather than in `utils/notices.ts`
-  for the same reason `NO_STORAGE_SPACE` lives in `recordReadiness.ts`: nothing has gone
-  wrong yet.
+- **Say why, do not hide.** Where the codec probe says this browser cannot encode MP4, the
+  button stays on screen, `disabled`, with the probe's own sentence in its `title` and in
+  the one visible note every blocked button's `aria-describedby` points at. That is the
+  record button's shape (see "The record button only offers what it can deliver"), and the
+  reasons live beside their gate rather than in `utils/notices.ts` for the same reason
+  `NO_STORAGE_SPACE` lives in `recordReadiness.ts`: nothing has gone wrong yet.
+- **The gate is a real codec probe, and it is asynchronous.** `probeMP4Support()`
+  (`core/converter.ts`) checks the four WebCodecs globals and then asks
+  `VideoEncoder.isConfigSupported()` and `AudioEncoder.isConfigSupported()` about the
+  **same** configurations `convertToMP4` will configure — H.264 `avc1.640028` at a
+  representative 1280x720 (5 Mbps, 30 fps) and AAC-LC `mp4a.40.2` (48 kHz, stereo,
+  128 kbps). Both are declared once, in `mp4VideoEncoderConfig()` and
+  `MP4_AUDIO_ENCODER_CONFIG`, and the conversion configures from them, so the probe cannot
+  drift into asking a different question than the button is gating on; the unit test "asks
+  about the same H.264 and AAC configuration the conversion configures" pins that. It never
+  rejects — a probe that could not answer is a `{ supported: false }` with a reason — and it
+  memoises for the life of the page, so the UI asks once. Its four reasons
+  (`MP4_NO_WEBCODECS_REASON`, `MP4_NO_H264_REASON`, `MP4_NO_AAC_REASON`,
+  `MP4_PROBE_FAILED_REASON`) name what is missing.
+- **"Checking..." rather than a flash.** Because the answer is asynchronous it is asked at
+  capability bootstrap (`useCapabilityBootstrap`, alongside capability detection and the
+  storage estimate — never on the click path) and lands in `store.mp4Support`
+  (`{ state: 'checking' | 'ready', supported, reason? }`). While it is `checking` the button
+  is `disabled` with `MP4_CHECKING_REASON`; it then goes enabled, or disabled with the
+  probe's reason. It is never enabled first and taken away: offering a conversion and
+  withdrawing it a tick later is worse than waiting a tick to offer it.
+  `RecordingsListPanel` selects `mp4Support` and hands it to the hook, so `App` never
+  subscribes to it and the render contract below is unchanged.
+  `isMP4ConversionSupported()` remains as the cheap synchronous presence check, and
+  `convertToMP4` keeps guarding itself with it — that guard is a defence, not the UI's gate.
 - **Cancelling is not failing.** Cancel aborts through an `AbortSignal`; the converter
   rejects with `ConversionAbortedError`, the row returns to idle, no file is written and
   **no notice is raised**. Any other rejection becomes `mp4ConversionFailed(message)` in
@@ -518,15 +542,8 @@ message and navigate to its own editor itself.
 `RecordingsList` itself stays driven by props alone (`mp4Converting`, `mp4BlockedReason`,
 `onDownloadMp4`, `onCancelMp4`), which is what its own test asserts.
 
-**Follow-ups, both inherited from `core/converter.ts` rather than introduced here:**
+**Follow-up, inherited from `core/converter.ts` rather than introduced here:**
 
-- `isMP4ConversionSupported()` is a **presence check, not a codec probe** — it tests that
-  `VideoEncoder`, `VideoFrame`, `AudioEncoder` and `AudioContext` exist and never calls
-  `VideoEncoder.isConfigSupported({ codec: 'avc1…' })`. A browser with WebCodecs but no
-  H.264 encoder therefore gets an **enabled** button whose click fails at `configure()` and
-  lands in the notice channel. It degrades into a sentence rather than a wrong screen, so
-  it was left alone; making the gate a real probe means making it async, which means the
-  button can flash from enabled to disabled, which is its own design question.
 - MP4 and WebM downloads share one analytics event (`Recording Downloaded`), so the
   minutes-long conversion cannot be told from the instant download.
 
