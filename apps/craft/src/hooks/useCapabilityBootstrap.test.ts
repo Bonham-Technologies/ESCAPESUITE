@@ -8,13 +8,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useCapabilityBootstrap } from './useCapabilityBootstrap'
 import { useRecorderStore } from '../store/recorderStore'
-import { permissionsOverrides, detectionResult, resetAppDoubles } from '../test/appDoubles'
+import {
+  permissionsOverrides,
+  detectionResult,
+  converterModule,
+  resetAppDoubles,
+} from '../test/appDoubles'
 
 vi.mock('../core/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../core/permissions')>()
   const { permissionsOverrides: overrides } = await import('../test/appDoubles')
   return { ...actual, ...overrides }
 })
+// The MP4 codec probe is the other browser boundary the bootstrap crosses: it
+// asks WebCodecs whether it can encode H.264 and AAC, which jsdom cannot
+// answer.
+vi.mock('../core/converter', async () => (await import('../test/appDoubles')).converterModule)
 
 let loadRecordings: ReturnType<typeof vi.fn>
 let refreshStorageSpace: ReturnType<typeof vi.fn>
@@ -23,7 +32,11 @@ beforeEach(() => {
   resetAppDoubles()
   loadRecordings = vi.fn(async () => {})
   refreshStorageSpace = vi.fn(async () => {})
-  useRecorderStore.setState({ capabilitiesReady: false, notice: null })
+  useRecorderStore.setState({
+    capabilitiesReady: false,
+    notice: null,
+    mp4Support: { state: 'checking', supported: false },
+  })
 })
 
 function mountBootstrap() {
@@ -31,6 +44,7 @@ function mountBootstrap() {
     setCapabilities,
     setDetailedCapabilities,
     setCapabilitiesReady,
+    setMp4Support,
     setNotice,
   } = useRecorderStore.getState()
   return renderHook(() =>
@@ -38,6 +52,7 @@ function mountBootstrap() {
       setCapabilities,
       setDetailedCapabilities,
       setCapabilitiesReady,
+      setMp4Support,
       setNotice,
       loadRecordings: loadRecordings as unknown as () => Promise<void>,
       refreshStorageSpace: refreshStorageSpace as unknown as () => Promise<void>,
@@ -60,6 +75,49 @@ describe('useCapabilityBootstrap', () => {
     })
     expect(useRecorderStore.getState().detailedCapabilities).toEqual(detected.detailed)
     expect(permissionsOverrides.detectCapabilities).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks the MP4 codec probe once, and writes its answer into the store', async () => {
+    mountBootstrap()
+
+    await waitFor(() => {
+      expect(useRecorderStore.getState().mp4Support).toEqual({
+        state: 'ready',
+        supported: true,
+      })
+    })
+    expect(converterModule.probeMP4Support).toHaveBeenCalledTimes(1)
+  })
+
+  it('holds the MP4 answer at "checking" until the probe answers', async () => {
+    // The button is disabled while this holds, so it never flashes from
+    // enabled to disabled when the answer turns out to be no.
+    let answer: (support: { supported: boolean; reason?: string }) => void = () => {}
+    converterModule.probeMP4Support.mockReturnValue(
+      new Promise<{ supported: boolean; reason?: string }>(resolve => {
+        answer = resolve
+      })
+    )
+
+    mountBootstrap()
+
+    await waitFor(() => {
+      expect(useRecorderStore.getState().capabilitiesReady).toBe(true)
+    })
+    expect(useRecorderStore.getState().mp4Support).toEqual({
+      state: 'checking',
+      supported: false,
+    })
+
+    await act(async () => {
+      answer({ supported: false, reason: 'This browser cannot encode H.264 video.' })
+    })
+
+    expect(useRecorderStore.getState().mp4Support).toEqual({
+      state: 'ready',
+      supported: false,
+      reason: 'This browser cannot encode H.264 video.',
+    })
   })
 
   it('loads the stored recordings exactly once, alongside the detection', async () => {

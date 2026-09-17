@@ -10,6 +10,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   useMp4Download,
   MP4_BUSY_REASON,
+  MP4_CHECKING_REASON,
   MP4_UNSUPPORTED_REASON,
 } from './useMp4Download'
 import { storeVideo } from '../core/storage'
@@ -21,7 +22,7 @@ import {
   resetAppDoubles,
   type ConversionProgressLike,
 } from '../test/appDoubles'
-import type { SourceVideo } from '../store/types'
+import type { Mp4Support, SourceVideo } from '../store/types'
 
 vi.mock('../core/converter', async () => (await import('../test/appDoubles')).converterModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
@@ -100,8 +101,19 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderMp4Download() {
-  return renderHook(() => useMp4Download({ setNotice }))
+/** What the store holds once the codec probe has said yes. */
+const MP4_SUPPORTED: Mp4Support = { state: 'ready', supported: true }
+
+/**
+ * The hook is handed the probe's answer rather than asking for it: the field
+ * lives in the store and `RecordingsListPanel` selects it, so a test can put
+ * the browser in any of the three states — still checking, cannot, can — and
+ * move between them with `rerender`.
+ */
+function renderMp4Download(mp4Support: Mp4Support = MP4_SUPPORTED) {
+  return renderHook((support: Mp4Support) => useMp4Download({ setNotice, mp4Support: support }), {
+    initialProps: mp4Support,
+  })
 }
 
 describe('useMp4Download, start to finish', () => {
@@ -354,10 +366,64 @@ describe('useMp4Download failures', () => {
 })
 
 describe('useMp4Download gating', () => {
-  it('is blocked, with a reason, where the browser cannot encode H.264', async () => {
+  it('is blocked, saying so, while the codec probe is still checking', async () => {
+    // The probe is asynchronous, so there is a moment before it answers. The
+    // button must be disabled for it rather than enabled and then taken away:
+    // an enabled-to-disabled flash offers a conversion this browser may not be
+    // able to do.
     await seed('take-1', 'Take One')
-    converterModule.isMP4ConversionSupported.mockReturnValue(false)
-    const { result } = renderMp4Download()
+    const { result } = renderMp4Download({ state: 'checking', supported: false })
+
+    expect(result.current.blockedReason).toBe(MP4_CHECKING_REASON)
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    expect(converterModule.convertToMP4).not.toHaveBeenCalled()
+    expect(clicks).toEqual([])
+  })
+
+  it('is offered once the probe says this browser can encode it', async () => {
+    await seed('take-1', 'Take One')
+    const { result, rerender } = renderMp4Download({ state: 'checking', supported: false })
+
+    rerender(MP4_SUPPORTED)
+    expect(result.current.blockedReason).toBeNull()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+  })
+
+  it('is blocked with the probe\'s own reason once it says it cannot', async () => {
+    await seed('take-1', 'Take One')
+    const { result, rerender } = renderMp4Download({ state: 'checking', supported: false })
+
+    rerender({
+      state: 'ready',
+      supported: false,
+      reason: 'This browser cannot encode H.264 video, which an MP4 needs.',
+    })
+
+    expect(result.current.blockedReason).toBe(
+      'This browser cannot encode H.264 video, which an MP4 needs.'
+    )
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    expect(converterModule.convertToMP4).not.toHaveBeenCalled()
+    expect(clicks).toEqual([])
+  })
+
+  it('falls back to the general reason when the refusal came with none', async () => {
+    await seed('take-1', 'Take One')
+    const { result } = renderMp4Download({ state: 'ready', supported: false })
 
     expect(result.current.blockedReason).toBe(MP4_UNSUPPORTED_REASON)
 
@@ -366,7 +432,6 @@ describe('useMp4Download gating', () => {
     })
 
     expect(converterModule.convertToMP4).not.toHaveBeenCalled()
-    expect(clicks).toEqual([])
   })
 
   it('runs one conversion at a time, and says why the others are blocked', async () => {

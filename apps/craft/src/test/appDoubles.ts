@@ -123,9 +123,20 @@ async function convertToMP4Double(
   return new Blob([blob], { type: 'video/mp4' })
 }
 
+export interface Mp4SupportProbeLike {
+  supported: boolean
+  reason?: string
+}
+
 export const converterModule = {
   fixWebMMetadata: vi.fn(async (blob: Blob) => new Blob([blob], { type: 'video/webm' })),
   isMP4ConversionSupported: vi.fn(() => true),
+  /**
+   * The codec probe, answering yes. A test about a browser that cannot encode
+   * MP4 says so here; one about the moment before the answer arrives returns a
+   * promise it never settles.
+   */
+  probeMP4Support: vi.fn<() => Promise<Mp4SupportProbeLike>>(async () => ({ supported: true })),
   convertToMP4: vi.fn(convertToMP4Double),
   ConversionAbortedError,
 }
@@ -169,6 +180,8 @@ export function resetAppDoubles(): void {
   )
   converterModule.isMP4ConversionSupported.mockReset()
   converterModule.isMP4ConversionSupported.mockReturnValue(true)
+  converterModule.probeMP4Support.mockReset()
+  converterModule.probeMP4Support.mockResolvedValue({ supported: true })
   converterModule.convertToMP4.mockReset()
   converterModule.convertToMP4.mockImplementation(convertToMP4Double)
 

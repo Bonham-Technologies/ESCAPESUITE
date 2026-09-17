@@ -282,14 +282,31 @@ describe('App MP4 downloads', () => {
     expect(browser.downloads).toEqual([]);
   });
 
-  it('offers MP4 disabled, with a reason, where the browser cannot encode it', async () => {
-    converterModule.isMP4ConversionSupported.mockReturnValue(false);
+  it('offers MP4 disabled while the codec probe is still checking', async () => {
+    // Never answers: the button must be disabled *for* the probe rather than
+    // enabled and then taken away.
+    converterModule.probeMP4Support.mockReturnValue(new Promise(() => {}));
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
     await renderApp();
 
     const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
     expect(mp4).toBeDisabled();
-    expect(mp4.getAttribute('title')).toContain('WebCodecs');
+    expect(mp4.getAttribute('title')).toContain('Checking');
+    // The instant WebM download never waits on the MP4 question.
+    expect(screen.getByRole('button', { name: 'Download Standup Demo' })).toBeEnabled();
+  });
+
+  it('offers MP4 disabled, with the probe\'s reason, where the browser cannot encode it', async () => {
+    converterModule.probeMP4Support.mockResolvedValue({
+      supported: false,
+      reason: 'This browser cannot encode H.264 video, which an MP4 needs.',
+    });
+    await seedRecording({ id: 'take-1', name: 'Standup Demo' });
+    await renderApp();
+
+    const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
+    expect(mp4).toBeDisabled();
+    expect(mp4.getAttribute('title')).toContain('H.264');
     // The instant WebM download is unaffected.
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo' }));
     expect(browser.downloads).toEqual([

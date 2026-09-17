@@ -40,6 +40,7 @@ describe('recorderStore', () => {
       screenStream: null,
       webcamStream: null,
       hasStorageSpace: true,
+      mp4Support: { state: 'checking', supported: false },
     })
   })
 
@@ -60,6 +61,11 @@ describe('recorderStore', () => {
     it('should have no recordings initially', () => {
       const { recordings } = useRecorderStore.getState()
       expect(recordings).toHaveLength(0)
+    })
+
+    it('should not claim MP4 support before the codec probe has answered', () => {
+      const { mp4Support } = useRecorderStore.getState()
+      expect(mp4Support).toEqual({ state: 'checking', supported: false })
     })
   })
 
@@ -250,6 +256,24 @@ describe('recorderStore', () => {
       setDetailedCapabilities(detailed)
 
       expect(useRecorderStore.getState().detailedCapabilities).toEqual(detailed)
+    })
+  })
+
+  describe('setMp4Support', () => {
+    it('should record the codec probe\'s answer, reason and all', () => {
+      const { setMp4Support } = useRecorderStore.getState()
+
+      setMp4Support({
+        state: 'ready',
+        supported: false,
+        reason: 'This browser cannot encode AAC audio, which an MP4 needs.',
+      })
+
+      expect(useRecorderStore.getState().mp4Support).toEqual({
+        state: 'ready',
+        supported: false,
+        reason: 'This browser cannot encode AAC audio, which an MP4 needs.',
+      })
     })
   })
 
