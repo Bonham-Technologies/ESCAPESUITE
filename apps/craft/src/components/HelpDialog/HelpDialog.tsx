@@ -108,8 +108,11 @@ export function HelpDialog({ onClose }: HelpDialogProps) {
                 in Chrome, Firefox, and most video editors.
               </li>
               <li>
-                <strong>MP4</strong> - Universal format. Takes a moment to convert but plays
-                everywhere including Windows Media Player and QuickTime.
+                <strong>MP4</strong> - Universal format, and it plays everywhere including
+                Windows Media Player and QuickTime. Your browser converts it here on your
+                machine, which takes roughly as long as the recording itself - you will see
+                the progress and can cancel at any point. One at a time, and Chrome or Edge
+                only.
               </li>
             </ul>
           </section>

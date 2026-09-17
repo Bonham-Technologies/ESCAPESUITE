@@ -115,8 +115,9 @@ dist/
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
 - Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for PiP, audio-only takes and browsers without it
 - Outputs WebM either way, but only the MediaRecorder path needs repairing: `useRecordingSave` runs `webm-duration-fix` over MediaRecorder output at save time, and writes WebCodecs output through untouched (Mediabunny already emits Duration and Cues)
-- Recordings download as WebM, and only as WebM — the stored blob, no conversion step
-- `converter.ts` also holds MP4 (H.264+AAC) and compatible-WebM (VP9+Opus) conversion via WebCodecs + Mediabunny, with cancellation, background-tab yielding and progress reporting. **The UI has reached none of it since #209** — only `fixWebMMetadata()` is called. Present, tested and unwired, pending a product decision; see `apps/craft/CLAUDE.md`'s "Download Formats"
+- Two downloads per recording: **WebM** is the stored blob handed straight back, instant and always available; **MP4** (H.264 + AAC) is `converter.ts` re-encoding it in the page with WebCodecs + Mediabunny — one conversion at a time, with a phase-and-percentage progress row, a Cancel button, and a disabled button carrying a visible reason where the browser has no WebCodecs. No upload either way; a failed conversion raises the app's one notice and leaves the WebM download untouched
+- The conversion state is held in `RecordingsListPanel`, below `App`, so a progress report re-renders the library and nothing else (`App.mp4rerender.test.tsx` counts it)
+- `converter.ts`'s other conversion path — compatible WebM (VP9 + Opus re-encode), `remuxToWebM` / `isWebMRemuxSupported` — is still present, tested and **unwired**; see `apps/craft/CLAUDE.md`'s "Download Formats"
 
 ### ESCAPEARTIST (apps/artist)
 - Zustand store in `src/store/projectStore.ts`
