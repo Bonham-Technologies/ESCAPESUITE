@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.0
+
+### Minor Changes
+
+- 4d62686: Download recordings as MP4 (H.264 + AAC) again — converted locally in the browser with progress and cancel; WebM stays the instant option.
+
 ## 2.3.11
 
 ### Patch Changes
