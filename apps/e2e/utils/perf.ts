@@ -361,6 +361,54 @@ export async function readCdpMetrics(cdp: CDPSession): Promise<CdpSnapshot> {
   ) as CdpSnapshot
 }
 
+/** The same counters plus the clock they were sampled against. */
+export type CdpTimedSnapshot = CdpSnapshot & {
+  /** `Performance.getMetrics`' own `Timestamp`, in seconds. Never defaulted. */
+  Timestamp: number
+}
+
+/**
+ * Read the renderer's counters *and* the instant they were read at, in one
+ * round trip.
+ *
+ * `readCdpMetrics` above gives a benchmark the counter deltas but no way to say
+ * how long the bracket it read them over actually was — so a figure like "task
+ * ms per frame" ends up dividing milliseconds measured between two CDP calls by
+ * a frame count measured between two `page.evaluate` calls, which are different
+ * windows offset by a round trip each. `Performance.getMetrics` already returns
+ * a `Timestamp` alongside the counters, so taking it here costs nothing extra
+ * and lets a caller turn both halves into rates over their own windows before
+ * dividing one by the other.
+ *
+ * A pure addition: `readCdpMetrics` is unchanged and every existing benchmark
+ * still calls that one, so no existing number moves.
+ *
+ * A missing `Timestamp` **throws**, where the counters above default to 0. The
+ * asymmetry is deliberate: a counter this build does not emit is a metric the
+ * report simply has nothing to say about, but the clock is a *denominator* — a
+ * zero there makes every rate taken against it `Infinity`, which
+ * `JSON.stringify` writes as `null` and the report renders as the string
+ * "null". A broken measurement has to look broken, not quietly become a number
+ * nobody can tell is wrong.
+ */
+export async function readCdpTimedMetrics(cdp: CDPSession): Promise<CdpTimedSnapshot> {
+  const { metrics } = await cdp.send('Performance.getMetrics')
+  const byName = new Map(metrics.map((m) => [m.name, m.value]))
+  const timestamp = byName.get('Timestamp')
+  if (typeof timestamp !== 'number') {
+    throw new Error(
+      "Performance.getMetrics returned no 'Timestamp' — the renderer clock every rate is " +
+        'measured against is missing, so the benchmark cannot report one'
+    )
+  }
+  return {
+    ...(Object.fromEntries(
+      CDP_METRICS.map((name) => [name, byName.get(name) ?? 0])
+    ) as CdpSnapshot),
+    Timestamp: timestamp,
+  }
+}
+
 /**
  * Force a collection, then read the JS heap.
  *

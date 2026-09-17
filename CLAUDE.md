@@ -228,12 +228,15 @@ readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is empt
 perf project's `globalSetup` first, so a stale result can never be reported as current.
 All three outputs are gitignored.
 
-Four benchmarks, each run three times and reported as the median, all against **one
-deterministic 12-clip, 13-second scene** (14 clips over 4 tracks at 1280x720, clips
-scaled to fill the frame — scale 1 means native pixel size here) built in-test from
-`apps/e2e/fixtures/headless/source.mp4` and loaded through the documented integration
-API (`GET_STATE` for the imported source's id, then `LOAD_PROJECT`) — there is no app
-code for the benchmarks' sake:
+Eight benchmarks, each run three times and reported as the median: four
+ESCAPEARTIST, three ESCAPECRAFT, and the headless kit render. The four
+ESCAPEARTIST ones run against **one deterministic 12-clip, 13-second scene** (14 clips
+over 4 tracks at 1280x720, clips scaled to fill the frame — scale 1 means native pixel
+size here) built in-test from `apps/e2e/fixtures/headless/source.mp4` and loaded through
+the documented integration API (`GET_STATE` for the imported source's id, then
+`LOAD_PROJECT`); the three ESCAPECRAFT ones drive real takes through the recorder's own
+UI against `mockSyntheticMedia`'s canvas-and-oscillator capture devices at 1280x720.
+There is no app code for the benchmarks' sake in either app:
 
 - **`preview-playback`** — 6 s of playback, first second discarded: rendered fps (counted
   by wrapping `requestAnimationFrame`), long tasks, JS heap delta after a CDP-forced GC,
@@ -249,8 +252,34 @@ code for the benchmarks' sake:
 - **`export-mp4` / `export-webm`** — one 720p export of the same scene through the export
   dialog: wall time, frames encoded and encoder queue high-water (both from a wrapper on
   `VideoEncoder.prototype.encode`), heap delta.
+- **`craft-screen-recording`** — ESCAPECRAFT recording a 6 s screen-only take, first
+  second discarded. That take goes through `WebCodecsRecorder`, which encodes on the main
+  thread, so the same `VideoEncoder.prototype.encode` wrapper counts every recorded frame:
+  frames encoded and per second, **renderer task per frame**, animation frames per second
+  (the recorders' audio-level rAF loop), layouts, style recalcs, long tasks, heap delta and
+  the stored WebM's size.
+- **`craft-pip-recording`** — the same take with the webcam on, which `recorder-factory.ts`
+  routes through the `Compositor` into MediaRecorder. Encoding is then off the main thread
+  and `framesEncoded` is 0 by construction, so the rate reported is `compositedFps`, counted
+  by wrapping `CanvasRenderingContext2D.prototype.drawImage` and halving the calls whose
+  first argument is an `HTMLVideoElement` — a composited frame is exactly one screen draw
+  plus one webcam draw.
+- **`craft-mp4-conversion`** — one 6 s take converted to MP4 in the page by `convertToMP4`,
+  driven through the recording row's own button: wall time, frames encoded, renderer task
+  per frame, encoder queue high-water, heap delta and the MP4's size. The conversion is
+  bound to playback speed by `requestVideoFrameCallback`, so its wall time has a floor of
+  roughly the take's length and **`taskMsPerFrame` is the number a converter change moves**.
 - **`headless-kit-render`** — `services/headless-artist` rendering
   `fixtures/headless/project.json`, Chromium launch included.
+
+The ESCAPECRAFT benchmarks assert nothing about speed either; their only `expect`s are the
+six tripwires saying the benchmark measured the wrong thing — a take that stopped
+mid-window; a "WebCodecs" take that encoded nothing, or that drew video into a canvas at all
+(which would mean `WebCodecsRecorder` had taken its `startVideoElementCapture` fallback, a
+different pipeline under the same name); a PiP take that composited nothing, or whose
+`drawImage` count came out odd (which would mean a capture track was not ready for some
+frames, so the two-draws-per-composited-frame divisor is wrong); and a conversion that
+encoded no frames.
 
 `PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
 project resolution for `preview-playback` only — the export benchmarks always render 720p
@@ -276,6 +305,12 @@ locations are lines in the `.ts` files and not in Vite's transformed output. Its
 sample is charged the interval that *follows* it, and recursion counts once per sample — is
 covered by `apps/e2e/scripts/profile-top.test.mjs`, run by `pnpm test:scripts` (node:test,
 no browser) in CI's `test` job.
+
+ESCAPECRAFT's own baseline — the three benchmarks above over three consecutive `pnpm perf`
+invocations, what each metric means, and the two findings the first measurement turned up
+(the compositor holding ~23 fps against its own 30 fps target, and the first take of a
+session costing a quarter of what every later take costs) — is in
+[docs/performance/2026-09-17-craft-baseline.md](docs/performance/2026-09-17-craft-baseline.md).
 
 Baseline numbers, the machine they came from and the launch args they used live in
 [docs/performance/2026-09-12-baseline.md](docs/performance/2026-09-12-baseline.md); the

@@ -132,24 +132,36 @@ slow runner and pass on a fast one regardless of the code, so a regression shows
 up as a number in `perf-report.json`, not as a red test.
 
 ```bash
-pnpm perf                # from the monorepo root — both benchmarks, the kit's, and the merged report
+pnpm perf                # from the monorepo root — all seven browser benchmarks, the kit's, and the merged report
 pnpm test:perf           # from this directory — the browser benchmarks alone
 ```
 
 `playwright.perf.config.ts` is deliberately unlike the other configs: Chromium
 only, one worker, no retries, and fixed launch args
 (`--enable-precise-memory-info --disable-gpu --autoplay-policy=no-user-gesture-required`).
-It starts ESCAPEARTIST alone, on a strict port 5175.
+It starts both apps on strict ports — ESCAPEARTIST on 5175, ESCAPECRAFT on 5174 —
+with `reuseExistingServer`, so a dev server you already have running is used as-is.
 
-Both specs run against one deterministic 12-clip, 13-second scene built by `utils/perf.ts`
+The ESCAPEARTIST specs (`preview-playback`, `timeline-interaction`, `export-*`) run
+against one deterministic 12-clip, 13-second scene built by `utils/perf.ts`
 from `fixtures/headless/source.mp4` and loaded through the documented integration
 API — the fixture is imported once through the media library's real file input,
 `GET_STATE` reports the id it was given, and `LOAD_PROJECT` installs a project
 whose 14 clips reference it. Nothing was added to the apps to make this possible.
 
+`craft-recording.spec.ts` is the ESCAPECRAFT half, with its plumbing in
+`utils/craftPerf.ts` (separate from `utils/perf.ts`, which is the ESCAPEARTIST scene;
+the instruments themselves are imported from it, so the two sets of numbers are
+comparable). Three benchmarks — a screen take through `WebCodecsRecorder`, a PiP take
+through the `Compositor` and MediaRecorder, and an in-page MP4 conversion — each driven
+through the recorder's own UI exactly as `tests/escapecraft/mp4-download.spec.ts` drives
+one, against `mockSyntheticMedia`'s canvas-and-oscillator capture devices at 1280x720.
+Nothing was added to ESCAPECRAFT for them either.
+
 Everything else is measured from outside the page: `addInitScript` wrappers count
-`requestAnimationFrame` callbacks and `VideoEncoder.prototype.encode` calls, a
-`PerformanceObserver` collects long tasks, and a CDP session supplies
+`requestAnimationFrame` callbacks, `VideoEncoder.prototype.encode` calls and (for the
+compositor, which never touches `VideoEncoder`) `drawImage` calls whose source is a
+`<video>`; a `PerformanceObserver` collects long tasks; and a CDP session supplies
 `Performance.getMetrics` and the `HeapProfiler.collectGarbage` that anchors every
 heap reading.
 
@@ -160,7 +172,10 @@ actually invokes — then runs both benchmark suites in sequence and **always**
 runs `scripts/perf-report.mjs`, which merges whatever exists with the headless
 kit's own report into `perf-report.json` at the repo root.
 Baseline numbers live in
-[docs/performance/2026-09-12-baseline.md](../../docs/performance/2026-09-12-baseline.md).
+[docs/performance/2026-09-12-baseline.md](../../docs/performance/2026-09-12-baseline.md)
+for ESCAPEARTIST and
+[docs/performance/2026-09-17-craft-baseline.md](../../docs/performance/2026-09-17-craft-baseline.md)
+for ESCAPECRAFT.
 
 ## Test Utilities
 
@@ -172,7 +187,8 @@ The `utils/` directory provides reusable testing utilities:
 | `error-mocks.ts` | Permission denial, offline/slow network, codec failures |
 | `indexeddb.ts` | IndexedDB management |
 | `media-mocks.ts` | Inert media stubs plus `mockSyntheticMedia` (real canvas/audio streams) |
-| `perf.ts` | The benchmark scene, the measured windows, and the result JSON |
+| `perf.ts` | The ESCAPEARTIST benchmark scene, the measured windows, and the result JSON |
+| `craftPerf.ts` | The ESCAPECRAFT benchmark takes: capture size, the recording windows, the MP4 conversion |
 | `viewports.ts` | Shared viewport sizes |
 
 There are no auth, billing or licensing utilities: the apps have no accounts,
