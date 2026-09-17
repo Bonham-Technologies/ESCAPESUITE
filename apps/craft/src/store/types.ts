@@ -64,6 +64,31 @@ export interface DetailedCapabilities {
   mediaRecorder: CapabilityInfo;
 }
 
+/**
+ * What the browser said when asked whether it can encode an MP4 — the gate on
+ * the library row's MP4 button.
+ *
+ * `state` is here because the answer is asynchronous: `probeMP4Support()` asks
+ * WebCodecs about the real H.264 and AAC configurations, so there is a moment
+ * on the way in where the answer is not known. The button is disabled for that
+ * moment rather than enabled and then taken away.
+ */
+export interface Mp4Support {
+  /** 'checking' until the codec probe has answered. */
+  state: 'checking' | 'ready';
+  /** Whether a conversion may be offered at all — no H.264 encoder is fatal. */
+  supported: boolean;
+  /**
+   * Whether that conversion will have sound. False where the browser has no
+   * AAC encoder: the conversion still runs and the file still plays, silent,
+   * which is what `convertToMP4` does with the same answer — so this does not
+   * disable the button, it only adds a note.
+   */
+  audio: boolean;
+  /** The probe's own sentence for what is missing. Absent when all is well. */
+  reason?: string;
+}
+
 export interface AudioLevels {
   microphone: number; // 0-1
   system: number; // 0-1
@@ -88,6 +113,12 @@ export interface RecorderStore {
   detailedCapabilities: DetailedCapabilities;
   /** False until capability detection has answered — the Record button waits on it. */
   capabilitiesReady: boolean;
+  /**
+   * Whether this browser can actually encode an MP4, as `probeMP4Support()`
+   * found. Starts out 'checking'; the library row's MP4 button is disabled
+   * until it is 'ready'. Only `RecordingsListPanel` selects it.
+   */
+  mp4Support: Mp4Support;
   recordings: Recording[];
   /**
    * The one thing the app has to say that is not a state change — a failed
@@ -125,6 +156,7 @@ export interface RecorderStore {
   setCapabilities: (caps: EnvironmentCapabilities) => void;
   setDetailedCapabilities: (caps: DetailedCapabilities) => void;
   setCapabilitiesReady: (ready: boolean) => void;
+  setMp4Support: (support: Mp4Support) => void;
   setNotice: (notice: string | null) => void;
   setSystemAudioShared: (shared: boolean) => void;
   /** Re-read the storage headroom into `hasStorageSpace`. Never rejects. */

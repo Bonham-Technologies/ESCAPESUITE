@@ -27,6 +27,15 @@ export const NO_SYSTEM_AUDIO =
   "System audio was not shared — tick 'Share system audio' in the browser dialog."
 
 /**
+ * Said after a conversion that ran in a browser with no AAC encoder. The codec
+ * probe says the same thing before it, under the library
+ * (`MP4_NO_AUDIO_REASON` in `core/converter.ts`), so the user is told twice:
+ * once while there is still a choice, once about the file they now have.
+ */
+export const MP4_SAVED_WITHOUT_AUDIO =
+  'Saved as MP4 — without audio: this browser has no AAC encoder'
+
+/**
  * The one notice that carries a detail: what the MP4 conversion said when it
  * failed. A function rather than a constant because the browser's own message
  * ("No H.264 encoder", a decode failure) is the useful half — but it is still

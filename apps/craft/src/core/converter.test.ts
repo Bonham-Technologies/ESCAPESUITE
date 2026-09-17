@@ -5,7 +5,12 @@ import {
   fixWebMMetadata,
   isMP4ConversionSupported,
   isWebMRemuxSupported,
+  probeMP4Support,
   ConversionAbortedError,
+  MP4_NO_WEBCODECS_REASON,
+  MP4_NO_H264_REASON,
+  MP4_NO_AUDIO_REASON,
+  MP4_PROBE_FAILED_REASON,
   type ConversionProgress,
 } from './converter'
 import {
@@ -191,6 +196,120 @@ describe('converter', () => {
       } finally {
         g.VideoEncoder = saved
       }
+    })
+  })
+
+  // --- probeMP4Support -----------------------------------------------------
+
+  describe('probeMP4Support', () => {
+    /**
+     * A converter module whose probe has not been asked yet.
+     *
+     * `probeMP4Support()` memoises its answer for the life of the page — the
+     * UI asks once — so a second probe is arranged by taking a fresh module
+     * instance rather than by shipping a reset hook in production code. Only
+     * the probe is taken from it: it touches the WebCodecs globals and nothing
+     * else, so it needs none of the module doubles the conversion tests reach
+     * through their own static import.
+     */
+    async function freshProbe(): Promise<typeof probeMP4Support> {
+      vi.resetModules()
+      return (await import('./converter')).probeMP4Support
+    }
+
+    it('reports support, audio included, when the browser can encode both H.264 and AAC', async () => {
+      const probe = await freshProbe()
+
+      await expect(probe()).resolves.toEqual({ supported: true, audio: true })
+    })
+
+    it('asks about the same H.264 and AAC configuration the conversion configures', async () => {
+      // The whole point of the probe: a question about a *different* config
+      // than `convertToMP4` will configure answers a different question than
+      // the button is gating on.
+      const videoAsked = vi.spyOn(VideoEncoderDouble, 'isConfigSupported')
+      const audioAsked = vi.spyOn(AudioEncoderDouble, 'isConfigSupported')
+      const probe = await freshProbe()
+
+      await probe()
+
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise, video } = start(p => convertToMP4(SOURCE, p))
+      await playThroughRvfc(video, 3)
+      await promise
+
+      expect(videoAsked.mock.calls[0][0]).toEqual(lastVideoEncoder().configureCalls[0])
+      // `convertToMP4` asks about AAC itself before adding the track; the
+      // probe's question is the first one, and it is the same question.
+      expect(audioAsked.mock.calls[0][0]).toEqual(lastAudioEncoder().configureCalls[0])
+    })
+
+    it('refuses, naming H.264, when the video encoder will not take that config', async () => {
+      VideoEncoderDouble.supportPlan = false
+      const probe = await freshProbe()
+
+      await expect(probe()).resolves.toEqual({
+        supported: false,
+        audio: false,
+        reason: MP4_NO_H264_REASON,
+      })
+    })
+
+    it('still offers the conversion, warning it will be silent, when only AAC is missing', async () => {
+      // `convertToMP4` treats a missing AAC encoder as non-fatal — it drops the
+      // audio and produces a working silent MP4 ("drops audio and warns when
+      // AAC is unsupported", below). The probe has to agree with it: refusing
+      // here would disable a button that works.
+      AudioEncoderDouble.supportPlan = false
+      const probe = await freshProbe()
+
+      await expect(probe()).resolves.toEqual({
+        supported: true,
+        audio: false,
+        reason: MP4_NO_AUDIO_REASON,
+      })
+    })
+
+    it('refuses rather than rejecting when asking itself fails', async () => {
+      // A probe that threw would leave the button stuck on "Checking...".
+      VideoEncoderDouble.supportPlan = 'throw'
+      const probe = await freshProbe()
+
+      await expect(probe()).resolves.toEqual({
+        supported: false,
+        audio: false,
+        reason: MP4_PROBE_FAILED_REASON,
+      })
+    })
+
+    it('refuses, naming WebCodecs, where the API is not there to ask', async () => {
+      const g = globalThis as unknown as Record<string, unknown>
+      const saved = g.VideoEncoder
+      delete g.VideoEncoder
+      try {
+        const probe = await freshProbe()
+
+        await expect(probe()).resolves.toEqual({
+          supported: false,
+          audio: false,
+          reason: MP4_NO_WEBCODECS_REASON,
+        })
+      } finally {
+        g.VideoEncoder = saved
+      }
+    })
+
+    it('asks the browser once a page load, however many callers ask it', async () => {
+      const videoAsked = vi.spyOn(VideoEncoderDouble, 'isConfigSupported')
+      const probe = await freshProbe()
+
+      const first = probe()
+      const second = probe()
+
+      expect(second).toBe(first)
+      await expect(second).resolves.toEqual({ supported: true, audio: true })
+      await probe()
+      expect(videoAsked).toHaveBeenCalledTimes(1)
     })
   })
 

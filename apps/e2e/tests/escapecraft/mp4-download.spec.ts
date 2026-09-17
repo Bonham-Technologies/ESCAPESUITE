@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
-import { hasWebCodecs } from '../../utils/webcodecs'
+import { canConvertToMp4 } from '../../utils/webcodecs'
 
 /**
  * ESCAPECRAFT downloads a recording as MP4, converted in the page.
@@ -13,11 +13,13 @@ import { hasWebCodecs } from '../../utils/webcodecs'
  * the browser made locally.
  *
  * Which half runs is decided by the browser in front of it rather than by its
- * name: `hasWebCodecs()` (`utils/webcodecs.ts`, one copy shared with the
- * standalone spec) asks the page the same question `isMP4ConversionSupported()`
- * asks. Chromium has it and converts; a browser without it must show the button
- * disabled with its reason, never hide it. Naming browsers here would rot —
- * WebCodecs support has been arriving outside Chromium.
+ * name: `canConvertToMp4()` (`utils/webcodecs.ts`, one copy shared with the
+ * standalone spec) asks the page the same question `probeMP4Support()` asks —
+ * WebCodecs present and the H.264 configuration the conversion uses accepted.
+ * (A missing AAC encoder is not part of it: that browser still converts, to a
+ * silent MP4.) Chromium answers yes and converts; a browser that answers no
+ * must show the button disabled with its reason, never hide it. Naming browsers
+ * here would rot — WebCodecs support has been arriving outside Chromium.
  */
 
 const CRAFT_URL = 'http://localhost:5174'
@@ -49,7 +51,7 @@ test.describe('ESCAPECRAFT MP4 download', () => {
   })
 
   test('converts the recording and saves an .mp4 file', async ({ page }) => {
-    test.skip(!(await hasWebCodecs(page)), 'MP4 conversion needs WebCodecs')
+    test.skip(!(await canConvertToMp4(page)), 'This browser cannot encode H.264')
     test.setTimeout(180_000)
 
     const mp4Button = page.getByRole('button', { name: /Download .+ as MP4/ })
@@ -73,20 +75,22 @@ test.describe('ESCAPECRAFT MP4 download', () => {
     await expect(mp4Button).toBeEnabled()
   })
 
-  test('offers MP4 disabled, with a reason, where WebCodecs is missing', async ({ page }) => {
-    test.skip(await hasWebCodecs(page), 'This browser can convert — the enabled path is above')
+  test('offers MP4 disabled, with a reason, where it cannot encode MP4', async ({ page }) => {
+    test.skip(await canConvertToMp4(page), 'This browser can convert — the enabled path is above')
 
     const mp4Button = page.getByRole('button', { name: /Download .+ as MP4/ })
     await expect(mp4Button).toBeVisible()
     await expect(mp4Button).toBeDisabled()
-    await expect(mp4Button).toHaveAttribute('title', /WebCodecs/)
+    // Whichever way the probe refused names itself in the reason. AAC is not
+    // among them — a browser missing only that gets the enabled path above.
+    await expect(mp4Button).toHaveAttribute('title', /WebCodecs|H\.264|could not say/)
 
     // The instant WebM download is never affected by an MP4 problem.
     await expect(page.getByRole('button', { name: /^Download (?!.+ as MP4).+$/ })).toBeEnabled()
   })
 
   test('cancelling a conversion leaves the row idle and downloads nothing', async ({ page }) => {
-    test.skip(!(await hasWebCodecs(page)), 'MP4 conversion needs WebCodecs')
+    test.skip(!(await canConvertToMp4(page)), 'This browser cannot encode H.264')
     test.setTimeout(120_000)
 
     let downloaded = false
