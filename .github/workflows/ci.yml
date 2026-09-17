@@ -74,6 +74,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: TypeScript check (shared)
+        run: pnpm --filter=@escapesuite/shared run typecheck
+
       - name: TypeScript check (plan)
         run: pnpm --filter=@escapesuite/plan run typecheck
 

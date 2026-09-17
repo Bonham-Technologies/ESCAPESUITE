@@ -1,0 +1,38 @@
+{
+  /* Single project covering the whole package — shared has no separate build
+     step of its own (its `build` script is a no-op; consumers compile it as
+     part of their own app builds) and no app/test split like craft or artist,
+     so unlike those apps this isn't a `tsconfig.json` that only wires up
+     project references — it does the type-checking itself, over all of
+     `src` including the tests, the way headless-artist's does. */
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    /* `vite/client` for `import.meta.env` (see src/config/index.ts);
+       `vitest/globals` because vitest.config.ts runs with `globals: true`;
+       jest-dom's matcher types for the custom expect() assertions the tests
+       use (wired up at runtime by src/test/setup.ts). */
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom/vitest"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["dist"]
+}
