@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 
 /**
@@ -11,12 +11,25 @@ import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-moc
  * point: the claim being tested is that the file the browser saves is an MP4
  * the browser made locally.
  *
- * Chromium only. MP4 conversion needs WebCodecs (`VideoEncoder`/`AudioEncoder`),
- * which Firefox and WebKit do not implement — there the button is expected to
- * be disabled with its reason instead, which is asserted in its own test below.
+ * Which half runs is decided by the browser in front of it rather than by its
+ * name: `hasWebCodecs()` asks the page the same question `isMP4ConversionSupported()`
+ * asks. Chromium has it and converts; a browser without it must show the button
+ * disabled with its reason, never hide it. Naming browsers here would rot —
+ * WebCodecs support has been arriving outside Chromium.
  */
 
 const CRAFT_URL = 'http://localhost:5174'
+
+/** What `isMP4ConversionSupported()` checks, asked of the live page. */
+async function hasWebCodecs(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () =>
+      typeof VideoEncoder !== 'undefined' &&
+      typeof VideoFrame !== 'undefined' &&
+      typeof AudioEncoder !== 'undefined' &&
+      typeof AudioContext !== 'undefined'
+  )
+}
 
 test.describe('ESCAPECRAFT MP4 download', () => {
   test.beforeEach(async ({ page }) => {
@@ -44,11 +57,8 @@ test.describe('ESCAPECRAFT MP4 download', () => {
     })
   })
 
-  test('converts the recording and saves an .mp4 file', async ({ page, browserName }) => {
-    test.skip(
-      browserName !== 'chromium',
-      'MP4 conversion uses WebCodecs, which only Chromium-based browsers implement'
-    )
+  test('converts the recording and saves an .mp4 file', async ({ page }) => {
+    test.skip(!(await hasWebCodecs(page)), 'MP4 conversion needs WebCodecs')
     test.setTimeout(180_000)
 
     const mp4Button = page.getByRole('button', { name: /Download .+ as MP4/ })
@@ -72,14 +82,8 @@ test.describe('ESCAPECRAFT MP4 download', () => {
     await expect(mp4Button).toBeEnabled()
   })
 
-  test('offers MP4 disabled, with a reason, where WebCodecs is missing', async ({
-    page,
-    browserName,
-  }) => {
-    test.skip(
-      browserName === 'chromium',
-      'Chromium implements WebCodecs — the enabled path is covered above'
-    )
+  test('offers MP4 disabled, with a reason, where WebCodecs is missing', async ({ page }) => {
+    test.skip(await hasWebCodecs(page), 'This browser can convert — the enabled path is above')
 
     const mp4Button = page.getByRole('button', { name: /Download .+ as MP4/ })
     await expect(mp4Button).toBeVisible()
@@ -90,14 +94,8 @@ test.describe('ESCAPECRAFT MP4 download', () => {
     await expect(page.getByRole('button', { name: /^Download (?!.+ as MP4).+$/ })).toBeEnabled()
   })
 
-  test('cancelling a conversion leaves the row idle and downloads nothing', async ({
-    page,
-    browserName,
-  }) => {
-    test.skip(
-      browserName !== 'chromium',
-      'MP4 conversion uses WebCodecs, which only Chromium-based browsers implement'
-    )
+  test('cancelling a conversion leaves the row idle and downloads nothing', async ({ page }) => {
+    test.skip(!(await hasWebCodecs(page)), 'MP4 conversion needs WebCodecs')
     test.setTimeout(120_000)
 
     let downloaded = false

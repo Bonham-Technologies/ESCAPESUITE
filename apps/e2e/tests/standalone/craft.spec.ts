@@ -219,6 +219,14 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     await page.goto(CRAFT_URL)
     await page.waitForLoadState('networkidle')
 
+    // MP4 conversion needs WebCodecs; a browser without it shows the button
+    // disabled with its reason, which `tests/escapecraft/mp4-download.spec.ts`
+    // covers. What is being asserted here is that converting needs no network.
+    const canConvert = await page.evaluate(
+      () => typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined'
+    )
+    test.skip(!canConvert, 'MP4 conversion needs WebCodecs')
+
     const screenSource = page
       .locator('[class*="sourceToggle"]')
       .filter({ hasText: 'Screen' })
