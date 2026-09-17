@@ -25,3 +25,12 @@ export const DETECTION_FAILED =
 
 export const NO_SYSTEM_AUDIO =
   "System audio was not shared — tick 'Share system audio' in the browser dialog."
+
+/**
+ * The one notice that carries a detail: what the MP4 conversion said when it
+ * failed. A function rather than a constant because the browser's own message
+ * ("No H.264 encoder", a decode failure) is the useful half — but it is still
+ * one string, raised through the same `setNotice` channel as the rest.
+ * Cancelling a conversion raises nothing: see `useMp4Download`.
+ */
+export const mp4ConversionFailed = (message: string) => `MP4 conversion failed: ${message}`
