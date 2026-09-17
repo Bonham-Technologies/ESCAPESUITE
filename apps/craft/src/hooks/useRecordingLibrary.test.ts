@@ -162,27 +162,41 @@ describe('useRecordingLibrary downloading', () => {
   // Changed assertion: the revoke used to happen in the same tick as click(),
   // which cancels the download outside Chrome. It is deferred by one turn now,
   // so this test has to let that turn run.
+  //
+  // Fake timers drive that turn deterministically. Two independently-scheduled
+  // zero-delay macrotasks (the helper's revoke and this test's own advance)
+  // have no ordering guarantee beyond registration order — under coverage
+  // instrumentation or CI load that ordering can flip, so a real setTimeout
+  // sleep here was a ~1-in-9 flake.
+  //
+  // Only setTimeout/clearTimeout are faked, not the vitest default (which
+  // also covers setImmediate): fake-indexeddb — what getVideoBlob runs on —
+  // schedules its own callbacks via a jsdom-sandbox-escaped setImmediate
+  // (see fake-indexeddb's lib/scheduling.js), and faking that too leaves it
+  // waiting on a tick that never comes, hanging the test.
   it('clicks an anchor with a file-safe name and cleans the URL up after it', async () => {
-    await seed('take-1', 'Standup Demo: 9/9')
-    const { result } = mountLibrary([listed('take-1', 'Standup Demo: 9/9', 12)])
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await seed('take-1', 'Standup Demo: 9/9')
+      const { result } = mountLibrary([listed('take-1', 'Standup Demo: 9/9', 12)])
 
-    await act(async () => {
-      await result.current.handleDownload('take-1', 'Standup Demo: 9/9')
-    })
+      await act(async () => {
+        await result.current.handleDownload('take-1', 'Standup Demo: 9/9')
+      })
 
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.webm' }])
-    expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
-    expect(document.querySelector('a[download]')).toBeNull()
-    // The browser has not necessarily started reading the blob yet, so the URL
-    // must still be live when click() returns.
-    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.webm' }])
+      expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
+      expect(document.querySelector('a[download]')).toBeNull()
+      // The browser has not necessarily started reading the blob yet, so the URL
+      // must still be live when click() returns.
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
 
-    // Timers stay real here: fake-indexeddb is what getVideoBlob runs on, and
-    // the App suites fake setInterval only for exactly that reason. One
-    // macrotask is all the deferred revoke needs.
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
 
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('downloads nothing when the blob has gone missing', async () => {
