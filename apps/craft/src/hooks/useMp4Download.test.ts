@@ -116,7 +116,27 @@ describe('useMp4Download, start to finish', () => {
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
     expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.mp4' }])
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
-    expect(setNotice).not.toHaveBeenCalled()
+    // A conversion that worked says nothing of its own, and clears whatever
+    // the channel was still holding — see the notice test below.
+    expect(setNotice.mock.calls).toEqual([[null]])
+  })
+
+  it('clears an earlier failure once a conversion succeeds', async () => {
+    await seed('take-1', 'Take One')
+    converterModule.convertToMP4.mockRejectedValueOnce(new Error('No H.264 encoder'))
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+    expect(setNotice).toHaveBeenLastCalledWith('MP4 conversion failed: No H.264 encoder')
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    expect(setNotice).toHaveBeenLastCalledWith(null)
+    expect(clicks).toHaveLength(1)
   })
 
   it('is idle again once the conversion is done', async () => {
@@ -131,7 +151,7 @@ describe('useMp4Download, start to finish', () => {
     expect(result.current.blockedReason).toBeNull()
   })
 
-  it('reports the phase and the percentage of the row being converted', async () => {
+  it('reports what the converter is doing, and how far, for the row being converted', async () => {
     await seed('take-1', 'Take One')
     const conversion = deferConversion()
     const { result } = renderMp4Download()
@@ -144,14 +164,22 @@ describe('useMp4Download, start to finish', () => {
     })
 
     act(() => {
-      conversion.report({ phase: 'encoding', progress: 42, message: 'Encoding video...' })
+      conversion.report({ phase: 'encoding', progress: 42, message: 'Encoding frames...' })
     })
-    expect(result.current.converting).toEqual({ id: 'take-1', phase: 'encoding', progress: 42 })
+    expect(result.current.converting).toEqual({
+      id: 'take-1',
+      message: 'Encoding frames...',
+      progress: 42,
+    })
 
     act(() => {
-      conversion.report({ phase: 'finalizing', progress: 99, message: 'Writing file...' })
+      conversion.report({ phase: 'finalizing', progress: 99, message: 'Finalizing MP4...' })
     })
-    expect(result.current.converting).toEqual({ id: 'take-1', phase: 'finalizing', progress: 99 })
+    expect(result.current.converting).toEqual({
+      id: 'take-1',
+      message: 'Finalizing MP4...',
+      progress: 99,
+    })
 
     await act(async () => {
       conversion.settle(new Blob(['mp4-bytes'], { type: 'video/mp4' }))
@@ -229,6 +257,72 @@ describe('useMp4Download cancellation', () => {
 
     expect(() => result.current.cancelMp4Download()).not.toThrow()
   })
+
+  it('downloads nothing when the conversion finishes after being cancelled', async () => {
+    // `convertToMP4` does not check the signal between the last encoded frame
+    // and the muxer's `finalize()`, and on an audio-less take there is no abort
+    // check after frame capture at all — so a late cancel can come back as a
+    // *resolved* MP4 rather than a `ConversionAbortedError`. The user asked for
+    // no file; they must not be handed one.
+    await seed('take-1', 'Take One')
+    let settle: (blob: Blob) => void = () => {}
+    let signal: AbortSignal | undefined
+    const started = new Promise<void>((resolveStarted) => {
+      converterModule.convertToMP4.mockImplementation(
+        (_blob, _onProgress, abortSignal) =>
+          new Promise<Blob>((resolve) => {
+            settle = resolve
+            signal = abortSignal
+            resolveStarted()
+          })
+      )
+    })
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One')
+    })
+    await act(async () => {
+      await started
+    })
+
+    await act(async () => {
+      result.current.cancelMp4Download()
+    })
+    expect(signal?.aborted).toBe(true)
+
+    // The conversion ignores the abort and finishes anyway.
+    await act(async () => {
+      settle(new Blob(['mp4-bytes'], { type: 'video/mp4' }))
+    })
+    await waitFor(() => expect(result.current.converting).toBeNull())
+
+    expect(clicks).toEqual([])
+    expect(analyticsModule.track).not.toHaveBeenCalledWith('Recording Downloaded', undefined)
+    expect(setNotice).not.toHaveBeenCalled()
+  })
+
+  it('aborts the conversion when the component goes away', async () => {
+    await seed('take-1', 'Take One')
+    const conversion = deferConversion()
+    const { result, unmount } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One')
+    })
+    await act(async () => {
+      await conversion.started
+    })
+
+    unmount()
+
+    // Otherwise the whole CPU-bound encode runs to completion behind a screen
+    // that is gone, and then hands the user a file from it.
+    expect(conversion.signal?.aborted).toBe(true)
+    await flushMicrotasks()
+    expect(clicks).toEqual([])
+    expect(setNotice).not.toHaveBeenCalled()
+  })
 })
 
 describe('useMp4Download failures', () => {
@@ -295,9 +389,21 @@ describe('useMp4Download gating', () => {
     })
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
-    expect(result.current.converting).toEqual({ id: 'take-1', phase: 'preparing', progress: 0 })
+    // The deferred double reports nothing, so the row still shows the hook's
+    // own opening label — the converter has not spoken yet.
+    expect(result.current.converting).toEqual({
+      id: 'take-1',
+      message: 'Starting conversion…',
+      progress: 0,
+    })
   })
 })
+
+/** Let whatever the unmounted conversion was doing settle. */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 3; i++) await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
 
 /** Put the converter double back to the one-turn happy path. */
 function resetConverterToHappyPath(): void {

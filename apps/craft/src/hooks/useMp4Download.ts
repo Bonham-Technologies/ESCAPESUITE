@@ -10,12 +10,11 @@
 // frame redraws the library row and nothing else — the same reason
 // `SourceTogglesPanel` owns the `audioLevels` subscription. `App` never sees
 // it, and `App.mp4rerender.test.tsx` counts that.
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   convertToMP4,
   isMP4ConversionSupported,
   ConversionAbortedError,
-  type ConversionProgress,
 } from '../core/converter'
 import { getVideoBlob } from '../core/storage'
 import { analytics } from '../utils/analytics'
@@ -38,7 +37,12 @@ export const MP4_BUSY_REASON =
 /** The conversion in flight: which recording, and how far it has got. */
 export interface Mp4Conversion {
   id: string
-  phase: ConversionProgress['phase']
+  /**
+   * The converter's own description of what it is doing right now
+   * ("Encoding frames (playing video)..."). Its `phase` is the same thing
+   * coarser and in lower case, so the row shows this instead.
+   */
+  message: string
   /** 0-100. */
   progress: number
 }
@@ -62,14 +66,25 @@ export function useMp4Download({ setNotice }: Mp4DownloadDeps): Mp4Download {
   // A ref rather than state: the guard below has to see the running conversion
   // in the same tick a second click arrives, before React has re-rendered.
   const abortRef = useRef<AbortController | null>(null)
+  // A presence check on the four globals, not a codec probe — it never calls
+  // `VideoEncoder.isConfigSupported()`. A browser with WebCodecs but no H.264
+  // encoder therefore gets an *enabled* button whose click fails at
+  // `configure()` and lands in the notice channel. It degrades into a sentence
+  // rather than a wrong screen, and `converter.ts` is not ours to change here;
+  // see the follow-up note in `apps/craft/CLAUDE.md`.
   const supported = isMP4ConversionSupported()
+
+  // A conversion holds the whole processor for about as long as the recording
+  // runs. Left alone, an unmount would let it finish behind a screen that no
+  // longer exists and then hand the user a file from it.
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const startMp4Download = async (id: string, name: string): Promise<void> => {
     if (!supported || abortRef.current) return
 
     const controller = new AbortController()
     abortRef.current = controller
-    setConverting({ id, phase: 'preparing', progress: 0 })
+    setConverting({ id, message: 'Starting conversion…', progress: 0 })
 
     try {
       const blob = await getVideoBlob(id)
@@ -77,11 +92,23 @@ export function useMp4Download({ setNotice }: Mp4DownloadDeps): Mp4Download {
 
       const mp4 = await convertToMP4(
         blob,
-        ({ phase, progress }) => setConverting({ id, phase, progress }),
+        ({ message, progress }) => setConverting({ id, message, progress }),
         controller.signal
       )
 
+      // Abort does not always reject. `convertToMP4` checks the signal while
+      // it encodes, but there is no check between the last frame and the
+      // muxer's `finalize()` — and on a take with no audio, none after frame
+      // capture at all — so a late cancel comes back as a finished MP4. The
+      // user asked for no file.
+      if (controller.signal.aborted) return
+
       analytics.recordingDownloaded()
+      // A conversion that worked makes any earlier "MP4 conversion failed"
+      // untrue, and this is the one channel, so it is cleared here. It clears
+      // whatever is in the region, not only an MP4 notice — the price of
+      // having exactly one.
+      setNotice(null)
       downloadBlob(mp4, `${safeFileName(name)}.mp4`)
     } catch (error) {
       // Cancelling is not a failure — the user asked for it, and there is

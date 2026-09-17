@@ -43,7 +43,7 @@ const MP4_BLOCKED_REASON_ID = 'mp4-blocked-reason';
  * **The two downloads differ in kind, not only in format.** WebM is the stored
  * blob handed straight back; MP4 is a conversion that takes about as long as
  * the recording does and uses the whole processor, so exactly one runs at a
- * time: the row it runs on shows its phase, its percentage and a Cancel
+ * time: the row it runs on shows the converter's progress message, its percentage and a Cancel
  * button, and every other row's MP4 button goes disabled with the reason in
  * `title` and in the visible note its `aria-describedby` points at — the same
  * "say why" shape the record button uses. Where the browser has no WebCodecs
@@ -143,7 +143,7 @@ export function RecordingsList({
                   <div className={styles.conversionProgress}>
                     <div className={styles.conversionProgressHeader}>
                       <span className={styles.conversionProgressText}>
-                        {converting.phase} • {Math.round(converting.progress)}%
+                        {converting.message} • {Math.round(converting.progress)}%
                       </span>
                       <button
                         className={styles.conversionCancelButton}

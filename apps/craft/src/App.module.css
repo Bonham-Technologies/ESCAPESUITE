@@ -468,9 +468,6 @@
 .conversionProgressText {
   font-size: 0.625rem;
   color: var(--text-secondary);
-  /* The converter names its phase in lower case ("encoding"); the label is
-     the only place it is shown to the user. */
-  text-transform: capitalize;
 }
 
 .conversionCancelButton {

@@ -1,5 +1,6 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
+import { hasWebCodecs } from '../../utils/webcodecs'
 
 /**
  * ESCAPECRAFT downloads a recording as MP4, converted in the page.
@@ -12,24 +13,14 @@ import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-moc
  * the browser made locally.
  *
  * Which half runs is decided by the browser in front of it rather than by its
- * name: `hasWebCodecs()` asks the page the same question `isMP4ConversionSupported()`
+ * name: `hasWebCodecs()` (`utils/webcodecs.ts`, one copy shared with the
+ * standalone spec) asks the page the same question `isMP4ConversionSupported()`
  * asks. Chromium has it and converts; a browser without it must show the button
  * disabled with its reason, never hide it. Naming browsers here would rot —
  * WebCodecs support has been arriving outside Chromium.
  */
 
 const CRAFT_URL = 'http://localhost:5174'
-
-/** What `isMP4ConversionSupported()` checks, asked of the live page. */
-async function hasWebCodecs(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () =>
-      typeof VideoEncoder !== 'undefined' &&
-      typeof VideoFrame !== 'undefined' &&
-      typeof AudioEncoder !== 'undefined' &&
-      typeof AudioContext !== 'undefined'
-  )
-}
 
 test.describe('ESCAPECRAFT MP4 download', () => {
   test.beforeEach(async ({ page }) => {

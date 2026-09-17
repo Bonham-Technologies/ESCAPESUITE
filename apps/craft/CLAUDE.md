@@ -101,7 +101,7 @@ selector contract above.
 | `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
-| `hooks/useMp4Download.ts` | One MP4 conversion at a time: the `AbortController`, the `{ id, phase, progress }` the row draws, the two button reasons, and the failure that becomes a notice. Called by `RecordingsListPanel`, never by `App` |
+| `hooks/useMp4Download.ts` | One MP4 conversion at a time: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the two button reasons, and the failure that becomes a notice. Called by `RecordingsListPanel`, never by `App` |
 | `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete (re-reading the storage headroom after it), and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
 
 ### Errors and notices
@@ -493,7 +493,21 @@ message and navigate to its own editor itself.
   rejects with `ConversionAbortedError`, the row returns to idle, no file is written and
   **no notice is raised**. Any other rejection becomes `mp4ConversionFailed(message)` in
   the header's live region — the app's one notice channel, unchanged — and the WebM
-  download is unaffected either way.
+  download is unaffected either way. A conversion that *succeeds* clears the channel
+  (`setNotice(null)`), because an earlier "MP4 conversion failed" is no longer true; that
+  clears whatever the region held, which is the price of having exactly one.
+- **Abort does not always reject, so the hook checks the signal again.** `convertToMP4`
+  checks the signal while it encodes, but there is none between the last frame and the
+  muxer's `finalize()` — and on a take with no audio, none after frame capture at all — so
+  a late cancel can come back as a finished MP4. `useMp4Download` therefore re-reads
+  `controller.signal.aborted` after the `await` and returns before analytics and the
+  download, rather than trusting the rejection. The unit double that always rejects on
+  abort is exactly what would hide this, so one test makes it *resolve* after aborting.
+- **Unmounting aborts.** The hook's one effect is a cleanup: `abortRef.current?.abort()`.
+  Without it an unmount mid-conversion leaves the whole CPU-bound encode running behind a
+  screen that no longer exists and then hands the user a file from it. In the shipped app
+  `App` renders the panel unconditionally, so this fires at page teardown — it is a
+  lifecycle guarantee, not a hot path.
 - **Where the state lives is the performance contract.** `convertToMP4` reports progress
   continuously and the only pixels it moves are one row's bar, so the state is held in
   `components/RecordingsList/RecordingsListPanel.tsx`, one level below `App` — exactly as
@@ -503,6 +517,18 @@ message and navigate to its own editor itself.
 
 `RecordingsList` itself stays driven by props alone (`mp4Converting`, `mp4BlockedReason`,
 `onDownloadMp4`, `onCancelMp4`), which is what its own test asserts.
+
+**Follow-ups, both inherited from `core/converter.ts` rather than introduced here:**
+
+- `isMP4ConversionSupported()` is a **presence check, not a codec probe** — it tests that
+  `VideoEncoder`, `VideoFrame`, `AudioEncoder` and `AudioContext` exist and never calls
+  `VideoEncoder.isConfigSupported({ codec: 'avc1…' })`. A browser with WebCodecs but no
+  H.264 encoder therefore gets an **enabled** button whose click fails at `configure()` and
+  lands in the notice channel. It degrades into a sentence rather than a wrong screen, so
+  it was left alone; making the gate a real probe means making it async, which means the
+  button can flash from enabled to disabled, which is its own design question.
+- MP4 and WebM downloads share one analytics event (`Recording Downloaded`), so the
+  minutes-long conversion cannot be told from the instant download.
 
 **Still unwired:** the compatible-WebM path (`remuxToWebM`, `isWebMRemuxSupported` — a
 VP9 + Opus re-encode into a freshly-muxed container). It is present and tested and nothing

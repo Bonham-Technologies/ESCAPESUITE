@@ -199,14 +199,17 @@ describe('RecordingsList MP4 downloads', () => {
     expect(screen.getByRole('button', { name: 'Download Take Seven' })).toBeEnabled()
   })
 
-  it('shows the phase and percentage on the row being converted', () => {
+  it('shows what the converter is doing, and how far, on the row being converted', () => {
     const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
-      mp4Converting: { id: 'r7', phase: 'encoding', progress: 42 },
+      mp4Converting: { id: 'r7', message: 'Encoding frames (playing video)...', progress: 42 },
     })
 
     const progress = screen.getByRole('progressbar', { name: 'Converting Take Seven to MP4' })
     expect(progress).toHaveAttribute('aria-valuenow', '42')
-    expect(container.querySelector(`.${styles.conversionProgress}`)).toHaveTextContent('encoding')
+    // The converter's own sentence, not its coarser lower-case phase name.
+    expect(container.querySelector(`.${styles.conversionProgress}`)).toHaveTextContent(
+      'Encoding frames (playing video)...'
+    )
     expect(container.querySelector(`.${styles.conversionProgress}`)).toHaveTextContent('42%')
     expect(container.querySelector<HTMLElement>(`.${styles.conversionProgressFill}`)).toHaveStyle({
       width: '42%',
@@ -216,7 +219,7 @@ describe('RecordingsList MP4 downloads', () => {
   it('cancels the conversion from the row it is running on', async () => {
     const user = userEvent.setup()
     const { calls } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
-      mp4Converting: { id: 'r7', phase: 'encoding', progress: 42 },
+      mp4Converting: { id: 'r7', message: 'Encoding frames...', progress: 42 },
     })
 
     await user.click(screen.getByRole('button', { name: 'Cancel MP4 conversion of Take Seven' }))
@@ -228,7 +231,7 @@ describe('RecordingsList MP4 downloads', () => {
     const busy = 'One conversion at a time.'
     const { container } = renderList(
       [makeRecording({ id: 'r1', name: 'First' }), makeRecording({ id: 'r2', name: 'Second' })],
-      { mp4Converting: { id: 'r1', phase: 'preparing', progress: 0 }, mp4BlockedReason: busy }
+      { mp4Converting: { id: 'r1', message: 'Preparing conversion...', progress: 0 }, mp4BlockedReason: busy }
     )
 
     expect(container.querySelectorAll(`.${styles.conversionProgress}`)).toHaveLength(1)
