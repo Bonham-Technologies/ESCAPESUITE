@@ -11,16 +11,13 @@
 // `SourceTogglesPanel` owns the `audioLevels` subscription. `App` never sees
 // it, and `App.mp4rerender.test.tsx` counts that.
 import { useEffect, useRef, useState } from 'react'
-import {
-  convertToMP4,
-  isMP4ConversionSupported,
-  ConversionAbortedError,
-} from '../core/converter'
+import { convertToMP4, ConversionAbortedError } from '../core/converter'
 import { getVideoBlob } from '../core/storage'
 import { analytics } from '../utils/analytics'
 import { downloadBlob } from '../utils/downloadBlob'
 import { mp4ConversionFailed } from '../utils/notices'
 import { safeFileName } from '../utils/recordingFormat'
+import type { Mp4Support } from '../store/types'
 
 /**
  * Why the MP4 button cannot start a conversion, in the same "say why" shape
@@ -33,6 +30,14 @@ export const MP4_UNSUPPORTED_REASON =
 
 export const MP4_BUSY_REASON =
   'One conversion at a time — converting to MP4 uses the whole processor.'
+
+/**
+ * While the codec probe is still asking. The button is disabled for this
+ * moment rather than enabled and then taken away: offering a conversion and
+ * withdrawing it a tick later is worse than waiting a tick to offer it.
+ */
+export const MP4_CHECKING_REASON =
+  'Checking whether this browser can convert to MP4…'
 
 /** The conversion in flight: which recording, and how far it has got. */
 export interface Mp4Conversion {
@@ -59,20 +64,24 @@ export interface Mp4Download {
 export interface Mp4DownloadDeps {
   /** The app's one notice channel — see "Errors and notices" in CLAUDE.md. */
   setNotice: (notice: string | null) => void
+  /**
+   * What the codec probe found — `store.mp4Support`, selected by
+   * `RecordingsListPanel` and handed down rather than read here, so `App`
+   * never subscribes to it.
+   */
+  mp4Support: Mp4Support
 }
 
-export function useMp4Download({ setNotice }: Mp4DownloadDeps): Mp4Download {
+export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4Download {
   const [converting, setConverting] = useState<Mp4Conversion | null>(null)
   // A ref rather than state: the guard below has to see the running conversion
   // in the same tick a second click arrives, before React has re-rendered.
   const abortRef = useRef<AbortController | null>(null)
-  // A presence check on the four globals, not a codec probe — it never calls
-  // `VideoEncoder.isConfigSupported()`. A browser with WebCodecs but no H.264
-  // encoder therefore gets an *enabled* button whose click fails at
-  // `configure()` and lands in the notice channel. It degrades into a sentence
-  // rather than a wrong screen, and `converter.ts` is not ours to change here;
-  // see the follow-up note in `apps/craft/CLAUDE.md`.
-  const supported = isMP4ConversionSupported()
+  // The real question, asked of WebCodecs at capability bootstrap: can this
+  // browser encode H.264 and AAC in the configuration `convertToMP4` will use?
+  // Until it has answered there is nothing to offer, so `checking` blocks the
+  // button exactly as a `no` does — with a different sentence.
+  const supported = mp4Support.state === 'ready' && mp4Support.supported
 
   // A conversion holds the whole processor for about as long as the recording
   // runs. Left alone, an unmount would let it finish behind a screen that no
@@ -126,9 +135,23 @@ export function useMp4Download({ setNotice }: Mp4DownloadDeps): Mp4Download {
     abortRef.current?.abort()
   }
 
+  // Why the button cannot be pressed, in the order the reasons rule each other
+  // out: the question is still open, the answer was no, a conversion is
+  // already running.
+  let blockedReason: string | null = null
+  if (mp4Support.state === 'checking') {
+    blockedReason = MP4_CHECKING_REASON
+  } else if (!mp4Support.supported) {
+    // The probe names what is missing (H.264, AAC, WebCodecs itself); the
+    // constant is the fallback for a refusal that came without a reason.
+    blockedReason = mp4Support.reason ?? MP4_UNSUPPORTED_REASON
+  } else if (converting) {
+    blockedReason = MP4_BUSY_REASON
+  }
+
   return {
     converting,
-    blockedReason: supported ? (converting ? MP4_BUSY_REASON : null) : MP4_UNSUPPORTED_REASON,
+    blockedReason,
     startMp4Download,
     cancelMp4Download,
   }

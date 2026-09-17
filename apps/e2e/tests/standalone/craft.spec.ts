@@ -5,7 +5,7 @@ import {
   mockSyntheticMedia,
   grantMediaPermissions,
 } from '../../utils/media-mocks'
-import { hasWebCodecs } from '../../utils/webcodecs'
+import { canConvertToMp4 } from '../../utils/webcodecs'
 
 /**
  * Smoke tests for the ESCAPECRAFT offline build.
@@ -220,10 +220,11 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     await page.goto(CRAFT_URL)
     await page.waitForLoadState('networkidle')
 
-    // MP4 conversion needs WebCodecs; a browser without it shows the button
-    // disabled with its reason, which `tests/escapecraft/mp4-download.spec.ts`
-    // covers. What is being asserted here is that converting needs no network.
-    test.skip(!(await hasWebCodecs(page)), 'MP4 conversion needs WebCodecs')
+    // MP4 conversion needs an H.264 and an AAC encoder behind WebCodecs; a
+    // browser without them shows the button disabled with its reason, which
+    // `tests/escapecraft/mp4-download.spec.ts` covers. What is being asserted
+    // here is that converting needs no network.
+    test.skip(!(await canConvertToMp4(page)), 'This browser cannot encode H.264 + AAC')
 
     const screenSource = page
       .locator('[class*="sourceToggle"]')

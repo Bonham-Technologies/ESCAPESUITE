@@ -247,6 +247,12 @@ async function captureFramesViaPlayback(
 
 /**
  * Check if MP4 conversion is supported (requires WebCodecs)
+ *
+ * A *presence* check on the four globals, and deliberately cheap and
+ * synchronous: it is what `convertToMP4` guards itself with, and what any
+ * caller that needs an answer in the same tick can have. It says nothing about
+ * whether this browser can actually encode H.264 or AAC — that question is
+ * asynchronous, and `probeMP4Support()` below is the one that asks it.
  */
 export function isMP4ConversionSupported(): boolean {
   return (
@@ -255,6 +261,119 @@ export function isMP4ConversionSupported(): boolean {
     typeof AudioEncoder !== 'undefined' &&
     typeof AudioContext !== 'undefined'
   );
+}
+
+/** The video bitrate an encode of this frame size is given. */
+function videoBitrateForFrameSize(width: number, height: number): number {
+  const pixels = width * height;
+  if (pixels >= 1920 * 1080) {
+    return 8_000_000; // 8 Mbps for 1080p+
+  }
+  if (pixels >= 1280 * 720) {
+    return 5_000_000; // 5 Mbps for 720p
+  }
+  return 2_500_000; // 2.5 Mbps for smaller
+}
+
+/** H.264 High Profile Level 4.0 — what an MP4 conversion encodes video as. */
+const MP4_VIDEO_CODEC = 'avc1.640028';
+/** AAC-LC — what an MP4 conversion encodes audio as. */
+const MP4_AUDIO_CODEC = 'mp4a.40.2';
+const MP4_FRAME_RATE = 30;
+const MP4_SAMPLE_RATE = 48000;
+
+/**
+ * The H.264 configuration `convertToMP4` will configure for a source of this
+ * size. Declared once because `probeMP4Support()` has to ask the browser about
+ * the *same* configuration: a probe of a different codec string, profile or
+ * frame size answers a different question than the button is gating on.
+ */
+function mp4VideoEncoderConfig(width: number, height: number): VideoEncoderConfig {
+  return {
+    codec: MP4_VIDEO_CODEC,
+    width,
+    height,
+    bitrate: videoBitrateForFrameSize(width, height),
+    framerate: MP4_FRAME_RATE,
+  };
+}
+
+/** The AAC configuration `convertToMP4` will configure — see above. */
+const MP4_AUDIO_ENCODER_CONFIG: AudioEncoderConfig = {
+  codec: MP4_AUDIO_CODEC,
+  sampleRate: MP4_SAMPLE_RATE,
+  numberOfChannels: 2,
+  bitrate: 128000,
+};
+
+/**
+ * The frame size the probe asks about. A recording's own size is not known
+ * until one is picked, and the question being asked is whether the browser has
+ * an H.264 encoder at all, so it asks about a representative 720p frame — the
+ * middle rung of the bitrate ladder above.
+ */
+const PROBE_WIDTH = 1280;
+const PROBE_HEIGHT = 720;
+
+/** What the codec probe found: whether MP4 can be offered, and if not, why. */
+export interface MP4SupportProbe {
+  supported: boolean;
+  /** One user-facing sentence naming what is missing. Absent when supported. */
+  reason?: string;
+}
+
+export const MP4_NO_WEBCODECS_REASON =
+  'This browser cannot convert to MP4 — it needs the WebCodecs API (Chrome or Edge).';
+export const MP4_NO_H264_REASON =
+  'This browser cannot encode H.264 video, which an MP4 needs.';
+export const MP4_NO_AAC_REASON =
+  'This browser cannot encode AAC audio, which an MP4 needs.';
+export const MP4_PROBE_FAILED_REASON =
+  'This browser could not say whether it can encode MP4, so the conversion is not offered.';
+
+/**
+ * Memoised for the life of the page: the answer cannot change while the tab is
+ * open, and the UI asks on the way in rather than on the click path.
+ */
+let mp4SupportProbe: Promise<MP4SupportProbe> | null = null;
+
+/**
+ * Ask WebCodecs whether this browser can actually encode an MP4 — H.264 video
+ * and AAC audio, in the same configuration `convertToMP4` will configure.
+ *
+ * The presence check above is not enough to gate the button on: WebCodecs
+ * being there says nothing about which codecs are behind it, and a browser
+ * without an H.264 encoder would otherwise be offered a conversion that fails
+ * part-way. Never rejects — a probe that could not answer is an answer of
+ * "no", with a reason, rather than an exception on a capability path.
+ */
+export function probeMP4Support(): Promise<MP4SupportProbe> {
+  mp4SupportProbe ??= askMP4Support();
+  return mp4SupportProbe;
+}
+
+async function askMP4Support(): Promise<MP4SupportProbe> {
+  if (!isMP4ConversionSupported()) {
+    return { supported: false, reason: MP4_NO_WEBCODECS_REASON };
+  }
+
+  try {
+    const [video, audio] = await Promise.all([
+      VideoEncoder.isConfigSupported(mp4VideoEncoderConfig(PROBE_WIDTH, PROBE_HEIGHT)),
+      AudioEncoder.isConfigSupported(MP4_AUDIO_ENCODER_CONFIG),
+    ]);
+
+    if (!video.supported) {
+      return { supported: false, reason: MP4_NO_H264_REASON };
+    }
+    if (!audio.supported) {
+      return { supported: false, reason: MP4_NO_AAC_REASON };
+    }
+    return { supported: true };
+  } catch (error) {
+    console.warn('MP4 codec probe failed:', error);
+    return { supported: false, reason: MP4_PROBE_FAILED_REASON };
+  }
 }
 
 /**
@@ -364,7 +483,7 @@ export async function convertToMP4(
     const width = video.videoWidth;
     const height = video.videoHeight;
     const duration = video.duration;
-    const frameRate = 30;
+    const frameRate = MP4_FRAME_RATE;
     const totalFrames = Math.ceil(duration * frameRate);
 
     onProgress({ phase: 'preparing', progress: 5, message: 'Extracting audio...' });
@@ -396,18 +515,11 @@ export async function convertToMP4(
 
     // Create audio packet source if we have audio
     let audioSource: EncodedAudioPacketSource | null = null;
-    const sampleRate = 48000;
+    const sampleRate = MP4_SAMPLE_RATE;
 
     if (audioData) {
-      const aacConfig = {
-        codec: 'mp4a.40.2', // AAC-LC
-        sampleRate,
-        numberOfChannels: 2,
-        bitrate: 128000,
-      };
-
       try {
-        const support = await AudioEncoder.isConfigSupported(aacConfig);
+        const support = await AudioEncoder.isConfigSupported(MP4_AUDIO_ENCODER_CONFIG);
         if (support.supported) {
           audioSource = new EncodedAudioPacketSource('aac');
           output.addAudioTrack(audioSource);
@@ -424,17 +536,6 @@ export async function convertToMP4(
     // Start the output
     await output.start();
 
-    // Determine video bitrate based on resolution
-    const pixels = width * height;
-    let videoBitrate: number;
-    if (pixels >= 1920 * 1080) {
-      videoBitrate = 8_000_000; // 8 Mbps for 1080p+
-    } else if (pixels >= 1280 * 720) {
-      videoBitrate = 5_000_000; // 5 Mbps for 720p
-    } else {
-      videoBitrate = 2_500_000; // 2.5 Mbps for smaller
-    }
-
     // Create video encoder
     videoEncoder = new VideoEncoder({
       output: async (chunk, meta) => {
@@ -445,13 +546,8 @@ export async function convertToMP4(
       },
     });
 
-    await videoEncoder.configure({
-      codec: 'avc1.640028', // H.264 High Profile Level 4.0
-      width,
-      height,
-      bitrate: videoBitrate,
-      framerate: frameRate,
-    });
+    // The same configuration `probeMP4Support()` asked about, by construction.
+    await videoEncoder.configure(mp4VideoEncoderConfig(width, height));
 
     // Create audio encoder if we have audio
     if (audioData && audioSource) {
@@ -464,12 +560,7 @@ export async function convertToMP4(
         },
       });
 
-      await audioEncoder.configure({
-        codec: 'mp4a.40.2',
-        sampleRate,
-        numberOfChannels: 2,
-        bitrate: 128000,
-      });
+      await audioEncoder.configure(MP4_AUDIO_ENCODER_CONFIG);
     }
 
     onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames (playing video)...' });
@@ -688,16 +779,7 @@ export async function remuxToWebM(
     // Start the output
     await output.start();
 
-    // Determine video bitrate based on resolution
-    const pixels = width * height;
-    let videoBitrate: number;
-    if (pixels >= 1920 * 1080) {
-      videoBitrate = 8_000_000; // 8 Mbps for 1080p+
-    } else if (pixels >= 1280 * 720) {
-      videoBitrate = 5_000_000; // 5 Mbps for 720p
-    } else {
-      videoBitrate = 2_500_000; // 2.5 Mbps for smaller
-    }
+    const videoBitrate = videoBitrateForFrameSize(width, height);
 
     // Create video encoder (VP9)
     videoEncoder = new VideoEncoder({

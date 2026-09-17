@@ -25,9 +25,9 @@ function App() {
   // below and every hook it calls — on *every* store write, including the ~12
   // audio levels a second a running take pushes. The fields only the Sources
   // panel draws (`detailedCapabilities`, `audioLevels`, `systemAudioShared`)
-  // are deliberately absent: `SourceTogglesPanel` subscribes to those itself,
-  // so a level push redraws the meters and nothing else. `App.rerender.test.tsx`
-  // counts it.
+  // are deliberately absent, and so is `mp4Support`: `SourceTogglesPanel` and
+  // `RecordingsListPanel` subscribe to those themselves, so a level push
+  // redraws the meters and nothing else. `App.rerender.test.tsx` counts it.
   //
   // The actions are selected the same way and cost nothing: zustand creates
   // them once, and `set` only ever merges state over them, so each is a stable
@@ -45,6 +45,7 @@ function App() {
   const setCapabilities = useRecorderStore((s) => s.setCapabilities);
   const setDetailedCapabilities = useRecorderStore((s) => s.setDetailedCapabilities);
   const setCapabilitiesReady = useRecorderStore((s) => s.setCapabilitiesReady);
+  const setMp4Support = useRecorderStore((s) => s.setMp4Support);
   const setNotice = useRecorderStore((s) => s.setNotice);
   const setSystemAudioShared = useRecorderStore((s) => s.setSystemAudioShared);
   const setState = useRecorderStore((s) => s.setState);
@@ -77,6 +78,7 @@ function App() {
     setCapabilities,
     setDetailedCapabilities,
     setCapabilitiesReady,
+    setMp4Support,
     setNotice,
     loadRecordings,
     refreshStorageSpace,

@@ -24,9 +24,10 @@ interface RecordingsListPanelProps {
  *
  * The four handlers that reach past the library (play, download, editor,
  * delete) still come from `App`, because `useRecordingLibrary` owns the
- * playback dialog the keyboard shortcuts have to know about. Only the notice
- * channel is picked up here, and `setNotice` is a stable zustand action, so
- * subscribing to it costs this panel no renders.
+ * playback dialog the keyboard shortcuts have to know about. What is picked up
+ * here is the notice channel and the MP4 codec probe's answer: `setNotice` is
+ * a stable zustand action, and `mp4Support` is written exactly once, when the
+ * probe answers, so neither costs this panel a render in flight.
  *
  * `RecordingsList` itself stays driven by props alone — its own test asserts
  * exactly that.
@@ -39,8 +40,14 @@ export function RecordingsListPanel({
   onDelete,
 }: RecordingsListPanelProps) {
   const setNotice = useRecorderStore((s) => s.setNotice);
+  // Selected here rather than in `App` for the same reason the conversion
+  // state lives here: it is the library's gate and nothing above it draws it.
+  // It is written once, by the capability bootstrap, so this panel re-renders
+  // once when the probe answers and never again.
+  const mp4Support = useRecorderStore((s) => s.mp4Support);
   const { converting, blockedReason, startMp4Download, cancelMp4Download } = useMp4Download({
     setNotice,
+    mp4Support,
   });
 
   return (

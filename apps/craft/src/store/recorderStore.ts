@@ -5,6 +5,7 @@ import type {
   RecordingConfig,
   EnvironmentCapabilities,
   DetailedCapabilities,
+  Mp4Support,
   AudioLevels,
   Recording,
 } from './types';
@@ -44,6 +45,8 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
     mediaRecorder: { available: false, reason: 'api_not_supported', message: 'Checking...' },
   },
   capabilitiesReady: false,
+  // Nothing is claimed about MP4 until the codec probe has answered.
+  mp4Support: { state: 'checking', supported: false },
   recordings: [],
   notice: null,
   systemAudioShared: true,
@@ -72,6 +75,9 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   setCapabilitiesReady: (capabilitiesReady: boolean) =>
     set({ capabilitiesReady }),
+
+  setMp4Support: (mp4Support: Mp4Support) =>
+    set({ mp4Support }),
 
   setNotice: (notice: string | null) =>
     set({ notice }),
