@@ -228,7 +228,8 @@ readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is empt
 perf project's `globalSetup` first, so a stale result can never be reported as current.
 All three outputs are gitignored.
 
-Seven benchmarks, each run three times and reported as the median. The four
+Eight benchmarks, each run three times and reported as the median: four
+ESCAPEARTIST, three ESCAPECRAFT, and the headless kit render. The four
 ESCAPEARTIST ones run against **one deterministic 12-clip, 13-second scene** (14 clips
 over 4 tracks at 1280x720, clips scaled to fill the frame — scale 1 means native pixel
 size here) built in-test from `apps/e2e/fixtures/headless/source.mp4` and loaded through

@@ -71,66 +71,82 @@ rather than being scaled down before anything is measured.
 
 ## Local baseline
 
-**Three consecutive `pnpm perf` invocations**, medians of three runs each, so the
-invocation-to-invocation spread is visible rather than hidden. Machine and launch args at
-the bottom.
+**Four `pnpm perf` invocations**, medians of three runs each, so the
+invocation-to-invocation spread is visible rather than hidden. A, B and C are the three
+consecutive invocations the baseline was taken from. **D** was taken after fix round 1
+changed how `taskMsPerFrame` is computed — it is now a ratio of two rates (renderer task ms
+per second, over frames per second) rather than a plain division of one window's
+milliseconds by another window's frame count. It is included so the effect of that change
+is visible: every figure in D, `taskMsPerFrame` included, sits inside the A–C spread, which
+is what the two windows differing by one CDP round trip in five seconds predicts. Machine
+and launch args at the bottom.
 
 ### `craft-screen-recording` — WebCodecs, 1280x720, 5 s window
 
-| Metric | Inv. A | Inv. B | Inv. C |
-| --- | --- | --- | --- |
-| **Frames encoded** | 144 | 144 | 146 |
-| **Frames/s** | 28.76 | 28.74 | 29.17 |
-| **Renderer task per frame** | 28.97 ms | 29.02 ms | 28.35 ms |
-| Renderer task duration | 4171.11 ms | 4165.83 ms | 4154.49 ms |
-| Animation frames/s | 60.11 | 60.07 | 59.94 |
-| Layouts | 301 | 303 | 302 |
-| Style recalcs | 301 | 301 | 300 |
-| Long tasks | 0 | 0 | 0 |
-| Encoder queue high-water | 0 | 0 | 0 |
-| Heap delta | −383.8 KB | −326.8 KB | −185.2 KB |
-| Output size (WebM) | 1.69 MB | 1.72 MB | 1.71 MB |
+| Metric | Inv. A | Inv. B | Inv. C | Inv. D |
+| --- | --- | --- | --- | --- |
+| **Frames encoded** | 144 | 144 | 146 | 144 |
+| **Frames/s** | 28.76 | 28.74 | 29.17 | 28.77 |
+| **Renderer task per frame** | 28.97 ms | 29.02 ms | 28.35 ms | 28.65 ms |
+| Renderer task duration | 4171.11 ms | 4165.83 ms | 4154.49 ms | 4142.96 ms |
+| Animation frames/s | 60.11 | 60.07 | 59.94 | 59.93 |
+| Layouts | 301 | 303 | 302 | 302 |
+| Style recalcs | 301 | 301 | 300 | 301 |
+| Long tasks | 0 | 0 | 0 | 0 |
+| Encoder queue high-water | 0 | 0 | 0 | 0 |
+| Heap delta | −383.8 KB | −326.8 KB | −185.2 KB | −164.4 KB |
+| Output size (WebM) | 1.69 MB | 1.72 MB | 1.71 MB | 1.72 MB |
 
 ### `craft-pip-recording` — Compositor + MediaRecorder, 1280x720, 5 s window
 
-| Metric | Inv. A | Inv. B | Inv. C |
-| --- | --- | --- | --- |
-| **Composited fps** | 22.76 | 22.78 | 22.38 |
-| Video draws | 228 | 228 | 224 |
-| Video draws/s | 45.52 | 45.55 | 44.76 |
-| **Renderer task per composited frame** | 35.20 ms | 34.85 ms | 35.73 ms |
-| Renderer task duration | 4002.25 ms | 3973.25 ms | 4001.58 ms |
-| Animation frames/s | 119.88 | 119.87 | 119.89 |
-| Frames encoded | 0 | 0 | 0 |
-| Layouts | 299 | 305 | 300 |
-| Style recalcs | 301 | 300 | 300 |
-| Long tasks | 0 | 0 | 0 |
-| Heap delta | −48.7 KB | −48.4 KB | −116.1 KB |
-| Output size (WebM) | 1009.3 KB | 1.05 MB | 1.02 MB |
+| Metric | Inv. A | Inv. B | Inv. C | Inv. D |
+| --- | --- | --- | --- | --- |
+| **Composited fps** | 22.76 | 22.78 | 22.38 | 22.77 |
+| Video draws | 228 | 228 | 224 | 228 |
+| Video draws/s | 45.52 | 45.55 | 44.76 | 45.54 |
+| **Renderer task per frame** (per *composited* frame here) | 35.20 ms | 34.85 ms | 35.73 ms | 34.69 ms |
+| Renderer task duration | 4002.25 ms | 3973.25 ms | 4001.58 ms | 3989.52 ms |
+| Animation frames/s | 119.88 | 119.87 | 119.89 | 120.23 |
+| Frames encoded | 0 | 0 | 0 | 0 |
+| Layouts | 299 | 305 | 300 | 305 |
+| Style recalcs | 301 | 300 | 300 | 300 |
+| Long tasks | 0 | 0 | 0 | 0 |
+| Heap delta | −48.7 KB | −48.4 KB | −116.1 KB | 171.5 KB |
+| Output size (WebM) | 1009.3 KB | 1.05 MB | 1.02 MB | 999.2 KB |
 
 ### `craft-mp4-conversion` — `convertToMP4` of a 6 s take
 
-| Metric | Inv. A | Inv. B | Inv. C |
-| --- | --- | --- | --- |
-| Wall time | 6759 ms | 6762 ms | 6753 ms |
-| Frames encoded | 195 | 195 | 195 |
-| Frames/s | 28.85 | 28.84 | 28.88 |
-| **Renderer task per frame** | 30.41 ms | 30.35 ms | 30.03 ms |
-| Renderer task duration | 5929.12 ms | 5918.11 ms | 5854.93 ms |
-| Encoder queue high-water | 4 | 4 | 3 |
-| Heap delta | 271.3 KB | 272.7 KB | 292.3 KB |
-| Output size (MP4) | 835.0 KB | 838.0 KB | 861.5 KB |
+| Metric | Inv. A | Inv. B | Inv. C | Inv. D |
+| --- | --- | --- | --- | --- |
+| Wall time | 6759 ms | 6762 ms | 6753 ms | 6753 ms |
+| Frames encoded | 195 | 195 | 195 | 195 |
+| Frames/s | 28.85 | 28.84 | 28.88 | 28.88 |
+| **Renderer task per frame** | 30.41 ms | 30.35 ms | 30.03 ms | 30.38 ms |
+| Renderer task duration | 5929.12 ms | 5918.11 ms | 5854.93 ms | 5925.26 ms |
+| Encoder queue high-water | 4 | 4 | 3 | 3 |
+| Heap delta | 271.3 KB | 272.7 KB | 292.3 KB | 271.6 KB |
+| Output size (MP4) | 835.0 KB | 838.0 KB | 861.5 KB | 825.0 KB |
 
 **The spread between invocations is small here** — every headline figure above moves by
-under 3% across the three, and `framesEncoded` for the conversion is identical (195) in all
-nine runs. That is a much tighter band than the timeline gestures showed on this machine
+under 3% across the four, and `framesEncoded` for the conversion is identical (195) in all
+twelve runs. That is a much tighter band than the timeline gestures showed on this machine
 (up to 2.5x between invocations,
-[2026-09-13-timeline-baseline.md](2026-09-13-timeline-baseline.md#run-to-run-spread-between-invocations--the-important-caveat)),
-and the reason is that all three of these benchmarks are **rate-limited rather than
-CPU-limited**: a 30 fps capture track delivers 30 frames a second whatever the machine, and
-`requestVideoFrameCallback` hands the converter frames at playback speed. What varies with
-the machine is `taskMsPerFrame` — how much of each 33 ms frame budget the main thread spent
-— and that is the figure to compare.
+[2026-09-13-timeline-baseline.md](2026-09-13-timeline-baseline.md#run-to-run-spread-between-invocations--the-important-caveat)).
+
+The reason is that the frame rates here are **paced rather than raced**: the conversion is
+handed frames by `requestVideoFrameCallback` at playback speed, the compositor draws on a
+gated rAF loop, and the recorder encodes whatever arrives on its capture track. None of the
+three is trying to go as fast as the CPU will let it, which is what the export benchmarks
+do. **That is not the same as "rate-limited whatever the machine":** the capture track is
+not a device, it is `mockSyntheticMedia`'s `setInterval(…, 33)` canvas painter running on
+the same main thread this benchmark reports as ~83% busy, and `setInterval` under that load
+delivers materially fewer than 30 frames a second. That is the most likely reason the screen
+take lands at 28.7–29.2 rather than ~30 (`WebCodecsRecorder`'s own gate is
+`targetFrameInterval * 0.8` = 26.7 ms, so it is not the thing dropping the difference) —
+see "How to read these" below.
+
+What varies with the machine, and what a comparison should therefore use, is
+`taskMsPerFrame`.
 
 The paired-alternation rule from round 2 still applies to any millisecond claim: swap base
 and patched code round-robin against one warm dev server rather than running a plain
@@ -179,25 +195,35 @@ root-caused, and it is a real follow-up.** Until it is, read the numbers this wa
 `compositedFps` comes out at **22.4–22.8**, not the 30 the `Compositor` asks for. That is
 not a measurement artefact and not a slow machine; it is the throttle's arithmetic.
 
-`Compositor.render` requests an animation frame every frame and then returns early unless
-`performance.now() - lastFrameTime >= 1000 / 30`, i.e. 33.333 ms, setting `lastFrameTime`
-to the *actual* draw time rather than to an ideal schedule. Measured in the page during a
-PiP take, the interval between animation frames has a **mean of 16.666 ms** and about
-**half of all gaps fall below 16.667 ms** (294 of 562 in one 5 s window). Two frames
-therefore sum to ~33.33 ms — within microseconds of the gate, on the wrong side of it about
-as often as not — so a substantial share of composited frames need a **third** animation
-frame and land at 50 ms instead of 33 ms.
+`Compositor.render` (`apps/craft/src/core/compositor.ts:148-157`) requests an animation
+frame every frame and then returns early unless
+`performance.now() - lastFrameTime >= 1000 / 30`, setting `lastFrameTime` to the *actual*
+draw time rather than to an ideal schedule. The gate is therefore **33.3333 ms**, and two
+animation frames on a 60 Hz display are **33.3334 ms** — a margin of about **0.1 µs**. Any
+negative jitter at all pushes a pair onto the wrong side of the comparison, and that frame
+waits for a third animation frame and lands at 50 ms instead of 33 ms.
 
-The benchmark's own numbers say the same thing arithmetically: 59.94 animation frames per
-second per loop against 22.78 composited frames per second is **2.63 animation frames per
-composited frame**, between the 2 the design intends and the 3 the gate keeps forcing.
+That is arithmetic off the source, and the benchmark's own published figures confirm the
+consequence: `rafPerSecond` of 119.88 is two loops, so 59.94 animation frames per second,
+against 22.78 composited frames per second — **2.63 animation frames per composited frame**,
+between the 2 the design intends and the 3 the gate keeps forcing. (An earlier draft of this
+file quoted an animation-frame gap histogram from a throwaway diagnostic. The numbers in it
+did not cohere — the stated sample count and window length were inconsistent — and the
+diagnostic is not part of the branch, so it has been removed rather than left as an
+unreproducible citation. Nothing in the conclusion rested on it.)
 
 Two consequences:
 
-- **The two-draws-per-composited-frame assumption behind `compositedFps` is sound.**
-  `drawFrame` draws the screen video and `drawWebcamOverlay` draws the webcam video, one
-  `drawImage` each, and the raw `videoDraws` count is even in every run measured (224, 226,
-  228, 230, 236). Halving is correct; what is wrong is upstream of it.
+- **The two-draws-per-composited-frame assumption behind `compositedFps` holds, and is now
+  enforced rather than asserted in prose.** `drawFrame` draws the screen video and
+  `drawWebcamOverlay` draws the webcam video, one `drawImage` each, **inside one synchronous
+  rAF callback** — so a counter snapshot can never land between them. Each draw is guarded
+  on its element's `readyState >= 2` (`compositor.ts:169`, `:174`), so a frame composited
+  while a capture element has no decoded frame yields one draw or none, which would
+  understate `compositedFps` and overstate `taskMsPerFrame` by the same factor. The PiP arm
+  therefore asserts `videoDraws % 2 === 0`, and the screen arm asserts `videoDraws === 0`
+  (which also catches `WebCodecsRecorder` silently taking its `startVideoElementCapture`
+  fallback). Observed even in every run measured: 224, 226, 228, 230, 236.
 - **A fix here is a real user-visible win** — a PiP recording is losing roughly a quarter of
   its frames to a comparison that is 33 µs on the wrong side — and it would move
   `compositedFps` without moving `taskMsPerFrame`, which is precisely why both are reported.
@@ -220,6 +246,18 @@ the page — so its `framesEncoded` is 0 and is reported as 0 rather than dresse
 take composites nothing, so its `compositedFps` is 0. Each benchmark has exactly one rate,
 and the report's headline picks the right one.
 
+**The screen take's `framesPerSecond` is jointly determined by the harness.** It reads
+28.7–29.2 rather than 30, and the shortfall is most likely the source, not the recorder:
+`mockSyntheticMedia`'s capture "device" is a `setInterval(…, 33)` painter on the same main
+thread that is ~83% busy in a second-or-later take, and `WebCodecsRecorder` encodes whatever
+the track delivers (its own gate is `targetFrameInterval * 0.8` = 26.7 ms, so it is not
+dropping the difference). So a future change that made the page *busier* could show up here
+as a lower "recorded frame rate" that has nothing to do with the recorder. Compare
+`taskMsPerFrame`. **`compositedFps` is not affected** — the compositor's rAF loop draws
+whatever the `<video>` element currently shows, at a rate set by rAF and its own gate,
+independent of how fast the source delivers — so the compositor finding above stands on its
+own. The two rates look symmetric and are not.
+
 **The conversion is real-time bound, so its wall time is a floor, not a score.**
 `convertToMP4` plays the stored WebM in an offscreen `<video>` and captures frames from
 `requestVideoFrameCallback`, so a 6 s take takes ~6.76 s to convert *however fast the
@@ -236,6 +274,14 @@ identical in every arm of a comparison, so it cancels; it is not zero, so an abs
 ("recording a 720p take costs 29 ms of main thread per frame") overstates the app's share.
 And as noted above, a fresh painter leaks per take, which is a slow drift the benchmark
 should be re-checked against if `PERF_RUNS` is ever raised.
+
+**The perf project's file order changed when these were added.** `craft-recording.spec.ts`
+sorts before `export.spec.ts`, so the ESCAPECRAFT benchmarks now run first and every
+`pnpm perf` also starts ESCAPECRAFT's Vite server. The two existing baseline docs were taken
+under the old ordering; the export figures either side of the change are inside their own
+stated ~1.5% band (`export-mp4` 76.7 here against 77.17 on 2026-09-12, `export-webm` 80.16
+against 80.76), so the three files stay comparable — but it is a difference between them,
+and it is recorded here rather than left to be rediscovered.
 
 **These are dev-server numbers, in React's development build**, under `--disable-gpu`
 software rasterisation. Same as every other benchmark in this repo. They are for comparing
@@ -275,9 +321,19 @@ The same machine and the same launch args as
 figures are comparable with each other.
 
 `pnpm perf` with all seven browser benchmarks plus the kit takes **~3.1 minutes** on this
-machine with a warm dev server (3.1 minutes for each of the three invocations above, against
+machine with a warm dev server (3.1 minutes for each of the four invocations above, against
 ~2 minutes before these three were added). The CI `perf` job's `timeout-minutes: 30` is left
 as it was.
+
+**Invocations A–C were taken before fix round 1; D was taken after it.** The review of this
+work asked for two changes that touch what is reported here, and both are in D:
+`taskMsPerFrame` is now a ratio of two rates rather than a plain division across two windows
+that differ by one CDP round trip (so the numerator and the denominator no longer come from
+differently-bracketed spans), and the conversion row's `6` is now published under its own
+key, `takeSeconds` ("Source take length"), because that benchmark has no measured window and
+labelling it "Measured window" was untrue. Neither change moved a figure outside the A–C
+spread — which is the point of showing D rather than quietly replacing A–C with it. Every
+other number in the tables is definitionally unchanged.
 
 ## Follow-ups this baseline opens
 

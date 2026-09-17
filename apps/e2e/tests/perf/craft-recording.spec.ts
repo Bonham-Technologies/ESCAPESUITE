@@ -2,7 +2,7 @@ import { test } from '@playwright/test'
 import {
   CAPTURE_SIZE_LABEL,
   TAKE_SECONDS,
-  TAKE_WARMUP_SECONDS,
+  TAKE_WINDOW_SECONDS,
   installCraftPerfInstrumentation,
   measureMp4Conversion,
   measureTake,
@@ -43,9 +43,6 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * of any comparison and small next to a 720p encode, but it is not nothing —
  * see `docs/performance/2026-09-17-craft-baseline.md`.
  */
-
-/** Seconds of the take the numbers are taken over; the warm-up is discarded. */
-const WINDOW_SECONDS = TAKE_SECONDS - TAKE_WARMUP_SECONDS
 
 const TAKE_MODES = [
   {
@@ -95,7 +92,15 @@ for (const arm of TAKE_MODES) {
         mode: arm.mode,
         recorder: arm.recorder,
         captureSize: CAPTURE_SIZE_LABEL,
-        windowSeconds: WINDOW_SECONDS,
+        windowSeconds: TAKE_WINDOW_SECONDS,
+        // Three of the six numbers below are a hard zero in each mode —
+        // `framesEncoded`/`framesPerSecond`/`encoderQueueHighWater` for PiP,
+        // `compositedFps`/`videoDraws`/`videoDrawsPerSecond` for screen — and
+        // they are written out anyway so both rows have the same JSON shape.
+        // A reader of the table has six rows to skip; a reader of the JSON has
+        // one schema instead of two, and `headline()` can pick the mode's real
+        // rate by asking which of them is non-zero. `measureTake` explains why
+        // each zero is a zero rather than an unobservable.
         framesEncoded: median(at('framesEncoded')),
         framesPerSecond: round(median(at('framesPerSecond'))),
         videoDraws: median(at('videoDraws')),
@@ -160,9 +165,13 @@ test.describe('perf: ESCAPECRAFT MP4 conversion', () => {
       name: 'craft-mp4-conversion',
       runs: PERF_RUNS,
       captureSize: CAPTURE_SIZE_LABEL,
-      // The take's length, not a measured window: `convertToMP4` runs at
-      // playback speed, so this is the floor `wallMs` is measured against.
-      windowSeconds: TAKE_SECONDS,
+      // `takeSeconds`, not `windowSeconds`: this benchmark has no measured
+      // window — it times a whole conversion, click to file. What six seconds
+      // describes is the *source take*, whose length is the floor `wallMs` is
+      // measured against because `convertToMP4` runs at playback speed. Writing
+      // it as `windowSeconds` would have the report label it "Measured window",
+      // which is the one thing it is not.
+      takeSeconds: TAKE_SECONDS,
       wallMs: round(median(at('wallMs'))),
       framesEncoded: median(at('framesEncoded')),
       framesPerSecond: round(median(at('framesPerSecond'))),

@@ -82,6 +82,7 @@ const METRICS = {
   recorder: { label: 'Recorder' },
   captureSize: { label: 'Capture size' },
   windowSeconds: { label: 'Measured window', unit: 's' },
+  takeSeconds: { label: 'Source take length', unit: 's' },
   moves: { label: 'Pointer moves per gesture' },
   renderedFps: { label: 'Rendered fps' },
   compositedFps: { label: 'Composited fps' },

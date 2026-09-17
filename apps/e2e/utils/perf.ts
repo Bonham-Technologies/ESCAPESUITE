@@ -361,6 +361,39 @@ export async function readCdpMetrics(cdp: CDPSession): Promise<CdpSnapshot> {
   ) as CdpSnapshot
 }
 
+/** The same counters plus the clock they were sampled against. */
+export type CdpTimedSnapshot = CdpSnapshot & {
+  /** `Performance.getMetrics`' own `Timestamp`, in seconds, or 0 if absent. */
+  Timestamp: number
+}
+
+/**
+ * Read the renderer's counters *and* the instant they were read at, in one
+ * round trip.
+ *
+ * `readCdpMetrics` above gives a benchmark the counter deltas but no way to say
+ * how long the bracket it read them over actually was — so a figure like "task
+ * ms per frame" ends up dividing milliseconds measured between two CDP calls by
+ * a frame count measured between two `page.evaluate` calls, which are different
+ * windows offset by a round trip each. `Performance.getMetrics` already returns
+ * a `Timestamp` alongside the counters, so taking it here costs nothing extra
+ * and lets a caller turn both halves into rates over their own windows before
+ * dividing one by the other.
+ *
+ * A pure addition: `readCdpMetrics` is unchanged and every existing benchmark
+ * still calls that one, so no existing number moves.
+ */
+export async function readCdpTimedMetrics(cdp: CDPSession): Promise<CdpTimedSnapshot> {
+  const { metrics } = await cdp.send('Performance.getMetrics')
+  const byName = new Map(metrics.map((m) => [m.name, m.value]))
+  return {
+    ...(Object.fromEntries(
+      CDP_METRICS.map((name) => [name, byName.get(name) ?? 0])
+    ) as CdpSnapshot),
+    Timestamp: byName.get('Timestamp') ?? 0,
+  }
+}
+
 /**
  * Force a collection, then read the JS heap.
  *

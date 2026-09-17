@@ -132,7 +132,7 @@ slow runner and pass on a fast one regardless of the code, so a regression shows
 up as a number in `perf-report.json`, not as a red test.
 
 ```bash
-pnpm perf                # from the monorepo root — both benchmarks, the kit's, and the merged report
+pnpm perf                # from the monorepo root — all seven browser benchmarks, the kit's, and the merged report
 pnpm test:perf           # from this directory — the browser benchmarks alone
 ```
 
