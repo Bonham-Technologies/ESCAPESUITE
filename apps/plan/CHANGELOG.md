@@ -1,5 +1,13 @@
 # @escapesuite/plan
 
+## 2.4.2
+
+### Patch Changes
+
+- 3b0fe5f: analytics mounts through the shared build-mode gate
+- Updated dependencies [3b0fe5f]
+  - @escapesuite/shared@1.3.3
+
 ## 2.3.11
 
 ### Patch Changes
