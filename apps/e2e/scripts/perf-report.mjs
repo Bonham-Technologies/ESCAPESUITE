@@ -44,6 +44,9 @@ const ORDER = [
   'timeline-interaction',
   'export-mp4',
   'export-webm',
+  'craft-screen-recording',
+  'craft-pip-recording',
+  'craft-mp4-conversion',
   'headless-kit-render',
 ]
 
@@ -75,12 +78,20 @@ const METRICS = {
   scene: { label: 'Scene' },
   format: { label: 'Format' },
   resolution: { label: 'Resolution' },
+  mode: { label: 'Capture mode' },
+  recorder: { label: 'Recorder' },
+  captureSize: { label: 'Capture size' },
   windowSeconds: { label: 'Measured window', unit: 's' },
   moves: { label: 'Pointer moves per gesture' },
   renderedFps: { label: 'Rendered fps' },
+  compositedFps: { label: 'Composited fps' },
+  videoDraws: { label: 'Video draws' },
+  videoDrawsPerSecond: { label: 'Video draws/s' },
+  rafPerSecond: { label: 'Animation frames/s' },
   longTaskCount: { label: 'Long tasks' },
   longTaskTotalMs: { label: 'Long-task total', unit: 'ms' },
   taskDurationMs: { label: 'Renderer task duration', unit: 'ms' },
+  taskMsPerFrame: { label: 'Renderer task per frame', unit: 'ms' },
   layoutCount: { label: 'Layouts' },
   recalcStyleCount: { label: 'Style recalcs' },
   wallMs: { label: 'Wall time', unit: 'ms' },
@@ -146,6 +157,9 @@ const PROFILE_LABELS = {
   'timeline-playheadScrub': 'Timeline playhead scrub',
   'export-mp4': 'MP4 export',
   'export-webm': 'WebM export',
+  'craft-screen': 'ESCAPECRAFT screen recording',
+  'craft-pip': 'ESCAPECRAFT PiP recording',
+  'craft-mp4': 'ESCAPECRAFT MP4 conversion',
 }
 
 /** Order profile sections appear in, whichever of them exist. */
@@ -156,6 +170,9 @@ const PROFILE_ORDER = [
   'timeline-playheadScrub',
   'export-mp4',
   'export-webm',
+  'craft-screen',
+  'craft-pip',
+  'craft-mp4',
 ]
 
 /**
@@ -214,8 +231,20 @@ function formatValue(key, value) {
 /** The one number each benchmark is really about, for the summary table. */
 function headline(benchmark) {
   if (typeof benchmark.renderedFps === 'number') return `${benchmark.renderedFps} rendered fps`
+  // A PiP take encodes off the main thread (MediaRecorder), so its rate is the
+  // compositor's and its `framesPerSecond` is 0 by construction. Tested first,
+  // and for a non-zero value, so the screen take — which composites nothing and
+  // reports `compositedFps: 0` — still headlines its encode rate below.
+  if (typeof benchmark.compositedFps === 'number' && benchmark.compositedFps > 0) {
+    return `${benchmark.compositedFps} composited fps`
+  }
   if (typeof benchmark.framesPerSecond === 'number') {
-    return `${benchmark.framesPerSecond} frames/s (${benchmark.wallMs} ms)`
+    // The wall-time parenthetical only when there is one: a recording benchmark
+    // measures a fixed window rather than a job that finishes, so it reports no
+    // `wallMs` and would otherwise headline "(undefined ms)".
+    return typeof benchmark.wallMs === 'number'
+      ? `${benchmark.framesPerSecond} frames/s (${benchmark.wallMs} ms)`
+      : `${benchmark.framesPerSecond} frames/s`
   }
   // A gesture benchmark has no single rate. Its headline is what one pointer
   // frame of a clip drag costs — the layout count first, because that is the

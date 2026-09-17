@@ -16,8 +16,12 @@ import { PERF_LAUNCH_ARGS } from './utils/perf'
  *   `--enable-precise-memory-info`, and software rasterisation keeps a local
  *   number comparable to a CI one.
  *
- * Only ESCAPEARTIST is started, on a strict 5175 rather than relying on Vite's
- * port auto-increment, because it is the only app the benchmarks touch.
+ * Both apps are started, each on a strict port rather than relying on Vite's
+ * port auto-increment: ESCAPEARTIST on 5175 for the preview, timeline and
+ * export benchmarks, ESCAPECRAFT on 5174 for the recording and MP4-conversion
+ * ones. `reuseExistingServer` is on, so a dev server already running on either
+ * port is used as-is — which is also what makes a warm-server invocation
+ * comparable to the numbers in the baseline docs.
  */
 export default defineConfig({
   testDir: './tests/perf',
@@ -51,6 +55,13 @@ export default defineConfig({
       command: 'pnpm exec vite --port 5175 --strictPort',
       cwd: '../artist',
       port: 5175,
+      reuseExistingServer: true,
+      timeout: 120_000,
+    },
+    {
+      command: 'pnpm exec vite --port 5174 --strictPort',
+      cwd: '../craft',
+      port: 5174,
       reuseExistingServer: true,
       timeout: 120_000,
     },

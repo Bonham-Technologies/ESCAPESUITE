@@ -655,6 +655,15 @@ the outcome, not on the double.
   are enforced in CI like any other test. The rule (2x the measured value rounded up, the
   measurement and its date in a comment, conservation laws exact, ceilings only ever lowered)
   is in the root `CLAUDE.md`.
+- **The milliseconds come from `pnpm perf`, not from here.** `apps/e2e/tests/perf/
+  craft-recording.spec.ts` records real takes in Chromium and reports what they cost in
+  time: `craft-screen-recording` (a screen take through `WebCodecsRecorder`),
+  `craft-pip-recording` (a PiP take through the `Compositor` into MediaRecorder, whose rate
+  is `compositedFps` because its encoding is off the main thread) and
+  `craft-mp4-conversion` (`convertToMP4` driven through the row's own MP4 button). They
+  measure and never assert; the ceilings above are the half that is enforced. Numbers, and
+  the two findings the first measurement produced, are in
+  `docs/performance/2026-09-17-craft-baseline.md`.
 - **Semicolon dialect is mixed, deliberately.** The suites the test decomposition added
   (`src/hooks/*.test.ts`, `src/utils/recordingFormat.test.ts`, and their siblings) omit
   line-ending semicolons; the older files (`src/App.library.test.tsx` and friends) carry them.
