@@ -85,8 +85,49 @@ export const thumbnailModule = {
 
 // --- core/converter ---------------------------------------------------------
 
+/**
+ * Stand-in for the real `ConversionAbortedError`.
+ *
+ * It has to be declared here rather than imported: this module is pulled in by
+ * the `vi.mock('./core/converter')` factory itself, so importing the real class
+ * would resolve to the mocked module and come back undefined — and the
+ * `instanceof` check in `useMp4Download` would then treat a cancellation as a
+ * failure. The app only ever sees whichever class the module it imports
+ * exports, so this one is the one its `instanceof` is against.
+ */
+export class ConversionAbortedError extends Error {
+  constructor() {
+    super('Conversion was cancelled')
+    this.name = 'ConversionAbortedError'
+  }
+}
+
+export interface ConversionProgressLike {
+  phase: 'preparing' | 'encoding' | 'finalizing'
+  progress: number
+  message: string
+}
+
+/**
+ * The happy path, start to finish in one turn: two progress reports and an MP4.
+ * A test that wants to watch a conversion mid-flight replaces it.
+ */
+async function convertToMP4Double(
+  blob: Blob,
+  onProgress: (progress: ConversionProgressLike) => void,
+  signal?: AbortSignal
+): Promise<Blob> {
+  onProgress({ phase: 'preparing', progress: 0, message: 'Preparing conversion...' })
+  if (signal?.aborted) throw new ConversionAbortedError()
+  onProgress({ phase: 'encoding', progress: 50, message: 'Encoding video...' })
+  return new Blob([blob], { type: 'video/mp4' })
+}
+
 export const converterModule = {
   fixWebMMetadata: vi.fn(async (blob: Blob) => new Blob([blob], { type: 'video/webm' })),
+  isMP4ConversionSupported: vi.fn(() => true),
+  convertToMP4: vi.fn(convertToMP4Double),
+  ConversionAbortedError,
 }
 
 // --- utils/sendToEditor -----------------------------------------------------
@@ -126,6 +167,10 @@ export function resetAppDoubles(): void {
   converterModule.fixWebMMetadata.mockImplementation(
     async (blob: Blob) => new Blob([blob], { type: 'video/webm' })
   )
+  converterModule.isMP4ConversionSupported.mockReset()
+  converterModule.isMP4ConversionSupported.mockReturnValue(true)
+  converterModule.convertToMP4.mockReset()
+  converterModule.convertToMP4.mockImplementation(convertToMP4Double)
 
   sendToEditorModule.sendToEditor.mockReset()
   sendToEditorModule.sendToEditor.mockReturnValue('opened')
