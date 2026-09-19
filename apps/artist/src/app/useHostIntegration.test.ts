@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useHostIntegration, type HostIntegrationDeps } from './useHostIntegration'
 import { initIntegration, loadVideoFromUrl, sendMessage } from '../utils/integration'
-import { processVideoFile } from '../core/videoProcessor'
+import { processVideoFile, resolveStoredDuration } from '../core/videoProcessor'
 import { getThumbnail, getVideo } from '../core/storage'
 import { getTheme, setTheme } from '@escapesuite/shared/theme'
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore'
@@ -57,6 +57,9 @@ beforeEach(() => {
   vi.mocked(initIntegration).mockReturnValue(() => {})
   vi.mocked(loadVideoFromUrl).mockResolvedValue({ blob: new Blob(), name: 'test.mp4' })
   vi.mocked(processVideoFile).mockResolvedValue({ ...sampleVideo })
+  vi.mocked(resolveStoredDuration).mockImplementation((_blob, metadata) =>
+    Promise.resolve(metadata.duration)
+  )
   vi.mocked(getVideo).mockResolvedValue(undefined)
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
   deps = {
@@ -230,6 +233,27 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
 
     expect(deps.addSourceVideo).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'rec-1', thumbnailUrl: undefined })
+    )
+  })
+
+  // A CRAFT take whose WebM lost its Duration element is stored as Infinity —
+  // CRAFT's own guard is `duration > 0`, which Infinity passes — so the handoff
+  // has to recover the length rather than trust what it was handed.
+  it('recovers the length of a recording stored with no usable duration', async () => {
+    vi.mocked(getVideo).mockResolvedValue({
+      blob: new Blob(['webm'], { type: 'video/webm' }),
+      metadata: { ...recording.metadata, duration: Infinity },
+    } as never)
+    vi.mocked(resolveStoredDuration).mockResolvedValue(7)
+
+    await mountIntegration({ loadVideoId: 'rec-1' })
+
+    expect(resolveStoredDuration).toHaveBeenCalledWith(
+      expect.any(Blob),
+      expect.objectContaining({ id: 'rec-1', duration: Infinity })
+    )
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'rec-1', duration: 7 })
     )
   })
 

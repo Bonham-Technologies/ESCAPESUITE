@@ -66,7 +66,35 @@ pnpm lint                # Run ESLint
 
 ### Core Modules (`src/core/`)
 - `storage.ts`: IndexedDB layer using `idb` library. Stores video blobs, thumbnails, projects, and settings in separate object stores
-- `videoProcessor.ts`: Video metadata extraction and thumbnail generation using native `<video>` element and canvas
+- `videoProcessor.ts`: Video metadata extraction and thumbnail generation using native `<video>` element and canvas.
+  **Duration fallback**: a WebM with no Duration/Cues element — raw MediaRecorder output, or an
+  ESCAPECRAFT take whose `fixWebMMetadata` failed — reports `Infinity` (or `0`) on
+  `loadedmetadata`. That used to **hang the import outright**, not merely mis-length it:
+  `processVideoFile` asked `generateThumbnail` for a frame at `duration * 0.1`, a browser throws a
+  `TypeError` on a non-finite `currentTime` (WebIDL `double`), the throw happens inside the
+  element's own event handler where no `try/catch` up the stack can see it, and the thumbnail
+  promise never settles — so the media row sat on "Processing…" for ever.
+  `extractVideoMetadata` now seeks to `Number.MAX_SAFE_INTEGER` (browsers clamp to the end;
+  Chromium scans the container to find it), listens for both `durationchange` and `seeked`, and
+  takes the first usable — finite, positive, and **not the seek target itself**, which an
+  un-clamped browser would report straight back — value of `video.duration`, else of
+  `video.currentTime` (the position the seek clamped to, which is all some browsers reveal). A
+  usable duration on `loadedmetadata` resolves immediately with no seek; nothing usable within 5 s
+  rejects with `Could not determine the duration of <name>`, which `VideoUploader` shows verbatim
+  in the file's upload row. One `release()` is the single settle path, so the probe is torn down
+  and the object URL revoked **exactly once** whichever way the promise settles — pinned by
+  `toHaveBeenCalledTimes(1)` on the success, timeout and error paths. `processVideoFile` passes the
+  thumbnail time explicitly as `metadata.duration * 0.1`, because `generateThumbnail` loads its own
+  element and would read the same `Infinity`.
+  **The stored path needs the same guard**: the `?loadVideo=` handoff from ESCAPECRAFT
+  (`app/useHostIntegration.ts`) adds a recording from its stored metadata and never calls
+  `extractVideoMetadata`, and CRAFT stores `Infinity` in preference to its own wall clock (its
+  guard is `duration > 0`, which `Infinity` passes). `resolveStoredDuration(blob, metadata)`
+  returns the stored duration when it is usable and otherwise recovers it from the blob, so the
+  handoff cannot build an infinite clip either. The `<video>` double
+  (`src/test/doubles/media.ts`) models the discovery with `durationAfterSeek` /
+  `durationStaysUnknown`, and throws on a non-finite `currentTime` the way a browser does, so this
+  class of hang is caught by the unit suite rather than only in a browser.
 - `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
   - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding

@@ -13,7 +13,7 @@
 import { useEffect } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
 import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
-import { processVideoFile } from '../core/videoProcessor';
+import { processVideoFile, resolveStoredDuration } from '../core/videoProcessor';
 import { getVideo, getThumbnail } from '../core/storage';
 import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import type { Project, SourceVideo } from '../store/types';
@@ -131,9 +131,13 @@ export function useHostIntegration({
                 thumbnailUrl = thumbnailObjectUrl;
               }
 
-              // Add video to source videos
+              // Add video to source videos. The stored duration is trusted
+              // unless it is unusable — a CRAFT take whose WebM lost its
+              // Duration element is stored as Infinity — in which case the
+              // length is recovered from the blob.
               addSourceVideo({
                 ...videoData.metadata,
+                duration: await resolveStoredDuration(videoData.blob, videoData.metadata),
                 thumbnailUrl,
               });
 
