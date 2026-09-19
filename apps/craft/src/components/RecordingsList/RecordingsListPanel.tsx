@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useState } from 'react';
 import { isEmbedded } from '@escapesuite/shared/config';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
@@ -65,8 +65,11 @@ export function RecordingsListPanel({
   // flag, because one row's read is no reason to refuse another's — the
   // narrower version of the "one at a time" rule `useMp4Download` needs for
   // the conversion, which is CPU-bound where this is not. A ref, not state:
-  // nothing on screen changes, so nothing should re-render.
-  const uploadsInFlight = useRef(new Set<string>());
+  // nothing on screen changes, so nothing should re-render. The Set is built
+  // once through a lazy `useState` initialiser rather than `useRef(new Set())`,
+  // which would allocate and discard a Set on every render — and this panel
+  // renders on every MP4 progress tick.
+  const [uploadsInFlight] = useState(() => ({ current: new Set<string>() }));
 
   const handleUploadToHost = async (id: string, name: string): Promise<void> => {
     if (uploadsInFlight.current.has(id)) return;

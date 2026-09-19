@@ -2,9 +2,10 @@
 //
 // `RecordingsList` is props-only and cannot ask — so the question is asked
 // here, once per render, and the answer is the presence or absence of one
-// prop. This file pins the three things that follow from that: the button is
-// there inside a frame, it is not there outside one, and what happens when
-// the blob the host asked for is no longer in storage.
+// prop. This file pins what follows from that: the button is there inside a
+// frame, it is not there outside one, a posted upload says nothing, a second
+// click during a read does not read twice, and what happens when the blob the
+// host asked for is no longer in storage or cannot be read at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
