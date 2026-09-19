@@ -142,13 +142,17 @@ describe('WebCodecsRecorder', () => {
     installVideoElementDouble()
     audio = installAudioContextDouble()
 
-    // The clock is FROZEN: `now` is never advanced in this file. The audio
-    // level monitor gates itself to one sample per 80ms of `performance.now()`,
-    // so exactly one sample is emitted per take here — the immediate one
+    // `now` moves only where a test moves it, and most tests never do. The
+    // audio level monitor gates itself to one sample per 80ms of
+    // `performance.now()`, so a test that ticks rAF without advancing `now`
+    // sees exactly one sample per take — the immediate one
     // `startAudioLevelMonitoring()` takes before the first frame — and
     // `tickAnimationFrames()` will never produce another. A test that wants
     // repeated emissions has to advance `now` between ticks; the per-second
-    // rates live in core/webcodecsRecorder.perf.test.ts, which does exactly that.
+    // rates live in core/webcodecsRecorder.perf.test.ts, which does exactly
+    // that. The frame-timing tests advance it too: since this fix `now` is the
+    // clock every frame timestamp and `getDuration()` are read from, while
+    // `vi.advanceTimersByTime()` drives the capture timer and nothing else.
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
     consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -318,6 +322,24 @@ describe('WebCodecsRecorder', () => {
   // --- start / capture (video element + setTimeout) ------------------------
 
   describe('frame capture via video element and setTimeout', () => {
+    /** One frame interval of the recorder's 30fps target, in milliseconds. */
+    const FRAME_MS = 1000 / 30
+
+    /**
+     * Let the capture timer fire `count` more times, moving the recording
+     * clock on by one frame interval each time. The timers and
+     * `performance.now()` are separate faked clocks here, so a test that only
+     * advanced the timers would drive the loop against a frozen clock.
+     */
+    function captureFrames(count: number): void {
+      for (let i = 0; i < count; i++) {
+        now += FRAME_MS
+        // One timer step per iteration: 34ms is past the 33.3ms timer and
+        // short of the one after it, so exactly one frame lands per call.
+        vi.advanceTimersByTime(Math.ceil(FRAME_MS))
+      }
+    }
+
     beforeEach(async () => {
       await recorder.initialize(screenStream, null, null, defaultConfig)
     })
@@ -357,9 +379,13 @@ describe('WebCodecsRecorder', () => {
       )
     })
 
-    it('emits a keyframe once per second and delta frames in between', () => {
+    // Pins keyframes to *elapsed time*, not to a frame count: the first frame
+    // at or past each whole second of the recording clock is a keyframe. The
+    // count-based rule this replaced (`frameCount % 30`) only coincided with
+    // one keyframe per second while the source really delivered 30fps.
+    it('emits a keyframe once per elapsed second and delta frames in between', () => {
       recorder.start()
-      vi.advanceTimersByTime(1000) // 30 more frames at 33.3ms
+      captureFrames(30) // one second of the recording clock
 
       const encodes = lastVideoEncoder().encodes
       expect(encodes.length).toBeGreaterThanOrEqual(31)
@@ -369,14 +395,19 @@ describe('WebCodecsRecorder', () => {
       expect(encodes[30].options).toEqual({ keyFrame: true })
     })
 
-    it('advances the frame timestamp by one frame duration each time', () => {
+    // Was "advances the frame timestamp by one frame duration each time":
+    // frame N was stamped N x 33333us whenever it was actually captured. Now
+    // the stamp is the recording clock at capture, so a source running slower
+    // than 30fps produces a video track as long as the take (the rounding of
+    // 33.333ms is why the third frame is 66667 and not 66666).
+    it('stamps each frame with the recording clock', () => {
       recorder.start()
-      vi.advanceTimersByTime(100)
+      captureFrames(2)
 
       const encodes = lastVideoEncoder().encodes
       expect(encodes[0].data.timestamp).toBe(0)
       expect(encodes[1].data.timestamp).toBe(33333)
-      expect(encodes[2].data.timestamp).toBe(66666)
+      expect(encodes[2].data.timestamp).toBe(66667)
     })
 
     it('closes every VideoFrame it creates', () => {
@@ -445,6 +476,22 @@ describe('WebCodecsRecorder', () => {
   describe('frame capture via requestVideoFrameCallback', () => {
     let frameCallbacks: Array<() => void>
 
+    /**
+     * Present one video frame to the capture loop, `ms` after the previous
+     * one. This is the path that shows the row's bug: `getDisplayMedia` hands
+     * over frames whenever the window repaints, which for a screen capture is
+     * routinely 5-15 a second rather than 30.
+     */
+    function presentFrame(ms = 0): void {
+      now += ms
+      frameCallbacks.pop()!()
+    }
+
+    /** The timestamp, in microseconds, of every frame encoded so far. */
+    function timestamps(): Array<number | undefined> {
+      return lastVideoEncoder().encodes.map(e => e.data.timestamp)
+    }
+
     beforeEach(async () => {
       frameCallbacks = []
       Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
@@ -468,19 +515,84 @@ describe('WebCodecsRecorder', () => {
       expect(frameCallbacks).toHaveLength(1)
       expect(lastVideoEncoder().encodes).toHaveLength(0)
 
-      frameCallbacks.pop()!()
-      frameCallbacks.pop()!()
-      frameCallbacks.pop()!()
+      presentFrame()
+      presentFrame(1000 / 30)
+      presentFrame(1000 / 30)
 
       const encodes = lastVideoEncoder().encodes
       expect(encodes).toHaveLength(3)
-      expect(encodes.map(e => e.data.timestamp)).toEqual([0, 33333, 66666])
+      // The recording clock at capture, not the frame index x 33333us.
+      expect(timestamps()).toEqual([0, 33333, 66667])
       expect(encodes.map(e => e.options)).toEqual([
         { keyFrame: true },
         { keyFrame: false },
         { keyFrame: false },
       ])
       expect(allFramesClosed()).toBe(true)
+    })
+
+    it('spans wall time when the source only delivers 15 frames a second', () => {
+      // The row's failure: a window capture running at half the target rate.
+      // Counting frames made 15 frames span half a second of video against a
+      // whole second of audio - playback at 2x, with the audio lagging.
+      recorder.start()
+
+      presentFrame()
+      presentFrame(1000 / 15)
+      presentFrame(1000 / 15)
+
+      expect(timestamps()).toEqual([0, 66667, 133333])
+    })
+
+    it('keeps timestamps strictly increasing when the clock does not move', () => {
+      // Mediabunny rejects a packet that does not advance on the one before
+      // it, so a coarse or frozen clock must not be allowed to stall the mux.
+      recorder.start()
+
+      presentFrame()
+      presentFrame()
+      presentFrame()
+
+      expect(timestamps()).toEqual([0, 1, 2])
+      expect(lastVideoEncoder().encodes.map(e => e.options)).toEqual([
+        { keyFrame: true },
+        { keyFrame: false },
+        { keyFrame: false },
+      ])
+    })
+
+    it('emits a keyframe once per elapsed second however few frames arrive', () => {
+      // 2.5fps: the old count-based rule (every 30th frame) would have put one
+      // keyframe every twelve seconds into a take like this.
+      recorder.start()
+
+      presentFrame()
+      presentFrame(400)
+      presentFrame(400)
+      presentFrame(400)
+
+      expect(timestamps()).toEqual([0, 400_000, 800_000, 1_200_000])
+      expect(lastVideoEncoder().encodes.map(e => e.options?.keyFrame)).toEqual([
+        true,
+        false,
+        false,
+        true,
+      ])
+    })
+
+    it('excludes paused time from the frame timestamps', () => {
+      recorder.start()
+
+      presentFrame()
+      presentFrame(100)
+      recorder.pause()
+      now += 5000
+      recorder.resume()
+      presentFrame(100)
+
+      // The frame after the resume carries on from where the take left off:
+      // five seconds of paused wall time are not five seconds of video.
+      expect(timestamps()).toEqual([0, 100_000, 200_000])
     })
 
     it('skips paused frames but keeps the callback loop alive', () => {
@@ -560,6 +672,12 @@ describe('WebCodecsRecorder', () => {
       processor.pushFrame(new VideoFrameDouble('raw-2', { timestamp: 2 }))
       await flush()
       expect(lastVideoEncoder().encodes).toHaveLength(2)
+      // ...and the frame that survived the throttle is stamped with the
+      // recording clock, 40ms in. This is the only path a Chrome/Edge screen
+      // take actually runs on, so it is the one that has to prove it tracks
+      // wall time: under the old `frameCount x 33333us` rule the second
+      // encoded frame was 33333 however long it took to arrive.
+      expect(lastVideoEncoder().encodes.map(e => e.data.timestamp)).toEqual([0, 40_000])
     })
 
     it('discards frames that arrive while paused', async () => {
@@ -940,10 +1058,24 @@ describe('WebCodecsRecorder', () => {
       expect(recorder.isPaused()).toBe(false)
     })
 
+    // The duration and the frame timestamps read one clock — `performance.now()`
+    // — so what the user is told the take is worth and what is written into the
+    // container cannot drift apart. These tests advance that clock, not the
+    // timers: the two are faked separately here.
     it('tracks elapsed time while recording', () => {
       recorder.start()
-      vi.advanceTimersByTime(2000)
+      now += 2000
       expect(recorder.getDuration()).toBeCloseTo(2, 1)
+    })
+
+    it('reports the duration from the clock the frames are stamped with', () => {
+      recorder.start()
+      now += 1500
+      vi.advanceTimersByTime(34) // let the capture timer stamp one more frame
+
+      const last = lastVideoEncoder().encodes.at(-1)!.data.timestamp
+      expect(last).toBe(1_500_000)
+      expect(recorder.getDuration()).toBeCloseTo(last! / 1_000_000, 5)
     })
 
     it('never reports recording and paused at the same time', () => {
@@ -962,13 +1094,13 @@ describe('WebCodecsRecorder', () => {
 
     it('excludes paused time from the duration, live and after resume', () => {
       recorder.start()
-      vi.advanceTimersByTime(1000)
+      now += 1000
       recorder.pause()
-      vi.advanceTimersByTime(5000)
+      now += 5000
       expect(recorder.getDuration()).toBeCloseTo(1, 1)
 
       recorder.resume()
-      vi.advanceTimersByTime(1000)
+      now += 1000
       expect(recorder.getDuration()).toBeCloseTo(2, 1)
     })
   })

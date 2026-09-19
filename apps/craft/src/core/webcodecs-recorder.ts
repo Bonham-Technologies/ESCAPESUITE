@@ -90,10 +90,23 @@ export class WebCodecsRecorder {
   // countdown. Never reset — a WebCodecsRecorder records one take.
   private hasStarted = false;
   private isPausedState = false;
+  // All three are `performance.now()` milliseconds — the one monotonic clock
+  // getDuration() and the frame timestamps (nextFrameTiming) both read, so the
+  // duration shown and the length muxed come from the same source. They are
+  // not identical: the controller reads getDuration() after stop() has flushed
+  // and finalised, a little past the last frame — see apps/craft/CLAUDE.md.
   private startTime = 0;
   private pausedDuration = 0;
   private pauseStartTime = 0;
+  /** Frames encoded so far. Nothing reads it — it is kept deliberately, as the
+   *  one running count of a take's captured frames, for the next thing that
+   *  wants recorder stats. It no longer decides timing (see nextFrameTiming). */
   private frameCount = 0;
+  /** Microsecond timestamp of the last frame handed to the encoder; -1 before
+   *  the first, so a take that starts on the clock's own zero still stamps 0. */
+  private lastFrameTimestampUs = -1;
+  /** Recording-clock microsecond mark at which the next keyframe is due. */
+  private nextKeyFrameUs = 0;
   private audioTimestamp = 0;
 
   // Frame capture (for fallback method)
@@ -382,9 +395,11 @@ export class WebCodecsRecorder {
     this.isRecordingActive = true;
     this.hasStarted = true;
     this.isPausedState = false;
-    this.startTime = Date.now();
+    this.startTime = performance.now();
     this.pausedDuration = 0;
     this.frameCount = 0;
+    this.lastFrameTimestampUs = -1;
+    this.nextKeyFrameUs = 0;
     this.audioTimestamp = 0;
 
     const frameDurationUs = Math.round((1 / this.frameRate) * 1_000_000);
@@ -392,7 +407,7 @@ export class WebCodecsRecorder {
     if (usingTrackProcessor && this.frameReader) {
       // Use MediaStreamTrackProcessor for direct frame access
       this.frameReaderActive = true;
-      this.startTrackProcessorCapture(frameDurationUs);
+      this.startTrackProcessorCapture();
     } else if (usingVideoElement) {
       // Fallback to video element + canvas approach
       this.startVideoElementCapture(frameDurationUs);
@@ -402,9 +417,57 @@ export class WebCodecsRecorder {
   }
 
   /**
+   * Decide the timestamp and keyframe flag for the frame being captured right
+   * now. All three capture paths go through here, so they cannot drift apart.
+   *
+   * The timestamp is the **recording clock at capture** — elapsed since
+   * `start()`, paused time excluded — and not the frame index times a nominal
+   * frame duration. `getDisplayMedia` does not promise 30fps: a window or
+   * screen capture routinely delivers 5-15 frames a second, and counting
+   * frames made N of them span N x 33.3ms however long they really took. A
+   * 60 s take at 15fps came out as a 30 s video track against 60 s of audio:
+   * playback at 2x with the audio lagging.
+   *
+   * Two rules on top of the clock:
+   * - **Strictly increasing.** Two frames inside one tick of a coarse or
+   *   frozen `performance.now()` would otherwise be stamped the same, so the
+   *   second takes previous + 1us. This is an **encoder-level** guard:
+   *   `VideoEncoder` is fed a monotonically increasing presentation timeline
+   *   and a zero-delta frame is a meaningless presentation. It is not a
+   *   container-level one — Mediabunny only throws when a timestamp is below
+   *   the largest of the *previous GOP*, and its WebM muxer rounds each
+   *   timestamp to a whole millisecond anyway, so 1us apart and identical land
+   *   on the same block timecode.
+   * - **A keyframe once per elapsed second**, not once per 30 frames. The
+   *   count-based rule only meant one a second while the source really ran at
+   *   30fps; at 10fps it was one every three seconds, and seeking suffered
+   *   for it. Note a resume is not forced to be a keyframe: a pause consumes
+   *   no recording clock, so the frame after it is keyed only if a second of
+   *   *recording* has passed since the last one.
+   *
+   * `now` is the reading of the clock the caller has already taken, where it
+   * has one: the track-processor path reads `performance.now()` for its
+   * throttle a few lines earlier, and reading it twice per frame both costs
+   * something per frame and lets the throttle and the stamp disagree.
+   */
+  private nextFrameTiming(now = performance.now()): { timestamp: number; keyFrame: boolean } {
+    const elapsedUs = Math.round((now - this.startTime - this.pausedDuration) * 1000);
+    const timestamp =
+      elapsedUs > this.lastFrameTimestampUs ? elapsedUs : this.lastFrameTimestampUs + 1;
+    this.lastFrameTimestampUs = timestamp;
+
+    const keyFrame = timestamp >= this.nextKeyFrameUs;
+    if (keyFrame) {
+      this.nextKeyFrameUs = timestamp + 1_000_000;
+    }
+
+    return { timestamp, keyFrame };
+  }
+
+  /**
    * Start frame capture using MediaStreamTrackProcessor (preferred method)
    */
-  private async startTrackProcessorCapture(frameDurationUs: number): Promise<void> {
+  private async startTrackProcessorCapture(): Promise<void> {
     if (!this.frameReader || !this.videoEncoder) return;
 
     const targetFrameInterval = 1000 / this.frameRate;
@@ -432,15 +495,13 @@ export class WebCodecsRecorder {
 
         if (this.videoEncoder && this.videoEncoder.state !== 'closed') {
           try {
-            // Create a new frame with controlled timestamp for consistent timing
-            const frame = new VideoFrame(sourceFrame, {
-              timestamp: this.frameCount * frameDurationUs,
-            });
+            // Re-stamp the frame with the recording clock (see nextFrameTiming),
+            // reusing the reading the throttle above already took.
+            const { timestamp, keyFrame } = this.nextFrameTiming(now);
+            const frame = new VideoFrame(sourceFrame, { timestamp });
             // Close source frame immediately - we've copied the data we need
             sourceFrame.close();
 
-            // Encode frame (keyframe every 1 second)
-            const keyFrame = this.frameCount % this.frameRate === 0;
             this.videoEncoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies the data it needs
             frame.close();
@@ -479,14 +540,15 @@ export class WebCodecsRecorder {
             // Draw current video frame to canvas
             this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
 
-            // Create VideoFrame from canvas
+            // Create VideoFrame from canvas, stamped with the recording clock
+            // (see nextFrameTiming). `duration` stays nominal: the muxer
+            // derives the real packet durations from the timestamps.
+            const { timestamp, keyFrame } = this.nextFrameTiming();
             const frame = new VideoFrame(this.canvas, {
-              timestamp: this.frameCount * frameDurationUs,
+              timestamp,
               duration: frameDurationUs,
             });
 
-            // Encode frame (keyframe every 1 second)
-            const keyFrame = this.frameCount % this.frameRate === 0;
             this.videoEncoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies data synchronously
             frame.close();
@@ -519,14 +581,15 @@ export class WebCodecsRecorder {
             // Draw current video frame to canvas
             this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
 
-            // Create VideoFrame from canvas
+            // Create VideoFrame from canvas, stamped with the recording clock
+            // (see nextFrameTiming). `duration` stays nominal: the muxer
+            // derives the real packet durations from the timestamps.
+            const { timestamp, keyFrame } = this.nextFrameTiming();
             const frame = new VideoFrame(this.canvas, {
-              timestamp: this.frameCount * frameDurationUs,
+              timestamp,
               duration: frameDurationUs,
             });
 
-            // Encode frame (keyframe every 1 second)
-            const keyFrame = this.frameCount % this.frameRate === 0;
             this.videoEncoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies data synchronously
             frame.close();
@@ -549,7 +612,7 @@ export class WebCodecsRecorder {
    */
   pause(): void {
     if (this.isRecordingActive && !this.isPausedState) {
-      this.pauseStartTime = Date.now();
+      this.pauseStartTime = performance.now();
       this.isPausedState = true;
       this.callbacks.onPause?.();
     }
@@ -560,7 +623,7 @@ export class WebCodecsRecorder {
    */
   resume(): void {
     if (this.isRecordingActive && this.isPausedState) {
-      this.pausedDuration += Date.now() - this.pauseStartTime;
+      this.pausedDuration += performance.now() - this.pauseStartTime;
       this.isPausedState = false;
       this.callbacks.onResume?.();
     }
@@ -627,12 +690,15 @@ export class WebCodecsRecorder {
    * Get the current recording duration in seconds.
    */
   getDuration(): number {
-    if (!this.startTime) return 0;
+    // Not `!this.startTime`: `performance.now()` legitimately returns 0 at the
+    // page's time origin, where `Date.now()` never could, and a take that
+    // started on that reading would otherwise report 0 seconds forever.
+    if (!this.hasStarted) return 0;
 
-    let elapsed = Date.now() - this.startTime - this.pausedDuration;
+    let elapsed = performance.now() - this.startTime - this.pausedDuration;
 
     if (this.isPausedState) {
-      elapsed -= Date.now() - this.pauseStartTime;
+      elapsed -= performance.now() - this.pauseStartTime;
     }
 
     return Math.max(0, elapsed / 1000);
