@@ -198,12 +198,20 @@ root-caused, and it is a real follow-up.** Until it is, read the numbers this wa
 > mix a single-run measurement against a three-run median, because a single run would be
 > the cheap first take.
 
-## Finding: the compositor holds ~23 fps against its own 30 fps target
+## Finding, fixed: the compositor held ~23 fps against its own 30 fps target
+
+*Everything from here to “The fix” below describes the code and the numbers as they stood
+at `7432e96`, in the present tense it was written in. Every `compositor.ts` line number in
+it is a line in that commit: `lastFrameTime` no longer exists, and the render loop, the
+gate and the `readyState` guards have all moved. Read it as the diagnosis, not as a
+description of the shipped code — and note that its closing prediction, that a fix would
+move `compositedFps` without moving `taskMsPerFrame`, turned out to be wrong; see “The
+fix”.*
 
 `compositedFps` comes out at **22.4–22.8**, not the 30 the `Compositor` asks for. That is
 not a measurement artefact and not a slow machine; it is the throttle's arithmetic.
 
-`Compositor.render` (`apps/craft/src/core/compositor.ts:148-157`) requests an animation
+`Compositor.render` (`apps/craft/src/core/compositor.ts:148-157` **at `7432e96`**) requests an animation
 frame every frame and then returns early unless
 `performance.now() - lastFrameTime >= 1000 / 30`, setting `lastFrameTime` to the *actual*
 draw time rather than to an ideal schedule.
@@ -221,7 +229,7 @@ So `now - lastFrameTime >= 1000 / 30` passes after two frames only if those two 
 measured at or *above* the ideal 16.6667 ms each, and fails the moment they measure a
 nanosecond below it. Nothing about that is a close call the machine usually wins: the
 comparison is decided entirely by dispatch jitter, and `lastFrameTime` is snapped to the
-callback's own `performance.now()` (`compositor.ts:153-154`) rather than to vsync, so the
+callback's own `performance.now()` (`compositor.ts:153-154` at `7432e96`) rather than to vsync, so the
 error does not cancel between frames. A pair that lands below waits for a **third** animation
 frame and that composited frame arrives at 50 ms instead of 33 ms.
 
@@ -240,7 +248,7 @@ Two consequences:
   enforced rather than asserted in prose.** `drawFrame` draws the screen video and
   `drawWebcamOverlay` draws the webcam video, one `drawImage` each, **inside one synchronous
   rAF callback** — so a counter snapshot can never land between them. Each draw is guarded
-  on its element's `readyState >= 2` (`compositor.ts:170`, `:175`), so a frame composited
+  on its element's `readyState >= 2` (`compositor.ts:170`, `:175` at `7432e96`), so a frame composited
   while a capture element has no decoded frame yields one draw or none, which would
   understate `compositedFps` and overstate `taskMsPerFrame` by the same factor. The PiP arm
   therefore asserts `videoDraws % 2 === 0`, and the screen arm asserts `videoDraws === 0`
@@ -252,6 +260,90 @@ Two consequences:
   A deadline-based gate (advance `lastFrameTime` by the frame interval rather than snapping
   it to `now`, with a catch-up clamp) is the obvious shape. **No app code was changed for
   this baseline**; it is recorded here to be fixed on its own ticket.
+
+### The fix (ESCSUITE-54, 2026-09-19)
+
+`Compositor.render` now holds a deadline, `nextFrameDue`, and draws when
+`now >= nextFrameDue - FRAME_TOLERANCE_MS` with `FRAME_TOLERANCE_MS = 4`. The deadline is
+advanced **by one frame interval from the schedule** rather than from the drawing frame's
+own clock, so jitter no longer accumulates; a gap longer than a frame interval resyncs it
+to `now + frameInterval` instead, so a hidden tab or a GC pause comes back to one draw per
+interval rather than to a burst. 4 ms exceeds real dispatch jitter and is well under one
+60 Hz tick, so two consecutive *evenly spaced* ticks still cannot both draw; under
+non-uniform jitter two adjacent ticks occasionally can, which is a cadence wobble and not a
+rate breach — the deadline advances a full interval per draw, so the mean rate cannot
+exceed the target whatever the spacing. `start()` leaves
+`nextFrameDue` at 0, which is always in the past, so the first frame is still painted
+immediately. See `apps/craft/CLAUDE.md`, "The PiP frame gate".
+
+**Measured by paired alternation** — old gate, new gate, old, new, run **sequentially**
+against one warm ESCAPECRAFT dev server on 5174, `craft-recording -g "PiP"`, three takes
+per arm reported as the median, same machine and launch args as the baseline above.
+
+**Validity of the arms.** All twelve takes had `longTaskCount` **0**, and eleven of the
+twelve had `rafPerSecond` within **0.5%** of 120. The twelfth — Old A run 2, at 117.83, or
+**−1.81%** — is the widest deviation in the set, so the honest band is “one take at
+117.8, the other eleven within 0.5%” rather than a flat ±1%. It does not touch the result:
+that run is not the median for any reported metric except `taskMsPerFrame`, Old A's median
+`compositedFps` (22.78) comes from run 3 at `rafPerSecond` 120.30, and Old B — whose takes
+are all within 0.4% — gives the same answer.
+
+(Two earlier attempts were discarded outright: another workload on this machine had dropped
+`rafPerSecond` to 40–60 and put 12–19 long tasks in a 5 s window, which halves
+`compositedFps` in *both* arms and measures the machine rather than the gate.)
+
+| Metric (per-metric median of 3) | Old A | Old B | New A | New B |
+| --- | --- | --- | --- | --- |
+| **Composited fps** | 22.78 | 22.37 | **29.97** | **29.98** |
+| Video draws | 228 | 224 | 300 | 300 |
+| **Renderer task per frame** | 34.67 ms | 35.27 ms | 26.63 ms | 26.69 ms |
+| Renderer task duration | 3992.49 ms | 3981.95 ms | 3993.81 ms | 4004.59 ms |
+| Animation frames/s | 120.16 | 120.21 | 119.89 | 119.92 |
+| Long tasks | 0 | 0 | 0 | 0 |
+
+Each column is a **per-metric** median, so a row can come from a different take than the
+one above it — Old A's `taskMsPerFrame` is run 2's while its `compositedFps` and
+`taskDurationMs` are run 3's, which is why 3992.49 / (22.78 × 5) = 35.05 rather than the
+34.67 in the table. That is the right way to take these medians and the wrong way to divide
+the rows into each other. All twelve takes, so the medians and the validity claim above are
+checkable:
+
+| Arm | Run | `compositedFps` | `videoDraws` | `taskMsPerFrame` | `taskDurationMs` | `rafPerSecond` | Long tasks |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Old A | 1 | 22.76 | 228 | 17.337 ms | 1978.04 ms | 120.16 | 0 |
+| Old A | 2 | 23.17 | 232 | 34.667 ms | 4019.70 ms | 117.83 | 0 |
+| Old A | 3 | 22.78 | 228 | 35.025 ms | 3992.49 ms | 120.30 | 0 |
+| New A | 1 | 29.92 | 300 | 14.888 ms | 2233.82 ms | 120.09 | 0 |
+| New A | 2 | 29.97 | 300 | 26.896 ms | 4034.18 ms | 119.89 | 0 |
+| New A | 3 | 29.97 | 300 | 26.628 ms | 3993.81 ms | 119.48 | 0 |
+| Old B | 1 | 22.37 | 224 | 17.614 ms | 1972.50 ms | 119.83 | 0 |
+| Old B | 2 | 21.97 | 220 | 36.597 ms | 4028.64 ms | 120.24 | 0 |
+| Old B | 3 | 22.56 | 226 | 35.268 ms | 3981.95 ms | 120.21 | 0 |
+| New B | 1 | 29.97 | 300 | 14.947 ms | 2243.03 ms | 120.26 | 0 |
+| New B | 2 | 29.98 | 300 | 27.020 ms | 4053.27 ms | 119.92 | 0 |
+| New B | 3 | 29.98 | 300 | 26.692 ms | 4004.59 ms | 119.91 | 0 |
+
+Run 1 of every arm is the cheap first take of a session — this file's own second finding,
+still open — which is why the median and not the mean is the reported figure. It behaves
+identically in both arms.
+
+`compositedFps` goes to the target it always asked for: **22.4–22.8 → 30.0**, +32%, and
+`videoDraws` is 300 exactly — 30 composited frames a second over a 5 s window, each drawing
+its two videos, so the `videoDraws % 2 === 0` tripwire still holds.
+
+**`taskDurationMs` did not rise, which the fix's own reasoning did not predict.** Drawing
+31% more frames was expected to cost roughly 31% more renderer time; instead the total is
+flat (3992/3982 ms old against 3994/4005 ms new, inside the arms' own spread) and
+`taskMsPerFrame` *falls* 23%, from ~35 ms to ~26.6 ms. The honest reading is that the
+composite itself is a small part of what the renderer is doing in this window — the
+synthetic 33 ms capture painter, MediaRecorder's plumbing and React are the rest — so the
+extra draws fit in slack that was already being paid for, and the per-frame figure improves
+because its denominator grew while its numerator did not. **That mechanism is inferred from
+the flat total, not confirmed by a CPU profile** — `PERF_PROFILE=1 pnpm perf` would settle
+it and was not run. What *is* measured, and all the claim needs, is that the total did not
+move: the fix did not make the page more expensive. `taskMsPerFrame` is therefore
+**not** the invariant here that the plan expected it to be; `taskDurationMs` is. A machine
+with no slack left would show the opposite, and that is the number to watch on one.
 
 ## How to read these
 
@@ -359,9 +451,10 @@ other number in the tables is definitionally unchanged.
 
 ## Follow-ups this baseline opens
 
-1. **The compositor's frame gate** (see the finding above): ~23 fps where 30 is intended, on
-   a throttle whose gate is bit-for-bit two 60 Hz frame intervals, so any dispatch jitter
-   costs a whole frame. A user-visible frame loss in every PiP recording.
+1. ~~**The compositor's frame gate**~~ — **fixed**, ESCSUITE-54, 2026-09-19. ~23 fps where
+   30 was intended, on a throttle whose gate was bit-for-bit two 60 Hz frame intervals, so
+   any dispatch jitter cost a whole frame. Now a deadline gate with a 4 ms tolerance and a
+   stall resync: 22.4–22.8 → 30.0 composited fps, paired numbers under the finding above.
 2. **The first-take step**: the first take of a session costs ~0.9 s of renderer task in a
    5 s window and every later take ~4.1 s, once, permanently, and not because of the
    recordings list or the harness. Not root-caused.

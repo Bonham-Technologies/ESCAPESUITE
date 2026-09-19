@@ -82,8 +82,17 @@ export function useRecordingSave({
     }
     capturedThumbnailRef.current = null; // Clear for next recording
 
-    // Use recorded duration if metadata extraction failed
-    const duration = metadata.duration > 0 ? metadata.duration : recordedDuration;
+    // Use recorded duration if metadata extraction failed. Both halves matter:
+    // `> 0` rejects the zero a failed extraction reports, and `isFinite`
+    // rejects the `Infinity` an unrepaired MediaRecorder WebM reports for its
+    // duration — which `> 0` alone would accept and store as the take's length.
+    // `extractVideoMetadata` already maps a non-finite duration to the timed
+    // one, so nothing delivers that today; this is the hook's own contract, not
+    // a dependence on the helper staying that way.
+    const duration =
+      Number.isFinite(metadata.duration) && metadata.duration > 0
+        ? metadata.duration
+        : recordedDuration;
 
     const sourceVideo = buildSourceVideo({
       id,

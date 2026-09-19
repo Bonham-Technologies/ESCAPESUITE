@@ -113,6 +113,28 @@ describe('useRecordingSave containers', () => {
     const [meta] = await getRecordingsMetadata()
     expect(meta).toMatchObject({ duration: 95, width: 640, height: 480 })
   })
+
+  // ESCSUITE-57. An unrepaired MediaRecorder WebM reports `Infinity` for its
+  // duration, and `Infinity > 0` is true — so a `> 0` guard on its own accepts
+  // it and stores a recording whose length is not a number anyone can use.
+  // `core/thumbnailGenerator.extractVideoMetadata` already maps a non-finite
+  // duration to the timed one, so the real save path never delivers this; the
+  // guard is the hook's own contract, and it should not depend on a helper it
+  // does not own staying that way.
+  it('falls back to the timed duration when the file reports an infinite one', async () => {
+    thumbnailModule.extractVideoMetadata.mockResolvedValue({
+      duration: Infinity,
+      width: 640,
+      height: 480,
+    })
+    const { result } = mountSave()
+
+    await result.current(RAW, 12)
+
+    expect(added[0].duration).toBe(12)
+    const [meta] = await getRecordingsMetadata()
+    expect(meta).toMatchObject({ duration: 12, width: 640, height: 480 })
+  })
 })
 
 describe('useRecordingSave thumbnails', () => {

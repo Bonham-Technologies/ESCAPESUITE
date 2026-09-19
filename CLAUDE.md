@@ -317,8 +317,9 @@ no browser) in CI's `test` job.
 
 ESCAPECRAFT's own baseline — the three benchmarks above over three consecutive `pnpm perf`
 invocations, what each metric means, and the two findings the first measurement turned up
-(the compositor holding ~23 fps against its own 30 fps target, and the first take of a
-session costing a quarter of what every later take costs) — is in
+(the compositor holding ~23 fps against its own 30 fps target, **fixed** by ESCSUITE-54 and
+now 30.0 with the paired before/after in the same file; and the first take of a session
+costing a quarter of what every later take costs, still open) — is in
 [docs/performance/2026-09-17-craft-baseline.md](docs/performance/2026-09-17-craft-baseline.md).
 
 Baseline numbers, the machine they came from and the launch args they used live in
