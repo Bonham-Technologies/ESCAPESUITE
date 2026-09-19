@@ -358,17 +358,33 @@ draw".** That distinction is the whole of ESCSUITE-54, and it is worth keeping:
 
 So `render` holds `nextFrameDue`, draws when `now >= nextFrameDue - FRAME_TOLERANCE_MS`, and
 advances `nextFrameDue` **by one frame interval from the schedule**, not from `now`. Two
-constants carry the design:
+decisions carry the design:
 
 - `FRAME_TOLERANCE_MS = 4` — how early a tick may run a frame due on the next tick. It has
-  to exceed real dispatch jitter and stay well under one 60 Hz tick (16.7 ms), or two
-  consecutive ticks could both qualify. `compositor.test.ts` asserts both halves: 60
-  jittered ticks draw exactly 30 frames, and no two adjacent ticks ever both draw.
+  to exceed real dispatch jitter and stay well under one 60 Hz tick (16.7 ms). **One test
+  bounds it from both sides**: the `jittered` row of "never draws on two consecutive %s
+  60Hz ticks", which runs the invariant over `JITTER_CYCLE_MS`. Below ~0.5 ms the tolerance
+  stops absorbing the cycle's short pair and a second frame lands inside one
+  `captureStream` window; at or above ~16.5 ms a tick a whole frame early qualifies. Both
+  ends are red, so deleting the constant does not ship silently. The `evenly spaced` row of
+  the same test bounds **nothing** — see the note below — and the jitter *count* test bounds
+  nothing either: 60 jittered ticks draw exactly 30 frames at every tolerance from 0 to 20,
+  because it is the schedule-based advance and not the tolerance that fixes the count.
 - The **stall clamp**: if `now - nextFrameDue > frameInterval` the schedule is resynced to
   `now + frameInterval` instead of being advanced one interval at a time. Without it, a
   hidden tab or a long GC pause would come back owing fifteen frames and draw them back to
   back into a canvas nobody was sampling. Pinned by "resyncs after a stall instead of
-  bursting to catch up".
+  bursting to catch up" (which also goes red at a tolerance of 17 ms).
+
+**What the gate guarantees, and what it only usually does.** The unconditional property —
+the one to rely on — is that **the deadline advances a full interval per draw, so the mean
+draw rate can never exceed the target**, whatever the tick spacing. "No two consecutive
+ticks both draw" is weaker: it is exact for **evenly spaced** ticks (with `1000 / 30`
+bit-for-bit `2 * (1000 / 60)`, "the last tick did not draw" and "this tick draws" are exact
+complements, which is why that row of the test holds at *any* tolerance, 0 included), but
+under non-uniform jitter two adjacent ticks can both draw — measured at ±2 ms random
+jitter: at most 2 in a row, sustained rate 30.11 fps. That is a cadence wobble, not a rate
+breach, and it is why the mean-rate property is the one the design rests on.
 
 `start()` sets `nextFrameDue = 0`, which is always in the past, so the first frame is drawn
 immediately — `compositor.perf.test.ts` counts a second of 60 Hz ticks as exactly

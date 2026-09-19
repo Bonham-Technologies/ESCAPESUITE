@@ -13,7 +13,9 @@ against a 30 fps target. The gate is now a deadline with a 4 ms tolerance, advan
 schedule rather than from the drawing frame's clock, with a resync so a stalled tab catches
 up instead of bursting. A PiP recording gets the frames it was always supposed to.
 
-`useRecordingSave` also hardens its duration guard: `metadata.duration > 0` accepted the
-`Infinity` an unrepaired MediaRecorder WebM reports, so it is now
+`useRecordingSave` also hardens its duration guard. `metadata.duration > 0` on its own would
+accept the `Infinity` an unrepaired MediaRecorder WebM reports for its duration; nothing
+delivers that today — the metadata helper already maps a non-finite duration to the timed
+one — but the hook should not depend on it, so the guard is now
 `Number.isFinite(metadata.duration) && metadata.duration > 0`, falling back to the recorded
-duration as before.
+duration as before. No behaviour change on any recording you can currently make.

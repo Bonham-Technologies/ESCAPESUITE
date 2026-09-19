@@ -157,7 +157,7 @@ describe('Compositor', () => {
       const compositor = new Compositor(1280, 720)
       const ctx = ctxOf(compositor)
 
-      // start() renders immediately; performance.now() is far past lastFrameTime.
+      // start() renders immediately; performance.now() is far past nextFrameDue.
       compositor.start(30)
       const drawsAfterStart = ctx.calls.filter(c => c.method === 'fillRect').length
       expect(drawsAfterStart).toBe(1)
@@ -241,7 +241,23 @@ describe('Compositor', () => {
       compositor.stop()
     })
 
-    it('never draws on two consecutive ticks', () => {
+    // This invariant is what bounds FRAME_TOLERANCE_MS, and only the **jittered**
+    // row bounds it: run over `JITTER_CYCLE_MS` it fails below ~0.5 ms (the
+    // tolerance stops absorbing the jitter, and the cycle's short pair draws a
+    // second frame inside one captureStream window) and at or above ~16.5 ms
+    // (a tick a whole frame early qualifies). So the constant is pinned from
+    // both sides, and deleting it turns this red.
+    //
+    // The evenly spaced row bounds nothing — with `1000 / 30` bit-for-bit
+    // `2 * (1000 / 60)`, "the last tick did not draw" and "this tick draws" are
+    // exact complements for *any* tolerance, so it holds even at 0. It is kept
+    // because it is the cadence a real 60 Hz display delivers.
+    const ADJACENCY_CYCLES: Array<[string, number[]]> = [
+      ['evenly spaced', [RAF_INTERVAL_MS]],
+      ['jittered', JITTER_CYCLE_MS],
+    ]
+
+    it.each(ADJACENCY_CYCLES)('never draws on two consecutive %s 60Hz ticks', (_label, cycle) => {
       const compositor = new Compositor(1280, 720)
       const ctx = ctxOf(compositor)
       const draws = () => ctx.calls.filter(c => c.method === 'fillRect').length
@@ -252,7 +268,7 @@ describe('Compositor', () => {
       let drewLastTick = true
 
       for (let tick = 0; tick < 60; tick++) {
-        now += RAF_INTERVAL_MS
+        now += cycle[tick % cycle.length]
         tickAnimationFrames()
         const drewThisTick = draws() > drawn
         // The tolerance that absorbs jitter must not be wide enough to let a

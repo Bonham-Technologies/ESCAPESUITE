@@ -27,8 +27,13 @@ export class Compositor {
    * `1000 / 30` is bit-for-bit `2 * (1000 / 60)`, so without a tolerance two
    * 60 Hz animation frames clear a 30 fps deadline with *zero* margin and any
    * dispatch jitter below the ideal pushes the draw out to a third frame
-   * (50 ms instead of 33 ms). 4 ms is well under one 60 Hz tick, so it absorbs
-   * that jitter and still cannot let two consecutive ticks both draw.
+   * (50 ms instead of 33 ms). 4 ms absorbs that jitter and stays well under one
+   * 60 Hz tick, so two consecutive *evenly spaced* ticks still cannot both draw
+   * — under non-uniform jitter two adjacent ticks occasionally can, which is a
+   * cadence wobble and not a rate breach: the deadline advances a full interval
+   * per draw, so the mean rate can never exceed the target whatever the
+   * spacing. Both ends of the 4 are red in `compositor.test.ts`; see
+   * `apps/craft/CLAUDE.md`, "The PiP frame gate".
    */
   private static readonly FRAME_TOLERANCE_MS = 4;
 
