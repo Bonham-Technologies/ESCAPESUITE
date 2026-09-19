@@ -386,7 +386,10 @@ raising its statements floor 97 → 98 and its functions floor 98 → 100. All t
 `packages/shared` and ARTIST's export dialog dropped its own copy of the focus trap: that
 raised shared's branches floor 88 → 90 (the hook brings 24 fully covered branches), moved
 ARTIST up a fraction and no floor, and moved CRAFT down a fraction — it lost a file that
-was covered outright — with no floor crossed either way.
+was covered outright — with no floor crossed either way. `@escapesuite/artist` was re-measured
+2026-09-19 after the duration probe (headerless video, then audio: `extractVideoMetadata`'s
+seek-to-end fallback lifted into one helper both paths call) added tests that moved statements,
+branches and functions up a hundredth or two each, and no floor.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -394,7 +397,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.23 | 96.46 | 99.67 |
-| `@escapesuite/artist` | 99.37 | 98.66 | 93.28 | 98.93 |
+| `@escapesuite/artist` | 99.37 | 98.67 | 93.30 | 98.94 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
