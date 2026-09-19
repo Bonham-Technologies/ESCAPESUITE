@@ -9,4 +9,7 @@ ESCAPECRAFT is running inside an iframe: it posts `UPLOAD_RECORDING
 { id, name, blob }` to the parent window, handing over the stored blob itself
 by structured clone. A host that cannot reach the shared IndexedDB no longer
 has to. Standalone ESCAPECRAFT never draws the button — there would be no one
-to post to — and nothing leaves the machine either way.
+to post to — and nothing goes over the network either way. A host that offers
+this action should name itself with `?hostOrigin=`: without it the post is
+addressed to `'*'`, which hands the recording's bytes to whatever page is
+framing ESCAPECRAFT.

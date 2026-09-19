@@ -311,7 +311,11 @@ export function generateShareUrl(
  *   to post to. The Blob crosses by structured clone, so the host receives the
  *   file itself and does not need to reach into the shared IndexedDB; `id`
  *   still addresses the same record there, and `name` is the recording's name
- *   in the library, without an extension. See
+ *   in the library, without an extension. Unlike SEND_TO_EDITOR, whose id is
+ *   useless to a page that cannot reach CRAFT's origin, this message carries
+ *   the file itself - so with no ?hostOrigin= the '*' fallback hands the bytes
+ *   to whatever page is framing CRAFT, and a host that ships this action
+ *   should name its origin and set frame-ancestors. See
  *   apps/craft/src/utils/uploadToHost.ts.
  *
  * URL parameters (read once at startup, see parseUrlParams):

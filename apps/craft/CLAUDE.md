@@ -460,7 +460,13 @@ host**: embedded or not, it opens the editor itself. Only "Send to Editor" and
 "Upload to host", which hand over one specific recording, become messages.
 
 **`?hostOrigin=<origin>`**: when the host names its own origin on CRAFT's URL,
-the `SEND_TO_EDITOR` post is addressed to that origin instead of `'*'`. The
+both host-routed posts — `SEND_TO_EDITOR` and `UPLOAD_RECORDING` — are
+addressed to that origin instead of `'*'`. **A production host should always
+set it now that `UPLOAD_RECORDING` exists**: without it, `SEND_TO_EDITOR`'s
+`'*'` fallback hands an arbitrary framer an opaque id it cannot resolve (the
+database is same-origin to CRAFT), but `UPLOAD_RECORDING`'s hands that same
+framer the recording's **bytes**. A deployment that ships this action wants
+both — its own origin here, and `frame-ancestors` below. The
 value must be a bare origin (`https://host.example`); anything else is ignored
 with one console warning and the post falls back to `'*'`. The parser is
 `parseHostOrigin()` in `@escapesuite/shared/config`, shared with ESCAPEARTIST.

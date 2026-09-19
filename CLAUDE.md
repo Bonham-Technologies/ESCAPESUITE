@@ -161,7 +161,9 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
   applied only while the name is still the default `Untitled Project`).
 - **`?hostOrigin=<origin>`** (both apps): the host's own origin, e.g. `https://host.example`.
-  Recommended for production hosts. Outbound posts are addressed to it instead of `'*'`, and
+  Recommended for production hosts — and effectively required of a host that offers CRAFT's
+  "Upload to host", since the `'*'` fallback hands that message's **bytes**, not just an id, to
+  whatever page is framing CRAFT. Outbound posts are addressed to it instead of `'*'`, and
   ARTIST ignores inbound messages from anywhere else. It protects the **host's** deployment,
   not against being framed — a hostile page that frames the app also controls the URL and would
   supply its own origin; refusing to be framed is `Content-Security-Policy: frame-ancestors` on

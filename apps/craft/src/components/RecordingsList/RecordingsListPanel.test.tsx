@@ -6,7 +6,7 @@
 // there inside a frame, it is not there outside one, and what happens when
 // the blob the host asked for is no longer in storage.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RecordingsListPanel } from './RecordingsListPanel'
 import { useRecorderStore } from '../../store/recorderStore'
@@ -73,6 +73,46 @@ describe('RecordingsListPanel upload to host', () => {
 
     expect(uploadToHostMock).toHaveBeenCalledWith('r7', 'Take Seven')
     expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('says the same thing when the read itself throws', async () => {
+    // `getVideoBlob` reaches `getDB()`, which throws outright where IndexedDB
+    // is blocked or unreadable — the one case where the user would otherwise
+    // get an unhandled rejection and no feedback at all.
+    const user = userEvent.setup()
+    isEmbedded.mockReturnValue(true)
+    uploadToHostMock.mockRejectedValue(new Error('storage blocked'))
+    renderPanel()
+
+    await user.click(screen.getByRole('button', { name: 'Upload Take Seven to host' }))
+
+    expect(useRecorderStore.getState().notice).toBe(UPLOAD_UNAVAILABLE)
+  })
+
+  it('reads the recording once per click, however fast the clicks are', async () => {
+    // A take can be a gigabyte. Two clicks before the first read comes back
+    // would read it twice and post the host two copies of the same id.
+    const user = userEvent.setup()
+    isEmbedded.mockReturnValue(true)
+    let release: (value: 'posted') => void = () => {}
+    uploadToHostMock.mockReturnValue(
+      new Promise<'posted'>((resolve) => {
+        release = resolve
+      })
+    )
+    renderPanel()
+
+    const upload = screen.getByRole('button', { name: 'Upload Take Seven to host' })
+    await user.click(upload)
+    await user.click(upload)
+    expect(uploadToHostMock).toHaveBeenCalledTimes(1)
+
+    // …and the row is uploadable again once the first one is done.
+    await act(async () => {
+      release('posted')
+    })
+    await user.click(upload)
+    expect(uploadToHostMock).toHaveBeenCalledTimes(2)
   })
 
   it('says so through the one notice channel when the blob is gone', async () => {

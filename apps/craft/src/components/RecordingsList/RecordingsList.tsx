@@ -49,9 +49,10 @@ const MP4_NOTE_ID = 'mp4-note';
  * also be handed the file.
  *
  * Nothing here touches storage. The row knows the recording's id and name and
- * hands both to the caller, because playing, downloading, converting, handing
- * over to the editor and deleting all reach past this panel — into IndexedDB,
- * into the playback dialog, into the host page.
+ * hands both to the caller, because playing, downloading, converting,
+ * uploading to the host, handing over to the editor and deleting all reach
+ * past this panel — into IndexedDB, into the playback dialog, into the host
+ * page.
  *
  * Each action button is labelled with the recording's own name ("Play Standup
  * Demo"), so a screen reader can tell one row's buttons from the next's; the

@@ -364,9 +364,10 @@ test.describe('Host embedding contract', () => {
   })
 
   test('ESCAPECRAFT hands a recording\'s bytes to the host', async ({ page }) => {
-    test.setTimeout(90_000)
+    // Nothing is captured here — the recording is seeded — so the budget is
+    // the dev server's first compile of CRAFT inside the frame, not a take.
+    test.setTimeout(60_000)
 
-    await grantMediaPermissions(page)
     await openHostPage(page, CRAFT_ORIGIN)
     const recordingId = await seedCraftRecording(page, 'Seeded Recording')
 

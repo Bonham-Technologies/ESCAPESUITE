@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { isEmbedded } from '@escapesuite/shared/config';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
@@ -58,9 +59,31 @@ export function RecordingsListPanel({
   // Standalone CRAFT has no one to post to, so the action does not exist
   // there — the prop is simply absent and the button is never drawn.
   const embedded = isEmbedded();
+  // The ids whose blobs are being read right now. A take can be a gigabyte,
+  // so a second click before the first read returns would read it twice and
+  // hand the host two copies of the same recording. Per id rather than one
+  // flag, because one row's read is no reason to refuse another's — the
+  // narrower version of the "one at a time" rule `useMp4Download` needs for
+  // the conversion, which is CPU-bound where this is not. A ref, not state:
+  // nothing on screen changes, so nothing should re-render.
+  const uploadsInFlight = useRef(new Set<string>());
 
   const handleUploadToHost = async (id: string, name: string): Promise<void> => {
-    if ((await uploadToHost(id, name)) === 'missing') setNotice(UPLOAD_UNAVAILABLE);
+    if (uploadsInFlight.current.has(id)) return;
+    uploadsInFlight.current.add(id);
+    try {
+      if ((await uploadToHost(id, name)) === 'missing') setNotice(UPLOAD_UNAVAILABLE);
+    } catch {
+      // `getVideoBlob` reaches `getDB()`, which throws outright where
+      // IndexedDB is blocked or unreadable. That is the same answer as an
+      // absent blob as far as the user is concerned — the recording could not
+      // be read and nothing was sent — and saying nothing would be worse here
+      // than anywhere else, because the host, not CRAFT, is what would show a
+      // result.
+      setNotice(UPLOAD_UNAVAILABLE);
+    } finally {
+      uploadsInFlight.current.delete(id);
+    }
   };
 
   return (
