@@ -90,9 +90,11 @@ export class WebCodecsRecorder {
   // countdown. Never reset — a WebCodecsRecorder records one take.
   private hasStarted = false;
   private isPausedState = false;
-  // All four are `performance.now()` milliseconds — one monotonic clock for
-  // getDuration() and for the frame timestamps, so what the user is told the
-  // take is worth and what goes into the container cannot drift apart.
+  // All three are `performance.now()` milliseconds — the one monotonic clock
+  // getDuration() and the frame timestamps (nextFrameTiming) both read, so the
+  // duration shown and the length muxed come from the same source. They are
+  // not identical: the controller reads getDuration() after stop() has flushed
+  // and finalised, a little past the last frame — see apps/craft/CLAUDE.md.
   private startTime = 0;
   private pausedDuration = 0;
   private pauseStartTime = 0;
