@@ -9,9 +9,10 @@ import { grantMediaPermissions } from '../../utils/media-mocks'
  *
  * ESCAPEARTIST and ESCAPECRAFT are designed to be dropped into someone else's
  * page in an iframe. That arrangement is a contract — the host expects `READY`
- * when the editor comes up, `EXPORT_COMPLETE` carrying the finished file, and
- * `SEND_TO_EDITOR` when a recording is handed over instead of a popup window;
- * the apps expect `?suppressRestore=1` and `?title=` to be honoured. Unit tests
+ * when the editor comes up, `EXPORT_COMPLETE` carrying the finished file,
+ * `SEND_TO_EDITOR` when a recording is handed over instead of a popup window,
+ * and `UPLOAD_RECORDING` carrying a recording's own bytes; the apps expect
+ * `?suppressRestore=1` and `?title=` to be honoured. Unit tests
  * cover each half in isolation with a stubbed `window.parent`; only a real
  * frame proves the two halves meet.
  *
@@ -360,6 +361,30 @@ test.describe('Host embedding contract', () => {
       expect(complete.blobSize).toBeGreaterThan(1000)
       expect(complete.blobType).toContain('webm')
     })
+  })
+
+  test('ESCAPECRAFT hands a recording\'s bytes to the host', async ({ page }) => {
+    test.setTimeout(90_000)
+
+    await grantMediaPermissions(page)
+    await openHostPage(page, CRAFT_ORIGIN)
+    const recordingId = await seedCraftRecording(page, 'Seeded Recording')
+
+    const frame = await embed(page, '/')
+    // The button exists only because this CRAFT is framed — standalone CRAFT
+    // never draws it (RecordingsListPanel.test.tsx pins that half).
+    const upload = frame.getByRole('button', { name: 'Upload Seeded Recording to host' })
+    await expect(upload).toBeVisible({ timeout: 30_000 })
+
+    await upload.click()
+
+    const message = await waitForHostMessage(page, 'UPLOAD_RECORDING')
+    expect(message.id).toBe(recordingId)
+    expect(message.name).toBe('Seeded Recording')
+    // A real Blob crossed the frame boundary by structured clone — measured in
+    // the host page, because a Blob cannot survive the evaluate boundary.
+    expect(message.blobSize).toBeGreaterThan(0)
+    expect(message.blobType).toContain('webm')
   })
 
   test('ESCAPECRAFT posts SEND_TO_EDITOR instead of opening a window', async ({

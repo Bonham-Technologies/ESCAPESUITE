@@ -1,7 +1,7 @@
 import type { Mp4Conversion } from '../../hooks/useMp4Download';
 import type { Recording } from '../../store/types';
 import { formatDuration } from '../../utils/recordingFormat';
-import { DownloadIcon, EditIcon, PlayIcon, RecordIcon, TrashIcon } from '../icons';
+import { DownloadIcon, EditIcon, PlayIcon, RecordIcon, TrashIcon, UploadIcon } from '../icons';
 import styles from '../../App.module.css';
 
 interface RecordingsListProps {
@@ -21,6 +21,14 @@ interface RecordingsListProps {
   onDownload: (id: string, name: string) => void;
   onDownloadMp4: (id: string, name: string) => void;
   onCancelMp4: () => void;
+  /**
+   * Hand the recording's bytes to the page embedding CRAFT, or absent when
+   * nothing is embedding it. The button exists exactly when this prop does:
+   * the panel asks `isEmbedded()`, this component only draws what it is
+   * given, and standalone CRAFT is therefore one prop short of an action it
+   * could not complete.
+   */
+  onUploadToHost?: (id: string, name: string) => void;
   onSendToEditor: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -37,7 +45,8 @@ const MP4_NOTE_ID = 'mp4-note';
 
 /**
  * The library panel: every saved take with its thumbnail, duration and size,
- * and the five things that can be done with it.
+ * and the five things that can be done with it — six inside a host, which can
+ * also be handed the file.
  *
  * Nothing here touches storage. The row knows the recording's id and name and
  * hands both to the caller, because playing, downloading, converting, handing
@@ -74,6 +83,7 @@ export function RecordingsList({
   onDownload,
   onDownloadMp4,
   onCancelMp4,
+  onUploadToHost,
   onSendToEditor,
   onDelete,
 }: RecordingsListProps) {
@@ -139,6 +149,16 @@ export function RecordingsList({
                   >
                     MP4
                   </button>
+                  {onUploadToHost && (
+                    <button
+                      className={styles.iconButton}
+                      onClick={() => onUploadToHost(recording.id, recording.name)}
+                      title="Upload to host"
+                      aria-label={`Upload ${recording.name} to host`}
+                    >
+                      <UploadIcon />
+                    </button>
+                  )}
                   <button
                     className={styles.iconButton}
                     onClick={() => onSendToEditor(recording.id)}

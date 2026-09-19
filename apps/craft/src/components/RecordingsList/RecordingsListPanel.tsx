@@ -1,5 +1,8 @@
+import { isEmbedded } from '@escapesuite/shared/config';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
+import { uploadToHost } from '../../utils/uploadToHost';
+import { UPLOAD_UNAVAILABLE } from '../../utils/notices';
 import { RecordingsList } from './RecordingsList';
 import type { Recording } from '../../store/types';
 
@@ -30,7 +33,10 @@ interface RecordingsListPanelProps {
  * probe answers, so neither costs this panel a render in flight.
  *
  * `RecordingsList` itself stays driven by props alone — its own test asserts
- * exactly that.
+ * exactly that. That is why "Upload to host" is decided here too: whether
+ * there is a host at all is not a property of a recording, and `isEmbedded()`
+ * is a `window.parent !== window` comparison, so asking it on every render
+ * costs less than remembering the answer.
  */
 export function RecordingsListPanel({
   recordings,
@@ -49,6 +55,13 @@ export function RecordingsListPanel({
     setNotice,
     mp4Support,
   });
+  // Standalone CRAFT has no one to post to, so the action does not exist
+  // there — the prop is simply absent and the button is never drawn.
+  const embedded = isEmbedded();
+
+  const handleUploadToHost = async (id: string, name: string): Promise<void> => {
+    if ((await uploadToHost(id, name)) === 'missing') setNotice(UPLOAD_UNAVAILABLE);
+  };
 
   return (
     <RecordingsList
@@ -60,6 +73,9 @@ export function RecordingsListPanel({
       onDownload={onDownload}
       onDownloadMp4={(id, name) => void startMp4Download(id, name)}
       onCancelMp4={cancelMp4Download}
+      onUploadToHost={
+        embedded ? (id, name) => void handleUploadToHost(id, name) : undefined
+      }
       onSendToEditor={onSendToEditor}
       onDelete={onDelete}
     />

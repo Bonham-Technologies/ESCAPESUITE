@@ -304,6 +304,15 @@ export function generateShareUrl(
  *   CRAFT's header "Open Editor" button is deliberately NOT routed through the
  *   host - it still opens the editor itself, embedded or not. Only "Send to
  *   Editor", which hands over a specific recording, becomes a message.
+ * - UPLOAD_RECORDING: { id: string, name: string, blob: Blob } - A recording's
+ *   own bytes, handed to the host to do what it likes with (upload, attach,
+ *   keep). Posted only when CRAFT is embedded, from a per-row "Upload to host"
+ *   button that standalone CRAFT does not draw at all - there would be no one
+ *   to post to. The Blob crosses by structured clone, so the host receives the
+ *   file itself and does not need to reach into the shared IndexedDB; `id`
+ *   still addresses the same record there, and `name` is the recording's name
+ *   in the library, without an extension. See
+ *   apps/craft/src/utils/uploadToHost.ts.
  *
  * URL parameters (read once at startup, see parseUrlParams):
  * - video=<url> - Load a video from a URL (repeatable)
