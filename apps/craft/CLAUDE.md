@@ -286,7 +286,8 @@ the Help button.
   `'webcodecs' | 'mediarecorder'`, which is what the controller puts in `recorderTypeRef`
   and what the save path branches on to decide whether the blob needs repairing
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
-- `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen
+- `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen, throttled to
+  the take's target frame rate by the deadline gate described under "The PiP frame gate"
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction. Its size, type
   and quality constants are **imported from `utils/previewThumbnail.ts`**, not declared here:
   five suites (`App.settings`, `App.saving`, `App.recording`, `App.library`,
@@ -335,6 +336,43 @@ Enhanced capability detection with detailed unavailability reasons:
 
 Which sources are captured is `src/hooks/useMediaStreams.ts`; what is done with them — countdown,
 start, pause, resume, stop, cancel and teardown — is `src/hooks/useRecordingController.ts`.
+
+### The PiP frame gate
+
+Only Picture-in-Picture composites. `Compositor.render` requests an animation frame every
+frame — 60 a second on an ordinary display — and draws on a fraction of them, because
+`canvas.captureStream(frameRate)` samples the canvas at the take's frame rate (30 by
+default) and drawing faster is work thrown away.
+
+**The gate is a deadline with a tolerance, not "has a frame interval elapsed since the last
+draw".** That distinction is the whole of ESCSUITE-54, and it is worth keeping:
+
+- `1000 / 30` is not merely close to two 60 Hz ticks, it is **bit-for-bit the same IEEE 754
+  double** as `2 * (1000 / 60)` (`node -e "console.log((1000/30) === 2*(1000/60))"` → `true`).
+  An elapsed-time gate therefore clears after two animation frames with *zero* margin, and
+  fails the instant dispatch jitter puts either frame a nanosecond under ideal.
+- Snapping the reference to the drawing frame's own `performance.now()` charges that miss
+  forward instead of letting it cancel, so the loop settles into a mix of 33 ms and 50 ms
+  gaps. Measured before the fix: **22.4–22.8 composited fps** against a 30 fps target, 2.63
+  animation frames per composited frame.
+
+So `render` holds `nextFrameDue`, draws when `now >= nextFrameDue - FRAME_TOLERANCE_MS`, and
+advances `nextFrameDue` **by one frame interval from the schedule**, not from `now`. Two
+constants carry the design:
+
+- `FRAME_TOLERANCE_MS = 4` — how early a tick may run a frame due on the next tick. It has
+  to exceed real dispatch jitter and stay well under one 60 Hz tick (16.7 ms), or two
+  consecutive ticks could both qualify. `compositor.test.ts` asserts both halves: 60
+  jittered ticks draw exactly 30 frames, and no two adjacent ticks ever both draw.
+- The **stall clamp**: if `now - nextFrameDue > frameInterval` the schedule is resynced to
+  `now + frameInterval` instead of being advanced one interval at a time. Without it, a
+  hidden tab or a long GC pause would come back owing fifteen frames and draw them back to
+  back into a canvas nobody was sampling. Pinned by "resyncs after a stall instead of
+  bursting to catch up".
+
+`start()` sets `nextFrameDue = 0`, which is always in the past, so the first frame is drawn
+immediately — `compositor.perf.test.ts` counts a second of 60 Hz ticks as exactly
+`TARGET_FPS + 1` draws for that reason.
 
 ### Recorder lifecycle
 
@@ -729,8 +767,9 @@ the outcome, not on the double.
   is `compositedFps` because its encoding is off the main thread) and
   `craft-mp4-conversion` (`convertToMP4` driven through the row's own MP4 button). They
   measure and never assert; the ceilings above are the half that is enforced. Numbers, and
-  the two findings the first measurement produced, are in
-  `docs/performance/2026-09-17-craft-baseline.md`.
+  the two findings the first measurement produced — the compositor's frame gate, **fixed**
+  by ESCSUITE-54 with the paired before/after in that file, and the first-take step, still
+  open — are in `docs/performance/2026-09-17-craft-baseline.md`.
 - **Semicolon dialect is mixed, deliberately.** The suites the test decomposition added
   (`src/hooks/*.test.ts`, `src/utils/recordingFormat.test.ts`, and their siblings) omit
   line-ending semicolons; the older files (`src/App.library.test.tsx` and friends) carry them.

@@ -205,6 +205,92 @@ describe('Compositor', () => {
 
       compositor.stop()
     })
+
+    // ESCSUITE-54. The gate used to be `now - lastFrameTime < 1000 / 30` with
+    // `lastFrameTime` snapped to the drawing tick's own clock. `1000 / 30` is
+    // bit-for-bit `2 * (1000 / 60)`, so two 60Hz ticks clear it with *zero*
+    // margin: a pair that measures a nanosecond short waits for a third tick,
+    // and the miss is charged forward because the deadline moves with the late
+    // draw. Real takes composited 22.4-22.8 fps against a 30 fps target.
+    //
+    // A ±0.5 ms alternation does not reproduce it — every adjacent pair of an
+    // alternating jitter sums back to exactly two ideal ticks — so the jitter
+    // below runs on a three-tick cycle instead. Its mean is exactly 1000 / 60,
+    // no delta is more than 1 ms off ideal, and no two consecutive deltas sum
+    // to 1000 / 30.
+    const RAF_INTERVAL_MS = 1000 / 60
+    const JITTER_CYCLE_MS = [RAF_INTERVAL_MS - 0.5, RAF_INTERVAL_MS + 1, RAF_INTERVAL_MS - 0.5]
+
+    it('still draws 30 frames a second when 60Hz ticks jitter around the ideal interval', () => {
+      const compositor = new Compositor(1280, 720)
+      const ctx = ctxOf(compositor)
+      const draws = () => ctx.calls.filter(c => c.method === 'fillRect').length
+
+      compositor.start(30)
+      expect(draws()).toBe(1)
+
+      for (let tick = 0; tick < 60; tick++) {
+        now += JITTER_CYCLE_MS[tick % JITTER_CYCLE_MS.length]
+        tickAnimationFrames()
+      }
+
+      // One second of jittered 60Hz frames is 30 composited ones, on top of
+      // the frame start() paints immediately. The old gate drew 20.
+      expect(draws()).toBe(1 + 30)
+
+      compositor.stop()
+    })
+
+    it('never draws on two consecutive ticks', () => {
+      const compositor = new Compositor(1280, 720)
+      const ctx = ctxOf(compositor)
+      const draws = () => ctx.calls.filter(c => c.method === 'fillRect').length
+
+      compositor.start(30)
+      let drawn = draws()
+      // start() drew on the tick before the loop's first.
+      let drewLastTick = true
+
+      for (let tick = 0; tick < 60; tick++) {
+        now += RAF_INTERVAL_MS
+        tickAnimationFrames()
+        const drewThisTick = draws() > drawn
+        // The tolerance that absorbs jitter must not be wide enough to let a
+        // tick run a frame that is a whole tick away from being due.
+        expect(drewThisTick && drewLastTick).toBe(false)
+        drawn = draws()
+        drewLastTick = drewThisTick
+      }
+
+      compositor.stop()
+    })
+
+    it('resyncs after a stall instead of bursting to catch up', () => {
+      const compositor = new Compositor(1280, 720)
+      const ctx = ctxOf(compositor)
+      const draws = () => ctx.calls.filter(c => c.method === 'fillRect').length
+
+      compositor.start(30)
+      expect(draws()).toBe(1)
+
+      // A hidden tab, or a long GC pause: no animation frame for half a second.
+      now += 500
+      tickAnimationFrames()
+      expect(draws()).toBe(2)
+
+      // The fifteen frames that stall "owed" are never drawn: advancing the
+      // deadline by one interval at a time would burst here, so a gap longer
+      // than a frame resyncs the schedule to now instead. The loop goes
+      // straight back to one draw every other tick.
+      const expectedAfterStall = [2, 3, 3, 4, 4, 5]
+      for (const expected of expectedAfterStall) {
+        now += RAF_INTERVAL_MS
+        tickAnimationFrames()
+        expect(draws()).toBe(expected)
+      }
+
+      compositor.stop()
+    })
   })
 
   describe('drawing the screen layer', () => {

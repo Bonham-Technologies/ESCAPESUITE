@@ -198,7 +198,7 @@ root-caused, and it is a real follow-up.** Until it is, read the numbers this wa
 > mix a single-run measurement against a three-run median, because a single run would be
 > the cheap first take.
 
-## Finding: the compositor holds ~23 fps against its own 30 fps target
+## Finding, fixed: the compositor held ~23 fps against its own 30 fps target
 
 `compositedFps` comes out at **22.4–22.8**, not the 30 the `Compositor` asks for. That is
 not a measurement artefact and not a slow machine; it is the throttle's arithmetic.
@@ -252,6 +252,50 @@ Two consequences:
   A deadline-based gate (advance `lastFrameTime` by the frame interval rather than snapping
   it to `now`, with a catch-up clamp) is the obvious shape. **No app code was changed for
   this baseline**; it is recorded here to be fixed on its own ticket.
+
+### The fix (ESCSUITE-54, 2026-09-19)
+
+`Compositor.render` now holds a deadline, `nextFrameDue`, and draws when
+`now >= nextFrameDue - FRAME_TOLERANCE_MS` with `FRAME_TOLERANCE_MS = 4`. The deadline is
+advanced **by one frame interval from the schedule** rather than from the drawing frame's
+own clock, so jitter no longer accumulates; a gap longer than a frame interval resyncs it
+to `now + frameInterval` instead, so a hidden tab or a GC pause comes back to one draw per
+interval rather than to a burst. 4 ms exceeds real dispatch jitter and is well under one
+60 Hz tick, so two consecutive ticks still cannot both draw. `start()` leaves
+`nextFrameDue` at 0, which is always in the past, so the first frame is still painted
+immediately. See `apps/craft/CLAUDE.md`, "The PiP frame gate".
+
+**Measured by paired alternation** — old gate, new gate, old, new, run **sequentially**
+against one warm ESCAPECRAFT dev server on 5174, `craft-recording -g "PiP"`, three takes
+per arm reported as the median, same machine and launch args as the baseline above. Every
+one of the twelve takes had `longTaskCount` 0 and `rafPerSecond` within 1% of 120, so no
+arm is a contended one. (Two earlier attempts were discarded outright: another workload on
+this machine had dropped `rafPerSecond` to 40–60 and put 12–19 long tasks in a 5 s window,
+which halves `compositedFps` in *both* arms and measures the machine rather than the gate.)
+
+| Metric | Old A | Old B | New A | New B |
+| --- | --- | --- | --- | --- |
+| **Composited fps** | 22.78 | 22.37 | **29.97** | **29.98** |
+| Video draws | 228 | 224 | 300 | 300 |
+| **Renderer task per frame** | 34.67 ms | 35.27 ms | 26.63 ms | 26.69 ms |
+| Renderer task duration | 3992.49 ms | 3981.95 ms | 3993.81 ms | 4004.59 ms |
+| Animation frames/s | 120.16 | 120.21 | 119.89 | 119.92 |
+| Long tasks | 0 | 0 | 0 | 0 |
+
+`compositedFps` goes to the target it always asked for: **22.4–22.8 → 30.0**, +32%, and
+`videoDraws` is 300 exactly — 30 composited frames a second over a 5 s window, each drawing
+its two videos, so the `videoDraws % 2 === 0` tripwire still holds.
+
+**`taskDurationMs` did not rise, which the fix's own reasoning did not predict.** Drawing
+31% more frames was expected to cost roughly 31% more renderer time; instead the total is
+flat (3992/3982 ms old against 3994/4005 ms new, inside the arms' own spread) and
+`taskMsPerFrame` *falls* 23%, from ~35 ms to ~26.6 ms. The honest reading is that the
+composite itself is a small part of what the renderer is doing in this window — the
+synthetic 33 ms capture painter, MediaRecorder's plumbing and React are the rest — so the
+extra draws fit in slack that was already being paid for, and the per-frame figure improves
+because its denominator grew while its numerator did not. `taskMsPerFrame` is therefore
+**not** the invariant here that the plan expected it to be; `taskDurationMs` is. A machine
+with no slack left would show the opposite, and that is the number to watch on one.
 
 ## How to read these
 
@@ -359,9 +403,10 @@ other number in the tables is definitionally unchanged.
 
 ## Follow-ups this baseline opens
 
-1. **The compositor's frame gate** (see the finding above): ~23 fps where 30 is intended, on
-   a throttle whose gate is bit-for-bit two 60 Hz frame intervals, so any dispatch jitter
-   costs a whole frame. A user-visible frame loss in every PiP recording.
+1. ~~**The compositor's frame gate**~~ — **fixed**, ESCSUITE-54, 2026-09-19. ~23 fps where
+   30 was intended, on a throttle whose gate was bit-for-bit two 60 Hz frame intervals, so
+   any dispatch jitter cost a whole frame. Now a deadline gate with a 4 ms tolerance and a
+   stall resync: 22.4–22.8 → 30.0 composited fps, paired numbers under the finding above.
 2. **The first-take step**: the first take of a session costs ~0.9 s of renderer task in a
    5 s window and every later take ~4.1 s, once, permanently, and not because of the
    recordings list or the harness. Not root-caused.
