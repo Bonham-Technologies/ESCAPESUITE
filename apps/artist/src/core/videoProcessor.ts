@@ -381,37 +381,33 @@ export async function processImageFile(file: File): Promise<SourceVideo> {
 
 /**
  * Extract metadata from an audio file
+ *
+ * The length comes from `loadMediaDuration`, the same probe the video importer
+ * uses: an ESCAPECRAFT take recorded with no camera is raw MediaRecorder Opus
+ * in a WebM with no Duration element, so it reports `Infinity` (or `0`) on
+ * `loadedmetadata` here exactly as it does there, and an unchecked read builds
+ * an infinitely long audio clip.
  */
 export async function extractAudioMetadata(file: File): Promise<SourceVideo> {
-  return new Promise((resolve, reject) => {
-    const audio = document.createElement('audio');
-    audio.preload = 'metadata';
+  const audio = document.createElement('audio');
+  audio.preload = 'metadata';
 
-    const objectUrl = URL.createObjectURL(file);
-    audio.src = objectUrl;
+  const objectUrl = URL.createObjectURL(file);
+  audio.src = objectUrl;
 
-    audio.onloadedmetadata = () => {
-      const metadata: SourceVideo = {
-        id: uuidv4(),
-        name: file.name,
-        duration: audio.duration,
-        width: 0, // Audio has no dimensions
-        height: 0,
-        frameRate: 0, // Not applicable for audio
-        mimeType: file.type,
-        size: file.size,
-        mediaType: 'audio',
-      };
+  const duration = await loadMediaDuration(audio, objectUrl, file.name, 'audio');
 
-      URL.revokeObjectURL(objectUrl);
-      resolve(metadata);
-    };
-
-    audio.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Failed to load audio: ${file.name}`));
-    };
-  });
+  return {
+    id: uuidv4(),
+    name: file.name,
+    duration,
+    width: 0, // Audio has no dimensions
+    height: 0,
+    frameRate: 0, // Not applicable for audio
+    mimeType: file.type,
+    size: file.size,
+    mediaType: 'audio',
+  };
 }
 
 /**

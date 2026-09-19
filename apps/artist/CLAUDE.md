@@ -74,11 +74,11 @@ pnpm lint                # Run ESLint
   `TypeError` on a non-finite `currentTime` (WebIDL `double`), the throw happens inside the
   element's own event handler where no `try/catch` up the stack can see it, and the thumbnail
   promise never settles — so the media row sat on "Processing…" for ever.
-  `extractVideoMetadata` now seeks to `Number.MAX_SAFE_INTEGER` (browsers clamp to the end;
+  `loadMediaDuration` now seeks to `Number.MAX_SAFE_INTEGER` (browsers clamp to the end;
   Chromium scans the container to find it), listens for both `durationchange` and `seeked`, and
   takes the first usable — finite, positive, and **not the seek target itself**, which an
-  un-clamped browser would report straight back — value of `video.duration`, else of
-  `video.currentTime` (the position the seek clamped to, which is all some browsers reveal). A
+  un-clamped browser would report straight back — value of the element's `duration`, else of its
+  `currentTime` (the position the seek clamped to, which is all some browsers reveal). A
   usable duration on `loadedmetadata` resolves immediately with no seek; nothing usable within 5 s
   rejects with `Could not determine the duration of <name>`, which `VideoUploader` shows verbatim
   in the file's upload row. One `release()` is the single settle path, so the probe is torn down
@@ -86,6 +86,12 @@ pnpm lint                # Run ESLint
   `toHaveBeenCalledTimes(1)` on the success, timeout and error paths. `processVideoFile` passes the
   thumbnail time explicitly as `metadata.duration * 0.1`, because `generateThumbnail` loads its own
   element and would read the same `Infinity`.
+  **`extractAudioMetadata` shares the probe**: `loadMediaDuration(element, objectUrl, name, kind)`
+  is the one implementation both importers call — an ESCAPECRAFT take recorded with no camera is
+  the same headerless WebM, just Opus-only, and used to build an infinitely long *audio* clip
+  (no hang, since the audio path never seeks, but the same wrong length). Only the word in the
+  failure message differs: `Failed to load audio: <name>` against the video path's
+  `Failed to load video: <name>`, with `Could not determine the duration of <name>` shared.
   **The stored path needs the same guard**: the `?loadVideo=` handoff from ESCAPECRAFT
   (`app/useHostIntegration.ts`) adds a recording from its stored metadata and never calls
   `extractVideoMetadata`, and CRAFT stores `Infinity` in preference to its own wall clock (its
@@ -94,7 +100,9 @@ pnpm lint                # Run ESLint
   handoff cannot build an infinite clip either. The `<video>` double
   (`src/test/doubles/media.ts`) models the discovery with `durationAfterSeek` /
   `durationStaysUnknown`, and throws on a non-finite `currentTime` the way a browser does, so this
-  class of hang is caught by the unit suite rather than only in a browser.
+  class of hang is caught by the unit suite rather than only in a browser. The `<audio>` double
+  shares that one `currentTime` setter (`SeekScript`, which both `VideoScript` and `AudioScript`
+  extend), so the two importers cannot drift apart in the tests either.
 - `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
   - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
