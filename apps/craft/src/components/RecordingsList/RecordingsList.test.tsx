@@ -33,7 +33,10 @@ function renderList(
     mp4Converting?: Mp4Conversion | null
     mp4BlockedReason?: string | null
     mp4Note?: string | null
-  } = {}
+  } = {},
+  // Absent by default, because that is what standalone CRAFT passes: no host,
+  // no button. The panel is what decides; this component only draws.
+  onUploadToHost?: (id: string, name: string) => void
 ) {
   const calls = {
     onPlay: vi.fn<(id: string, name: string) => void>(),
@@ -49,6 +52,7 @@ function renderList(
       mp4Converting={mp4.mp4Converting ?? null}
       mp4BlockedReason={mp4.mp4BlockedReason ?? null}
       mp4Note={mp4.mp4Note ?? null}
+      onUploadToHost={onUploadToHost}
       {...calls}
     />
   )
@@ -288,5 +292,57 @@ describe('RecordingsList MP4 downloads', () => {
       'title',
       'Converting to MP4…'
     )
+  })
+})
+
+describe('RecordingsList upload to host', () => {
+  const onUploadToHost = vi.fn<(id: string, name: string) => void>()
+
+  it('offers no upload button when it is given no handler', () => {
+    // Standalone CRAFT: there is no host to post to, so the action does not
+    // exist. This component never asks whether it is embedded — the absence
+    // of the prop IS the answer, and that is the whole props-only contract.
+    renderList([makeRecording({ name: 'Standup Demo' })])
+
+    expect(screen.queryByRole('button', { name: /to host$/ })).toBeNull()
+  })
+
+  it('offers the upload named after its recording when it is given a handler', () => {
+    renderList([makeRecording({ name: 'Standup Demo' })], {}, onUploadToHost)
+
+    const upload = screen.getByRole('button', { name: 'Upload Standup Demo to host' })
+    expect(upload).toHaveAttribute('title', 'Upload to host')
+    expect(upload).toHaveClass(styles.iconButton)
+  })
+
+  it('uploads by id and name, so the host can name the file it receives', async () => {
+    const user = userEvent.setup()
+    renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {}, onUploadToHost)
+
+    await user.click(screen.getByRole('button', { name: 'Upload Take Seven to host' }))
+
+    expect(onUploadToHost).toHaveBeenCalledWith('r7', 'Take Seven')
+  })
+
+  it('sits between the MP4 download and the editor handoff', async () => {
+    // Downloads first, then the two ways out of CRAFT (host, editor), then
+    // delete. The order is what a keyboard user tabs through.
+    const { container } = renderList(
+      [makeRecording({ name: 'Take Seven' })],
+      {},
+      onUploadToHost
+    )
+
+    const labels = [
+      ...container.querySelectorAll<HTMLElement>(`.${styles.recordingActions} button`),
+    ].map((button) => button.getAttribute('aria-label'))
+    expect(labels).toEqual([
+      'Play Take Seven',
+      'Download Take Seven',
+      'Download Take Seven as MP4',
+      'Upload Take Seven to host',
+      'Open Take Seven in Editor',
+      'Delete Take Seven',
+    ])
   })
 })

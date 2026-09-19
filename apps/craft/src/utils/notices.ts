@@ -43,3 +43,13 @@ export const MP4_SAVED_WITHOUT_AUDIO =
  * Cancelling a conversion raises nothing: see `useMp4Download`.
  */
 export const mp4ConversionFailed = (message: string) => `MP4 conversion failed: ${message}`
+
+/**
+ * Said when "Upload to host" found nothing to send: the row is drawn from
+ * metadata the store still holds, and the bytes it names were not in storage.
+ * Only an embedded CRAFT can raise it — see `utils/uploadToHost.ts`. Silence
+ * would be indistinguishable from a successful hand-over, since the host, not
+ * CRAFT, is what shows the result.
+ */
+export const UPLOAD_UNAVAILABLE =
+  'That recording could not be read from your library — nothing was sent to the host.'

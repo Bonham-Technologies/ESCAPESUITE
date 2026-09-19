@@ -21,6 +21,7 @@ import {
   EditIcon,
   TrashIcon,
   DownloadIcon,
+  UploadIcon,
 } from './icons'
 
 function draw(element: ReactElement): SVGSVGElement {
@@ -44,6 +45,7 @@ const actionIcons: Array<[string, () => ReactElement]> = [
   ['EditIcon', EditIcon],
   ['TrashIcon', TrashIcon],
   ['DownloadIcon', DownloadIcon],
+  ['UploadIcon', UploadIcon],
 ]
 
 describe('source icons', () => {
@@ -99,6 +101,14 @@ describe('action icons', () => {
     expect(draw(<EditIcon />)).toHaveAttribute('stroke', 'currentColor')
     expect(draw(<TrashIcon />)).toHaveAttribute('stroke', 'currentColor')
     expect(draw(<DownloadIcon />)).toHaveAttribute('stroke', 'currentColor')
+    expect(draw(<UploadIcon />)).toHaveAttribute('stroke', 'currentColor')
+  })
+
+  it('points the upload arrow the opposite way from the download arrow', () => {
+    // The two sit in the same row of buttons, so the only thing telling them
+    // apart at a glance is which way the arrow goes.
+    expect(draw(<DownloadIcon />).querySelector('polyline')).toHaveAttribute('points', '7 10 12 15 17 10')
+    expect(draw(<UploadIcon />).querySelector('polyline')).toHaveAttribute('points', '17 8 12 3 7 8')
   })
 
   it('draws pause as two bars and play as one triangle', () => {

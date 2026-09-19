@@ -1,5 +1,9 @@
+import { useState } from 'react';
+import { isEmbedded } from '@escapesuite/shared/config';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
+import { uploadToHost } from '../../utils/uploadToHost';
+import { UPLOAD_UNAVAILABLE } from '../../utils/notices';
 import { RecordingsList } from './RecordingsList';
 import type { Recording } from '../../store/types';
 
@@ -30,7 +34,10 @@ interface RecordingsListPanelProps {
  * probe answers, so neither costs this panel a render in flight.
  *
  * `RecordingsList` itself stays driven by props alone — its own test asserts
- * exactly that.
+ * exactly that. That is why "Upload to host" is decided here too: whether
+ * there is a host at all is not a property of a recording, and `isEmbedded()`
+ * is a `window.parent !== window` comparison, so asking it on every render
+ * costs less than remembering the answer.
  */
 export function RecordingsListPanel({
   recordings,
@@ -49,6 +56,38 @@ export function RecordingsListPanel({
     setNotice,
     mp4Support,
   });
+  // Standalone CRAFT has no one to post to, so the action does not exist
+  // there — the prop is simply absent and the button is never drawn.
+  const embedded = isEmbedded();
+  // The ids whose blobs are being read right now. A take can be a gigabyte,
+  // so a second click before the first read returns would read it twice and
+  // hand the host two copies of the same recording. Per id rather than one
+  // flag, because one row's read is no reason to refuse another's — the
+  // narrower version of the "one at a time" rule `useMp4Download` needs for
+  // the conversion, which is CPU-bound where this is not. A ref, not state:
+  // nothing on screen changes, so nothing should re-render. The Set is built
+  // once through a lazy `useState` initialiser rather than `useRef(new Set())`,
+  // which would allocate and discard a Set on every render — and this panel
+  // renders on every MP4 progress tick.
+  const [uploadsInFlight] = useState(() => ({ current: new Set<string>() }));
+
+  const handleUploadToHost = async (id: string, name: string): Promise<void> => {
+    if (uploadsInFlight.current.has(id)) return;
+    uploadsInFlight.current.add(id);
+    try {
+      if ((await uploadToHost(id, name)) === 'missing') setNotice(UPLOAD_UNAVAILABLE);
+    } catch {
+      // `getVideoBlob` reaches `getDB()`, which throws outright where
+      // IndexedDB is blocked or unreadable. That is the same answer as an
+      // absent blob as far as the user is concerned — the recording could not
+      // be read and nothing was sent — and saying nothing would be worse here
+      // than anywhere else, because the host, not CRAFT, is what would show a
+      // result.
+      setNotice(UPLOAD_UNAVAILABLE);
+    } finally {
+      uploadsInFlight.current.delete(id);
+    }
+  };
 
   return (
     <RecordingsList
@@ -60,6 +99,9 @@ export function RecordingsListPanel({
       onDownload={onDownload}
       onDownloadMp4={(id, name) => void startMp4Download(id, name)}
       onCancelMp4={cancelMp4Download}
+      onUploadToHost={
+        embedded ? (id, name) => void handleUploadToHost(id, name) : undefined
+      }
       onSendToEditor={onSendToEditor}
       onDelete={onDelete}
     />

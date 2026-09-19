@@ -147,14 +147,23 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - **CRAFT → host**: `{ type: 'SEND_TO_EDITOR', payload: { id } }` when embedded, instead of the
   `window.open()` it uses standalone. `id` addresses the recording in the shared IndexedDB.
   CRAFT's header "Open Editor" button is deliberately *not* routed through the host — it still
-  opens the editor itself when embedded. Only "Send to Editor" becomes a message.
+  opens the editor itself when embedded. Only "Send to Editor" and "Upload to host" become
+  messages.
+- **CRAFT → host (upload)**: `{ type: 'UPLOAD_RECORDING', payload: { id, name, blob } }` from a
+  per-row "Upload to host" button that exists **only** when CRAFT is embedded — the host is the
+  only thing that could receive it. The `Blob` goes by structured clone, so a host that cannot
+  reach the shared IndexedDB (or would rather not) gets the file itself. `RecordingsListPanel`
+  decides with `isEmbedded()`; `RecordingsList` is props-only and draws the button exactly when
+  it is given `onUploadToHost`. See `apps/craft/src/utils/uploadToHost.ts`.
 - **URL params (ARTIST)**: `?video=url` to preload, `?project=base64` for state,
   `?loadVideo=<id>` for the CRAFT handoff, `?suppressRestore=1` to skip the
   "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
   the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
   applied only while the name is still the default `Untitled Project`).
 - **`?hostOrigin=<origin>`** (both apps): the host's own origin, e.g. `https://host.example`.
-  Recommended for production hosts. Outbound posts are addressed to it instead of `'*'`, and
+  Recommended for production hosts — and effectively required of a host that offers CRAFT's
+  "Upload to host", since the `'*'` fallback hands that message's **bytes**, not just an id, to
+  whatever page is framing CRAFT. Outbound posts are addressed to it instead of `'*'`, and
   ARTIST ignores inbound messages from anywhere else. It protects the **host's** deployment,
   not against being framed — a hostile page that frames the app also controls the URL and would
   supply its own origin; refusing to be framed is `Content-Security-Policy: frame-ancestors` on

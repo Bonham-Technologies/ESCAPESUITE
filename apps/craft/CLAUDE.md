@@ -441,12 +441,32 @@ recorded blob available there without re-uploading it. Outside an iframe,
 Editor" and the header's "Open Editor" button — honour `VITE_EDITOR_URL` via
 the shared `editorUrl()` helper.
 
+**"Upload to host"** is the second host-routed action and the last one: an
+extra icon button on every library row, between the MP4 download and "Open in
+Editor", which posts `UPLOAD_RECORDING { id, name, blob }` to the parent — the
+stored blob itself, by structured clone, with no `arrayBuffer()` copy and no
+network of any kind. It exists **only** when CRAFT is embedded, because a host
+is the only thing that could receive it. `RecordingsListPanel` asks
+`isEmbedded()` and passes `onUploadToHost` only then; `RecordingsList` stays
+props-only and draws the button exactly when it has the prop, so the component
+never asks where it is running. A recording whose bytes are no longer in
+storage raises `UPLOAD_UNAVAILABLE` through the app's one notice channel — the
+host, not CRAFT, is what would otherwise show the result, so silence would look
+like success. See `src/utils/uploadToHost.ts`. No analytics event: what a host
+does with its own recordings is the host's business.
+
 The header's **"Open Editor" button is deliberately not routed through the
-host**: embedded or not, it opens the editor itself. Only "Send to Editor",
-which hands over one specific recording, becomes a message.
+host**: embedded or not, it opens the editor itself. Only "Send to Editor" and
+"Upload to host", which hand over one specific recording, become messages.
 
 **`?hostOrigin=<origin>`**: when the host names its own origin on CRAFT's URL,
-the `SEND_TO_EDITOR` post is addressed to that origin instead of `'*'`. The
+both host-routed posts — `SEND_TO_EDITOR` and `UPLOAD_RECORDING` — are
+addressed to that origin instead of `'*'`. **A production host should always
+set it now that `UPLOAD_RECORDING` exists**: without it, `SEND_TO_EDITOR`'s
+`'*'` fallback hands an arbitrary framer an opaque id it cannot resolve (the
+database is same-origin to CRAFT), but `UPLOAD_RECORDING`'s hands that same
+framer the recording's **bytes**. A deployment that ships this action wants
+both — its own origin here, and `frame-ancestors` below. The
 value must be a bare origin (`https://host.example`); anything else is ignored
 with one console warning and the post falls back to `'*'`. The parser is
 `parseHostOrigin()` in `@escapesuite/shared/config`, shared with ESCAPEARTIST.
