@@ -14,19 +14,19 @@
 // without needing timers.
 //
 // One browser behaviour the doubles model explicitly is duration discovery:
-// `VideoScript.durationAfterSeek` makes a <video> clamp a seek to that length
+// `SeekScript.durationAfterSeek` makes an element clamp a seek to that length
 // and announce it with 'durationchange' (or, with `durationStaysUnknown`, only
 // through the clamped `currentTime`), which is how a WebM with no Duration
-// element gives up its real length.
+// element gives up its real length. <video> and <audio> share that setter —
+// `AudioScript` carries the same three fields as `VideoScript`, because a
+// headerless WebM arrives through the audio importer too.
 import { vi } from 'vitest'
 
-export interface VideoScript {
-  videoWidth: number
-  videoHeight: number
-  duration: number
-  readyState: number
-  /** Fire 'error' instead of 'loadedmetadata'/'loadeddata' when src is set. */
-  fail: boolean
+/**
+ * What a seek does — shared by <video> and <audio>, which model it with one
+ * `currentTime` setter because one importer's headerless WebM is the other's.
+ */
+export interface SeekScript {
   /** Don't fire 'seeked' when currentTime is assigned (models a stalled seek). */
   stallSeek: boolean
   /**
@@ -51,14 +51,24 @@ export interface VideoScript {
   durationStaysUnknown: boolean
 }
 
+export interface VideoScript extends SeekScript {
+  videoWidth: number
+  videoHeight: number
+  duration: number
+  readyState: number
+  /** Fire 'error' instead of 'loadedmetadata'/'loadeddata' when src is set. */
+  fail: boolean
+}
+
 export interface ImageScript {
   naturalWidth: number
   naturalHeight: number
   fail: boolean
 }
 
-export interface AudioScript {
+export interface AudioScript extends SeekScript {
   duration: number
+  /** Fire 'error' instead of 'loadedmetadata' when src is set. */
   fail: boolean
 }
 
@@ -75,7 +85,11 @@ export interface MediaDoubles {
   readonly audios: HTMLAudioElement[]
   /** Every value assigned to a `src` of any of them, in order. */
   readonly srcAssignments: string[]
-  /** currentTime values assigned to videos, in order — i.e. the seeks requested. */
+  /**
+   * currentTime values assigned to videos or audios, in order — i.e. the seeks
+   * requested. Both kinds push here, so a test that scripts one of them reads
+   * its seeks straight off this list.
+   */
   readonly seeks: number[]
   /** Change what subsequently created elements report. */
   script(next: Partial<MediaDoubleScript>): void
@@ -93,7 +107,12 @@ const VIDEO_DEFAULTS: VideoScript = {
 }
 
 const IMAGE_DEFAULTS: ImageScript = { naturalWidth: 800, naturalHeight: 600, fail: false }
-const AUDIO_DEFAULTS: AudioScript = { duration: 180, fail: false }
+const AUDIO_DEFAULTS: AudioScript = {
+  duration: 180,
+  fail: false,
+  stallSeek: false,
+  durationStaysUnknown: false,
+}
 
 function own(el: object, prop: string, value: unknown): void {
   Object.defineProperty(el, prop, { value, configurable: true, writable: true })
@@ -128,17 +147,12 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     })
   }
 
-  function makeVideo(): HTMLVideoElement {
-    const el = realCreateElement('video') as HTMLVideoElement
-    const s = { ...video }
-    own(el, 'videoWidth', s.videoWidth)
-    own(el, 'videoHeight', s.videoHeight)
-    own(el, 'duration', s.duration)
-    own(el, 'readyState', s.readyState)
-    own(el, 'play', vi.fn().mockResolvedValue(undefined))
-    own(el, 'pause', vi.fn())
-    own(el, 'load', vi.fn())
-
+  /**
+   * The seek half of a media element: one implementation for <video> and
+   * <audio>, since the duration discovery both model is the same browser
+   * behaviour reached through two importers.
+   */
+  function defineCurrentTime(el: HTMLMediaElement, s: SeekScript): void {
     let currentTime = 0
     Object.defineProperty(el, 'currentTime', {
       configurable: true,
@@ -168,6 +182,20 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
         if (!s.stallSeek) queueMicrotask(() => el.dispatchEvent(new Event('seeked')))
       },
     })
+  }
+
+  function makeVideo(): HTMLVideoElement {
+    const el = realCreateElement('video') as HTMLVideoElement
+    const s = { ...video }
+    own(el, 'videoWidth', s.videoWidth)
+    own(el, 'videoHeight', s.videoHeight)
+    own(el, 'duration', s.duration)
+    own(el, 'readyState', s.readyState)
+    own(el, 'play', vi.fn().mockResolvedValue(undefined))
+    own(el, 'pause', vi.fn())
+    own(el, 'load', vi.fn())
+
+    defineCurrentTime(el, s)
 
     defineSrc(el, () => {
       if (s.fail) {
@@ -202,6 +230,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     own(el, 'play', vi.fn().mockResolvedValue(undefined))
     own(el, 'pause', vi.fn())
     own(el, 'load', vi.fn())
+    defineCurrentTime(el, s)
     defineSrc(el, () => {
       el.dispatchEvent(new Event(s.fail ? 'error' : 'loadedmetadata'))
     })

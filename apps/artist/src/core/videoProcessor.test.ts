@@ -542,6 +542,85 @@ describe('videoProcessor', () => {
       await expect(extractAudioMetadata(new File(['x'], 'bad.mp3', { type: 'audio/mp3' })))
         .rejects.toThrow('Failed to load audio: bad.mp3')
     })
+
+    // The headerless WebM the video importer probes for arrives here too: an
+    // ESCAPECRAFT take recorded with no camera is raw MediaRecorder Opus with
+    // no Duration element, so 'loadedmetadata' reports Infinity and an
+    // unchecked read builds an infinitely long audio clip.
+    it('seeks to the end to learn the duration of audio that reports Infinity', async () => {
+      media.script({ audio: { duration: Infinity, durationAfterSeek: 12.5 } })
+      const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+      const metadata = await extractAudioMetadata(
+        new File(['webm'], 'headerless.webm', { type: 'audio/webm' })
+      )
+
+      expect(metadata.duration).toBe(12.5)
+      expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
+      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledTimes(1)
+      revoke.mockRestore()
+    })
+
+    it('seeks to the end to learn the duration of audio that reports 0', async () => {
+      media.script({ audio: { duration: 0, durationAfterSeek: 8 } })
+
+      const metadata = await extractAudioMetadata(
+        new File(['webm'], 'zero.webm', { type: 'audio/webm' })
+      )
+
+      expect(metadata.duration).toBe(8)
+      expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
+    })
+
+    it('rejects when the audio end seek never reports back', async () => {
+      vi.useFakeTimers()
+      try {
+        media.script({ audio: { duration: Infinity, stallSeek: true } })
+        const revoke = vi.spyOn(URL, 'revokeObjectURL')
+        const pending = extractAudioMetadata(
+          new File(['webm'], 'stalled.webm', { type: 'audio/webm' })
+        )
+        const rejection = expect(pending).rejects.toThrow(
+          'Could not determine the duration of stalled.webm'
+        )
+
+        await vi.advanceTimersByTimeAsync(5000)
+
+        await rejection
+        expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+        expect(revoke).toHaveBeenCalledTimes(1)
+        revoke.mockRestore()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // A container that declares its length costs nothing extra: no seek, and
+    // the one revoke every settle path owes.
+    it('believes a declared duration without seeking, and revokes once', async () => {
+      const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+      const metadata = await extractAudioMetadata(
+        new File(['audio data'], 'song.mp3', { type: 'audio/mp3' })
+      )
+
+      expect(metadata.duration).toBe(180)
+      expect(media.seeks).toEqual([])
+      expect(revoke).toHaveBeenCalledTimes(1)
+      revoke.mockRestore()
+    })
+
+    it('revokes the object URL exactly once when the audio errors', async () => {
+      media.script({ audio: { fail: true } })
+      const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+      await expect(extractAudioMetadata(new File(['x'], 'bad.webm', { type: 'audio/webm' })))
+        .rejects.toThrow('Failed to load audio: bad.webm')
+      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledTimes(1)
+      revoke.mockRestore()
+    })
   })
 
   describe('generateAudioThumbnail', () => {

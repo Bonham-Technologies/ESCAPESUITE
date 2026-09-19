@@ -23,7 +23,8 @@ function isUsableDuration(value: number): boolean {
 }
 
 /**
- * Extract metadata from a video file
+ * Resolve the playable length of a media file, recovering it from the media
+ * itself when the container never declared one.
  *
  * A WebM with no Duration/Cues element — raw MediaRecorder output, or an
  * ESCAPECRAFT take whose metadata fix failed — reports `Infinity` (or `0`) on
@@ -32,15 +33,20 @@ function isUsableDuration(value: number): boolean {
  * length it reports: `duration` if it has one, otherwise the position the seek
  * clamped to. If neither arrives, reject — a rejection surfaces through the
  * same path a failed load does.
+ *
+ * Both importers go through here: the same headerless WebM arrives as a video
+ * or as an audio-only take, and the only thing that differs is the word in the
+ * failure message. The caller owns the element and creates the object URL;
+ * this owns the listeners, the probe's timer, and the single revoke that
+ * happens however the promise settles.
  */
-export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
+function loadMediaDuration(
+  element: HTMLMediaElement,
+  objectUrl: string,
+  name: string,
+  kind: 'video' | 'audio'
+): Promise<number> {
   return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.preload = 'metadata';
-
-    const objectUrl = URL.createObjectURL(file);
-    video.src = objectUrl;
-
     // Replaced by the end-seek probe with its own teardown: a no-op before there
     // is a probe to stop, and again after one has been stopped. Kept as a
     // variable so `release` can tear a probe down without branching on whether
@@ -54,24 +60,13 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
       // `src` still points at the URL about to be revoked, and some browsers
       // fire 'error' on a dangling src — which would re-enter `fail` and revoke
       // a second time.
-      video.onerror = null;
+      element.onerror = null;
       URL.revokeObjectURL(objectUrl);
     };
 
     const succeed = (duration: number) => {
-      const metadata: SourceVideo = {
-        id: uuidv4(),
-        name: file.name,
-        duration,
-        width: video.videoWidth,
-        height: video.videoHeight,
-        frameRate: 30, // Default, will be updated if we can detect it
-        mimeType: file.type,
-        size: file.size,
-      };
-
       release();
-      resolve(metadata);
+      resolve(duration);
     };
 
     const fail = (message: string) => {
@@ -81,7 +76,7 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
 
     const probeDurationBySeekingToEnd = () => {
       const timeout = setTimeout(() => {
-        fail(`Could not determine the duration of ${file.name}`);
+        fail(`Could not determine the duration of ${name}`);
       }, DURATION_PROBE_TIMEOUT_MS);
 
       const onProbe = () => {
@@ -89,8 +84,8 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
         // `seekable` range whose end is still Infinity mid-scan — reports back
         // the position we asked for. That is a seek target, not a length, and
         // accepting it would put 285 million years into the timeline.
-        const position = video.currentTime < END_SEEK_TARGET ? video.currentTime : 0;
-        const discovered = isUsableDuration(video.duration) ? video.duration : position;
+        const position = element.currentTime < END_SEEK_TARGET ? element.currentTime : 0;
+        const discovered = isUsableDuration(element.duration) ? element.duration : position;
         // The other event may still carry the answer, so keep waiting rather
         // than resolving with a length that is no better than the one we had.
         if (!isUsableDuration(discovered)) return;
@@ -101,27 +96,55 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
       // `release` — so no reference here resolves before it is initialised.
       stopProbe = () => {
         clearTimeout(timeout);
-        video.removeEventListener('durationchange', onProbe);
-        video.removeEventListener('seeked', onProbe);
+        element.removeEventListener('durationchange', onProbe);
+        element.removeEventListener('seeked', onProbe);
       };
 
-      video.addEventListener('durationchange', onProbe);
-      video.addEventListener('seeked', onProbe);
-      video.currentTime = END_SEEK_TARGET;
+      element.addEventListener('durationchange', onProbe);
+      element.addEventListener('seeked', onProbe);
+      element.currentTime = END_SEEK_TARGET;
     };
 
-    video.onloadedmetadata = () => {
-      if (isUsableDuration(video.duration)) {
-        succeed(video.duration);
+    element.onloadedmetadata = () => {
+      if (isUsableDuration(element.duration)) {
+        succeed(element.duration);
         return;
       }
       probeDurationBySeekingToEnd();
     };
 
-    video.onerror = () => {
-      fail(`Failed to load video: ${file.name}`);
+    element.onerror = () => {
+      fail(`Failed to load ${kind}: ${name}`);
     };
   });
+}
+
+/**
+ * Extract metadata from a video file
+ *
+ * The length comes from `loadMediaDuration`, which probes for it when the
+ * container declares none; the rest is read off the element once it has
+ * settled.
+ */
+export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
+  const video = document.createElement('video');
+  video.preload = 'metadata';
+
+  const objectUrl = URL.createObjectURL(file);
+  video.src = objectUrl;
+
+  const duration = await loadMediaDuration(video, objectUrl, file.name, 'video');
+
+  return {
+    id: uuidv4(),
+    name: file.name,
+    duration,
+    width: video.videoWidth,
+    height: video.videoHeight,
+    frameRate: 30, // Default, will be updated if we can detect it
+    mimeType: file.type,
+    size: file.size,
+  };
 }
 
 /**
@@ -358,37 +381,33 @@ export async function processImageFile(file: File): Promise<SourceVideo> {
 
 /**
  * Extract metadata from an audio file
+ *
+ * The length comes from `loadMediaDuration`, the same probe the video importer
+ * uses: an ESCAPECRAFT take recorded with no camera is raw MediaRecorder Opus
+ * in a WebM with no Duration element, so it reports `Infinity` (or `0`) on
+ * `loadedmetadata` here exactly as it does there, and an unchecked read builds
+ * an infinitely long audio clip.
  */
 export async function extractAudioMetadata(file: File): Promise<SourceVideo> {
-  return new Promise((resolve, reject) => {
-    const audio = document.createElement('audio');
-    audio.preload = 'metadata';
+  const audio = document.createElement('audio');
+  audio.preload = 'metadata';
 
-    const objectUrl = URL.createObjectURL(file);
-    audio.src = objectUrl;
+  const objectUrl = URL.createObjectURL(file);
+  audio.src = objectUrl;
 
-    audio.onloadedmetadata = () => {
-      const metadata: SourceVideo = {
-        id: uuidv4(),
-        name: file.name,
-        duration: audio.duration,
-        width: 0, // Audio has no dimensions
-        height: 0,
-        frameRate: 0, // Not applicable for audio
-        mimeType: file.type,
-        size: file.size,
-        mediaType: 'audio',
-      };
+  const duration = await loadMediaDuration(audio, objectUrl, file.name, 'audio');
 
-      URL.revokeObjectURL(objectUrl);
-      resolve(metadata);
-    };
-
-    audio.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Failed to load audio: ${file.name}`));
-    };
-  });
+  return {
+    id: uuidv4(),
+    name: file.name,
+    duration,
+    width: 0, // Audio has no dimensions
+    height: 0,
+    frameRate: 0, // Not applicable for audio
+    mimeType: file.type,
+    size: file.size,
+    mediaType: 'audio',
+  };
 }
 
 /**
