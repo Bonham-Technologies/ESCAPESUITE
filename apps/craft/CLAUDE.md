@@ -277,6 +277,7 @@ the Help button.
 - `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring (see
   "Audio level meters" for the 80 ms gate both recorders apply)
 - `webcodecs-recorder.ts`: VideoEncoder/AudioEncoder + Mediabunny recorder for non-PiP takes
+  (see "Frame timestamps and keyframes" for the recording clock every frame is stamped with)
 - `recorder-factory.ts`: `createRecorder()` / `canUseWebCodecsRecorder()` /
   `getRecorderType()` — picks between the two recorders for a take. WebCodecs unless the
   take is PiP (the compositor's hidden video elements break its frame capture) or has no
@@ -385,6 +386,37 @@ computes it as `(config.screenEnabled && !!screen) || (config.webcamEnabled && !
 the browser lacks yields a `null` stream with the toggle still on. `getRecorderType` gets it too:
 its answer is what `useRecordingSave` keys the `fixWebMMetadata` repair off, so an audio-only take
 would otherwise be saved as unseekable WebM.
+
+### Frame timestamps and keyframes
+
+`WebCodecsRecorder` stamps every encoded `VideoFrame` with the **recording clock at capture** —
+`performance.now()` since `start()`, paused time excluded, rounded to microseconds. One private
+`nextFrameTiming()` helper decides it for all three capture paths (`MediaStreamTrackProcessor`,
+`requestVideoFrameCallback`, the `setTimeout` loop), so they cannot drift apart.
+
+- It used to be `frameCount * 33333 us`. `getDisplayMedia` does not promise 30 fps: a window or a
+  screen capture routinely delivers 5-15 frames a second, and counting frames made N of them span
+  N x 33.3 ms however long they really took. A 60 s take at 15 fps came out as a 30 s video track
+  against 60 s of audio — playback at 2x, with the audio lagging
+- **Strictly increasing**: a computed timestamp that does not advance on the previous frame's
+  becomes previous + 1 us. Mediabunny rejects a packet that does not advance, and two frames
+  inside one tick of a frozen or coarse clock must not be allowed to stall the mux
+- **A keyframe once per elapsed second** — `keyFrame = timestamp >= nextKeyFrameUs`, then
+  `nextKeyFrameUs = timestamp + 1_000_000`, the first frame always a keyframe. The count-based
+  rule it replaced (`frameCount % frameRate`) only meant one a second while the source really ran
+  at 30 fps; at 10 fps it was one keyframe every three seconds, and seeking paid for it
+- **`getDuration()` reads the same clock**: `startTime`, `pauseStartTime` and `pausedDuration` are
+  `performance.now()` milliseconds, so the duration the user is shown and the length written into
+  the container come from one monotonic source and cannot disagree
+- The two fallback paths still put a nominal `duration: frameDurationUs` on the `VideoFrame`; the
+  muxer derives the real packet durations from the timestamps
+- **`recorder.ts` (MediaRecorder) is untouched.** It stamps no frames of its own — MediaRecorder
+  times them — so its `getDuration()` still measures with `Date.now()`; there is nothing for it to
+  keep in step with
+
+`webcodecs-recorder.test.ts` pins all of it against a scripted `performance.now()`: a 30 fps
+source, a 15 fps source (the bug above), the strictly-increasing guard under a frozen clock,
+keyframes at 0 / 400 / 800 / 1200 ms, and paused time excluded from the stamps.
 
 ### Audio level meters
 
