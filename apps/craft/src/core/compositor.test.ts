@@ -248,10 +248,12 @@ describe('Compositor', () => {
     // (a tick a whole frame early qualifies). So the constant is pinned from
     // both sides, and deleting it turns this red.
     //
-    // The evenly spaced row bounds nothing — with `1000 / 30` bit-for-bit
-    // `2 * (1000 / 60)`, "the last tick did not draw" and "this tick draws" are
-    // exact complements for *any* tolerance, so it holds even at 0. It is kept
-    // because it is the cadence a real 60 Hz display delivers.
+    // The evenly spaced row bounds nothing from below — with `1000 / 30`
+    // bit-for-bit `2 * (1000 / 60)`, "the last tick did not draw" and "this
+    // tick draws" are exact complements at any tolerance under one 60 Hz tick,
+    // so it holds even at 0 (at 16.667 ms and above the base case breaks:
+    // start()'s draw and the first loop tick both qualify). It is kept because
+    // it is the cadence a real 60 Hz display delivers.
     const ADJACENCY_CYCLES: Array<[string, number[]]> = [
       ['evenly spaced', [RAF_INTERVAL_MS]],
       ['jittered', JITTER_CYCLE_MS],

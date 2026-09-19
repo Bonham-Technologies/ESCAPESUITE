@@ -381,7 +381,9 @@ the one to rely on — is that **the deadline advances a full interval per draw,
 draw rate can never exceed the target**, whatever the tick spacing. "No two consecutive
 ticks both draw" is weaker: it is exact for **evenly spaced** ticks (with `1000 / 30`
 bit-for-bit `2 * (1000 / 60)`, "the last tick did not draw" and "this tick draws" are exact
-complements, which is why that row of the test holds at *any* tolerance, 0 included), but
+complements, which is why that row of the test holds at any tolerance below one 60 Hz tick,
+0 included — at 16.667 ms and above the base case breaks, `start()`'s draw and the first
+loop tick both qualifying), but
 under non-uniform jitter two adjacent ticks can both draw — measured at ±2 ms random
 jitter: at most 2 in a row, sustained rate 30.11 fps. That is a cadence wobble, not a rate
 breach, and it is why the mean-rate property is the one the design rests on.
