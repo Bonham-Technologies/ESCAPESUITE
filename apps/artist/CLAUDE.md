@@ -66,7 +66,21 @@ pnpm lint                # Run ESLint
 
 ### Core Modules (`src/core/`)
 - `storage.ts`: IndexedDB layer using `idb` library. Stores video blobs, thumbnails, projects, and settings in separate object stores
-- `videoProcessor.ts`: Video metadata extraction and thumbnail generation using native `<video>` element and canvas
+- `videoProcessor.ts`: Video metadata extraction and thumbnail generation using native `<video>` element and canvas.
+  **Duration fallback**: a WebM with no Duration/Cues element — raw MediaRecorder output, or an
+  ESCAPECRAFT take whose `fixWebMMetadata` failed — reports `Infinity` (or `0`) on
+  `loadedmetadata`, which would otherwise become an infinitely long `SourceVideo` and infinitely
+  long clips. `extractVideoMetadata` therefore seeks to `Number.MAX_SAFE_INTEGER` (browsers clamp
+  to the end; Chromium scans the container to find it), listens for both `durationchange` and
+  `seeked`, and takes the first usable — finite and positive — value of `video.duration`, else of
+  `video.currentTime` (the position the seek clamped to, which is all some browsers reveal). A
+  usable duration on `loadedmetadata` resolves immediately with no seek; nothing usable within 5 s
+  rejects with `Could not determine the duration of <name>`, which surfaces through the same path
+  a failed load does. The object URL is revoked on every path. Because `generateThumbnail` loads
+  its own element — and would read the same `Infinity` — `processVideoFile` passes the thumbnail
+  time explicitly as `metadata.duration * 0.1`. The `<video>` double
+  (`src/test/doubles/media.ts`) models the discovery with `durationAfterSeek` /
+  `durationStaysUnknown`
 - `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
   - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding

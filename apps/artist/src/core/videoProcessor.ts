@@ -7,7 +7,31 @@ import { storeVideo, storeThumbnail } from './storage';
 import { extractWaveformData } from '../utils/waveform';
 
 /**
+ * Seek target used to make a browser discover a duration it did not read from
+ * the container. Browsers clamp a seek to the end of the media, and Chromium
+ * scans the file to find that end — which is the only way to learn the length
+ * of a WebM written without a Duration element.
+ */
+const END_SEEK_TARGET = Number.MAX_SAFE_INTEGER;
+
+/** How long to wait for the end seek to report back before giving up. */
+const DURATION_PROBE_TIMEOUT_MS = 5000;
+
+/** A duration we can build a clip from: a real, positive number of seconds. */
+function isUsableDuration(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+/**
  * Extract metadata from a video file
+ *
+ * A WebM with no Duration/Cues element — raw MediaRecorder output, or an
+ * ESCAPECRAFT take whose metadata fix failed — reports `Infinity` (or `0`) on
+ * `loadedmetadata`. Rather than accept a clip that is infinitely long, seek
+ * past the end so the browser scans the container, and take the first real
+ * length it reports: `duration` if it has one, otherwise the position the seek
+ * clamped to. If neither arrives, reject — a rejection surfaces through the
+ * same path a failed load does.
  */
 export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
   return new Promise((resolve, reject) => {
@@ -17,11 +41,11 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
     const objectUrl = URL.createObjectURL(file);
     video.src = objectUrl;
 
-    video.onloadedmetadata = () => {
+    const succeed = (duration: number) => {
       const metadata: SourceVideo = {
         id: uuidv4(),
         name: file.name,
-        duration: video.duration,
+        duration,
         width: video.videoWidth,
         height: video.videoHeight,
         frameRate: 30, // Default, will be updated if we can detect it
@@ -33,9 +57,49 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
       resolve(metadata);
     };
 
-    video.onerror = () => {
+    const fail = (message: string) => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Failed to load video: ${file.name}`));
+      reject(new Error(message));
+    };
+
+    const probeDurationBySeekingToEnd = () => {
+      const stopWaiting = () => {
+        clearTimeout(timeout);
+        video.removeEventListener('durationchange', onProbe);
+        video.removeEventListener('seeked', onProbe);
+      };
+
+      const onProbe = () => {
+        const discovered = isUsableDuration(video.duration)
+          ? video.duration
+          : video.currentTime;
+        // The other event may still carry the answer, so keep waiting rather
+        // than resolving with a length that is no better than the one we had.
+        if (!isUsableDuration(discovered)) return;
+        stopWaiting();
+        succeed(discovered);
+      };
+
+      const timeout = setTimeout(() => {
+        stopWaiting();
+        fail(`Could not determine the duration of ${file.name}`);
+      }, DURATION_PROBE_TIMEOUT_MS);
+
+      video.addEventListener('durationchange', onProbe);
+      video.addEventListener('seeked', onProbe);
+      video.currentTime = END_SEEK_TARGET;
+    };
+
+    video.onloadedmetadata = () => {
+      if (isUsableDuration(video.duration)) {
+        succeed(video.duration);
+        return;
+      }
+      probeDurationBySeekingToEnd();
+    };
+
+    video.onerror = () => {
+      fail(`Failed to load video: ${file.name}`);
     };
   });
 }
@@ -113,9 +177,11 @@ export async function processVideoFile(file: File): Promise<SourceVideo> {
   const metadata = await extractVideoMetadata(file);
   metadata.mediaType = 'video';
 
-  // Generate thumbnail
+  // Generate thumbnail. The time is passed explicitly because generateThumbnail
+  // loads its own element, which for a file with no duration header reports the
+  // same Infinity this metadata was recovered from.
   try {
-    const thumbnail = await generateThumbnail(file);
+    const thumbnail = await generateThumbnail(file, metadata.duration * 0.1);
     await storeThumbnail(metadata.id, thumbnail);
     metadata.thumbnailUrl = URL.createObjectURL(thumbnail);
   } catch (error) {

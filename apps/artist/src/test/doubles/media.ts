@@ -12,6 +12,12 @@
 // served) when the code assigns `src` — or, for a seek, when it assigns
 // `currentTime`. Events fire in a microtask, matching a browser's asynchrony
 // without needing timers.
+//
+// One browser behaviour the doubles model explicitly is duration discovery:
+// `VideoScript.durationAfterSeek` makes a <video> clamp a seek to that length
+// and announce it with 'durationchange' (or, with `durationStaysUnknown`, only
+// through the clamped `currentTime`), which is how a WebM with no Duration
+// element gives up its real length.
 import { vi } from 'vitest'
 
 export interface VideoScript {
@@ -23,6 +29,26 @@ export interface VideoScript {
   fail: boolean
   /** Don't fire 'seeked' when currentTime is assigned (models a stalled seek). */
   stallSeek: boolean
+  /**
+   * The length the element only discovers once it is seeked — a WebM whose
+   * container carries no Duration element reports Infinity (or 0) on
+   * `loadedmetadata`, and browsers reveal the real length when a seek past the
+   * end makes them scan the file.
+   *
+   * When set, an assignment to `currentTime` clamps to this value the way a
+   * browser clamps a seek past the end (`seeks` still records the value the
+   * code asked for), then — unless `durationStaysUnknown` is set — updates
+   * `duration` to it and dispatches 'durationchange' before 'seeked'.
+   * Leave it unset and a seek behaves as it always has: no clamp, no
+   * 'durationchange', `duration` untouched.
+   */
+  durationAfterSeek?: number
+  /**
+   * With `durationAfterSeek`: the seek still clamps `currentTime`, but
+   * `duration` stays as scripted and no 'durationchange' fires — a browser
+   * that reveals the end only as the position the seek landed on.
+   */
+  durationStaysUnknown: boolean
 }
 
 export interface ImageScript {
@@ -63,6 +89,7 @@ const VIDEO_DEFAULTS: VideoScript = {
   readyState: 4,
   fail: false,
   stallSeek: false,
+  durationStaysUnknown: false,
 }
 
 const IMAGE_DEFAULTS: ImageScript = { naturalWidth: 800, naturalHeight: 600, fail: false }
@@ -117,8 +144,16 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
       configurable: true,
       get: () => currentTime,
       set: (next: number) => {
-        currentTime = next
         seeks.push(next)
+        if (s.durationAfterSeek === undefined) {
+          currentTime = next
+        } else {
+          currentTime = Math.min(next, s.durationAfterSeek)
+          if (!s.durationStaysUnknown && el.duration !== s.durationAfterSeek) {
+            own(el, 'duration', s.durationAfterSeek)
+            queueMicrotask(() => el.dispatchEvent(new Event('durationchange')))
+          }
+        }
         if (!s.stallSeek) queueMicrotask(() => el.dispatchEvent(new Event('seeked')))
       },
     })
