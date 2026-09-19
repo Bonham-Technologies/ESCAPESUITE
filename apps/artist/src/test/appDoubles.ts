@@ -76,6 +76,10 @@ export function integrationDouble() {
 export function videoProcessorDouble() {
   return {
     processVideoFile: vi.fn(() => Promise.resolve({ ...sampleVideo })),
+    // The quiet case: a stored recording whose duration needs no recovery.
+    resolveStoredDuration: vi.fn((_blob: Blob, metadata: SourceVideo) =>
+      Promise.resolve(metadata.duration)
+    ),
     processImageFile: vi.fn(() =>
       Promise.resolve({
         id: 'image1',

@@ -41,6 +41,23 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
     const objectUrl = URL.createObjectURL(file);
     video.src = objectUrl;
 
+    // Replaced by the end-seek probe with its own teardown: a no-op before there
+    // is a probe to stop, and again after one has been stopped. Kept as a
+    // variable so `release` can tear a probe down without branching on whether
+    // one is running — an `error` after the seek has started must not leave the
+    // timer armed, holding the element, the File and the URL for five seconds.
+    let stopProbe = () => {};
+
+    // Everything that happens exactly once, on whichever path settles first.
+    const release = () => {
+      stopProbe();
+      // `src` still points at the URL about to be revoked, and some browsers
+      // fire 'error' on a dangling src — which would re-enter `fail` and revoke
+      // a second time.
+      video.onerror = null;
+      URL.revokeObjectURL(objectUrl);
+    };
+
     const succeed = (duration: number) => {
       const metadata: SourceVideo = {
         id: uuidv4(),
@@ -53,37 +70,40 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
         size: file.size,
       };
 
-      URL.revokeObjectURL(objectUrl);
+      release();
       resolve(metadata);
     };
 
     const fail = (message: string) => {
-      URL.revokeObjectURL(objectUrl);
+      release();
       reject(new Error(message));
     };
 
     const probeDurationBySeekingToEnd = () => {
-      const stopWaiting = () => {
+      const timeout = setTimeout(() => {
+        fail(`Could not determine the duration of ${file.name}`);
+      }, DURATION_PROBE_TIMEOUT_MS);
+
+      const onProbe = () => {
+        // A browser that has not clamped the seek yet — or that clamps to a
+        // `seekable` range whose end is still Infinity mid-scan — reports back
+        // the position we asked for. That is a seek target, not a length, and
+        // accepting it would put 285 million years into the timeline.
+        const position = video.currentTime < END_SEEK_TARGET ? video.currentTime : 0;
+        const discovered = isUsableDuration(video.duration) ? video.duration : position;
+        // The other event may still carry the answer, so keep waiting rather
+        // than resolving with a length that is no better than the one we had.
+        if (!isUsableDuration(discovered)) return;
+        succeed(discovered);
+      };
+
+      // Assigned after everything it tears down exists, and read only from
+      // `release` — so no reference here resolves before it is initialised.
+      stopProbe = () => {
         clearTimeout(timeout);
         video.removeEventListener('durationchange', onProbe);
         video.removeEventListener('seeked', onProbe);
       };
-
-      const onProbe = () => {
-        const discovered = isUsableDuration(video.duration)
-          ? video.duration
-          : video.currentTime;
-        // The other event may still carry the answer, so keep waiting rather
-        // than resolving with a length that is no better than the one we had.
-        if (!isUsableDuration(discovered)) return;
-        stopWaiting();
-        succeed(discovered);
-      };
-
-      const timeout = setTimeout(() => {
-        stopWaiting();
-        fail(`Could not determine the duration of ${file.name}`);
-      }, DURATION_PROBE_TIMEOUT_MS);
 
       video.addEventListener('durationchange', onProbe);
       video.addEventListener('seeked', onProbe);
@@ -102,6 +122,27 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
       fail(`Failed to load video: ${file.name}`);
     };
   });
+}
+
+/**
+ * The duration to use for media already stored in IndexedDB.
+ *
+ * The `?loadVideo=` handoff from ESCAPECRAFT adds a stored recording straight
+ * from its stored metadata, so it never passes through `extractVideoMetadata`.
+ * CRAFT prefers the stored value to its own wall clock (its guard is
+ * `metadata.duration > 0`, and `Infinity > 0` is true), so a take whose WebM
+ * lost its Duration element arrives here with no usable length and would build
+ * an infinitely long clip. Recover it from the blob the way an imported file
+ * gets one; trust the stored value in every other case, which is the common one.
+ */
+export async function resolveStoredDuration(blob: Blob, metadata: SourceVideo): Promise<number> {
+  if (isUsableDuration(metadata.duration)) {
+    return metadata.duration;
+  }
+  const recovered = await extractVideoMetadata(
+    new File([blob], metadata.name, { type: blob.type })
+  );
+  return recovered.duration;
 }
 
 /**

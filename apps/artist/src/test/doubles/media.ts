@@ -144,11 +144,22 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
       configurable: true,
       get: () => currentTime,
       set: (next: number) => {
+        // Browsers reject a non-finite seek: `currentTime` is a WebIDL double,
+        // and the conversion throws a TypeError. Code that computes a seek from
+        // a duration it never checked (`duration * 0.1` on an Infinity) must be
+        // caught here rather than only in a real browser, where the throw
+        // happens inside an event handler and leaves the promise unsettled.
+        if (!Number.isFinite(next)) {
+          throw new TypeError('Failed to set the currentTime property: The provided double value is non-finite.')
+        }
         seeks.push(next)
         if (s.durationAfterSeek === undefined) {
           currentTime = next
         } else {
           currentTime = Math.min(next, s.durationAfterSeek)
+          // Announce the discovery once. A later in-range seek — the thumbnail's,
+          // say — is an ordinary seek, not a fresh discovery, so it must not
+          // re-fire 'durationchange'.
           if (!s.durationStaysUnknown && el.duration !== s.durationAfterSeek) {
             own(el, 'duration', s.durationAfterSeek)
             queueMicrotask(() => el.dispatchEvent(new Event('durationchange')))

@@ -12,6 +12,7 @@ import {
   processAudioFile,
   processImageFile,
   processVideoFile,
+  resolveStoredDuration,
 } from './videoProcessor'
 import { getThumbnail, getVideo, storeVideo } from './storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
@@ -103,6 +104,7 @@ describe('videoProcessor', () => {
 
       await expect(extractVideoMetadata(file)).rejects.toThrow('Failed to load video: broken.mp4')
       expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledTimes(1)
       revoke.mockRestore()
     })
 
@@ -120,6 +122,7 @@ describe('videoProcessor', () => {
       expect(metadata.duration).toBe(12.5)
       expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
       expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledTimes(1)
       revoke.mockRestore()
     })
 
@@ -168,6 +171,64 @@ describe('videoProcessor', () => {
 
         await rejection
         expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+        expect(revoke).toHaveBeenCalledTimes(1)
+        revoke.mockRestore()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // Nothing clamped the seek, so the element reports back the very target we
+    // asked for. That is a seek target, not a length: accepting it would put
+    // 285 million years on the timeline, which is worse than the Infinity this
+    // fallback exists to remove, because a finite number propagates silently
+    // into the clip, the timeline duration, the zoom and the export length.
+    it('refuses the seek target itself as a duration', async () => {
+      vi.useFakeTimers()
+      try {
+        // No durationAfterSeek, so the double does not clamp — a browser that
+        // has not yet worked out where the end is.
+        media.script({ video: { duration: Infinity } })
+        const pending = extractVideoMetadata(
+          new File(['webm'], 'unclamped.webm', { type: 'video/webm' })
+        )
+        const rejection = expect(pending).rejects.toThrow(
+          'Could not determine the duration of unclamped.webm'
+        )
+
+        await vi.advanceTimersByTimeAsync(5000)
+
+        await rejection
+        expect(media.videos[0].currentTime).toBe(Number.MAX_SAFE_INTEGER)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // An element that errors after the seek has started must not leave the
+    // probe's timer armed: it holds the element, the File and the URL, and it
+    // would revoke a second time when it eventually fired.
+    it('tears the probe down when the element errors mid-seek', async () => {
+      vi.useFakeTimers()
+      try {
+        media.script({ video: { duration: Infinity, stallSeek: true } })
+        const revoke = vi.spyOn(URL, 'revokeObjectURL')
+        const pending = extractVideoMetadata(
+          new File(['webm'], 'dies.webm', { type: 'video/webm' })
+        )
+        const rejection = expect(pending).rejects.toThrow('Failed to load video: dies.webm')
+
+        // Let loadedmetadata run and the probe arm itself, then kill the element.
+        await vi.advanceTimersByTimeAsync(0)
+        expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
+        media.videos[0].dispatchEvent(new Event('error'))
+
+        await rejection
+        expect(revoke).toHaveBeenCalledTimes(1)
+
+        // Five seconds on, the probe's timeout is gone rather than firing.
+        await vi.advanceTimersByTimeAsync(5000)
+        expect(revoke).toHaveBeenCalledTimes(1)
         revoke.mockRestore()
       } finally {
         vi.useRealTimers()
@@ -328,6 +389,48 @@ describe('videoProcessor', () => {
       expect(metadata.waveformData).toBeUndefined()
       expect(warn).toHaveBeenCalledWith('Failed to extract waveform data:', expect.any(Error))
       warn.mockRestore()
+    })
+  })
+
+  // The ?loadVideo= handoff from ESCAPECRAFT adds a stored recording from its
+  // stored metadata, which never passed through extractVideoMetadata — so the
+  // guard has to live here too, or a take stored as Infinity still builds an
+  // infinitely long clip.
+  describe('resolveStoredDuration', () => {
+    /** A stored recording's metadata, with whatever duration the test is about. */
+    const stored = (duration: number) => ({
+      id: 'rec-1',
+      name: 'Recording.webm',
+      duration,
+      width: 1280,
+      height: 720,
+      frameRate: 30,
+      mimeType: 'video/webm',
+      size: 1234,
+    })
+
+    it('trusts a usable stored duration without opening the blob', async () => {
+      const blob = new Blob(['webm'], { type: 'video/webm' })
+
+      await expect(resolveStoredDuration(blob, stored(12))).resolves.toBe(12)
+      // No element created: the common path costs nothing.
+      expect(media.videos).toHaveLength(0)
+    })
+
+    it('recovers the length of a recording stored with no usable duration', async () => {
+      media.script({ video: { duration: Infinity, durationAfterSeek: 9 } })
+      const blob = new Blob(['webm'], { type: 'video/webm' })
+
+      await expect(resolveStoredDuration(blob, stored(Infinity))).resolves.toBe(9)
+      expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
+    })
+
+    it('recovers the length of a recording stored as zero', async () => {
+      media.script({ video: { duration: 0, durationAfterSeek: 4 } })
+
+      await expect(
+        resolveStoredDuration(new Blob(['webm'], { type: 'video/webm' }), stored(0))
+      ).resolves.toBe(4)
     })
   })
 
