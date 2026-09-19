@@ -96,10 +96,13 @@ export class WebCodecsRecorder {
   private startTime = 0;
   private pausedDuration = 0;
   private pauseStartTime = 0;
+  /** Frames encoded so far. Nothing reads it — it is kept deliberately, as the
+   *  one running count of a take's captured frames, for the next thing that
+   *  wants recorder stats. It no longer decides timing (see nextFrameTiming). */
   private frameCount = 0;
   /** Microsecond timestamp of the last frame handed to the encoder; -1 before
    *  the first, so a take that starts on the clock's own zero still stamps 0. */
-  private lastFrameTimestamp = -1;
+  private lastFrameTimestampUs = -1;
   /** Recording-clock microsecond mark at which the next keyframe is due. */
   private nextKeyFrameUs = 0;
   private audioTimestamp = 0;
@@ -393,7 +396,7 @@ export class WebCodecsRecorder {
     this.startTime = performance.now();
     this.pausedDuration = 0;
     this.frameCount = 0;
-    this.lastFrameTimestamp = -1;
+    this.lastFrameTimestampUs = -1;
     this.nextKeyFrameUs = 0;
     this.audioTimestamp = 0;
 
@@ -424,19 +427,32 @@ export class WebCodecsRecorder {
    * playback at 2x with the audio lagging.
    *
    * Two rules on top of the clock:
-   * - **Strictly increasing.** Mediabunny rejects a packet that does not
-   *   advance on the one before it, so a frozen or coarse clock (two frames
-   *   inside one tick of `performance.now()`) yields previous + 1us rather
-   *   than a stall in the mux.
+   * - **Strictly increasing.** Two frames inside one tick of a coarse or
+   *   frozen `performance.now()` would otherwise be stamped the same, so the
+   *   second takes previous + 1us. This is an **encoder-level** guard:
+   *   `VideoEncoder` is fed a monotonically increasing presentation timeline
+   *   and a zero-delta frame is a meaningless presentation. It is not a
+   *   container-level one — Mediabunny only throws when a timestamp is below
+   *   the largest of the *previous GOP*, and its WebM muxer rounds each
+   *   timestamp to a whole millisecond anyway, so 1us apart and identical land
+   *   on the same block timecode.
    * - **A keyframe once per elapsed second**, not once per 30 frames. The
    *   count-based rule only meant one a second while the source really ran at
    *   30fps; at 10fps it was one every three seconds, and seeking suffered
-   *   for it.
+   *   for it. Note a resume is not forced to be a keyframe: a pause consumes
+   *   no recording clock, so the frame after it is keyed only if a second of
+   *   *recording* has passed since the last one.
+   *
+   * `now` is the reading of the clock the caller has already taken, where it
+   * has one: the track-processor path reads `performance.now()` for its
+   * throttle a few lines earlier, and reading it twice per frame both costs
+   * something per frame and lets the throttle and the stamp disagree.
    */
-  private nextFrameTiming(): { timestamp: number; keyFrame: boolean } {
-    const elapsedUs = Math.round((performance.now() - this.startTime - this.pausedDuration) * 1000);
-    const timestamp = elapsedUs > this.lastFrameTimestamp ? elapsedUs : this.lastFrameTimestamp + 1;
-    this.lastFrameTimestamp = timestamp;
+  private nextFrameTiming(now = performance.now()): { timestamp: number; keyFrame: boolean } {
+    const elapsedUs = Math.round((now - this.startTime - this.pausedDuration) * 1000);
+    const timestamp =
+      elapsedUs > this.lastFrameTimestampUs ? elapsedUs : this.lastFrameTimestampUs + 1;
+    this.lastFrameTimestampUs = timestamp;
 
     const keyFrame = timestamp >= this.nextKeyFrameUs;
     if (keyFrame) {
@@ -477,8 +493,9 @@ export class WebCodecsRecorder {
 
         if (this.videoEncoder && this.videoEncoder.state !== 'closed') {
           try {
-            // Re-stamp the frame with the recording clock (see nextFrameTiming)
-            const { timestamp, keyFrame } = this.nextFrameTiming();
+            // Re-stamp the frame with the recording clock (see nextFrameTiming),
+            // reusing the reading the throttle above already took.
+            const { timestamp, keyFrame } = this.nextFrameTiming(now);
             const frame = new VideoFrame(sourceFrame, { timestamp });
             // Close source frame immediately - we've copied the data we need
             sourceFrame.close();
@@ -671,7 +688,10 @@ export class WebCodecsRecorder {
    * Get the current recording duration in seconds.
    */
   getDuration(): number {
-    if (!this.startTime) return 0;
+    // Not `!this.startTime`: `performance.now()` legitimately returns 0 at the
+    // page's time origin, where `Date.now()` never could, and a take that
+    // started on that reading would otherwise report 0 seconds forever.
+    if (!this.hasStarted) return 0;
 
     let elapsed = performance.now() - this.startTime - this.pausedDuration;
 

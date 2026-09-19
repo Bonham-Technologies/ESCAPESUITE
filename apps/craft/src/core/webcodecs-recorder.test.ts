@@ -142,13 +142,17 @@ describe('WebCodecsRecorder', () => {
     installVideoElementDouble()
     audio = installAudioContextDouble()
 
-    // The clock is FROZEN: `now` is never advanced in this file. The audio
-    // level monitor gates itself to one sample per 80ms of `performance.now()`,
-    // so exactly one sample is emitted per take here — the immediate one
+    // `now` moves only where a test moves it, and most tests never do. The
+    // audio level monitor gates itself to one sample per 80ms of
+    // `performance.now()`, so a test that ticks rAF without advancing `now`
+    // sees exactly one sample per take — the immediate one
     // `startAudioLevelMonitoring()` takes before the first frame — and
     // `tickAnimationFrames()` will never produce another. A test that wants
     // repeated emissions has to advance `now` between ticks; the per-second
-    // rates live in core/webcodecsRecorder.perf.test.ts, which does exactly that.
+    // rates live in core/webcodecsRecorder.perf.test.ts, which does exactly
+    // that. The frame-timing tests advance it too: since this fix `now` is the
+    // clock every frame timestamp and `getDuration()` are read from, while
+    // `vi.advanceTimersByTime()` drives the capture timer and nothing else.
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
     consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -668,6 +672,12 @@ describe('WebCodecsRecorder', () => {
       processor.pushFrame(new VideoFrameDouble('raw-2', { timestamp: 2 }))
       await flush()
       expect(lastVideoEncoder().encodes).toHaveLength(2)
+      // ...and the frame that survived the throttle is stamped with the
+      // recording clock, 40ms in. This is the only path a Chrome/Edge screen
+      // take actually runs on, so it is the one that has to prove it tracks
+      // wall time: under the old `frameCount x 33333us` rule the second
+      // encoded frame was 33333 however long it took to arrive.
+      expect(lastVideoEncoder().encodes.map(e => e.data.timestamp)).toEqual([0, 40_000])
     })
 
     it('discards frames that arrive while paused', async () => {
