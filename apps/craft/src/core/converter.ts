@@ -33,7 +33,47 @@ import {
   EncodedAudioPacketSource,
   EncodedPacket,
 } from 'mediabunny';
-import fixWebmDuration from 'webm-duration-fix';
+import fixWebmDurationImport from 'webm-duration-fix';
+
+/** The one function `webm-duration-fix` provides: repair a WebM container. */
+type FixWebmDuration = (blob: Blob) => Promise<Blob>;
+
+/**
+ * Pick the repair function out of whatever the toolchain handed us for
+ * `webm-duration-fix`.
+ *
+ * The library is CommonJS: its `lib/index.js` ends `exports.default =
+ * fixWebmDuration` and sets `__esModule`. What a default import binds to is
+ * therefore a toolchain decision, and the toolchain changed its mind:
+ *
+ * - esbuild's `__toESM(mod, 0)` — Vite 7 and earlier, for both the dev server's
+ *   pre-bundled deps and the build — honours `__esModule` and binds the
+ *   **function** on `exports.default`.
+ * - Vite 8 moved dep optimization and the build to Rolldown and aligned CJS
+ *   interop with Node's (see `legacy.inconsistentCjsInterop` in Vite's config
+ *   types, the opt-out for the old behaviour). Node binds a default import to
+ *   the whole `module.exports`, so what arrives is the **object**
+ *   `{ __esModule: true, default: fixWebmDuration }`. Observed in both halves
+ *   of Vite 8.3: the dev server emits `const fixWebmDuration =
+ *   __vite__cjsImport1_webmDurationFix`, and the build emits
+ *   `__toESM(require_lib(), 1)` — the `1` being Node mode.
+ *
+ * Calling the object is a `TypeError`, `useRecordingSave` catches it, and every
+ * MediaRecorder take (PiP, audio-only, any browser without WebCodecs) is stored
+ * unrepaired — playable, but with no Duration and no Cues, so it will not
+ * scrub. No unit test could see it: they all `vi.mock('webm-duration-fix')`.
+ *
+ * Resolving it here rather than pinning a Vite option keeps the import correct
+ * whichever interop the next bundler picks. `tests/escapecraft/pip-seekable.spec.ts`
+ * and its production-layout twin in `apps/e2e` are what guard it, by recording a
+ * real PiP take and requiring the stored blob to report a finite duration.
+ */
+export function resolveFixWebmDuration(imported: unknown): FixWebmDuration {
+  if (typeof imported === 'function') return imported as FixWebmDuration;
+  return (imported as { default: FixWebmDuration }).default;
+}
+
+const fixWebmDuration = resolveFixWebmDuration(fixWebmDurationImport);
 
 export interface ConversionProgress {
   phase: 'preparing' | 'encoding' | 'finalizing';

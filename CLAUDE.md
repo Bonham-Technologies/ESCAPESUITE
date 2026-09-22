@@ -445,7 +445,9 @@ never above what the suite actually achieves:
 ## Key Constraints
 
 - WebCodecs API (ESCAPEARTIST exports) only works in Chrome/Edge
-- MediaRecorder produces WebM without proper seek metadata (requires post-processing)
+- MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
+  end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline, since only a PiP take
+  reaches that path)
 - AudioContext needs `resume()` call due to Chrome autoplay policy
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
 
