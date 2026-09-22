@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.5.2
+
+### Patch Changes
+
+- 8222d37: `Compositor.start()` on a running compositor now replaces its render loop instead of orphaning the first one, so a later `stop()` ends the loop rather than only the newest chain (ESCSUITE-58; defensive — nothing in the app starts a compositor twice). The previous `captureStream()` stays with whoever was handed it.
+- 65438d0: Stop the endless media-error loop every saved recording left behind. From the first recording
+  you saved, the tab kept a CPU core busy until you reloaded the page — a fresh recording, the
+  preview and the rest of the app all had to share what was left.
+  
+  `thumbnailGenerator`'s cleanup emptied the `<video>`'s `src` while its own `onerror` was still
+  attached, and an empty `src` is a load failure rather than a release: the browser answers it
+  with an `error` event. That went straight back into the cleanup that emptied `src`, which
+  emptied it again — so each saved take left a detached element spinning error → cleanup → error
+  at roughly 44,500 iterations a second for the rest of the session. The handlers now come off
+  before the element is released, and the release uses `removeAttribute('src')` + `load()`, which
+  raises no error and manufactures no `MediaError` at all — only `abort` and `emptied`, which
+  nothing listens for.
+- 914829c: Fix WebM container repair, which had been failing for every MediaRecorder take since the Vite 7 → 8 upgrade.
+  
+  `webm-duration-fix` is CommonJS (`exports.default` plus `__esModule`), and Vite 8 changed what a default import of such a module binds to: it moved dep optimization and the build to Rolldown and aligned CJS interop with Node's, so the import yielded the whole `module.exports` object instead of the function on it. Calling it threw `TypeError: fixWebmDuration is not a function`; `useRecordingSave` caught that, raised the `NOT_SEEKABLE` notice and stored the raw blob — so PiP takes, audio-only takes and takes in any browser without WebCodecs were saved with no Duration and no Cues and would not scrub. It affected the shipped build, not just the dev server.
+  
+  The dependency moved to Vite 8 on 2026-03-14, so **every ESCAPECRAFT release from 2.1.0 through 2.5.1 is affected**. There is no migration: takes those builds stored are still missing their Duration and Cues and are not repaired retroactively — in-app playback papers over it with the saved duration, but the WebM itself, and any copy already downloaded, stays unseekable. Re-record it, or use the row's MP4 download, which re-encodes the take into a fresh container.
+  
+  `converter.ts` now resolves the import to a function itself, accepting either interop shape, and a real PiP take is recorded and checked for a finite duration in both `apps/e2e` pipelines (dev server and the combined production build) so the regression cannot come back unseen.
+
 ## 2.5.1
 
 ### Patch Changes
