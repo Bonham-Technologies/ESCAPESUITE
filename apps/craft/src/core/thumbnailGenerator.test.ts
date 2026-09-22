@@ -46,7 +46,7 @@ describe('thumbnailGenerator', () => {
       expect(video.element.preload).toBe('metadata')
       // Cleaned up: object URL revoked, src attribute cleared
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-      expect(video.element.getAttribute('src')).toBe('')
+      expect(video.element.getAttribute('src')).toBeNull()
     })
 
     it('rejects when no 2D canvas context is available', async () => {
@@ -63,7 +63,7 @@ describe('thumbnailGenerator', () => {
 
       await expect(promise).rejects.toThrow('Failed to load video for thumbnail')
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-      expect(video.element.getAttribute('src')).toBe('')
+      expect(video.element.getAttribute('src')).toBeNull()
     })
 
     it('rejects and cleans up when drawing the frame throws', async () => {
@@ -78,7 +78,7 @@ describe('thumbnailGenerator', () => {
 
       await expect(promise).rejects.toThrow('Failed to draw video frame')
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-      expect(video.element.getAttribute('src')).toBe('')
+      expect(video.element.getAttribute('src')).toBeNull()
     })
 
     it('detaches its handlers on cleanup, so the emptied src cannot re-enter it', async () => {
@@ -177,7 +177,7 @@ describe('thumbnailGenerator', () => {
 
       await expect(promise).resolves.toEqual({ duration: 42.5, width: 640, height: 480 })
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-      expect(video.element.getAttribute('src')).toBe('')
+      expect(video.element.getAttribute('src')).toBeNull()
     })
 
     it('falls back to the known duration when the video reports Infinity', async () => {
@@ -228,7 +228,7 @@ describe('thumbnailGenerator', () => {
 
       await expect(promise).resolves.toEqual({ duration: 20, width: 1920, height: 1080 })
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-      expect(video.element.getAttribute('src')).toBe('')
+      expect(video.element.getAttribute('src')).toBeNull()
     })
 
     it('detaches its handlers on cleanup, so the emptied src cannot re-enter it', async () => {
@@ -241,6 +241,7 @@ describe('thumbnailGenerator', () => {
       // that re-enters cleanup, which empties src again — forever. fireError()
       // stands in for the error the platform raises against the emptied src;
       // one cleanup must mean one revoke and one clearTimeout.
+      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
       const promise = extractVideoMetadata(new Blob(['x']), 10)
       const video = getLastVideoDouble()!
       video.setMetadata({ duration: 10, videoWidth: 640, videoHeight: 480 })
@@ -250,6 +251,7 @@ describe('thumbnailGenerator', () => {
       video.fireError()
 
       expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBe(1)
+      expect(clearTimeoutSpy).toHaveBeenCalledTimes(1)
     })
 
     it('resolves with defaults and cleans up the object URL when the video never loads', async () => {
@@ -264,7 +266,7 @@ describe('thumbnailGenerator', () => {
 
       await expect(promise).resolves.toEqual({ duration: 20, width: 1920, height: 1080 })
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-      expect(video.element.getAttribute('src')).toBe('')
+      expect(video.element.getAttribute('src')).toBeNull()
     })
 
     it('does not resolve again after the timeout once loadeddata already fired', async () => {

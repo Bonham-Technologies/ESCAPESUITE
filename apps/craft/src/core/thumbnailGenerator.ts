@@ -34,7 +34,12 @@ export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
       video.onloadeddata = null;
       video.onerror = null;
       URL.revokeObjectURL(blobUrl);
-      video.src = '';
+      // `removeAttribute` + `load()`, not `src = ''`: emptying src runs the
+      // whole media load algorithm and manufactures a MediaError to fire at the
+      // element. With no src attribute and no srcObject, `load()` ends at
+      // NETWORK_EMPTY and fires nothing at all.
+      video.removeAttribute('src');
+      video.load();
     };
 
     const captureFrame = () => {
@@ -164,7 +169,12 @@ export async function extractVideoMetadata(
       video.onloadeddata = null;
       video.onerror = null;
       URL.revokeObjectURL(blobUrl);
-      video.src = '';
+      // `removeAttribute` + `load()`, not `src = ''`: emptying src runs the
+      // whole media load algorithm and manufactures a MediaError to fire at the
+      // element. With no src attribute and no srcObject, `load()` ends at
+      // NETWORK_EMPTY and fires nothing at all.
+      video.removeAttribute('src');
+      video.load();
     };
 
     video.onloadeddata = () => {
