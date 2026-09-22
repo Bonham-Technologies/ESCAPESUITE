@@ -263,6 +263,17 @@ export class HTMLVideoFrameSource implements IFrameSource {
     if (!this.disposed) {
       this.disposed = true;
       this.video.pause();
+      // Detach BEFORE emptying src. `create()` above leaves onloadeddata and
+      // onerror attached for the element's whole life, and the platform answers
+      // an empty `src` with an `error` event — so leaving onerror attached here
+      // hands that event back to a handler that revokes the object URL and
+      // rejects a promise settled long ago. Both are no-ops today, but the same
+      // shape in ESCAPECRAFT's thumbnailGenerator was an endless
+      // error -> cleanup -> error loop because its handler rewrote `src`
+      // (ESCSUITE-55). Nulling them is what keeps this site from being one edit
+      // away from that.
+      this.video.onloadeddata = null;
+      this.video.onerror = null;
       this.video.src = '';
       this.video.load();
 
