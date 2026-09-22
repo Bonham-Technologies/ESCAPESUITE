@@ -293,7 +293,19 @@ the Help button.
   five suites (`App.settings`, `App.saving`, `App.recording`, `App.library`,
   `hooks/useRecordingSave`) `vi.mock('./core/thumbnailGenerator')` wholesale, so a constant
   declared in this module would vanish under the mock. `utils/previewThumbnail.ts` is never
-  mocked, which is what makes it the single definition — keep it that way
+  mocked, which is what makes it the single definition — keep it that way.
+  **Both `cleanup()` helpers null `onloadeddata` and `onerror` before they release the
+  element, and must keep doing so.** Emptying a media element's `src` is a *load failure*,
+  not a release: the resource selection algorithm jumps to "failed with attribute" and fires
+  an `error` at the element. A handler still attached there re-enters the very cleanup that
+  emptied `src`, which empties it again — and the detached element then spins
+  error → cleanup → error for the life of the page. That was ESCSUITE-55: measured at
+  ~44,500 iterations a second, started by the first saved take of a session, and it left the
+  tab ~87% busy doing nothing for the rest of the session. The release itself is
+  `removeAttribute('src')` + `load()` rather than `src = ''` for the same reason — with no
+  `src` attribute and no `srcObject` the algorithm ends at `NETWORK_EMPTY` and fires nothing
+  at all. `generateStreamThumbnail` is exempt: it only ever sets `srcObject = null`, which
+  with no `src` attribute takes that same silent branch
 - `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
   goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus
   `convertToMP4()`, the `probeMP4Support()` codec probe the MP4 button is gated on (H.264
