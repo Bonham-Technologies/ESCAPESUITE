@@ -130,6 +130,21 @@ describe('Compositor', () => {
       expect(drawsAfterStop).toBe(0)
     })
 
+    it('a second start() replaces the first render loop instead of orphaning it', () => {
+      // ESCSUITE-58: start() scheduled a new chain into animationFrameId over the
+      // old one, so stop() cancelled only the newer chain and the first kept
+      // drawing until the page went away. Nothing calls start() twice today;
+      // this pins the defensive contract.
+      const compositor = new Compositor(1280, 720)
+      compositor.start(30)
+      compositor.start(30)
+      expect(pendingFrameCount()).toBe(1)
+
+      compositor.stop()
+      expect(pendingFrameCount()).toBe(0)
+      expect(tickAnimationFrames()).toBe(0)
+    })
+
     it('is safe to stop twice and to stop without starting', () => {
       const compositor = new Compositor(1280, 720)
       expect(() => compositor.stop()).not.toThrow()

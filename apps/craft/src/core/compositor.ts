@@ -111,6 +111,14 @@ export class Compositor {
    * Start compositing and return the output stream.
    */
   start(frameRate: number = 30): MediaStream {
+    // A start() on a running compositor replaces its loop. Without this the
+    // new chain's handle overwrote the old one's, so stop() cancelled only the
+    // newer chain and the first kept drawing until the page went away
+    // (ESCSUITE-58). Nothing calls start() twice today; this is the contract.
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
     this.targetFrameRate = frameRate;
     // 0 is always in the past, so the first render draws immediately.
     this.nextFrameDue = 0;
