@@ -109,6 +109,14 @@ and launch args at the bottom.
 second-or-later runs, and every second-or-later run in this document was taken with the
 ESCSUITE-55 error loop running.
 
+The output size moves further than the frame count explains — 1.43 MB against 1.69–1.72 MB, a
+17% drop where the 140-against-144 frames accounts for ~3%. **Unexplained**, one invocation
+either side, and not load-bearing for anything here: it is a VP8/VP9 rate-controller outcome on
+a synthetic source whose content is identical every run, so the most likely reading is that
+encoding decisions differ when the encoder is not competing for the main thread. Noted rather
+than explained, because the earlier claim that "neither the frame rate nor the output changes
+with it" was made under the loop and this is the figure that contradicts it.
+
 ### `craft-pip-recording` — Compositor + MediaRecorder, 1280x720, 5 s window
 
 | Metric | Inv. A | Inv. B | Inv. C | Inv. D | **After #55** |
@@ -180,12 +188,14 @@ see "How to read these" below.
 
 > **Superseded by ESCSUITE-55.** The "~83% busy" in that paragraph was the error loop, and
 > the prediction it makes is now testable: freeing the main thread should have pushed the
-> capture rate back toward 30. It did not — post-fix the thread is ~18% busy and the screen
-> take reads 27.97 frames/s, inside the same 27.7–29.2 band. So main-thread contention was
-> **not** what held the rate below 30; the likelier remaining explanation is beating between
+> capture rate back **up**, toward 30. It went **down** — post-fix the thread is ~18% busy and
+> the screen take reads **27.97** frames/s, below the 28.7–29.2 the loop-era invocations
+> recorded. That is the wrong direction for the starvation theory, so the theory is falsified
+> whatever the exact band; the likelier remaining explanation is beating between
 > `setInterval(…, 33)` (30.3 Hz) and `captureStream(30)`'s own sampling. Unresolved, and not
 > worth resolving unless someone wants to make a claim about the recorded frame rate — in
-> which case it needs its own paired measurement first.
+> which case it needs its own paired measurement first. (One invocation either side, so the
+> 0.8 f/s drop itself is not a claim — only its sign, which is all the falsification needs.)
 
 What varies with the machine, and what a comparison should therefore use, is
 `taskMsPerFrame`.
@@ -226,7 +236,7 @@ known, all measured:
 So: something about the first take of a session leaves the page in a more expensive steady
 state, and it is not the library, not the harness, and not cumulative.
 
-### The cause, and the fix (ESCSUITE-55, PR #TBD, 2026-09-21)
+### The cause, and the fix (ESCSUITE-55, PR #415, 2026-09-21)
 
 **It was an endless media-error loop, and it was an app bug, not a benchmark artefact.**
 
@@ -261,7 +271,10 @@ first recording a user saved left the tab burning most of a core until they relo
 
 The fix is to detach `onloadeddata` and `onerror` **before** releasing the element, and to
 release it with `removeAttribute('src')` + `load()` — which, with no `src` attribute and no
-`srcObject`, ends at `NETWORK_EMPTY` and fires nothing at all. After it, the same idle window
+`srcObject`, ends at `NETWORK_EMPTY` with no `error` and no `MediaError`. (Not silent: `load()`
+queues `abort` and `emptied` on the way. Nothing listens for either. The property that matters
+is that no `error` is manufactured, because an `error` is what the loop ran on.) After it, the
+same idle window
 shows **27 ms** of renderer task, 0 errors and 0 revokes, and a take's own window shows one of
 each.
 
@@ -475,7 +488,8 @@ and the report's headline picks the right one.
 28.7–29.2 rather than 30, and the shortfall is most likely the source, not the recorder:
 `mockSyntheticMedia`'s capture "device" is a `setInterval(…, 33)` painter on the same main
 thread that is ~83% busy in a second-or-later take (that figure was the ESCSUITE-55 error
-loop; post-fix it is ~18% and the rate did not move — see the note under the local baseline),
+loop; post-fix it is ~18% and the rate went *down* rather than up, which is the wrong way for
+this explanation — see the note under the local baseline),
 and `WebCodecsRecorder` encodes whatever the track delivers (its own gate is `targetFrameInterval * 0.8` = 26.7 ms, so it is not
 dropping the difference). So a future change that made the page *busier* could show up here
 as a lower "recorded frame rate" that has nothing to do with the recorder. Compare

@@ -12,4 +12,5 @@ with an `error` event. That went straight back into the cleanup that emptied `sr
 emptied it again — so each saved take left a detached element spinning error → cleanup → error
 at roughly 44,500 iterations a second for the rest of the session. The handlers now come off
 before the element is released, and the release uses `removeAttribute('src')` + `load()`, which
-fires nothing at all.
+raises no error and manufactures no `MediaError` at all — only `abort` and `emptied`, which
+nothing listens for.

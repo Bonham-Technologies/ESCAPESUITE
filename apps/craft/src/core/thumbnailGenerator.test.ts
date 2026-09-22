@@ -98,6 +98,12 @@ describe('thumbnailGenerator', () => {
       video.fireError()
 
       expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBe(1)
+      // Twice: once to start the load, once in cleanup() to release it. The
+      // release is two steps and the six `getAttribute('src')` assertions only
+      // cover the first — without cleanup()'s load() this reads 1, the element
+      // keeps the resource it already loaded and never reaches NETWORK_EMPTY,
+      // and every other test in this file still passes.
+      expect(vi.mocked(video.element.load)).toHaveBeenCalledTimes(2)
     })
 
     it('rejects when the canvas produces no blob', async () => {
@@ -252,6 +258,9 @@ describe('thumbnailGenerator', () => {
 
       expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBe(1)
       expect(clearTimeoutSpy).toHaveBeenCalledTimes(1)
+      // As above — one to start, one to release. removeAttribute alone does
+      // not release the resource.
+      expect(vi.mocked(video.element.load)).toHaveBeenCalledTimes(2)
     })
 
     it('resolves with defaults and cleans up the object URL when the video never loads', async () => {

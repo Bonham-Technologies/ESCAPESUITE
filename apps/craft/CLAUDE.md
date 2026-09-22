@@ -303,8 +303,10 @@ the Help button.
   ~44,500 iterations a second, started by the first saved take of a session, and it left the
   tab ~87% busy doing nothing for the rest of the session. The release itself is
   `removeAttribute('src')` + `load()` rather than `src = ''` for the same reason — with no
-  `src` attribute and no `srcObject` the algorithm ends at `NETWORK_EMPTY` and fires nothing
-  at all. `generateStreamThumbnail` is exempt: it only ever sets `srcObject = null`, which
+  `src` attribute and no `srcObject` the algorithm ends at `NETWORK_EMPTY` with **no `error`
+  and no `MediaError`**. (It is not silent: `load()` queues `abort` and `emptied` on the way
+  there. Nothing listens for either, and neither can re-enter a cleanup; the property that
+  matters is that no `error` is manufactured.) `generateStreamThumbnail` is exempt: it only ever sets `srcObject = null`, which
   with no `src` attribute takes that same silent branch
 - `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
   goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus

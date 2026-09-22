@@ -19,6 +19,12 @@
 // platform would, as thumbnailGenerator.test.ts does. Until this double grows
 // a real resource-selection model, the *trigger* is unpinned and only the
 // consequence is tested.
+//
+// The release path is half-modelled for the same reason: load() below is a
+// bare vi.fn(), so the `abort` and `emptied` a real load() queues on its way to
+// NETWORK_EMPTY never happen here either. What a test CAN pin is that load()
+// was called at all — removeAttribute('src') on its own does not release the
+// resource — and thumbnailGenerator.test.ts does exactly that.
 import { vi } from 'vitest'
 
 /** Metadata fields a test can force onto the element. */

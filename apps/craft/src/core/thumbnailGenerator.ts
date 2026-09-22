@@ -34,10 +34,13 @@ export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
       video.onloadeddata = null;
       video.onerror = null;
       URL.revokeObjectURL(blobUrl);
-      // `removeAttribute` + `load()`, not `src = ''`: emptying src runs the
-      // whole media load algorithm and manufactures a MediaError to fire at the
-      // element. With no src attribute and no srcObject, `load()` ends at
-      // NETWORK_EMPTY and fires nothing at all.
+      // `removeAttribute` + `load()`, not `src = ''`: emptying src is a load
+      // *failure*, so it manufactures a MEDIA_ERR_SRC_NOT_SUPPORTED and fires
+      // `error` at the element. `removeAttribute` does not itself invoke the
+      // load algorithm, and the `load()` that follows finds neither src nor
+      // srcObject, so resource selection ends at NETWORK_EMPTY with no `error`
+      // and no MediaError — only `abort` and `emptied`, which nothing here
+      // listens for.
       video.removeAttribute('src');
       video.load();
     };
@@ -169,10 +172,13 @@ export async function extractVideoMetadata(
       video.onloadeddata = null;
       video.onerror = null;
       URL.revokeObjectURL(blobUrl);
-      // `removeAttribute` + `load()`, not `src = ''`: emptying src runs the
-      // whole media load algorithm and manufactures a MediaError to fire at the
-      // element. With no src attribute and no srcObject, `load()` ends at
-      // NETWORK_EMPTY and fires nothing at all.
+      // `removeAttribute` + `load()`, not `src = ''`: emptying src is a load
+      // *failure*, so it manufactures a MEDIA_ERR_SRC_NOT_SUPPORTED and fires
+      // `error` at the element. `removeAttribute` does not itself invoke the
+      // load algorithm, and the `load()` that follows finds neither src nor
+      // srcObject, so resource selection ends at NETWORK_EMPTY with no `error`
+      // and no MediaError — only `abort` and `emptied`, which nothing here
+      // listens for.
       video.removeAttribute('src');
       video.load();
     };
