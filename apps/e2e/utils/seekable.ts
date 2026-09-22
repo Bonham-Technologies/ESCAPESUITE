@@ -21,9 +21,19 @@ import { expect, type ConsoleMessage, type Page } from '@playwright/test'
  * two cannot drift: the whole point is that both build pipelines are checked.
  */
 
-/** The `NOT_SEEKABLE` notice, verbatim from `apps/craft/src/utils/notices.ts`. */
+/**
+ * The `NOT_SEEKABLE` notice. `apps/e2e` has no dependency on craft, so the text
+ * can only be copied — and a copy asserted with `toHaveCount(0)` passes when it
+ * goes stale, which is the wrong failure direction. The full string is kept here
+ * as documentation (it is verbatim from `apps/craft/src/utils/notices.ts`) and
+ * the assertion is made against the fragment below, which survives rewording of
+ * the sentence around it.
+ */
 export const NOT_SEEKABLE_NOTICE =
   'Saved, but the recording may not be seekable — the container repair failed.'
+
+/** The load-bearing part of it, which is what gets asserted. */
+export const NOT_SEEKABLE_FRAGMENT = /may not be seekable/
 
 export interface ConsoleCapture {
   /** Every console line and page error, newest last. */
@@ -96,10 +106,14 @@ export interface StoredDuration {
 }
 
 /**
- * Load the one stored recording out of `video-editor-db` and report what a
- * `<video>` makes of it. Reads the blob the app actually wrote, not the one it
- * offered for download, so a repair that silently fell back to the raw blob is
- * visible here.
+ * Load the stored recording out of `video-editor-db` and report what a `<video>`
+ * makes of it. Reads the blob the app actually wrote, not the one it offered for
+ * download, so a repair that silently fell back to the raw blob is visible here.
+ *
+ * `getAll()` returns key order and the keys are uuid v4, so "last" is not
+ * "newest" — this is only unambiguous because the callers record exactly one
+ * take in a fresh browser context. Recording a second take before calling this
+ * would need the store queried by `createdAt` instead.
  */
 export async function storedRecordingDuration(page: Page): Promise<StoredDuration> {
   return page.evaluate(() => {
@@ -148,7 +162,7 @@ export async function storedRecordingDuration(page: Page): Promise<StoredDuratio
  * console blamed `webm-duration-fix`, no `NOT_SEEKABLE` notice reached the
  * header's live region, and the stored blob has a finite duration.
  */
-export async function expectSeekableTake(page: Page, console: ConsoleCapture): Promise<void> {
+export async function expectSeekableTake(page: Page, log: ConsoleCapture): Promise<void> {
   // The property that matters first, so a failure says what the user would see
   // rather than which line logged about it.
   const stored = await storedRecordingDuration(page)
@@ -159,7 +173,7 @@ export async function expectSeekableTake(page: Page, console: ConsoleCapture): P
   ).toBe(true)
   expect(Number(stored.reported)).toBeGreaterThan(0)
 
-  await expect(page.getByText(NOT_SEEKABLE_NOTICE)).toHaveCount(0)
-  expect(console.matching(/fixWebmDuration is not a function/)).toEqual([])
-  expect(console.matching(/WebM metadata repair failed/)).toEqual([])
+  await expect(page.getByText(NOT_SEEKABLE_FRAGMENT)).toHaveCount(0)
+  expect(log.matching(/fixWebmDuration is not a function/)).toEqual([])
+  expect(log.matching(/WebM metadata repair failed/)).toEqual([])
 }

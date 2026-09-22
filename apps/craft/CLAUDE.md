@@ -725,12 +725,16 @@ that the instant download does not already do.
   what a default import binds to is a toolchain decision — esbuild's `__toESM(mod, 0)` (Vite 7
   and earlier) honours `__esModule` and binds the **function**, while Vite 8, which moved both
   dep optimization and the build to Rolldown, follows Node and binds the whole **`module.exports`
-  object** (its `legacy.inconsistentCjsInterop` flag is the opt-out for the old behaviour).
-  Under Vite 8.3 that turned every MediaRecorder save into `TypeError: fixWebmDuration is not a
-  function`, caught by `useRecordingSave`, `NOT_SEEKABLE` raised and the take stored unrepaired —
-  in the dev server *and* in the shipped build. `converter.ts`'s exported `resolveFixWebmDuration()`
-  takes whichever of the two shapes arrives and yields the function, so the import survives the
-  next bundler as well. No unit test can see the problem: they all
+  object** (its `legacy.inconsistentCjsInterop` flag is the opt-out, documented against
+  "pre-Vite 8" behaviour — i.e. this arrived with the **7 → 8 major**, commit `7c40710`,
+  2026-03-14, first released here as craft 2.1.0; 8.3.0 is merely what it was found and fixed
+  under, so every craft release 2.1.0–2.5.1 shipped it). It turned every MediaRecorder save into
+  `TypeError: fixWebmDuration is not a function`, caught by `useRecordingSave`, `NOT_SEEKABLE`
+  raised and the take stored unrepaired — in the dev server *and* in the shipped build; takes
+  already saved that way are not repaired retroactively. `converter.ts`'s exported
+  `resolveFixWebmDuration()` unwraps **one** level of `default`, which is every shape a *default*
+  import produces; it is not a general interop shim (Vite's namespace helper double-wraps, so an
+  `import * as` here would need a loop). No unit test can see the problem: they all
   `vi.mock('webm-duration-fix')`, and vitest's own pipeline resolves the default the old way.
   The guard is therefore a browser test — `apps/e2e/tests/escapecraft/pip-seekable.spec.ts`
   against the dev server and `apps/e2e/tests/production/pip-seekable.spec.ts` against the

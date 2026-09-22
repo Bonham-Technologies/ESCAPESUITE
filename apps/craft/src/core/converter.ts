@@ -35,8 +35,12 @@ import {
 } from 'mediabunny';
 import fixWebmDurationImport from 'webm-duration-fix';
 
-/** The one function `webm-duration-fix` provides: repair a WebM container. */
-type FixWebmDuration = (blob: Blob) => Promise<Blob>;
+/**
+ * The one function `webm-duration-fix` provides: repair a WebM container. Taken
+ * from the library's own `lib/index.d.ts` rather than restated, so it tracks the
+ * package — TypeScript reads the declaration whatever the runtime interop does.
+ */
+type FixWebmDuration = typeof fixWebmDurationImport;
 
 /**
  * Pick the repair function out of whatever the toolchain handed us for
@@ -44,29 +48,38 @@ type FixWebmDuration = (blob: Blob) => Promise<Blob>;
  *
  * The library is CommonJS: its `lib/index.js` ends `exports.default =
  * fixWebmDuration` and sets `__esModule`. What a default import binds to is
- * therefore a toolchain decision, and the toolchain changed its mind:
+ * therefore a toolchain decision, and the toolchain changed its mind at the
+ * Vite 7 → 8 major (`7c40710`, 2026-03-14, vite 8.0.0; first released here as
+ * craft 2.1.0):
  *
  * - esbuild's `__toESM(mod, 0)` — Vite 7 and earlier, for both the dev server's
  *   pre-bundled deps and the build — honours `__esModule` and binds the
  *   **function** on `exports.default`.
  * - Vite 8 moved dep optimization and the build to Rolldown and aligned CJS
  *   interop with Node's (see `legacy.inconsistentCjsInterop` in Vite's config
- *   types, the opt-out for the old behaviour). Node binds a default import to
- *   the whole `module.exports`, so what arrives is the **object**
- *   `{ __esModule: true, default: fixWebmDuration }`. Observed in both halves
- *   of Vite 8.3: the dev server emits `const fixWebmDuration =
- *   __vite__cjsImport1_webmDurationFix`, and the build emits
- *   `__toESM(require_lib(), 1)` — the `1` being Node mode.
+ *   types, the opt-out documented for "pre-Vite 8" behaviour). Node binds a
+ *   default import to the whole `module.exports`, so what arrives is the
+ *   **object** `{ __esModule: true, default: fixWebmDuration }`. Observed in both
+ *   halves of the 8.3.0 the bug was found and fixed under: the dev server emits
+ *   `const fixWebmDuration = __vite__cjsImport1_webmDurationFix`, and the build
+ *   emits `__toESM(require_lib(), 1)` — the `1` being Node mode.
  *
  * Calling the object is a `TypeError`, `useRecordingSave` catches it, and every
  * MediaRecorder take (PiP, audio-only, any browser without WebCodecs) is stored
  * unrepaired — playable, but with no Duration and no Cues, so it will not
  * scrub. No unit test could see it: they all `vi.mock('webm-duration-fix')`.
  *
- * Resolving it here rather than pinning a Vite option keeps the import correct
- * whichever interop the next bundler picks. `tests/escapecraft/pip-seekable.spec.ts`
- * and its production-layout twin in `apps/e2e` are what guard it, by recording a
- * real PiP take and requiring the stored blob to report a finite duration.
+ * Scope, exactly: this unwraps **one** level of `default`, which is every shape
+ * a *default* import produces — the bare function, or `module.exports` with the
+ * function on `.default`. It is not a general interop shim; Vite's namespace
+ * helper double-wraps (`{ ...exports, default: exports }`), so if this module
+ * ever switches to `import * as`, this has to grow a loop. Doing it here rather
+ * than pinning a Vite option keeps one app's import correct without opting the
+ * whole app out of an upstream change.
+ *
+ * `tests/escapecraft/pip-seekable.spec.ts` and its production-layout twin in
+ * `apps/e2e` are what guard it, by recording a real PiP take and requiring the
+ * stored blob to report a finite duration.
  */
 export function resolveFixWebmDuration(imported: unknown): FixWebmDuration {
   if (typeof imported === 'function') return imported as FixWebmDuration;

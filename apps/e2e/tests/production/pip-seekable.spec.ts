@@ -30,6 +30,7 @@ test.describe('ESCAPECRAFT PiP recording (production layout)', () => {
 
     await recordPipTake(page, CRAFT_URL)
 
+    // Same log-line path proof, and the same caveat, as the dev-server spec.
     expect(consoleLog.matching(/Using MediaRecorder-based recorder \(PiP mode\)/)).not.toEqual([])
 
     await expectSeekableTake(page, consoleLog)

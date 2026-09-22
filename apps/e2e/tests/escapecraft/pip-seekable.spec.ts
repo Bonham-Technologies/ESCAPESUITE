@@ -41,6 +41,15 @@ test.describe('ESCAPECRAFT PiP recording', () => {
 
     // The take really did take the MediaRecorder path — otherwise this spec
     // would be a second, slower copy of the screen-only WebCodecs one.
+    //
+    // Proving that with a log line is the weak link: the string is not
+    // contractual, so a rewording turns this red for a cosmetic reason. It is
+    // kept because the assertion is positive — a reworded log fails loudly, it
+    // never passes silently — and because without it this spec could quietly
+    // decay into a slow copy of the WebCodecs path. The sturdier signal, worth
+    // taking when this is next touched: an `addInitScript` wrapping
+    // `window.MediaRecorder` and `window.VideoEncoder` to count constructions,
+    // then asserting MediaRecorder was built and VideoEncoder was not.
     expect(consoleLog.matching(/Using MediaRecorder-based recorder \(PiP mode\)/)).not.toEqual([])
 
     await expectSeekableTake(page, consoleLog)
