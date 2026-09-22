@@ -390,14 +390,16 @@ ARTIST up a fraction and no floor, and moved CRAFT down a fraction — it lost a
 was covered outright — with no floor crossed either way. `@escapesuite/artist` was re-measured
 2026-09-19 after the duration probe (headerless video, then audio: `extractVideoMetadata`'s
 seek-to-end fallback lifted into one helper both paths call) added tests that moved statements,
-branches and functions up a hundredth or two each, and no floor.
+branches and functions up a hundredth or two each, and no floor. `@escapesuite/craft` was
+re-measured 2026-09-21 after the `webm-duration-fix` CJS-interop fix, whose new test covers
+both arms of the resolver: statements, branches and functions each up a fraction, and no floor.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.23 | 96.46 | 99.67 |
+| `@escapesuite/craft` | 100.00 | 99.30 | 96.73 | 99.72 |
 | `@escapesuite/artist` | 99.37 | 98.67 | 93.30 | 98.94 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
@@ -445,7 +447,10 @@ never above what the suite actually achieves:
 ## Key Constraints
 
 - WebCodecs API (ESCAPEARTIST exports) only works in Chrome/Edge
-- MediaRecorder produces WebM without proper seek metadata (requires post-processing)
+- MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
+  end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; PiP takes, audio-only
+  takes and any browser without WebCodecs all reach that path, but a PiP take is the only one the
+  specs can drive in headless Chromium)
 - AudioContext needs `resume()` call due to Chrome autoplay policy
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
 

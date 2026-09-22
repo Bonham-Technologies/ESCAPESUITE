@@ -298,7 +298,9 @@ the Help button.
   goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus
   `convertToMP4()`, the `probeMP4Support()` codec probe the MP4 button is gated on (H.264
   fatal, AAC only silencing), and the
-  `isMP4ConversionSupported()` presence check the conversion guards itself with. The library
+  `isMP4ConversionSupported()` presence check the conversion guards itself with, and
+  `resolveFixWebmDuration()`, the hand-written CJS interop the repair's import needs (see
+  "WebM Handling"). The library
   row's MP4 download reaches them through `hooks/useMp4Download.ts`. `remuxToWebM()` / `isWebMRemuxSupported()` (the
   compatible-WebM VP9 + Opus re-encode) are the one part of this module nothing calls; see
   "Download Formats"
@@ -718,6 +720,28 @@ that the instant download does not already do.
   `knownDuration`, which the player falls back to when `video.duration` is `Infinity` or 0
 - A repair that fails still saves the raw blob, and raises the `NOT_SEEKABLE` notice. That
   path exists only for MediaRecorder takes, for the same reason
+- **The import of `webm-duration-fix` is resolved by hand**, and has to be. The library is
+  CommonJS: `lib/index.js` ends `exports.default = fixWebmDuration` and sets `__esModule`, so
+  what a default import binds to is a toolchain decision — esbuild's `__toESM(mod, 0)` (Vite 7
+  and earlier) honours `__esModule` and binds the **function**, while Vite 8, which moved both
+  dep optimization and the build to Rolldown, follows Node and binds the whole **`module.exports`
+  object** (its `legacy.inconsistentCjsInterop` flag is the opt-out, documented against
+  "pre-Vite 8" behaviour — i.e. this arrived with the **7 → 8 major**, commit `7c40710`,
+  2026-03-14, first released here as craft 2.1.0; 8.3.0 is merely what it was found and fixed
+  under, so every craft release 2.1.0–2.5.1 shipped it). It turned every MediaRecorder save into
+  `TypeError: fixWebmDuration is not a function`, caught by `useRecordingSave`, `NOT_SEEKABLE`
+  raised and the take stored unrepaired — in the dev server *and* in the shipped build; takes
+  already saved that way are not repaired retroactively. `converter.ts`'s exported
+  `resolveFixWebmDuration()` unwraps **one** level of `default`, which is every shape a *default*
+  import produces; it is not a general interop shim (Vite's namespace helper double-wraps, so an
+  `import * as` here would need a loop). No unit test can see the problem: they all
+  `vi.mock('webm-duration-fix')`, and vitest's own pipeline resolves the default the old way.
+  The guard is therefore a browser test — `apps/e2e/tests/escapecraft/pip-seekable.spec.ts`
+  against the dev server and `apps/e2e/tests/production/pip-seekable.spec.ts` against the
+  combined `dist/` — which records a real **PiP** take (the only mode that reaches MediaRecorder
+  in Chromium) and requires the stored blob to report a finite `duration` in a `<video>`.
+  `src/core/converterInterop.test.ts` is the one suite that imports the real module, and pins
+  both arms of the resolver
 
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`, **in the hosted build only**. The standalone
