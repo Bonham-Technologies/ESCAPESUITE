@@ -115,6 +115,8 @@ export class Compositor {
     // new chain's handle overwrote the old one's, so stop() cancelled only the
     // newer chain and the first kept drawing until the page went away
     // (ESCSUITE-58). Nothing calls start() twice today; this is the contract.
+    // Only the loop is replaced: the previous captureStream() belongs to
+    // whoever was handed it, and a canvas capture track is theirs to stop.
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -131,7 +133,7 @@ export class Compositor {
    * Stop compositing.
    */
   stop(): void {
-    if (this.animationFrameId) {
+    if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
