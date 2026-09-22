@@ -63,14 +63,19 @@ class MockHTMLVideoElement {
   videoHeight = 1080;
   readyState = 4;
 
+  /** The last value assigned to each property handler, null included. */
+  lastOnLoadedData: (() => void) | null = null;
+  lastOnError: (() => void) | null = null;
+
   set onloadeddata(handler: (() => void) | null) {
+    this.lastOnLoadedData = handler;
     if (handler) {
       setTimeout(() => handler(), 0);
     }
   }
 
-  set onerror(_handler: (() => void) | null) {
-    // Error handler - not used in tests
+  set onerror(handler: (() => void) | null) {
+    this.lastOnError = handler;
   }
 
   addEventListener(event: string, handler: () => void) {
@@ -404,6 +409,27 @@ describe('frameSource', () => {
       await source.dispose();
 
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test-url');
+    });
+
+    it('detaches its handlers on dispose, before it empties src', async () => {
+      // create() leaves onloadeddata and onerror attached for the element's
+      // whole life, and dispose() empties `src` — which the platform answers
+      // with an `error` event. Handing that back to a live handler is how
+      // ESCAPECRAFT's thumbnailGenerator ended up spinning
+      // error -> cleanup -> error for the life of the page (ESCSUITE-55). It
+      // does not loop here, because this handler does not rewrite `src`; the
+      // handlers come off anyway, so it cannot start to.
+      let element!: MockHTMLVideoElement;
+      videoFactory = () => (element = new MockHTMLVideoElement());
+      const source = await HTMLVideoFrameSource.create(
+        'test-source',
+        new Blob(['test'], { type: 'video/mp4' })
+      );
+
+      await source.dispose();
+
+      expect(element.lastOnError).toBeNull();
+      expect(element.lastOnLoadedData).toBeNull();
     });
   });
 

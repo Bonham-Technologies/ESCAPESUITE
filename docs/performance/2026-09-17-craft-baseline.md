@@ -91,49 +91,82 @@ and launch args at the bottom.
 
 ### `craft-screen-recording` — WebCodecs, 1280x720, 5 s window
 
-| Metric | Inv. A | Inv. B | Inv. C | Inv. D |
-| --- | --- | --- | --- | --- |
-| **Frames encoded** | 144 | 144 | 146 | 144 |
-| **Frames/s** | 28.76 | 28.74 | 29.17 | 28.77 |
-| **Renderer task per frame** | 28.97 ms | 29.02 ms | 28.35 ms | 28.65 ms |
-| Renderer task duration | 4171.11 ms | 4165.83 ms | 4154.49 ms | 4142.96 ms |
-| Animation frames/s | 60.11 | 60.07 | 59.94 | 59.93 |
-| Layouts | 301 | 303 | 302 | 302 |
-| Style recalcs | 301 | 301 | 300 | 301 |
-| Long tasks | 0 | 0 | 0 | 0 |
-| Encoder queue high-water | 0 | 0 | 0 | 0 |
-| Heap delta | −383.8 KB | −326.8 KB | −185.2 KB | −164.4 KB |
-| Output size (WebM) | 1.69 MB | 1.72 MB | 1.71 MB | 1.72 MB |
+| Metric | Inv. A | Inv. B | Inv. C | Inv. D | **After #55** |
+| --- | --- | --- | --- | --- | --- |
+| **Frames encoded** | 144 | 144 | 146 | 144 | 140 |
+| **Frames/s** | 28.76 | 28.74 | 29.17 | 28.77 | 27.97 |
+| **Renderer task per frame** | 28.97 ms | 29.02 ms | 28.35 ms | 28.65 ms | **6.54 ms** |
+| Renderer task duration | 4171.11 ms | 4165.83 ms | 4154.49 ms | 4142.96 ms | **915.73 ms** |
+| Animation frames/s | 60.11 | 60.07 | 59.94 | 59.93 | 60.05 |
+| Layouts | 301 | 303 | 302 | 302 | 300 |
+| Style recalcs | 301 | 301 | 300 | 301 | 300 |
+| Long tasks | 0 | 0 | 0 | 0 | 0 |
+| Encoder queue high-water | 0 | 0 | 0 | 0 | 0 |
+| Heap delta | −383.8 KB | −326.8 KB | −185.2 KB | −164.4 KB | −354.0 KB |
+| Output size (WebM) | 1.69 MB | 1.72 MB | 1.71 MB | 1.72 MB | 1.43 MB |
+
+**A–D are superseded** — see "The cause, and the fix" below. Their medians are medians of
+second-or-later runs, and every second-or-later run in this document was taken with the
+ESCSUITE-55 error loop running.
+
+The output size moves further than the frame count explains — 1.43 MB against 1.69–1.72 MB, a
+17% drop where the 140-against-144 frames accounts for ~3%. **Unexplained**, one invocation
+either side, and not load-bearing for anything here: it is a VP8/VP9 rate-controller outcome on
+a synthetic source whose content is identical every run, so the most likely reading is that
+encoding decisions differ when the encoder is not competing for the main thread. Noted rather
+than explained, because the earlier claim that "neither the frame rate nor the output changes
+with it" was made under the loop and this is the figure that contradicts it.
 
 ### `craft-pip-recording` — Compositor + MediaRecorder, 1280x720, 5 s window
 
-| Metric | Inv. A | Inv. B | Inv. C | Inv. D |
-| --- | --- | --- | --- | --- |
-| **Composited fps** | 22.76 | 22.78 | 22.38 | 22.77 |
-| Video draws | 228 | 228 | 224 | 228 |
-| Video draws/s | 45.52 | 45.55 | 44.76 | 45.54 |
-| **Renderer task per frame** (per *composited* frame here) | 35.20 ms | 34.85 ms | 35.73 ms | 34.69 ms |
-| Renderer task duration | 4002.25 ms | 3973.25 ms | 4001.58 ms | 3989.52 ms |
-| Animation frames/s | 119.88 | 119.87 | 119.89 | 120.23 |
-| Frames encoded | 0 | 0 | 0 | 0 |
-| Layouts | 299 | 305 | 300 | 305 |
-| Style recalcs | 301 | 300 | 300 | 300 |
-| Long tasks | 0 | 0 | 0 | 0 |
-| Heap delta | −48.7 KB | −48.4 KB | −116.1 KB | 171.5 KB |
-| Output size (WebM) | 1009.3 KB | 1.05 MB | 1.02 MB | 999.2 KB |
+| Metric | Inv. A | Inv. B | Inv. C | Inv. D | **After #55** |
+| --- | --- | --- | --- | --- | --- |
+| **Composited fps** | 22.76 | 22.78 | 22.38 | 22.77 | 30.11 |
+| Video draws | 228 | 228 | 224 | 228 | 302 |
+| Video draws/s | 45.52 | 45.55 | 44.76 | 45.54 | 60.22 |
+| **Renderer task per frame** (per *composited* frame here) | 35.20 ms | 34.85 ms | 35.73 ms | 34.69 ms | **16.09 ms** |
+| Renderer task duration | 4002.25 ms | 3973.25 ms | 4001.58 ms | 3989.52 ms | **2425.02 ms** |
+| Animation frames/s | 119.88 | 119.87 | 119.89 | 120.23 | 120.03 |
+| Frames encoded | 0 | 0 | 0 | 0 | 0 |
+| Layouts | 299 | 305 | 300 | 305 | 306 |
+| Style recalcs | 301 | 300 | 300 | 300 | 301 |
+| Long tasks | 0 | 0 | 0 | 0 | 0 |
+| Heap delta | −48.7 KB | −48.4 KB | −116.1 KB | 171.5 KB | −141.4 KB |
+| Output size (WebM) | 1009.3 KB | 1.05 MB | 1.02 MB | 999.2 KB | 1.00 MB |
+
+**A–D are superseded**, and two separate fixes sit between them and the last column: the
+compositor's frame gate (ESCSUITE-54, which is what moves `compositedFps` 22.8 → 30.1) and the
+error loop (ESCSUITE-55, which is what moves the renderer task 3990 → 2425 ms). The
+ESCSUITE-54 paired measurement below isolates the first of the two; it was itself taken with
+the loop running, in both of its arms, which is why its `taskDurationMs` sits at ~4000 ms in
+all four columns and ~2425 ms here.
 
 ### `craft-mp4-conversion` — `convertToMP4` of a 6 s take
 
-| Metric | Inv. A | Inv. B | Inv. C | Inv. D |
-| --- | --- | --- | --- | --- |
-| Wall time | 6759 ms | 6762 ms | 6753 ms | 6753 ms |
-| Frames encoded | 195 | 195 | 195 | 195 |
-| Frames/s | 28.85 | 28.84 | 28.88 | 28.88 |
-| **Renderer task per frame** | 30.41 ms | 30.35 ms | 30.03 ms | 30.38 ms |
-| Renderer task duration | 5929.12 ms | 5918.11 ms | 5854.93 ms | 5925.26 ms |
-| Encoder queue high-water | 4 | 4 | 3 | 3 |
-| Heap delta | 271.3 KB | 272.7 KB | 292.3 KB | 271.6 KB |
-| Output size (MP4) | 835.0 KB | 838.0 KB | 861.5 KB | 825.0 KB |
+| Metric | Inv. A | Inv. B | Inv. C | Inv. D | **After #55** |
+| --- | --- | --- | --- | --- | --- |
+| Wall time | 6759 ms | 6762 ms | 6753 ms | 6753 ms | 6741 ms |
+| Frames encoded | 195 | 195 | 195 | 195 | 195 |
+| Frames/s | 28.85 | 28.84 | 28.88 | 28.88 | 28.93 |
+| **Renderer task per frame** | 30.41 ms | 30.35 ms | 30.03 ms | 30.38 ms | **8.82 ms** |
+| Renderer task duration | 5929.12 ms | 5918.11 ms | 5854.93 ms | 5925.26 ms | **1719.71 ms** |
+| Encoder queue high-water | 4 | 4 | 3 | 3 | 1 |
+| Heap delta | 271.3 KB | 272.7 KB | 292.3 KB | 271.6 KB | 240.8 KB |
+| Output size (MP4) | 835.0 KB | 838.0 KB | 861.5 KB | 825.0 KB | 863.8 KB |
+
+**A–D are superseded, and this benchmark is the worst affected of the three.** It records a
+plain take *before* converting, so the error loop was running for **all three** of its runs,
+not just the second and third — A–D are not a measurement of conversion at all. It costs
+**−71%** of the renderer task it appeared to: 5925 → 1720 ms, 30.38 → 8.82 ms per frame.
+
+Two things in that column are worth reading together. **Wall time did not move** (6753 →
+6741 ms) — exactly what this file predicts, because the conversion is bound to playback speed
+and `framesEncoded` is the same 195 it has been in every run ever recorded here. And the
+**encoder queue high-water fell 3–4 → 1**: with the main thread no longer spinning, the
+encoder stops falling behind the frames `requestVideoFrameCallback` hands it. Wall time being
+a floor rather than a score, and `taskMsPerFrame` being the number a converter change moves,
+are both stated under "How to read these"; this is what that looks like when something
+actually moves.
 
 **The spread between invocations is small here** — every headline figure above moves by
 under 3% across the four, and `framesEncoded` for the conversion is identical (195) in all
@@ -152,6 +185,17 @@ delivers materially fewer than 30 frames a second. That is the most likely reaso
 take lands at 28.7–29.2 rather than ~30 (`WebCodecsRecorder`'s own gate is
 `targetFrameInterval * 0.8` = 26.7 ms, so it is not the thing dropping the difference) —
 see "How to read these" below.
+
+> **Superseded by ESCSUITE-55.** The "~83% busy" in that paragraph was the error loop, and
+> the prediction it makes is now testable: freeing the main thread should have pushed the
+> capture rate back **up**, toward 30. It went **down** — post-fix the thread is ~18% busy and
+> the screen take reads **27.97** frames/s, below the 28.7–29.2 the loop-era invocations
+> recorded. That is the wrong direction for the starvation theory, so the theory is falsified
+> whatever the exact band; the likelier remaining explanation is beating between
+> `setInterval(…, 33)` (30.3 Hz) and `captureStream(30)`'s own sampling. Unresolved, and not
+> worth resolving unless someone wants to make a claim about the recorded frame rate — in
+> which case it needs its own paired measurement first. (One invocation either side, so the
+> 0.8 f/s drop itself is not a claim — only its sign, which is all the falsification needs.)
 
 What varies with the machine, and what a comparison should therefore use, is
 `taskMsPerFrame`.
@@ -190,13 +234,93 @@ known, all measured:
   the stored file's size are the same in run 1 as in runs 2 and 3.
 
 So: something about the first take of a session leaves the page in a more expensive steady
-state, and it is not the library, not the harness, and not cumulative. **It has not been
-root-caused, and it is a real follow-up.** Until it is, read the numbers this way:
+state, and it is not the library, not the harness, and not cumulative.
 
-> The reported median describes a **second-or-later take**, which is deliberate — it is the
-> steady state, and it is what a user's session mostly consists of. A comparison must never
-> mix a single-run measurement against a three-run median, because a single run would be
-> the cheap first take.
+### The cause, and the fix (ESCSUITE-55, PR #415, 2026-09-21)
+
+**It was an endless media-error loop, and it was an app bug, not a benchmark artefact.**
+
+`thumbnailGenerator.ts` had two `cleanup()` helpers that ended with `video.src = ''`.
+Emptying a media element's `src` is a *load failure*, not a release: the resource selection
+algorithm jumps to "failed with attribute", sets a `MEDIA_ERR_SRC_NOT_SUPPORTED` and fires
+`error` at the element. The handler answering that error was the very `cleanup()` that had
+emptied `src` — so it ran again, emptied `src` again, and errored again. Every call left a
+detached `<video>` spinning error → cleanup → error for the rest of the page's life.
+`useRecordingSave.ts` calls `extractVideoMetadata` exactly once per saved recording, so the
+loop started when the **first** take of a session was saved and never stopped.
+
+The event is fired from a *queued task*, which is why it showed up as a task treadmill —
+`longTaskCount` 0, no extra animation frames, no extra layouts, no extra style recalcs, just
+several tens of thousands of very short tasks a second — rather than as a stack overflow or
+one long task. And because a busy-spin consumes whatever main-thread capacity is spare, **one
+loop already saturates the thread**: that is the whole explanation of "steps once, then
+flat". The second and third loops added by later takes had nothing left to consume.
+
+Measured from outside the app, over a **5 s idle window** with nothing recording:
+
+| | renderer task / 5 s | `error` events | `URL.revokeObjectURL` calls |
+| --- | --- | --- | --- |
+| before the first take | **0.95 ms** | 0 | 0 |
+| after take 1 | **4332.7 ms** | 222,873 | 222,873 |
+| after take 2 | 4284.9 ms | 224,168 | 224,168 |
+| after take 4 | 4231.7 ms | 210,595 | 210,595 |
+
+≈44,500 laps a second, for ever, on a page doing nothing at all. **This was not confined to
+the benchmark.** `thumbnailGenerator.ts` has no build-mode branch, so in a real session the
+first recording a user saved left the tab burning most of a core until they reloaded.
+
+The fix is to detach `onloadeddata` and `onerror` **before** releasing the element, and to
+release it with `removeAttribute('src')` + `load()` — which, with no `src` attribute and no
+`srcObject`, ends at `NETWORK_EMPTY` with no `error` and no `MediaError`. (Not silent: `load()`
+queues `abort` and `emptied` on the way. Nothing listens for either. The property that matters
+is that no `error` is manufactured, because an `error` is what the loop ran on.) After it, the
+same idle window
+shows **27 ms** of renderer task, 0 errors and 0 revokes, and a take's own window shows one of
+each.
+
+`craft-screen-recording`, renderer task per run, same machine and launch args, load verified
+below 4 before each:
+
+| | Run 1 | Run 2 | Run 3 |
+| --- | --- | --- | --- |
+| Before | 890.8 ms | 4110.4 ms | 4084.4 ms |
+| **After** | **886.5 ms** | **915.7 ms** | **1013.4 ms** |
+
+The step is gone: the three runs now sit within 14% of each other instead of differing 4.6x,
+and median `taskMsPerFrame` falls 27.98 → 6.54 ms. (An independent earlier post-fix
+invocation read 905.7 / 937.8 / 1013.3 ms — the same shape, and inside the run-to-run spread
+this file already documents.)
+
+**Run 1 did not move**, which is the check that the diagnosis was right rather than merely
+correlated: take 1 is the one take that never had a loop running during it, so the fix had
+nothing to remove there, and it reads 890.8 ms before and 886.5 ms after.
+
+### How to read the tables above, now
+
+> **Every second-or-later run in this document was taken with the loop running.** The only
+> uncontaminated figures it contains are the run-1 ones, and the three-run medians in the
+> tables above — which are by construction medians *of* second-or-later runs — are therefore
+> measurements of a page that was ~80% busy spinning in `thumbnailGenerator`. They are
+> superseded. Do not compare a future change against them; re-baseline first.
+>
+> `craft-mp4-conversion` is the worst affected and the least obvious: it records a plain take
+> *before* converting, so **all three** of its runs were contaminated. Its post-fix numbers
+> are in its own table above.
+>
+> The earlier instruction in this section — that the median "describes a second-or-later
+> take, which is deliberate, it is the steady state a user's session mostly consists of" —
+> was right that it was the steady state and wrong that this was acceptable. The steady state
+> was a bug.
+
+With the loop gone, **follow-up 3 below (the harness's own leaked painter and `AudioContext`)
+is what is left, and it is small.** The post-fix runs still trend gently upward within an
+invocation — screen 886 / 916 / 1013 ms, PiP 2388 / 2425 / 2502 ms — which is consistent with
+one more leaked 33 ms painter and one more un-closed `AudioContext` per take. At three runs it
+is a few percent and does not change any conclusion here, exactly as the original measurement
+of it said; it matters only if `PERF_RUNS` is ever raised. An earlier post-fix attempt appeared
+to show a much steeper PiP drift (2399 / 2882 / 3418 ms) and that was the machine, not the
+harness — its third run had `rafPerSecond` 95.4 against the expected ~120. It is recorded here
+because it is the sort of number that would otherwise be quoted as a finding.
 
 ## Finding, fixed: the compositor held ~23 fps against its own 30 fps target
 
@@ -363,8 +487,10 @@ and the report's headline picks the right one.
 **The screen take's `framesPerSecond` is jointly determined by the harness.** It reads
 28.7–29.2 rather than 30, and the shortfall is most likely the source, not the recorder:
 `mockSyntheticMedia`'s capture "device" is a `setInterval(…, 33)` painter on the same main
-thread that is ~83% busy in a second-or-later take, and `WebCodecsRecorder` encodes whatever
-the track delivers (its own gate is `targetFrameInterval * 0.8` = 26.7 ms, so it is not
+thread that is ~83% busy in a second-or-later take (that figure was the ESCSUITE-55 error
+loop; post-fix it is ~18% and the rate went *down* rather than up, which is the wrong way for
+this explanation — see the note under the local baseline),
+and `WebCodecsRecorder` encodes whatever the track delivers (its own gate is `targetFrameInterval * 0.8` = 26.7 ms, so it is not
 dropping the difference). So a future change that made the page *busier* could show up here
 as a lower "recorded frame rate" that has nothing to do with the recorder. Compare
 `taskMsPerFrame`. **`compositedFps` is not affected** — the compositor's rAF loop draws
@@ -409,8 +535,11 @@ falling behind real time, which is the thing that drops frames in a take — wor
 
 **Nothing here is a long task, on this machine.** All nine recording runs and all nine
 conversion runs recorded 0. That is despite the main thread being ~80% busy in a
-second-or-later take, which says the work is spread across many short tasks rather than
-concentrated — but on a machine a third the speed it would not be, which is the whole reason
+second-or-later take — which, it turned out, was ~44,500 error-event tasks a second from
+ESCSUITE-55, and is the sharpest possible illustration of the point: a thread can be pinned
+at 80% by work that never produces a single long task, so `longTaskCount` 0 is not evidence
+that a page is healthy. Post-fix the same window is ~18% busy, still with 0 long tasks. Either
+way the work is spread across many short tasks rather than concentrated — but on a machine a third the speed it would not be, which is the whole reason
 this repo has a lightweight-performance rule.
 
 **CI numbers are relative, not comparable to these.** The `perf` job runs on a shared
@@ -455,9 +584,14 @@ other number in the tables is definitionally unchanged.
    30 was intended, on a throttle whose gate was bit-for-bit two 60 Hz frame intervals, so
    any dispatch jitter cost a whole frame. Now a deadline gate with a 4 ms tolerance and a
    stall resync: 22.4–22.8 → 30.0 composited fps, paired numbers under the finding above.
-2. **The first-take step**: the first take of a session costs ~0.9 s of renderer task in a
-   5 s window and every later take ~4.1 s, once, permanently, and not because of the
-   recordings list or the harness. Not root-caused.
+2. ~~**The first-take step**~~ — **fixed**, ESCSUITE-55, 2026-09-21. The first take of a
+   session cost ~0.9 s of renderer task in a 5 s window and every later take ~4.1 s, once and
+   permanently. `thumbnailGenerator`'s `cleanup()` emptied the `<video>`'s `src` with its own
+   `onerror` still attached, and an empty `src` is a load failure: each saved recording left a
+   detached element spinning error → cleanup → error at ~44,500 laps a second for the life of
+   the page, saturating the main thread. Handlers are now detached before the element is
+   released. Numbers under the finding above; **every second-or-later figure in this document
+   predates the fix and is superseded.**
 3. **`mockSyntheticMedia` leaks a capture painter per take.** Harmless at three runs
    (measured flat), but it is a confound that grows with run count and the helper is shared
    with the functional E2E suites. Clearing the interval when the track ends would remove it.

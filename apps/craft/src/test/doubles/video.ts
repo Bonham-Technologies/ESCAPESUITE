@@ -6,6 +6,25 @@
 // This double intercepts document.createElement('video') so tests can reach
 // the exact element the code under test created, then override its metadata
 // and fire the events (loadeddata/error/seeked) the code listens for.
+//
+// One platform behaviour it deliberately does NOT model: setting `src` to the
+// empty string is a *load failure*, not a release. The resource selection
+// algorithm's attribute mode jumps straight to "failed with attribute" —
+// networkState NETWORK_NO_SOURCE, a MediaError with code
+// MEDIA_ERR_SRC_NOT_SUPPORTED, and an `error` event fired at the element. That
+// is how ESCSUITE-55 happened: a cleanup that emptied `src` with its own
+// `onerror` still attached re-entered itself for the life of the page. jsdom
+// implements no media loading at all, so nothing here can raise it for free —
+// a test that cares must hand-fire it with fireError() at the point the
+// platform would, as thumbnailGenerator.test.ts does. Until this double grows
+// a real resource-selection model, the *trigger* is unpinned and only the
+// consequence is tested.
+//
+// The release path is half-modelled for the same reason: load() below is a
+// bare vi.fn(), so the `abort` and `emptied` a real load() queues on its way to
+// NETWORK_EMPTY never happen here either. What a test CAN pin is that load()
+// was called at all — removeAttribute('src') on its own does not release the
+// resource — and thumbnailGenerator.test.ts does exactly that.
 import { vi } from 'vitest'
 
 /** Metadata fields a test can force onto the element. */

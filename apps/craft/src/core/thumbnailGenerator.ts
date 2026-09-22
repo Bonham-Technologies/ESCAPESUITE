@@ -26,8 +26,23 @@ export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
     video.preload = 'metadata';
 
     const cleanup = () => {
+      // Detach BEFORE emptying src. Chromium answers an empty `src` with an
+      // `error` event at the element, so a handler still attached here calls
+      // cleanup() again, which empties src again — an error loop that never
+      // ends and that outlives the thumbnail it was cleaning up after
+      // (ESCSUITE-55).
+      video.onloadeddata = null;
+      video.onerror = null;
       URL.revokeObjectURL(blobUrl);
-      video.src = '';
+      // `removeAttribute` + `load()`, not `src = ''`: emptying src is a load
+      // *failure*, so it manufactures a MEDIA_ERR_SRC_NOT_SUPPORTED and fires
+      // `error` at the element. `removeAttribute` does not itself invoke the
+      // load algorithm, and the `load()` that follows finds neither src nor
+      // srcObject, so resource selection ends at NETWORK_EMPTY with no `error`
+      // and no MediaError — only `abort` and `emptied`, which nothing here
+      // listens for.
+      video.removeAttribute('src');
+      video.load();
     };
 
     const captureFrame = () => {
@@ -149,8 +164,23 @@ export async function extractVideoMetadata(
 
     const cleanup = () => {
       clearTimeout(timeout);
+      // Detach BEFORE emptying src, for the reason given on generateThumbnail's
+      // cleanup above. This is the copy that bit: saving a recording calls this
+      // function exactly once, so from the second take of a session onward the
+      // page spun in `onerror` at roughly 44,500 iterations a second, for the
+      // rest of the session (ESCSUITE-55).
+      video.onloadeddata = null;
+      video.onerror = null;
       URL.revokeObjectURL(blobUrl);
-      video.src = '';
+      // `removeAttribute` + `load()`, not `src = ''`: emptying src is a load
+      // *failure*, so it manufactures a MEDIA_ERR_SRC_NOT_SUPPORTED and fires
+      // `error` at the element. `removeAttribute` does not itself invoke the
+      // load algorithm, and the `load()` that follows finds neither src nor
+      // srcObject, so resource selection ends at NETWORK_EMPTY with no `error`
+      // and no MediaError — only `abort` and `emptied`, which nothing here
+      // listens for.
+      video.removeAttribute('src');
+      video.load();
     };
 
     video.onloadeddata = () => {
