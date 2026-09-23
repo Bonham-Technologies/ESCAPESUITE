@@ -1,4 +1,9 @@
-// The transport bar, driven by props only.
+// The transport bar, driven by props only — with one exception it does not
+// own: the elapsed number inside the timer span is `RecordingDurationReadout`,
+// which subscribes to the store itself so the once-a-second tick cannot
+// re-render this bar (see `RecordingDurationReadout.test.tsx` and
+// `App.rerender.test.tsx`). The span and its classes are still this
+// component's, so the tests that care about the number set the store.
 //
 // Every control here is conditional on the recorder's state, so the tests walk
 // the state machine one value at a time: which buttons exist, what the record
@@ -6,12 +11,19 @@
 // anything at all. The `preparing` and `saving` states are the interesting
 // ones — the button is disabled *and* has no handler — and each is asserted on
 // its own rather than folded into an "inactive" case.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RecorderControls } from './RecorderControls'
+import { useRecorderStore } from '../../store/recorderStore'
 import type { RecordingState } from '../../store/types'
 import styles from '../../App.module.css'
+
+// The store is a module singleton, so a duration set by one test would
+// otherwise be read by the next.
+beforeEach(() => {
+  useRecorderStore.setState({ currentDuration: 0 })
+})
 
 function makeCallbacks() {
   return {
@@ -26,7 +38,7 @@ function makeCallbacks() {
 const activeStates: RecordingState[] = ['countdown', 'recording', 'paused']
 
 function renderControls(
-  options: { state?: RecordingState; currentDuration?: number; blockedReason?: string | null } = {}
+  options: { state?: RecordingState; blockedReason?: string | null } = {}
 ) {
   const state = options.state ?? 'idle'
   const calls = makeCallbacks()
@@ -34,7 +46,6 @@ function renderControls(
     <RecorderControls
       state={state}
       isRecordingActive={activeStates.includes(state)}
-      currentDuration={options.currentDuration ?? 0}
       blockedReason={options.blockedReason ?? null}
       {...calls}
     />
@@ -70,7 +81,7 @@ describe('RecorderControls while idle', () => {
   })
 
   it('shows a resting timer', () => {
-    const { container } = renderControls({ currentDuration: 0 })
+    const { container } = renderControls()
 
     const timer = container.querySelector(`.${styles.timer}`) as HTMLElement
     expect(timer).toHaveTextContent('00:00')
@@ -81,7 +92,8 @@ describe('RecorderControls while idle', () => {
 describe('RecorderControls mid-take', () => {
   it('offers pause, stop and cancel while recording', async () => {
     const user = userEvent.setup()
-    const { calls, container } = renderControls({ state: 'recording', currentDuration: 65 })
+    useRecorderStore.setState({ currentDuration: 65 })
+    const { calls, container } = renderControls({ state: 'recording' })
 
     const pause = screen.getByRole('button', { name: 'Pause recording' })
     expect(pause).toHaveAttribute('title', 'Pause (P)')

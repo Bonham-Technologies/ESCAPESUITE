@@ -188,6 +188,30 @@ describe('useRecordingSave list entry', () => {
     expect(added[0]).toMatchObject({ hasAudio: false, hasWebcam: true })
   })
 
+  // ESCSUITE-60. The list entry above lives in memory; the stored metadata is
+  // what a reload reads back. They are built from the same config expression,
+  // so the two records cannot disagree about whether the take had audio — and
+  // the M4A button, which is gated on it, stays truthful after a reload.
+  it('stores the same answer about audio in the metadata a reload reads back', async () => {
+    const { result } = mountSave({ webcamEnabled: false, microphoneEnabled: true, systemAudioEnabled: false })
+
+    await result.current(RAW, 4)
+
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(true)
+    expect(meta.hasAudio).toBe(added[0].hasAudio)
+  })
+
+  it('stores a silent take as having no audio', async () => {
+    const { result } = mountSave({ webcamEnabled: true, microphoneEnabled: false, systemAudioEnabled: false })
+
+    await result.current(RAW, 4)
+
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(false)
+    expect(meta.hasAudio).toBe(added[0].hasAudio)
+  })
+
   // Changed assertion: the hook used to swallow the failure into a
   // console.error, which left its caller setting 'idle' as if the take had
   // been saved. It now rejects, and reporting the failure is the caller's job.

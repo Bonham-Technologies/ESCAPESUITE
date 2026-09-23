@@ -12,10 +12,16 @@ export interface BuildSourceVideoInput {
   duration: number;
   width: number;
   height: number;
+  /**
+   * Whether the take captured any audio. The caller passes the same
+   * `microphoneEnabled || systemAudioEnabled` answer `buildRecordingEntry`
+   * uses below, so the stored metadata and the list entry cannot disagree.
+   */
+  hasAudio: boolean;
 }
 
 /** The SourceVideo metadata written to storage alongside a finished recording's blob. */
-export function buildSourceVideo({ id, now, blob, duration, width, height }: BuildSourceVideoInput): SourceVideo {
+export function buildSourceVideo({ id, now, blob, duration, width, height, hasAudio }: BuildSourceVideoInput): SourceVideo {
   return {
     id,
     name: `Recording ${new Date(now).toLocaleString()}`,
@@ -28,6 +34,10 @@ export function buildSourceVideo({ id, now, blob, duration, width, height }: Bui
     mediaType: 'video',
     source: 'recording',
     recordedAt: now,
+    // The list entry's `hasAudio` only lives as long as the tab. This is the
+    // copy a reload reads back, and the M4A button is gated on it — see
+    // `loadRecordings` in `store/recorderStore.ts`.
+    hasAudio,
   };
 }
 

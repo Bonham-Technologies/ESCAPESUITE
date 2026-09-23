@@ -139,7 +139,11 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
           size: m.size,
           thumbnailUrl,
           hasWebcam: false, // TODO: Store this in metadata
-          hasAudio: true, // TODO: Store this in metadata
+          // Written by `buildSourceVideo` since ESCSUITE-60. Recordings saved
+          // before that have no field at all, and keep the answer they used
+          // to get — a take that did have audio would otherwise lose its M4A
+          // button for good, which is worse than the stale offer.
+          hasAudio: m.hasAudio ?? true,
         };
       })
     );

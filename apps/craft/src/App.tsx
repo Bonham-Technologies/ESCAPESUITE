@@ -27,7 +27,11 @@ function App() {
   // panel draws (`detailedCapabilities`, `audioLevels`, `systemAudioShared`)
   // are deliberately absent, and so is `mp4Support`: `SourceTogglesPanel` and
   // `RecordingsListPanel` subscribe to those themselves, so a level push
-  // redraws the meters and nothing else. `App.rerender.test.tsx` counts it.
+  // redraws the meters and nothing else. The two fields that tick on their own
+  // — `currentDuration`, once a second for the whole take, and `countdownValue`
+  // — are absent for the same reason: `RecordingDurationReadout` and
+  // `CountdownOverlay` subscribe to them where the numbers are drawn.
+  // `App.rerender.test.tsx` counts all of it.
   //
   // The actions are selected the same way and cost nothing: zustand creates
   // them once, and `set` only ever merges state over them, so each is a stable
@@ -39,8 +43,6 @@ function App() {
   const recordings = useRecorderStore((s) => s.recordings);
   const notice = useRecorderStore((s) => s.notice);
   const hasStorageSpace = useRecorderStore((s) => s.hasStorageSpace);
-  const currentDuration = useRecorderStore((s) => s.currentDuration);
-  const countdownValue = useRecorderStore((s) => s.countdownValue);
   const setConfig = useRecorderStore((s) => s.setConfig);
   const setCapabilities = useRecorderStore((s) => s.setCapabilities);
   const setDetailedCapabilities = useRecorderStore((s) => s.setDetailedCapabilities);
@@ -230,7 +232,6 @@ function App() {
             isPiPActive={isPiPActive}
             previewStream={previewStream}
             state={state}
-            countdownValue={countdownValue}
             previewRef={previewRef}
             canvasPreviewRef={canvasPreviewRef}
           />
@@ -239,7 +240,6 @@ function App() {
           <RecorderControls
             state={state}
             isRecordingActive={isRecordingActive}
-            currentDuration={currentDuration}
             onPause={handlePauseRecording}
             onResume={handleResumeRecording}
             onStart={handleStartRecording}

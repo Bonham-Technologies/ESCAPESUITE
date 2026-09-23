@@ -14,6 +14,7 @@ describe('buildSourceVideo', () => {
       duration: 42,
       width: 1280,
       height: 720,
+      hasAudio: true,
     })
 
     expect(sourceVideo).toEqual({
@@ -28,7 +29,25 @@ describe('buildSourceVideo', () => {
       mediaType: 'video',
       source: 'recording',
       recordedAt: now,
+      hasAudio: true,
     })
+  })
+
+  // ESCSUITE-60. The stored metadata is the only record of the take that
+  // survives a reload, so whether it had audio has to be written here — the
+  // list entry's `hasAudio` lives in memory and is rebuilt from this on load.
+  it('records a silent take as having no audio', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'rec-3',
+      now: 0,
+      blob: new Blob(),
+      duration: 1,
+      width: 1,
+      height: 1,
+      hasAudio: false,
+    })
+
+    expect(sourceVideo.hasAudio).toBe(false)
   })
 
   it('takes whatever duration the caller passes — no fallback of its own', () => {
@@ -39,6 +58,7 @@ describe('buildSourceVideo', () => {
       duration: 0,
       width: 1,
       height: 1,
+      hasAudio: true,
     })
 
     expect(sourceVideo.duration).toBe(0)
