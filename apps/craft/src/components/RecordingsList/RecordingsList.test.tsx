@@ -213,10 +213,10 @@ describe('RecordingsList MP4 downloads', () => {
   })
 
   it('keeps a reason with no note to the button itself', () => {
-    // "Checking whether this browser can convert to MP4…" is true for a moment
-    // on every load. Said out loud under the library it would appear and
-    // vanish each time, moving the page; the button still carries it.
-    const checking = 'Checking whether this browser can convert to MP4…'
+    // "Checking what this browser can convert…" is true for a moment on every
+    // load. Said out loud under the library it would appear and vanish each
+    // time, moving the page; the button still carries it.
+    const checking = 'Checking what this browser can convert…'
     const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
       mp4BlockedReason: checking,
     })
