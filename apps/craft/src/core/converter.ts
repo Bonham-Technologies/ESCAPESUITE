@@ -399,6 +399,14 @@ export const MP4_NO_AUDIO_REASON =
   'MP4 will have no audio in this browser (no AAC encoder)';
 export const MP4_PROBE_FAILED_REASON =
   'This browser could not say whether it can encode MP4, so the conversion is not offered.';
+/**
+ * Why an audio-only conversion refused a take: there was no decodable audio in
+ * it at all. The M4A button is disabled for a recording whose metadata says it
+ * has no audio, so this is the defence behind that gate rather than the usual
+ * way a user meets it — a take can also be *recorded* with a microphone that
+ * produced silence the container never carried.
+ */
+export const M4A_NO_AUDIO_MESSAGE = 'This recording has no audio track';
 
 /**
  * Memoised for the life of the page: the answer cannot change while the tab is
@@ -788,6 +796,123 @@ export async function convertToMP4(
     if (videoEncoder && videoEncoder.state !== 'closed') {
       videoEncoder.close();
     }
+    if (audioEncoder && audioEncoder.state !== 'closed') {
+      audioEncoder.close();
+    }
+  }
+}
+
+/**
+ * Convert a recording to M4A: its audio alone, AAC in an MP4 container.
+ *
+ * The third download, and the only one that throws away picture. A mic-only
+ * take is already an audio recording, but it is stored as an audio-only WebM,
+ * which plays and is not an "audio file" to most tools; and `convertToMP4`
+ * refuses a take with no video outright. This produces `audio/mp4` — the
+ * `.m4a` every audio editor, podcast tool and phone opens.
+ *
+ * It is the tail of `convertToMP4` and nothing else: extract, encode AAC, mux.
+ * No `<video>`, no playback, no canvas, no `VideoFrame` — which is why it
+ * costs a fraction of an MP4 conversion of the same take, and why it is the
+ * one conversion that can be offered on a recording with no picture.
+ *
+ * **AAC is a hard requirement here**, unlike in `convertToMP4`, which drops
+ * the audio and muxes a silent video when the browser has no AAC encoder.
+ * There is no silent M4A worth writing, so this refuses — in the probe's own
+ * words (`MP4_NO_AUDIO_REASON`), so the button's reason and the failure say
+ * the same sentence.
+ *
+ * @param webmBlob - The recording to take the audio out of
+ * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal for cancellation
+ */
+export async function convertToM4A(
+  webmBlob: Blob,
+  onProgress: ProgressCallback,
+  signal?: AbortSignal
+): Promise<Blob> {
+  onProgress({ phase: 'preparing', progress: 0, message: 'Extracting audio…' });
+
+  // Declared out here so the finally below can release it however this
+  // function leaves — including a cancellation part-way through the encode.
+  let audioEncoder: AudioEncoder | null = null;
+
+  try {
+    const audioBuffer = await extractAudio(webmBlob, (p) => {
+      onProgress({ phase: 'preparing', progress: p * 0.15, message: 'Extracting audio…' });
+    });
+    if (!audioBuffer) {
+      throw new Error(M4A_NO_AUDIO_MESSAGE);
+    }
+    const audioData = audioBufferToFloat32(audioBuffer);
+
+    // The same question `probeMP4Support()` asks, about the same configuration
+    // this configures below. A browser that cannot answer is answering no: an
+    // encoder that will not configure fails a few lines later anyway, and this
+    // way it fails with a sentence rather than with whatever the API threw.
+    let aacSupported = false;
+    try {
+      const support = await AudioEncoder.isConfigSupported(MP4_AUDIO_ENCODER_CONFIG);
+      aacSupported = support.supported === true;
+    } catch {
+      console.warn('Failed to check AAC support, refusing the audio-only conversion');
+    }
+    if (!aacSupported) {
+      throw new Error(MP4_NO_AUDIO_REASON);
+    }
+
+    // Create Mediabunny output — one audio track, and deliberately no video
+    // track: an MP4 container carrying only sound is what `.m4a` names.
+    const target = new BufferTarget();
+    const output = new Output({
+      format: new Mp4OutputFormat({
+        fastStart: 'in-memory',
+      }),
+      target,
+    });
+
+    const audioSource = new EncodedAudioPacketSource('aac');
+    output.addAudioTrack(audioSource);
+
+    await output.start();
+
+    audioEncoder = new AudioEncoder({
+      output: async (chunk, meta) => {
+        await audioSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+      },
+      error: (e) => {
+        console.error('Audio encoder error:', e);
+      },
+    });
+
+    await audioEncoder.configure(MP4_AUDIO_ENCODER_CONFIG);
+
+    // The encode is the whole conversion here, so it owns the whole bar
+    // between the extraction and the mux.
+    await encodeAudioChunks(audioData, audioEncoder, signal, (fraction) => {
+      onProgress({
+        phase: 'encoding',
+        progress: 15 + fraction * 80,
+        message: 'Encoding audio…',
+      });
+    });
+
+    onProgress({ phase: 'finalizing', progress: 95, message: 'Finalizing M4A…' });
+
+    await output.finalize();
+
+    const buffer = target.buffer;
+    if (!buffer) {
+      throw new Error('Conversion failed: no data was written to buffer');
+    }
+    const m4aBlob = new Blob([buffer], { type: 'audio/mp4' });
+
+    onProgress({ phase: 'finalizing', progress: 100, message: 'Conversion complete!' });
+
+    return m4aBlob;
+  } finally {
+    // `encodeAudioChunks` closes it on the success path; this releases it when
+    // the conversion left early (cancellation, or a failure part-way).
     if (audioEncoder && audioEncoder.state !== 'closed') {
       audioEncoder.close();
     }
