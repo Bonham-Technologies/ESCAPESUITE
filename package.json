@@ -36,7 +36,7 @@
     "release": "changeset version && changeset git-tag"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.2",
+    "@changesets/cli": "^3.0.3",
     "turbo": "^2.11.2"
   },
   "engines": {
