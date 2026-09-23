@@ -524,6 +524,90 @@ function audioBufferToFloat32(audioBuffer: AudioBuffer): Float32Array {
 }
 
 /**
+ * Encode interleaved stereo samples as AAC, one 1024-sample chunk at a time,
+ * and flush the encoder when they are all in.
+ *
+ * Lifted out of `convertToMP4` unchanged so `convertToM4A` can run the same
+ * pass without the video half: the two differ in what they mux, not in how the
+ * audio is encoded, and a second copy of this loop would be a second place for
+ * the planar layout, the abort cadence and the backpressure drain to drift.
+ *
+ * `audioData` arrives interleaved `[L, R, L, R, ...]` from
+ * `audioBufferToFloat32`, while `AudioData`'s `f32-planar` wants
+ * `[L, L, L, ..., R, R, R, ...]` — the per-chunk copy below is that transpose.
+ *
+ * Cancellation is checked before the first chunk and every hundredth after it,
+ * which is the cadence `convertToMP4` has always used: often enough that a
+ * cancel lands within a frame of audio, rarely enough that the check is not
+ * itself part of the cost.
+ *
+ * `onProgress` receives the fraction of the audio encoded so far (0-1), for a
+ * caller whose whole conversion *is* this loop. `convertToMP4` passes none:
+ * its audio pass is the last tenth of a conversion that has already reported
+ * one frame at a time.
+ */
+async function encodeAudioChunks(
+  audioData: Float32Array,
+  audioEncoder: AudioEncoder,
+  signal?: AbortSignal,
+  onProgress?: (fraction: number) => void
+): Promise<void> {
+  // Check for cancellation before audio encoding
+  checkAborted(signal);
+
+  const sampleRate = MP4_SAMPLE_RATE;
+  const samplesPerChunk = 1024;
+  const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
+  let audioTimestamp = 0;
+  let chunkCount = 0;
+
+  for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
+    // Check for cancellation periodically during audio encoding
+    if (chunkCount % 100 === 0) {
+      checkAborted(signal);
+    }
+    chunkCount++;
+
+    const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
+
+    // Create planar data: [all left samples][all right samples]
+    const planarData = new Float32Array(chunkSize * 2);
+
+    for (let i = 0; i < chunkSize; i++) {
+      const srcIndex = offset + i;
+      // Left channel goes first (indices 0 to chunkSize-1)
+      planarData[i] = audioData[srcIndex * 2] || 0;
+      // Right channel goes second (indices chunkSize to chunkSize*2-1)
+      planarData[chunkSize + i] = audioData[srcIndex * 2 + 1] || 0;
+    }
+
+    const audioFrame = new AudioData({
+      format: 'f32-planar',
+      sampleRate,
+      numberOfFrames: chunkSize,
+      numberOfChannels: 2,
+      timestamp: audioTimestamp,
+      data: planarData,
+    });
+
+    audioEncoder.encode(audioFrame);
+    audioFrame.close();
+
+    audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
+
+    onProgress?.(Math.min(offset + chunkSize, totalAudioSamples) / totalAudioSamples);
+
+    // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
+    while (audioEncoder.encodeQueueSize > 20) {
+      await yieldToMain();
+    }
+  }
+
+  await audioEncoder.flush();
+  audioEncoder.close();
+}
+
+/**
  * Convert WebM blob to MP4
  * @param webmBlob - The WebM blob to convert
  * @param onProgress - Progress callback
@@ -596,7 +680,6 @@ export async function convertToMP4(
 
     // Create audio packet source if we have audio
     let audioSource: EncodedAudioPacketSource | null = null;
-    const sampleRate = MP4_SAMPLE_RATE;
 
     if (audioData) {
       try {
@@ -679,59 +762,8 @@ export async function convertToMP4(
     onProgress({ phase: 'encoding', progress: 90, message: 'Encoding audio...' });
 
     // Encode audio if we have it
-    // Note: audioData is interleaved [L, R, L, R, ...] but AudioData f32-planar
-    // expects planar format [L, L, L, ..., R, R, R, ...]
     if (audioEncoder && audioData) {
-      // Check for cancellation before audio encoding
-      checkAborted(signal);
-
-      const samplesPerChunk = 1024;
-      const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
-      let audioTimestamp = 0;
-      let chunkCount = 0;
-
-      for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
-        // Check for cancellation periodically during audio encoding
-        if (chunkCount % 100 === 0) {
-          checkAborted(signal);
-        }
-        chunkCount++;
-
-        const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
-
-        // Create planar data: [all left samples][all right samples]
-        const planarData = new Float32Array(chunkSize * 2);
-
-        for (let i = 0; i < chunkSize; i++) {
-          const srcIndex = offset + i;
-          // Left channel goes first (indices 0 to chunkSize-1)
-          planarData[i] = audioData[srcIndex * 2] || 0;
-          // Right channel goes second (indices chunkSize to chunkSize*2-1)
-          planarData[chunkSize + i] = audioData[srcIndex * 2 + 1] || 0;
-        }
-
-        const audioFrame = new AudioData({
-          format: 'f32-planar',
-          sampleRate,
-          numberOfFrames: chunkSize,
-          numberOfChannels: 2,
-          timestamp: audioTimestamp,
-          data: planarData,
-        });
-
-        audioEncoder.encode(audioFrame);
-        audioFrame.close();
-
-        audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
-
-        // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
-        while (audioEncoder.encodeQueueSize > 20) {
-          await yieldToMain();
-        }
-      }
-
-      await audioEncoder.flush();
-      audioEncoder.close();
+      await encodeAudioChunks(audioData, audioEncoder, signal);
     }
 
     onProgress({ phase: 'finalizing', progress: 95, message: 'Finalizing MP4...' });
