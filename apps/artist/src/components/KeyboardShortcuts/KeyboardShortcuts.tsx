@@ -116,6 +116,17 @@ export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // The same typing guard the other two window listeners open with. The
+      // sheet traps no focus, so the header's project-name field is still
+      // Tab-reachable behind it, and a `?` typed into a name is a `?`.
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // No stopPropagation and no preventDefault: the editor's two cascades
+      // are already gated on `App`'s `modalOpen` while the sheet is up, so
+      // there is nothing below to stop, and neither key has a default worth
+      // taking away.
       if (e.key === 'Escape' || e.key === '?' || (e.shiftKey && e.key === '/')) {
         onCloseRef.current();
       }

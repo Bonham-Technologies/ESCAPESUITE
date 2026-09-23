@@ -148,7 +148,7 @@ function App() {
   // for the screen reader, but it traps no focus, holds nothing to interact
   // with and is gone as soon as the project finishes loading — there is no
   // dialog in front of the user to be confused by.
-  const modalOpen = showExport || showShortcuts || showSessionPrompt;
+  const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog;
 
   useAppKeyboardShortcuts({
     canUndo,

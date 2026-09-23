@@ -506,6 +506,21 @@ describe('App keyboard shortcuts', () => {
     // A dialog is modal: nothing behind it may act on a key. The gate is
     // App's `modalOpen`, read by both window listeners — the shortcut cascade
     // and the transport's.
+    //
+    // Each case seeds one selected clip, so Delete has something to take. The
+    // three keys are asserted one at a time rather than in a batch: Delete
+    // followed by Ctrl+Z would otherwise put the clip back and read as a pass.
+    const expectNoKeysTaken = () => {
+      press('Delete')
+      expect(store().project.timeline.clips).toHaveLength(1)
+
+      press('z', { ctrlKey: true })
+      fireEvent.keyDown(window, { code: 'Space' })
+      expect(store().isPlaying).toBe(false)
+      // Every branch the three keys could have reached announces itself.
+      expect(notification()).toBeUndefined()
+    }
+
     it('stops the editor shortcuts while the export dialog is open', async () => {
       const user = userEvent.setup()
       addClip('clip1', 0, 2)
@@ -515,12 +530,23 @@ describe('App keyboard shortcuts', () => {
       await user.click(screen.getByRole('button', { name: 'Export video' }))
       expect(await screen.findByRole('heading', { name: 'Export Video' })).toBeInTheDocument()
 
-      press('Delete')
-      press('z', { ctrlKey: true })
-      fireEvent.keyDown(window, { code: 'Space' })
+      expectNoKeysTaken()
+    })
 
-      expect(store().project.timeline.clips).toHaveLength(1)
-      expect(store().isPlaying).toBe(false)
+    it('stops them while the project-load safety dialog is open', async () => {
+      const user = userEvent.setup()
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      vi.mocked(showOpenProjectDialog).mockResolvedValueOnce(
+        new File(['{}'], 'demo.escape', { type: 'application/json' })
+      )
+      await renderApp()
+
+      await user.click(screen.getByRole('button', { name: 'File menu' }))
+      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      expect(await screen.findByTestId('project-load-dialog')).toBeInTheDocument()
+
+      expectNoKeysTaken()
     })
 
     it('stops them while the shortcut sheet is open', async () => {
@@ -529,11 +555,7 @@ describe('App keyboard shortcuts', () => {
       await renderApp()
       press('?')
 
-      press('Delete')
-      fireEvent.keyDown(window, { code: 'Space' })
-
-      expect(store().project.timeline.clips).toHaveLength(1)
-      expect(store().isPlaying).toBe(false)
+      expectNoKeysTaken()
     })
   })
 

@@ -108,6 +108,24 @@ describe('KeyboardShortcuts', () => {
       expect(onClose).not.toHaveBeenCalled()
     })
 
+    it('leaves a key typed into a field alone', () => {
+      // The sheet traps no focus, so the header's project-name input is still
+      // Tab-reachable behind it — and a `?` typed into a name is a `?`.
+      const onClose = vi.fn()
+      const input = document.createElement('input')
+      document.body.append(input)
+      render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
+
+      fireEvent.keyDown(input, { key: '?', bubbles: true })
+      const textarea = document.createElement('textarea')
+      document.body.append(textarea)
+      fireEvent.keyDown(textarea, { key: 'Escape', bubbles: true })
+
+      expect(onClose).not.toHaveBeenCalled()
+      input.remove()
+      textarea.remove()
+    })
+
     it('stops listening once it is closed', () => {
       const onClose = vi.fn()
       const { rerender } = render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
