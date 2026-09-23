@@ -245,6 +245,12 @@ const COUNTDOWN_TICKS = 3;
  * One `act` per tick for the same reason `pushLevels` takes one: the controller
  * writes one value per interval, and a loop inside a single `act` would batch
  * them all into one commit.
+ *
+ * Each tick writes a DISTINCT value (`i`, then a descending countdown), and the
+ * exact leaf counts below depend on it: zustand drops a write whose value is
+ * `Object.is`-equal to the current one, so a loop that pushed a constant would
+ * make the leaf render once and the pin read as a regression. `pushLevels`
+ * does not share the hazard — it writes a fresh object each push.
  */
 function tickDuration(count: number): void {
   for (let i = 1; i <= count; i++) {
