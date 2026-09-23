@@ -101,6 +101,11 @@ export function useRecordingSave({
       duration,
       width: metadata.width,
       height: metadata.height,
+      // The same expression `buildRecordingEntry` uses below, deliberately:
+      // one answer, written to both records. The config is what was asked for
+      // rather than what the blob ended up carrying, but reading the blob
+      // would mean a decode on the save path — see ESCSUITE-60.
+      hasAudio: config.microphoneEnabled || config.systemAudioEnabled,
     });
 
     await storeVideo(id, blob, sourceVideo);

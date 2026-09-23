@@ -83,7 +83,7 @@ selector contract above.
 | `utils/notices.ts` | The app's whole vocabulary of notices — eight strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
 | `utils/downloadBlob.ts` | The anchor both downloads share: object URL, `<a download>`, click, remove, deferred revoke. No naming logic of its own — the caller hands it a finished filename |
 | `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace`. Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
-| `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. No store, and no blob-URL creation |
+| `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. Both carry `hasAudio`, from the one config expression, so the stored copy and the in-memory one cannot disagree. No store, and no blob-URL creation |
 | `components/icons.tsx` | The inline SVG icon set, every path drawn in `currentColor`. The source icons take a `className` because their size is per call site; the action icons are `aria-hidden` and sized entirely by their button |
 | `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region — carrying both the recorder state and the app's one `notice` — and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
 | `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
@@ -739,9 +739,14 @@ test asserts.
   `recording.hasAudio` and falls back to `NO_AUDIO_TRACK_REASON` ("This recording has no
   audio") when nothing app-wide is blocking. `convertToM4A` refuses the same case again with
   `M4A_NO_AUDIO_MESSAGE` — the button is the courtesy, the converter is the defence.
-  (`Recording.hasAudio` is truthful for a take recorded this session; recordings *reloaded*
-  from storage are all marked `hasAudio: true` by `loadRecordings()`'s standing TODO, so
-  after a reload the gate falls back to the converter's refusal in the notice channel.)
+  (`Recording.hasAudio` is truthful across a reload since ESCSUITE-60: `buildSourceVideo`
+  writes `hasAudio` into the stored `SourceVideo` from the same
+  `microphoneEnabled || systemAudioEnabled` expression the list entry uses, and
+  `loadRecordings()` reads it back as `m.hasAudio ?? true`. The `?? true` is for recordings
+  saved *before* that field existed — they keep the answer they used to get, because
+  demoting a take that did have audio would cost it its M4A button for good. It is the
+  config's answer rather than the blob's: reading the saved file would mean a decode on the
+  save path, and `convertToM4A`'s own refusal is still the defence behind the button.)
 - **No new notices and no new analytics event.** Success clears the channel and failure
   raises `mp4ConversionFailed(message)`, whose wording is now the format-neutral
   "Conversion failed: …" because one code path serves both. The download is counted as

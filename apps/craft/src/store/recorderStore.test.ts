@@ -309,6 +309,35 @@ describe('recorderStore', () => {
       expect(recordings[0].hasAudio).toBe(true)
     })
 
+    // ESCSUITE-60. `hasAudio` gates the M4A button. It is written into the
+    // stored metadata at save time, so a reloaded screen-only take must come
+    // back silent rather than as the hard-coded `true` this used to return —
+    // which offered an M4A download that could only fail into the notice.
+    it('carries a stored take back as silent when that is what was recorded', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        { id: 'silent', name: 'Silent', duration: 5, size: 50, hasAudio: false } as SourceVideo,
+      ])
+      vi.mocked(getThumbnail).mockResolvedValue(undefined)
+
+      await useRecorderStore.getState().loadRecordings()
+
+      expect(useRecorderStore.getState().recordings[0].hasAudio).toBe(false)
+    })
+
+    // Recordings saved before ESCSUITE-60 have no `hasAudio` at all. They keep
+    // the old answer rather than being demoted to silent, because a take that
+    // did have audio would otherwise lose its M4A button for good.
+    it('assumes audio for a recording saved before the field existed', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        { id: 'legacy', name: 'Legacy', duration: 5, size: 50 } as SourceVideo,
+      ])
+      vi.mocked(getThumbnail).mockResolvedValue(undefined)
+
+      await useRecorderStore.getState().loadRecordings()
+
+      expect(useRecorderStore.getState().recordings[0].hasAudio).toBe(true)
+    })
+
     it('defaults createdAt to 0 when recordedAt is missing', async () => {
       vi.mocked(getRecordingsMetadata).mockResolvedValue([
         { id: 'no-date', name: 'No Date', duration: 5, size: 50 } as SourceVideo,
