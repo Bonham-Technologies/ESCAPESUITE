@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import type { RecordingState } from '../../store/types';
 import { ScreenIcon } from '../icons';
+import { CountdownOverlay } from './CountdownOverlay';
 import styles from '../../App.module.css';
 
 interface RecordingPreviewProps {
@@ -9,7 +10,6 @@ interface RecordingPreviewProps {
   /** The single-source stream to mirror when there is no compositor. */
   previewStream: MediaStream | null;
   state: RecordingState;
-  countdownValue: number;
   /**
    * The `<video>` the App attaches `previewStream` to. It stays the App's ref
    * rather than this component's, because the preview-attach effect and the
@@ -35,7 +35,6 @@ export function RecordingPreview({
   isPiPActive,
   previewStream,
   state,
-  countdownValue,
   previewRef,
   canvasPreviewRef,
 }: RecordingPreviewProps) {
@@ -63,12 +62,9 @@ export function RecordingPreview({
           </div>
         )}
 
-        {/* Countdown overlay */}
-        {state === 'countdown' && countdownValue > 0 && (
-          <div className={styles.countdown}>
-            <span className={styles.countdownNumber}>{countdownValue}</span>
-          </div>
-        )}
+        {/* Countdown overlay — it reads the number from the store itself, so
+            each tick re-renders the overlay and not this stage */}
+        <CountdownOverlay state={state} />
       </div>
     </div>
   );

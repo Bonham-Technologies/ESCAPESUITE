@@ -1,14 +1,12 @@
 import type { RecordingState } from '../../store/types';
-import { formatDuration } from '../../utils/recordingFormat';
 import { CloseIcon, PauseIcon, PlayIcon } from '../icons';
+import { RecordingDurationReadout } from './RecordingDurationReadout';
 import styles from '../../App.module.css';
 
 interface RecorderControlsProps {
   state: RecordingState;
   /** True for countdown, recording and paused. */
   isRecordingActive: boolean;
-  /** Elapsed seconds, ticked while recording. */
-  currentDuration: number;
   onPause: () => void;
   onResume: () => void;
   onStart: () => void;
@@ -52,7 +50,6 @@ const BLOCKED_REASON_ID = 'record-blocked-reason';
 export function RecorderControls({
   state,
   isRecordingActive,
-  currentDuration,
   onPause,
   onResume,
   onStart,
@@ -77,9 +74,10 @@ export function RecorderControls({
           </button>
         )}
 
-        {/* Timer */}
+        {/* Timer — the number subscribes to the store itself, so the
+            once-a-second tick re-renders it and not this bar */}
         <span className={`${styles.timer} ${isRecordingActive ? styles.recording : ''}`}>
-          {formatDuration(currentDuration)}
+          <RecordingDurationReadout />
         </span>
 
         {/* Main record button */}

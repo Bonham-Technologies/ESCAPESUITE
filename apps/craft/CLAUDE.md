@@ -51,6 +51,18 @@ five non-subscribers at exactly 0 (measured 2026-09-16, before → after: `App` 
 Restoring the destructure, or threading `audioLevels` back through `App`, passes every other
 App test and fails only that file.
 
+**The same rule for the two fields that tick on their own.** `currentDuration` (the
+controller's once-a-second `setCurrentDuration`, for the whole length of a take) and
+`countdownValue` (3-2-1, before one) are not in `App` either. Each is drawn by a leaf that
+subscribes to it where it is shown — `RecordingDurationReadout` inside the transport bar's
+timer span, `CountdownOverlay` inside the preview stage — so a tick re-renders five characters
+or one digit instead of the whole screen. `App.rerender.test.tsx` counts this too, exactly
+(measured 2026-09-23 over five duration ticks and three countdown ticks, before → after: `App`
+8 → 0, and with it `AppHeader`, `RecordingsList`, `RecorderControls`, `RecordingPreview` and
+`SourceToggles` 8 → 0 each, while the readout renders 5 and the overlay 3), and it asserts the
+two numbers are still *drawn* — a leaf that subscribed to nothing would pass a render count of
+zero.
+
 The hooks are called in a fixed order — theme, capability bootstrap, media streams, recording
 save, recording controller, keyboard shortcuts, recording library — because that order is the
 order the effects ran in when they were all inline, and for the ones that bind something it is
@@ -92,7 +104,9 @@ selector contract above.
 | `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its six action buttons, each labelled with the recording's own name — plus the conversion's progress row (named after the format actually running) and the one visible note the MP4 and M4A buttons are described by (`mp4Note`, which is not the same thing as `mp4BlockedReason` — see "Download Formats"). The one gate it decides for itself is `recording.hasAudio`, which disables M4A: a fact about the row rather than about the app. Props only; it touches no storage and holds no state |
 | `components/RecordingsList/RecordingsListPanel.tsx` | The library's own subscription and state: `useMp4Download` lives here rather than in `App`, so a progress report redraws the list and nothing else. It is also where the *format* is chosen — `onDownloadMp4` and `onDownloadM4a` are the same `startMp4Download` with a different last argument. Selects only `setNotice`, which is a stable action. The other four handlers still come down from `App`, because `useRecordingLibrary` owns the playback dialog the shortcuts need |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
-| `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`), and the `blockedReason` that sits in front of that ladder |
+| `components/RecordingPreview/CountdownOverlay.tsx` | The 3-2-1 overlay and its own subscription to `countdownValue`, so a countdown tick re-renders one digit rather than the preview stage and everything above it. `state` stays a prop — `App` derives it for the transport bar too, and it changes once per transition rather than on a tick |
+| `components/RecorderControls/RecorderControls.tsx` | The transport bar and the shortcut legend: which controls exist in each state, the record button's three-way `onClick` ladder (start when idle, stop while active, nothing at all in `preparing` and `saving`), and the `blockedReason` that sits in front of that ladder. The timer `<span>` and its classes are its own; the number inside it is not |
+| `components/RecorderControls/RecordingDurationReadout.tsx` | The elapsed number alone — no props, no markup of its own — subscribing to `currentDuration` so the once-a-second tick re-renders five characters instead of the bar, the screen and the seven hooks `App` calls |
 | `components/PlaybackDialog/PlaybackDialog.tsx` | The modal that plays one saved recording back — the frame around `VideoPlayer`, the backdrop-dismiss behaviour, and the saved `duration` the player is told rather than asked for. Calls the shared `useDialogBehaviour` for the keyboard half |
 | `components/HelpDialog/HelpDialog.tsx` | The Recording Tips modal: static copy in four sections, the same backdrop-dismiss behaviour, named through `aria-labelledby`, and the `tabIndex={0}` that makes its scrolling body keyboard-reachable. Calls the shared `useDialogBehaviour` too |
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |

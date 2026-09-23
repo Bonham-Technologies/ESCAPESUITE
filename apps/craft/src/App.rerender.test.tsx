@@ -33,6 +33,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import { act } from '@testing-library/react';
 import { useRecorderStore } from './store/recorderStore';
+import type { RecordingState } from './store/types';
 import { resetAppDoubles } from './test/appDoubles';
 import {
   renderApp,
@@ -48,6 +49,8 @@ import * as recordingsList from './components/RecordingsList/RecordingsList';
 import * as recorderControls from './components/RecorderControls/RecorderControls';
 import * as recordingPreview from './components/RecordingPreview/RecordingPreview';
 import * as appHeader from './components/AppHeader/AppHeader';
+import * as durationReadout from './components/RecorderControls/RecordingDurationReadout';
+import * as countdownOverlay from './components/RecordingPreview/CountdownOverlay';
 
 // The same browser boundaries every other App suite replaces: capture, WebCodecs
 // muxing, thumbnail decoding, editor navigation, analytics delivery.
@@ -90,8 +93,13 @@ interface Counters {
 /**
  * Install the render counters, then mount the app mid-take with both audio
  * sources on, so the meters are on screen and a level push has somewhere to go.
+ *
+ * `state` is a parameter only so the countdown suite below can mount mid-count
+ * with its overlay actually on screen; every level-push test takes the default.
  */
-async function renderCountingApp(): Promise<{ counters: Counters; mounted: Record<keyof Counters, number> }> {
+async function renderCountingApp(
+  state: RecordingState = 'recording'
+): Promise<{ counters: Counters; mounted: Record<keyof Counters, number> }> {
   const counters: Counters = {
     app: vi.spyOn(keyboardShortcuts, 'useKeyboardShortcuts'),
     sourceToggles: vi.spyOn(sourceToggles, 'SourceToggles'),
@@ -100,7 +108,7 @@ async function renderCountingApp(): Promise<{ counters: Counters; mounted: Recor
     recordingPreview: vi.spyOn(recordingPreview, 'RecordingPreview'),
     appHeader: vi.spyOn(appHeader, 'AppHeader'),
   };
-  useRecorderStore.setState({ state: 'recording' });
+  useRecorderStore.setState({ state });
   await renderApp();
   return { counters, mounted: renders(counters) };
 }
@@ -221,5 +229,108 @@ describe('a state change and the React tree', () => {
     await flush();
 
     expect(since(counters, mounted).app).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/**
+ * The two numbers that tick on their own: the elapsed-duration readout, once a
+ * second for the whole length of a take, and the 3-2-1 countdown before one.
+ */
+const DURATION_TICKS = 5;
+const COUNTDOWN_TICKS = 3;
+
+/**
+ * Tick the elapsed duration `count` times, one `act` each.
+ *
+ * One `act` per tick for the same reason `pushLevels` takes one: the controller
+ * writes one value per interval, and a loop inside a single `act` would batch
+ * them all into one commit.
+ */
+function tickDuration(count: number): void {
+  for (let i = 1; i <= count; i++) {
+    act(() => {
+      useRecorderStore.getState().setCurrentDuration(i);
+    });
+  }
+}
+
+/** Count down from `count` to 1, one `act` each, as the countdown interval does. */
+function tickCountdown(count: number): void {
+  for (let i = count; i >= 1; i--) {
+    act(() => {
+      useRecorderStore.getState().setCountdown(i);
+    });
+  }
+}
+
+interface LeafCounters {
+  durationReadout: ReturnType<typeof vi.spyOn>;
+  countdownOverlay: ReturnType<typeof vi.spyOn>;
+}
+
+/**
+ * The same counting method one level lower, for the two leaves that *do*
+ * subscribe to the ticking fields. Installed before the tree is created, like
+ * the six above, and counted separately so the six existing expectations in
+ * this file keep their exact shape.
+ */
+function leafRenders(leaves: LeafCounters): Record<keyof LeafCounters, number> {
+  return {
+    durationReadout: leaves.durationReadout.mock.calls.length,
+    countdownOverlay: leaves.countdownOverlay.mock.calls.length,
+  };
+}
+
+describe('the duration tick and the countdown, and the React tree', () => {
+  it('re-renders the two leaves that draw the numbers, and nothing above them', async () => {
+    const leaves: LeafCounters = {
+      durationReadout: vi.spyOn(durationReadout, 'RecordingDurationReadout'),
+      countdownOverlay: vi.spyOn(countdownOverlay, 'CountdownOverlay'),
+    };
+    // Mounted mid-countdown, so both leaves are on screen for real: the
+    // readout draws its zero and the overlay is one tick from a number.
+    const { counters, mounted } = await renderCountingApp('countdown');
+    const leavesMounted = leafRenders(leaves);
+
+    tickDuration(DURATION_TICKS);
+    tickCountdown(COUNTDOWN_TICKS);
+
+    // Measured 2026-09-23, before and after: `App` 8 → 0, and with it
+    // `AppHeader` 8 → 0, `RecordingsList` 8 → 0, `RecorderControls` 8 → 0,
+    // `RecordingPreview` 8 → 0, `SourceToggles` 8 → 0 — eight being the five
+    // duration ticks plus the three countdown ticks, every one of which used
+    // to re-render the whole screen and the seven hooks `App` calls. Exact,
+    // for the same reason the level-push counts are: a component that does not
+    // subscribe re-renders never, so putting either selector back in `App`
+    // fails here and nowhere else.
+    expect(since(counters, mounted)).toEqual({
+      app: 0,
+      appHeader: 0,
+      recordingsList: 0,
+      recorderControls: 0,
+      recordingPreview: 0,
+      sourceToggles: 0,
+    });
+    // And the work has to land *somewhere* — a leaf that subscribed to nothing
+    // would pass the block above by rendering zero times.
+    expect(leafRenders(leaves)).toEqual({
+      durationReadout: leavesMounted.durationReadout + DURATION_TICKS,
+      countdownOverlay: leavesMounted.countdownOverlay + COUNTDOWN_TICKS,
+    });
+  });
+
+  it('draws the numbers App never handed them', async () => {
+    useRecorderStore.setState({ state: 'countdown' });
+    const { container } = await renderApp();
+
+    act(() => {
+      useRecorderStore.getState().setCurrentDuration(65);
+    });
+    act(() => {
+      useRecorderStore.getState().setCountdown(2);
+    });
+
+    expect(container.querySelector(`.${styles.timer}`)).toHaveTextContent('01:05');
+    expect(container.querySelector(`.${styles.countdownNumber}`)).toHaveTextContent('2');
   });
 });

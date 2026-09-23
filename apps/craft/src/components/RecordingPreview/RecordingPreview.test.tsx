@@ -1,4 +1,8 @@
-// The preview stage, driven by props only.
+// The preview stage, driven by props only — the countdown number excepted:
+// `CountdownOverlay` reads it from the store itself, so a tick cannot
+// re-render this stage. What the overlay draws in each state is its own file's
+// business (`CountdownOverlay.test.tsx`); what is asserted here is that it is
+// laid *over* whatever the preview is showing.
 //
 // Three mutually exclusive contents and one overlay. The order they are
 // checked in matters: during a picture-in-picture take both `isPiPActive` and
@@ -6,18 +10,23 @@
 // show a stream that has been round-tripped through the encoder instead of the
 // compositor's own canvas. That precedence gets its own test, as does the fact
 // that both DOM handles reach the caller's refs.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { createRef, type RefObject } from 'react'
 import { render, screen } from '@testing-library/react'
 import { RecordingPreview } from './RecordingPreview'
+import { useRecorderStore } from '../../store/recorderStore'
 import type { RecordingState } from '../../store/types'
 import styles from '../../App.module.css'
+
+// The store is a module singleton: reset the one field the overlay reads.
+beforeEach(() => {
+  useRecorderStore.setState({ countdownValue: 0 })
+})
 
 interface Options {
   isPiPActive?: boolean
   previewStream?: MediaStream | null
   state?: RecordingState
-  countdownValue?: number
   previewRef?: RefObject<HTMLVideoElement | null>
   canvasPreviewRef?: RefObject<HTMLDivElement | null>
 }
@@ -30,7 +39,6 @@ function renderPreview(options: Options = {}) {
       isPiPActive={options.isPiPActive ?? false}
       previewStream={options.previewStream ?? null}
       state={options.state ?? 'idle'}
-      countdownValue={options.countdownValue ?? 0}
       previewRef={previewRef}
       canvasPreviewRef={canvasPreviewRef}
     />
@@ -94,9 +102,9 @@ describe('RecordingPreview contents', () => {
 
 describe('RecordingPreview countdown', () => {
   it('counts down over whatever the preview is showing', () => {
+    useRecorderStore.setState({ countdownValue: 3 })
     const { container } = renderPreview({
       state: 'countdown',
-      countdownValue: 3,
       previewStream: streamStub(),
     })
 
@@ -105,18 +113,13 @@ describe('RecordingPreview countdown', () => {
     expect(container.querySelector('video')).toBeInTheDocument()
   })
 
-  it('stops drawing at zero, before the take starts', () => {
-    const { container } = renderPreview({ state: 'countdown', countdownValue: 0 })
+  // The state the overlay is handed is this component's own `state` prop, so
+  // that it is threaded through at all is asserted here; which states draw and
+  // which do not is `CountdownOverlay.test.tsx`'s.
+  it('draws no countdown outside one', () => {
+    useRecorderStore.setState({ countdownValue: 3 })
+    const { container } = renderPreview({ state: 'recording', previewStream: streamStub() })
 
     expect(container.querySelector(`.${styles.countdownNumber}`)).toBeNull()
   })
-
-  it.each(['idle', 'preparing', 'recording', 'paused', 'saving'] as RecordingState[])(
-    'draws no countdown while %s',
-    (state) => {
-      const { container } = renderPreview({ state, countdownValue: 3 })
-
-      expect(container.querySelector(`.${styles.countdownNumber}`)).toBeNull()
-    }
-  )
 })
