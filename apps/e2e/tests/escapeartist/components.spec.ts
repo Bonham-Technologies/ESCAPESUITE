@@ -65,6 +65,22 @@ test.describe('Export Dialog', () => {
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
   })
+
+  test('the editor behind it takes no keys', async ({ page }) => {
+    await openExportDialog(page)
+    // Focus lands on the dialog's first button when it opens, and Space on a
+    // focused button is a click. Move it to the dialog container (tabindex=-1)
+    // so Space is nothing but a global shortcut — which is what this asserts
+    // the editor no longer answers.
+    await page.getByRole('heading', { name: 'Export Video' }).click()
+
+    await page.keyboard.press('Space')
+
+    // The transport is still paused: the play button has not become a pause
+    // button behind the dialog.
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+    await expect(page.getByTitle('Pause (Space)')).toHaveCount(0)
+  })
 })
 
 test.describe('Keyframe Panel', () => {

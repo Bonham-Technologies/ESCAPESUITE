@@ -6,6 +6,7 @@
 // key mapping would decide for itself whether that is 'z' or 'Z'.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { useEditorStore } from './store/projectStore'
 import { resetStoreForTest, store, addClip } from './test/fixtures/projectStore'
 import { renderApp, settleApp } from './test/renderApp'
@@ -498,6 +499,41 @@ describe('App keyboard shortcuts', () => {
 
       expect(store().outPoint).toBe(4)
       expect(notification()).toBe('Out point: 0:04')
+    })
+  })
+
+  describe('a modal in front of the editor', () => {
+    // A dialog is modal: nothing behind it may act on a key. The gate is
+    // App's `modalOpen`, read by both window listeners — the shortcut cascade
+    // and the transport's.
+    it('stops the editor shortcuts while the export dialog is open', async () => {
+      const user = userEvent.setup()
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      await renderApp()
+
+      await user.click(screen.getByRole('button', { name: 'Export video' }))
+      expect(await screen.findByRole('heading', { name: 'Export Video' })).toBeInTheDocument()
+
+      press('Delete')
+      press('z', { ctrlKey: true })
+      fireEvent.keyDown(window, { code: 'Space' })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      expect(store().isPlaying).toBe(false)
+    })
+
+    it('stops them while the shortcut sheet is open', async () => {
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      await renderApp()
+      press('?')
+
+      press('Delete')
+      fireEvent.keyDown(window, { code: 'Space' })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      expect(store().isPlaying).toBe(false)
     })
   })
 

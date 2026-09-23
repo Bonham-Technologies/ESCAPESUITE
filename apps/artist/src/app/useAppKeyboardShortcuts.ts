@@ -7,6 +7,11 @@
 // points → multi-selection → single selection, and four tests assert exactly
 // that sequence. The block moves as one unit; nothing in it is reordered.
 //
+// Above the whole cascade sits `modalOpen`: while a dialog is up, the editor
+// behind it takes no key at all. The transport's own window listener
+// (`components/Preview/PlaybackControls.tsx`) carries the same gate, because
+// Space and the arrows live there rather than here.
+//
 // Its effect is the editor's **fourth**, so `App` calls this hook seventh.
 //
 // The deps array is the one the effect carried inline, character for
@@ -47,6 +52,17 @@ export interface AppKeyboardShortcutsDeps {
   handleZoomIn: () => void;
   handleZoomOut: () => void;
   showNotification: ShowNotification;
+  /**
+   * True while a modal is on screen — the export dialog, the shortcuts sheet or
+   * the session-restore prompt. A dialog is modal, so nothing behind it may act
+   * on a key: Space used to start playback, Delete used to remove the selected
+   * clip and Ctrl+Z used to undo, all from behind a dialog the user could not
+   * see past. Each modal owns whichever keys are its own — the export dialog's
+   * Escape never reaches this listener at all, because `useDialogBehaviour`
+   * stops it in the capture phase, and the shortcuts sheet binds its own
+   * Escape and `?` for the same reason.
+   */
+  modalOpen: boolean;
   keyframePanelOpen: boolean;
   setKeyframePanelOpen: (open: boolean) => void;
   setSelectedClipId: (id: string | null) => void;
@@ -89,6 +105,7 @@ export function useAppKeyboardShortcuts({
   handleZoomIn,
   handleZoomOut,
   showNotification,
+  modalOpen,
   keyframePanelOpen,
   setKeyframePanelOpen,
   setSelectedClipId,
@@ -119,6 +136,11 @@ export function useAppKeyboardShortcuts({
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if typing in input fields
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // A modal is in front; the app behind it is not taking keys.
+      if (modalOpen) {
         return;
       }
 
@@ -356,7 +378,7 @@ export function useAppKeyboardShortcuts({
   }, [
     canUndo, canRedo, undo, redo, selectedClipId, removeClipFromTimeline, rippleDeleteClip, activeTool,
     duplicateClip, handleSaveProject, handleLoadProject, clips.length,
-    handleZoomIn, handleZoomOut, showNotification, keyframePanelOpen, setKeyframePanelOpen,
+    handleZoomIn, handleZoomOut, showNotification, modalOpen, keyframePanelOpen, setKeyframePanelOpen,
     setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker,
     goToNextMarker, goToPreviousMarker, showShortcuts, splitClip,
     selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection,

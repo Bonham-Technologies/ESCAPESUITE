@@ -245,4 +245,34 @@ describe('PlaybackControls keyboard shortcuts', () => {
 
     expect(store().isPlaying).toBe(false)
   })
+
+  describe('with a modal in front', () => {
+    it('leaves every transport key alone', () => {
+      addClip('clip1', 0, 10)
+      store().setCurrentTime(5)
+      render(<PlaybackControls modalOpen={true} />)
+
+      fireEvent.keyDown(window, { code: 'Space' })
+      fireEvent.keyDown(window, { code: 'ArrowLeft' })
+      fireEvent.keyDown(window, { code: 'ArrowRight' })
+      fireEvent.keyDown(window, { code: 'Home' })
+      fireEvent.keyDown(window, { code: 'End' })
+
+      expect(store().isPlaying).toBe(false)
+      expect(store().currentTime).toBe(5)
+    })
+
+    it('takes them again the moment the modal closes', () => {
+      addClip('clip1', 0, 10)
+      const { rerender } = render(<PlaybackControls modalOpen={true} />)
+
+      fireEvent.keyDown(window, { code: 'Space' })
+      expect(store().isPlaying).toBe(false)
+
+      rerender(<PlaybackControls modalOpen={false} />)
+      fireEvent.keyDown(window, { code: 'Space' })
+
+      expect(store().isPlaying).toBe(true)
+    })
+  })
 })

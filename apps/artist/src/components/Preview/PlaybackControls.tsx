@@ -3,11 +3,27 @@
 //
 // Owns no canvas and draws nothing; it only moves the playhead in the store,
 // which is why it sits beside PreviewPlayer rather than inside it.
+//
+// Space and the arrows are bound on `window` here rather than in
+// `app/useAppKeyboardShortcuts.ts`, so this listener carries its own copy of
+// that hook's `modalOpen` gate: a dialog is modal, and Space must not start
+// playback from behind one.
 import { useCallback, useEffect } from 'react';
 import { useEditorStore } from '../../store/projectStore';
 import styles from './PreviewPlayer.module.css';
 
-export function PlaybackControls() {
+interface PlaybackControlsProps {
+  /**
+   * True while a modal is on screen. The transport's keys stop; its buttons,
+   * which the dialog covers anyway, are left alone.
+   *
+   * Optional, and false by default, so a test that renders the transport on
+   * its own gets the plain behaviour. `App` always passes the real flag.
+   */
+  modalOpen?: boolean;
+}
+
+export function PlaybackControls({ modalOpen = false }: PlaybackControlsProps) {
   const isPlaying = useEditorStore((state) => state.isPlaying);
   const currentTime = useEditorStore((state) => state.currentTime);
   const timelineDuration = useEditorStore((state) => state.project.timeline.duration);
@@ -48,6 +64,11 @@ export function PlaybackControls() {
         return;
       }
 
+      // A modal is in front; the app behind it is not taking keys.
+      if (modalOpen) {
+        return;
+      }
+
       switch (e.code) {
         case 'Space':
           e.preventDefault();
@@ -74,7 +95,7 @@ export function PlaybackControls() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePlayPause, handleStepBackward, handleStepForward, handleGoToStart, handleGoToEnd]);
+  }, [modalOpen, handlePlayPause, handleStepBackward, handleStepForward, handleGoToStart, handleGoToEnd]);
 
   return (
     <div className={styles.controls}>
