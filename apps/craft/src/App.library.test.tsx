@@ -294,7 +294,7 @@ describe('App MP4 downloads', () => {
     expect(mp4.getAttribute('title')).toContain('Checking');
     // …and says nothing under the library while it waits: a note that appears
     // and vanishes on every load would move the page for no reason.
-    expect(screen.queryByText(/Checking whether this browser/)).toBeNull();
+    expect(screen.queryByText(/Checking what this browser/)).toBeNull();
     // The instant WebM download never waits on the MP4 question.
     expect(screen.getByRole('button', { name: 'Download Standup Demo' })).toBeEnabled();
   });

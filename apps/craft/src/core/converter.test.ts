@@ -922,6 +922,9 @@ describe('converter', () => {
 
       await expect(promise).rejects.toThrow(MP4_NO_AUDIO_REASON)
       expect(getMediabunnyState().outputs).toHaveLength(0)
+      // …and refuses before decoding anything: the codec question is a
+      // microsecond, the decode is the whole file.
+      expect(audio.contexts).toHaveLength(0)
     })
 
     it('refuses the same way when asking about AAC throws', async () => {

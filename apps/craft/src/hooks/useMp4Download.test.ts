@@ -656,6 +656,35 @@ describe('useMp4Download audio-only (M4A)', () => {
     expect(result.current.m4aBlockedReason).toBe(MP4_UNSUPPORTED_REASON)
   })
 
+  it('is offered, and runs, where only the video codec is missing', async () => {
+    // An M4A needs an AAC encoder and nothing else, so `supported: false` — the
+    // answer about H.264 — must not reach this button. The gate and the action
+    // read the same reason, which is what stops an enabled button from being a
+    // dead one: before, the button rendered enabled here and the click did
+    // nothing at all. (Today's probe never returns this combination; the type
+    // allows it, and a fix for the probe's H.264/AAC collapse would make it
+    // real.)
+    await seed('take-1', 'Take One')
+    const { result } = renderMp4Download({
+      state: 'ready',
+      supported: false,
+      audio: true,
+      reason: 'This browser cannot encode H.264 video, which an MP4 needs.',
+    })
+
+    expect(result.current.m4aBlockedReason).toBeNull()
+    expect(result.current.blockedReason).toBe(
+      'This browser cannot encode H.264 video, which an MP4 needs.'
+    )
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One', 'm4a')
+    })
+
+    expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.m4a' }])
+  })
+
   it('is offered, with nothing to say, once the probe says the browser can encode AAC', () => {
     const { result } = renderMp4Download()
 

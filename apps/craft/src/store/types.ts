@@ -79,10 +79,14 @@ export interface Mp4Support {
   /** Whether a conversion may be offered at all — no H.264 encoder is fatal. */
   supported: boolean;
   /**
-   * Whether that conversion will have sound. False where the browser has no
-   * AAC encoder: the conversion still runs and the file still plays, silent,
-   * which is what `convertToMP4` does with the same answer — so this does not
-   * disable the button, it only adds a note.
+   * Whether the browser has an AAC encoder, and so whether a conversion will
+   * have sound.
+   *
+   * It means two different things to the two downloads, because they treat it
+   * differently. For **MP4** it is not a refusal: `convertToMP4` drops the
+   * audio and muxes a working silent file, so `false` does not disable that
+   * button — it only adds a note. For **M4A** it is the whole conversion, so
+   * `false` disables that button outright, carrying `reason` as its sentence.
    */
   audio: boolean;
   /** The probe's own sentence for what is missing. Absent when all is well. */

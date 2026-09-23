@@ -7,9 +7,10 @@ ESCAPECRAFT: download a recording's audio on its own, as M4A
 A third download per row, beside WebM and MP4: **M4A** — the take's audio alone,
 AAC in an MP4 container (`audio/mp4`, `.m4a`). A mic-only take is already an
 audio recording, but what ESCAPECRAFT stores for it is an audio-only WebM: it
-plays, and it is not an "audio file" to most tools, while the MP4 conversion
-refuses a take with no video outright. Now the sound of any take comes out as a
-file audio editors, podcast tools and phones open.
+plays, and it is not an "audio file" to most tools — and the MP4 conversion is
+no help, since a take with no picture in it fails part-way through that one.
+Now the sound of any take comes out as a file audio editors, podcast tools and
+phones open.
 
 The conversion is local, like the others — `decodeAudioData`, a WebCodecs AAC
 encode, a Mediabunny mux — and it is the tail of the MP4 conversion and nothing

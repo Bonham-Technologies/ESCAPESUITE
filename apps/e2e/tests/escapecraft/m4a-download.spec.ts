@@ -111,6 +111,16 @@ test.describe('ESCAPECRAFT M4A download', () => {
 
   test('offers M4A disabled, saying so, on a take with no audio in it', async ({ page }) => {
     await record(page, { microphone: false })
+    // The per-row reason is the *fallback* arm of the gate: the browser's
+    // answer wins when there is one. So this claim is only observable where
+    // nothing app-wide is blocking — on a browser whose probe refuses, the
+    // title is the probe's sentence and asserting this one would be asserting
+    // the wrong thing. Same guard as the other two tests, for a different
+    // reason.
+    test.skip(
+      !((await canConvertToMp4(page)) && (await canEncodeAac(page))),
+      'The per-recording reason is only visible when nothing app-wide is blocking'
+    )
 
     const m4aButton = page.getByRole('button', { name: /Download .+ as audio \(M4A\)/ })
     await expect(m4aButton).toBeVisible()
@@ -119,6 +129,48 @@ test.describe('ESCAPECRAFT M4A download', () => {
 
     // The take is still a video, so the other two downloads are untouched.
     await expect(page.getByRole('button', { name: /^Download (?!.+ as ).+$/ })).toBeEnabled()
+  })
+
+  test('keeps every action button inside the library when the row cannot fit on one line', async ({
+    page,
+  }) => {
+    // The third download is a third button in a 280px sidebar, and
+    // `.recordingsList` is `overflow-x: hidden` — so a row that outgrows its
+    // width does not scroll, it loses its last button to the clip. Measured in
+    // Chromium 2026-09-22: seven buttons (the host's Upload included) want
+    // 228px where the row has ~223px, and a classic scrollbar takes ~15px more.
+    // `.recordingActions` wraps instead; this is that, observed rather than
+    // asserted in CSS. Narrowing the sidebar stands in for the scrollbar and
+    // for the host's extra button at once.
+    await record(page, { microphone: true })
+
+    await page.addStyleTag({ content: '[class*="sidebar"] { width: 220px !important; }' })
+
+    const actions = page.locator('[class*="recordingActions"]').first()
+    const list = page.locator('[class*="recordingsList"]').first()
+    const listBox = (await list.boundingBox())!
+    const buttons = actions.locator('button')
+    const count = await buttons.count()
+    expect(count).toBeGreaterThanOrEqual(6)
+
+    for (let i = 0; i < count; i++) {
+      const box = (await buttons.nth(i).boundingBox())!
+      const label = await buttons.nth(i).getAttribute('aria-label')
+      // Inside the library's own box, horizontally: anything past it is
+      // clipped rather than scrolled to.
+      expect(box.x, `${label} starts inside the library`).toBeGreaterThanOrEqual(listBox.x - 1)
+      expect(
+        box.x + box.width,
+        `${label} ends inside the library`
+      ).toBeLessThanOrEqual(listBox.x + listBox.width + 1)
+    }
+
+    // …and it fits by wrapping, not by squashing: the row is more than one
+    // button tall, and no button has been shrunk to nothing.
+    const actionsBox = (await actions.boundingBox())!
+    expect(actionsBox.height).toBeGreaterThan(30)
+    const firstBox = (await buttons.first().boundingBox())!
+    expect(firstBox.width).toBeGreaterThanOrEqual(24)
   })
 
   test('offers M4A disabled, with a reason, where it cannot encode AAC', async ({ page }) => {

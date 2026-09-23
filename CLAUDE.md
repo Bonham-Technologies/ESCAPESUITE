@@ -115,7 +115,7 @@ dist/
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
 - Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for PiP, audio-only takes and browsers without it
 - Outputs WebM either way, but only the MediaRecorder path needs repairing: `useRecordingSave` runs `webm-duration-fix` over MediaRecorder output at save time, and writes WebCodecs output through untouched (Mediabunny already emits Duration and Cues)
-- Three downloads per recording: **WebM** is the stored blob handed straight back, instant and always available; **MP4** (H.264 + AAC) is `converter.ts` re-encoding it in the page with WebCodecs + Mediabunny; **M4A** (`convertToM4A`, `audio/mp4`) is the take's audio alone, AAC in an MP4 container, for a mic-only take that should come out as an audio file. The two conversions share one slot — one at a time whichever it is — with a phase-and-percentage progress row, a Cancel button, and a disabled button carrying a visible reason where the browser cannot encode. No upload either way; a failed conversion raises the app's one notice and leaves the WebM download untouched
+- Three downloads per recording: **WebM** is the stored blob handed straight back, instant and always available; **MP4** (H.264 + AAC) is `converter.ts` re-encoding it in the page with WebCodecs + Mediabunny; **M4A** (`convertToM4A`, `audio/mp4`) is the take's audio alone, AAC in an MP4 container, for a mic-only take that should come out as an audio file. The two conversions share one slot — one at a time whichever it is — with a phase-and-percentage progress row, a Cancel button, and a disabled button carrying a visible reason wherever a conversion is refused. Nothing is uploaded by any of the three; a failed conversion raises the app's one notice and leaves the WebM download untouched
 - The two conversions are gated differently, because they fail differently: no AAC encoder makes an MP4 *silent* (still offered, with a note) and an M4A *impossible* (disabled, with the same sentence as its reason), and a take with no audio in it disables M4A alone. See `apps/craft/CLAUDE.md`'s "Download Formats"
 - The conversion state is held in `RecordingsListPanel`, below `App`, so a progress report re-renders the library and nothing else (`App.mp4rerender.test.tsx` counts it)
 - `converter.ts`'s other conversion path — compatible WebM (VP9 + Opus re-encode), `remuxToWebM` / `isWebMRemuxSupported` — is still present, tested and **unwired**; see `apps/craft/CLAUDE.md`'s "Download Formats"
@@ -403,7 +403,7 @@ never above what the suite actually achieves:
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.32 | 96.86 | 99.73 |
+| `@escapesuite/craft` | 100.00 | 99.32 | 96.85 | 99.73 |
 | `@escapesuite/artist` | 99.37 | 98.67 | 93.30 | 98.94 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |

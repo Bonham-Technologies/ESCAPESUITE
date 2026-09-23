@@ -43,12 +43,14 @@ interface RecordingsListProps {
 }
 
 /**
- * The id the MP4 buttons' `aria-describedby` points at. One note for the whole
- * list rather than one per row: what it says is a fact about the app (no H.264
- * encoder, no AAC encoder, a conversion already running), not about the
- * recording, so repeating it under every row would say the same sentence five
- * times. It exists only while `mp4Note` is non-null, which is why the buttons
- * point at it only then.
+ * The id both conversion buttons' `aria-describedby` points at — the MP4 one
+ * and the M4A one, because every sentence the note can carry is true of both
+ * (no H.264 encoder and no WebCodecs block them together; no AAC encoder
+ * silences one and forbids the other; a conversion already running blocks
+ * both). One note for the whole list rather than one per row: what it says is
+ * a fact about the app, not about the recording, so repeating it under every
+ * row would say the same sentence five times. It exists only while `mp4Note`
+ * is non-null, which is why the buttons point at it only then.
  */
 const MP4_NOTE_ID = 'mp4-note';
 
@@ -60,7 +62,7 @@ const FORMAT_LABELS: Record<Mp4Conversion['format'], string> = {
 
 /**
  * The library panel: every saved take with its thumbnail, duration and size,
- * and the five things that can be done with it — six inside a host, which can
+ * and the six things that can be done with it — seven inside a host, which can
  * also be handed the file.
  *
  * Nothing here touches storage. The row knows the recording's id and name and

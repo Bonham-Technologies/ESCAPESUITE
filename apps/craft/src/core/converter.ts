@@ -405,6 +405,12 @@ export const MP4_PROBE_FAILED_REASON =
  * has no audio, so this is the defence behind that gate rather than the usual
  * way a user meets it — a take can also be *recorded* with a microphone that
  * produced silence the container never carried.
+ *
+ * Its pair is `NO_AUDIO_TRACK_REASON` in `hooks/useMp4Download.ts` ("This
+ * recording has no audio"), which titles the disabled button for the same
+ * fact. Two strings on purpose — that one is about a button, this one is
+ * thrown and becomes a notice — and neither is canonical: change both or
+ * neither.
  */
 export const M4A_NO_AUDIO_MESSAGE = 'This recording has no audio track';
 
@@ -485,8 +491,14 @@ async function extractAudio(
   blob: Blob,
   onProgress?: (progress: number) => void
 ): Promise<AudioBuffer | null> {
+  // Declared out here so the finally below closes it however this leaves. The
+  // one path that used to escape without closing was `blob.arrayBuffer()`
+  // rejecting — between the context being constructed and the inner try that
+  // owned the close — which left a live AudioContext per attempt.
+  let audioContext: AudioContext | null = null;
+
   try {
-    const audioContext = new AudioContext({ sampleRate: 48000 });
+    audioContext = new AudioContext({ sampleRate: 48000 });
     const arrayBuffer = await blob.arrayBuffer();
 
     onProgress?.(10);
@@ -494,15 +506,17 @@ async function extractAudio(
     try {
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
       onProgress?.(100);
-      await audioContext.close();
       return audioBuffer;
     } catch {
       // No audio or unsupported format
-      await audioContext.close();
       return null;
     }
   } catch {
     return null;
+  } finally {
+    // Null only where the constructor itself threw, which is the one case
+    // with nothing to release.
+    await audioContext?.close();
   }
 }
 
@@ -807,9 +821,11 @@ export async function convertToMP4(
  *
  * The third download, and the only one that throws away picture. A mic-only
  * take is already an audio recording, but it is stored as an audio-only WebM,
- * which plays and is not an "audio file" to most tools; and `convertToMP4`
- * refuses a take with no video outright. This produces `audio/mp4` — the
- * `.m4a` every audio editor, podcast tool and phone opens.
+ * which plays and is not an "audio file" to most tools; and `convertToMP4` is
+ * no help there — it has no guard against a take with no picture, so it
+ * configures a 0x0 video encoder and fails with whatever the browser says.
+ * This produces `audio/mp4` — the `.m4a` every audio editor, podcast tool and
+ * phone opens.
  *
  * It is the tail of `convertToMP4` and nothing else: extract, encode AAC, mux.
  * No `<video>`, no playback, no canvas, no `VideoFrame` — which is why it
@@ -838,18 +854,13 @@ export async function convertToM4A(
   let audioEncoder: AudioEncoder | null = null;
 
   try {
-    const audioBuffer = await extractAudio(webmBlob, (p) => {
-      onProgress({ phase: 'preparing', progress: p * 0.15, message: 'Extracting audio…' });
-    });
-    if (!audioBuffer) {
-      throw new Error(M4A_NO_AUDIO_MESSAGE);
-    }
-    const audioData = audioBufferToFloat32(audioBuffer);
-
-    // The same question `probeMP4Support()` asks, about the same configuration
-    // this configures below. A browser that cannot answer is answering no: an
-    // encoder that will not configure fails a few lines later anyway, and this
-    // way it fails with a sentence rather than with whatever the API threw.
+    // Asked first, because it is the cheap half: the same question
+    // `probeMP4Support()` asks, about the same configuration this configures
+    // below. A browser that cannot answer is answering no — an encoder that
+    // will not configure fails a few lines later anyway, and this way it fails
+    // with a sentence rather than with whatever the API threw. Decoding the
+    // whole file only to refuse it would be a gigabyte of work for an answer
+    // available in a microsecond.
     let aacSupported = false;
     try {
       const support = await AudioEncoder.isConfigSupported(MP4_AUDIO_ENCODER_CONFIG);
@@ -860,6 +871,14 @@ export async function convertToM4A(
     if (!aacSupported) {
       throw new Error(MP4_NO_AUDIO_REASON);
     }
+
+    const audioBuffer = await extractAudio(webmBlob, (p) => {
+      onProgress({ phase: 'preparing', progress: p * 0.15, message: 'Extracting audio…' });
+    });
+    if (!audioBuffer) {
+      throw new Error(M4A_NO_AUDIO_MESSAGE);
+    }
+    const audioData = audioBufferToFloat32(audioBuffer);
 
     // Create Mediabunny output — one audio track, and deliberately no video
     // track: an MP4 container carrying only sound is what `.m4a` names.

@@ -628,7 +628,9 @@ message and navigate to its own editor itself.
   cheap (`converter.perf.test.ts` pins zero of each) and what lets it be offered on a take
   with no picture at all. It exists because a mic-only take is already an audio recording
   and what is stored for it is an audio-only WebM: it plays, and it is not an "audio file"
-  to most tools — while `convertToMP4` refuses a take with no video outright.
+  to most tools — and `convertToMP4` is no help there. It has no guard against a take with
+  no picture: it configures a 0x0 video encoder and fails with whatever the browser says,
+  which reaches the user as "Conversion failed: …" rather than as a designed refusal.
 
 `hooks/useMp4Download.ts` owns both conversions, and the rules are:
 
