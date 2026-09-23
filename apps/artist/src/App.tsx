@@ -140,6 +140,16 @@ function App() {
 
   const { handleZoomIn, handleZoomOut } = useTimelineZoom({ zoom, setZoom });
 
+  // A modal is on screen, so the editor behind it takes no key — not Space,
+  // not Delete, not Ctrl+Z. Both of the app's window listeners read this: the
+  // shortcut cascade below and the transport's own, in PlaybackControls.
+  //
+  // The loading overlay is deliberately not in here. It carries `role="dialog"`
+  // for the screen reader, but it traps no focus, holds nothing to interact
+  // with and is gone as soon as the project finishes loading — there is no
+  // dialog in front of the user to be confused by.
+  const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog;
+
   useAppKeyboardShortcuts({
     canUndo,
     canRedo,
@@ -156,6 +166,7 @@ function App() {
     handleZoomIn,
     handleZoomOut,
     showNotification,
+    modalOpen,
     keyframePanelOpen,
     setKeyframePanelOpen,
     setSelectedClipId,
@@ -220,7 +231,7 @@ function App() {
         {/* Center - Preview */}
         <section className={styles.previewSection}>
           <PreviewPlayer />
-          <PlaybackControls />
+          <PlaybackControls modalOpen={modalOpen} />
         </section>
 
         {/* Right sidebar - Clip Inspector */}

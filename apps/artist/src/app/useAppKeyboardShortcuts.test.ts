@@ -62,6 +62,7 @@ beforeEach(() => {
     handleZoomIn: vi.fn(),
     handleZoomOut: vi.fn(),
     showNotification: vi.fn(),
+    modalOpen: false,
     keyframePanelOpen: false,
     setKeyframePanelOpen: vi.fn(),
     setSelectedClipId: vi.fn(),
@@ -564,6 +565,49 @@ describe('the Escape cascade, in order', () => {
     expect(press('Escape')).toBe(true)
     expect(deps.setSelectedClipId).not.toHaveBeenCalled()
     expect(deps.clearMultiSelection).not.toHaveBeenCalled()
+  })
+})
+
+describe('a modal in front of the editor', () => {
+  /** Everything the cascade could act on, so a silent key is the gate and not an empty store. */
+  const loaded = {
+    modalOpen: true,
+    selectedClipId: 'clip-1',
+    selectedClipIds: new Set(['clip-1']),
+    clipboard: [] as Clip[],
+    inPoint: 1,
+    outPoint: 3,
+  }
+
+  it('takes no key at all', () => {
+    mountShortcuts(loaded)
+
+    // Each of these claims the key and acts on it when nothing is in front.
+    expect(press('z', { ctrlKey: true })).toBe(true)
+    expect(press('Delete')).toBe(true)
+    expect(press('v')).toBe(true)
+    expect(press('?')).toBe(true)
+    expect(press('Escape')).toBe(true)
+
+    expect(deps.undo).not.toHaveBeenCalled()
+    expect(deps.deleteSelectedClips).not.toHaveBeenCalled()
+    expect(deps.removeClipFromTimeline).not.toHaveBeenCalled()
+    expect(deps.setActiveTool).not.toHaveBeenCalled()
+    expect(deps.setShowShortcuts).not.toHaveBeenCalled()
+    expect(deps.clearInOutPoints).not.toHaveBeenCalled()
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
+  it('takes them again the moment the modal closes', () => {
+    const { rerender } = mountShortcuts(loaded)
+
+    press('v')
+    expect(deps.setActiveTool).not.toHaveBeenCalled()
+
+    rerender({ ...deps, modalOpen: false })
+    press('v')
+
+    expect(deps.setActiveTool).toHaveBeenCalledWith('select')
   })
 })
 

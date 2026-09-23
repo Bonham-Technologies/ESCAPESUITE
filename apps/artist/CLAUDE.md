@@ -305,6 +305,12 @@ Clips support animated properties via keyframes:
   keyframe *and* the selected clip, because the graph's old listener was itself on `window`
   alongside the editor's.
 
+  **The graph is not covered by the editor's modal gate** (see "Dialogs" below). Those two
+  `window` cascades stop while a dialog is up; this element-level handler does not, and the
+  three overlays that trap no focus leave the graph focusable behind them. Recorded here because
+  this is where the propagation contract lives; the fix belongs with adopting
+  `useDialogBehaviour` in those overlays.
+
   **What counts as active**: every key that acts on "the active keyframe" — `Delete`,
   `Backspace`, `Escape` — is gated on the *rendered* active option (`activeIndex !== -1`), not on
   the remembered active time, so the keyboard can never disagree with what the graph draws; an
@@ -351,7 +357,7 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 | `cursor.ts` | The CSS cursor a drag mode advertises |
 | `types.ts` | The shapes the above share (`DragMode`, `OverlayBounds`, `HandleHit`, `PreviewSceneContext`). **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
 | `InlineTextEditorAnchor.tsx` | Positioning `InlineTextEditor` over the text it edits, through the canvas' object-fit mapping |
-| `PlaybackControls.tsx` | The transport buttons and their keyboard shortcuts; no canvas at all |
+| `PlaybackControls.tsx` | The transport buttons and their keyboard shortcuts (Space, the arrows, Home, End — bound on `window` here, not in the App cascade); no canvas at all. Takes `modalOpen`, the same gate the App cascade carries, so Space cannot start playback from behind a dialog |
 | `PreviewTimecode.tsx` | The playhead readout `<span>` — the only thing that re-renders on a playback tick (see below) |
 
 Hooks:
@@ -657,8 +663,8 @@ a live array rather than a count: `useAppKeyboardShortcuts`' Ctrl+B (split) bran
 `clips.find(...)`, while `useProjectActions`' `clipCount` and the header's `canExport` only
 ever want `clips.length`.
 
-**The keyboard cascade's 37 deps re-bind the listener, and that is fine — measured, not
-assumed.** Every change to one of the 37 values `useAppKeyboardShortcuts` closes over tears the
+**The keyboard cascade's 38 deps re-bind the listener, and that is fine — measured, not
+assumed.** Every change to one of the 38 values `useAppKeyboardShortcuts` closes over tears the
 `keydown` listener off `window` and binds a fresh closure. Round 2 counted it rather than
 guessing: `useAppKeyboardShortcuts.rebinds.test.tsx` drives the hook through `App`'s own
 selectors over a scripted 20-edit burst and measures **15 re-binds** (2026-09-13) — about one
@@ -706,7 +712,7 @@ and queries `styles.menuBackdrop`.
 | `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect |
 | `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
-| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. The editor's **fourth** effect. Its deps array is the inline one character for character, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **37 deps, measured and left verbatim** — see below |
+| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. Above all of it sits `modalOpen`, which stops the cascade dead while a dialog is up (see "Dialogs"). The editor's **fourth** effect. Its deps array is the inline one character for character plus `modalOpen`, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **38 deps, measured and left verbatim** — see below |
 | `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **fifth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
 | `AppHeader.tsx` | The top bar: the dashboard link (hidden in the standalone build, which this component asks about itself), the wordmark, the project-name field, and the File menu plus the quick Save and Export buttons |
@@ -760,13 +766,55 @@ Two things about the adoption are worth knowing:
 - **Escape still leaves through `handleCancel`**, the same path as the × and Cancel
   buttons, so an in-progress export is aborted exactly as they abort it.
 
-`useAppKeyboardShortcuts` has **no `modalOpen` gate** — CRAFT's equivalent does — so
-nothing but the hook's own `stopPropagation()` keeps the editor's shortcuts off a key the
-dialog has claimed. That works because the hook listens on `document` in the **capture**
-phase and the shortcut cascade listens on `window` in the bubble phase, and because Escape
-is the only key it stops. It is also the reason for the keyframe graph's known limitation
-above. `LoadingOverlay` and `SessionRestorePrompt` are `role="dialog" aria-modal="true"`
-but have no trap or Escape handling of their own and do not use the hook.
+#### The modal gate on the global shortcuts
+
+**While a modal is up, the editor behind it takes no key at all.** `App` computes one flag —
+`const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog`
+— and hands it to *both* of the app's `window` cascades: `useAppKeyboardShortcuts` and
+`PlaybackControls` (which owns Space, the arrows, Home and End). Each returns from its handler immediately when it is true,
+below the input/textarea check and above every other branch — the same shape, and the same
+comment, as ESCAPECRAFT's `useKeyboardShortcuts` (PR #381). Before it, Space started playback,
+Delete removed the selected clip and Ctrl+Z undid, all from behind a dialog the user could not
+see past.
+
+**Escape is the dialog's, never the global handler's.** `ExportDialog` closes on Escape
+through `useDialogBehaviour`, which listens on `document` in the **capture** phase and
+`stopPropagation()`s that one key — above every `window` bubble listener, which is why Escape
+was the only key that already behaved correctly and why the gate changes nothing about it. The
+shortcut sheet is the same idea by a different route: it is counted in `modalOpen`, so the
+cascade that used to close it no longer sees a key, and it binds its own three on `window`
+itself (`components/KeyboardShortcuts/KeyboardShortcuts.tsx`): Escape, `?` and Shift+`/`, each
+behind the same input/textarea typing guard the other two listeners open with — the sheet traps
+no focus, so the header's project-name field is still Tab-reachable behind it. It needs no
+`stopPropagation`, because the two cascades below it are already gated. That is the arrangement
+ESCAPECRAFT's playback dialog uses, and what keeps the footer's "Press `?` to toggle this
+panel" true.
+
+**Two cascade branches are consequently unreachable from `App`**: the hook's own `?` toggle and
+the first arm of its Escape cascade (close the sheet). `showShortcuts` can only ever be `false`
+by the time the gated handler runs, so `setShowShortcuts(!showShortcuts)` is permanently
+`setShowShortcuts(true)`. They are **retained only for the hook's own unit tests and for the
+branch-order contract** this file describes as the semantics of that file — nothing in the
+running app reaches them. Folding the sheet's two keys back above the gate inside the one
+cascade would remove the dead arms at the cost of the gate no longer sitting above every other
+branch; if that trade is ever taken, this paragraph and the sheet's listener go together.
+
+**`LoadingOverlay` is deliberately not in the flag.** It carries `role="dialog"
+aria-modal="true"` for the screen reader, but it traps no focus, holds nothing to interact
+with and is gone the moment the project finishes loading — there is no dialog in front of the
+user to be confused by. `SessionRestorePrompt` has no trap or Escape handling of its own
+either and does not use `useDialogBehaviour`, but it *is* in the flag: it is a question with
+two buttons that waits for an answer. `ProjectLoadDialog` (`useProjectActions`'
+`showProjectLoadDialog`) is the same shape and is in the flag for the same reason; it owns no
+key of its own, so gating the editor behind it strands nothing.
+
+**What is still not gated**, and is a separate piece of work: nothing stops the *keyframe
+graph* while a modal is up. It is a focusable `role=listbox` with its own element-level
+handler, so a user who had it focused can open the shortcut sheet with `?` (which the graph
+lets fall through) and then still nudge, delete and add keyframes with the arrows, Delete and
+Enter from behind it. `ExportDialog` is immune because it really traps focus; `KeyboardShortcuts`,
+`SessionRestorePrompt` and `ProjectLoadDialog` do not, which is what leaves the graph reachable.
+The fix is to adopt `useDialogBehaviour` in those three rather than to grow another flag.
 
 ### Export Performance Optimizations (`src/core/exporter.ts`)
 The export pipeline includes several optimizations to improve performance:

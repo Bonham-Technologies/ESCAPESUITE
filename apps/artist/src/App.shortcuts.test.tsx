@@ -6,6 +6,7 @@
 // key mapping would decide for itself whether that is 'z' or 'Z'.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { useEditorStore } from './store/projectStore'
 import { resetStoreForTest, store, addClip } from './test/fixtures/projectStore'
 import { renderApp, settleApp } from './test/renderApp'
@@ -498,6 +499,63 @@ describe('App keyboard shortcuts', () => {
 
       expect(store().outPoint).toBe(4)
       expect(notification()).toBe('Out point: 0:04')
+    })
+  })
+
+  describe('a modal in front of the editor', () => {
+    // A dialog is modal: nothing behind it may act on a key. The gate is
+    // App's `modalOpen`, read by both window listeners — the shortcut cascade
+    // and the transport's.
+    //
+    // Each case seeds one selected clip, so Delete has something to take. The
+    // three keys are asserted one at a time rather than in a batch: Delete
+    // followed by Ctrl+Z would otherwise put the clip back and read as a pass.
+    const expectNoKeysTaken = () => {
+      press('Delete')
+      expect(store().project.timeline.clips).toHaveLength(1)
+
+      press('z', { ctrlKey: true })
+      fireEvent.keyDown(window, { code: 'Space' })
+      expect(store().isPlaying).toBe(false)
+      // Every branch the three keys could have reached announces itself.
+      expect(notification()).toBeUndefined()
+    }
+
+    it('stops the editor shortcuts while the export dialog is open', async () => {
+      const user = userEvent.setup()
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      await renderApp()
+
+      await user.click(screen.getByRole('button', { name: 'Export video' }))
+      expect(await screen.findByRole('heading', { name: 'Export Video' })).toBeInTheDocument()
+
+      expectNoKeysTaken()
+    })
+
+    it('stops them while the project-load safety dialog is open', async () => {
+      const user = userEvent.setup()
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      vi.mocked(showOpenProjectDialog).mockResolvedValueOnce(
+        new File(['{}'], 'demo.escape', { type: 'application/json' })
+      )
+      await renderApp()
+
+      await user.click(screen.getByRole('button', { name: 'File menu' }))
+      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      expect(await screen.findByTestId('project-load-dialog')).toBeInTheDocument()
+
+      expectNoKeysTaken()
+    })
+
+    it('stops them while the shortcut sheet is open', async () => {
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      await renderApp()
+      press('?')
+
+      expectNoKeysTaken()
     })
   })
 

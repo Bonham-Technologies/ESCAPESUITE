@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import styles from './KeyboardShortcuts.module.css'
@@ -65,6 +65,76 @@ describe('KeyboardShortcuts', () => {
     await user.click(container.querySelector<HTMLElement>(`.${styles.overlay}`)!)
 
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  describe('its own keys', () => {
+    // The sheet is a modal, so `useAppKeyboardShortcuts` stops taking keys
+    // while it is up (App's `modalOpen`). The two keys that are the sheet's
+    // own — Escape and a second `?` — are bound here instead, which is why the
+    // global cascade never sees them and the footer's promise still holds.
+    it('closes on Escape', () => {
+      const onClose = vi.fn()
+      render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
+
+      fireEvent.keyDown(window, { key: 'Escape' })
+
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('closes on a second ?', () => {
+      const onClose = vi.fn()
+      render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
+
+      fireEvent.keyDown(window, { key: '?' })
+
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('closes on Shift+/ too', () => {
+      const onClose = vi.fn()
+      render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
+
+      fireEvent.keyDown(window, { key: '/', shiftKey: true })
+
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves every other key alone', () => {
+      const onClose = vi.fn()
+      render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
+
+      fireEvent.keyDown(window, { key: 'v' })
+
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('leaves a key typed into a field alone', () => {
+      // The sheet traps no focus, so the header's project-name input is still
+      // Tab-reachable behind it — and a `?` typed into a name is a `?`.
+      const onClose = vi.fn()
+      const input = document.createElement('input')
+      document.body.append(input)
+      render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
+
+      fireEvent.keyDown(input, { key: '?', bubbles: true })
+      const textarea = document.createElement('textarea')
+      document.body.append(textarea)
+      fireEvent.keyDown(textarea, { key: 'Escape', bubbles: true })
+
+      expect(onClose).not.toHaveBeenCalled()
+      input.remove()
+      textarea.remove()
+    })
+
+    it('stops listening once it is closed', () => {
+      const onClose = vi.fn()
+      const { rerender } = render(<KeyboardShortcuts isOpen={true} onClose={onClose} />)
+
+      rerender(<KeyboardShortcuts isOpen={false} onClose={onClose} />)
+      fireEvent.keyDown(window, { key: 'Escape' })
+
+      expect(onClose).not.toHaveBeenCalled()
+    })
   })
 
   it('stays open when a click lands inside the panel', async () => {

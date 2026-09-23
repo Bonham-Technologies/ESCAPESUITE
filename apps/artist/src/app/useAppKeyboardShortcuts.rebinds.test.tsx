@@ -33,6 +33,7 @@ const appCallbacks = {
   setShowShortcuts: () => {},
   setShowExport: () => {},
   showShortcuts: false,
+  modalOpen: false,
 }
 
 /** `App.tsx`'s wiring of the hook, selector for selector. */

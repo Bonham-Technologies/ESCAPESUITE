@@ -65,6 +65,43 @@ test.describe('Export Dialog', () => {
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
   })
+
+  test('the editor behind it takes no keys', async ({ page }) => {
+    // Positive control first, so the negative half below cannot pass simply
+    // because the app had not reacted yet: with nothing in front, Space really
+    // does drive the transport. `body.press` also parks focus off the "Add
+    // Text" button the seed left it on — Space there would be a click.
+    await page.locator('body').press('Space')
+    await expect(page.getByTitle('Pause (Space)')).toBeVisible()
+    await page.locator('body').press('Space')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+
+    await openExportDialog(page)
+    // Focus lands on the dialog's first button when it opens, and Space on a
+    // focused button is a click. Move it to the dialog container (tabindex=-1)
+    // so Space is nothing but a global shortcut — which is what this asserts
+    // the editor no longer answers.
+    await page.getByRole('heading', { name: 'Export Video' }).click()
+
+    await page.keyboard.press('Space')
+
+    // Give the app its chance to be wrong before asserting it is not. A
+    // `toBeVisible` that already holds resolves on the first poll, so without
+    // this the assertion could go green on a slow commit rather than on the
+    // gate; two frames is more than the synchronous store write and React
+    // commit the control above needed.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
+    )
+
+    // The transport is still paused: the play button has not become a pause
+    // button behind the dialog.
+    await expect(page.getByTitle('Pause (Space)')).toHaveCount(0)
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+  })
 })
 
 test.describe('Keyframe Panel', () => {

@@ -1,3 +1,11 @@
+// The shortcut sheet, and the two keys that are its own.
+//
+// It is a modal, so `App` counts it in `modalOpen` and the global cascade
+// (`app/useAppKeyboardShortcuts.ts`) stops taking keys while it is up. That
+// cascade is also what used to close it, so the sheet binds Escape and a
+// second `?` here instead — the same arrangement ESCAPECRAFT's playback dialog
+// uses, and what keeps the footer's "Press ? to toggle this panel" true.
+import { useEffect, useRef } from 'react';
 import styles from './KeyboardShortcuts.module.css';
 
 interface KeyboardShortcutsProps {
@@ -96,6 +104,38 @@ const shortcutGroups: ShortcutGroup[] = [
 ];
 
 export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
+  // `onClose` is read through a ref because `App` passes a fresh arrow every
+  // render; depending on it directly would re-bind the listener on every
+  // keystroke the app re-renders for. Same reason as `useDialogBehaviour`'s.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // The same typing guard the other two window listeners open with. The
+      // sheet traps no focus, so the header's project-name field is still
+      // Tab-reachable behind it, and a `?` typed into a name is a `?`.
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // No stopPropagation and no preventDefault: the editor's two cascades
+      // are already gated on `App`'s `modalOpen` while the sheet is up, so
+      // there is nothing below to stop, and neither key has a default worth
+      // taking away.
+      if (e.key === 'Escape' || e.key === '?' || (e.shiftKey && e.key === '/')) {
+        onCloseRef.current();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
