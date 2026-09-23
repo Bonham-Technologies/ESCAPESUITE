@@ -13,6 +13,7 @@ import {
   MP4_CHECKING_REASON,
   MP4_UNSUPPORTED_REASON,
 } from './useMp4Download'
+import type { ConversionFormat } from './useMp4Download'
 import { MP4_SAVED_WITHOUT_AUDIO } from '../utils/notices'
 import { storeVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
@@ -55,13 +56,15 @@ async function seed(id: string, name: string): Promise<void> {
  * A conversion the test drives by hand: it reports whatever progress the test
  * asks for and finishes only when the test says so.
  */
-function deferConversion() {
+function deferConversion(format: ConversionFormat = 'mp4') {
   let report: (progress: ConversionProgressLike) => void = () => {}
   let settle: (blob: Blob) => void = () => {}
   let fail: (error: unknown) => void = () => {}
   let signal: AbortSignal | undefined
   const started = new Promise<void>((resolveStarted) => {
-    converterModule.convertToMP4.mockImplementation(
+    const converting =
+      format === 'm4a' ? converterModule.convertToM4A : converterModule.convertToMP4
+    converting.mockImplementation(
       (_blob, onProgress, abortSignal) =>
         new Promise<Blob>((resolve, reject) => {
           report = onProgress
@@ -150,7 +153,7 @@ describe('useMp4Download, start to finish', () => {
     await act(async () => {
       await result.current.startMp4Download('take-1', 'Take One')
     })
-    expect(setNotice).toHaveBeenLastCalledWith('MP4 conversion failed: No H.264 encoder')
+    expect(setNotice).toHaveBeenLastCalledWith('Conversion failed: No H.264 encoder')
 
     await act(async () => {
       await result.current.startMp4Download('take-1', 'Take One')
@@ -189,6 +192,7 @@ describe('useMp4Download, start to finish', () => {
     })
     expect(result.current.converting).toEqual({
       id: 'take-1',
+      format: 'mp4',
       message: 'Encoding frames...',
       progress: 42,
     })
@@ -198,6 +202,7 @@ describe('useMp4Download, start to finish', () => {
     })
     expect(result.current.converting).toEqual({
       id: 'take-1',
+      format: 'mp4',
       message: 'Finalizing MP4...',
       progress: 99,
     })
@@ -356,7 +361,7 @@ describe('useMp4Download failures', () => {
       await result.current.startMp4Download('take-1', 'Take One')
     })
 
-    expect(setNotice).toHaveBeenCalledWith('MP4 conversion failed: No H.264 encoder')
+    expect(setNotice).toHaveBeenCalledWith('Conversion failed: No H.264 encoder')
     expect(clicks).toEqual([])
     expect(result.current.converting).toBeNull()
   })
@@ -370,7 +375,7 @@ describe('useMp4Download failures', () => {
       await result.current.startMp4Download('take-1', 'Take One')
     })
 
-    expect(setNotice).toHaveBeenCalledWith('MP4 conversion failed: encoder exploded')
+    expect(setNotice).toHaveBeenCalledWith('Conversion failed: encoder exploded')
   })
 })
 
@@ -521,9 +526,175 @@ describe('useMp4Download gating', () => {
     // own opening label — the converter has not spoken yet.
     expect(result.current.converting).toEqual({
       id: 'take-1',
+      format: 'mp4',
       message: 'Starting conversion…',
       progress: 0,
     })
+  })
+})
+
+describe('useMp4Download audio-only (M4A)', () => {
+  it('converts the take\'s audio and downloads it under a safe .m4a name', async () => {
+    await seed('take-1', 'Standup Demo: 9/9')
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo: 9/9', 'm4a')
+    })
+
+    // The audio-only converter, not the video one: an M4A is not an MP4 with
+    // the picture thrown away afterwards.
+    expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
+    expect(converterModule.convertToMP4).not.toHaveBeenCalled()
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.m4a' }])
+    expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
+    expect(setNotice.mock.calls).toEqual([[null]])
+  })
+
+  it('names the format on the conversion in flight, so the row can say which it is', async () => {
+    await seed('take-1', 'Take One')
+    const conversion = deferConversion('m4a')
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One', 'm4a')
+    })
+    await act(async () => {
+      await conversion.started
+    })
+
+    expect(result.current.converting).toEqual({
+      id: 'take-1',
+      format: 'm4a',
+      message: 'Starting conversion…',
+      progress: 0,
+    })
+
+    act(() => {
+      conversion.report({ phase: 'encoding', progress: 42, message: 'Encoding audio…' })
+    })
+    expect(result.current.converting).toEqual({
+      id: 'take-1',
+      format: 'm4a',
+      message: 'Encoding audio…',
+      progress: 42,
+    })
+
+    await act(async () => {
+      conversion.settle(new Blob(['m4a-bytes'], { type: 'audio/mp4' }))
+    })
+    await waitFor(() => expect(result.current.converting).toBeNull())
+  })
+
+  it('shares the one conversion slot with MP4, in both directions', async () => {
+    // Both are CPU-bound and there is one processor. An M4A running blocks an
+    // MP4 for the same reason a second MP4 is blocked, and says the same thing.
+    await seed('take-1', 'Take One')
+    await seed('take-2', 'Take Two')
+    const conversion = deferConversion('m4a')
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One', 'm4a')
+    })
+    await act(async () => {
+      await conversion.started
+    })
+
+    expect(result.current.blockedReason).toBe(MP4_BUSY_REASON)
+    expect(result.current.m4aBlockedReason).toBe(MP4_BUSY_REASON)
+
+    await act(async () => {
+      await result.current.startMp4Download('take-2', 'Take Two')
+    })
+    await act(async () => {
+      await result.current.startMp4Download('take-2', 'Take Two', 'm4a')
+    })
+
+    expect(converterModule.convertToMP4).not.toHaveBeenCalled()
+    expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
+    expect(clicks).toEqual([])
+  })
+
+  it('is blocked, saying so, while the codec probe is still checking', async () => {
+    await seed('take-1', 'Take One')
+    const { result } = renderMp4Download({ state: 'checking', supported: false, audio: false })
+
+    expect(result.current.m4aBlockedReason).toBe(MP4_CHECKING_REASON)
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One', 'm4a')
+    })
+
+    expect(converterModule.convertToM4A).not.toHaveBeenCalled()
+    expect(clicks).toEqual([])
+  })
+
+  it('is blocked where there is no AAC encoder, though MP4 is still offered', async () => {
+    // The asymmetry the whole format turns on: `convertToMP4` drops the audio
+    // and writes a silent video, which is still a video. There is no silent
+    // M4A worth writing, so the same browser gets one button and not the other.
+    await seed('take-1', 'Take One')
+    const { result } = renderMp4Download(MP4_SILENT)
+
+    expect(result.current.m4aBlockedReason).toBe(
+      'MP4 will have no audio in this browser (no AAC encoder)'
+    )
+    expect(result.current.blockedReason).toBeNull()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One', 'm4a')
+    })
+
+    expect(converterModule.convertToM4A).not.toHaveBeenCalled()
+    expect(clicks).toEqual([])
+  })
+
+  it('falls back to the general reason when the refusal came with none', async () => {
+    const { result } = renderMp4Download({ state: 'ready', supported: true, audio: false })
+
+    expect(result.current.m4aBlockedReason).toBe(MP4_UNSUPPORTED_REASON)
+  })
+
+  it('is offered, with nothing to say, once the probe says the browser can encode AAC', () => {
+    const { result } = renderMp4Download()
+
+    expect(result.current.m4aBlockedReason).toBeNull()
+    expect(result.current.note).toBeNull()
+  })
+
+  it('raises a failure through the one notice channel, in wording that fits either format', async () => {
+    await seed('take-1', 'Take One')
+    converterModule.convertToM4A.mockRejectedValue(new Error('This recording has no audio track'))
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One', 'm4a')
+    })
+
+    expect(setNotice).toHaveBeenCalledWith('Conversion failed: This recording has no audio track')
+    expect(clicks).toEqual([])
+  })
+
+  it('cancelling an audio conversion downloads nothing and says nothing', async () => {
+    await seed('take-1', 'Take One')
+    const conversion = deferConversion('m4a')
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One', 'm4a')
+    })
+    await act(async () => {
+      await conversion.started
+    })
+    await act(async () => {
+      result.current.cancelMp4Download()
+    })
+
+    expect(conversion.signal?.aborted).toBe(true)
+    await waitFor(() => expect(result.current.converting).toBeNull())
+    expect(clicks).toEqual([])
+    expect(setNotice).not.toHaveBeenCalled()
   })
 })
 

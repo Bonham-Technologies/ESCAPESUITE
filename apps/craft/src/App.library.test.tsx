@@ -278,7 +278,7 @@ describe('App MP4 downloads', () => {
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo as MP4' }));
     await flush();
 
-    expect(screen.getByText('MP4 conversion failed: No H.264 encoder')).toBeTruthy();
+    expect(screen.getByText('Conversion failed: No H.264 encoder')).toBeTruthy();
     expect(browser.downloads).toEqual([]);
   });
 

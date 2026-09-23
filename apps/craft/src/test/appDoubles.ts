@@ -123,6 +123,20 @@ async function convertToMP4Double(
   return new Blob([blob], { type: 'video/mp4' })
 }
 
+/**
+ * The audio-only happy path: the same shape, an `audio/mp4` blob at the end.
+ */
+async function convertToM4ADouble(
+  blob: Blob,
+  onProgress: (progress: ConversionProgressLike) => void,
+  signal?: AbortSignal
+): Promise<Blob> {
+  onProgress({ phase: 'preparing', progress: 0, message: 'Extracting audio…' })
+  if (signal?.aborted) throw new ConversionAbortedError()
+  onProgress({ phase: 'encoding', progress: 50, message: 'Encoding audio…' })
+  return new Blob([blob], { type: 'audio/mp4' })
+}
+
 export interface Mp4SupportProbeLike {
   supported: boolean
   /** False when the browser has no AAC encoder: the MP4 is offered, silent. */
@@ -143,6 +157,7 @@ export const converterModule = {
     audio: true,
   })),
   convertToMP4: vi.fn(convertToMP4Double),
+  convertToM4A: vi.fn(convertToM4ADouble),
   ConversionAbortedError,
 }
 
@@ -189,6 +204,8 @@ export function resetAppDoubles(): void {
   converterModule.probeMP4Support.mockResolvedValue({ supported: true, audio: true })
   converterModule.convertToMP4.mockReset()
   converterModule.convertToMP4.mockImplementation(convertToMP4Double)
+  converterModule.convertToM4A.mockReset()
+  converterModule.convertToM4A.mockImplementation(convertToM4ADouble)
 
   sendToEditorModule.sendToEditor.mockReset()
   sendToEditorModule.sendToEditor.mockReturnValue('opened')

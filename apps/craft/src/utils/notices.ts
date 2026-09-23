@@ -36,13 +36,16 @@ export const MP4_SAVED_WITHOUT_AUDIO =
   'Saved as MP4 — without audio: this browser has no AAC encoder'
 
 /**
- * The one notice that carries a detail: what the MP4 conversion said when it
- * failed. A function rather than a constant because the browser's own message
- * ("No H.264 encoder", a decode failure) is the useful half — but it is still
- * one string, raised through the same `setNotice` channel as the rest.
- * Cancelling a conversion raises nothing: see `useMp4Download`.
+ * The one notice that carries a detail: what a conversion said when it failed.
+ * A function rather than a constant because the browser's own message ("No
+ * H.264 encoder", a decode failure, "This recording has no audio track") is
+ * the useful half — but it is still one string, raised through the same
+ * `setNotice` channel as the rest. The wording names no format because both
+ * conversions raise it: the MP4 download and the audio-only M4A, which have
+ * one code path and one notice between them. Cancelling a conversion raises
+ * nothing: see `useMp4Download`.
  */
-export const mp4ConversionFailed = (message: string) => `MP4 conversion failed: ${message}`
+export const mp4ConversionFailed = (message: string) => `Conversion failed: ${message}`
 
 /**
  * Said when "Upload to host" found nothing to send: the row is drawn from

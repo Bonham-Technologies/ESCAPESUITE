@@ -7,12 +7,16 @@
 // click during a read does not read twice, and what happens when the blob the
 // host asked for is no longer in storage or cannot be read at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import 'fake-indexeddb/auto'
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RecordingsListPanel } from './RecordingsListPanel'
 import { useRecorderStore } from '../../store/recorderStore'
 import { uploadToHost } from '../../utils/uploadToHost'
 import { UPLOAD_UNAVAILABLE } from '../../utils/notices'
+import { converterModule, resetAppDoubles } from '../../test/appDoubles'
+import { storeVideo } from '../../core/storage'
+import { clearAllRecordings } from '../../test/recordingsDb'
 import type { Recording } from '../../store/types'
 
 const { isEmbedded } = vi.hoisted(() => ({ isEmbedded: vi.fn(() => false) }))
@@ -23,7 +27,12 @@ vi.mock('@escapesuite/shared/config', async (importOriginal) => ({
 
 vi.mock('../../utils/uploadToHost', () => ({ uploadToHost: vi.fn() }))
 
+// The converter is a boundary the browser owns (WebCodecs, Mediabunny); what
+// is under test is which of its two entry points the panel reaches for.
+vi.mock('../../core/converter', async () => (await import('../../test/appDoubles')).converterModule)
+
 const uploadToHostMock = vi.mocked(uploadToHost)
+const { convertToMP4, convertToM4A } = converterModule
 
 const recording: Recording = {
   id: 'r7',
@@ -48,14 +57,74 @@ function renderPanel() {
   )
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  resetAppDoubles()
   isEmbedded.mockReturnValue(false)
   uploadToHostMock.mockResolvedValue('posted')
-  useRecorderStore.setState({ notice: null })
+  useRecorderStore.setState({
+    notice: null,
+    mp4Support: { state: 'ready', supported: true, audio: true },
+  })
+  await clearAllRecordings()
+  await storeVideo('r7', new Blob(['video-bytes'], { type: 'video/webm' }), {
+    id: 'r7',
+    name: 'Take Seven',
+    duration: 5,
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    mimeType: 'video/webm',
+    size: 2048,
+    mediaType: 'video',
+    source: 'recording',
+    recordedAt: 1_000,
+  })
 })
 
 afterEach(() => {
   vi.clearAllMocks()
+})
+
+describe('RecordingsListPanel downloads', () => {
+  it('wires the M4A button to an audio-only conversion of that recording', async () => {
+    // The panel is where the format is chosen: `RecordingsList` has two
+    // handlers and no idea what either converts to.
+    const user = userEvent.setup()
+    renderPanel()
+
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' }))
+
+    expect(convertToM4A).toHaveBeenCalledTimes(1)
+    expect(convertToMP4).not.toHaveBeenCalled()
+  })
+
+  it('offers both downloads while the codec probe says the browser can encode them', () => {
+    renderPanel()
+
+    expect(screen.getByRole('button', { name: 'Download Take Seven as MP4' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })).toBeEnabled()
+  })
+
+  it('hands the M4A gate down, so a browser with no AAC encoder cannot start one', () => {
+    useRecorderStore.setState({
+      mp4Support: {
+        state: 'ready',
+        supported: true,
+        audio: false,
+        reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+      },
+    })
+    renderPanel()
+
+    const m4a = screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })
+    expect(m4a).toBeDisabled()
+    expect(m4a).toHaveAttribute(
+      'title',
+      'MP4 will have no audio in this browser (no AAC encoder)'
+    )
+    // …while the MP4 it can still write stays on offer.
+    expect(screen.getByRole('button', { name: 'Download Take Seven as MP4' })).toBeEnabled()
+  })
 })
 
 describe('RecordingsListPanel upload to host', () => {

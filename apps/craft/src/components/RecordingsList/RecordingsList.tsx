@@ -1,4 +1,4 @@
-import type { Mp4Conversion } from '../../hooks/useMp4Download';
+import { NO_AUDIO_TRACK_REASON, type Mp4Conversion } from '../../hooks/useMp4Download';
 import type { Recording } from '../../store/types';
 import { formatDuration } from '../../utils/recordingFormat';
 import { DownloadIcon, EditIcon, PlayIcon, RecordIcon, TrashIcon, UploadIcon } from '../icons';
@@ -12,6 +12,14 @@ interface RecordingsListProps {
   /** Why no MP4 conversion may be started, or null when one may. */
   mp4BlockedReason: string | null;
   /**
+   * Why no M4A conversion may be started, or null when one may. Separate from
+   * `mp4BlockedReason` because the two are gated differently: a browser with
+   * no AAC encoder still writes a (silent) MP4 and cannot write an M4A at all.
+   * The per-recording half of the M4A gate — a take with no audio in it — is
+   * decided here rather than handed down, because it is a fact about the row.
+   */
+  m4aBlockedReason: string | null;
+  /**
    * What to say out loud under the library, or null. Not the same thing as
    * `mp4BlockedReason`: "still checking" blocks without being worth a
    * paragraph, and "this MP4 will be silent" is worth one without blocking.
@@ -20,6 +28,7 @@ interface RecordingsListProps {
   onPlay: (id: string, name: string) => void;
   onDownload: (id: string, name: string) => void;
   onDownloadMp4: (id: string, name: string) => void;
+  onDownloadM4a: (id: string, name: string) => void;
   onCancelMp4: () => void;
   /**
    * Hand the recording's bytes to the page embedding CRAFT, or absent when
@@ -43,6 +52,12 @@ interface RecordingsListProps {
  */
 const MP4_NOTE_ID = 'mp4-note';
 
+/** What each conversion is called on the row that is running it. */
+const FORMAT_LABELS: Record<Mp4Conversion['format'], string> = {
+  mp4: 'MP4',
+  m4a: 'M4A',
+};
+
 /**
  * The library panel: every saved take with its thumbnail, duration and size,
  * and the five things that can be done with it — six inside a host, which can
@@ -58,14 +73,21 @@ const MP4_NOTE_ID = 'mp4-note';
  * Demo"), so a screen reader can tell one row's buttons from the next's; the
  * icons themselves are `aria-hidden`.
  *
- * **The two downloads differ in kind, not only in format.** WebM is the stored
- * blob handed straight back; MP4 is a conversion that takes about as long as
- * the recording does and uses the whole processor, so exactly one runs at a
- * time: the row it runs on shows the converter's progress message, its percentage and a Cancel
- * button, and every other row's MP4 button goes disabled with the reason in
+ * **The three downloads differ in kind, not only in format.** WebM is the
+ * stored blob handed straight back; MP4 and M4A are conversions that use the
+ * whole processor, so exactly one of them runs at a time — whichever it is:
+ * the row it runs on shows the converter's progress message, its percentage and a Cancel
+ * button (both named after the format actually running), and every other row's
+ * conversion buttons go disabled with the reason in
  * `title` and in the visible note its `aria-describedby` points at — the same
  * "say why" shape the record button uses. Where the browser cannot encode
  * H.264 at all, the button is disabled with that reason rather than hidden.
+ *
+ * M4A is the audio alone, and it is gated twice: by the browser
+ * (`m4aBlockedReason` — an AAC encoder is a hard requirement there, where an
+ * MP4 merely goes silent without one) and by the recording (`hasAudio`, the
+ * one gate this component decides for itself, because it is a fact about the
+ * row rather than about the app).
  *
  * The note and the blocked reason are two props because they are two
  * questions. A button can be blocked by something not worth saying out loud
@@ -79,10 +101,12 @@ export function RecordingsList({
   recordings,
   mp4Converting,
   mp4BlockedReason,
+  m4aBlockedReason,
   mp4Note,
   onPlay,
   onDownload,
   onDownloadMp4,
+  onDownloadM4a,
   onCancelMp4,
   onUploadToHost,
   onSendToEditor,
@@ -103,6 +127,15 @@ export function RecordingsList({
             // "one at a time" is not why *this* button is unavailable.
             const converting = mp4Converting?.id === recording.id ? mp4Converting : null;
             const blockedReason = converting ? null : mp4BlockedReason;
+            // What the conversion in flight is called, so a row running an M4A
+            // does not describe itself as converting to MP4.
+            const convertingLabel = converting ? FORMAT_LABELS[converting.format] : null;
+            // The browser's answer first, then this recording's: where there
+            // is no AAC encoder at all, that is the truer reason than "this
+            // take has no sound in it".
+            const m4aReason = converting
+              ? null
+              : m4aBlockedReason ?? (recording.hasAudio ? null : NO_AUDIO_TRACK_REASON);
             return (
               <div key={recording.id} className={styles.recordingItem}>
                 {recording.thumbnailUrl ? (
@@ -143,12 +176,30 @@ export function RecordingsList({
                   <button
                     className={styles.mp4Button}
                     onClick={() => onDownloadMp4(recording.id, recording.name)}
-                    title={blockedReason ?? (converting ? 'Converting to MP4…' : 'Download MP4')}
+                    title={
+                      blockedReason ??
+                      (converting ? `Converting to ${convertingLabel}…` : 'Download MP4')
+                    }
                     aria-label={`Download ${recording.name} as MP4`}
                     aria-describedby={mp4Note && !converting ? MP4_NOTE_ID : undefined}
                     disabled={converting !== null || blockedReason !== null}
                   >
                     MP4
+                  </button>
+                  <button
+                    className={styles.mp4Button}
+                    onClick={() => onDownloadM4a(recording.id, recording.name)}
+                    title={
+                      m4aReason ??
+                      (converting
+                        ? `Converting to ${convertingLabel}…`
+                        : 'Download audio only (M4A)')
+                    }
+                    aria-label={`Download ${recording.name} as audio (M4A)`}
+                    aria-describedby={mp4Note && !converting ? MP4_NOTE_ID : undefined}
+                    disabled={converting !== null || m4aReason !== null}
+                  >
+                    M4A
                   </button>
                   {onUploadToHost && (
                     <button
@@ -186,7 +237,7 @@ export function RecordingsList({
                       <button
                         className={styles.conversionCancelButton}
                         onClick={onCancelMp4}
-                        aria-label={`Cancel MP4 conversion of ${recording.name}`}
+                        aria-label={`Cancel ${convertingLabel} conversion of ${recording.name}`}
                       >
                         Cancel
                       </button>
@@ -194,7 +245,7 @@ export function RecordingsList({
                     <div
                       className={styles.conversionProgressBar}
                       role="progressbar"
-                      aria-label={`Converting ${recording.name} to MP4`}
+                      aria-label={`Converting ${recording.name} to ${convertingLabel}`}
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={Math.round(converting.progress)}

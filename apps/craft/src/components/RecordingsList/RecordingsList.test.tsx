@@ -32,6 +32,7 @@ function renderList(
   mp4: {
     mp4Converting?: Mp4Conversion | null
     mp4BlockedReason?: string | null
+    m4aBlockedReason?: string | null
     mp4Note?: string | null
   } = {},
   // Absent by default, because that is what standalone CRAFT passes: no host,
@@ -42,6 +43,7 @@ function renderList(
     onPlay: vi.fn<(id: string, name: string) => void>(),
     onDownload: vi.fn<(id: string, name: string) => void>(),
     onDownloadMp4: vi.fn<(id: string, name: string) => void>(),
+    onDownloadM4a: vi.fn<(id: string, name: string) => void>(),
     onCancelMp4: vi.fn<() => void>(),
     onSendToEditor: vi.fn<(id: string) => void>(),
     onDelete: vi.fn<(id: string) => void>(),
@@ -51,6 +53,7 @@ function renderList(
       recordings={recordings}
       mp4Converting={mp4.mp4Converting ?? null}
       mp4BlockedReason={mp4.mp4BlockedReason ?? null}
+      m4aBlockedReason={mp4.m4aBlockedReason ?? null}
       mp4Note={mp4.mp4Note ?? null}
       onUploadToHost={onUploadToHost}
       {...calls}
@@ -243,7 +246,12 @@ describe('RecordingsList MP4 downloads', () => {
 
   it('shows what the converter is doing, and how far, on the row being converted', () => {
     const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
-      mp4Converting: { id: 'r7', message: 'Encoding frames (playing video)...', progress: 42 },
+      mp4Converting: {
+        id: 'r7',
+        format: 'mp4',
+        message: 'Encoding frames (playing video)...',
+        progress: 42,
+      },
     })
 
     const progress = screen.getByRole('progressbar', { name: 'Converting Take Seven to MP4' })
@@ -261,7 +269,7 @@ describe('RecordingsList MP4 downloads', () => {
   it('cancels the conversion from the row it is running on', async () => {
     const user = userEvent.setup()
     const { calls } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
-      mp4Converting: { id: 'r7', message: 'Encoding frames...', progress: 42 },
+      mp4Converting: { id: 'r7', format: 'mp4', message: 'Encoding frames...', progress: 42 },
     })
 
     await user.click(screen.getByRole('button', { name: 'Cancel MP4 conversion of Take Seven' }))
@@ -274,7 +282,7 @@ describe('RecordingsList MP4 downloads', () => {
     const { container } = renderList(
       [makeRecording({ id: 'r1', name: 'First' }), makeRecording({ id: 'r2', name: 'Second' })],
       {
-        mp4Converting: { id: 'r1', message: 'Preparing conversion...', progress: 0 },
+        mp4Converting: { id: 'r1', format: 'mp4', message: 'Preparing conversion...', progress: 0 },
         mp4BlockedReason: busy,
         mp4Note: busy,
       }
@@ -292,6 +300,97 @@ describe('RecordingsList MP4 downloads', () => {
       'title',
       'Converting to MP4…'
     )
+  })
+})
+
+describe('RecordingsList M4A downloads', () => {
+  it('offers M4A beside MP4, named after its recording', () => {
+    renderList([makeRecording({ name: 'Standup Demo' })])
+
+    const m4a = screen.getByRole('button', { name: 'Download Standup Demo as audio (M4A)' })
+    expect(m4a).toHaveAttribute('title', 'Download audio only (M4A)')
+    expect(m4a).toBeEnabled()
+    expect(m4a).toHaveTextContent('M4A')
+  })
+
+  it('converts by id and name, so the file can be named after the take', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })])
+
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' }))
+
+    expect(calls.onDownloadM4a).toHaveBeenCalledWith('r7', 'Take Seven')
+    expect(calls.onDownloadMp4).not.toHaveBeenCalled()
+  })
+
+  it('says a take has no audio rather than offering an empty file', () => {
+    // A screen-only take. The reason is about this row, not about the browser,
+    // so it is the one gate `RecordingsList` decides for itself.
+    renderList([makeRecording({ id: 'r7', name: 'Take Seven', hasAudio: false })])
+
+    const m4a = screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })
+    expect(m4a).toBeDisabled()
+    expect(m4a).toHaveAttribute('title', 'This recording has no audio')
+    // The take is still a video, so both of the other downloads are untouched.
+    expect(screen.getByRole('button', { name: 'Download Take Seven as MP4' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Take Seven' })).toBeEnabled()
+  })
+
+  it('says why M4A is unavailable while MP4 stays offered', () => {
+    // A browser with no AAC encoder: the MP4 is silent, the M4A is nothing.
+    const silent = 'MP4 will have no audio in this browser (no AAC encoder)'
+    const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
+      m4aBlockedReason: silent,
+      mp4Note: silent,
+    })
+
+    const m4a = screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })
+    expect(m4a).toBeDisabled()
+    expect(m4a).toHaveAttribute('title', silent)
+    const describedBy = m4a.getAttribute('aria-describedby')!
+    expect(container.querySelector(`#${describedBy}`)).toHaveTextContent(silent)
+    expect(screen.getByRole('button', { name: 'Download Take Seven as MP4' })).toBeEnabled()
+  })
+
+  it('names the format on the row being converted, and on the way out of it', () => {
+    const { container } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })], {
+      mp4Converting: { id: 'r7', format: 'm4a', message: 'Encoding audio…', progress: 42 },
+    })
+
+    // The progress row is the same row; what it says is not the same thing.
+    expect(
+      screen.getByRole('progressbar', { name: 'Converting Take Seven to M4A' })
+    ).toHaveAttribute('aria-valuenow', '42')
+    expect(
+      screen.getByRole('button', { name: 'Cancel M4A conversion of Take Seven' })
+    ).toBeInTheDocument()
+    expect(container.querySelector(`.${styles.conversionProgress}`)).toHaveTextContent(
+      'Encoding audio…'
+    )
+    // Both downloads are disabled while it runs, and both say which conversion
+    // is holding the processor.
+    for (const name of ['Download Take Seven as MP4', 'Download Take Seven as audio (M4A)']) {
+      const button = screen.getByRole('button', { name })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title', 'Converting to M4A…')
+    }
+  })
+
+  it('blocks the other rows while an audio conversion runs', () => {
+    const busy = 'One conversion at a time.'
+    renderList(
+      [makeRecording({ id: 'r1', name: 'First' }), makeRecording({ id: 'r2', name: 'Second' })],
+      {
+        mp4Converting: { id: 'r1', format: 'm4a', message: 'Encoding audio…', progress: 10 },
+        mp4BlockedReason: busy,
+        m4aBlockedReason: busy,
+        mp4Note: busy,
+      }
+    )
+
+    const other = screen.getByRole('button', { name: 'Download Second as audio (M4A)' })
+    expect(other).toBeDisabled()
+    expect(other).toHaveAttribute('title', busy)
   })
 })
 
@@ -325,8 +424,8 @@ describe('RecordingsList upload to host', () => {
   })
 
   it('sits between the MP4 download and the editor handoff', async () => {
-    // Downloads first, then the two ways out of CRAFT (host, editor), then
-    // delete. The order is what a keyboard user tabs through.
+    // The three downloads first, then the two ways out of CRAFT (host,
+    // editor), then delete. The order is what a keyboard user tabs through.
     const { container } = renderList(
       [makeRecording({ name: 'Take Seven' })],
       {},
@@ -340,6 +439,7 @@ describe('RecordingsList upload to host', () => {
       'Play Take Seven',
       'Download Take Seven',
       'Download Take Seven as MP4',
+      'Download Take Seven as audio (M4A)',
       'Upload Take Seven to host',
       'Open Take Seven in Editor',
       'Delete Take Seven',
