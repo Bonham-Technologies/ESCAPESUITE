@@ -51,3 +51,40 @@ export async function canConvertToMp4(page: Page): Promise<boolean> {
     }
   })
 }
+
+/**
+ * Whether the page can encode AAC — the gate ESCAPECRAFT's **M4A** button adds
+ * on top of the MP4 one.
+ *
+ * The asymmetry is the app's, not this helper's: `convertToMP4` drops the
+ * audio and writes a silent MP4 where there is no AAC encoder, so AAC is
+ * deliberately absent from `canConvertToMp4()` above — while `convertToM4A`
+ * has nothing left to write without it and refuses outright. A browser can
+ * therefore be offered one button and not the other, and a spec that asked
+ * only the MP4 question would run the enabled M4A path against a browser that
+ * cannot produce one.
+ *
+ * The configuration is `MP4_AUDIO_ENCODER_CONFIG` from `converter.ts`,
+ * duplicated rather than imported because it has to run inside the page — the
+ * same arrangement, and the same keep-it-in-step obligation, as the H.264
+ * configuration above.
+ */
+export async function canEncodeAac(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    if (typeof AudioEncoder === 'undefined' || typeof AudioContext === 'undefined') {
+      return false
+    }
+
+    try {
+      const audio = await AudioEncoder.isConfigSupported({
+        codec: 'mp4a.40.2',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 128000,
+      })
+      return Boolean(audio.supported)
+    } catch {
+      return false
+    }
+  })
+}

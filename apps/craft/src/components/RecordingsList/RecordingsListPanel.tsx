@@ -17,7 +17,8 @@ interface RecordingsListPanelProps {
 }
 
 /**
- * The library panel's MP4 conversion state, held one level below `App`.
+ * The library panel's conversion state — MP4 and M4A both — held one level
+ * below `App`.
  *
  * `convertToMP4` reports progress continuously for the whole length of a
  * conversion, and the only pixels it moves are one row's progress bar. Holding
@@ -52,7 +53,14 @@ export function RecordingsListPanel({
   // It is written once, by the capability bootstrap, so this panel re-renders
   // once when the probe answers and never again.
   const mp4Support = useRecorderStore((s) => s.mp4Support);
-  const { converting, blockedReason, note, startMp4Download, cancelMp4Download } = useMp4Download({
+  const {
+    converting,
+    blockedReason,
+    m4aBlockedReason,
+    note,
+    startMp4Download,
+    cancelMp4Download,
+  } = useMp4Download({
     setNotice,
     mp4Support,
   });
@@ -94,10 +102,12 @@ export function RecordingsListPanel({
       recordings={recordings}
       mp4Converting={converting}
       mp4BlockedReason={blockedReason}
+      m4aBlockedReason={m4aBlockedReason}
       mp4Note={note}
       onPlay={onPlay}
       onDownload={onDownload}
       onDownloadMp4={(id, name) => void startMp4Download(id, name)}
+      onDownloadM4a={(id, name) => void startMp4Download(id, name, 'm4a')}
       onCancelMp4={cancelMp4Download}
       onUploadToHost={
         embedded ? (id, name) => void handleUploadToHost(id, name) : undefined

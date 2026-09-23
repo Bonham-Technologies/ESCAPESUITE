@@ -12,19 +12,22 @@
 // date beside them; the conservation laws (created == closed == encoded) are
 // exact.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { convertToMP4, type ConversionProgress } from './converter'
+import { convertToMP4, convertToM4A, type ConversionProgress } from './converter'
 import {
   installWebCodecsDoubles,
   uninstallWebCodecsDoubles,
   resetWebCodecsDoubles,
   lastVideoEncoder,
+  lastAudioEncoder,
   getCreatedFrames,
   allFramesClosed,
+  VideoEncoderDouble,
 } from '../test/doubles/webcodecs'
 import { resetMediabunnyDouble } from '../test/doubles/mediabunny'
 import {
   installAudioContextDouble,
   uninstallAudioContextDouble,
+  createAudioBufferDouble,
   type AudioContextDoubleControl,
 } from '../test/doubles/audio'
 import {
@@ -138,6 +141,45 @@ describe('converter per-frame work', () => {
     // The rVFC fast path should never fall back to the rAF loop, and whichever
     // ran must not still be queued once the blob is handed back.
     expect(raf.pending()).toBe(0)
+    expect(audio.contexts.every((c) => c.state === 'closed')).toBe(true)
+  })
+})
+
+// The audio-only (M4A) conversion has no per-frame half at all: no playback,
+// no canvas, no VideoFrame. What it does have is the same 1024-sample AAC loop
+// the MP4 conversion runs at the end, and the same conservation laws apply to
+// it — one encode per chunk, one flush for the run, every AudioData closed.
+describe('audio-only (M4A) per-chunk work', () => {
+  /** Two seconds of 48 kHz audio, which is 96,000 samples per channel. */
+  const AUDIO_SAMPLES = 96_000
+  /** …and 94 chunks of 1024, the last one short. */
+  const CHUNKS = Math.ceil(AUDIO_SAMPLES / 1024)
+
+  async function convertAudio(): Promise<void> {
+    audio.decodeResult = createAudioBufferDouble({ length: AUDIO_SAMPLES })
+    await convertToM4A(SOURCE, () => {})
+  }
+
+  it('encodes exactly one AAC chunk per 1024 samples, and flushes once', async () => {
+    await convertAudio()
+
+    // Exact: a chunk encoded twice is a doubled file, and a dropped flush is
+    // a truncated one.
+    expect(lastAudioEncoder().encodes).toHaveLength(CHUNKS)
+    expect(lastAudioEncoder().flushCalls).toBe(1)
+    expect(getCreatedFrames('AudioData')).toHaveLength(CHUNKS)
+    expect(allFramesClosed()).toBe(true)
+  })
+
+  it('does no video work at all', async () => {
+    await convertAudio()
+
+    // Exact: the point of the format. A VideoEncoder configured here, or a
+    // canvas drawn to, would be the whole cost of an MP4 conversion spent on
+    // a file with no picture in it.
+    expect(VideoEncoderDouble.instances).toHaveLength(0)
+    expect(getCreatedFrames('VideoFrame')).toHaveLength(0)
+    expect(getLastCanvasContext()).toBeNull()
     expect(audio.contexts.every((c) => c.state === 'closed')).toBe(true)
   })
 })

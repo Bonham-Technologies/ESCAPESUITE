@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   convertToMP4,
+  convertToM4A,
   remuxToWebM,
   fixWebMMetadata,
   isMP4ConversionSupported,
   isWebMRemuxSupported,
   probeMP4Support,
   ConversionAbortedError,
+  M4A_NO_AUDIO_MESSAGE,
   MP4_NO_WEBCODECS_REASON,
   MP4_NO_H264_REASON,
   MP4_NO_AUDIO_REASON,
@@ -807,6 +809,164 @@ describe('converter', () => {
   })
 
   // --- remuxToWebM ---------------------------------------------------------
+
+  // --- convertToM4A --------------------------------------------------------
+
+  describe('convertToM4A', () => {
+    /** Run an audio-only conversion, collecting every progress report. */
+    function convertAudio(signal?: AbortSignal): {
+      promise: Promise<Blob>
+      progress: ConversionProgress[]
+    } {
+      const progress: ConversionProgress[] = []
+      const promise = convertToM4A(SOURCE, p => progress.push(p), signal)
+      promise.catch(() => {})
+      return { promise, progress }
+    }
+
+    it('produces an audio/mp4 blob with an audio track and no video track at all', async () => {
+      // The whole point of the format: an M4A is the take's sound, in a
+      // container audio tools recognise. A video track — even an empty one —
+      // would make it a video file again.
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise } = convertAudio()
+
+      const blob = await promise
+      expect(blob.type).toBe('audio/mp4')
+      expect(blob.size).toBe(128)
+
+      const state = getMediabunnyState()
+      expect(state.formats.map(f => f.name)).toEqual(['mp4'])
+      expect(state.formats[0].options).toEqual({ fastStart: 'in-memory' })
+      expect(state.audioSources.map(s => s.codec)).toEqual(['aac'])
+      expect(state.videoSources).toHaveLength(0)
+      expect(lastMediabunnyOutput().addVideoTrack).not.toHaveBeenCalled()
+      expect(lastMediabunnyOutput().addAudioTrack).toHaveBeenCalledTimes(1)
+      // No frames are captured, so nothing plays and nothing is drawn.
+      expect(VideoEncoderDouble.instances).toHaveLength(0)
+      expect(getCreatedFrames('VideoFrame')).toHaveLength(0)
+    })
+
+    it('encodes the AAC configuration the codec probe asked about', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise } = convertAudio()
+      await promise
+
+      expect(lastAudioEncoder().configureCalls[0]).toEqual({
+        codec: 'mp4a.40.2',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 128000,
+      })
+    })
+
+    it('splits the audio into 1024-sample chunks, flushes once and muxes every packet', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      const { promise } = convertAudio()
+      await promise
+
+      const encoder = lastAudioEncoder()
+      expect(encoder.encodes.map(e => e.data.init!.numberOfFrames)).toEqual([1024, 1024, 352])
+      expect(encoder.flushCalls).toBe(1)
+      expect(encoder.closeCalls).toBe(1)
+      expect(getCreatedFrames('AudioData').every(f => f.closed)).toBe(true)
+      expect(getMediabunnyState().audioSources[0].packets).toHaveLength(3)
+      expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    })
+
+    it('reports progress that only moves forward, through every phase, to 100', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      const { promise, progress } = convertAudio()
+      await promise
+
+      expect(progress[0]).toEqual({
+        phase: 'preparing',
+        progress: 0,
+        message: 'Extracting audio…',
+      })
+      // Every phase is visited, and none is revisited once it is left.
+      const order = ['preparing', 'encoding', 'finalizing']
+      const phases = progress.map(p => p.phase)
+      expect([...new Set(phases)]).toEqual(order)
+      expect(phases.map(phase => order.indexOf(phase))).toEqual(
+        [...phases.map(phase => order.indexOf(phase))].sort((a, b) => a - b)
+      )
+      // The encoding pass is what the user watches, so it reports per chunk.
+      expect(progress.filter(p => p.phase === 'encoding')).toHaveLength(3)
+      expect(progress.every(p => p.message.length > 0)).toBe(true)
+      for (let i = 1; i < progress.length; i++) {
+        expect(progress[i].progress).toBeGreaterThanOrEqual(progress[i - 1].progress)
+      }
+      expect(progress[progress.length - 1].progress).toBe(100)
+    })
+
+    it('refuses a take that has no audio to extract, saying so', async () => {
+      // A screen-only take. `convertToMP4` would convert it happily; there is
+      // no audio file to be made of it, and the button is disabled for exactly
+      // this reason — this is the defence behind that gate.
+      audio.decodeResult = null // decodeAudioData rejects
+      const { promise } = convertAudio()
+
+      await expect(promise).rejects.toThrow(M4A_NO_AUDIO_MESSAGE)
+      expect(getMediabunnyState().outputs).toHaveLength(0)
+      expect(AudioEncoderDouble.instances).toHaveLength(0)
+    })
+
+    it('refuses, in the probe\'s own words, where the browser has no AAC encoder', async () => {
+      // Unlike an MP4, which is muxed silent when AAC is missing, an M4A with
+      // no audio codec is nothing at all. One wording for the one fact, shared
+      // with the button's reason.
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      AudioEncoderDouble.supportPlan = false
+      const { promise } = convertAudio()
+
+      await expect(promise).rejects.toThrow(MP4_NO_AUDIO_REASON)
+      expect(getMediabunnyState().outputs).toHaveLength(0)
+      // …and refuses before decoding anything: the codec question is a
+      // microsecond, the decode is the whole file.
+      expect(audio.contexts).toHaveLength(0)
+    })
+
+    it('refuses the same way when asking about AAC throws', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      AudioEncoderDouble.supportPlan = 'throw'
+      const { promise } = convertAudio()
+
+      await expect(promise).rejects.toThrow(MP4_NO_AUDIO_REASON)
+    })
+
+    it('aborts on a cancelled signal, closing the encoder it had opened', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      const controller = new AbortController()
+      controller.abort()
+      const { promise } = convertAudio(controller.signal)
+
+      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
+      // The encoder is configured before the first chunk, so the abort leaves
+      // one open unless the finally releases it.
+      expect(lastAudioEncoder().state).toBe('closed')
+      expect(lastAudioEncoder().encodes).toHaveLength(0)
+      expect(lastMediabunnyOutput().finalize).not.toHaveBeenCalled()
+    })
+
+    it('rejects when the muxer wrote no bytes', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      getMediabunnyState().producesBuffer = false
+      const { promise } = convertAudio()
+
+      await expect(promise).rejects.toThrow('Conversion failed: no data was written to buffer')
+    })
+
+    it('logs an asynchronous audio encoder error', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise } = convertAudio()
+      await promise
+
+      lastAudioEncoder().emitError('AAC encoder died')
+
+      expect(consoleError).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
+    })
+  })
 
   describe('remuxToWebM', () => {
     it('produces a WebM blob muxed from VP9 + Opus', async () => {

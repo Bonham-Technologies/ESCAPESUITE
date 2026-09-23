@@ -85,8 +85,11 @@ test.describe('ESCAPECRAFT MP4 download', () => {
     // among them — a browser missing only that gets the enabled path above.
     await expect(mp4Button).toHaveAttribute('title', /WebCodecs|H\.264|could not say/)
 
-    // The instant WebM download is never affected by an MP4 problem.
-    await expect(page.getByRole('button', { name: /^Download (?!.+ as MP4).+$/ })).toBeEnabled()
+    // The instant WebM download is never affected by an MP4 problem. The
+    // lookahead excludes every "Download … as <format>" button, not only the
+    // MP4 one: the row also carries an M4A button, and a locator that matched
+    // both would be a strict-mode violation rather than an assertion.
+    await expect(page.getByRole('button', { name: /^Download (?!.+ as ).+$/ })).toBeEnabled()
   })
 
   test('cancelling a conversion leaves the row idle and downloads nothing', async ({ page }) => {

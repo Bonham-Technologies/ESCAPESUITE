@@ -399,6 +399,20 @@ export const MP4_NO_AUDIO_REASON =
   'MP4 will have no audio in this browser (no AAC encoder)';
 export const MP4_PROBE_FAILED_REASON =
   'This browser could not say whether it can encode MP4, so the conversion is not offered.';
+/**
+ * Why an audio-only conversion refused a take: there was no decodable audio in
+ * it at all. The M4A button is disabled for a recording whose metadata says it
+ * has no audio, so this is the defence behind that gate rather than the usual
+ * way a user meets it — a take can also be *recorded* with a microphone that
+ * produced silence the container never carried.
+ *
+ * Its pair is `NO_AUDIO_TRACK_REASON` in `hooks/useMp4Download.ts` ("This
+ * recording has no audio"), which titles the disabled button for the same
+ * fact. Two strings on purpose — that one is about a button, this one is
+ * thrown and becomes a notice — and neither is canonical: change both or
+ * neither.
+ */
+export const M4A_NO_AUDIO_MESSAGE = 'This recording has no audio track';
 
 /**
  * Memoised for the life of the page: the answer cannot change while the tab is
@@ -477,8 +491,14 @@ async function extractAudio(
   blob: Blob,
   onProgress?: (progress: number) => void
 ): Promise<AudioBuffer | null> {
+  // Declared out here so the finally below closes it however this leaves. The
+  // one path that used to escape without closing was `blob.arrayBuffer()`
+  // rejecting — between the context being constructed and the inner try that
+  // owned the close — which left a live AudioContext per attempt.
+  let audioContext: AudioContext | null = null;
+
   try {
-    const audioContext = new AudioContext({ sampleRate: 48000 });
+    audioContext = new AudioContext({ sampleRate: 48000 });
     const arrayBuffer = await blob.arrayBuffer();
 
     onProgress?.(10);
@@ -486,15 +506,17 @@ async function extractAudio(
     try {
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
       onProgress?.(100);
-      await audioContext.close();
       return audioBuffer;
     } catch {
       // No audio or unsupported format
-      await audioContext.close();
       return null;
     }
   } catch {
     return null;
+  } finally {
+    // Null only where the constructor itself threw, which is the one case
+    // with nothing to release.
+    await audioContext?.close();
   }
 }
 
@@ -521,6 +543,90 @@ function audioBufferToFloat32(audioBuffer: AudioBuffer): Float32Array {
   }
 
   return result;
+}
+
+/**
+ * Encode interleaved stereo samples as AAC, one 1024-sample chunk at a time,
+ * and flush the encoder when they are all in.
+ *
+ * Lifted out of `convertToMP4` unchanged so `convertToM4A` can run the same
+ * pass without the video half: the two differ in what they mux, not in how the
+ * audio is encoded, and a second copy of this loop would be a second place for
+ * the planar layout, the abort cadence and the backpressure drain to drift.
+ *
+ * `audioData` arrives interleaved `[L, R, L, R, ...]` from
+ * `audioBufferToFloat32`, while `AudioData`'s `f32-planar` wants
+ * `[L, L, L, ..., R, R, R, ...]` — the per-chunk copy below is that transpose.
+ *
+ * Cancellation is checked before the first chunk and every hundredth after it,
+ * which is the cadence `convertToMP4` has always used: often enough that a
+ * cancel lands within a frame of audio, rarely enough that the check is not
+ * itself part of the cost.
+ *
+ * `onProgress` receives the fraction of the audio encoded so far (0-1), for a
+ * caller whose whole conversion *is* this loop. `convertToMP4` passes none:
+ * its audio pass is the last tenth of a conversion that has already reported
+ * one frame at a time.
+ */
+async function encodeAudioChunks(
+  audioData: Float32Array,
+  audioEncoder: AudioEncoder,
+  signal?: AbortSignal,
+  onProgress?: (fraction: number) => void
+): Promise<void> {
+  // Check for cancellation before audio encoding
+  checkAborted(signal);
+
+  const sampleRate = MP4_SAMPLE_RATE;
+  const samplesPerChunk = 1024;
+  const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
+  let audioTimestamp = 0;
+  let chunkCount = 0;
+
+  for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
+    // Check for cancellation periodically during audio encoding
+    if (chunkCount % 100 === 0) {
+      checkAborted(signal);
+    }
+    chunkCount++;
+
+    const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
+
+    // Create planar data: [all left samples][all right samples]
+    const planarData = new Float32Array(chunkSize * 2);
+
+    for (let i = 0; i < chunkSize; i++) {
+      const srcIndex = offset + i;
+      // Left channel goes first (indices 0 to chunkSize-1)
+      planarData[i] = audioData[srcIndex * 2] || 0;
+      // Right channel goes second (indices chunkSize to chunkSize*2-1)
+      planarData[chunkSize + i] = audioData[srcIndex * 2 + 1] || 0;
+    }
+
+    const audioFrame = new AudioData({
+      format: 'f32-planar',
+      sampleRate,
+      numberOfFrames: chunkSize,
+      numberOfChannels: 2,
+      timestamp: audioTimestamp,
+      data: planarData,
+    });
+
+    audioEncoder.encode(audioFrame);
+    audioFrame.close();
+
+    audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
+
+    onProgress?.(Math.min(offset + chunkSize, totalAudioSamples) / totalAudioSamples);
+
+    // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
+    while (audioEncoder.encodeQueueSize > 20) {
+      await yieldToMain();
+    }
+  }
+
+  await audioEncoder.flush();
+  audioEncoder.close();
 }
 
 /**
@@ -596,7 +702,6 @@ export async function convertToMP4(
 
     // Create audio packet source if we have audio
     let audioSource: EncodedAudioPacketSource | null = null;
-    const sampleRate = MP4_SAMPLE_RATE;
 
     if (audioData) {
       try {
@@ -679,59 +784,8 @@ export async function convertToMP4(
     onProgress({ phase: 'encoding', progress: 90, message: 'Encoding audio...' });
 
     // Encode audio if we have it
-    // Note: audioData is interleaved [L, R, L, R, ...] but AudioData f32-planar
-    // expects planar format [L, L, L, ..., R, R, R, ...]
     if (audioEncoder && audioData) {
-      // Check for cancellation before audio encoding
-      checkAborted(signal);
-
-      const samplesPerChunk = 1024;
-      const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
-      let audioTimestamp = 0;
-      let chunkCount = 0;
-
-      for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
-        // Check for cancellation periodically during audio encoding
-        if (chunkCount % 100 === 0) {
-          checkAborted(signal);
-        }
-        chunkCount++;
-
-        const chunkSize = Math.min(samplesPerChunk, totalAudioSamples - offset);
-
-        // Create planar data: [all left samples][all right samples]
-        const planarData = new Float32Array(chunkSize * 2);
-
-        for (let i = 0; i < chunkSize; i++) {
-          const srcIndex = offset + i;
-          // Left channel goes first (indices 0 to chunkSize-1)
-          planarData[i] = audioData[srcIndex * 2] || 0;
-          // Right channel goes second (indices chunkSize to chunkSize*2-1)
-          planarData[chunkSize + i] = audioData[srcIndex * 2 + 1] || 0;
-        }
-
-        const audioFrame = new AudioData({
-          format: 'f32-planar',
-          sampleRate,
-          numberOfFrames: chunkSize,
-          numberOfChannels: 2,
-          timestamp: audioTimestamp,
-          data: planarData,
-        });
-
-        audioEncoder.encode(audioFrame);
-        audioFrame.close();
-
-        audioTimestamp += (chunkSize / sampleRate) * 1_000_000;
-
-        // Wait for encoder queue to drain (uses MessageChannel to avoid background tab throttling)
-        while (audioEncoder.encodeQueueSize > 20) {
-          await yieldToMain();
-        }
-      }
-
-      await audioEncoder.flush();
-      audioEncoder.close();
+      await encodeAudioChunks(audioData, audioEncoder, signal);
     }
 
     onProgress({ phase: 'finalizing', progress: 95, message: 'Finalizing MP4...' });
@@ -756,6 +810,128 @@ export async function convertToMP4(
     if (videoEncoder && videoEncoder.state !== 'closed') {
       videoEncoder.close();
     }
+    if (audioEncoder && audioEncoder.state !== 'closed') {
+      audioEncoder.close();
+    }
+  }
+}
+
+/**
+ * Convert a recording to M4A: its audio alone, AAC in an MP4 container.
+ *
+ * The third download, and the only one that throws away picture. A mic-only
+ * take is already an audio recording, but it is stored as an audio-only WebM,
+ * which plays and is not an "audio file" to most tools; and `convertToMP4` is
+ * no help there — it has no guard against a take with no picture, so it
+ * configures a 0x0 video encoder and fails with whatever the browser says.
+ * This produces `audio/mp4` — the `.m4a` every audio editor, podcast tool and
+ * phone opens.
+ *
+ * It is the tail of `convertToMP4` and nothing else: extract, encode AAC, mux.
+ * No `<video>`, no playback, no canvas, no `VideoFrame` — which is why it
+ * costs a fraction of an MP4 conversion of the same take, and why it is the
+ * one conversion that can be offered on a recording with no picture.
+ *
+ * **AAC is a hard requirement here**, unlike in `convertToMP4`, which drops
+ * the audio and muxes a silent video when the browser has no AAC encoder.
+ * There is no silent M4A worth writing, so this refuses — in the probe's own
+ * words (`MP4_NO_AUDIO_REASON`), so the button's reason and the failure say
+ * the same sentence.
+ *
+ * @param webmBlob - The recording to take the audio out of
+ * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal for cancellation
+ */
+export async function convertToM4A(
+  webmBlob: Blob,
+  onProgress: ProgressCallback,
+  signal?: AbortSignal
+): Promise<Blob> {
+  onProgress({ phase: 'preparing', progress: 0, message: 'Extracting audio…' });
+
+  // Declared out here so the finally below can release it however this
+  // function leaves — including a cancellation part-way through the encode.
+  let audioEncoder: AudioEncoder | null = null;
+
+  try {
+    // Asked first, because it is the cheap half: the same question
+    // `probeMP4Support()` asks, about the same configuration this configures
+    // below. A browser that cannot answer is answering no — an encoder that
+    // will not configure fails a few lines later anyway, and this way it fails
+    // with a sentence rather than with whatever the API threw. Decoding the
+    // whole file only to refuse it would be a gigabyte of work for an answer
+    // available in a microsecond.
+    let aacSupported = false;
+    try {
+      const support = await AudioEncoder.isConfigSupported(MP4_AUDIO_ENCODER_CONFIG);
+      aacSupported = support.supported === true;
+    } catch {
+      console.warn('Failed to check AAC support, refusing the audio-only conversion');
+    }
+    if (!aacSupported) {
+      throw new Error(MP4_NO_AUDIO_REASON);
+    }
+
+    const audioBuffer = await extractAudio(webmBlob, (p) => {
+      onProgress({ phase: 'preparing', progress: p * 0.15, message: 'Extracting audio…' });
+    });
+    if (!audioBuffer) {
+      throw new Error(M4A_NO_AUDIO_MESSAGE);
+    }
+    const audioData = audioBufferToFloat32(audioBuffer);
+
+    // Create Mediabunny output — one audio track, and deliberately no video
+    // track: an MP4 container carrying only sound is what `.m4a` names.
+    const target = new BufferTarget();
+    const output = new Output({
+      format: new Mp4OutputFormat({
+        fastStart: 'in-memory',
+      }),
+      target,
+    });
+
+    const audioSource = new EncodedAudioPacketSource('aac');
+    output.addAudioTrack(audioSource);
+
+    await output.start();
+
+    audioEncoder = new AudioEncoder({
+      output: async (chunk, meta) => {
+        await audioSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+      },
+      error: (e) => {
+        console.error('Audio encoder error:', e);
+      },
+    });
+
+    await audioEncoder.configure(MP4_AUDIO_ENCODER_CONFIG);
+
+    // The encode is the whole conversion here, so it owns the whole bar
+    // between the extraction and the mux.
+    await encodeAudioChunks(audioData, audioEncoder, signal, (fraction) => {
+      onProgress({
+        phase: 'encoding',
+        progress: 15 + fraction * 80,
+        message: 'Encoding audio…',
+      });
+    });
+
+    onProgress({ phase: 'finalizing', progress: 95, message: 'Finalizing M4A…' });
+
+    await output.finalize();
+
+    const buffer = target.buffer;
+    if (!buffer) {
+      throw new Error('Conversion failed: no data was written to buffer');
+    }
+    const m4aBlob = new Blob([buffer], { type: 'audio/mp4' });
+
+    onProgress({ phase: 'finalizing', progress: 100, message: 'Conversion complete!' });
+
+    return m4aBlob;
+  } finally {
+    // `encodeAudioChunks` closes it on the success path; this releases it when
+    // the conversion left early (cancellation, or a failure part-way).
     if (audioEncoder && audioEncoder.state !== 'closed') {
       audioEncoder.close();
     }

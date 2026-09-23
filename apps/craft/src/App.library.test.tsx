@@ -278,7 +278,7 @@ describe('App MP4 downloads', () => {
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo as MP4' }));
     await flush();
 
-    expect(screen.getByText('MP4 conversion failed: No H.264 encoder')).toBeTruthy();
+    expect(screen.getByText('Conversion failed: No H.264 encoder')).toBeTruthy();
     expect(browser.downloads).toEqual([]);
   });
 
@@ -294,7 +294,7 @@ describe('App MP4 downloads', () => {
     expect(mp4.getAttribute('title')).toContain('Checking');
     // …and says nothing under the library while it waits: a note that appears
     // and vanishes on every load would move the page for no reason.
-    expect(screen.queryByText(/Checking whether this browser/)).toBeNull();
+    expect(screen.queryByText(/Checking what this browser/)).toBeNull();
     // The instant WebM download never waits on the MP4 question.
     expect(screen.getByRole('button', { name: 'Download Standup Demo' })).toBeEnabled();
   });
