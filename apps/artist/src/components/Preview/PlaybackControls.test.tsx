@@ -237,6 +237,17 @@ describe('PlaybackControls keyboard shortcuts', () => {
     textarea.remove()
   })
 
+  it('leaves the transport alone while a select has focus', () => {
+    const select = document.createElement('select')
+    document.body.append(select)
+    render(<PlaybackControls />)
+
+    fireEvent.keyDown(select, { code: 'ArrowRight' })
+
+    expect(store().currentTime).toBe(0)
+    select.remove()
+  })
+
   it('stops listening once it is unmounted', () => {
     const { unmount } = render(<PlaybackControls />)
     unmount()
