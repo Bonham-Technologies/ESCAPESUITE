@@ -56,7 +56,7 @@ export function SessionRestorePrompt({ session, onRestore, onDecline }: SessionR
         aria-modal="true"
         aria-labelledby="session-prompt-title"
       >
-        <h3 id="session-prompt-title">Resume Previous Session?</h3>
+        <h2 id="session-prompt-title">Resume Previous Session?</h2>
         <p>
           You have an unsaved session from{' '}
           {new Date(session.timestamp).toLocaleString()}

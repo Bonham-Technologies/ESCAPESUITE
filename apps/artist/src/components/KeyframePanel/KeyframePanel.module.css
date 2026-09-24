@@ -6,7 +6,10 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
-  z-index: 1000;
+  /* Below --z-modal, so every dialog covers the panel. See the token's comment
+     in styles/index.css: this was a bare 1000, which let a pointer reach the
+     keyframe graph through an open modal. */
+  z-index: var(--z-panel);
   min-width: 500px;
   min-height: 500px;
 }

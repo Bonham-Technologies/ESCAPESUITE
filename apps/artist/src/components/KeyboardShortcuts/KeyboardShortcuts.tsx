@@ -116,7 +116,10 @@ const shortcutGroups: ShortcutGroup[] = [
 export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
   // `onClose` is read through a ref because `App` passes a fresh arrow every
   // render; depending on it directly would re-bind the listener on every
-  // keystroke the app re-renders for. Same reason as `useDialogBehaviour`'s.
+  // keystroke the app re-renders for. Same reason as `useDialogBehaviour`'s —
+  // and this is **not** a duplicate of the hook's: the hook's ref serves its
+  // own Escape listener, this one serves the `?` listener below. Both are
+  // needed; neither can be removed in favour of the other.
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;

@@ -306,11 +306,16 @@ Clips support animated properties via keyframes:
   alongside the editor's.
 
   **The graph is not covered by the editor's modal gate** (see "Dialogs" below) and does not
-  need to be. Those two `window` cascades stop while a dialog is up; this element-level handler
-  does not — but every one of the editor's four modals traps focus now, so the graph cannot be
-  focused behind one and the handler never runs. Recorded here because this is where the
-  propagation contract lives. It used to be reachable behind the three overlays that trapped
-  nothing; adopting `useDialogBehaviour` in those three closed it, without a gate here.
+  need to be — but it took *two* fixes to earn that, not one, and only the second closed it.
+  Those two `window` cascades stop while a dialog is up; this element-level handler does not. The
+  focus trap every modal now has closes the **Tab** route in. It cannot close the **pointer**
+  route, because that is a question of stacking, not focus: the keyframe panel is a
+  `createPortal` sibling of `#root` (which creates no stacking context), and it carried a bare
+  `z-index: 1000` against every modal's `--z-modal` (200) — so it painted *over* the dialog's
+  backdrop, `elementFromPoint` at the graph returned the listbox, and a click there focused the
+  graph and let Enter add a keyframe from behind an `aria-modal` dialog. `KeyframePanel.module.css`
+  now uses **`--z-panel` (150)**, below the modals and above the timeline and dropdowns. Both
+  routes are closed, and still no gate here.
 
   **What counts as active**: every key that acts on "the active keyframe" — `Delete`,
   `Backspace`, `Escape` — is gated on the *rendered* active option (`activeIndex !== -1`), not on
@@ -339,8 +344,8 @@ Clips support animated properties via keyframes:
 
   **Known limitation**: `useDialogBehaviour` listens on `document` in the capture phase, which
   runs *before* the graph's handler and so can't be shielded by its `stopPropagation()`. This is
-  moot in practice — the graph can't hold focus while any of the four modals that use the hook is
-  open. See "Dialogs" below.
+  moot in practice — the graph can neither be Tabbed to (the trap) nor clicked (`--z-panel` sits
+  under `--z-modal`) while any of the four modals that use the hook is open. See "Dialogs" below.
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
@@ -760,7 +765,7 @@ lands. In return each gets initial focus inside itself, a Tab/Shift+Tab cycle th
 leave, Escape claimed in the capture phase, and focus restored to whatever opened it.
 
 **Escape means something different in each, and that is a decision, not a default.** The hook
-calls whatever it is handed, so the three answers are the three arguments:
+calls whatever it is handed, so the four answers are the four arguments:
 
 | Modal | Escape calls | Why |
 |-------|--------------|-----|
@@ -768,6 +773,12 @@ calls whatever it is handed, so the three answers are the three arguments:
 | `KeyboardShortcuts` | `onClose` | the sheet holds no state and destroys nothing, so dismissing it is free |
 | `ProjectLoadDialog` | `onCancel` | the other two answers both replace the current timeline; cancelling is the only one that leaves the editor as the user left it |
 | `SessionRestorePrompt` | **nothing** — a module-level `swallowEscape()` no-op | `useSessionRestore`'s `handleDeclineSession` calls `clearSessionState()`, so "Start Fresh" **deletes** the saved session. Escape is the key people press to dismiss a thing; routing it to either button would either discard work or silently accept it. The hook still claims the key (so the editor's cascades behind the prompt never see it) and then does nothing: the prompt stays up, focus stays trapped, and the only two ways out are the two buttons — the right shape for a question that must be answered |
+
+**There is a fifth modal-shaped component, and it is dead code.**
+`components/ResolutionMismatchDialog.tsx` has no role, no name, no trap and no Escape — and
+nothing imports it but its own test. It is also the "ask on import" the project decided against
+(media auto-fits instead), so it is a deletion candidate rather than a fifth adoption. Named here
+so a reader who finds it does not conclude the "all four modals" claim above is wrong.
 
 Two shapes worth knowing, both about `isOpen`: `SessionRestorePrompt` is rendered only while
 open (`App` holds the `{showSessionPrompt && pendingSession && …}` guard), so "closed" is
@@ -780,6 +791,21 @@ The shortcut sheet needed one thing beyond the wiring: its `.content` grid scrol
 no controls, so it carries `tabIndex={0}` for a keyboard to scroll it at all (axe:
 `scrollable-region-focusable`, which the new audit below caught). That also makes it the
 sheet's second and last stop in the trap.
+
+Two more things the audits turned up, both now fixed: the session-restore and project-load
+dialogs' primary buttons were white on the `--accent-primary` fill at **2.75:1** and now use
+`--accent-on-fill` like `ExportDialog` already did; and both dialogs titled themselves with an
+`<h3>` under a page whose only `<h1>` is the logo, which skips a level (axe: `heading-order`).
+Both are `<h2>` now, matching `ExportDialog` — the session prompt's `.sessionPrompt h3` selector
+moved with it, and the project-load dialog's styling is on a `.title` class, so neither changed
+how anything renders.
+
+**An open question, deliberately left alone**: `SessionRestorePrompt` swallows Escape, so it is a
+dialog that demands an answer — which is what `role="alertdialog"` exists to tell assistive
+technology. It keeps `role="dialog"`, so the dead Escape is an undeclared deviation from the APG
+pattern. Changing it would move three test call sites and the audits' `include('[role="dialog"]')`
+selector, and it is arguable either way (a restore *offer* is not an alert), so it was not taken
+with the trap work.
 
 The hook started life *here*, as an inline effect in `ExportDialog`, and was lifted into
 CRAFT and then into `packages/shared`. The copy that stayed here had drifted in one way:
@@ -830,21 +856,47 @@ It carries `role="dialog" aria-modal="true"` for the screen reader, but it traps
 holds nothing to interact with and is gone the moment the project finishes loading — there is
 no dialog in front of the user to be confused by. `SessionRestorePrompt` and
 `ProjectLoadDialog` (`useProjectActions`' `showProjectLoadDialog`) are both in the flag and
-both trap focus: each is a question with buttons that waits for an answer. The flag and the
+both trap focus: each is a question with buttons that waits for an answer.
+
+**`ProjectLoadDialog` is rendered twice, and only one of the two is in the flag.** `App` renders
+it from `useProjectActions`; `VideoUploader` renders a *second* instance with its own
+`showProjectLoadDialog` state, opened by dropping a `.veditor` on the uploader
+(`VideoUploader.tsx:144-145`). That second flag is **not** in `modalOpen`, so the editor behind
+the uploader's copy still takes every key — and Ctrl+O from there opens `App`'s copy on top of
+it, giving two mounted dialogs, a duplicate `id="project-load-title"` (the second dialog's
+`aria-labelledby` then silently resolves to the first heading), a duplicate
+`data-testid="project-load-dialog"`, and two focus traps competing for Tab. All of it predates
+the trap work, which neither caused nor removed it. The fix is one dialog and one state — route
+the uploader's drop through `useProjectActions` — or at minimum lift its flag into `modalOpen`;
+tracked separately. The flag and the
 trap are still worth having together — the flag stops the editor taking keys from behind a
 dialog, the trap stops Tab walking out of one.
 
-**The keyframe-graph gap is closed** (it was recorded here as open — the F4 finding of the
-modal-gate review). Nothing gates the *keyframe graph* on `modalOpen`: it is a focusable
-`role=listbox` with its own element-level handler, so a user who had it focused could open the
-shortcut sheet with `?` (which the graph lets fall through) and then still nudge, delete and
-add keyframes with the arrows, Delete and Enter from behind it. `ExportDialog` was immune
-because it really trapped focus; `KeyboardShortcuts`, `SessionRestorePrompt` and
-`ProjectLoadDialog` did not, which is what left the graph reachable. All three now adopt
-`useDialogBehaviour`, so the graph cannot hold focus while any of them is up — **the fix was
-the trap, not another flag**, which is why no gate was added to the graph's handler and none
-is wanted. Three axe audits in `apps/e2e/tests/accessibility/core.spec.ts` hold the line on
-each dialog's role, name and `aria-modal`.
+**The keyframe-graph gap is closed — by two fixes, because it had two routes in** (it was
+recorded here as open: the F4 finding of the modal-gate review). Nothing gates the *keyframe
+graph* on `modalOpen`: it is a focusable `role=listbox` with its own element-level handler, so a
+user who reached it could still nudge, delete and add keyframes with the arrows, Delete and Enter
+from behind a dialog.
+
+1. **The Tab route** — `KeyboardShortcuts`, `SessionRestorePrompt` and `ProjectLoadDialog`
+   trapped no focus, so Tab walked out of them and into the graph. All three now adopt
+   `useDialogBehaviour`. **The fix was the trap, not another flag.**
+2. **The pointer route** — and this is the half the trap cannot touch, and the half the original
+   F4 note got wrong when it said "`ExportDialog` is immune because it really traps focus". A
+   trap governs focus, not hit-testing. The keyframe panel is a `createPortal` sibling of `#root`
+   and carried a bare `z-index: 1000`; every modal overlay is `--z-modal` (200). The panel
+   therefore painted over the backdrop, the backdrop never received the click, and
+   `document.elementFromPoint` at the graph returned the listbox — so a click focused the graph
+   and Enter added a keyframe through an open `aria-modal` dialog, `ExportDialog` included. The
+   palette gained **`--z-panel` (150)** — between `--z-dropdown` and `--z-modal` — and
+   `KeyframePanel.module.css` uses it.
+
+Neither half is provable in jsdom (there is no layout and no hit-testing), so both are held in
+Chromium: `apps/e2e/tests/accessibility/core.spec.ts` has one axe audit per overlay for the role,
+name and `aria-modal`, plus "an open modal covers the keyframe panel, so a pointer cannot reach
+the graph behind it", which checks `elementFromPoint` at the graph's centre before and after the
+sheet opens and then clicks there. **If `--z-panel` is ever raised above `--z-modal`, that test is
+what fails.**
 
 ### Export Performance Optimizations (`src/core/exporter.ts`)
 The export pipeline includes several optimizations to improve performance:

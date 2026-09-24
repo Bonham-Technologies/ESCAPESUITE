@@ -102,7 +102,10 @@ dist/
 - **Shared dialog behaviour**: `useDialogBehaviour` (`packages/shared/src/hooks`, imported
   as `@escapesuite/shared/hooks`) is the single modal keyboard implementation — initial
   focus, the Tab/Shift+Tab trap, Escape-to-close and focus restored to the opener — used by
-  CRAFT's two modals and ARTIST's export dialog. See each app's CLAUDE.md "Dialogs" note
+  CRAFT's two modals and all four of ARTIST's (export, shortcut sheet, project-load, session
+  restore). Escape's *meaning* is per dialog, not inherited: the hook calls whatever it is
+  handed, and ARTIST's session-restore prompt hands it a no-op because declining discards the
+  saved session. See each app's CLAUDE.md "Dialogs" note
 
 ### ESCAPEPLAN (apps/plan)
 - React Router for client-side routing
@@ -404,7 +407,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.32 | 96.85 | 99.73 |
-| `@escapesuite/artist` | 99.37 | 98.67 | 93.30 | 98.94 |
+| `@escapesuite/artist` | 99.38 | 98.67 | 93.33 | 98.94 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

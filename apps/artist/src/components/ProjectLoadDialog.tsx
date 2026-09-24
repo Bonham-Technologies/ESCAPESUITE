@@ -42,7 +42,7 @@ export function ProjectLoadDialog({
         aria-labelledby="project-load-title"
       >
         <div className={styles.header}>
-          <h3 className={styles.title} id="project-load-title">Load Project</h3>
+          <h2 className={styles.title} id="project-load-title">Load Project</h2>
         </div>
         <div className={styles.body}>
           <p className={styles.message}>

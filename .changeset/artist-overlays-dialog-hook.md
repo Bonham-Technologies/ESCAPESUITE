@@ -18,8 +18,15 @@ timeline alone; and the session prompt **swallows** Escape — declining calls
 `clearSessionState()`, so a dismissal key must not reach it. The prompt stays up with
 focus trapped, and the two buttons remain the only ways out.
 
-Two things fall out of the traps. The keyframe graph could previously be nudged, extended
-and deleted from behind these three overlays, because it is focusable and its handler is
-element-level rather than gated on the editor's modal flag; with the traps in place it
-cannot hold focus behind them at all. And the sheet's scrolling body was unreachable by
-keyboard — it now carries `tabIndex={0}`, so a keyboard user can scroll it.
+The keyframe graph could previously be nudged, extended and deleted from behind any dialog,
+because it is focusable, its handler is element-level rather than gated on the editor's modal
+flag, and the keyframe panel painted *over* every modal's backdrop — so a click went through
+the dialog and into the graph. The traps close the Tab route; the panel moving to a new
+`--z-panel` layer, below the modals, closes the pointer route.
+
+Three smaller things the overlays' new accessibility audits found. The shortcut sheet's
+scrolling body was unreachable by keyboard and now carries `tabIndex={0}`, so a keyboard user
+can scroll it. The "Save & Load" and "Restore Session" buttons take the palette's dark ink on
+their blue fill, where white only reached 2.75:1 — those two labels change colour. And both
+dialogs' titles move from `<h3>` to `<h2>`, which skipped a heading level under the page's
+`<h1>`; nothing about them renders differently.

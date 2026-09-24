@@ -59,6 +59,14 @@
   /* Z-index layers */
   --z-base: 0;
   --z-dropdown: 100;
+  /* Floating panels that live outside #root as body portals — the keyframe
+     panel is the only one. Above the timeline and the dropdowns, and
+     deliberately BELOW --z-modal: the panel used to be a bare z-index: 1000,
+     so it painted over every modal backdrop and a pointer could click straight
+     through an open aria-modal dialog into the keyframe graph and edit
+     keyframes behind it. The focus trap closes the Tab route; this token is
+     what closes the pointer route. */
+  --z-panel: 150;
   --z-modal: 200;
   --z-tooltip: 300;
   --z-playhead: 50;
