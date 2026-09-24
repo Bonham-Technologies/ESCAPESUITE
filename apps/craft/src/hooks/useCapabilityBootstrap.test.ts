@@ -124,11 +124,11 @@ describe('useCapabilityBootstrap', () => {
     })
   })
 
-  it('carries a silent-MP4 answer through intact, audio flag and reason', async () => {
+  it('carries a silent-MP4 answer through intact, audio flag and audio reason', async () => {
     converterModule.probeMP4Support.mockResolvedValue({
       supported: true,
       audio: false,
-      reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+      audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
     })
 
     mountBootstrap()
@@ -138,7 +138,7 @@ describe('useCapabilityBootstrap', () => {
         state: 'ready',
         supported: true,
         audio: false,
-        reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+        audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
       })
     })
   })

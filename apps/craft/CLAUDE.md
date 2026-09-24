@@ -672,11 +672,24 @@ message and navigate to its own editor itself.
   about the same H.264 and AAC configuration the conversion configures" pins that. It never
   rejects — a probe that could not answer is a `{ supported: false }` with a reason — and it
   memoises for the life of the page, so the UI asks once.
+- **Two encoders, two questions, two answers, two sentences.** `supported` (with `reason`)
+  is the **H.264** verdict; `audio` (with `audioReason`) is the **AAC** verdict, and it is
+  answered on its own whatever H.264 said. The two `isConfigSupported()` calls were always
+  both made — until ESCSUITE-61 the folding threw the AAC answer away as soon as H.264
+  failed, which disabled the M4A button in a browser that could have written the file and
+  titled it with a sentence about video. So a browser with AAC and no H.264 now gets
+  `{ supported: false, audio: true, reason: MP4_NO_H264_REASON }`: MP4 disabled, M4A
+  offered. `reason` is absent whenever `supported` is true, `audioReason` whenever `audio`
+  is true, and where the probe could not run at all — no WebCodecs, or
+  `isConfigSupported()` threw — *both* carry the same sentence, because neither question
+  got an answer. `useMp4Download`'s two gates read one field each and never the other's:
+  that is the whole point of there being two.
 - **No AAC encoder is not a refusal, because the conversion does not treat it as one.**
   `convertToMP4` asks about AAC itself, and where the answer is no it drops the audio and
   muxes the video anyway — a working, silent MP4 (`converter.test.ts`, "drops audio and
   warns when AAC is unsupported"). The probe therefore answers
-  `{ supported: true, audio: false, reason: MP4_NO_AUDIO_REASON }` there: the button stays
+  `{ supported: true, audio: false, audioReason: MP4_NO_AUDIO_REASON }` there — no `reason`,
+  because nothing is wrong with the MP4: the button stays
   **enabled**, and the missing sound is said as a *note* rather than as a blocked reason —
   "MP4 will have no audio in this browser (no AAC encoder)" — before the minutes are spent,
   and again afterwards through the one notice channel as `MP4_SAVED_WITHOUT_AUDIO` ("Saved
@@ -693,7 +706,8 @@ message and navigate to its own editor itself.
 - **"Checking..." rather than a flash.** Because the answer is asynchronous it is asked at
   capability bootstrap (`useCapabilityBootstrap`, alongside capability detection and the
   storage estimate — never on the click path) and lands in `store.mp4Support`
-  (`{ state: 'checking' | 'ready', supported, audio, reason? }`). While it is `checking` the
+  (`{ state: 'checking' | 'ready', supported, audio, reason?, audioReason? }`, the probe's
+  own shape with `state` in front of it). While it is `checking` the
   button is `disabled` with `MP4_CHECKING_REASON`; it then goes enabled, or disabled with
   the probe's reason. It is never enabled first and taken away: offering a conversion and
   withdrawing it a tick later is worse than waiting a tick to offer it.
@@ -745,10 +759,13 @@ test asserts.
 - **AAC is a hard requirement, where for MP4 it is only a preference.** `convertToMP4` drops
   the audio and muxes a silent video when the browser has no AAC encoder; there is no silent
   M4A worth writing, so `convertToM4A` refuses. The button follows: `m4aBlockedReason` is
-  non-null whenever `mp4Support.audio` is false, carrying the probe's *own* sentence
-  (`MP4_NO_AUDIO_REASON`) so the reason on the button and the message from a failed
-  conversion are one wording. The same browser therefore gets an enabled MP4 button with a
-  note and a disabled M4A button — the two gates are separate props for exactly this reason.
+  non-null whenever `mp4Support.audio` is false, carrying the probe's *own* sentence about
+  AAC (`audioReason`, i.e. `MP4_NO_AUDIO_REASON`) so the reason on the button and the
+  message from a failed conversion are one wording. It never reads `reason`: that is the
+  answer about H.264, and this conversion encodes no video (ESCSUITE-61). The same browser
+  therefore gets an enabled MP4 button with a note and a disabled M4A button — the two
+  gates are separate props for exactly this reason — and a browser with the opposite gap
+  gets a disabled MP4 button and an M4A that works.
 - **A take with no audio disables it, and that gate lives in the component.** Everything
   else about the conversion is a fact about the browser and is decided in the hook; whether
   *this recording* has sound is a fact about the row, so `RecordingsList` reads

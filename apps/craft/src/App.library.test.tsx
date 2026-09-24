@@ -306,7 +306,7 @@ describe('App MP4 downloads', () => {
     converterModule.probeMP4Support.mockResolvedValue({
       supported: true,
       audio: false,
-      reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+      audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
     });
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
     await renderApp();

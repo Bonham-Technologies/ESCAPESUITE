@@ -154,13 +154,17 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
 
   // The same three questions for the audio-only download, with one different
   // answer in the middle: a missing AAC encoder blocks an M4A outright, where
-  // it only silences an MP4. The fallback is the MP4 gate's, for a refusal
-  // that arrived without a sentence — the probe always sends one.
+  // it only silences an MP4. It reads `audioReason` — the probe's sentence
+  // about AAC — and never `reason`, which is the answer about H.264: this
+  // conversion needs no video encoder, so a browser missing one must not have
+  // that sentence put on this button (ESCSUITE-61). The fallback is the MP4
+  // gate's, for a refusal that arrived without a sentence; the probe always
+  // sends one.
   let m4aBlockedReason: string | null = null
   if (mp4Support.state === 'checking') {
     m4aBlockedReason = MP4_CHECKING_REASON
   } else if (!mp4Support.audio) {
-    m4aBlockedReason = mp4Support.reason ?? MP4_UNSUPPORTED_REASON
+    m4aBlockedReason = mp4Support.audioReason ?? MP4_UNSUPPORTED_REASON
   } else if (converting) {
     m4aBlockedReason = MP4_BUSY_REASON
   }
@@ -236,11 +240,11 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
   // And what the library says out loud. Everything blocking is said, except
   // "still checking": that one is true for a moment on every load, and a
   // paragraph that appears and vanishes moves the page for nothing. What is
-  // said while nothing is blocked is the silent-MP4 warning, so it arrives
-  // before the minutes are spent rather than after.
+  // said while nothing is blocked is the silent-MP4 warning — `audioReason`,
+  // the sentence about AAC, for the same reason the M4A gate reads it.
   let note: string | null = null
   if (mp4Support.state === 'ready') {
-    note = blockedReason ?? (mp4Support.audio ? null : mp4Support.reason ?? null)
+    note = blockedReason ?? (mp4Support.audio ? null : mp4Support.audioReason ?? null)
   }
 
   return {

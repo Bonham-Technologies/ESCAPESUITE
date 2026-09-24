@@ -141,7 +141,10 @@ export interface Mp4SupportProbeLike {
   supported: boolean
   /** False when the browser has no AAC encoder: the MP4 is offered, silent. */
   audio: boolean
+  /** Why an MP4 cannot be written. */
   reason?: string
+  /** Why it will have no sound — the AAC answer's own sentence. */
+  audioReason?: string
 }
 
 export const converterModule = {

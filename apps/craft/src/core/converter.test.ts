@@ -246,14 +246,32 @@ describe('converter', () => {
       expect(audioAsked.mock.calls[0][0]).toEqual(lastAudioEncoder().configureCalls[0])
     })
 
-    it('refuses, naming H.264, when the video encoder will not take that config', async () => {
+    // ESCSUITE-61. Two encoders, two questions, two answers. The AAC answer is
+    // not the H.264 answer's consequence: the M4A download needs only AAC, so
+    // collapsing them disabled that button in a browser that could have written
+    // the file, and titled it with a sentence about video.
+    it('refuses, naming H.264, when the video encoder will not take that config — and still says AAC is there', async () => {
       VideoEncoderDouble.supportPlan = false
+      const probe = await freshProbe()
+
+      await expect(probe()).resolves.toEqual({
+        supported: false,
+        audio: true,
+        reason: MP4_NO_H264_REASON,
+        audioReason: undefined,
+      })
+    })
+
+    it('answers no to both, with a sentence each, when neither encoder is there', async () => {
+      VideoEncoderDouble.supportPlan = false
+      AudioEncoderDouble.supportPlan = false
       const probe = await freshProbe()
 
       await expect(probe()).resolves.toEqual({
         supported: false,
         audio: false,
         reason: MP4_NO_H264_REASON,
+        audioReason: MP4_NO_AUDIO_REASON,
       })
     })
 
@@ -265,10 +283,14 @@ describe('converter', () => {
       AudioEncoderDouble.supportPlan = false
       const probe = await freshProbe()
 
+      // `reason` is the MP4 verdict and there is nothing wrong with it; the
+      // missing sound is `audioReason`, which is what the M4A gate and the
+      // silent-file note read.
       await expect(probe()).resolves.toEqual({
         supported: true,
         audio: false,
-        reason: MP4_NO_AUDIO_REASON,
+        reason: undefined,
+        audioReason: MP4_NO_AUDIO_REASON,
       })
     })
 
@@ -277,10 +299,13 @@ describe('converter', () => {
       VideoEncoderDouble.supportPlan = 'throw'
       const probe = await freshProbe()
 
+      // Neither question got an answer, so both carry the same sentence — the
+      // M4A button must not be left titled with silence.
       await expect(probe()).resolves.toEqual({
         supported: false,
         audio: false,
         reason: MP4_PROBE_FAILED_REASON,
+        audioReason: MP4_PROBE_FAILED_REASON,
       })
     })
 
@@ -295,6 +320,7 @@ describe('converter', () => {
           supported: false,
           audio: false,
           reason: MP4_NO_WEBCODECS_REASON,
+          audioReason: MP4_NO_WEBCODECS_REASON,
         })
       } finally {
         g.VideoEncoder = saved

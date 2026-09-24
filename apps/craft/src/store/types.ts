@@ -80,17 +80,30 @@ export interface Mp4Support {
   supported: boolean;
   /**
    * Whether the browser has an AAC encoder, and so whether a conversion will
-   * have sound.
+   * have sound. The AAC answer alone, whatever the H.264 answer was — the M4A
+   * download needs no video encoder (ESCSUITE-61).
    *
    * It means two different things to the two downloads, because they treat it
    * differently. For **MP4** it is not a refusal: `convertToMP4` drops the
    * audio and muxes a working silent file, so `false` does not disable that
    * button — it only adds a note. For **M4A** it is the whole conversion, so
-   * `false` disables that button outright, carrying `reason` as its sentence.
+   * `false` disables that button outright, carrying `audioReason` as its
+   * sentence.
    */
   audio: boolean;
-  /** The probe's own sentence for what is missing. Absent when all is well. */
+  /**
+   * The probe's sentence for why an MP4 cannot be written. Absent whenever
+   * `supported` is true — a silent MP4 is not a refusal.
+   */
   reason?: string;
+  /**
+   * The probe's sentence for the missing AAC encoder: what a disabled M4A
+   * button says, and what the silent-MP4 note says. Absent whenever `audio` is
+   * true, and the same sentence as `reason` where the probe could not run at
+   * all. Kept apart from `reason` so neither gate can be titled with the other
+   * one's wording.
+   */
+  audioReason?: string;
 }
 
 export interface AudioLevels {

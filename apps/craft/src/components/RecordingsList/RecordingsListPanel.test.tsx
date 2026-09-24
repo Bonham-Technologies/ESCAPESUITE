@@ -111,7 +111,7 @@ describe('RecordingsListPanel downloads', () => {
         state: 'ready',
         supported: true,
         audio: false,
-        reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+        audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
       },
     })
     renderPanel()

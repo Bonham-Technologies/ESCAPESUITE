@@ -369,21 +369,38 @@ const PROBE_WIDTH = 1280;
 const PROBE_HEIGHT = 720;
 
 /**
- * What the codec probe found: whether an MP4 can be offered at all, whether it
- * will have sound, and the one sentence that says what is missing.
+ * What the codec probe found: two independent answers, each with its own
+ * sentence — whether an MP4 can be offered at all, and whether AAC is there.
  *
  * `supported` and `audio` are separate because `convertToMP4` treats them
  * separately: no H.264 encoder is fatal, but no AAC encoder is not — the
  * conversion drops the audio and produces a working silent MP4. A probe that
  * refused there would disable a button that works.
+ *
+ * They are also separate in the *other* direction (ESCSUITE-61): the M4A
+ * download needs AAC and nothing else, so a browser without an H.264 encoder
+ * can still write one. `audio` therefore answers only about AAC, whatever the
+ * H.264 answer was, and the two sentences are two fields — one gate must never
+ * read the other's wording.
  */
 export interface MP4SupportProbe {
-  /** Whether a conversion can be run at all. */
+  /** Whether a conversion can be run at all — the H.264 answer. */
   supported: boolean;
-  /** Whether that conversion will have sound. */
+  /** Whether the browser has an AAC encoder, asked and answered on its own. */
   audio: boolean;
-  /** One user-facing sentence naming what is missing. Absent when all is well. */
+  /**
+   * One user-facing sentence for why an MP4 cannot be written. Absent whenever
+   * `supported` is true — a silent MP4 is not a refusal, and its warning is
+   * `audioReason`.
+   */
   reason?: string;
+  /**
+   * One user-facing sentence for the missing AAC encoder: what blocks an M4A
+   * outright and what warns that an MP4 will be silent. Absent whenever
+   * `audio` is true. Where the probe could not run at all it carries the same
+   * sentence as `reason`, because neither question got an answer.
+   */
+  audioReason?: string;
 }
 
 export const MP4_NO_WEBCODECS_REASON =
@@ -434,6 +451,11 @@ let mp4SupportProbe: Promise<MP4SupportProbe> | null = null;
  * H.264 encoder is fatal, no AAC encoder is `{ supported: true, audio: false }`
  * — the conversion drops the audio and the file still plays.
  *
+ * The two questions are independent, and so are the answers: `audio` is the AAC
+ * answer whatever H.264 said, with `audioReason` as its sentence. Folding it
+ * into the H.264 verdict (ESCSUITE-61) disabled the M4A button in a browser
+ * that could have written the file, and titled it with a sentence about video.
+ *
  * What it cannot answer is *this* recording: it asks about a representative
  * 720p frame (see `PROBE_WIDTH`), so on a source larger than the level the
  * codec string allows, `configure()` can still fail and the conversion falls
@@ -446,8 +468,14 @@ export function probeMP4Support(): Promise<MP4SupportProbe> {
 }
 
 async function askMP4Support(): Promise<MP4SupportProbe> {
+  // Neither question can be asked, so both carry the same sentence.
   if (!isMP4ConversionSupported()) {
-    return { supported: false, audio: false, reason: MP4_NO_WEBCODECS_REASON };
+    return {
+      supported: false,
+      audio: false,
+      reason: MP4_NO_WEBCODECS_REASON,
+      audioReason: MP4_NO_WEBCODECS_REASON,
+    };
   }
 
   try {
@@ -456,18 +484,33 @@ async function askMP4Support(): Promise<MP4SupportProbe> {
       AudioEncoder.isConfigSupported(MP4_AUDIO_ENCODER_CONFIG),
     ]);
 
-    if (!video.supported) {
-      return { supported: false, audio: false, reason: MP4_NO_H264_REASON };
-    }
-    if (!audio.supported) {
-      // What `convertToMP4` does with this same answer, a few hundred lines
-      // below: drop the audio and mux the video anyway.
-      return { supported: true, audio: false, reason: MP4_NO_AUDIO_REASON };
-    }
-    return { supported: true, audio: true };
+    // Two answers, folded separately. The AAC answer is *not* the H.264
+    // answer's consequence: what it gates is the M4A download, which needs no
+    // video encoder at all. A missing AAC encoder is still not a refusal for
+    // MP4 — `convertToMP4` drops the audio and muxes the video anyway, a few
+    // hundred lines below — so it leaves `supported` alone and says its piece
+    // through `audioReason`.
+    //
+    // `supported` is optional on the browser's answer, and an answer that did
+    // not say is not a yes — the same reading the `!video.supported` test this
+    // replaced had.
+    const h264 = video.supported === true;
+    const aac = audio.supported === true;
+    return {
+      supported: h264,
+      audio: aac,
+      ...(h264 ? {} : { reason: MP4_NO_H264_REASON }),
+      ...(aac ? {} : { audioReason: MP4_NO_AUDIO_REASON }),
+    };
   } catch (error) {
+    // One question threw; neither was answered.
     console.warn('MP4 codec probe failed:', error);
-    return { supported: false, audio: false, reason: MP4_PROBE_FAILED_REASON };
+    return {
+      supported: false,
+      audio: false,
+      reason: MP4_PROBE_FAILED_REASON,
+      audioReason: MP4_PROBE_FAILED_REASON,
+    };
   }
 }
 
