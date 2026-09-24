@@ -116,6 +116,16 @@ describe('the typing guard', () => {
 
     expect(deps.setActiveTool).not.toHaveBeenCalled()
   })
+
+  it('ignores keys chosen in a select', () => {
+    mountShortcuts()
+    const select = document.createElement('select')
+    document.body.appendChild(select)
+
+    pressInto(select, 'v')
+
+    expect(deps.setActiveTool).not.toHaveBeenCalled()
+  })
 })
 
 describe('undo and redo', () => {

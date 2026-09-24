@@ -793,10 +793,8 @@ prop is optional on the picker, because the dialog is complete without a listene
 picker's own tests render it bare; it is **required** on `MediaLibrarySidebar`, so `App` cannot
 forget it.
 
-`components/ResolutionMismatchDialog.tsx` is a **sixth** modal-shaped component and is dead
-code — nothing imports it but its own test, and it is the "ask on import" the project decided
-against (media auto-fits instead) — so it is a deletion candidate, not an adoption. It is named
-here so a reader who finds it does not conclude the "all five modals" claim above is wrong.
+There is no sixth: `ResolutionMismatchDialog`, the "ask on import" the project decided against
+(media auto-fits instead), sat unimported for months and was deleted with its stylesheet and test.
 
 Two shapes worth knowing, both about `isOpen`: `SessionRestorePrompt` is rendered only while
 open (`App` holds the `{showSessionPrompt && pendingSession && …}` guard), so "closed" is
@@ -844,8 +842,14 @@ at all.
 resolutionConfirmOpen`
 — and hands it to *both* of the app's `window` cascades: `useAppKeyboardShortcuts` and
 `PlaybackControls` (which owns Space, the arrows, Home and End). Each returns from its handler immediately when it is true,
-below the input/textarea check and above every other branch — the same shape, and the same
-comment, as ESCAPECRAFT's `useKeyboardShortcuts` (PR #381). Before it, Space started playback,
+below the typing check and above every other branch — the same shape, and the same
+comment, as ESCAPECRAFT's `useKeyboardShortcuts` (PR #381). That typing check names
+`HTMLInputElement`, `HTMLTextAreaElement` **and `HTMLSelectElement`** in both cascades: until
+the select was added, ArrowLeft/ArrowRight in the resolution picker, the export dialog's
+dropdowns or the keyframe panel's easing `<select>` stepped the playhead a frame instead of
+changing the option, because a native select changes its option on those keys *and* lets the
+event bubble to `window`. Pinned by a test in each cascade's suite (keys pressed into a
+focused `<select>` reach neither handler). Before it, Space started playback,
 Delete removed the selected clip and Ctrl+Z undid, all from behind a dialog the user could not
 see past.
 
