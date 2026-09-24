@@ -1,10 +1,11 @@
 // The "Resume Previous Session?" modal on its own. The
 // `{showSessionPrompt && pendingSession && …}` guard stays in App, so the
 // session is always present here.
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionRestorePrompt } from './SessionRestorePrompt';
+import { pretendElementsAreVisible } from '../test/doubles/layout';
 import type { SessionState } from '../core/storage';
 import type { Project, SourceVideo } from '../store/types';
 
@@ -100,5 +101,80 @@ describe('SessionRestorePrompt', () => {
     await user.click(screen.getByRole('button', { name: 'Start Fresh' }));
 
     expect(onDecline).toHaveBeenCalledTimes(1);
+  });
+
+  describe('modal keyboard behaviour', () => {
+    // The prompt gets its trap, its initial focus and its focus restore from
+    // the shared `useDialogBehaviour`. These pin the wiring; the mechanics are
+    // the hook's own suite's job.
+    let restoreVisibility: () => void;
+
+    beforeEach(() => {
+      restoreVisibility = pretendElementsAreVisible();
+    });
+
+    afterEach(() => {
+      restoreVisibility();
+    });
+
+    it('moves focus into the prompt when it opens and back to the opener when it goes', () => {
+      const opener = document.createElement('button');
+      document.body.appendChild(opener);
+      opener.focus();
+
+      const { unmount } = render(
+        <SessionRestorePrompt session={sessionWith(1, 1)} onRestore={vi.fn()} onDecline={vi.fn()} />
+      );
+
+      expect(screen.getByRole('button', { name: 'Restore Session' })).toHaveFocus();
+
+      unmount();
+
+      expect(opener).toHaveFocus();
+      opener.remove();
+    });
+
+    it('wraps Tab from the last control back to the first', () => {
+      render(
+        <SessionRestorePrompt session={sessionWith(1, 1)} onRestore={vi.fn()} onDecline={vi.fn()} />
+      );
+      screen.getByRole('button', { name: 'Start Fresh' }).focus();
+
+      fireEvent.keyDown(document, { key: 'Tab' });
+
+      expect(screen.getByRole('button', { name: 'Restore Session' })).toHaveFocus();
+    });
+
+    it('wraps Shift+Tab from the first control round to the last', () => {
+      render(
+        <SessionRestorePrompt session={sessionWith(1, 1)} onRestore={vi.fn()} onDecline={vi.fn()} />
+      );
+      screen.getByRole('button', { name: 'Restore Session' }).focus();
+
+      fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+
+      expect(screen.getByRole('button', { name: 'Start Fresh' })).toHaveFocus();
+    });
+
+    it('swallows Escape rather than declining: the saved session survives it', () => {
+      // The ruling, and the reason the prompt passes a no-op close where the
+      // other two dialogs pass their cancel: `handleDeclineSession`
+      // (app/useSessionRestore.ts) calls `clearSessionState()`. Declining is
+      // destructive, so Escape — a key people press to dismiss things — must
+      // not reach it. Escape keeps the prompt up and focus inside it; the only
+      // two ways out are the two buttons.
+      const onDecline = vi.fn();
+      const onRestore = vi.fn();
+      render(
+        <SessionRestorePrompt session={sessionWith(1, 1)} onRestore={onRestore} onDecline={onDecline} />
+      );
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      expect(onDecline).not.toHaveBeenCalled();
+      expect(onRestore).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Restore Session' })).toHaveFocus();
+    });
   });
 });

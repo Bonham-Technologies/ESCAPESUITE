@@ -38,3 +38,27 @@ export function setRect(el: Element, { left = 0, top = 0, width = 0, height = 0 
 export function setRects(boxes: Array<[Element, Box]>): void {
   for (const [el, box] of boxes) setRect(el, box)
 }
+
+/**
+ * Make every element report a layout box for `offsetParent`.
+ *
+ * jsdom performs no layout, so `HTMLElement.offsetParent` is `null` even on
+ * elements plainly on screen. The shared focus trap (`useDialogBehaviour` in
+ * `@escapesuite/shared/hooks`) uses `offsetParent !== null` to skip controls CSS
+ * has hidden, so under jsdom it would otherwise find nothing focusable in any
+ * dialog at all.
+ *
+ * Report `document.body` for every element instead — what a rendered element's
+ * offsetParent would be — and hand back the undo.
+ */
+export function pretendElementsAreVisible(): () => void {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+    configurable: true,
+    get: () => document.body,
+  })
+  return () => {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
+  }
+}

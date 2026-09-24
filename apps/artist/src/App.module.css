@@ -501,7 +501,11 @@
   text-align: center;
 }
 
-.sessionPrompt h3 {
+/* An h2, not an h3: the page's only h1 is the ESCAPEARTIST logo, so a dialog
+   heading at level 3 skips a level (axe: heading-order, caught by the
+   session-prompt audit). Every property a UA stylesheet would differ on is set
+   here, and both levels are bold, so the rendering is unchanged. */
+.sessionPrompt h2 {
   margin: 0 0 var(--spacing-md);
   font-size: 18px;
   color: var(--text-primary);
@@ -538,7 +542,9 @@
 .sessionRestoreButton {
   background: var(--accent-primary);
   border: 1px solid var(--accent-primary);
-  color: white;
+  /* White on this fill is 2.75:1 — see --accent-on-fill in styles/index.css.
+     Caught by the session-prompt axe audit added with the focus trap. */
+  color: var(--accent-on-fill);
 }
 
 .sessionRestoreButton:hover {

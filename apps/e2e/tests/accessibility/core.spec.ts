@@ -290,6 +290,193 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(unlabeled).toHaveLength(0)
   })
 
+  /**
+   * The editor's three other modals.
+   *
+   * Same shape as the Export-dialog audit above and the CRAFT dialog audits
+   * further up: open the thing, prove it really is an `aria-modal` dialog with
+   * an accessible name, then count serious/critical violations inside it.
+   *
+   * The audit is scoped to `[role="dialog"]` rather than run over the whole
+   * page: the editor behind these carries a canvas timeline whose contrast axe
+   * cannot compute, which is why the page-wide audit above disables
+   * `color-contrast` outright. Scoping keeps that rule live *inside* the dialog,
+   * where it can actually be judged. An `include` that matched nothing would
+   * also report zero violations, so each run asserts it had something in front
+   * of it.
+   */
+  async function dialogViolations(page: Page) {
+    const results = await runAxeCheck(page, { includeSelector: '[role="dialog"]' })
+    expect(results.passes).toBeGreaterThan(0)
+    return results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+  }
+
+  test('keyboard shortcuts sheet passes axe-core audit', async ({ page }) => {
+    // `?` is the only way in — there is no button for it.
+    await page.keyboard.press('Shift+Slash')
+
+    const sheet = page.getByRole('dialog', { name: 'Keyboard Shortcuts' })
+    await expect(sheet).toBeVisible()
+    await expect(sheet).toHaveAttribute('aria-modal', 'true')
+
+    expect(await dialogViolations(page)).toHaveLength(0)
+  })
+
+  test('an open modal covers the keyframe panel, so a pointer cannot reach the graph behind it', async ({
+    page,
+  }) => {
+    // The focus trap closes the *Tab* route into the keyframe graph. It cannot
+    // close the *pointer* route, because that is a question of stacking: the
+    // panel is a `createPortal` sibling of #root and used to carry a bare
+    // `z-index: 1000`, while every modal overlay is `--z-modal` (200). It
+    // therefore painted over the dialog's backdrop, `elementFromPoint` at the
+    // graph returned the listbox, and a click there focused the graph and let
+    // Enter add a keyframe from behind an `aria-modal` dialog. The panel now
+    // uses `--z-panel` (150), below the modals.
+    await seedTextClip(page)
+    await page.keyboard.press('k')
+    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    await expect(panel).toBeVisible()
+    await panel.getByText('Opacity', { exact: true }).click()
+
+    const graph = page.getByRole('listbox', { name: 'Keyframes for Opacity' })
+    await expect(graph).toBeVisible()
+    const box = (await graph.boundingBox())!
+    const cx = Math.round(box.x + box.width / 2)
+    const cy = Math.round(box.y + box.height / 2)
+
+    // What `document.elementFromPoint` returns at that coordinate, classified
+    // against the two subtrees that matter. Both the keyframe panel and the
+    // sheet call their outer element `.panel`, so a `[class*="panel"]` test
+    // cannot tell them apart — walk to each subtree's root and use `contains`.
+    const hitAt = (x: number, y: number) =>
+      page.evaluate(([px, py]) => {
+        const el = document.elementFromPoint(px, py)
+        const graphEl = document.querySelector('[role="listbox"]')
+        /** The portal's outermost element: the one whose parent is <body>. */
+        const portalRoot = (from: Element | null) => {
+          let node = from
+          while (node && node.parentElement !== document.body) node = node.parentElement
+          return node
+        }
+        const panelRoot = portalRoot(graphEl)
+        const dialogEl = document.querySelector('[role="dialog"]')
+        return {
+          isGraph: el === graphEl,
+          inKeyframePanel: !!(el && panelRoot && panelRoot.contains(el)),
+          // The dialog, something inside it, or the backdrop that holds it.
+          inDialogLayer: !!(
+            el &&
+            dialogEl &&
+            (el === dialogEl || dialogEl.contains(el) || el === dialogEl.parentElement)
+          ),
+        }
+      }, [x, y])
+
+    // With nothing in front of it, that point really is the graph — otherwise
+    // the assertion below would pass for the wrong reason.
+    expect(await hitAt(cx, cy)).toEqual({
+      isGraph: true,
+      inKeyframePanel: true,
+      inDialogLayer: false,
+    })
+
+    await page.keyboard.press('Shift+Slash')
+    await expect(page.getByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeVisible()
+
+    // ...and now the sheet is what a click at that point would hit: the graph is
+    // no longer the hit target and nothing in the keyframe panel is either.
+    expect(await hitAt(cx, cy)).toEqual({
+      isGraph: false,
+      inKeyframePanel: false,
+      inDialogLayer: true,
+    })
+
+    // The consequence: clicking there cannot focus the graph — the click lands
+    // in the sheet, which is what used to be unreachable at this coordinate.
+    await page.mouse.click(cx, cy)
+    expect(await graph.evaluate((el) => el === document.activeElement)).toBe(false)
+  })
+
+  test('project load dialog passes axe-core audit', async ({ page }) => {
+    // The safety dialog only appears when there is work to lose, so seed a clip
+    // first. Opening a project goes through the File System Access API; stub the
+    // picker so the file arrives without a native dialog. The file is never read
+    // on this path — the dialog is the question asked *before* the load — so any
+    // handle that answers `getFile()` will do.
+    await seedTextClip(page)
+    await page.evaluate(() => {
+      ;(window as unknown as { showOpenFilePicker: unknown }).showOpenFilePicker = async () => [
+        { getFile: async () => new File(['{}'], 'seed.veditor', { type: 'application/json' }) },
+      ]
+    })
+
+    await page.getByRole('button', { name: 'File menu' }).click()
+    await page.getByText('Open Project...').click()
+
+    const dialog = page.getByRole('dialog', { name: 'Load Project' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
+
+    expect(await dialogViolations(page)).toHaveLength(0)
+  })
+
+  test('session restore prompt passes axe-core audit', async ({ page }) => {
+    // The prompt is only offered for a session that holds at least one source
+    // video (`app/useSessionRestore.ts`), and it is read on mount — so write one
+    // straight into the `settings` store the app keeps it in and reload. The
+    // first navigation in `beforeEach` is what created the database.
+    await page.evaluate(async () => {
+      const session = {
+        project: {
+          id: 'seeded',
+          name: 'Seeded Session',
+          width: 1280,
+          height: 720,
+          frameRate: 30,
+          duration: 0,
+          created: 0,
+          modified: 0,
+          timeline: { clips: [], tracks: [], duration: 0 },
+        },
+        sourceVideos: [
+          {
+            id: 'video1',
+            name: 'video1.mp4',
+            duration: 10,
+            width: 1280,
+            height: 720,
+            frameRate: 30,
+            mimeType: 'video/mp4',
+            size: 1000,
+          },
+        ],
+        currentTime: 0,
+        selectedClipId: null,
+        zoom: 1,
+        timestamp: Date.now(),
+      }
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('video-editor-db')
+        request.onerror = () => reject(new Error('Failed to open database'))
+        request.onsuccess = () => {
+          const tx = request.result.transaction('settings', 'readwrite')
+          tx.objectStore('settings').put(session, 'current-session')
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(new Error('Failed to seed session'))
+        }
+      })
+    })
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+
+    const prompt = page.getByRole('dialog', { name: 'Resume Previous Session?' })
+    await expect(prompt).toBeVisible()
+    await expect(prompt).toHaveAttribute('aria-modal', 'true')
+
+    expect(await dialogViolations(page)).toHaveLength(0)
+  })
+
   test('keyframe graph passes axe-core audit and is keyboard reachable', async ({ page }) => {
     // The graph only exists inside the keyframe panel, which only draws one for
     // a selected clip — so seed a clip (it is selected on creation), open the

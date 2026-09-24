@@ -13,8 +13,10 @@
 
   --accent-primary: #4a9eff;
   /* Ink for text/icons on an --accent-primary fill — white only reaches 2.75:1
-     there. Applied to the toolbar, export and track controls so far; the
-     remaining accent-filled buttons still use white (see #275 follow-ups). */
+     there. Applied to the toolbar, export and track controls, and to the
+     session-restore and project-load dialogs' primary buttons (the axe audits
+     added with their focus traps caught both); any accent-filled button still
+     on white is a remaining #275 follow-up. */
   --accent-on-fill: #0b1220;
   --accent-secondary: #7c4dff;
   --accent-success: #4caf50;
@@ -57,6 +59,16 @@
   /* Z-index layers */
   --z-base: 0;
   --z-dropdown: 100;
+  /* Floating panels that live outside #root as body portals — the keyframe
+     panel is the only one. Above the timeline (nothing in ARTIST uses
+     --z-dropdown today; the File menu sits at --z-modal, so the panel is
+     below its backdrop too, which is right for a menu that owns the screen),
+     and deliberately BELOW --z-modal: the panel used to be a bare z-index: 1000,
+     so it painted over every modal backdrop and a pointer could click straight
+     through an open aria-modal dialog into the keyframe graph and edit
+     keyframes behind it. The focus trap closes the Tab route; this token is
+     what closes the pointer route. */
+  --z-panel: 150;
   --z-modal: 200;
   --z-tooltip: 300;
   --z-playhead: 50;
