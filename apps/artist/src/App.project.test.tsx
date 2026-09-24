@@ -272,6 +272,72 @@ describe('App project lifecycle', () => {
     })
   })
 
+  describe('one project-load dialog', () => {
+    // ESCSUITE-63: dropping a `.veditor` on the uploader used to open a *second*
+    // `ProjectLoadDialog` — the uploader's own, with its own pending file and its
+    // own copies of the replace/merge handlers. That flag was not in `modalOpen`,
+    // so Ctrl+O still fired from behind it and opened App's copy on top: two
+    // mounted dialogs, a duplicate `id="project-load-title"` (the second
+    // dialog's `aria-labelledby` then silently resolving to the first heading),
+    // a duplicate testid, and two focus traps fighting over Tab.
+    const dropProjectFile = async (dropped: File) => {
+      const zone = screen.getByText('Drop media or click to browse').parentElement as HTMLElement
+      fireEvent.drop(zone, { dataTransfer: { files: [dropped] } })
+      expect(await screen.findByTestId('project-load-dialog')).toBeInTheDocument()
+    }
+
+    it('shows one dialog, and Ctrl+O cannot stack a second on it', async () => {
+      addClip('clip1', 0, 2)
+      vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+      await renderApp()
+
+      await dropProjectFile(new File(['{}'], 'dropped.veditor', { type: '' }))
+      fireEvent.keyDown(window, { key: 'o', ctrlKey: true })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(screen.getAllByRole('dialog', { name: 'Load Project' })).toHaveLength(1)
+      expect(screen.getAllByTestId('project-load-dialog')).toHaveLength(1)
+      // The gate held: the picker was never even opened.
+      expect(showOpenProjectDialog).not.toHaveBeenCalled()
+    })
+
+    it('loads the dropped file from that one dialog', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const user = userEvent.setup()
+      addClip('clip1', 0, 2)
+      const dropped = new File(['{}'], 'dropped.veditor', { type: '' })
+      await renderApp()
+      await dropProjectFile(dropped)
+
+      await user.click(screen.getByTestId('project-load-discard'))
+
+      await waitFor(() => expect(loadProject).toHaveBeenCalledWith(dropped))
+      expect(saveProject).not.toHaveBeenCalled()
+      consoleError.mockRestore()
+    })
+
+    it('loads a dropped file straight away with an empty timeline, and says so', async () => {
+      const dropped = new File(['{}'], 'dropped.veditor', { type: '' })
+      vi.mocked(loadProject).mockResolvedValueOnce({
+        project: { ...store().project, name: 'Dropped Project' },
+        sourceVideos: [],
+      })
+      await renderApp()
+
+      const zone = screen.getByText('Drop media or click to browse').parentElement as HTMLElement
+      fireEvent.drop(zone, { dataTransfer: { files: [dropped] } })
+
+      // The drop path used to load in silence, and `alert()` on failure. It is
+      // the app's own notice channel now, the same as the File menu's.
+      await waitFor(() => expect(notification()).toBe('Project loaded successfully'))
+      expect(store().project.name).toBe('Dropped Project')
+      expect(screen.queryByTestId('project-load-dialog')).not.toBeInTheDocument()
+    })
+  })
+
   describe('the session restore prompt', () => {
     it('restores the saved session', async () => {
       const user = userEvent.setup()

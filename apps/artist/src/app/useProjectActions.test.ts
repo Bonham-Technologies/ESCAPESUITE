@@ -175,6 +175,48 @@ describe('opening a project', () => {
   })
 })
 
+describe('a project file handed in from elsewhere', () => {
+  // `handleProjectFile` is the "given a project file" half of
+  // `handleLoadProject`, exposed so the uploader's drop/pick path can ask the
+  // same question instead of owning a second dialog of its own (ESCSUITE-63).
+  it('loads it straight away when the timeline is empty', async () => {
+    const file = projectFile()
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Dropped' },
+      sourceVideos: [],
+    })
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      result.current.handleProjectFile(file)
+    })
+
+    expect(loadProject).toHaveBeenCalledWith(file)
+    expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'Dropped' }))
+    expect(deps.showNotification).toHaveBeenCalledWith('Project loaded successfully', 'success')
+    expect(result.current.showProjectLoadDialog).toBe(false)
+    // Nothing was picked: the file arrived from the caller, not the file picker.
+    expect(showOpenProjectDialog).not.toHaveBeenCalled()
+  })
+
+  it('asks first when there is work on the timeline, and the answer loads that file', async () => {
+    const file = projectFile()
+    const { result } = mountActions({ clipCount: 2 })
+
+    act(() => {
+      result.current.handleProjectFile(file)
+    })
+    expect(result.current.showProjectLoadDialog).toBe(true)
+    expect(loadProject).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await result.current.handleProjectLoadDiscardAndLoad()
+    })
+
+    expect(loadProject).toHaveBeenCalledWith(file)
+  })
+})
+
 describe('the safety dialog', () => {
   /** Open the dialog the way Ctrl+O over a populated timeline does. */
   const openDialog = async (result: { current: { handleLoadProject: () => Promise<void> } }) => {

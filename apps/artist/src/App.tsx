@@ -102,6 +102,7 @@ function App() {
     showProjectLoadDialog,
     handleSaveProject,
     handleLoadProject,
+    handleProjectFile,
     handleNewProject,
     handleProjectLoadCancel,
     handleProjectLoadSaveAndLoad,
@@ -237,6 +238,7 @@ function App() {
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           onConfirmOpenChange={setResolutionConfirmOpen}
+          onProjectFile={handleProjectFile}
         />
 
         {/* Center - Preview */}

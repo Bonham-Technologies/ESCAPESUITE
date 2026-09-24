@@ -3,10 +3,8 @@ import { useEditorStore } from '../store/projectStore';
 import { processVideoFile, processImageFile, processAudioFile } from '../core/videoProcessor';
 import { getStorageEstimate, clearAllVideos, deleteVideo } from '../core/storage';
 import { getFrameCache } from '../core/frameCache';
-import { saveProject, loadProject } from '../core/projectManager';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
-import { ProjectLoadDialog } from './ProjectLoadDialog';
 import styles from './VideoUploader.module.css';
 
 interface UploadProgress {
@@ -22,23 +20,34 @@ interface StorageInfo {
   available: number;
 }
 
-export function VideoUploader() {
+interface VideoUploaderProps {
+  /**
+   * Called with a `.veditor` the user dropped here or picked through the file
+   * input. The uploader recognises a project file and hands it on; the "you
+   * have unsaved work" question, the dialog and the load itself all belong to
+   * `useProjectActions` (`App` passes its `handleProjectFile`).
+   *
+   * Required, and deliberately: this used to be a second `ProjectLoadDialog`
+   * rendered right here, with its own pending file and its own copies of the
+   * replace/merge handlers — a dialog `App`'s `modalOpen` knew nothing about, so
+   * the editor behind it still took every key and Ctrl+O stacked App's copy on
+   * top of it (ESCSUITE-63). A caller that forgets to wire this now fails to
+   * compile rather than silently swallowing a dropped project.
+   */
+  onProjectFile: (file: File) => void;
+}
+
+export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [showStorageWarning, setShowStorageWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [pendingProjectFile, setPendingProjectFile] = useState<File | null>(null);
-  const [showProjectLoadDialog, setShowProjectLoadDialog] = useState(false);
-
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
-  const project = useEditorStore((state) => state.project);
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const addSourceVideo = useEditorStore((state) => state.addSourceVideo);
   const removeSourceVideo = useEditorStore((state) => state.removeSourceVideo);
-  const setProject = useEditorStore((state) => state.setProject);
-  const resetProject = useEditorStore((state) => state.resetProject);
 
   // Calculate which videos are unused (not referenced by any clip)
   const { unusedVideos, unusedSize } = useMemo(() => {
@@ -125,62 +134,13 @@ export function VideoUploader() {
     }
   }, [sourceVideos, removeSourceVideo, refreshStorageInfo]);
 
-  // Load a .veditor project file
-  const loadProjectFile = useCallback(async (file: File) => {
-    try {
-      const { project: loadedProject, sourceVideos: loadedVideos } = await loadProject(file);
-      resetProject();
-      setProject(loadedProject);
-      loadedVideos.forEach(addSourceVideo);
-    } catch (error) {
-      console.error('Failed to load project file:', error);
-      alert('Failed to load project file.');
-    }
-  }, [resetProject, setProject, addSourceVideo]);
-
-  // Handle .veditor file upload with safety dialog
-  const handleProjectFileUpload = useCallback((file: File) => {
-    if (clips.length > 0) {
-      setPendingProjectFile(file);
-      setShowProjectLoadDialog(true);
-    } else {
-      loadProjectFile(file);
-    }
-  }, [clips.length, loadProjectFile]);
-
-  const handleProjectLoadCancel = useCallback(() => {
-    setPendingProjectFile(null);
-    setShowProjectLoadDialog(false);
-  }, []);
-
-  const handleProjectLoadSaveAndLoad = useCallback(async () => {
-    setShowProjectLoadDialog(false);
-    const file = pendingProjectFile;
-    setPendingProjectFile(null);
-    if (!file) return;
-    try {
-      await saveProject(project, sourceVideos);
-    } catch (error) {
-      console.error('Failed to save current project:', error);
-    }
-    await loadProjectFile(file);
-  }, [pendingProjectFile, project, sourceVideos, loadProjectFile]);
-
-  const handleProjectLoadDiscardAndLoad = useCallback(async () => {
-    setShowProjectLoadDialog(false);
-    const file = pendingProjectFile;
-    setPendingProjectFile(null);
-    if (!file) return;
-    await loadProjectFile(file);
-  }, [pendingProjectFile, loadProjectFile]);
-
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const allFiles = Array.from(files);
 
     // Check for .veditor project files first
     const projectFiles = allFiles.filter((file) => file.name.endsWith('.veditor'));
     if (projectFiles.length > 0) {
-      handleProjectFileUpload(projectFiles[0]);
+      onProjectFile(projectFiles[0]);
       return;
     }
 
@@ -265,7 +225,7 @@ export function VideoUploader() {
         refreshStorageInfo();
       }
     }
-  }, [addSourceVideo, refreshStorageInfo, handleProjectFileUpload]);
+  }, [addSourceVideo, refreshStorageInfo, onProjectFile]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -416,13 +376,6 @@ export function VideoUploader() {
           ))}
         </div>
       )}
-
-      <ProjectLoadDialog
-        isOpen={showProjectLoadDialog}
-        onCancel={handleProjectLoadCancel}
-        onSaveAndLoad={handleProjectLoadSaveAndLoad}
-        onDiscardAndLoad={handleProjectLoadDiscardAndLoad}
-      />
     </div>
   );
 }

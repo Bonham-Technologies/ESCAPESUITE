@@ -2,6 +2,12 @@
 // (with the "you have unsaved work" safety dialog in front of it), and
 // starting over.
 //
+// It owns the *only* project-load dialog in the editor. `VideoUploader` used to
+// render a second one for a dropped `.veditor`, with its own pending file and
+// its own copies of the replace/merge handlers — and a flag `App`'s `modalOpen`
+// knew nothing about, so Ctrl+O stacked App's dialog on top of it (ESCSUITE-63).
+// `handleProjectFile` is the entry that path now calls instead.
+//
 // Binds no effects, so its position in `App`'s hook order does not affect the
 // effect order; it sits third because the keyboard-shortcut hook takes
 // `handleSaveProject` and `handleLoadProject` as parameters.
@@ -41,6 +47,14 @@ export interface ProjectActions {
   showProjectLoadDialog: boolean;
   handleSaveProject: () => Promise<void>;
   handleLoadProject: () => Promise<void>;
+  /**
+   * Open the project in `file`: ask first if the timeline holds work, load it
+   * outright if it does not.
+   *
+   * For callers that already have the file — the uploader's drop and pick paths
+   * — where `handleLoadProject` is for the ones that need it picked first.
+   */
+  handleProjectFile: (file: File) => void;
   handleNewProject: () => void;
   handleProjectLoadCancel: () => void;
   handleProjectLoadSaveAndLoad: () => Promise<void>;
@@ -99,11 +113,11 @@ export function useProjectActions({
     }
   }, [resetProject, setProject, addSourceVideo, showNotification]);
 
-  // Handle load project (Ctrl+O / File menu)
-  const handleLoadProject = useCallback(async () => {
-    const file = await showOpenProjectDialog();
-    if (!file) return;
-
+  // Given a project file: ask before replacing work in progress, load it
+  // straight away when there is none. Shared by Ctrl+O / the File menu (which
+  // picks the file first) and the uploader's drop and pick paths (which are
+  // handed one).
+  const handleProjectFile = useCallback((file: File) => {
     if (clipCount > 0) {
       setPendingProjectFile(file);
       setShowProjectLoadDialog(true);
@@ -111,6 +125,14 @@ export function useProjectActions({
       loadProjectFile(file);
     }
   }, [clipCount, loadProjectFile]);
+
+  // Handle load project (Ctrl+O / File menu)
+  const handleLoadProject = useCallback(async () => {
+    const file = await showOpenProjectDialog();
+    if (!file) return;
+
+    handleProjectFile(file);
+  }, [handleProjectFile]);
 
   const handleProjectLoadCancel = useCallback(() => {
     setPendingProjectFile(null);
@@ -160,6 +182,7 @@ export function useProjectActions({
     showProjectLoadDialog,
     handleSaveProject,
     handleLoadProject,
+    handleProjectFile,
     handleNewProject,
     handleProjectLoadCancel,
     handleProjectLoadSaveAndLoad,

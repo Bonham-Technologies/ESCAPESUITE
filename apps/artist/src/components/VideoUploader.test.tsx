@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { VideoUploader, VideoLibrary } from './VideoUploader'
 import { useEditorStore } from '../store/projectStore'
@@ -6,7 +6,7 @@ import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore
 import { getFrameCache, resetFrameCache } from '../core/frameCache'
 import { storeVideo, getAllVideoMetadata } from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
-import type { Project, SourceVideo } from '../store/types'
+import type { SourceVideo } from '../store/types'
 import styles from './VideoUploader.module.css'
 
 // The metadata extractors need real media decoding, so they stay collaborators;
@@ -21,16 +21,6 @@ vi.mock('../core/videoProcessor', () => ({
   processVideoFile: mockProcessVideoFile,
   processImageFile: mockProcessImageFile,
   processAudioFile: mockProcessAudioFile,
-}))
-
-const { mockSaveProject, mockLoadProject } = vi.hoisted(() => ({
-  mockSaveProject: vi.fn(),
-  mockLoadProject: vi.fn(),
-}))
-
-vi.mock('../core/projectManager', () => ({
-  saveProject: mockSaveProject,
-  loadProject: mockLoadProject,
 }))
 
 const MB = 1024 * 1024
@@ -84,6 +74,14 @@ function fakeBitmap(width = 100, height = 100) {
 
 const file = (name: string, type: string, content = 'x') => new File([content], name, { type })
 
+/**
+ * What `App` passes down: `useProjectActions`' "given a project file" entry.
+ *
+ * The uploader recognises a `.veditor` and hands it up — it asks nothing and
+ * loads nothing itself, so every case can render it with a spy here.
+ */
+let onProjectFile: Mock<(file: File) => void>
+
 const dropZone = () => screen.getByText('Drop media or click to browse').parentElement!
 const fileInput = () => screen.getByLabelText('Add media files') as HTMLInputElement
 
@@ -103,7 +101,7 @@ describe('VideoUploader', () => {
     mockProcessVideoFile.mockResolvedValue(videoMeta)
     mockProcessImageFile.mockResolvedValue(imageMeta)
     mockProcessAudioFile.mockResolvedValue(audioMeta)
-    mockSaveProject.mockResolvedValue(undefined)
+    onProjectFile = vi.fn()
     vi.stubGlobal('confirm', vi.fn(() => true))
     vi.stubGlobal('alert', vi.fn())
   })
@@ -121,7 +119,7 @@ describe('VideoUploader', () => {
      * unasserted.
      */
     async function renderUploader(): Promise<void> {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
       await act(async () => {
         await Promise.resolve()
       })
@@ -158,7 +156,7 @@ describe('VideoUploader', () => {
 
   describe('storage information', () => {
     it('reports what is used against the quota', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       expect(await screen.findByText('50.0 MB / 500.0 MB')).toBeInTheDocument()
       const fill = document.querySelector<HTMLElement>(`.${styles.storageProgressFill}`)!
@@ -168,7 +166,7 @@ describe('VideoUploader', () => {
 
     it('warns when less than 100MB is left', async () => {
       scriptStorage(60 * MB, 100 * MB)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       await waitFor(() =>
         expect(document.querySelector(`.${styles.storageBar}`)).toHaveClass(styles.storageWarning)
@@ -182,7 +180,7 @@ describe('VideoUploader', () => {
       })
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader />)
+        render(<VideoUploader onProjectFile={onProjectFile} />)
 
         await waitFor(() =>
           expect(errorLog).toHaveBeenCalledWith(
@@ -199,7 +197,7 @@ describe('VideoUploader', () => {
 
   describe('importing media', () => {
     it('imports a dropped video into the media library', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
       const dropped = file('test.mp4', 'video/mp4')
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [dropped] } })
@@ -210,7 +208,7 @@ describe('VideoUploader', () => {
     })
 
     it('routes an image to the image processor', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       selectFiles([file('test.png', 'image/png')])
 
@@ -220,7 +218,7 @@ describe('VideoUploader', () => {
     })
 
     it('routes audio to the audio processor', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       selectFiles([file('test.mp3', 'audio/mp3')])
 
@@ -229,7 +227,7 @@ describe('VideoUploader', () => {
     })
 
     it('clears the file input so the same file can be picked again', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
       const input = fileInput()
       // jsdom never reports a non-empty value for a file input, so record what
       // the component writes rather than reading the value back.
@@ -249,7 +247,7 @@ describe('VideoUploader', () => {
 
     it('drops the finished upload from the list after a moment', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
       await act(async () => {
@@ -267,7 +265,7 @@ describe('VideoUploader', () => {
     })
 
     it('rejects files that are not media at all', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       selectFiles([file('notes.txt', 'text/plain')])
 
@@ -279,7 +277,7 @@ describe('VideoUploader', () => {
 
     it('refuses a file that would not fit in the remaining quota', async () => {
       scriptStorage(10 * MB, 15 * MB)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       selectFiles([file('big.mp4', 'video/mp4', 'x'.repeat(2048))])
 
@@ -295,7 +293,7 @@ describe('VideoUploader', () => {
       mockProcessVideoFile.mockRejectedValue(new Error('Unsupported codec'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader />)
+        render(<VideoUploader onProjectFile={onProjectFile} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -314,7 +312,7 @@ describe('VideoUploader', () => {
       mockProcessVideoFile.mockRejectedValue(new Error('QuotaExceededError: no room'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader />)
+        render(<VideoUploader onProjectFile={onProjectFile} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -330,7 +328,7 @@ describe('VideoUploader', () => {
       mockProcessVideoFile.mockRejectedValue('kaboom')
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader />)
+        render(<VideoUploader onProjectFile={onProjectFile} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -341,126 +339,59 @@ describe('VideoUploader', () => {
     })
   })
 
-  describe('loading a project file', () => {
-    const loadedProject = (): Project => ({
-      ...store().project,
-      id: 'loaded',
-      name: 'Loaded Project',
+  describe('handing a project file to its caller', () => {
+    // The uploader used to own a *second* `ProjectLoadDialog`, its own
+    // `pendingProjectFile` / `showProjectLoadDialog` state and its own copies of
+    // the replace/merge handlers — a dialog `App`'s `modalOpen` knew nothing
+    // about (ESCSUITE-63). The question, the dialog and the load all belong to
+    // `useProjectActions` now; the seven cases that drove the uploader's own
+    // dialog moved there and to App.project.test.tsx with them.
+    it('hands a dropped project file up, and asks nothing itself', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} />)
+      const projectFile = file('my.veditor', '')
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [projectFile] } })
+
+      await waitFor(() => expect(onProjectFile).toHaveBeenCalledWith(projectFile))
+      expect(screen.queryByTestId('project-load-dialog')).not.toBeInTheDocument()
     })
 
-    beforeEach(() => {
-      mockLoadProject.mockImplementation(() =>
-        Promise.resolve({ project: loadedProject(), sourceVideos: [videoMeta] })
-      )
-    })
-
-    it('loads straight away when the timeline is empty', async () => {
-      render(<VideoUploader />)
+    it('hands a picked project file up the same way', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} />)
       const projectFile = file('my.veditor', '')
 
       selectFiles([projectFile])
 
-      await waitFor(() => expect(store().project.name).toBe('Loaded Project'))
-      expect(mockLoadProject).toHaveBeenCalledWith(projectFile)
-      expect(store().sourceVideos).toEqual([videoMeta])
-      expect(screen.queryByTestId('project-load-dialog')).not.toBeInTheDocument()
+      await waitFor(() => expect(onProjectFile).toHaveBeenCalledWith(projectFile))
     })
 
-    it('asks first when the timeline already holds clips', async () => {
+    it('hands it up whatever is on the timeline — the caller decides what to ask', async () => {
       addClip('clip1', 0, 2)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       selectFiles([file('my.veditor', '')])
 
-      expect(await screen.findByTestId('project-load-dialog')).toBeInTheDocument()
-      expect(mockLoadProject).not.toHaveBeenCalled()
-    })
-
-    it('leaves the current project alone when the prompt is cancelled', async () => {
-      addClip('clip1', 0, 2)
-      render(<VideoUploader />)
-      selectFiles([file('my.veditor', '')])
-      await screen.findByTestId('project-load-dialog')
-
-      fireEvent.click(screen.getByTestId('project-load-cancel'))
-
+      await waitFor(() => expect(onProjectFile).toHaveBeenCalledTimes(1))
       expect(screen.queryByTestId('project-load-dialog')).not.toBeInTheDocument()
-      expect(mockLoadProject).not.toHaveBeenCalled()
       expect(store().project.timeline.clips).toHaveLength(1)
     })
 
-    it('saves the current project before loading when asked to', async () => {
-      addClip('clip1', 0, 2)
-      const currentProject = store().project
-      const currentSources = store().sourceVideos
-      render(<VideoUploader />)
-      selectFiles([file('my.veditor', '')])
-      await screen.findByTestId('project-load-dialog')
-
-      fireEvent.click(screen.getByTestId('project-load-save'))
-
-      await waitFor(() => expect(mockLoadProject).toHaveBeenCalledTimes(1))
-      expect(mockSaveProject).toHaveBeenCalledWith(currentProject, currentSources)
-      expect(store().project.name).toBe('Loaded Project')
-    })
-
-    it('still loads when saving the current project fails', async () => {
-      addClip('clip1', 0, 2)
-      mockSaveProject.mockRejectedValue(new Error('disk full'))
-      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
-      try {
-        render(<VideoUploader />)
-        selectFiles([file('my.veditor', '')])
-        await screen.findByTestId('project-load-dialog')
-
-        fireEvent.click(screen.getByTestId('project-load-save'))
-
-        await waitFor(() => expect(store().project.name).toBe('Loaded Project'))
-        expect(errorLog).toHaveBeenCalledWith(
-          'Failed to save current project:',
-          expect.any(Error)
-        )
-      } finally {
-        errorLog.mockRestore()
-      }
-    })
-
-    it('discards the current project when asked to', async () => {
-      addClip('clip1', 0, 2)
-      render(<VideoUploader />)
-      selectFiles([file('my.veditor', '')])
-      await screen.findByTestId('project-load-dialog')
-
-      fireEvent.click(screen.getByTestId('project-load-discard'))
-
-      await waitFor(() => expect(store().project.name).toBe('Loaded Project'))
-      expect(mockSaveProject).not.toHaveBeenCalled()
-    })
-
-    it('tells the user when the project file cannot be read', async () => {
-      mockLoadProject.mockRejectedValue(new Error('corrupt'))
-      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
-      try {
-        render(<VideoUploader />)
-
-        selectFiles([file('my.veditor', '')])
-
-        await waitFor(() =>
-          expect(globalThis.alert).toHaveBeenCalledWith('Failed to load project file.')
-        )
-        expect(errorLog).toHaveBeenCalledWith('Failed to load project file:', expect.any(Error))
-      } finally {
-        errorLog.mockRestore()
-      }
-    })
-
     it('ignores the media alongside a project file', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       selectFiles([file('my.veditor', ''), file('test.mp4', 'video/mp4')])
 
-      await waitFor(() => expect(mockLoadProject).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(onProjectFile).toHaveBeenCalledTimes(1))
       expect(mockProcessVideoFile).not.toHaveBeenCalled()
+    })
+
+    it('leaves a file that is not a project to the media path', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} />)
+
+      selectFiles([file('test.mp4', 'video/mp4')])
+
+      await waitFor(() => expect(mockProcessVideoFile).toHaveBeenCalledTimes(1))
+      expect(onProjectFile).not.toHaveBeenCalled()
     })
   })
 
@@ -470,7 +401,7 @@ describe('VideoUploader', () => {
       store().addSourceVideo(videoMeta)
       const bitmap = fakeBitmap()
       getFrameCache().set(0, bitmap)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -485,7 +416,7 @@ describe('VideoUploader', () => {
       vi.mocked(globalThis.confirm).mockReturnValue(false)
       await storeVideo('kept', new Blob(['bytes']), { ...videoMeta, id: 'kept' })
       store().addSourceVideo(videoMeta)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -496,14 +427,14 @@ describe('VideoUploader', () => {
 
     it('hides the clear-all button when almost nothing is stored', async () => {
       scriptStorage(1024, 500 * MB)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       await screen.findByText('1.0 KB / 500.0 MB')
       expect(screen.queryByRole('button', { name: 'Clear All' })).not.toBeInTheDocument()
     })
 
     it('offers to clear the frame cache only while frames are held', async () => {
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
       await screen.findByText('50.0 MB / 500.0 MB')
       expect(screen.queryByRole('button', { name: /Clear Cache/ })).not.toBeInTheDocument()
     })
@@ -511,7 +442,7 @@ describe('VideoUploader', () => {
     it('clears the frame cache', async () => {
       const bitmap = fakeBitmap()
       getFrameCache().set(0, bitmap)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       // 100x100 RGBA = 40000 bytes
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Cache (39.1 KB)' }))
@@ -526,7 +457,7 @@ describe('VideoUploader', () => {
       store().addSourceVideo(videoMeta)
       store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048 })
       addClip('clip1', 0, 2) // references video1
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
 
@@ -537,7 +468,7 @@ describe('VideoUploader', () => {
     it('hides the clear-unused button when every source is in use', async () => {
       store().addSourceVideo(videoMeta)
       addClip('clip1', 0, 2)
-      render(<VideoUploader />)
+      render(<VideoUploader onProjectFile={onProjectFile} />)
 
       await screen.findByText('50.0 MB / 500.0 MB')
       expect(screen.queryByRole('button', { name: /Clear Unused/ })).not.toBeInTheDocument()

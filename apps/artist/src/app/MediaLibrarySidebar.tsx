@@ -14,6 +14,13 @@ interface MediaLibrarySidebarProps {
    * compile.
    */
   onConfirmOpenChange: (open: boolean) => void;
+  /**
+   * Passed straight to `VideoUploader`: called with a `.veditor` the user
+   * dropped on it or picked through it. `App` passes `useProjectActions`'
+   * `handleProjectFile`, which owns the editor's one project-load dialog — the
+   * uploader asks nothing and loads nothing itself.
+   */
+  onProjectFile: (file: File) => void;
 }
 
 /**
@@ -28,6 +35,7 @@ export function MediaLibrarySidebar({
   collapsed,
   onToggle,
   onConfirmOpenChange,
+  onProjectFile,
 }: MediaLibrarySidebarProps) {
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''}`}>
@@ -53,7 +61,7 @@ export function MediaLibrarySidebar({
       {!collapsed && (
         <>
           <div className={styles.uploaderContainer}>
-            <VideoUploader />
+            <VideoUploader onProjectFile={onProjectFile} />
             <ResolutionPicker onConfirmOpenChange={onConfirmOpenChange} />
           </div>
 

@@ -699,7 +699,7 @@ single `toBeLessThanOrEqual(1)`.
 
 Every module below has its own test file. `App.tsx` itself is covered through the six
 `App.*.test.tsx` files that drive the rendered editor — `App.test.tsx` (the shell),
-`App.project.test.tsx` (new/open/save and the load-safety dialog), `App.session.test.tsx`
+`App.project.test.tsx` (new/open/save, the load-safety dialog and the one-dialog rule), `App.session.test.tsx`
 (restore prompt and autosave), `App.shortcuts.test.tsx` (the keydown cascade),
 `App.messages.test.tsx` (the host integration surface) and `App.rerender.test.tsx` (the
 `currentTime` contract above). `src/App.module.css` is deliberately not split: all ten
@@ -714,7 +714,7 @@ and queries `styles.menuBackdrop`.
 | `sessionSnapshot.ts` | `buildSessionSnapshot` — what of the editor's state the autosave writes, and in what shape. Takes the state and the timestamp as values rather than reading `getState()`/`Date.now()` itself, so the call site keeps control of *when* they are read |
 | `useThemeLifecycle.ts` | Starting the shared theme module on mount and stopping it on unmount. The editor's **first** effect, so `App` calls it first |
 | `useNotification.ts` | The transient status toast: one slot, not a queue. `showNotification` overwrites whatever is showing and opens a fresh three-second timer, which is deliberately neither stored nor cleared — carried behaviour, pinned by the App suite. Binds no effect; sits second because every hook after it takes `showNotification` |
-| `useProjectActions.ts` | Project lifecycle: save to disk, open from disk with the "you have unsaved work" dialog in front of it, and start over. Owns `isSaving`, `isLoading`, `showProjectLoadDialog` and the pending file. Takes `clipCount` as a number, the dependency both callbacks carried inline. Binds no effect; sits third because the shortcut hook takes `handleSaveProject` and `handleLoadProject` |
+| `useProjectActions.ts` | Project lifecycle: save to disk, open from disk with the "you have unsaved work" dialog in front of it, and start over. Owns `isSaving`, `isLoading`, `showProjectLoadDialog` and the pending file — and the editor's **only** project-load dialog: `handleProjectFile(file)` is the "given a project file" entry the uploader's drop/pick path calls, with `handleLoadProject` being that same entry behind the file picker (see "Dialogs"). Takes `clipCount` as a number, the dependency both callbacks carried inline. Binds no effect; sits third because the shortcut hook takes `handleSaveProject` and `handleLoadProject` |
 | `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect |
 | `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
@@ -723,7 +723,7 @@ and queries `styles.menuBackdrop`.
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
 | `AppHeader.tsx` | The top bar: the dashboard link (hidden in the standalone build, which this component asks about itself), the wordmark, the project-name field, and the File menu plus the quick Save and Export buttons |
 | `FileMenu.tsx` | The header's File dropdown: the button, the click-outside backdrop, and the four items with their shortcut hints. Each item acts and then closes; what "acts" means belongs to the caller |
-| `MediaLibrarySidebar.tsx` | The left sidebar: its header and collapse button, and — while open — the uploader, the resolution picker and the library listing. `onConfirmOpenChange` is a pure pass-through to `ResolutionPicker` that the sidebar has no behaviour of its own for (see "Dialogs"); it is **required** here, so a caller that forgets to wire it fails to compile |
+| `MediaLibrarySidebar.tsx` | The left sidebar: its header and collapse button, and — while open — the uploader, the resolution picker and the library listing. Two of its props are pure pass-throughs it has no behaviour of its own for — `onConfirmOpenChange` to `ResolutionPicker` and `onProjectFile` to `VideoUploader` — and both are **required** here, so a caller that forgets to wire either fails to compile (see "Dialogs" for both) |
 | `InspectorSidebar.tsx` | The right sidebar: the inspector's header and collapse button, with `ClipEditor` underneath while it is open |
 | `MobileInspectorToggle.tsx` | The floating inspector toggle shown at narrow widths, rendered inside `<main>` as a sibling of the inspector it controls |
 | `TimelineResizeHandle.tsx` | The grab strip between the editor body and the timeline. It reports the two gestures and nothing else; the drag belongs to `useTimelineHeight` |
@@ -880,19 +880,30 @@ no dialog in front of the user to be confused by. `SessionRestorePrompt` and
 `ProjectLoadDialog` (`useProjectActions`' `showProjectLoadDialog`) are both in the flag and
 both trap focus: each is a question with buttons that waits for an answer.
 
-**`ProjectLoadDialog` is rendered twice, and only one of the two is in the flag.** `App` renders
-it from `useProjectActions`; `VideoUploader` renders a *second* instance with its own
-`showProjectLoadDialog` state, opened by dropping a `.veditor` on the uploader
-(`VideoUploader.tsx:144-145`). That second flag is **not** in `modalOpen`, so the editor behind
-the uploader's copy still takes every key — and Ctrl+O from there opens `App`'s copy on top of
-it, giving two mounted dialogs, a duplicate `id="project-load-title"` (the second dialog's
-`aria-labelledby` then silently resolves to the first heading), a duplicate
-`data-testid="project-load-dialog"`, and two focus traps competing for Tab. All of it predates
-the trap work, which neither caused nor removed it. The fix is one dialog and one state — route
-the uploader's drop through `useProjectActions` — or at minimum lift its flag into `modalOpen`;
-tracked as ESCSUITE-63. The flag and the
-trap are still worth having together — the flag stops the editor taking keys from behind a
-dialog, the trap stops Tab walking out of one.
+**There is one `ProjectLoadDialog`, served from `useProjectActions`** (ESCSUITE-63). It used to
+be rendered *twice*: `App`'s, plus a second instance inside `VideoUploader` with its own
+`showProjectLoadDialog` / `pendingProjectFile` state and its own copies of the replace/merge
+handlers, opened by dropping a `.veditor` on the uploader. That second flag was **not** in
+`modalOpen`, so the editor behind the uploader's copy took every key — and Ctrl+O from there
+opened `App`'s copy on top of it: two mounted dialogs, a duplicate `id="project-load-title"`
+(the second dialog's `aria-labelledby` then silently resolving to the first heading), a duplicate
+`data-testid="project-load-dialog"`, and two focus traps competing for Tab.
+
+`useProjectActions` now exposes **`handleProjectFile(file)`** — the "given a project file: ask if
+the timeline holds work, load it outright if not" half of `handleLoadProject`, which is all
+`handleLoadProject` does after picking a file. It is threaded `App → MediaLibrarySidebar →
+VideoUploader` as a **required** `onProjectFile`, so a caller that forgets it fails to compile
+rather than silently swallowing a dropped project, and the uploader keeps no project state at
+all: it recognises a `.veditor`, hands it up, and is done. Three behaviours the drop path used to
+have differently went with the duplication, all of them the App path's and all of them better:
+the load now shows the blocking `LoadingOverlay`, a success reports `Project loaded successfully`
+through the notice channel rather than nothing at all, and a file that cannot be read reports
+`Failed to load project` there too instead of a blocking `alert('Failed to load project file.')`
+— the only browser `alert()` any ARTIST error path still used. Save-and-load also announces its
+save (and its save *failure*), which the uploader's copy swallowed to the console.
+
+The flag and the trap are still worth having together — the flag stops the editor taking keys
+from behind a dialog, the trap stops Tab walking out of one.
 
 **The keyframe-graph gap is closed — by two fixes, because it had two routes in** (it was
 recorded here as open: the F4 finding of the modal-gate review). Nothing gates the *keyframe
