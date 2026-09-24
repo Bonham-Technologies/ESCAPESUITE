@@ -1,7 +1,21 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../store/projectStore';
 import { RESOLUTION_PRESETS } from '../store/types';
 import styles from './ResolutionPicker.module.css';
+
+interface ResolutionPickerProps {
+  /**
+   * Told whenever the change-resolution confirm opens or closes, so `App` can
+   * count it in `modalOpen` — the flag that stops the editor behind a dialog
+   * taking keys.
+   *
+   * Optional: the confirm is a complete dialog without it (the picker is
+   * rendered bare in its own tests), and nothing about the dialog's behaviour
+   * depends on anyone listening.
+   */
+  onConfirmOpenChange?: (open: boolean) => void;
+}
 
 type PresetKey = keyof typeof RESOLUTION_PRESETS;
 
@@ -19,7 +33,7 @@ function getCurrentPresetKey(width: number, height: number): PresetKey | 'custom
   return 'custom';
 }
 
-export function ResolutionPicker() {
+export function ResolutionPicker({ onConfirmOpenChange }: ResolutionPickerProps) {
   const resolution = useEditorStore((state) => state.project.resolution);
   const setProjectResolution = useEditorStore((state) => state.setProjectResolution);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -49,6 +63,31 @@ export function ResolutionPicker() {
     setPendingResolution(null);
   }, []);
 
+  // Escape cancels. Confirming is the only other answer and it rewrites the
+  // project's resolution, which a dismissal key must never do; cancelling costs
+  // nothing — the select is controlled by the store's resolution, so it snaps
+  // back to the preset still in force. Trap, initial focus and focus restored
+  // to the select all come from the hook, as they do for the other four modals.
+  const dialogRef = useDialogBehaviour(handleCancel, showConfirm);
+
+  // Read through a ref for the same reason the hook reads its `onClose` that
+  // way: a caller passing a fresh arrow every render would otherwise re-run the
+  // effect below, reporting a close and a re-open for a dialog that never moved.
+  const onConfirmOpenChangeRef = useRef(onConfirmOpenChange);
+  useEffect(() => {
+    onConfirmOpenChangeRef.current = onConfirmOpenChange;
+  }, [onConfirmOpenChange]);
+
+  // Derived from `showConfirm` rather than announced by the three handlers, so
+  // the report cannot drift from the state it describes — and so an unmount
+  // while the confirm is up (collapsing the sidebar) still reports it gone,
+  // instead of leaving `App`'s `modalOpen` stuck true and the editor deaf.
+  useEffect(() => {
+    if (!showConfirm) return;
+    onConfirmOpenChangeRef.current?.(true);
+    return () => onConfirmOpenChangeRef.current?.(false);
+  }, [showConfirm]);
+
   return (
     <div className={styles.container}>
       <div className={styles.row}>
@@ -74,9 +113,16 @@ export function ResolutionPicker() {
 
       {showConfirm && pendingResolution && (
         <div className={styles.confirmOverlay} data-testid="resolution-change-confirm">
-          <div className={styles.confirmDialog}>
+          <div
+            ref={dialogRef}
+            tabIndex={-1}
+            className={styles.confirmDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="resolution-confirm-title"
+          >
             <div className={styles.confirmHeader}>
-              <h3 className={styles.confirmTitle}>Change Resolution</h3>
+              <h2 className={styles.confirmTitle} id="resolution-confirm-title">Change Resolution</h2>
             </div>
             <div className={styles.confirmBody}>
               <p className={styles.confirmMessage}>

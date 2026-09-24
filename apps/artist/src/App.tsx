@@ -35,6 +35,11 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // The media library's resolution-change confirm, reported up from
+  // `ResolutionPicker` through `MediaLibrarySidebar`. It is the one modal whose
+  // open flag is not App's own state to begin with; two hops of prop rather than
+  // a field in the store's ui slice, which nothing else would read.
+  const [resolutionConfirmOpen, setResolutionConfirmOpen] = useState(false);
 
   // URL parameters are read once at startup; later URL changes are ignored.
   const [urlParams] = useState(parseUrlParams);
@@ -148,7 +153,12 @@ function App() {
   // for the screen reader, but it traps no focus, holds nothing to interact
   // with and is gone as soon as the project finishes loading — there is no
   // dialog in front of the user to be confused by.
-  const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog;
+  const modalOpen =
+    showExport ||
+    showShortcuts ||
+    showSessionPrompt ||
+    showProjectLoadDialog ||
+    resolutionConfirmOpen;
 
   useAppKeyboardShortcuts({
     canUndo,
@@ -226,6 +236,7 @@ function App() {
         <MediaLibrarySidebar
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onConfirmOpenChange={setResolutionConfirmOpen}
         />
 
         {/* Center - Preview */}

@@ -557,6 +557,21 @@ describe('App keyboard shortcuts', () => {
 
       expectNoKeysTaken()
     })
+
+    it('stops them while the resolution-change confirm is open', async () => {
+      // The fifth modal, and the one that reaches `modalOpen` through a prop
+      // rather than App's own state: the picker reports its confirm open to
+      // MediaLibrarySidebar, which hands it up.
+      const user = userEvent.setup()
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      await renderApp()
+
+      await user.selectOptions(screen.getByLabelText('Resolution'), '4K')
+      expect(screen.getByTestId('resolution-change-confirm')).toBeInTheDocument()
+
+      expectNoKeysTaken()
+    })
   })
 
   describe('escape', () => {

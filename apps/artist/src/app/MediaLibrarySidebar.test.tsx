@@ -1,6 +1,7 @@
 // The left sidebar on its own: the collapse fork, and the uploader/picker/
 // library only while it is open.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ComponentProps } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MediaLibrarySidebar } from './MediaLibrarySidebar';
@@ -16,16 +17,32 @@ beforeEach(() => {
   resetStoreForTest();
 });
 
+/**
+ * The sidebar with its required props, any of which a test can override.
+ *
+ * `onConfirmOpenChange` is a pure pass-through the sidebar has no behaviour of
+ * its own for, and every case below needs it filled in.
+ */
+const renderSidebar = (overrides: Partial<ComponentProps<typeof MediaLibrarySidebar>> = {}) =>
+  render(
+    <MediaLibrarySidebar
+      collapsed={false}
+      onToggle={vi.fn()}
+      onConfirmOpenChange={vi.fn()}
+      {...overrides}
+    />
+  );
+
 describe('MediaLibrarySidebar', () => {
   it('names the library and offers the uploader while open', () => {
-    render(<MediaLibrarySidebar collapsed={false} onToggle={vi.fn()} />);
+    renderSidebar();
 
     expect(screen.getByText('Media Library')).toHaveAttribute('id', 'media-library-title');
     expect(screen.getByText('Drop media or click to browse')).toBeInTheDocument();
   });
 
   it('offers to collapse while open', () => {
-    render(<MediaLibrarySidebar collapsed={false} onToggle={vi.fn()} />);
+    renderSidebar();
 
     const button = screen.getByTitle('Collapse sidebar');
     expect(button).toHaveAccessibleName('Collapse media library sidebar');
@@ -33,14 +50,14 @@ describe('MediaLibrarySidebar', () => {
   });
 
   it('hides the title and the library contents while collapsed', () => {
-    render(<MediaLibrarySidebar collapsed onToggle={vi.fn()} />);
+    renderSidebar({ collapsed: true });
 
     expect(screen.queryByText('Media Library')).not.toBeInTheDocument();
     expect(screen.queryByText('Drop media or click to browse')).not.toBeInTheDocument();
   });
 
   it('offers to expand while collapsed', () => {
-    render(<MediaLibrarySidebar collapsed onToggle={vi.fn()} />);
+    renderSidebar({ collapsed: true });
 
     const button = screen.getByTitle('Expand sidebar');
     expect(button).toHaveAccessibleName('Expand media library sidebar');
@@ -48,11 +65,11 @@ describe('MediaLibrarySidebar', () => {
   });
 
   it('points the chevron the other way once collapsed', () => {
-    const open = render(<MediaLibrarySidebar collapsed={false} onToggle={vi.fn()} />);
+    const open = renderSidebar();
     const openPoints = open.container.querySelector('polyline')!.getAttribute('points');
     open.unmount();
 
-    const shut = render(<MediaLibrarySidebar collapsed onToggle={vi.fn()} />);
+    const shut = renderSidebar({ collapsed: true });
     const shutPoints = shut.container.querySelector('polyline')!.getAttribute('points');
 
     expect(openPoints).toBe('15 18 9 12 15 6');
@@ -62,10 +79,21 @@ describe('MediaLibrarySidebar', () => {
   it('asks its caller to toggle', async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
-    render(<MediaLibrarySidebar collapsed={false} onToggle={onToggle} />);
+    renderSidebar({ onToggle });
 
     await user.click(screen.getByTitle('Collapse sidebar'));
 
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the picker's confirm-open report through to its caller", async () => {
+    const user = userEvent.setup();
+    const onConfirmOpenChange = vi.fn();
+    renderSidebar({ onConfirmOpenChange });
+
+    await user.selectOptions(screen.getByLabelText('Resolution'), '4K');
+
+    expect(screen.getByTestId('resolution-change-confirm')).toBeInTheDocument();
+    expect(onConfirmOpenChange).toHaveBeenCalledWith(true);
   });
 });
