@@ -13,9 +13,10 @@ export interface BuildSourceVideoInput {
   width: number;
   height: number;
   /**
-   * Whether the take captured any audio. The caller passes the same
-   * `microphoneEnabled || systemAudioEnabled` answer `buildRecordingEntry`
-   * uses below, so the stored metadata and the list entry cannot disagree.
+   * Whether the take captured any audio. Computed once by the caller and
+   * handed to `buildRecordingEntry` as well, so the stored metadata and the
+   * list entry cannot disagree — see `useRecordingSave`, which owns the one
+   * expression.
    */
   hasAudio: boolean;
 }
@@ -46,11 +47,18 @@ export interface BuildRecordingEntryInput {
   now: number;
   size: number;
   thumbnailUrl: string;
-  config: Pick<RecordingConfig, 'webcamEnabled' | 'microphoneEnabled' | 'systemAudioEnabled'>;
+  config: Pick<RecordingConfig, 'webcamEnabled'>;
+  /**
+   * Whether the take captured any audio — the same value `buildSourceVideo`
+   * was given. Passed in rather than derived from the config here, because the
+   * config cannot answer it: ticking "System Audio" only *asks* for it, and
+   * the browser's share dialog has the last word (ESCSUITE-62).
+   */
+  hasAudio: boolean;
 }
 
 /** The recorder's own Recording list entry for a finished recording. */
-export function buildRecordingEntry({ sourceVideo, now, size, thumbnailUrl, config }: BuildRecordingEntryInput): Recording {
+export function buildRecordingEntry({ sourceVideo, now, size, thumbnailUrl, config, hasAudio }: BuildRecordingEntryInput): Recording {
   return {
     id: sourceVideo.id,
     name: sourceVideo.name,
@@ -59,6 +67,6 @@ export function buildRecordingEntry({ sourceVideo, now, size, thumbnailUrl, conf
     size,
     thumbnailUrl,
     hasWebcam: config.webcamEnabled,
-    hasAudio: config.microphoneEnabled || config.systemAudioEnabled,
+    hasAudio,
   };
 }

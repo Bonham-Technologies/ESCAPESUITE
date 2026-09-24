@@ -75,8 +75,10 @@ function recordButton(): HTMLButtonElement {
  * Run a whole screen-only take: acquire, start, stop. Returns the capture
  * doubles plus the raw blob the recorder handed over.
  */
-async function recordATake(options: { previewWidth?: number; duration?: number } = {}) {
-  const screenStream = screenStreamDouble();
+async function recordATake(
+  options: { previewWidth?: number; duration?: number; systemAudio?: boolean } = {}
+) {
+  const screenStream = screenStreamDouble({ withAudio: options.systemAudio ?? false });
   const mic = micStreamDouble();
   permissionsOverrides.requestScreenCapture.mockResolvedValue(screenStream.stream);
   permissionsOverrides.requestMicrophone.mockResolvedValue(mic.stream);
@@ -209,12 +211,32 @@ describe('App saving a recording', () => {
 
   it('marks a system-audio-only take as having audio', async () => {
     resetRecorderStore({ countdownSeconds: 0, microphoneEnabled: false, systemAudioEnabled: true });
-    await recordATake();
+    // The share picker's own tick box was ticked, so the display stream came
+    // back carrying an audio track — see the sibling below for the take where
+    // it did not.
+    await recordATake({ systemAudio: true });
 
     expect(useRecorderStore.getState().recordings[0]).toMatchObject({
       hasAudio: true,
       hasWebcam: false,
     });
+  });
+
+  // ESCSUITE-62. Ticking "System Audio" in CRAFT only asks for it; the browser's
+  // share dialog carries the tick box, and clearing it hands back a display
+  // stream with no audio track at all. Both records used to say the take had
+  // audio, which left the M4A button offering an audio download of silence.
+  it('marks a system-audio take the share picker silenced as having none', async () => {
+    resetRecorderStore({ countdownSeconds: 0, microphoneEnabled: false, systemAudioEnabled: true });
+    await recordATake({ systemAudio: false });
+
+    expect(useRecorderStore.getState().recordings[0]).toMatchObject({
+      hasAudio: false,
+      hasWebcam: false,
+    });
+    // ...and the copy a reload reads back agrees.
+    const [meta] = await getRecordingsMetadata();
+    expect(meta.hasAudio).toBe(false);
   });
 
   it('ignores a recorder stop that arrives after the take was cancelled', async () => {

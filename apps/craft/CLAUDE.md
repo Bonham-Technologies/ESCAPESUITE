@@ -95,7 +95,7 @@ selector contract above.
 | `utils/notices.ts` | The app's whole vocabulary of notices — eight strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
 | `utils/downloadBlob.ts` | The anchor both downloads share: object URL, `<a download>`, click, remove, deferred revoke. No naming logic of its own — the caller hands it a finished filename |
 | `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace`. Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
-| `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. Both carry `hasAudio`, from the one config expression, so the stored copy and the in-memory one cannot disagree. No store, and no blob-URL creation |
+| `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. Both carry `hasAudio`, the one answer its caller computed, so the stored copy and the in-memory one cannot disagree — neither builder derives it (see `useRecordingSave`). No store, and no blob-URL creation |
 | `components/icons.tsx` | The inline SVG icon set, every path drawn in `currentColor`. The source icons take a `className` because their size is per call site; the action icons are `aria-hidden` and sized entirely by their button |
 | `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region — carrying both the recorder state and the app's one `notice` — and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
 | `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
@@ -112,7 +112,7 @@ selector contract above.
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
 | `hooks/useCapabilityBootstrap.ts` | The way in: capability detection, the MP4 codec probe (`probeMP4Support()` → `store.mp4Support`) and the initial `loadRecordings()`, all in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
-| `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier |
+| `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier. Owns the one `hasAudio` expression both records are given — `microphoneEnabled || (systemAudioEnabled && systemAudioShared)`, the flag read through `getState()` so the hook adds no render |
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
 | `hooks/useMp4Download.ts` | One conversion at a time — MP4 or M4A, one shared slot: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, format, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the button reasons for each format (still checking, cannot, busy — plus, for M4A only, a browser with no AAC encoder), the separate visible `note` (the silent-MP4 warning, or the blocking reason when there is one worth saying), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App` |
@@ -163,9 +163,11 @@ Two related rules follow from it:
   meter for the take. The notice is withheld when there was no display capture at all
   (system audio on, screen off) — there was no dialog to miss a tick box in — so the
   greyed meter carries its own, weaker wording (`NO_SYSTEM_AUDIO_HINT`, "No system audio
-  arrived for this take") rather than the notice's. The flag is display-only and the meter
-  is drawn only while a take runs, so `handleStartRecording` resetting it to `true` is its
-  whole lifecycle.
+  arrived for this take") rather than the notice's. `handleStartRecording` resetting it to
+  `true` is its whole lifecycle — which is also what makes it readable at save time: it
+  still describes the take just finished until the *next* one starts. `useRecordingSave`
+  reads it there (ESCSUITE-62) so a take whose tick box was cleared is stored as having no
+  audio, rather than as a silent recording with an M4A button.
 
 ### The record button only offers what it can deliver
 
@@ -754,13 +756,16 @@ test asserts.
   audio") when nothing app-wide is blocking. `convertToM4A` refuses the same case again with
   `M4A_NO_AUDIO_MESSAGE` — the button is the courtesy, the converter is the defence.
   (`Recording.hasAudio` is truthful across a reload since ESCSUITE-60: `buildSourceVideo`
-  writes `hasAudio` into the stored `SourceVideo` from the same
-  `microphoneEnabled || systemAudioEnabled` expression the list entry uses, and
+  writes `hasAudio` into the stored `SourceVideo` from the same expression the list entry
+  gets — both are handed the one answer `useRecordingSave` computes — and
   `loadRecordings()` reads it back as `m.hasAudio ?? true`. The `?? true` is for recordings
   saved *before* that field existed — they keep the answer they used to get, because
-  demoting a take that did have audio would cost it its M4A button for good. It is the
-  config's answer rather than the blob's: reading the saved file would mean a decode on the
-  save path, and `convertToM4A`'s own refusal is still the defence behind the button.)
+  demoting a take that did have audio would cost it its M4A button for good. That
+  expression is `microphoneEnabled || (systemAudioEnabled && systemAudioShared)` since
+  ESCSUITE-62: the config alone said yes to a take whose share picker cleared the system-
+  audio tick box, which is a take with no sound in it at all. It is still the streams'
+  answer rather than the blob's — reading the saved file would mean a decode on the save
+  path, and `convertToM4A`'s own refusal is still the defence behind the button.)
 - **No new notices and no new analytics event.** Success clears the channel and failure
   raises `mp4ConversionFailed(message)`, whose wording is now the format-neutral
   "Conversion failed: …" because one code path serves both. The download is counted as
