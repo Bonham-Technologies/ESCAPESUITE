@@ -689,9 +689,9 @@ describe('useMp4Download audio-only (M4A)', () => {
     // answer about H.264 — must not reach this button. The gate and the action
     // read the same reason, which is what stops an enabled button from being a
     // dead one: before, the button rendered enabled here and the click did
-    // nothing at all. (Today's probe never returns this combination; the type
-    // allows it, and a fix for the probe's H.264/AAC collapse would make it
-    // real.)
+    // nothing at all. This combination is real since ESCSUITE-61: the probe
+    // answers for H.264 and AAC independently, so a browser with an AAC
+    // encoder and no H.264 lands exactly here — keep this test.
     await seed('take-1', 'Take One')
     const { result } = renderMp4Download({
       state: 'ready',

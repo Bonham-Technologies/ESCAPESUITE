@@ -260,9 +260,11 @@ export function useRecordingController({
     try {
       cancelledRef.current = false;
       // Starting a take is the "next successful action" that clears whatever
-      // the last one had to report. The System meter goes back with it: the
-      // flag is display-only and the meter is drawn only while a take runs,
-      // so resetting it here is the whole of its lifecycle.
+      // the last one had to report. The System meter goes back with it. The
+      // flag is NOT display-only: `useRecordingSave` reads it at save time to
+      // decide the stored `hasAudio` (ESCSUITE-62), so it must describe the
+      // take just finished until the next one starts — which is exactly when
+      // it is reset, here, and nowhere else.
       setNotice(null);
       setSystemAudioShared(true);
       setState('preparing');
