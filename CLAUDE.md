@@ -102,8 +102,8 @@ dist/
 - **Shared dialog behaviour**: `useDialogBehaviour` (`packages/shared/src/hooks`, imported
   as `@escapesuite/shared/hooks`) is the single modal keyboard implementation — initial
   focus, the Tab/Shift+Tab trap, Escape-to-close and focus restored to the opener — used by
-  CRAFT's two modals and all four of ARTIST's (export, shortcut sheet, project-load, session
-  restore). Escape's *meaning* is per dialog, not inherited: the hook calls whatever it is
+  CRAFT's two modals and all five of ARTIST's (export, shortcut sheet, project-load, session
+  restore, the resolution-change confirm). Escape's *meaning* is per dialog, not inherited: the hook calls whatever it is
   handed, and ARTIST's session-restore prompt hands it a no-op because declining discards the
   saved session. See each app's CLAUDE.md "Dialogs" note
 

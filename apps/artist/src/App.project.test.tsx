@@ -319,6 +319,28 @@ describe('App project lifecycle', () => {
       consoleError.mockRestore()
     })
 
+    it('reports a dropped file it cannot read through the notice channel, not an alert', async () => {
+      // The drop path used to `alert('Failed to load project file.')` from the
+      // uploader's own error handling. It reports through the app's one notice
+      // channel now, like every other ARTIST failure and like the File menu's
+      // own load — the change this describe exists to pin.
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+      vi.mocked(loadProject).mockRejectedValueOnce(new Error('corrupt'))
+      await renderApp()
+
+      const zone = screen.getByText('Drop media or click to browse').parentElement as HTMLElement
+      fireEvent.drop(zone, {
+        dataTransfer: { files: [new File(['{}'], 'dropped.veditor', { type: '' })] },
+      })
+
+      await waitFor(() => expect(notification()).toBe('Failed to load project'))
+      expect(alertSpy).not.toHaveBeenCalled()
+      expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
+      alertSpy.mockRestore()
+      consoleError.mockRestore()
+    })
+
     it('loads a dropped file straight away with an empty timeline, and says so', async () => {
       const dropped = new File(['{}'], 'dropped.veditor', { type: '' })
       vi.mocked(loadProject).mockResolvedValueOnce({

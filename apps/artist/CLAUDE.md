@@ -899,8 +899,15 @@ have differently went with the duplication, all of them the App path's and all o
 the load now shows the blocking `LoadingOverlay`, a success reports `Project loaded successfully`
 through the notice channel rather than nothing at all, and a file that cannot be read reports
 `Failed to load project` there too instead of a blocking `alert('Failed to load project file.')`
-— the only browser `alert()` any ARTIST error path still used. Save-and-load also announces its
-save (and its save *failure*), which the uploader's copy swallowed to the console.
+— the last `alert()` on any ARTIST *load* path (the uploader still raises one to reject a file
+that is not media at all, and `confirm()` still guards Clear All and New Project). Save-and-load
+also announces its save, and a failed save, which the uploader's copy swallowed to the console.
+The one thing that swap costs, for the record: `useNotification` is a single slot on a
+three-second timer, so a failure the user happens not to be looking at is now missed, where an
+`alert` demanded acknowledgement. It is the only one of the four that is arguably worse for the
+user, and it is named in the changeset for that reason. `App.project.test.tsx`'s
+`one project-load dialog` describe pins it — a dropped file that cannot be parsed reports through
+the notice channel and calls no `alert`.
 
 The flag and the trap are still worth having together — the flag stops the editor taking keys
 from behind a dialog, the trap stops Tab walking out of one.

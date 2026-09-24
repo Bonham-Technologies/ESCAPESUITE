@@ -562,6 +562,13 @@ describe('App keyboard shortcuts', () => {
       // The fifth modal, and the one that reaches `modalOpen` through a prop
       // rather than App's own state: the picker reports its confirm open to
       // MediaLibrarySidebar, which hands it up.
+      //
+      // No `pretendElementsAreVisible()` here, unlike ResolutionPicker's own
+      // dialog describe: with every `offsetParent` null the hook finds nothing
+      // focusable and focuses the container instead of Cancel. That is not the
+      // browser's focus path, and it does not matter to what this case asserts —
+      // the three keys go to `window`, which the hook never touches, so the only
+      // thing that can make them inert is the gate.
       const user = userEvent.setup()
       addClip('clip1', 0, 2)
       store().setSelectedClipId('clip1')

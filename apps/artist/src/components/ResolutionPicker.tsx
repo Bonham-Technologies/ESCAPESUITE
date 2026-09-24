@@ -63,30 +63,49 @@ export function ResolutionPicker({ onConfirmOpenChange }: ResolutionPickerProps)
     setPendingResolution(null);
   }, []);
 
+  // **The one condition**: what the hook opens on, what is reported to `App`,
+  // and what the overlay below renders on are the same thing. `showConfirm`
+  // alone would not be: if the two pieces of state ever diverged, `modalOpen`
+  // would go true with no dialog on screen and no trap — the hook bails silently
+  // when its ref is empty — and the editor would be deaf to every key with
+  // nothing in front of the user. They cannot diverge today (all three handlers
+  // write both together), and this is what makes that true by construction
+  // rather than by inspection. The JSX spells it with the truthy form because
+  // that is what narrows `pendingResolution` for the two reads inside it.
+  const confirmOpen = showConfirm && pendingResolution !== null;
+
   // Escape cancels. Confirming is the only other answer and it rewrites the
   // project's resolution, which a dismissal key must never do; cancelling costs
   // nothing — the select is controlled by the store's resolution, so it snaps
   // back to the preset still in force. Trap, initial focus and focus restored
   // to the select all come from the hook, as they do for the other four modals.
-  const dialogRef = useDialogBehaviour(handleCancel, showConfirm);
+  const dialogRef = useDialogBehaviour(handleCancel, confirmOpen);
 
   // Read through a ref for the same reason the hook reads its `onClose` that
-  // way: a caller passing a fresh arrow every render would otherwise re-run the
-  // effect below, reporting a close and a re-open for a dialog that never moved.
+  // way: it is what lets the effect below depend on `confirmOpen` alone.
+  // Depending on the callback as well — which `react-hooks/exhaustive-deps`
+  // would otherwise require — means a caller passing a fresh arrow every render
+  // re-runs the effect, reporting a close and a re-open for a dialog that never
+  // moved. The trade is that a callback swapped *while* the confirm is open
+  // never receives its `true`, only the eventual `false`; `App` passes a stable
+  // `setState` function, so that is theory rather than practice.
   const onConfirmOpenChangeRef = useRef(onConfirmOpenChange);
   useEffect(() => {
     onConfirmOpenChangeRef.current = onConfirmOpenChange;
   }, [onConfirmOpenChange]);
 
-  // Derived from `showConfirm` rather than announced by the three handlers, so
-  // the report cannot drift from the state it describes — and so an unmount
-  // while the confirm is up (collapsing the sidebar) still reports it gone,
-  // instead of leaving `App`'s `modalOpen` stuck true and the editor deaf.
+  // Derived from the flag rather than announced by the three handlers, so the
+  // report cannot drift from the state it describes — and so an unmount while
+  // the confirm is up (collapsing the sidebar) still reports it gone, instead of
+  // leaving `App`'s `modalOpen` stuck true and the editor deaf. Under
+  // `StrictMode` the effect double-invokes in dev, so the sequence a listener
+  // sees on opening is true → false → true; every report is still paired and the
+  // settled state is still correct, which is all `modalOpen` reads.
   useEffect(() => {
-    if (!showConfirm) return;
+    if (!confirmOpen) return;
     onConfirmOpenChangeRef.current?.(true);
     return () => onConfirmOpenChangeRef.current?.(false);
-  }, [showConfirm]);
+  }, [confirmOpen]);
 
   return (
     <div className={styles.container}>

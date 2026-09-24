@@ -17,4 +17,7 @@ second, duplicate "Load Project" dialog that `modalOpen` knew nothing about, so 
 `App`'s copy on top of it — two dialogs, two focus traps, duplicate ids. The uploader now hands
 the file to `useProjectActions`, which owns the one dialog: the drop path gains the loading
 overlay and the "Project loaded successfully" / "Failed to load project" notices the File-menu
-path always had, and loses the blocking `alert()` it used to report a bad file with.
+path always had, its save-and-load answer now reports the save — and a failed save — instead of
+swallowing it to the console, and it loses the blocking `alert()` it used to report an unreadable
+file with. That last one is the only change of the four that costs a user anything: the notice is
+one slot on a three-second timer, where an `alert` demanded acknowledgement.
