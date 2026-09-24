@@ -793,10 +793,10 @@ prop is optional on the picker, because the dialog is complete without a listene
 picker's own tests render it bare; it is **required** on `MediaLibrarySidebar`, so `App` cannot
 forget it.
 
-`components/ResolutionMismatchDialog.tsx` is a **sixth** modal-shaped component and is dead
-code — nothing imports it but its own test, and it is the "ask on import" the project decided
-against (media auto-fits instead) — so it is a deletion candidate, not an adoption. It is named
-here so a reader who finds it does not conclude the "all five modals" claim above is wrong.
+`components/ResolutionMismatchDialog.tsx` was a **sixth** modal-shaped component and dead
+code — nothing imported it but its own test, and it was the "ask on import" the project decided
+against (media auto-fits instead). It has been deleted, along with its `.module.css` and
+`.test.tsx`, so "all five modals" above is now the whole story with no exception to name.
 
 Two shapes worth knowing, both about `isOpen`: `SessionRestorePrompt` is rendered only while
 open (`App` holds the `{showSessionPrompt && pendingSession && …}` guard), so "closed" is
