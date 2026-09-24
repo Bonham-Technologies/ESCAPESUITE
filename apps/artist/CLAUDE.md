@@ -774,11 +774,15 @@ calls whatever it is handed, so the four answers are the four arguments:
 | `ProjectLoadDialog` | `onCancel` | the other two answers both replace the current timeline; cancelling is the only one that leaves the editor as the user left it |
 | `SessionRestorePrompt` | **nothing** — a module-level `swallowEscape()` no-op | `useSessionRestore`'s `handleDeclineSession` calls `clearSessionState()`, so "Start Fresh" **deletes** the saved session. Escape is the key people press to dismiss a thing; routing it to either button would either discard work or silently accept it. The hook still claims the key (so the editor's cascades behind the prompt never see it) and then does nothing: the prompt stays up, focus stays trapped, and the only two ways out are the two buttons — the right shape for a question that must be answered |
 
-**There is a fifth modal-shaped component, and it is dead code.**
-`components/ResolutionMismatchDialog.tsx` has no role, no name, no trap and no Escape — and
-nothing imports it but its own test. It is also the "ask on import" the project decided against
-(media auto-fits instead), so it is a deletion candidate rather than a fifth adoption. Named here
-so a reader who finds it does not conclude the "all four modals" claim above is wrong.
+**There is a fifth LIVE modal-shaped component, not yet adopted: ESCSUITE-64.**
+`components/ResolutionPicker.tsx`'s resolution-change confirm (rendered from
+`app/MediaLibrarySidebar.tsx`) is a full-screen `--z-modal` overlay with a heading and two
+buttons, and it has no role, no name, no trap, no Escape, and no place in `modalOpen` — Tab walks
+out behind it and every editor shortcut still fires. Same adoption as the four above, one ticket.
+A sixth, `components/ResolutionMismatchDialog.tsx`, is dead code — nothing imports it but its
+own test, and it is the "ask on import" the project decided against (media auto-fits instead) —
+so it is a deletion candidate, not an adoption. Both named here so a reader who finds either does
+not conclude the "all four modals" claim above is wrong.
 
 Two shapes worth knowing, both about `isOpen`: `SessionRestorePrompt` is rendered only while
 open (`App` holds the `{showSessionPrompt && pendingSession && …}` guard), so "closed" is
@@ -868,7 +872,7 @@ it, giving two mounted dialogs, a duplicate `id="project-load-title"` (the secon
 `data-testid="project-load-dialog"`, and two focus traps competing for Tab. All of it predates
 the trap work, which neither caused nor removed it. The fix is one dialog and one state — route
 the uploader's drop through `useProjectActions` — or at minimum lift its flag into `modalOpen`;
-tracked separately. The flag and the
+tracked as ESCSUITE-63. The flag and the
 trap are still worth having together — the flag stops the editor taking keys from behind a
 dialog, the trap stops Tab walking out of one.
 

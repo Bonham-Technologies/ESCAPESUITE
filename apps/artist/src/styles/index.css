@@ -60,8 +60,10 @@
   --z-base: 0;
   --z-dropdown: 100;
   /* Floating panels that live outside #root as body portals — the keyframe
-     panel is the only one. Above the timeline and the dropdowns, and
-     deliberately BELOW --z-modal: the panel used to be a bare z-index: 1000,
+     panel is the only one. Above the timeline (nothing in ARTIST uses
+     --z-dropdown today; the File menu sits at --z-modal, so the panel is
+     below its backdrop too, which is right for a menu that owns the screen),
+     and deliberately BELOW --z-modal: the panel used to be a bare z-index: 1000,
      so it painted over every modal backdrop and a pointer could click straight
      through an open aria-modal dialog into the keyframe graph and edit
      keyframes behind it. The focus trap closes the Tab route; this token is
