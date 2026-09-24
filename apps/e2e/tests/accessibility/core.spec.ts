@@ -421,6 +421,19 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(await dialogViolations(page)).toHaveLength(0)
   })
 
+  test('resolution-change confirm passes axe-core audit', async ({ page }) => {
+    // The fifth modal, and the only one opened by changing a form control
+    // rather than by a button: picking any preset that is not the project's
+    // current resolution raises the confirm.
+    await page.getByLabel('Resolution').selectOption('4K')
+
+    const dialog = page.getByRole('dialog', { name: 'Change Resolution' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
+
+    expect(await dialogViolations(page)).toHaveLength(0)
+  })
+
   test('session restore prompt passes axe-core audit', async ({ page }) => {
     // The prompt is only offered for a session that holds at least one source
     // video (`app/useSessionRestore.ts`), and it is read on mount — so write one

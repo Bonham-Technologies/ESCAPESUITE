@@ -345,7 +345,7 @@ Clips support animated properties via keyframes:
   **Known limitation**: `useDialogBehaviour` listens on `document` in the capture phase, which
   runs *before* the graph's handler and so can't be shielded by its `stopPropagation()`. This is
   moot in practice — the graph can neither be Tabbed to (the trap) nor clicked (`--z-panel` sits
-  under `--z-modal`) while any of the four modals that use the hook is open. See "Dialogs" below.
+  under `--z-modal`) while any of the five modals that use the hook is open. See "Dialogs" below.
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
@@ -699,7 +699,7 @@ single `toBeLessThanOrEqual(1)`.
 
 Every module below has its own test file. `App.tsx` itself is covered through the six
 `App.*.test.tsx` files that drive the rendered editor — `App.test.tsx` (the shell),
-`App.project.test.tsx` (new/open/save and the load-safety dialog), `App.session.test.tsx`
+`App.project.test.tsx` (new/open/save, the load-safety dialog and the one-dialog rule), `App.session.test.tsx`
 (restore prompt and autosave), `App.shortcuts.test.tsx` (the keydown cascade),
 `App.messages.test.tsx` (the host integration surface) and `App.rerender.test.tsx` (the
 `currentTime` contract above). `src/App.module.css` is deliberately not split: all ten
@@ -714,7 +714,7 @@ and queries `styles.menuBackdrop`.
 | `sessionSnapshot.ts` | `buildSessionSnapshot` — what of the editor's state the autosave writes, and in what shape. Takes the state and the timestamp as values rather than reading `getState()`/`Date.now()` itself, so the call site keeps control of *when* they are read |
 | `useThemeLifecycle.ts` | Starting the shared theme module on mount and stopping it on unmount. The editor's **first** effect, so `App` calls it first |
 | `useNotification.ts` | The transient status toast: one slot, not a queue. `showNotification` overwrites whatever is showing and opens a fresh three-second timer, which is deliberately neither stored nor cleared — carried behaviour, pinned by the App suite. Binds no effect; sits second because every hook after it takes `showNotification` |
-| `useProjectActions.ts` | Project lifecycle: save to disk, open from disk with the "you have unsaved work" dialog in front of it, and start over. Owns `isSaving`, `isLoading`, `showProjectLoadDialog` and the pending file. Takes `clipCount` as a number, the dependency both callbacks carried inline. Binds no effect; sits third because the shortcut hook takes `handleSaveProject` and `handleLoadProject` |
+| `useProjectActions.ts` | Project lifecycle: save to disk, open from disk with the "you have unsaved work" dialog in front of it, and start over. Owns `isSaving`, `isLoading`, `showProjectLoadDialog` and the pending file — and the editor's **only** project-load dialog: `handleProjectFile(file)` is the "given a project file" entry the uploader's drop/pick path calls, with `handleLoadProject` being that same entry behind the file picker (see "Dialogs"). Takes `clipCount` as a number, the dependency both callbacks carried inline. Binds no effect; sits third because the shortcut hook takes `handleSaveProject` and `handleLoadProject` |
 | `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect |
 | `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
@@ -723,7 +723,7 @@ and queries `styles.menuBackdrop`.
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
 | `AppHeader.tsx` | The top bar: the dashboard link (hidden in the standalone build, which this component asks about itself), the wordmark, the project-name field, and the File menu plus the quick Save and Export buttons |
 | `FileMenu.tsx` | The header's File dropdown: the button, the click-outside backdrop, and the four items with their shortcut hints. Each item acts and then closes; what "acts" means belongs to the caller |
-| `MediaLibrarySidebar.tsx` | The left sidebar: its header and collapse button, and — while open — the uploader, the resolution picker and the library listing |
+| `MediaLibrarySidebar.tsx` | The left sidebar: its header and collapse button, and — while open — the uploader, the resolution picker and the library listing. Two of its props are pure pass-throughs it has no behaviour of its own for — `onConfirmOpenChange` to `ResolutionPicker` and `onProjectFile` to `VideoUploader` — and both are **required** here, so a caller that forgets to wire either fails to compile (see "Dialogs" for both) |
 | `InspectorSidebar.tsx` | The right sidebar: the inspector's header and collapse button, with `ClipEditor` underneath while it is open |
 | `MobileInspectorToggle.tsx` | The floating inspector toggle shown at narrow widths, rendered inside `<main>` as a sibling of the inspector it controls |
 | `TimelineResizeHandle.tsx` | The grab strip between the editor body and the timeline. It reports the two gestures and nothing else; the drag belongs to `useTimelineHeight` |
@@ -749,10 +749,11 @@ and queries `styles.menuBackdrop`.
 
 ### Dialogs
 
-**All four of the editor's modals** — `ExportDialog`, the shortcut sheet
+**All five of the editor's modals** — `ExportDialog`, the shortcut sheet
 (`components/KeyboardShortcuts/KeyboardShortcuts.tsx`), the project-load safety dialog
-(`components/ProjectLoadDialog.tsx`) and the session-restore prompt
-(`app/SessionRestorePrompt.tsx`) — get their keyboard behaviour from
+(`components/ProjectLoadDialog.tsx`), the session-restore prompt
+(`app/SessionRestorePrompt.tsx`) and the resolution-change confirm
+(`components/ResolutionPicker.tsx`) — get their keyboard behaviour from
 **`useDialogBehaviour`** in `packages/shared/src/hooks`, imported as
 `@escapesuite/shared/hooks`. ESCAPECRAFT's two modals use the same hook; it is the one
 implementation for every dialog in the suite, and the place to change any of this.
@@ -765,31 +766,45 @@ lands. In return each gets initial focus inside itself, a Tab/Shift+Tab cycle th
 leave, Escape claimed in the capture phase, and focus restored to whatever opened it.
 
 **Escape means something different in each, and that is a decision, not a default.** The hook
-calls whatever it is handed, so the four answers are the four arguments:
+calls whatever it is handed, so the five answers are the five arguments:
 
 | Modal | Escape calls | Why |
 |-------|--------------|-----|
 | `ExportDialog` | `handleCancel` | closes, aborting an export in flight exactly as the × and Cancel do |
 | `KeyboardShortcuts` | `onClose` | the sheet holds no state and destroys nothing, so dismissing it is free |
 | `ProjectLoadDialog` | `onCancel` | the other two answers both replace the current timeline; cancelling is the only one that leaves the editor as the user left it |
+| `ResolutionPicker`'s confirm | `handleCancel` | confirming rewrites the project's resolution, which "may affect overlay positions and scaling" and cannot be undone automatically; cancelling costs nothing, and the select is controlled by the store's resolution so it snaps back to the preset still in force |
 | `SessionRestorePrompt` | **nothing** — a module-level `swallowEscape()` no-op | `useSessionRestore`'s `handleDeclineSession` calls `clearSessionState()`, so "Start Fresh" **deletes** the saved session. Escape is the key people press to dismiss a thing; routing it to either button would either discard work or silently accept it. The hook still claims the key (so the editor's cascades behind the prompt never see it) and then does nothing: the prompt stays up, focus stays trapped, and the only two ways out are the two buttons — the right shape for a question that must be answered |
 
-**There is a fifth LIVE modal-shaped component, not yet adopted: ESCSUITE-64.**
-`components/ResolutionPicker.tsx`'s resolution-change confirm (rendered from
-`app/MediaLibrarySidebar.tsx`) is a full-screen `--z-modal` overlay with a heading and two
-buttons, and it has no role, no name, no trap, no Escape, and no place in `modalOpen` — Tab walks
-out behind it and every editor shortcut still fires. Same adoption as the four above, one ticket.
-A sixth, `components/ResolutionMismatchDialog.tsx`, is dead code — nothing imports it but its
-own test, and it is the "ask on import" the project decided against (media auto-fits instead) —
-so it is a deletion candidate, not an adoption. Both named here so a reader who finds either does
-not conclude the "all four modals" claim above is wrong.
+**The fifth modal is the odd one out in exactly one way: its open flag is not `App`'s own
+state** (ESCSUITE-64, which adopted it — it used to have no role, no name, no trap, no Escape
+and no place in `modalOpen`). `ResolutionPicker` owns `showConfirm`, and `App` has to know about
+it to gate the editor's keys, so the picker reports it: an optional
+`onConfirmOpenChange?: (open: boolean) => void`, handed down `App → MediaLibrarySidebar →
+ResolutionPicker` (**two hops**, which is why it is a prop and not a field in the store's ui
+slice — nothing else would ever read that field). `App` holds `resolutionConfirmOpen` and passes
+`setResolutionConfirmOpen` itself, so the identity is stable. Inside the picker the report is
+**derived from `showConfirm` in an effect**, not announced by the three handlers: it cannot then
+drift from the state it describes, and the effect's cleanup means an unmount with the confirm up
+— collapsing the sidebar — still reports it gone instead of leaving `modalOpen` stuck true and
+the editor deaf. (Nothing can reach the collapse control from behind the overlay today; the
+cleanup is there so that stays a fact about the CSS rather than a load-bearing assumption.) The
+prop is optional on the picker, because the dialog is complete without a listener and the
+picker's own tests render it bare; it is **required** on `MediaLibrarySidebar`, so `App` cannot
+forget it.
+
+`components/ResolutionMismatchDialog.tsx` is a **sixth** modal-shaped component and is dead
+code — nothing imports it but its own test, and it is the "ask on import" the project decided
+against (media auto-fits instead) — so it is a deletion candidate, not an adoption. It is named
+here so a reader who finds it does not conclude the "all five modals" claim above is wrong.
 
 Two shapes worth knowing, both about `isOpen`: `SessionRestorePrompt` is rendered only while
 open (`App` holds the `{showSessionPrompt && pendingSession && …}` guard), so "closed" is
 "unmounted" and it leaves the hook's second argument on its `true` default, like both CRAFT
-modals. `ExportDialog`, `KeyboardShortcuts` and `ProjectLoadDialog` are mounted for the life
-of their parent and return `null` when closed, so each passes `isOpen` and the effect opens
-and closes with the flag.
+modals. `ExportDialog`, `KeyboardShortcuts`, `ProjectLoadDialog` and `ResolutionPicker`'s
+confirm are mounted for the life of their parent (the picker itself always is; the overlay is
+the conditional part) and pass a flag — `isOpen`, or `showConfirm` — so the effect opens and
+closes with it.
 
 The shortcut sheet needed one thing beyond the wiring: its `.content` grid scrolls and holds
 no controls, so it carries `tabIndex={0}` for a keyboard to scroll it at all (axe:
@@ -802,7 +817,9 @@ dialogs' primary buttons were white on the `--accent-primary` fill at **2.75:1**
 `<h3>` under a page whose only `<h1>` is the logo, which skips a level (axe: `heading-order`).
 Both are `<h2>` now, matching `ExportDialog` — the session prompt's `.sessionPrompt h3` selector
 moved with it, and the project-load dialog's styling is on a `.title` class, so neither changed
-how anything renders.
+how anything renders. The resolution confirm had **both** of the same two faults and took both
+fixes with its adoption (`.confirmTitle` is a class too, so its `<h3>` → `<h2>` changed nothing
+visual either).
 
 **An open question, deliberately left alone**: `SessionRestorePrompt` swallows Escape, so it is a
 dialog that demands an answer — which is what `role="alertdialog"` exists to tell assistive
@@ -823,7 +840,8 @@ at all.
 #### The modal gate on the global shortcuts
 
 **While a modal is up, the editor behind it takes no key at all.** `App` computes one flag —
-`const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog`
+`const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog ||
+resolutionConfirmOpen`
 — and hands it to *both* of the app's `window` cascades: `useAppKeyboardShortcuts` and
 `PlaybackControls` (which owns Space, the arrows, Home and End). Each returns from its handler immediately when it is true,
 below the input/textarea check and above every other branch — the same shape, and the same
@@ -831,8 +849,8 @@ comment, as ESCAPECRAFT's `useKeyboardShortcuts` (PR #381). Before it, Space sta
 Delete removed the selected clip and Ctrl+Z undid, all from behind a dialog the user could not
 see past.
 
-**Escape is the dialog's, never the global handler's** — and since all four modals use
-`useDialogBehaviour`, that is now literally true of all four. The hook listens on `document` in
+**Escape is the dialog's, never the global handler's** — and since all five modals use
+`useDialogBehaviour`, that is now literally true of all five. The hook listens on `document` in
 the **capture** phase and `stopPropagation()`s that one key, above every `window` bubble
 listener, which is why Escape was the only key that already behaved correctly and why the gate
 changes nothing about it.
@@ -862,19 +880,37 @@ no dialog in front of the user to be confused by. `SessionRestorePrompt` and
 `ProjectLoadDialog` (`useProjectActions`' `showProjectLoadDialog`) are both in the flag and
 both trap focus: each is a question with buttons that waits for an answer.
 
-**`ProjectLoadDialog` is rendered twice, and only one of the two is in the flag.** `App` renders
-it from `useProjectActions`; `VideoUploader` renders a *second* instance with its own
-`showProjectLoadDialog` state, opened by dropping a `.veditor` on the uploader
-(`VideoUploader.tsx:144-145`). That second flag is **not** in `modalOpen`, so the editor behind
-the uploader's copy still takes every key — and Ctrl+O from there opens `App`'s copy on top of
-it, giving two mounted dialogs, a duplicate `id="project-load-title"` (the second dialog's
-`aria-labelledby` then silently resolves to the first heading), a duplicate
-`data-testid="project-load-dialog"`, and two focus traps competing for Tab. All of it predates
-the trap work, which neither caused nor removed it. The fix is one dialog and one state — route
-the uploader's drop through `useProjectActions` — or at minimum lift its flag into `modalOpen`;
-tracked as ESCSUITE-63. The flag and the
-trap are still worth having together — the flag stops the editor taking keys from behind a
-dialog, the trap stops Tab walking out of one.
+**There is one `ProjectLoadDialog`, served from `useProjectActions`** (ESCSUITE-63). It used to
+be rendered *twice*: `App`'s, plus a second instance inside `VideoUploader` with its own
+`showProjectLoadDialog` / `pendingProjectFile` state and its own copies of the replace/merge
+handlers, opened by dropping a `.veditor` on the uploader. That second flag was **not** in
+`modalOpen`, so the editor behind the uploader's copy took every key — and Ctrl+O from there
+opened `App`'s copy on top of it: two mounted dialogs, a duplicate `id="project-load-title"`
+(the second dialog's `aria-labelledby` then silently resolving to the first heading), a duplicate
+`data-testid="project-load-dialog"`, and two focus traps competing for Tab.
+
+`useProjectActions` now exposes **`handleProjectFile(file)`** — the "given a project file: ask if
+the timeline holds work, load it outright if not" half of `handleLoadProject`, which is all
+`handleLoadProject` does after picking a file. It is threaded `App → MediaLibrarySidebar →
+VideoUploader` as a **required** `onProjectFile`, so a caller that forgets it fails to compile
+rather than silently swallowing a dropped project, and the uploader keeps no project state at
+all: it recognises a `.veditor`, hands it up, and is done. Three behaviours the drop path used to
+have differently went with the duplication, all of them the App path's and all of them better:
+the load now shows the blocking `LoadingOverlay`, a success reports `Project loaded successfully`
+through the notice channel rather than nothing at all, and a file that cannot be read reports
+`Failed to load project` there too instead of a blocking `alert('Failed to load project file.')`
+— the last `alert()` on any ARTIST *load* path (the uploader still raises one to reject a file
+that is not media at all, and `confirm()` still guards Clear All and New Project). Save-and-load
+also announces its save, and a failed save, which the uploader's copy swallowed to the console.
+The one thing that swap costs, for the record: `useNotification` is a single slot on a
+three-second timer, so a failure the user happens not to be looking at is now missed, where an
+`alert` demanded acknowledgement. It is the only one of the four that is arguably worse for the
+user, and it is named in the changeset for that reason. `App.project.test.tsx`'s
+`one project-load dialog` describe pins it — a dropped file that cannot be parsed reports through
+the notice channel and calls no `alert`.
+
+The flag and the trap are still worth having together — the flag stops the editor taking keys
+from behind a dialog, the trap stops Tab walking out of one.
 
 **The keyframe-graph gap is closed — by two fixes, because it had two routes in** (it was
 recorded here as open: the F4 finding of the modal-gate review). Nothing gates the *keyframe

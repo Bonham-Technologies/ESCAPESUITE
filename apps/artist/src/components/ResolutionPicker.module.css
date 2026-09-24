@@ -124,7 +124,10 @@
 
 .confirmButton {
   background: var(--accent-primary);
-  color: white;
+  /* White on this fill is 2.75:1 — see --accent-on-fill in styles/index.css.
+     The same fix the project-load and session-restore dialogs took when their
+     axe audits landed; this dialog's audit would have reported it next. */
+  color: var(--accent-on-fill);
 }
 
 .confirmButton:hover {

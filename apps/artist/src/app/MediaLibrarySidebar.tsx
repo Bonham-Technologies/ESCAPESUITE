@@ -7,6 +7,20 @@ interface MediaLibrarySidebarProps {
   collapsed: boolean;
   /** Flip the sidebar open or shut. */
   onToggle: () => void;
+  /**
+   * Passed straight to `ResolutionPicker`: told when its change-resolution
+   * confirm opens or closes. Required here, unlike on the picker itself, so a
+   * caller that forgets to count the fifth modal in `modalOpen` fails to
+   * compile.
+   */
+  onConfirmOpenChange: (open: boolean) => void;
+  /**
+   * Passed straight to `VideoUploader`: called with a `.veditor` the user
+   * dropped on it or picked through it. `App` passes `useProjectActions`'
+   * `handleProjectFile`, which owns the editor's one project-load dialog — the
+   * uploader asks nothing and loads nothing itself.
+   */
+  onProjectFile: (file: File) => void;
 }
 
 /**
@@ -17,7 +31,12 @@ interface MediaLibrarySidebarProps {
  * Collapsing is the caller's state; this only renders the two halves of the
  * fork and asks to be toggled.
  */
-export function MediaLibrarySidebar({ collapsed, onToggle }: MediaLibrarySidebarProps) {
+export function MediaLibrarySidebar({
+  collapsed,
+  onToggle,
+  onConfirmOpenChange,
+  onProjectFile,
+}: MediaLibrarySidebarProps) {
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''}`}>
       <div className={styles.sidebarHeader}>
@@ -42,8 +61,8 @@ export function MediaLibrarySidebar({ collapsed, onToggle }: MediaLibrarySidebar
       {!collapsed && (
         <>
           <div className={styles.uploaderContainer}>
-            <VideoUploader />
-            <ResolutionPicker />
+            <VideoUploader onProjectFile={onProjectFile} />
+            <ResolutionPicker onConfirmOpenChange={onConfirmOpenChange} />
           </div>
 
           <div className={styles.libraryContainer}>

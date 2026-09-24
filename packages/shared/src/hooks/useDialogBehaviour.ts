@@ -2,13 +2,14 @@
 // opens, Tab cycles inside it, Escape closes it, and focus goes back to
 // whatever opened it when it closes.
 //
-// One implementation, six dialogs: ESCAPECRAFT's Recording Tips and playback
-// modals, and all four of ESCAPEARTIST's — the export dialog, the shortcut
-// sheet, the project-load safety dialog and the session-restore prompt. It
-// started as the export dialog's inline effect, was lifted into a CRAFT hook
-// when CRAFT grew a second modal, and lives here now so ARTIST could drop its
-// copy — which had drifted, missing the container-focus arm of the Shift+Tab
-// trap — and so ARTIST's other three could adopt it rather than grow their own.
+// One implementation, seven dialogs: ESCAPECRAFT's Recording Tips and playback
+// modals, and all five of ESCAPEARTIST's — the export dialog, the shortcut
+// sheet, the project-load safety dialog, the session-restore prompt and
+// `ResolutionPicker`'s change-resolution confirm. It started as the export
+// dialog's inline effect, was lifted into a CRAFT hook when CRAFT grew a second
+// modal, and lives here now so ARTIST could drop its copy — which had drifted,
+// missing the container-focus arm of the Shift+Tab trap — and so ARTIST's other
+// four could adopt it rather than grow their own.
 //
 // Escape and a wrapping Tab are both handled in the **capture** phase on
 // `document`, which is above every `window`-bubble listener in either app —
