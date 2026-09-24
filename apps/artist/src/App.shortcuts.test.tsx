@@ -560,13 +560,20 @@ describe('App keyboard shortcuts', () => {
   })
 
   describe('escape', () => {
-    it('closes the shortcut sheet first', async () => {
+    it('closes the shortcut sheet, and the cascade below it takes nothing', async () => {
       addClip('clip1', 0, 2)
       store().setSelectedClipId('clip1')
       await renderApp()
       press('?')
 
-      press('Escape')
+      // Escape goes to `document`, not `window`: the sheet closes on it through
+      // `useDialogBehaviour` now, which listens on `document` in the capture
+      // phase — above the cascade's `window` listener, and above where a
+      // window-dispatched event would ever be seen. It used to be the sheet's
+      // own `window` listener, which is what `press` reaches. Same outcome, one
+      // Escape path: the hook `stopPropagation()`s the key, so the clip below
+      // stays selected for that reason as well as the `modalOpen` gate's.
+      fireEvent.keyDown(document, { key: 'Escape' })
 
       expect(screen.queryByRole('heading', { name: 'Keyboard Shortcuts' })).not.toBeInTheDocument()
       expect(store().selectedClipId).toBe('clip1')

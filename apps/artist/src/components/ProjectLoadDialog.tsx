@@ -1,3 +1,4 @@
+import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import styles from './ProjectLoadDialog.module.css';
 
 interface ProjectLoadDialogProps {
@@ -7,19 +8,41 @@ interface ProjectLoadDialogProps {
   onDiscardAndLoad: () => void;
 }
 
+/**
+ * The "you have unsaved work" question asked in front of opening a project.
+ *
+ * **Escape cancels**, the same path as the Cancel button. The other two answers
+ * — save then load, discard then load — both replace what is on the timeline, so
+ * neither can be what a dismissal key does; cancelling is the only one of the
+ * three that leaves the editor exactly as the user left it.
+ *
+ * Trap, initial focus and focus restore come from `useDialogBehaviour`. The
+ * dialog returns `null` while closed but is mounted for the life of its parent,
+ * so it passes `isOpen` and the effect opens and closes with the flag — the same
+ * arrangement `ExportDialog` uses.
+ */
 export function ProjectLoadDialog({
   isOpen,
   onCancel,
   onSaveAndLoad,
   onDiscardAndLoad,
 }: ProjectLoadDialogProps) {
+  const dialogRef = useDialogBehaviour(onCancel, isOpen);
+
   if (!isOpen) return null;
 
   return (
     <div className={styles.overlay} data-testid="project-load-dialog">
-      <div className={styles.dialog}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-load-title"
+      >
         <div className={styles.header}>
-          <h3 className={styles.title}>Load Project</h3>
+          <h3 className={styles.title} id="project-load-title">Load Project</h3>
         </div>
         <div className={styles.body}>
           <p className={styles.message}>

@@ -13,8 +13,10 @@
 
   --accent-primary: #4a9eff;
   /* Ink for text/icons on an --accent-primary fill — white only reaches 2.75:1
-     there. Applied to the toolbar, export and track controls so far; the
-     remaining accent-filled buttons still use white (see #275 follow-ups). */
+     there. Applied to the toolbar, export and track controls, and to the
+     session-restore and project-load dialogs' primary buttons (the axe audits
+     added with their focus traps caught both); any accent-filled button still
+     on white is a remaining #275 follow-up. */
   --accent-on-fill: #0b1220;
   --accent-secondary: #7c4dff;
   --accent-success: #4caf50;

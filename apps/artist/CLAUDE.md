@@ -305,11 +305,12 @@ Clips support animated properties via keyframes:
   keyframe *and* the selected clip, because the graph's old listener was itself on `window`
   alongside the editor's.
 
-  **The graph is not covered by the editor's modal gate** (see "Dialogs" below). Those two
-  `window` cascades stop while a dialog is up; this element-level handler does not, and the
-  three overlays that trap no focus leave the graph focusable behind them. Recorded here because
-  this is where the propagation contract lives; the fix belongs with adopting
-  `useDialogBehaviour` in those overlays.
+  **The graph is not covered by the editor's modal gate** (see "Dialogs" below) and does not
+  need to be. Those two `window` cascades stop while a dialog is up; this element-level handler
+  does not — but every one of the editor's four modals traps focus now, so the graph cannot be
+  focused behind one and the handler never runs. Recorded here because this is where the
+  propagation contract lives. It used to be reachable behind the three overlays that trapped
+  nothing; adopting `useDialogBehaviour` in those three closed it, without a gate here.
 
   **What counts as active**: every key that acts on "the active keyframe" — `Delete`,
   `Backspace`, `Escape` — is gated on the *rendered* active option (`activeIndex !== -1`), not on
@@ -336,10 +337,10 @@ Clips support animated properties via keyframes:
   frame while the clip preview plays. Tests that compare the live region's text exactly strip
   `\u200B` first.
 
-  **Known limitation**: `ExportDialog`'s `useDialogBehaviour` listens on `document` in the
-  capture phase, which runs *before* the graph's handler and so can't be shielded by its
-  `stopPropagation()`. This is moot in practice — the graph can't hold focus while that dialog
-  is open. See "Dialogs" below.
+  **Known limitation**: `useDialogBehaviour` listens on `document` in the capture phase, which
+  runs *before* the graph's handler and so can't be shielded by its `stopPropagation()`. This is
+  moot in practice — the graph can't hold focus while any of the four modals that use the hook is
+  open. See "Dialogs" below.
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
@@ -724,7 +725,7 @@ and queries `styles.menuBackdrop`.
 | `TimelinePane.tsx` | The bottom pane: add-track, zoom out, the zoom readout and zoom in, above `Timeline` itself. **Deliberately not memoised** — `App.rerender.test.tsx` counts `Timeline` renders, and a memo here would make that pass for the wrong reason and hide a future `currentTime` subscription |
 | `NotificationToast.tsx` | The status toast in the corner. The `{notification && …}` guard stays in `App`, so it never renders an empty live region |
 | `LoadingOverlay.tsx` | The modal spinner shown while a project loads. The `{isLoading && …}` guard likewise stays in `App` |
-| `SessionRestorePrompt.tsx` | The "Resume Previous Session?" modal and its two buttons. The `{showSessionPrompt && pendingSession && …}` guard stays in `App`, so `session` is always present here |
+| `SessionRestorePrompt.tsx` | The "Resume Previous Session?" modal and its two buttons. The `{showSessionPrompt && pendingSession && …}` guard stays in `App`, so `session` is always present here — and so "closed" is "unmounted", which is why its `useDialogBehaviour` keeps the default `isOpen`. **Escape is swallowed** by a no-op: declining deletes the saved session, so a dismissal key must not reach it. See "Dialogs" |
 
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`, **in the hosted build only**. The standalone
@@ -743,10 +744,42 @@ and queries `styles.menuBackdrop`.
 
 ### Dialogs
 
-`ExportDialog` is the editor's only modal with keyboard behaviour of its own, and it gets
-all of it from **`useDialogBehaviour`** in `packages/shared/src/hooks`, imported as
+**All four of the editor's modals** — `ExportDialog`, the shortcut sheet
+(`components/KeyboardShortcuts/KeyboardShortcuts.tsx`), the project-load safety dialog
+(`components/ProjectLoadDialog.tsx`) and the session-restore prompt
+(`app/SessionRestorePrompt.tsx`) — get their keyboard behaviour from
+**`useDialogBehaviour`** in `packages/shared/src/hooks`, imported as
 `@escapesuite/shared/hooks`. ESCAPECRAFT's two modals use the same hook; it is the one
 implementation for every dialog in the suite, and the place to change any of this.
+
+Each carries the same five things: the hook's `ref` on the **panel** (not the backdrop),
+`role="dialog"`, `aria-modal="true"`, `aria-labelledby` pointing at its own heading's `id`,
+and `tabIndex={-1}` on that same element — the last because the hook's Shift+Tab trap has an
+arm for focus parked on the container, which is where a click on the dialog's own padding
+lands. In return each gets initial focus inside itself, a Tab/Shift+Tab cycle that cannot
+leave, Escape claimed in the capture phase, and focus restored to whatever opened it.
+
+**Escape means something different in each, and that is a decision, not a default.** The hook
+calls whatever it is handed, so the three answers are the three arguments:
+
+| Modal | Escape calls | Why |
+|-------|--------------|-----|
+| `ExportDialog` | `handleCancel` | closes, aborting an export in flight exactly as the × and Cancel do |
+| `KeyboardShortcuts` | `onClose` | the sheet holds no state and destroys nothing, so dismissing it is free |
+| `ProjectLoadDialog` | `onCancel` | the other two answers both replace the current timeline; cancelling is the only one that leaves the editor as the user left it |
+| `SessionRestorePrompt` | **nothing** — a module-level `swallowEscape()` no-op | `useSessionRestore`'s `handleDeclineSession` calls `clearSessionState()`, so "Start Fresh" **deletes** the saved session. Escape is the key people press to dismiss a thing; routing it to either button would either discard work or silently accept it. The hook still claims the key (so the editor's cascades behind the prompt never see it) and then does nothing: the prompt stays up, focus stays trapped, and the only two ways out are the two buttons — the right shape for a question that must be answered |
+
+Two shapes worth knowing, both about `isOpen`: `SessionRestorePrompt` is rendered only while
+open (`App` holds the `{showSessionPrompt && pendingSession && …}` guard), so "closed" is
+"unmounted" and it leaves the hook's second argument on its `true` default, like both CRAFT
+modals. `ExportDialog`, `KeyboardShortcuts` and `ProjectLoadDialog` are mounted for the life
+of their parent and return `null` when closed, so each passes `isOpen` and the effect opens
+and closes with the flag.
+
+The shortcut sheet needed one thing beyond the wiring: its `.content` grid scrolls and holds
+no controls, so it carries `tabIndex={0}` for a keyboard to scroll it at all (axe:
+`scrollable-region-focusable`, which the new audit below caught). That also makes it the
+sheet's second and last stop in the trap.
 
 The hook started life *here*, as an inline effect in `ExportDialog`, and was lifted into
 CRAFT and then into `packages/shared`. The copy that stayed here had drifted in one way:
@@ -756,15 +789,6 @@ on the dialog's own padding lands. Shift+Tab from there walked backwards out of 
 `aria-modal` dialog. The shared hook treats the container as "at the start" and wraps to
 the last control; `ExportDialog` carries `tabIndex={-1}` so the container is a focus target
 at all.
-
-Two things about the adoption are worth knowing:
-
-- **`isOpen` is passed.** The hook's second argument defaults to `true`, which suits a
-  dialog rendered only while open (both CRAFT modals). `ExportDialog` is mounted for the
-  life of the editor and returns `null` when closed, so it passes `isOpen` and the effect
-  opens and closes with the flag.
-- **Escape still leaves through `handleCancel`**, the same path as the × and Cancel
-  buttons, so an in-progress export is aborted exactly as they abort it.
 
 #### The modal gate on the global shortcuts
 
@@ -777,18 +801,20 @@ comment, as ESCAPECRAFT's `useKeyboardShortcuts` (PR #381). Before it, Space sta
 Delete removed the selected clip and Ctrl+Z undid, all from behind a dialog the user could not
 see past.
 
-**Escape is the dialog's, never the global handler's.** `ExportDialog` closes on Escape
-through `useDialogBehaviour`, which listens on `document` in the **capture** phase and
-`stopPropagation()`s that one key — above every `window` bubble listener, which is why Escape
-was the only key that already behaved correctly and why the gate changes nothing about it. The
-shortcut sheet is the same idea by a different route: it is counted in `modalOpen`, so the
-cascade that used to close it no longer sees a key, and it binds its own three on `window`
-itself (`components/KeyboardShortcuts/KeyboardShortcuts.tsx`): Escape, `?` and Shift+`/`, each
-behind the same input/textarea typing guard the other two listeners open with — the sheet traps
-no focus, so the header's project-name field is still Tab-reachable behind it. It needs no
-`stopPropagation`, because the two cascades below it are already gated. That is the arrangement
-ESCAPECRAFT's playback dialog uses, and what keeps the footer's "Press `?` to toggle this
-panel" true.
+**Escape is the dialog's, never the global handler's** — and since all four modals use
+`useDialogBehaviour`, that is now literally true of all four. The hook listens on `document` in
+the **capture** phase and `stopPropagation()`s that one key, above every `window` bubble
+listener, which is why Escape was the only key that already behaved correctly and why the gate
+changes nothing about it.
+
+The shortcut sheet keeps **one** key of its own on `window`: the second `?` (and Shift+`/`)
+that toggles it shut, behind the same input/textarea typing guard the other two listeners open
+with. The guard is still needed even though the sheet traps focus, because the listener is on
+`window`, which every field in the document reaches. It needs no `stopPropagation`, because the
+two cascades below it are already gated. That is what keeps the footer's "Press `?` to toggle
+this panel" true. **Escape was bound there too until the sheet adopted the hook**; two
+listeners for one key was one Escape path too many, and the `window` one was the one to go —
+it could not `stopPropagation` anything useful and it sat below the hook's.
 
 **Two cascade branches are consequently unreachable from `App`**: the hook's own `?` toggle and
 the first arm of its Escape cascade (close the sheet). `showShortcuts` can only ever be `false`
@@ -799,22 +825,26 @@ running app reaches them. Folding the sheet's two keys back above the gate insid
 cascade would remove the dead arms at the cost of the gate no longer sitting above every other
 branch; if that trade is ever taken, this paragraph and the sheet's listener go together.
 
-**`LoadingOverlay` is deliberately not in the flag.** It carries `role="dialog"
-aria-modal="true"` for the screen reader, but it traps no focus, holds nothing to interact
-with and is gone the moment the project finishes loading — there is no dialog in front of the
-user to be confused by. `SessionRestorePrompt` has no trap or Escape handling of its own
-either and does not use `useDialogBehaviour`, but it *is* in the flag: it is a question with
-two buttons that waits for an answer. `ProjectLoadDialog` (`useProjectActions`'
-`showProjectLoadDialog`) is the same shape and is in the flag for the same reason; it owns no
-key of its own, so gating the editor behind it strands nothing.
+**`LoadingOverlay` is deliberately not in the flag, and is the one overlay with no trap.**
+It carries `role="dialog" aria-modal="true"` for the screen reader, but it traps no focus,
+holds nothing to interact with and is gone the moment the project finishes loading — there is
+no dialog in front of the user to be confused by. `SessionRestorePrompt` and
+`ProjectLoadDialog` (`useProjectActions`' `showProjectLoadDialog`) are both in the flag and
+both trap focus: each is a question with buttons that waits for an answer. The flag and the
+trap are still worth having together — the flag stops the editor taking keys from behind a
+dialog, the trap stops Tab walking out of one.
 
-**What is still not gated**, and is a separate piece of work: nothing stops the *keyframe
-graph* while a modal is up. It is a focusable `role=listbox` with its own element-level
-handler, so a user who had it focused can open the shortcut sheet with `?` (which the graph
-lets fall through) and then still nudge, delete and add keyframes with the arrows, Delete and
-Enter from behind it. `ExportDialog` is immune because it really traps focus; `KeyboardShortcuts`,
-`SessionRestorePrompt` and `ProjectLoadDialog` do not, which is what leaves the graph reachable.
-The fix is to adopt `useDialogBehaviour` in those three rather than to grow another flag.
+**The keyframe-graph gap is closed** (it was recorded here as open — the F4 finding of the
+modal-gate review). Nothing gates the *keyframe graph* on `modalOpen`: it is a focusable
+`role=listbox` with its own element-level handler, so a user who had it focused could open the
+shortcut sheet with `?` (which the graph lets fall through) and then still nudge, delete and
+add keyframes with the arrows, Delete and Enter from behind it. `ExportDialog` was immune
+because it really trapped focus; `KeyboardShortcuts`, `SessionRestorePrompt` and
+`ProjectLoadDialog` did not, which is what left the graph reachable. All three now adopt
+`useDialogBehaviour`, so the graph cannot hold focus while any of them is up — **the fix was
+the trap, not another flag**, which is why no gate was added to the graph's handler and none
+is wanted. Three axe audits in `apps/e2e/tests/accessibility/core.spec.ts` hold the line on
+each dialog's role, name and `aria-modal`.
 
 ### Export Performance Optimizations (`src/core/exporter.ts`)
 The export pipeline includes several optimizations to improve performance:

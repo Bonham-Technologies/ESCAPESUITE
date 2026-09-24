@@ -290,6 +290,117 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(unlabeled).toHaveLength(0)
   })
 
+  /**
+   * The editor's three other modals.
+   *
+   * Same shape as the Export-dialog audit above and the CRAFT dialog audits
+   * further up: open the thing, prove it really is an `aria-modal` dialog with
+   * an accessible name, then count serious/critical violations inside it.
+   *
+   * The audit is scoped to `[role="dialog"]` rather than run over the whole
+   * page: the editor behind these carries a canvas timeline whose contrast axe
+   * cannot compute, which is why the page-wide audit above disables
+   * `color-contrast` outright. Scoping keeps that rule live *inside* the dialog,
+   * where it can actually be judged. An `include` that matched nothing would
+   * also report zero violations, so each run asserts it had something in front
+   * of it.
+   */
+  async function dialogViolations(page: Page) {
+    const results = await runAxeCheck(page, { includeSelector: '[role="dialog"]' })
+    expect(results.passes).toBeGreaterThan(0)
+    return results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+  }
+
+  test('keyboard shortcuts sheet passes axe-core audit', async ({ page }) => {
+    // `?` is the only way in — there is no button for it.
+    await page.keyboard.press('Shift+Slash')
+
+    const sheet = page.getByRole('dialog', { name: 'Keyboard Shortcuts' })
+    await expect(sheet).toBeVisible()
+    await expect(sheet).toHaveAttribute('aria-modal', 'true')
+
+    expect(await dialogViolations(page)).toHaveLength(0)
+  })
+
+  test('project load dialog passes axe-core audit', async ({ page }) => {
+    // The safety dialog only appears when there is work to lose, so seed a clip
+    // first. Opening a project goes through the File System Access API; stub the
+    // picker so the file arrives without a native dialog. The file is never read
+    // on this path — the dialog is the question asked *before* the load — so any
+    // handle that answers `getFile()` will do.
+    await seedTextClip(page)
+    await page.evaluate(() => {
+      ;(window as unknown as { showOpenFilePicker: unknown }).showOpenFilePicker = async () => [
+        { getFile: async () => new File(['{}'], 'seed.veditor', { type: 'application/json' }) },
+      ]
+    })
+
+    await page.getByRole('button', { name: 'File menu' }).click()
+    await page.getByText('Open Project...').click()
+
+    const dialog = page.getByRole('dialog', { name: 'Load Project' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
+
+    expect(await dialogViolations(page)).toHaveLength(0)
+  })
+
+  test('session restore prompt passes axe-core audit', async ({ page }) => {
+    // The prompt is only offered for a session that holds at least one source
+    // video (`app/useSessionRestore.ts`), and it is read on mount — so write one
+    // straight into the `settings` store the app keeps it in and reload. The
+    // first navigation in `beforeEach` is what created the database.
+    await page.evaluate(async () => {
+      const session = {
+        project: {
+          id: 'seeded',
+          name: 'Seeded Session',
+          width: 1280,
+          height: 720,
+          frameRate: 30,
+          duration: 0,
+          created: 0,
+          modified: 0,
+          timeline: { clips: [], tracks: [], duration: 0 },
+        },
+        sourceVideos: [
+          {
+            id: 'video1',
+            name: 'video1.mp4',
+            duration: 10,
+            width: 1280,
+            height: 720,
+            frameRate: 30,
+            mimeType: 'video/mp4',
+            size: 1000,
+          },
+        ],
+        currentTime: 0,
+        selectedClipId: null,
+        zoom: 1,
+        timestamp: Date.now(),
+      }
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('video-editor-db')
+        request.onerror = () => reject(new Error('Failed to open database'))
+        request.onsuccess = () => {
+          const tx = request.result.transaction('settings', 'readwrite')
+          tx.objectStore('settings').put(session, 'current-session')
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(new Error('Failed to seed session'))
+        }
+      })
+    })
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+
+    const prompt = page.getByRole('dialog', { name: 'Resume Previous Session?' })
+    await expect(prompt).toBeVisible()
+    await expect(prompt).toHaveAttribute('aria-modal', 'true')
+
+    expect(await dialogViolations(page)).toHaveLength(0)
+  })
+
   test('keyframe graph passes axe-core audit and is keyboard reachable', async ({ page }) => {
     // The graph only exists inside the keyframe panel, which only draws one for
     // a selected clip — so seed a clip (it is selected on creation), open the

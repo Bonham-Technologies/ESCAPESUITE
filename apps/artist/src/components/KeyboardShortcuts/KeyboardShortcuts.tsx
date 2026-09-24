@@ -1,11 +1,21 @@
-// The shortcut sheet, and the two keys that are its own.
+// The shortcut sheet, and the one key that is still its own.
 //
 // It is a modal, so `App` counts it in `modalOpen` and the global cascade
 // (`app/useAppKeyboardShortcuts.ts`) stops taking keys while it is up. That
-// cascade is also what used to close it, so the sheet binds Escape and a
-// second `?` here instead — the same arrangement ESCAPECRAFT's playback dialog
-// uses, and what keeps the footer's "Press ? to toggle this panel" true.
+// cascade is also what used to *open and close* it, so the second `?` that
+// toggles it shut is bound here instead — the same arrangement ESCAPECRAFT's
+// playback dialog uses, and what keeps the footer's "Press ? to toggle this
+// panel" true.
+//
+// **Escape closes the sheet, and it is `useDialogBehaviour`'s.** It was bound
+// here too until the sheet adopted the shared hook; two listeners for one key
+// was one Escape path too many. Closing the sheet costs nothing — it holds no
+// state and destroys nothing — so the hook's unconditional Escape is exactly
+// the right meaning here. The hook also claims the key in the capture phase on
+// `document` and `stopPropagation()`s it, which the sheet's own listener never
+// did (it did not need to: the cascades below were already gated).
 import { useEffect, useRef } from 'react';
+import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import styles from './KeyboardShortcuts.module.css';
 
 interface KeyboardShortcutsProps {
@@ -112,22 +122,26 @@ export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
     onCloseRef.current = onClose;
   }, [onClose]);
 
+  const dialogRef = useDialogBehaviour(onClose, isOpen);
+
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // The same typing guard the other two window listeners open with. The
-      // sheet traps no focus, so the header's project-name field is still
-      // Tab-reachable behind it, and a `?` typed into a name is a `?`.
+      // sheet traps focus now, so no field inside it can take a keystroke and
+      // the header's project-name input is no longer Tab-reachable behind it —
+      // but this listener is on `window`, which every field in the document
+      // reaches, so the guard is still what keeps a typed `?` a `?`.
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
 
       // No stopPropagation and no preventDefault: the editor's two cascades
       // are already gated on `App`'s `modalOpen` while the sheet is up, so
-      // there is nothing below to stop, and neither key has a default worth
-      // taking away.
-      if (e.key === 'Escape' || e.key === '?' || (e.shiftKey && e.key === '/')) {
+      // there is nothing below to stop, and `?` has no default worth taking
+      // away.
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         onCloseRef.current();
       }
     };
@@ -140,9 +154,17 @@ export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className={styles.panel}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="keyboard-shortcuts-title"
+      >
         <div className={styles.header}>
-          <h2>Keyboard Shortcuts</h2>
+          <h2 id="keyboard-shortcuts-title">Keyboard Shortcuts</h2>
           <button className={styles.closeButton} onClick={onClose} title="Close (Escape)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -151,7 +173,11 @@ export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
           </button>
         </div>
 
-        <div className={styles.content}>
+        {/* The groups scroll and hold no controls of their own, so the region
+            itself has to be in the tab order for a keyboard to scroll it
+            (axe: scrollable-region-focusable). Being focusable also makes it
+            the sheet's second and last stop in the focus trap. */}
+        <div className={styles.content} tabIndex={0}>
           {shortcutGroups.map((group) => (
             <div key={group.title} className={styles.group}>
               <h3 className={styles.groupTitle}>{group.title}</h3>

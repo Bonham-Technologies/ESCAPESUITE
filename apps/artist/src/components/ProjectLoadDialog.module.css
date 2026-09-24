@@ -74,7 +74,9 @@
 
 .saveButton {
   background: var(--accent-primary);
-  color: white;
+  /* White on this fill is 2.75:1 — see --accent-on-fill in styles/index.css.
+     Caught by the project-load axe audit added with the focus trap. */
+  color: var(--accent-on-fill);
 }
 
 .saveButton:hover {
