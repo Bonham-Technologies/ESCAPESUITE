@@ -108,12 +108,16 @@ afterEach(() => {
 /** What the store holds once the codec probe has said yes, sound included. */
 const MP4_SUPPORTED: Mp4Support = { state: 'ready', supported: true, audio: true }
 
-/** …and what it holds where there is no AAC encoder: offered, but silent. */
+/**
+ * …and what it holds where there is no AAC encoder: offered, but silent. The
+ * sentence arrives as `audioReason` — `reason` is the MP4 verdict, and there is
+ * nothing wrong with the MP4 here (ESCSUITE-61).
+ */
 const MP4_SILENT: Mp4Support = {
   state: 'ready',
   supported: true,
   audio: false,
-  reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+  audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
 }
 
 /**
@@ -656,14 +660,38 @@ describe('useMp4Download audio-only (M4A)', () => {
     expect(result.current.m4aBlockedReason).toBe(MP4_UNSUPPORTED_REASON)
   })
 
+  // ESCSUITE-61. The two gates read two different sentences, so a browser
+  // missing both encoders titles each button with the fact about it — the M4A
+  // button is not disabled with a sentence about video.
+  it('is blocked with the AAC sentence where MP4 is blocked with the H.264 one', async () => {
+    const { result } = renderMp4Download({
+      state: 'ready',
+      supported: false,
+      audio: false,
+      reason: 'This browser cannot encode H.264 video, which an MP4 needs.',
+      audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
+    })
+
+    expect(result.current.m4aBlockedReason).toBe(
+      'MP4 will have no audio in this browser (no AAC encoder)'
+    )
+    expect(result.current.blockedReason).toBe(
+      'This browser cannot encode H.264 video, which an MP4 needs.'
+    )
+    // What is said out loud is the blocking reason, as ever: the MP4 one.
+    expect(result.current.note).toBe(
+      'This browser cannot encode H.264 video, which an MP4 needs.'
+    )
+  })
+
   it('is offered, and runs, where only the video codec is missing', async () => {
     // An M4A needs an AAC encoder and nothing else, so `supported: false` — the
     // answer about H.264 — must not reach this button. The gate and the action
     // read the same reason, which is what stops an enabled button from being a
     // dead one: before, the button rendered enabled here and the click did
-    // nothing at all. (Today's probe never returns this combination; the type
-    // allows it, and a fix for the probe's H.264/AAC collapse would make it
-    // real.)
+    // nothing at all. This combination is real since ESCSUITE-61: the probe
+    // answers for H.264 and AAC independently, so a browser with an AAC
+    // encoder and no H.264 lands exactly here — keep this test.
     await seed('take-1', 'Take One')
     const { result } = renderMp4Download({
       state: 'ready',

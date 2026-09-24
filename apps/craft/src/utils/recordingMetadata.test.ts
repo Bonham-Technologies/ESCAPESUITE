@@ -67,11 +67,7 @@ describe('buildSourceVideo', () => {
 
 describe('buildRecordingEntry', () => {
   const sourceVideo = { id: 'rec-1', name: 'Recording 1/1/2026', duration: 42 }
-  const baseConfig: Pick<RecordingConfig, 'webcamEnabled' | 'microphoneEnabled' | 'systemAudioEnabled'> = {
-    webcamEnabled: true,
-    microphoneEnabled: false,
-    systemAudioEnabled: false,
-  }
+  const baseConfig: Pick<RecordingConfig, 'webcamEnabled'> = { webcamEnabled: true }
 
   it('carries the id/name/duration from sourceVideo and hasWebcam from config', () => {
     const entry = buildRecordingEntry({
@@ -80,6 +76,7 @@ describe('buildRecordingEntry', () => {
       size: 456,
       thumbnailUrl: 'blob:thumb',
       config: baseConfig,
+      hasAudio: false,
     })
 
     expect(entry).toEqual({
@@ -94,37 +91,31 @@ describe('buildRecordingEntry', () => {
     })
   })
 
-  it('hasAudio is true when only the microphone is enabled', () => {
-    const entry = buildRecordingEntry({
-      sourceVideo,
-      now: 123,
-      size: 456,
-      thumbnailUrl: 'blob:thumb',
-      config: { ...baseConfig, microphoneEnabled: true, systemAudioEnabled: false },
-    })
-
-    expect(entry.hasAudio).toBe(true)
-  })
-
-  it('hasAudio is true when only system audio is enabled', () => {
-    const entry = buildRecordingEntry({
-      sourceVideo,
-      now: 123,
-      size: 456,
-      thumbnailUrl: 'blob:thumb',
-      config: { ...baseConfig, microphoneEnabled: false, systemAudioEnabled: true },
-    })
-
-    expect(entry.hasAudio).toBe(true)
-  })
-
-  it('hasAudio is false when neither microphone nor system audio is enabled', () => {
+  // ESCSUITE-62. `hasAudio` is no longer derived here: ticking "System Audio"
+  // only *asks* for it, so the config alone cannot say whether the take got
+  // any. The caller computes the one answer (see `useRecordingSave`) and hands
+  // the same value to both builders.
+  it('takes the hasAudio the caller computed rather than reading the config', () => {
     const entry = buildRecordingEntry({
       sourceVideo,
       now: 123,
       size: 456,
       thumbnailUrl: 'blob:thumb',
       config: baseConfig,
+      hasAudio: true,
+    })
+
+    expect(entry.hasAudio).toBe(true)
+  })
+
+  it('records a silent take as having no audio', () => {
+    const entry = buildRecordingEntry({
+      sourceVideo,
+      now: 123,
+      size: 456,
+      thumbnailUrl: 'blob:thumb',
+      config: baseConfig,
+      hasAudio: false,
     })
 
     expect(entry.hasAudio).toBe(false)

@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { storeVideo, storeThumbnail, createBlobUrl } from '../core/storage';
 import { generateThumbnail, extractVideoMetadata } from '../core/thumbnailGenerator';
 import { fixWebMMetadata } from '../core/converter';
+import { useRecorderStore } from '../store/recorderStore';
 import { createPlaceholderThumbnail } from '../utils/previewThumbnail';
 import { buildSourceVideo, buildRecordingEntry } from '../utils/recordingMetadata';
 import { NOT_SEEKABLE } from '../utils/notices';
@@ -94,6 +95,27 @@ export function useRecordingSave({
         ? metadata.duration
         : recordedDuration;
 
+    // Whether the take actually captured any audio — one answer, written to
+    // both records below so the stored metadata and the list entry cannot
+    // disagree (ESCSUITE-60), and the M4A button stays truthful after a reload.
+    //
+    // The microphone half is the config's to answer: asking for it and getting
+    // it are the same event, and a refused permission never starts a take.
+    // System audio is not: ticking it only *asks*, because the tick box that
+    // decides is in the browser's own share dialog, so a take recorded with it
+    // clear has no sound at all (ESCSUITE-62). `systemAudioShared` is what the
+    // controller read off the display stream's tracks when this take started —
+    // it is reset to `true` only when the *next* one starts, so at save time it
+    // still describes the take being saved.
+    //
+    // Read through `getState()` rather than selected: this hook renders inside
+    // `App`, and a subscription here would re-render the whole screen on a
+    // field the save path reads once. Still the config rather than the blob —
+    // reading the file back would mean a decode on the save path.
+    const { systemAudioShared } = useRecorderStore.getState();
+    const hasAudio =
+      config.microphoneEnabled || (config.systemAudioEnabled && systemAudioShared);
+
     const sourceVideo = buildSourceVideo({
       id,
       now,
@@ -101,11 +123,7 @@ export function useRecordingSave({
       duration,
       width: metadata.width,
       height: metadata.height,
-      // The same expression `buildRecordingEntry` uses below, deliberately:
-      // one answer, written to both records. The config is what was asked for
-      // rather than what the blob ended up carrying, but reading the blob
-      // would mean a decode on the save path — see ESCSUITE-60.
-      hasAudio: config.microphoneEnabled || config.systemAudioEnabled,
+      hasAudio,
     });
 
     await storeVideo(id, blob, sourceVideo);
@@ -117,6 +135,7 @@ export function useRecordingSave({
       size: blob.size,
       thumbnailUrl: createBlobUrl(thumbnail),
       config,
+      hasAudio,
     }));
   }, [setState, addRecording, setNotice, config, recorderTypeRef, capturedThumbnailRef]);
 

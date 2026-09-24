@@ -263,19 +263,20 @@ describe('recorderStore', () => {
     it('should record the codec probe\'s answer, reason and all', () => {
       const { setMp4Support } = useRecorderStore.getState()
 
-      // The silent-MP4 shape: offered, but without sound and saying so.
+      // The silent-MP4 shape: offered, but without sound and saying so. The
+      // sentence is `audioReason`, the answer about AAC alone (ESCSUITE-61).
       setMp4Support({
         state: 'ready',
         supported: true,
         audio: false,
-        reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+        audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
       })
 
       expect(useRecorderStore.getState().mp4Support).toEqual({
         state: 'ready',
         supported: true,
         audio: false,
-        reason: 'MP4 will have no audio in this browser (no AAC encoder)',
+        audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
       })
     })
   })

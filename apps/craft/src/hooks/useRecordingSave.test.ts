@@ -8,11 +8,12 @@
 // test sets them the way a take would have.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import 'fake-indexeddb/auto'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { useRecordingSave, type RecordingSaveDeps } from './useRecordingSave'
 import { getRecordingsMetadata, getThumbnail } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { converterModule, thumbnailModule, resetAppDoubles } from '../test/appDoubles'
+import { useRecorderStore } from '../store/recorderStore'
 import { getLastCanvasContext, resetCanvasContextDouble } from '../test/doubles/canvas'
 import { defaultConfig, type Recording, type RecordingConfig, type RecordingState } from '../store/types'
 
@@ -35,6 +36,9 @@ beforeEach(async () => {
   states = []
   added = []
   notices = []
+  // What `handleStartRecording` sets at the top of every take; a test that
+  // cares sets it the way the just-finished take left it.
+  useRecorderStore.setState({ systemAudioShared: true })
   await clearAllRecordings()
 })
 
@@ -210,6 +214,67 @@ describe('useRecordingSave list entry', () => {
     const [meta] = await getRecordingsMetadata()
     expect(meta.hasAudio).toBe(false)
     expect(meta.hasAudio).toBe(added[0].hasAudio)
+  })
+
+  // ESCSUITE-62. Ticking "System Audio" only *asks* for it — the browser's own
+  // share dialog carries the tick box — so a take recorded with the box left
+  // clear has no sound at all. The controller already knows (it reads the
+  // display stream's tracks at take start and writes `systemAudioShared`), and
+  // this is the take that flag describes: it is reset to `true` only when the
+  // *next* take starts. Marking the take audible cost it nothing visible and
+  // cost the M4A button its truth — it offered an audio download of silence.
+  it('marks a take whose share picker cleared system audio as silent', async () => {
+    useRecorderStore.setState({ systemAudioShared: false })
+    const { result } = mountSave({ microphoneEnabled: false, systemAudioEnabled: true })
+
+    await result.current(RAW, 4)
+
+    expect(added[0].hasAudio).toBe(false)
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(false)
+  })
+
+  it('marks it audible when the picker did share system audio', async () => {
+    useRecorderStore.setState({ systemAudioShared: true })
+    const { result } = mountSave({ microphoneEnabled: false, systemAudioEnabled: true })
+
+    await result.current(RAW, 4)
+
+    expect(added[0].hasAudio).toBe(true)
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(true)
+  })
+
+  it('keeps a microphone take audible however the share picker answered', async () => {
+    useRecorderStore.setState({ systemAudioShared: false })
+    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: true })
+
+    await result.current(RAW, 4)
+
+    expect(added[0].hasAudio).toBe(true)
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(true)
+  })
+
+  // The flag is read with `getState()` on the save path, not selected: this
+  // hook renders inside `App`, and a subscription here would re-render the
+  // whole screen every time a take started.
+  it('reads the flag without subscribing to it', async () => {
+    let renders = 0
+    const deps: RecordingSaveDeps = {
+      recorderTypeRef,
+      capturedThumbnailRef,
+      config: { ...defaultConfig, microphoneEnabled: false, systemAudioEnabled: true },
+      setState: (state) => { states.push(state) },
+      addRecording: (recording) => { added.push(recording) },
+      setNotice: (notice) => { notices.push(notice) },
+    }
+    renderHook(() => { renders++; return useRecordingSave(deps) })
+    const before = renders
+
+    act(() => { useRecorderStore.setState({ systemAudioShared: false }) })
+
+    expect(renders).toBe(before)
   })
 
   // Changed assertion: the hook used to swallow the failure into a
