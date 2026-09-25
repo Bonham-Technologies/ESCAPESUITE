@@ -200,7 +200,7 @@ describe('useRecordingSave list entry', () => {
   it('stores the same answer about audio in the metadata a reload reads back', async () => {
     const { result } = mountSave({ webcamEnabled: false, microphoneEnabled: true, systemAudioEnabled: false })
 
-    await result.current(RAW, 4, null, { micAcquired: true })
+    await result.current(RAW, 4, null, { micAcquired: true, separateTracks: false })
 
     const [meta] = await getRecordingsMetadata()
     expect(meta.hasAudio).toBe(true)
@@ -250,7 +250,7 @@ describe('useRecordingSave list entry', () => {
     useRecorderStore.setState({ systemAudioShared: false })
     const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: true })
 
-    await result.current(RAW, 4, null, { micAcquired: true })
+    await result.current(RAW, 4, null, { micAcquired: true, separateTracks: false })
 
     expect(added[0].hasAudio).toBe(true)
     const [meta] = await getRecordingsMetadata()
@@ -269,7 +269,7 @@ describe('useRecordingSave list entry', () => {
   it('marks a take whose microphone never opened as silent', async () => {
     const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
 
-    await result.current(RAW, 4, null, { micAcquired: false })
+    await result.current(RAW, 4, null, { micAcquired: false, separateTracks: false })
 
     expect(added[0].hasAudio).toBe(false)
     const [meta] = await getRecordingsMetadata()
@@ -279,7 +279,7 @@ describe('useRecordingSave list entry', () => {
   it('marks a take whose microphone did open as audible', async () => {
     const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
 
-    await result.current(RAW, 4, null, { micAcquired: true })
+    await result.current(RAW, 4, null, { micAcquired: true, separateTracks: false })
 
     expect(added[0].hasAudio).toBe(true)
     const [meta] = await getRecordingsMetadata()
@@ -354,7 +354,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
       webcamShape: 'rectangle',
     })
 
-    await result.current(RAW, 6, [companionPart], { micAcquired: true })
+    await result.current(RAW, 6, [companionPart], { micAcquired: true, separateTracks: true })
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(2)
@@ -448,6 +448,43 @@ describe('useRecordingSave for a separate-tracks take', () => {
     expect(converterModule.fixWebMMetadata).not.toHaveBeenCalled()
   })
 
+  // ESCSUITE-68. A take is several files because it was *started* that way, not
+  // because companions happened to arrive. Every way the recorder can lose all
+  // of them delivers `null` — which is also what an ordinary take delivers, so
+  // the list cannot answer the question and the resolved mode has to. The
+  // primary is still the take's primary: named by its own `takeId`, with its
+  // role and the overlay geometry the camera was recorded at. Inferred from the
+  // list, it used to be stored as though the take had been composited.
+  it('still records the primary as the take primary when every companion was lost', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const { result } = mountSave({
+      webcamEnabled: true,
+      separateTracks: true,
+      webcamPosition: 'bottom-left',
+      webcamSize: 0.25,
+      webcamShape: 'circle',
+    })
+
+    await result.current(RAW, 6, null, { micAcquired: false, separateTracks: true })
+
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(1)
+    const [primary] = stored
+    expect(primary.takeId).toBe(primary.id)
+    expect(primary.role).toBe('screen')
+    expect(primary.startOffset).toBe(0)
+    expect(primary.overlayPlacement).toEqual({
+      position: 'bottom-left',
+      size: 0.25,
+      shape: 'circle',
+    })
+    expect(added.map(entry => entry.role)).toEqual(['screen'])
+  })
+
+  // The config asked for the mode, but the take was not resolved on it — the
+  // browser could not serve two pipelines, so the controller resolved it away
+  // before the countdown and `captured` says so (`separateTracks` defaults to
+  // false). That is an ordinary composited take and is stored as one.
   it('saves one part when there is no companion, exactly as before', async () => {
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 

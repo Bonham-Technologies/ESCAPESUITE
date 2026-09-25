@@ -17,15 +17,17 @@ import type {
 import { companionPartFor } from './companionParts';
 
 /**
- * What the take actually captured, as opposed to what its config asked for.
+ * What the take was resolved to be, as opposed to what its config asked for.
  *
- * Resolved once by `useRecordingController` when the take starts, from the
- * streams it really acquired, and handed to `saveRecording` with the blob —
- * the same resolve-once discipline the separate-tracks mode gets, and for the
- * same reason: a fact about that take, not about the settings as they stand
- * now.
+ * Resolved once by `useRecordingController` before the countdown — from the
+ * streams it really acquired and the browser it is running in — and handed to
+ * `saveRecording` with the blob, in `onStop`'s own closure. Every field is a
+ * fact about *that* take rather than about the settings as they stand when it
+ * ends, which is the whole point: the settings can move under a running take
+ * (the panel is disabled, the store behind it is not), and a late `onStop` must
+ * not be answered with the next take's configuration.
  */
-export interface CapturedAudio {
+export interface CapturedTake {
   /**
    * A microphone stream with a track in it was really acquired — the toggle
    * AND the device. That is the pair the recorder asks when it wires the mix
@@ -33,6 +35,16 @@ export interface CapturedAudio {
    * `hasAudio` cannot disagree with either (ESCSUITE-70).
    */
   micAcquired: boolean;
+  /**
+   * The take was recorded as separate tracks: the toggle AND a PiP take AND a
+   * browser that can serve two pipelines. Carried rather than re-derived
+   * because the save path cannot ask any of the three — it sees the config as
+   * it stands now, which is a different question — and because the companions
+   * it is handed cannot answer it either: every way the recorder can lose all
+   * of them delivers the same empty list an ordinary take delivers
+   * (ESCSUITE-68).
+   */
+  separateTracks: boolean;
 }
 
 /**
@@ -45,10 +57,13 @@ export interface CapturedAudio {
  * browser's own share dialog answered (ESCSUITE-62).
  *
  * A pure function of three booleans, called once per record-writing pass by
- * `useRecordingSave`, so nothing derives this expression twice.
+ * `useRecordingSave`, so nothing derives this expression twice. It asks for the
+ * one field of the take it reads rather than the whole `CapturedTake`, so
+ * growing that record cannot oblige a caller of *this* to answer a question
+ * about audio that is not one.
  */
 export function resolveHasAudio(
-  captured: CapturedAudio,
+  captured: Pick<CapturedTake, 'micAcquired'>,
   systemAudioEnabled: boolean,
   systemAudioShared: boolean
 ): boolean {
