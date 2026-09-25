@@ -1,6 +1,7 @@
 import { NO_AUDIO_TRACK_REASON, type Mp4Conversion } from '../../hooks/useMp4Download';
 import type { Recording } from '../../store/types';
 import { formatDuration } from '../../utils/recordingFormat';
+import { companionPartFor } from '../../utils/companionParts';
 import { DownloadIcon, EditIcon, PlayIcon, RecordIcon, TrashIcon, UploadIcon } from '../icons';
 import styles from '../../App.module.css';
 
@@ -132,9 +133,10 @@ export function RecordingsList({
   onSendToEditor,
   onDelete,
 }: RecordingsListProps) {
-  // Which takes still have a webcam half in the library. A primary whose
-  // companion was deleted is a plain take again (see `utils/takeOrder.ts`),
-  // so its downloads leave nothing out and it says nothing.
+  // Which takes still have a *camera* half in the library. The interim MP4
+  // note is about the webcam alone — the mix is still on the primary, so the
+  // audio parts take nothing out of the conversions — and a primary whose
+  // webcam row was deleted is a plain take again (see `utils/takeOrder.ts`).
   const takesWithCompanion = new Set(
     recordings
       .filter((recording) => recording.role === 'webcam' && recording.takeId !== undefined)
@@ -164,7 +166,10 @@ export function RecordingsList({
             const m4aReason = converting
               ? null
               : m4aBlockedReason ?? (recording.hasAudio ? null : NO_AUDIO_TRACK_REASON);
-            const isCompanion = recording.role === 'webcam';
+            // Every companion row — camera or sound — says which track it is
+            // and carries no conversions: those are the take's downloads and
+            // live on the primary row.
+            const companionLabel = companionPartFor(recording.role);
             const hasCompanion = takesWithCompanion.has(recording.id);
             const noteId = hasCompanion ? separateTracksNoteId(recording.id) : null;
             // Both notes can apply at once: one is about the browser, one about
@@ -187,7 +192,7 @@ export function RecordingsList({
                 <div className={styles.recordingInfo}>
                   <div className={styles.recordingName}>{recording.name}</div>
                   <div className={styles.recordingMeta}>
-                    {isCompanion && 'Webcam track • '}
+                    {companionLabel && `${companionLabel.trackLabel} track • `}
                     {formatDuration(recording.duration)} •{' '}
                     {(recording.size / 1024 / 1024).toFixed(1)} MB
                   </div>
@@ -211,7 +216,7 @@ export function RecordingsList({
                       <DownloadIcon />
                     </button>
                   </div>
-                  {!isCompanion && (
+                  {!companionLabel && (
                     <>
                       <button
                         className={styles.mp4Button}

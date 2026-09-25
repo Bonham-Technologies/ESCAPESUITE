@@ -142,9 +142,14 @@ describe('the separate-tracks toggle', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
     // The cost is said before the choice, not after it — the same shape as the
     // silent-MP4 note under the library.
+    //
+    // The mode splits the sound as well as the picture (ESCSUITE-14 slice 3),
+    // and the help text is where that is said before the choice rather than
+    // discovered in the library afterwards. One toggle, because the spec
+    // treats separate tracks as one mode and the storage gate prices one.
     expect(
       screen.getByText(
-        'Records the screen and the webcam as two files, so the webcam can be moved, resized or removed in the editor. Uses about twice the CPU and storage.'
+        'Records the screen, the webcam and each audio source as separate files, so the webcam and the sound can be adjusted in the editor. Uses about twice the CPU and storage.'
       )
     ).toBeInTheDocument()
   })

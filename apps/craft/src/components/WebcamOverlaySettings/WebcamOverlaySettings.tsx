@@ -5,11 +5,15 @@ import styles from '../../App.module.css';
  * What the separate-tracks mode is for and what it costs, said before the
  * choice rather than after it.
  *
- * Two encoders and two files: about twice the CPU while recording and about
- * twice the bytes afterwards. The wording is pinned by this component's test.
+ * It splits the sound as well as the picture (slice 3): the camera, the
+ * microphone and the system audio each become their own file, while the
+ * screen recording keeps the mixed audio so a screen-only download still has
+ * sound. One toggle for all of it, because the spec treats separate tracks as
+ * one mode and the storage headroom gate prices one. The wording is pinned by
+ * this component's test.
  */
 export const SEPARATE_TRACKS_HELP =
-  'Records the screen and the webcam as two files, so the webcam can be moved, resized or removed in the editor. Uses about twice the CPU and storage.';
+  'Records the screen, the webcam and each audio source as separate files, so the webcam and the sound can be adjusted in the editor. Uses about twice the CPU and storage.';
 
 /**
  * The id the toggle's `aria-describedby` points at — the one paragraph that
