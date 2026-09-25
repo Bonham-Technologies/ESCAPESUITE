@@ -28,7 +28,7 @@ import {
 } from '../test/doubles/canvas'
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastream'
-import { WEBCAM_TRACK_NOT_SAVED } from '../utils/notices'
+import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
 
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
@@ -79,6 +79,11 @@ function screenStreamWithAudio(): MediaStream {
 
 function webcamStream(): MediaStream {
   return createStreamDouble([createTrackDouble('video', { id: 'webcam-video' })])
+}
+
+/** A microphone capture with a live audio track, as `requestMicrophone` returns. */
+function micStreamWithTrack(): MediaStream {
+  return createStreamDouble([createTrackDouble('audio', { id: 'mic-audio' })])
 }
 
 function resetStore(config: Partial<RecordingConfig> = {}): void {
@@ -915,9 +920,9 @@ describe('a separate-tracks take', () => {
 
     // Once, and not as a side effect of the start-of-take clear.
     expect(
-      setNotice.mock.calls.filter(([notice]) => notice === WEBCAM_TRACK_NOT_SAVED)
+      setNotice.mock.calls.filter(([notice]) => notice === SEPARATE_TRACK_NOT_SAVED)
     ).toHaveLength(1)
-    expect(useRecorderStore.getState().notice).toBe(WEBCAM_TRACK_NOT_SAVED)
+    expect(useRecorderStore.getState().notice).toBe(SEPARATE_TRACK_NOT_SAVED)
     // ...and the screen recording is still saved, exactly as it is today.
     expect(harness.saveRecording).toHaveBeenCalledWith(
       recorder.stopBlob,
@@ -939,7 +944,7 @@ describe('a separate-tracks take', () => {
 
     await act(async () => { await result.current.handleStopRecording() })
 
-    expect(setNotice).not.toHaveBeenCalledWith(WEBCAM_TRACK_NOT_SAVED)
+    expect(setNotice).not.toHaveBeenCalledWith(SEPARATE_TRACK_NOT_SAVED)
     expect(useRecorderStore.getState().notice).toBeNull()
   })
 
@@ -962,6 +967,95 @@ describe('a separate-tracks take', () => {
     expect(harness.deps.recorderTypeRef.current).toBe('mediarecorder')
     // ...and the compositor is back in the recording path, as today.
     expect(recorder.initializeCalls[0].screen).not.toBe(harness.streams.screen)
+  })
+
+  it('says a separate track was lost when the recorder delivers fewer than the take asked for', async () => {
+    // Screen, webcam and a microphone that really was acquired: three
+    // companions' worth of sources, so a list of one is two tracks short.
+    harness = separateHarness({ countdownSeconds: 0, microphoneEnabled: true })
+    harness.streams.mic = micStreamWithTrack()
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    recorder.companionParts = [
+      { role: 'webcam', blob: new Blob(['webcam'], { type: 'video/webm' }), startOffset: 0 },
+    ]
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    // The recorder cannot report this: `null` and a short list are what an
+    // ordinary take delivers too. Only this closure still knows how many
+    // companions the take asked for.
+    expect(
+      setNotice.mock.calls.filter(([notice]) => notice === SEPARATE_TRACK_NOT_SAVED)
+    ).toHaveLength(1)
+  })
+
+  it('says nothing when every companion the take asked for arrived', async () => {
+    harness = separateHarness({ countdownSeconds: 0, microphoneEnabled: true })
+    harness.streams.mic = micStreamWithTrack()
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    recorder.companionParts = [
+      { role: 'webcam', blob: new Blob(['webcam'], { type: 'video/webm' }), startOffset: 0 },
+      { role: 'mic', blob: new Blob(['mic'], { type: 'audio/webm' }), startOffset: 0 },
+    ]
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    expect(setNotice).not.toHaveBeenCalledWith(SEPARATE_TRACK_NOT_SAVED)
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('does not count a microphone the take never got', async () => {
+    // The toggle is on and `acquireStreams` came back without one — a device
+    // that would not open. The take asks for one companion, gets one, and
+    // says nothing.
+    harness = separateHarness({ countdownSeconds: 0, microphoneEnabled: true })
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    recorder.companionParts = [
+      { role: 'webcam', blob: new Blob(['webcam'], { type: 'video/webm' }), startOffset: 0 },
+    ]
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    expect(setNotice).not.toHaveBeenCalledWith(SEPARATE_TRACK_NOT_SAVED)
+  })
+
+  it('says it once for a take that lost two of the three parts it asked for', async () => {
+    // A microphone that opened and a share dialog that ticked system audio, so
+    // the take asks for three companions and gets one. One sentence covers
+    // both losses: there is one notice channel, and which tracks they were is
+    // what the console carries.
+    harness = separateHarness({
+      countdownSeconds: 0,
+      microphoneEnabled: true,
+      systemAudioEnabled: true,
+    })
+    harness.streams.mic = micStreamWithTrack()
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    recorder.companionParts = [
+      { role: 'webcam', blob: new Blob(['webcam'], { type: 'video/webm' }), startOffset: 0 },
+    ]
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    expect(
+      setNotice.mock.calls.filter(([notice]) => notice === SEPARATE_TRACK_NOT_SAVED)
+    ).toHaveLength(1)
   })
 })
 

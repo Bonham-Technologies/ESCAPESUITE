@@ -29,7 +29,7 @@ import {
   NO_SYSTEM_AUDIO,
   SAVE_FAILED,
   START_FAILED,
-  WEBCAM_TRACK_NOT_SAVED,
+  SEPARATE_TRACK_NOT_SAVED,
 } from '../utils/notices';
 import { Compositor } from '../core/compositor';
 import { analytics } from '../utils/analytics';
@@ -319,6 +319,18 @@ export function useRecordingController({
       // one the take is audio only, which the WebCodecs recorder cannot serve.
       const hasVideoSource = (config.screenEnabled && !!screen) || (config.webcamEnabled && !!webcam);
 
+      // How many extra files this take is asking for: the camera, and one per
+      // audio source it really has. The same two questions the recorder asks
+      // when it builds the pipelines — a stream with a track in it AND its
+      // toggle — so the two cannot disagree. This is the only layer that
+      // knows the number: the recorder delivers `null` or a short list for a
+      // lost part and for a take that never asked, and they look identical.
+      const expectedCompanions = separateTracks
+        ? 1 +
+          (config.microphoneEnabled && (mic?.getAudioTracks().length ?? 0) > 0 ? 1 : 0) +
+          (config.systemAudioEnabled && systemAudioShared ? 1 : 0)
+        : 0;
+
       // Set up preview
       // This avoids canvas.captureStream() issues with hidden video elements
 
@@ -370,15 +382,14 @@ export function useRecordingController({
           // A stop that lands after the take was cancelled or the screen went
           // away is a chunk nobody asked for: drop it rather than save it.
           if (cancelledRef.current) return;
-          // Three of the four ways the camera half can be lost happen inside
-          // the recorder — no frame encoded, the pipeline gave up, the muxer's
-          // finalize threw — and all three arrive here as `companion: null`,
+          // Four of the ways a part can be lost happen inside the recorder —
+          // it was never set up, it encoded nothing, it gave up, its finalize
+          // threw — and all four arrive here as a list that is simply shorter,
           // which is exactly what an ordinary take delivers. Only this closure
-          // still knows the take was *resolved* on separate tracks, so this is
-          // the only place that can tell "lost" from "never asked for". The
-          // save hook says the same sentence for a companion lost in storage.
-          if (separateTracks && !companions) {
-            setNotice(WEBCAM_TRACK_NOT_SAVED);
+          // still knows how many the take was resolved to produce. The save
+          // hook says the same sentence for a part lost in storage.
+          if ((companions?.length ?? 0) < expectedCompanions) {
+            setNotice(SEPARATE_TRACK_NOT_SAVED);
           }
           // The recorder can finish a take on its own — the capture ended — so
           // nobody has been through handleStopRecording to stop the ticker.
