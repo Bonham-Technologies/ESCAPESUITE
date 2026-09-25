@@ -145,10 +145,37 @@ interface VideoCompanionPipeline extends CompanionPipelineBase {
   timing: FrameTiming;
 }
 
-// `AudioCompanionPipeline` arrives with the mic and system-audio companions;
-// the union has one member here so nothing in this build pretends to handle a
-// kind that does not exist yet.
-type CompanionPipeline = VideoCompanionPipeline;
+/**
+ * One audio source of a separate-tracks take, in its own Opus-only WebM: its
+ * own `MediaStreamAudioSourceNode`, its own `ScriptProcessorNode`, its own
+ * `AudioEncoder`, its own output.
+ *
+ * It is a *second* tap on a track the mix is already reading, not a diversion
+ * of it: the primary output keeps the mixed audio exactly as before, so a
+ * screen-only download still has sound and the composite (slice 4) still has
+ * the mix to draw on. Two `MediaStreamAudioSourceNode`s on one track is
+ * ordinary Web Audio — a source node is a reader, not an owner.
+ */
+interface AudioCompanionPipeline extends CompanionPipelineBase {
+  readonly kind: 'audio';
+  readonly role: 'mic' | 'system';
+  encoder: AudioEncoder | null;
+  packetSource: EncodedAudioPacketSource | null;
+  /** Kept so `cleanup()` can disconnect it; the node is otherwise write-only. */
+  processor: ScriptProcessorNode | null;
+  /**
+   * Microseconds of audio this pipeline has encoded — its own presentation
+   * clock, reset by `start()` and advanced by its own sample count.
+   *
+   * Per pipeline rather than shared with `audioTimestamp`, and that is the
+   * point: three callbacks advancing one counter would interleave and stamp
+   * each other's audio. What they share is the *origin* — one `start()`, one
+   * `AudioContext`, one gate — which is what puts the parts on one timeline.
+   */
+  timestampUs: number;
+}
+
+type CompanionPipeline = VideoCompanionPipeline | AudioCompanionPipeline;
 
 /** Bitrate for a video pipeline of this size. */
 function videoBitrateFor(width: number, height: number): number {
@@ -419,6 +446,10 @@ export class WebCodecsRecorder {
       webcamStream
     ) {
       await this.initializeCompanion(webcamStream);
+      // ...and each audio source that is really being recorded gets its own
+      // file too (slice 3). After the webcam, so the companion list — and the
+      // parts `stop()` delivers — is in role order.
+      await this.initializeAudioCompanions(this.audioContext, screenStream, micStream, config);
     }
 
     // Start audio level monitoring
@@ -518,6 +549,148 @@ export class WebCodecsRecorder {
     };
     track.addEventListener('ended', companionEnded);
     this.trackEndedHandlers.set(track, companionEnded);
+  }
+
+  /**
+   * One Opus-only WebM per audio source the take is actually recording.
+   *
+   * The two conditions are the same two `initialize` already asked when it
+   * wired the mix — a stream with an audio track in it AND its toggle — so
+   * the set of audio companions and the mix can never disagree about what the
+   * take is recording, and neither can `useRecordingSave`'s `hasAudio`
+   * (`microphoneEnabled || (systemAudioEnabled && systemAudioShared)`).
+   * Microphone before system audio, so the companion list is in role order.
+   */
+  private async initializeAudioCompanions(
+    context: AudioContext,
+    screenStream: MediaStream | null,
+    micStream: MediaStream | null,
+    config: RecordingConfig
+  ): Promise<void> {
+    const micTrack = config.microphoneEnabled ? micStream?.getAudioTracks()[0] : undefined;
+    if (micTrack) await this.initializeAudioCompanion(context, 'mic', micTrack);
+
+    const systemTrack = config.systemAudioEnabled
+      ? screenStream?.getAudioTracks()[0]
+      : undefined;
+    if (systemTrack) await this.initializeAudioCompanion(context, 'system', systemTrack);
+  }
+
+  /**
+   * Build one audio companion, or record the take without it and say why.
+   *
+   * Every refusal is a warning rather than a throw, exactly as the webcam
+   * companion's is: the take the user asked for is mostly the screen, and
+   * losing it because a third Opus encoder would not configure would be a far
+   * worse outcome than a take with one track fewer. `stop()` then simply
+   * leaves this role out of the list, and the controller — which knows how
+   * many companions the take asked for — is what tells the user.
+   */
+  private async initializeAudioCompanion(
+    context: AudioContext,
+    role: 'mic' | 'system',
+    track: MediaStreamTrack
+  ): Promise<void> {
+    const { trackLabel } = COMPANION_PARTS[role];
+    let companion: AudioCompanionPipeline;
+
+    try {
+      const target = new BufferTarget();
+      const output = new Output({ format: new WebMOutputFormat(), target });
+      const packetSource = new EncodedAudioPacketSource('opus');
+      // One audio track and no video track at all: every ARTIST read path and
+      // CRAFT's own converter are single-track by construction.
+      output.addAudioTrack(packetSource);
+      await output.start();
+
+      companion = {
+        kind: 'audio',
+        role,
+        encoder: null,
+        output,
+        target,
+        packetSource,
+        processor: null,
+        encodedCount: 0,
+        timestampUs: 0,
+        failed: false,
+      };
+
+      const encoder = new AudioEncoder({
+        output: async (chunk, meta) => {
+          // Read through the pipeline rather than captured, because cleanup()
+          // nulls it: an encoder output that lands after a take has been torn
+          // down must find nothing to add to rather than write into a
+          // finalized muxer.
+          const source = companion.packetSource;
+          if (source) {
+            await source.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          }
+        },
+        error: (e) => {
+          console.warn(`${trackLabel} track encoder failed: ${e.message}`);
+          this.failCompanion(companion);
+        },
+      });
+
+      await encoder.configure({
+        codec: 'opus',
+        sampleRate: this.sampleRate,
+        numberOfChannels: 2,
+        bitrate: 128000,
+      });
+      companion.encoder = encoder;
+    } catch (e) {
+      console.warn(`${trackLabel} track could not be set up:`, e);
+      return;
+    }
+
+    // A second tap on the track the mix is already reading. The
+    // ScriptProcessorNode is the same node the mix uses — 4096 samples at
+    // 48kHz, ~85ms chunks — rather than an AudioWorklet, because this class
+    // has exactly one audio-capture mechanism and a second one in the same
+    // take would be two things to keep in step for no gain.
+    const source = context.createMediaStreamSource(new MediaStream([track]));
+    const processor = context.createScriptProcessor(4096, 2, 2);
+
+    processor.onaudioprocess = (event) => {
+      if (!this.isRecordingActive || this.isPausedState || !companion.encoder) return;
+
+      const leftChannel = event.inputBuffer.getChannelData(0);
+      const rightChannel = event.inputBuffer.getChannelData(1);
+      const numberOfFrames = leftChannel.length;
+
+      const planarData = new Float32Array(numberOfFrames * 2);
+      for (let i = 0; i < numberOfFrames; i++) {
+        planarData[i] = leftChannel[i];
+        planarData[numberOfFrames + i] = rightChannel[i];
+      }
+
+      try {
+        const audioData = new AudioData({
+          format: 'f32-planar',
+          sampleRate: this.sampleRate,
+          numberOfFrames,
+          numberOfChannels: 2,
+          timestamp: companion.timestampUs,
+          data: planarData,
+        });
+
+        companion.encoder.encode(audioData);
+        audioData.close();
+
+        companion.timestampUs += (numberOfFrames / this.sampleRate) * 1_000_000;
+        companion.encodedCount++;
+      } catch (e) {
+        console.error('Audio encoding error:', e);
+      }
+    };
+
+    source.connect(processor);
+    processor.connect(context.destination);
+    companion.processor = processor;
+
+    this.companions.push(companion);
   }
 
   /** Read every video companion's track into its own encoder, on the shared clock. */
@@ -753,6 +926,8 @@ export class WebCodecsRecorder {
       if (companion.kind === 'video') {
         companion.timing = newFrameTiming();
         companion.readerActive = true;
+      } else {
+        companion.timestampUs = 0;
       }
     }
     this.startCompanionCaptures();
@@ -1242,6 +1417,10 @@ export class WebCodecsRecorder {
         } catch {
           // Ignore errors
         }
+      }
+      if (companion.kind === 'audio' && companion.processor) {
+        companion.processor.disconnect();
+        companion.processor = null;
       }
       companion.encoder = null;
       companion.output = null;
