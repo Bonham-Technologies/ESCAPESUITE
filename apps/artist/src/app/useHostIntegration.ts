@@ -15,7 +15,10 @@
 // recording can be several parts sharing a `takeId`, so `takeImport.ts` brings
 // them all into the library and `placeTakeOnTimeline` puts them on the timeline
 // in one undo step. The store action is reached through `getState()` rather than
-// taken as a dep, so `App` gains no selector (`App.rerender.test.tsx`).
+// taken as a dep, so `App` gains no selector (`App.rerender.test.tsx`), and so
+// is the media library the "already loaded" guard consults — `importTake` is
+// handed that lookup rather than an answer, because the take's parts are not
+// known until it has scanned for them.
 //
 // Placement is the one thing that does **not** happen the moment the import
 // lands: it waits for the "Resume Previous Session?" prompt. See
@@ -212,33 +215,40 @@ export function useHostIntegration({
           // nothing and saves the whole import.
           if (cancelled) return;
           if (videoData) {
-            // Check if video is already loaded
-            const existingVideos = useEditorStore.getState().sourceVideos;
-            if (!existingVideos.some(v => v.id === loadVideoId)) {
-              // The id names a take's **primary** part, and a take can be
-              // several files sharing a takeId (ESCSUITE-14). Every part joins
-              // the library; every part that can be placed goes on the
-              // timeline, in one undo step — for every take, not only one
-              // recorded as separate tracks (decision 7).
-              const take = await importTake(videoData, addSourceVideo);
-              if (cancelled) {
-                // This effect is gone: its parts are in the library (harmless,
-                // and the run that replaced it adds the same ids), but the
-                // timeline and the toast belong to whoever is still mounted.
-                for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
-                return;
-              }
-              thumbnailObjectUrls.push(...take.thumbnailUrls);
-              pendingTake.current = {
-                clipParts: take.clipParts,
-                name: videoData.metadata.name,
-                missingParts: take.missingParts,
-              };
-              // Once the question is settled this places the take on the same
-              // tick it always did; while it is open this is a no-op and the
-              // effect below drains it when the answer lands.
-              if (!sessionDecisionPendingRef.current) placePendingTake();
+            // The id names a take's **primary** part, and a take can be
+            // several files sharing a takeId (ESCSUITE-14). Every part joins
+            // the library; every part that can be placed goes on the
+            // timeline, in one undo step — for every take, not only one
+            // recorded as separate tracks (decision 7).
+            //
+            // "Already loaded" is a question about the whole take, so it is
+            // asked there rather than here: the parts are not known until the
+            // metadata scan, and a take the library holds *any* part of is
+            // skipped whole. Read through `getState()` at call time, so the
+            // mount-only effect is not answering it from a stale library.
+            const take = await importTake(videoData, addSourceVideo, (id) =>
+              useEditorStore.getState().sourceVideos.some((v) => v.id === id)
+            );
+            if (cancelled) {
+              // This effect is gone: its parts are in the library (harmless,
+              // and the run that replaced it adds the same ids), but the
+              // timeline and the toast belong to whoever is still mounted.
+              for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
+              return;
             }
+            // Nothing was imported, so there is nothing to place and — as ever
+            // for a take already in the library — nothing to say about it.
+            if (take.alreadyInLibrary) return;
+            thumbnailObjectUrls.push(...take.thumbnailUrls);
+            pendingTake.current = {
+              clipParts: take.clipParts,
+              name: videoData.metadata.name,
+              missingParts: take.missingParts,
+            };
+            // Once the question is settled this places the take on the same
+            // tick it always did; while it is open this is a no-op and the
+            // effect below drains it when the answer lands.
+            if (!sessionDecisionPendingRef.current) placePendingTake();
           } else {
             console.error('Video not found in IndexedDB:', loadVideoId);
             showNotification('Recording not found', 'error');

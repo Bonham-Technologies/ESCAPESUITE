@@ -110,6 +110,30 @@ describe('importTake', () => {
     ])
   })
 
+  it('refuses a take whose companion the library already holds, before it writes anything', async () => {
+    // The primary is not in the library here: the user deleted it and the host
+    // re-sent the take. The companion is, so the take is not new — and the
+    // refusal has to land before the first `addSourceVideo`, because a part
+    // re-added would replace its library entry (and its thumbnail URL) and a
+    // part re-placed would arrive on the timeline twice.
+    const take = await importTake(primary, addSourceVideo, (id) => id === 'take-1-webcam')
+
+    expect(take.alreadyInLibrary).toBe(true)
+    expect(take.clipParts).toEqual([])
+    expect(take.thumbnailUrls).toEqual([])
+    expect(added).toEqual([])
+    expect(getVideo).not.toHaveBeenCalled()
+    expect(getThumbnail).not.toHaveBeenCalled()
+    expect(resolveStoredDuration).not.toHaveBeenCalled()
+  })
+
+  it('imports a take no part of which the library holds', async () => {
+    const take = await importTake(primary, addSourceVideo, () => false)
+
+    expect(take.alreadyInLibrary).toBe(false)
+    expect(added.map((v) => v.id)).toEqual(['take-1', 'take-1-webcam'])
+  })
+
   it('carries each part thumbnail as a blob URL for the caller to revoke', async () => {
     vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
 

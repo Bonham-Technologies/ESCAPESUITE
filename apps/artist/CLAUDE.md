@@ -242,9 +242,17 @@ Three things the import refuses to do, each chosen rather than defaulted:
   IndexedDB is not type-checked; a record written by a newer ESCAPECRAFT is visible and
   deletable rather than placed somewhere arbitrary. (`partRoleRank` answers `Infinity` for such
   a role, which is also what sorts those parts last.)
-- **A take already in the library is skipped whole** — no re-add, no second placement, no
-  notice. That guard predates this work and is what keeps a host re-navigating the same id from
-  placing the take twice.
+- **A take any part of which is already in the library is skipped whole** — no re-add, no
+  second placement, no notice. That guard predates this work and is what keeps a host
+  re-navigating the same id from placing the take twice. It used to ask only about the
+  **primary**, which was a hole a user could walk through: delete the primary from the media
+  library, re-send the take from ESCAPECRAFT, and the companion — still in the library, so
+  re-adding it is idempotent by id — was **placed** a second time, on a second new track
+  (ESCSUITE-69). So the question is asked about every part, and asked in `app/takeImport.ts`
+  rather than in the hook, because the parts are not known until the metadata scan and the
+  refusal has to land before the first write: `importTake` takes an `isInLibrary(id)` lookup
+  (the hook lends it `useEditorStore.getState().sourceVideos`, read at call time) and answers
+  `alreadyInLibrary`, on which the hook returns without placing or saying anything.
 
 **The effect that runs the import knows when it is gone.** `useHostIntegration`'s
 `?loadVideo=` branch carries an effect-scoped `cancelled` flag, set as the cleanup's first

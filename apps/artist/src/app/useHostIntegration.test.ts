@@ -414,6 +414,22 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       expect(useEditorStore.getState().history.past).toHaveLength(pastBefore - 1)
     })
 
+    // The take is skipped whole when ANY of its parts is already held, not only
+    // when the primary is: the user can delete the primary from the library and
+    // then re-send the take from ESCAPECRAFT, which leaves the companion behind
+    // to be found. Adding it again would be idempotent by id, but *placing* it
+    // again is not — a second webcam clip would arrive on a second new track.
+    it('skips the whole take when only its companion is already in the library', async () => {
+      seedTake()
+      act(() => useEditorStore.getState().addSourceVideo(webcam))
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      expect(deps.addSourceVideo).not.toHaveBeenCalled()
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+      expect(deps.showNotification).not.toHaveBeenCalled()
+    })
+
     it('says a part was skipped when its blob is gone, and still places the rest', async () => {
       vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
       vi.mocked(getVideo).mockImplementation((id) =>
