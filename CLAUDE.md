@@ -143,13 +143,16 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 ```
 
 A **take** is not always one file. Since ESCSUITE-14 a recording made with "Record webcam as
-a separate track" is several `SourceVideo`s sharing a `takeId`, each with a `role`
+a separate track" is up to **four** `SourceVideo`s sharing a `takeId` — the screen, the webcam,
+the microphone and the system audio — each with a `role`
 (`'screen' | 'webcam' | 'mic' | 'system'`) and a `startOffset`; the take is named by its
-primary (the primary's `takeId` is its own id), and the primary carries the
-`overlayPlacement` the webcam was recorded at. Every field is optional and `DB_VERSION` stays
-1, so a single-file take — which is every recording made before it and every composited PiP
-take after it — is read exactly as before. A consumer that resolves one id should expect
-siblings: `getAllVideoMetadata()` filtered on `takeId`.
+primary (the primary's `takeId` is its own id), and the primary carries both the
+`overlayPlacement` the webcam was recorded at **and the mixed audio**, so a consumer that only
+knows how to read one file still gets a complete, audible recording. The `mic` and `system`
+parts are stored as `mediaType: 'audio'` with no dimensions and no thumbnail. Every field is
+optional and `DB_VERSION` stays 1, so a single-file take — which is every recording made before
+it and every composited PiP take after it — is read exactly as before. A consumer that resolves
+one id should expect siblings: `getAllVideoMetadata()` filtered on `takeId`.
 
 ### Integration API (embedding CRAFT / ARTIST in a host page)
 Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) — true whenever
@@ -312,8 +315,11 @@ There is no app code for the benchmarks' sake in either app:
   metrics, and it is the only arm that reports a real encode rate *and* a real
   `compositedFps`. Since slice 3 the take's sound has companions too — the microphone as its
   own Opus file beside the mix on the primary — so the arm also runs **two `AudioEncoder`s**
-  and stores **three** library rows per take (screen, webcam, microphone; system audio is off
-  by default and the synthetic display stream carries no audio track, so there is no fourth).
+  and stores **three** library rows per take (screen, webcam, microphone; system audio is off by
+  default and the synthetic display stream carries no audio track *as the benchmark drives it* —
+  `mockSyntheticMedia` adds its oscillator to `getDisplayMedia` only when the capture asked for
+  audio, which nothing here does — so there is no fourth. The ESCAPECRAFT e2e spec, which does
+  click that toggle, sees four parts).
   Neither is published: the audio encoders are counted by instance identity as a tripwire and
   the row count only so the wait after Stop is for the take's last part. First numbers, and
   the re-measurement with the audio companions, in
@@ -391,7 +397,10 @@ Seven ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.pe
 and render counts per pointer move), `apps/craft/src/core/compositor.perf.test.ts`,
 `apps/craft/src/core/converter.perf.test.ts`,
 `apps/craft/src/core/webcodecsRecorder.perf.test.ts` (level-monitor emissions, analyser and
-planar buffers, frame/encode/flush and AudioContext lifecycles for one take) and its mirror
+planar buffers, frame/encode/flush and AudioContext lifecycles for one take — including a
+separate-tracks take's audio companions: one `AudioData` created and closed per buffer per
+pipeline, one encode each, one flush and one close each, and one `AudioContext` for all three)
+and its mirror
 `apps/craft/src/core/recorder.perf.test.ts` (the same emission rate for the MediaRecorder
 path, so the two recorders' monitors cannot drift apart) — run the same scene through the same
 doubles the behaviour tests use and count what one frame costs: 2D-context calls,
@@ -464,14 +473,22 @@ branches up a hundredth to 96.81, statements and functions unchanged, and again 
 handoff resolving a take's parts and placing them on the timeline): all four figures up — lines
 99.38, statements 98.71, functions 98.95 and branches 93.38 → 93.51, the new modules being
 small, pure and fully covered — and **no floor crossed**, so artist's floors stay
-99 / 98 / 93 / 98.
+99 / 98 / 93 / 98. `@escapesuite/craft` was re-measured 2026-09-25 at the end of ESCSUITE-14
+slice 3 (the microphone and the system audio recorded as their own tracks beside the webcam):
+lines still exactly 100.00, statements 99.33 → 99.39, functions unchanged at 99.52, and branches
+96.82 → **97.36** — which crosses a whole percent, so craft's **branches floor goes 96 → 97** in
+`apps/craft/vite.config.ts` and `scripts/coverage-report.mjs`, leaving its floors
+100 / 99 / 97 / 99. The audio pipelines are the shape that pays for itself: one builder, one
+callback and one failure arm each, all three reachable from the doubles. The craft row was also a
+hundredth stale on two figures — it read 96.81 branches / 99.51 functions, while the commit this
+slice started from measures 96.82 / 99.52 — and is corrected here along with the rest of the row.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.33 | 96.81 | 99.51 |
+| `@escapesuite/craft` | 100.00 | 99.39 | 97.36 | 99.52 |
 | `@escapesuite/artist` | 99.38 | 98.71 | 93.51 | 98.95 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
