@@ -56,7 +56,7 @@ describe('WebcamOverlaySettingsPanel', () => {
       screen.getByRole('button', { name: 'Record webcam as a separate track' })
     ).toBeDisabled()
     expect(
-      screen.getByText('Not enough storage for two tracks — delete a recording first.')
+      screen.getByText('Not enough storage for separate tracks — delete a recording first.')
     ).toBeInTheDocument()
   })
 

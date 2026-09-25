@@ -26,7 +26,7 @@ export const SEPARATE_TRACKS_NO_WEBCODECS_REASON =
  * this sentence means the browser really did say no.
  */
 export const SEPARATE_TRACKS_NO_SPACE_REASON =
-  'Not enough storage for two tracks — delete a recording first.'
+  'Not enough storage for separate tracks — delete a recording first.'
 
 /**
  * Why the separate-tracks toggle is disabled, or null when it is offered.
