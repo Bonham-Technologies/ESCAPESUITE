@@ -3,6 +3,11 @@
 // Recording list entry. Callers pass in whatever they already computed (the
 // blob, the duration, the generated thumbnail URL) and get back a plain
 // object — no store, no blob-URL creation (that stays at the call site).
+//
+// `resolveHasAudio` lives here too: it is the one expression that answers the
+// question both records are given, and it is here rather than inside
+// `useRecordingSave` so that the hook and the tests that pin the answer call
+// the same function instead of two copies of the same `||`.
 import type {
   SourceVideo,
   Recording,
@@ -10,6 +15,45 @@ import type {
   OverlayPlacement,
 } from '../store/types';
 import { companionPartFor } from './companionParts';
+
+/**
+ * What the take actually captured, as opposed to what its config asked for.
+ *
+ * Resolved once by `useRecordingController` when the take starts, from the
+ * streams it really acquired, and handed to `saveRecording` with the blob —
+ * the same resolve-once discipline the separate-tracks mode gets, and for the
+ * same reason: a fact about that take, not about the settings as they stand
+ * now.
+ */
+export interface CapturedAudio {
+  /**
+   * A microphone stream with a track in it was really acquired — the toggle
+   * AND the device. That is the pair the recorder asks when it wires the mix
+   * and the pair the controller counts the take's parts with, so the stored
+   * `hasAudio` cannot disagree with either (ESCSUITE-70).
+   */
+  micAcquired: boolean;
+}
+
+/**
+ * Whether a take captured any audio: the one answer its two records are given.
+ *
+ * Neither half is a toggle, because a toggle only *asks*. The microphone half
+ * is the track the take really acquired (ESCSUITE-70) — a machine with no
+ * microphone leaves the toggle on and hands back `mic: null`. The system half
+ * is the toggle AND `systemAudioShared`, which is what the tick box in the
+ * browser's own share dialog answered (ESCSUITE-62).
+ *
+ * A pure function of three booleans, called once per record-writing pass by
+ * `useRecordingSave`, so nothing derives this expression twice.
+ */
+export function resolveHasAudio(
+  captured: CapturedAudio,
+  systemAudioEnabled: boolean,
+  systemAudioShared: boolean
+): boolean {
+  return captured.micAcquired || (systemAudioEnabled && systemAudioShared);
+}
 
 export interface BuildSourceVideoInput {
   id: string;
@@ -115,9 +159,11 @@ export interface BuildRecordingEntryInput {
   hasWebcam: boolean;
   /**
    * Whether this part captured any audio — the same value `buildSourceVideo`
-   * was given. The config cannot answer it: ticking "System Audio" only
-   * *asks* for it, and the browser's share dialog has the last word
-   * (ESCSUITE-62).
+   * was given. The config cannot answer it, in either half: ticking "System
+   * Audio" only *asks* for it and the browser's share dialog has the last word
+   * (ESCSUITE-62), and the microphone toggle only asks too — a machine with no
+   * microphone records none with the toggle still on (ESCSUITE-70). See
+   * `resolveHasAudio` above, which is what the caller computes it with.
    */
   hasAudio: boolean;
 }

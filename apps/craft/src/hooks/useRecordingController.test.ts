@@ -29,6 +29,9 @@ import {
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastream'
 import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
+// The save path's own expression, not a copy of it: if `resolveHasAudio`
+// changed, the agreement table below would change with it.
+import { resolveHasAudio } from '../utils/recordingMetadata'
 
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
@@ -1237,11 +1240,15 @@ describe('a separate-tracks take', () => {
       expect(short.lossesReported).toBe(1)
       expect(whole.lossesReported).toBe(0)
 
-      // What the save path is handed, and the `hasAudio` it derives from it —
-      // `useRecordingSave`'s own expression, pinned there.
+      // What the save path is handed, and the `hasAudio` the save path derives
+      // from it — through the same function it calls, so this cannot agree with
+      // a rule the app no longer follows.
       expect(whole.captured.micAcquired).toBe(expectsMic)
-      const hasAudio =
-        whole.captured.micAcquired || (combination.systemEnabled && whole.systemAudioShared)
+      const hasAudio = resolveHasAudio(
+        whole.captured,
+        combination.systemEnabled,
+        whole.systemAudioShared
+      )
       expect(hasAudio).toBe(audioParts > 0)
     })
   }

@@ -563,15 +563,17 @@ export class WebCodecsRecorder {
    * pair, so the number of parts the take is counted as asking for cannot
    * disagree with the number built here either.
    *
-   * `useRecordingSave`'s `hasAudio` cannot disagree either, since ESCSUITE-70:
-   * its microphone half is the controller's `micAcquired` — the same "toggle
-   * AND a track" test, resolved once when the take starts and handed to the
-   * save path with the blob — and its system half is `systemAudioShared`, read
-   * off the display stream's own tracks. A take whose microphone toggle is on
-   * but whose `acquireStreams` came back with `mic: null` (a machine with no
+   * `useRecordingSave`'s `hasAudio` agrees about the *microphone* since
+   * ESCSUITE-70: that half is the controller's `micAcquired` — the same "toggle
+   * AND a track" test, resolved once when the take starts and carried to the
+   * save path in `onStop`'s own closure. So a take whose microphone toggle is
+   * on but whose `acquireStreams` came back with `mic: null` (a machine with no
    * microphone, where `capabilities.microphone` is false) records no mic
    * source, builds no mic companion, is counted as asking for none, and is
-   * stored as having no audio.
+   * stored as having no audio. Its system half is `systemAudioShared`, which
+   * the save path reads from the store *at save time* rather than receiving,
+   * so it describes this take only until the next one starts — see the comment
+   * on the expression in `useRecordingSave`.
    *
    * Microphone before system audio, so the companion list is in role order.
    */
