@@ -208,7 +208,16 @@ function App() {
     showNotification,
   });
 
-  useHostIntegration({ urlParams, addSourceVideo, setProject, showNotification });
+  // `sessionPromptOpen` is this component's own state, not a store selector:
+  // the handoff holds its take back until the restore question is answered,
+  // and App gains no new subscription for it (App.rerender.test.tsx).
+  useHostIntegration({
+    urlParams,
+    addSourceVideo,
+    setProject,
+    showNotification,
+    sessionPromptOpen: showSessionPrompt,
+  });
 
   return (
     <div className={styles.app}>

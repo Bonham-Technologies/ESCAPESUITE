@@ -69,6 +69,9 @@ beforeEach(() => {
     addSourceVideo: vi.fn(),
     setProject: vi.fn(),
     showNotification: vi.fn(),
+    // No saved session is the ordinary case: the prompt never opens, so the
+    // take is placed the moment the import lands, exactly as it always was.
+    sessionPromptOpen: false,
   }
 })
 
@@ -495,6 +498,106 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       // import's own caller is the only thing that can hand them back.
       expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
       expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    })
+
+    // "Resume Previous Session?" replaces the project and then clears the
+    // history (`app/useSessionRestore.ts`), and ESCAPECRAFT's standalone
+    // "Send to Editor" opens /artist/?loadVideo=<id> with no ?suppressRestore=1
+    // — so a take placed before the prompt is answered is discarded by
+    // "Restore" with no undo step back to it. The take therefore waits: it
+    // joins the library straight away (nothing about the library is at risk)
+    // and goes on the timeline once the prompt is gone, whichever way it was
+    // answered.
+    describe('and a "Resume Previous Session?" prompt in front of it', () => {
+      /** Mount with the prompt already up, the way a saved session leaves it. */
+      const mountBehindPrompt = async () => {
+        deps = { ...deps, urlParams: { ...defaultUrlParams(), loadVideoId: 'take-1' } }
+        const view = renderHook(
+          ({ sessionPromptOpen }: { sessionPromptOpen: boolean }) =>
+            useHostIntegration({ ...deps, sessionPromptOpen }),
+          { initialProps: { sessionPromptOpen: true } }
+        )
+        await act(async () => {
+          await Promise.resolve()
+          await Promise.resolve()
+        })
+        return view
+      }
+
+      /** Answer the prompt — the only thing the hook sees either way. */
+      const closePrompt = async (view: { rerender: (p: { sessionPromptOpen: boolean }) => void }) => {
+        await act(async () => {
+          view.rerender({ sessionPromptOpen: false })
+          await Promise.resolve()
+        })
+      }
+
+      it('holds the take back while the prompt is up, and places it once it closes', async () => {
+        seedTake()
+
+        const view = await mountBehindPrompt()
+
+        // The library is safe either way — restoring re-adds its own source
+        // videos and addSourceVideo is idempotent by id — so the parts go in
+        // now. The timeline is what "Restore" would overwrite.
+        expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+        expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+        // And the toast waits with it: telling the user "Loaded recording"
+        // before anything is on the timeline is the same lie the placement
+        // would have been.
+        expect(deps.showNotification).not.toHaveBeenCalled()
+
+        await closePrompt(view)
+
+        const clips = useEditorStore.getState().project.timeline.clips
+        expect(clips.map((c) => c.sourceVideoId)).toEqual(['take-1', 'take-1-webcam'])
+        expect(deps.showNotification).toHaveBeenCalledTimes(1)
+        expect(deps.showNotification).toHaveBeenCalledWith(
+          'Loaded recording: Screen recording (2 tracks)',
+          'success'
+        )
+      })
+
+      it('appends the take after a restored session instead of losing it', async () => {
+        seedTake()
+
+        const view = await mountBehindPrompt()
+
+        // What "Restore" does: replace the project, then clear the history so
+        // there is nothing to undo back past. Placing before this ran is what
+        // silently discarded the take.
+        act(() => {
+          addClip('restored', 0, 4)
+          useEditorStore.getState().clearHistory()
+        })
+
+        await closePrompt(view)
+
+        const clips = useEditorStore.getState().project.timeline.clips
+        expect(clips.map((c) => c.name)).toEqual([
+          'restored',
+          'Screen recording',
+          'Screen recording — webcam',
+        ])
+        // The append-at-end rule puts it after the restored work rather than on
+        // top of it, and the restore's clearHistory ran first, so the one undo
+        // step the take records still undoes it.
+        expect(clips[1].timelinePosition).toBe(4)
+        expect(useEditorStore.getState().history.past).toHaveLength(1)
+      })
+
+      it('places the take once even if the prompt is answered twice', async () => {
+        seedTake()
+
+        const view = await mountBehindPrompt()
+        await closePrompt(view)
+        // A re-render with the prompt still closed must not place it again:
+        // the pending take is drained, not re-read.
+        await closePrompt(view)
+
+        expect(useEditorStore.getState().project.timeline.clips).toHaveLength(2)
+        expect(deps.showNotification).toHaveBeenCalledTimes(1)
+      })
     })
   })
 })

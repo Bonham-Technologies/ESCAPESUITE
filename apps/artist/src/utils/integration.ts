@@ -335,7 +335,11 @@ export function generateShareUrl(
  *   included; a handoff into a session that already holds clips appends at the
  *   end of the timeline. A part whose blob is missing is skipped with a notice
  *   and never costs the take its primary. Unlike LOAD_VIDEO and ?video=, which
- *   fetch a file into the library and place nothing.
+ *   fetch a file into the library and place nothing. The parts join the media
+ *   library as soon as they are read, but the *placement* waits for the
+ *   "Resume Previous Session?" prompt to be answered (restoring replaces the
+ *   project), so a take handed to a session with saved work lands after the
+ *   restored clips rather than being discarded by them.
  * - suppressRestore=1|true - Skip the "Resume Previous Session?" prompt.
  *   ESCAPEARTIST neither offers nor writes the saved session under this flag:
  *   the session autosave is off too, so a host-driven session leaves whatever

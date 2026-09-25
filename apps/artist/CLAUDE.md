@@ -255,13 +255,22 @@ would otherwise have the cleanup revoke an array that is still empty and land a
 `LOAD_VIDEO` and `?video=` are **not** take handoffs: they fetch a file from a URL, address no
 stored take, and still only add to the library. Both are pinned as placing nothing.
 
-**One interaction worth knowing**: ESCAPECRAFT's standalone "Send to Editor" opens
-`/artist/?loadVideo=<id>` with no `?suppressRestore=1`, so a user with a saved session can be
-offered "Resume Previous Session?" *after* the take has been placed — and restoring replaces
-the project, so the placed clips go while the media stays in the library (`setProject` plus a
-per-video `addSourceVideo`). That is the pre-existing shape of session restore, newly visible
-now that a handoff puts something on the timeline. A host that drives its own state should
-pass `?suppressRestore=1`, which switches the prompt and the autosave off together.
+**Placement waits for the restore decision.** ESCAPECRAFT's standalone "Send to Editor" opens
+`/artist/?loadVideo=<id>` with **no** `?suppressRestore=1`, so a user with a saved session is
+offered "Resume Previous Session?" while the handoff is arriving — and restoring does
+`setProject` plus `clearHistory()` (`app/useSessionRestore.ts`), which would replace a take
+placed before it and leave no undo step back to it. So the two halves of the import are split:
+the parts join the **media library** as soon as they are read (restoring re-adds its own source
+videos and `addSourceVideo` is idempotent by id, so nothing there is at risk), while the
+**timeline** placement and its toast are held in a ref and drained by a second effect once
+`sessionPromptOpen` goes false — whichever way the prompt was answered. Declining places the
+take as usual; accepting restores first and then appends the take after the restored clips (the
+append-at-end rule), one undo step, and since the restore's `clearHistory()` has already run
+that step still undoes it. `App` passes its own `showSessionPrompt` — component state, not a
+store selector, so this costs `App` no subscription. With no saved session the prompt never
+opens and the take is placed on the same tick it always was. A host that drives its own state
+should still pass `?suppressRestore=1`, which switches the prompt and the autosave off
+together.
 
 The whole path is pinned by `app/takeImport.test.ts`, `app/useHostIntegration.test.ts`,
 `store/__tests__/projectStore.takePlacement.test.ts` and `utils/overlayPlacement.test.ts` /

@@ -17,6 +17,11 @@ it was recorded in — and, unlike the composited recording, you can now move it
 animate it or delete it. Its rounded/circular *shape* is not carried over yet; that is
 coming with the clip mask that will apply to every clip, not only this one.
 
+If the editor offers to resume a previous session while a recording is arriving, the
+recording waits: it joins your media library straight away, and goes on the timeline once you
+have answered — after the restored clips if you resume, at the start if you do not. Either
+way it is still the one undo step.
+
 If a part of a take is missing from storage — cleared, deleted by hand, or unreadable — the
 rest still arrives and the editor says how many parts were skipped instead of reporting a
 clean success. A part recorded by a newer ESCAPECRAFT than this editor knows about is added to

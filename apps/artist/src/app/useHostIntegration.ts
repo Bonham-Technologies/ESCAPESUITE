@@ -16,7 +16,11 @@
 // them all into the library and `placeTakeOnTimeline` puts them on the timeline
 // in one undo step. The store action is reached through `getState()` rather than
 // taken as a dep, so `App` gains no selector (`App.rerender.test.tsx`).
-import { useEffect } from 'react';
+//
+// Placement is the one thing that does **not** happen the moment the import
+// lands: it waits for the "Resume Previous Session?" prompt. See
+// `placePendingTake` below.
+import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
 import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
 import { processVideoFile } from '../core/videoProcessor';
@@ -24,7 +28,7 @@ import { getVideo } from '../core/storage';
 import { importTake } from './takeImport';
 import { takeLoadedMessage } from './appFormat';
 import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
-import type { Project, SourceVideo } from '../store/types';
+import type { Project, SourceVideo, TakeClipPart } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
 /** What the host surface needs from the editor. */
@@ -34,6 +38,22 @@ export interface HostIntegrationDeps {
   addSourceVideo: (video: SourceVideo) => void;
   setProject: (project: Project) => void;
   showNotification: ShowNotification;
+  /**
+   * The "Resume Previous Session?" prompt is up, so the timeline is still
+   * being negotiated and a handed-over take must not be written to it yet.
+   *
+   * `App`'s own `showSessionPrompt` — component state, not a store selector, so
+   * this costs `App` no new subscription (`App.rerender.test.tsx`).
+   */
+  sessionPromptOpen: boolean;
+}
+
+/** A take that has arrived in the library and is waiting for the timeline. */
+interface PendingTake {
+  clipParts: TakeClipPart[];
+  /** The take's name, for the toast raised when it is finally placed. */
+  name: string;
+  missingParts: number;
 }
 
 export function useHostIntegration({
@@ -41,7 +61,40 @@ export function useHostIntegration({
   addSourceVideo,
   setProject,
   showNotification,
+  sessionPromptOpen,
 }: HostIntegrationDeps): void {
+  // The take the handoff imported, held until the session question is settled.
+  // `useSessionRestore`'s "Restore" does setProject + clearHistory, so a take
+  // placed before the answer is replaced and left with no undo step back to it
+  // — and ESCAPECRAFT's standalone "Send to Editor" opens /artist/?loadVideo=
+  // with no ?suppressRestore=1, so that is the ordinary path, not a corner.
+  // Waiting is what keeps both: restore first, append after.
+  const pendingTake = useRef<PendingTake | null>(null);
+  // Read by the import when its storage reads land, so a take that arrives
+  // while the prompt is up parks itself instead of racing it.
+  const sessionPromptOpenRef = useRef(sessionPromptOpen);
+
+  /**
+   * Put the waiting take on the timeline, and only then say so.
+   *
+   * The toast travels with the placement rather than the import: "Loaded
+   * recording" while the timeline is still empty is the same untruth the early
+   * placement was. Nulls the ref first, so answering the prompt twice — or a
+   * re-render behind it — places the take once.
+   */
+  const placePendingTake = useCallback(() => {
+    const take = pendingTake.current;
+    if (!take) return;
+    pendingTake.current = null;
+    useEditorStore.getState().placeTakeOnTimeline(take.clipParts);
+    showNotification(
+      takeLoadedMessage(take.name, take.clipParts.length, take.missingParts),
+      // One toast slot: a take that lost a part says so instead of
+      // reporting a clean success the user would read as one.
+      take.missingParts > 0 ? 'info' : 'success'
+    );
+  }, [showNotification]);
+
   // Initialize integration API
   useEffect(() => {
     const cleanup = initIntegration(async (message) => {
@@ -166,18 +219,15 @@ export function useHostIntegration({
                 return;
               }
               thumbnailObjectUrls.push(...take.thumbnailUrls);
-              useEditorStore.getState().placeTakeOnTimeline(take.clipParts);
-
-              showNotification(
-                takeLoadedMessage(
-                  videoData.metadata.name,
-                  take.clipParts.length,
-                  take.missingParts
-                ),
-                // One toast slot: a take that lost a part says so instead of
-                // reporting a clean success the user would read as one.
-                take.missingParts > 0 ? 'info' : 'success'
-              );
+              pendingTake.current = {
+                clipParts: take.clipParts,
+                name: videoData.metadata.name,
+                missingParts: take.missingParts,
+              };
+              // With no saved session the prompt never opens, so this places
+              // the take on the same tick it always did; with one up, it is a
+              // no-op and the effect below drains it when the answer lands.
+              if (!sessionPromptOpenRef.current) placePendingTake();
             }
           } else {
             console.error('Video not found in IndexedDB:', loadVideoId);
@@ -208,4 +258,12 @@ export function useHostIntegration({
       for (const url of thumbnailObjectUrls) URL.revokeObjectURL(url);
     };
   }, []);
+
+  // The session question, answered. Runs on mount too (the prompt starts
+  // closed and opens only once storage has been read), where there is nothing
+  // waiting and this is a no-op.
+  useEffect(() => {
+    sessionPromptOpenRef.current = sessionPromptOpen;
+    if (!sessionPromptOpen) placePendingTake();
+  }, [sessionPromptOpen, placePendingTake]);
 }
