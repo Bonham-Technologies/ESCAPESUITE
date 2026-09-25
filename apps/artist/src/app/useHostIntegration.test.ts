@@ -673,7 +673,7 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
         expect(deps.showNotification).toHaveBeenCalledTimes(1)
       })
 
-        it('places the take once, however often the question is re-opened', async () => {
+      it('places the take once, however often the question is re-opened', async () => {
         seedTake()
 
         const view = await mountBehindPrompt()
