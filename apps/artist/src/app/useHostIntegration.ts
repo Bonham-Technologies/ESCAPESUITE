@@ -10,11 +10,19 @@
 // once, and `GET_STATE` works around the staleness with an explicit
 // `useEditorStore.getState()` (see its comment). The other cases rely on those
 // four being stable for the component's life, which they are.
+//
+// The `?loadVideo=` branch resolves a **take**, not a file: since ESCSUITE-14 a
+// recording can be several parts sharing a `takeId`, so `takeImport.ts` brings
+// them all into the library and `placeTakeOnTimeline` puts them on the timeline
+// in one undo step. The store action is reached through `getState()` rather than
+// taken as a dep, so `App` gains no selector (`App.rerender.test.tsx`).
 import { useEffect } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
 import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
-import { processVideoFile, resolveStoredDuration } from '../core/videoProcessor';
-import { getVideo, getThumbnail } from '../core/storage';
+import { processVideoFile } from '../core/videoProcessor';
+import { getVideo } from '../core/storage';
+import { importTake } from './takeImport';
+import { takeLoadedMessage } from './appFormat';
 import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
@@ -95,10 +103,11 @@ export function useHostIntegration({
     // Check for URL parameters (parsed once at startup)
     const { videos, loadVideoId, title } = urlParams;
 
-    // The ?loadVideo= thumbnail's blob URL, handed back in the cleanup below.
-    // It is handed to `addSourceVideo` and lives as long as the media library
-    // entry, so it cannot be revoked at the point it is created.
-    let thumbnailObjectUrl: string | undefined;
+    // The ?loadVideo= thumbnails' blob URLs, handed back in the cleanup below.
+    // They are handed to `addSourceVideo` and live as long as the media library
+    // entries, so they cannot be revoked at the point they are created. A take
+    // can be several parts since ESCSUITE-14, so there can be several.
+    const thumbnailObjectUrls: string[] = [];
 
     // Load videos from URL parameters
     if (videos.length > 0) {
@@ -123,25 +132,25 @@ export function useHostIntegration({
             // Check if video is already loaded
             const existingVideos = useEditorStore.getState().sourceVideos;
             if (!existingVideos.some(v => v.id === loadVideoId)) {
-              // Get thumbnail if available
-              let thumbnailUrl: string | undefined;
-              const thumbnailBlob = await getThumbnail(loadVideoId);
-              if (thumbnailBlob) {
-                thumbnailObjectUrl = URL.createObjectURL(thumbnailBlob);
-                thumbnailUrl = thumbnailObjectUrl;
-              }
+              // The id names a take's **primary** part, and a take can be
+              // several files sharing a takeId (ESCSUITE-14). Every part joins
+              // the library; every part that can be placed goes on the
+              // timeline, in one undo step — for every take, not only one
+              // recorded as separate tracks (decision 7).
+              const take = await importTake(videoData, addSourceVideo);
+              thumbnailObjectUrls.push(...take.thumbnailUrls);
+              useEditorStore.getState().placeTakeOnTimeline(take.clipParts);
 
-              // Add video to source videos. The stored duration is trusted
-              // unless it is unusable — a CRAFT take whose WebM lost its
-              // Duration element is stored as Infinity — in which case the
-              // length is recovered from the blob.
-              addSourceVideo({
-                ...videoData.metadata,
-                duration: await resolveStoredDuration(videoData.blob, videoData.metadata),
-                thumbnailUrl,
-              });
-
-              showNotification(`Loaded recording: ${videoData.metadata.name}`, 'success');
+              showNotification(
+                takeLoadedMessage(
+                  videoData.metadata.name,
+                  take.clipParts.length,
+                  take.missingParts
+                ),
+                // One toast slot: a take that lost a part says so instead of
+                // reporting a clean success the user would read as one.
+                take.missingParts > 0 ? 'info' : 'success'
+              );
             }
           } else {
             console.error('Video not found in IndexedDB:', loadVideoId);
@@ -168,7 +177,7 @@ export function useHostIntegration({
 
     return () => {
       cleanup();
-      if (thumbnailObjectUrl) URL.revokeObjectURL(thumbnailObjectUrl);
+      for (const url of thumbnailObjectUrls) URL.revokeObjectURL(url);
     };
   }, []);
 }

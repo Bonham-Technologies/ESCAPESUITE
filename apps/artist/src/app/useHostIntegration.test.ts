@@ -13,7 +13,7 @@ import { act, renderHook } from '@testing-library/react'
 import { useHostIntegration, type HostIntegrationDeps } from './useHostIntegration'
 import { initIntegration, loadVideoFromUrl, sendMessage } from '../utils/integration'
 import { processVideoFile, resolveStoredDuration } from '../core/videoProcessor'
-import { getThumbnail, getVideo } from '../core/storage'
+import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage'
 import { getTheme, setTheme } from '@escapesuite/shared/theme'
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore'
 import { addClip, resetStoreForTest, store } from '../test/fixtures/projectStore'
@@ -61,6 +61,7 @@ beforeEach(() => {
     Promise.resolve(metadata.duration)
   )
   vi.mocked(getVideo).mockResolvedValue(undefined)
+  vi.mocked(getAllVideoMetadata).mockResolvedValue([])
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
   deps = {
     urlParams: defaultUrlParams(),
@@ -182,6 +183,16 @@ describe('inbound messages', () => {
     })
   })
 
+  it('LOAD_VIDEO adds to the library and places nothing', async () => {
+    await mountIntegration()
+
+    await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/clip.mp4' } })
+
+    // A fetched URL is not a take handoff: it addresses no stored take, and a
+    // host that loads one today must not find its timeline written to.
+    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+  })
+
   it('a message with no case falls through silently', async () => {
     await mountIntegration()
 
@@ -198,6 +209,12 @@ describe('the ?video= parameter', () => {
 
     expect(loadVideoFromUrl).toHaveBeenCalledWith('https://host.example/a.mp4')
     expect(deps.addSourceVideo).toHaveBeenCalledWith(expect.objectContaining({ id: sampleVideo.id }))
+  })
+
+  it('adds to the library and places nothing', async () => {
+    await mountIntegration({ videos: ['https://host.example/a.mp4'] })
+
+    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
   })
 
   it('logs a url it could not load', async () => {
@@ -284,6 +301,135 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
 
     expect(consoleError).toHaveBeenCalledWith('Failed to load video from IndexedDB:', expect.any(Error))
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to load recording', 'error')
+  })
+
+  it('puts a single-file take on the timeline as well as in the library', async () => {
+    vi.mocked(getVideo).mockResolvedValue(recording as never)
+
+    await mountIntegration({ loadVideoId: 'rec-1' })
+
+    // ESCSUITE-14 decision 7: the handoff places clips for *every* take, not
+    // only one recorded as separate tracks. This is the behaviour change.
+    const clips = useEditorStore.getState().project.timeline.clips
+    expect(clips).toHaveLength(1)
+    expect(clips[0].sourceVideoId).toBe('rec-1')
+    expect(clips[0].timelinePosition).toBe(0)
+    expect(deps.showNotification).toHaveBeenCalledWith('Loaded recording: Recording.webm', 'success')
+  })
+
+  describe('a take recorded as separate tracks', () => {
+    const PLACEMENT = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
+
+    const primary = {
+      ...sampleVideo,
+      id: 'take-1',
+      name: 'Screen recording',
+      duration: 6,
+      width: 1920,
+      height: 1080,
+      takeId: 'take-1',
+      role: 'screen' as const,
+      startOffset: 0,
+      overlayPlacement: PLACEMENT,
+    }
+    const webcam = {
+      ...sampleVideo,
+      id: 'take-1-webcam',
+      name: 'Screen recording — webcam',
+      duration: 6,
+      width: 1280,
+      height: 720,
+      takeId: 'take-1',
+      role: 'webcam' as const,
+      startOffset: 0.5,
+    }
+
+    /** Both parts in storage, the way a separate-tracks take is stored. */
+    const seedTake = (parts = [primary, webcam]) => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue(parts)
+      vi.mocked(getVideo).mockImplementation((id) =>
+        Promise.resolve(
+          parts.some((part) => part.id === id)
+            ? { blob: new Blob(['bytes'], { type: 'video/webm' }), metadata: parts.find((p) => p.id === id)! }
+            : undefined
+        ) as never
+      )
+    }
+
+    it('adds both parts and places them on two tracks, one above the other', async () => {
+      seedTake()
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+      const { clips, tracks } = useEditorStore.getState().project.timeline
+      expect(clips.map((c) => c.sourceVideoId)).toEqual(['take-1', 'take-1-webcam'])
+      expect(clips[1].timelinePosition).toBe(0.5)
+      const trackIndex = (id: string) => tracks.find((t) => t.id === id)!.index
+      expect(trackIndex(clips[1].trackId)).toBeGreaterThan(trackIndex(clips[0].trackId))
+      expect(deps.showNotification).toHaveBeenCalledWith(
+        'Loaded recording: Screen recording (2 tracks)',
+        'success'
+      )
+    })
+
+    it('seeds the webcam clip transform from the placement the take was recorded at', async () => {
+      seedTake()
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      const webcamClip = useEditorStore.getState().project.timeline.clips[1]
+      // 1920 x 0.2 = 384 wide at a 30px inset, centred at 1698/1920 across and
+      // (1080 - 30 - 108)/1080 down — the corner the compositor drew in.
+      expect(webcamClip.transform.x).toBeCloseTo(1698 / 1920, 10)
+      expect(webcamClip.transform.y).toBeCloseTo(942 / 1080, 10)
+      expect(webcamClip.transform.scaleX).toBeCloseTo(0.3, 10)
+    })
+
+    it('is one undo step, and undo leaves both parts in the library', async () => {
+      seedTake()
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+      const pastBefore = useEditorStore.getState().history.past.length
+
+      act(() => useEditorStore.getState().undo())
+
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+      expect(useEditorStore.getState().history.past).toHaveLength(pastBefore - 1)
+    })
+
+    it('says a part was skipped when its blob is gone, and still places the rest', async () => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
+      vi.mocked(getVideo).mockImplementation((id) =>
+        Promise.resolve(
+          id === 'take-1'
+            ? { blob: new Blob(['bytes'], { type: 'video/webm' }), metadata: primary }
+            : undefined
+        ) as never
+      )
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(1)
+      expect(deps.showNotification).toHaveBeenCalledWith(
+        'Loaded recording: Screen recording — 1 missing part skipped',
+        'info'
+      )
+    })
+
+    it('revokes every thumbnail it made when the editor goes away', async () => {
+      seedTake()
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+
+      const { unmount } = await mountIntegration({ loadVideoId: 'take-1' })
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+      unmount()
+
+      // One per part: the URLs live as long as the library entries, so the
+      // cleanup is the only place they can be handed back.
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    })
   })
 })
 
