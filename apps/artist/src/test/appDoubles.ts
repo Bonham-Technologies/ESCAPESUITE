@@ -39,6 +39,9 @@ export function storageDouble() {
     getSessionState: vi.fn(() => Promise.resolve(undefined)),
     clearSessionState: vi.fn(() => Promise.resolve()),
     getVideo: vi.fn(() => Promise.resolve(undefined)),
+    // The handoff asks for the whole library when the take it was given has a
+    // takeId — that is how it finds the take's other parts (ESCSUITE-14).
+    getAllVideoMetadata: vi.fn(() => Promise.resolve([] as SourceVideo[])),
     getThumbnail: vi.fn(() => Promise.resolve(undefined)),
     getSetting: vi.fn(() => Promise.resolve(null)),
     setSetting: vi.fn(() => Promise.resolve()),
