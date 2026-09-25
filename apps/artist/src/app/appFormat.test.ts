@@ -1,6 +1,6 @@
 // appFormat on its own: no App, no notification state — just the strings.
 import { describe, it, expect } from 'vitest';
-import { clipCountMessage, formatTimeForNotification } from './appFormat';
+import { clipCountMessage, formatTimeForNotification, takeLoadedMessage } from './appFormat';
 
 describe('clipCountMessage', () => {
   it('pluralises "clips" for zero', () => {
@@ -35,5 +35,30 @@ describe('formatTimeForNotification', () => {
 
   it('formats a time past a minute as m:ss', () => {
     expect(formatTimeForNotification(65)).toBe('1:05');
+  });
+});
+
+describe('takeLoadedMessage', () => {
+  it('names a single-file recording exactly as it always has', () => {
+    // Unchanged copy, deliberately: a plain take is the overwhelming majority
+    // of handoffs and this is the sentence its tests already pin.
+    expect(takeLoadedMessage('Screen recording', 1, 0)).toBe('Loaded recording: Screen recording');
+  });
+
+  it('says how many tracks a multi-part take came in on', () => {
+    expect(takeLoadedMessage('Screen recording', 2, 0)).toBe(
+      'Loaded recording: Screen recording (2 tracks)'
+    );
+  });
+
+  it('says what was missing, and says it instead of the happy sentence', () => {
+    // One toast slot on a three-second timer: two messages would mean the first
+    // is never read, so the problem takes the slot.
+    expect(takeLoadedMessage('Screen recording', 1, 1)).toBe(
+      'Loaded recording: Screen recording — 1 missing part skipped'
+    );
+    expect(takeLoadedMessage('Screen recording', 1, 2)).toBe(
+      'Loaded recording: Screen recording — 2 missing parts skipped'
+    );
   });
 });

@@ -63,6 +63,30 @@ describe('the startup session check', () => {
     expect(result.current.showSessionPrompt).toBe(false)
   })
 
+  it('leaves the question open while the storage read is still in flight', async () => {
+    // The flag is false from the first render, before the read comes back —
+    // not only once a prompt is on screen. `App` hands `!sessionRestored` to
+    // `useHostIntegration` precisely for this window: `showSessionPrompt` is
+    // still false here, and a handed-over take placed now would be replaced by
+    // the Restore the user has not even been offered yet.
+    let answer: (session: SessionState | undefined) => void = () => {}
+    vi.mocked(getSessionState).mockImplementation(
+      () => new Promise((resolve) => { answer = resolve })
+    )
+
+    const { result } = mountRestore()
+
+    expect(result.current.sessionRestored).toBe(false)
+    expect(result.current.showSessionPrompt).toBe(false)
+
+    await act(async () => {
+      answer(undefined)
+      await Promise.resolve()
+    })
+
+    expect(result.current.sessionRestored).toBe(true)
+  })
+
   it('offers a session that has media in it', async () => {
     const session = savedSession()
     vi.mocked(getSessionState).mockResolvedValue(session)

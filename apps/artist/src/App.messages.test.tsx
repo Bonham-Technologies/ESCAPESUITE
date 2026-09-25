@@ -9,7 +9,7 @@ import { installMediaPlaybackStubs } from './test/doubles/media'
 import { defaultUrlParams, sampleVideo } from './test/appDoubles'
 import { initIntegration, loadVideoFromUrl, parseUrlParams, sendMessage } from './utils/integration'
 import { processVideoFile } from './core/videoProcessor'
-import { getThumbnail, getVideo } from './core/storage'
+import { getAllVideoMetadata, getThumbnail, getVideo } from './core/storage'
 import { getTheme, setTheme } from '@escapesuite/shared/theme'
 
 vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
@@ -348,6 +348,58 @@ describe('App URL parameters', () => {
       })
       expect(store().sourceVideos.filter((v) => v.id === 'recording1')).toHaveLength(1)
       expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    })
+
+    it('places both parts of a separate-tracks take in the running editor', async () => {
+      const primary = {
+        ...sampleVideo,
+        id: 'take-1',
+        name: 'Screen recording',
+        duration: 6,
+        width: 1920,
+        height: 1080,
+        takeId: 'take-1',
+        role: 'screen' as const,
+        startOffset: 0,
+        overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' } as const,
+      }
+      const webcam = {
+        ...sampleVideo,
+        id: 'take-1-webcam',
+        name: 'Screen recording — webcam',
+        duration: 6,
+        width: 1280,
+        height: 720,
+        takeId: 'take-1',
+        role: 'webcam' as const,
+        startOffset: 0.5,
+      }
+      const parts = [primary, webcam]
+      vi.mocked(getAllVideoMetadata).mockResolvedValue(parts)
+      vi.mocked(getVideo).mockImplementation((id) =>
+        Promise.resolve(
+          parts.some((part) => part.id === id)
+            ? { blob: new Blob(), metadata: parts.find((part) => part.id === id)! }
+            : undefined
+        ) as never
+      )
+      urlParams({ loadVideoId: 'take-1' })
+
+      await renderApp()
+
+      await waitFor(() =>
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Loaded recording: Screen recording (2 tracks)'
+        )
+      )
+      // The editor the user sees: two clips on two tracks, the webcam half
+      // above the screen half and half a second into it.
+      expect(store().project.timeline.clips.map((c) => c.sourceVideoId)).toEqual([
+        'take-1',
+        'take-1-webcam',
+      ])
+      expect(store().project.timeline.tracks).toHaveLength(2)
+      expect(await screen.findByText(/^2 clips · 2 tracks$/)).toBeInTheDocument()
     })
   })
 })

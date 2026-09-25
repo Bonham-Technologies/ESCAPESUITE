@@ -10,13 +10,25 @@
 // once, and `GET_STATE` works around the staleness with an explicit
 // `useEditorStore.getState()` (see its comment). The other cases rely on those
 // four being stable for the component's life, which they are.
-import { useEffect } from 'react';
+//
+// The `?loadVideo=` branch resolves a **take**, not a file: since ESCSUITE-14 a
+// recording can be several parts sharing a `takeId`, so `takeImport.ts` brings
+// them all into the library and `placeTakeOnTimeline` puts them on the timeline
+// in one undo step. The store action is reached through `getState()` rather than
+// taken as a dep, so `App` gains no selector (`App.rerender.test.tsx`).
+//
+// Placement is the one thing that does **not** happen the moment the import
+// lands: it waits for the "Resume Previous Session?" prompt. See
+// `placePendingTake` below.
+import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
 import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
-import { processVideoFile, resolveStoredDuration } from '../core/videoProcessor';
-import { getVideo, getThumbnail } from '../core/storage';
+import { processVideoFile } from '../core/videoProcessor';
+import { getVideo } from '../core/storage';
+import { importTake } from './takeImport';
+import { takeLoadedMessage } from './appFormat';
 import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
-import type { Project, SourceVideo } from '../store/types';
+import type { Project, SourceVideo, TakeClipPart } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
 /** What the host surface needs from the editor. */
@@ -26,6 +38,30 @@ export interface HostIntegrationDeps {
   addSourceVideo: (video: SourceVideo) => void;
   setProject: (project: Project) => void;
   showNotification: ShowNotification;
+  /**
+   * The startup session question is **unanswered**, so the timeline is still
+   * being negotiated and a handed-over take must not be written to it yet.
+   *
+   * Deliberately wider than "the prompt is on screen": for the first moments of
+   * a load the prompt has not appeared *yet* — `getSessionState()` has not come
+   * back — and a take placed in that window is discarded by the "Restore" that
+   * follows it just as surely. `App` fills this from `useSessionRestore`'s
+   * `sessionRestored`, which is false from the first render until the question
+   * is settled one of five ways (suppressed, nothing stored, the read failed,
+   * restored, declined), so it covers both halves of the wait.
+   *
+   * Component state in `App`, not a store selector, so this costs `App` no new
+   * subscription (`App.rerender.test.tsx`).
+   */
+  sessionDecisionPending: boolean;
+}
+
+/** A take that has arrived in the library and is waiting for the timeline. */
+interface PendingTake {
+  clipParts: TakeClipPart[];
+  /** The take's name, for the toast raised when it is finally placed. */
+  name: string;
+  missingParts: number;
 }
 
 export function useHostIntegration({
@@ -33,7 +69,42 @@ export function useHostIntegration({
   addSourceVideo,
   setProject,
   showNotification,
+  sessionDecisionPending,
 }: HostIntegrationDeps): void {
+  // The take the handoff imported, held until the session question is settled.
+  // `useSessionRestore`'s "Restore" does setProject + clearHistory, so a take
+  // placed before the answer is replaced and left with no undo step back to it
+  // — and ESCAPECRAFT's standalone "Send to Editor" opens /artist/?loadVideo=
+  // with no ?suppressRestore=1, so that is the ordinary path, not a corner.
+  // Waiting is what keeps both: restore first, append after.
+  const pendingTake = useRef<PendingTake | null>(null);
+  // Read by the import when its storage reads land, so a take that arrives
+  // before the question is answered parks itself instead of racing it. It
+  // starts `true` on a cold load, which is what stops an import that beats the
+  // session read to the finish from being placed and then replaced.
+  const sessionDecisionPendingRef = useRef(sessionDecisionPending);
+
+  /**
+   * Put the waiting take on the timeline, and only then say so.
+   *
+   * The toast travels with the placement rather than the import: "Loaded
+   * recording" while the timeline is still empty is the same untruth the early
+   * placement was. Nulls the ref first, so answering the prompt twice — or a
+   * re-render behind it — places the take once.
+   */
+  const placePendingTake = useCallback(() => {
+    const take = pendingTake.current;
+    if (!take) return;
+    pendingTake.current = null;
+    useEditorStore.getState().placeTakeOnTimeline(take.clipParts);
+    showNotification(
+      takeLoadedMessage(take.name, take.clipParts.length, take.missingParts),
+      // One toast slot: a take that lost a part says so instead of
+      // reporting a clean success the user would read as one.
+      take.missingParts > 0 ? 'info' : 'success'
+    );
+  }, [showNotification]);
+
   // Initialize integration API
   useEffect(() => {
     const cleanup = initIntegration(async (message) => {
@@ -95,10 +166,28 @@ export function useHostIntegration({
     // Check for URL parameters (parsed once at startup)
     const { videos, loadVideoId, title } = urlParams;
 
-    // The ?loadVideo= thumbnail's blob URL, handed back in the cleanup below.
-    // It is handed to `addSourceVideo` and lives as long as the media library
-    // entry, so it cannot be revoked at the point it is created.
-    let thumbnailObjectUrl: string | undefined;
+    // The ?loadVideo= thumbnails' blob URLs, handed back in the cleanup below.
+    // They are handed to `addSourceVideo` and live as long as the media library
+    // entries, so they cannot be revoked at the point they are created. A take
+    // can be several parts since ESCSUITE-14, so there can be several.
+    const thumbnailObjectUrls: string[] = [];
+
+    // Set by the cleanup, read by the import once its storage reads land. The
+    // import is far longer than the effect it belongs to can be relied on to
+    // outlive — a metadata scan plus a getVideo and a getThumbnail per part —
+    // and two things go wrong without it:
+    //
+    //   * StrictMode (every dev build: `bootstrapApp` wraps App in it) mounts
+    //     the effect, cleans it up and mounts it again, so two imports run at
+    //     once. The library guard below cannot separate them, because the first
+    //     is still awaiting storage when the second one checks; only the run
+    //     whose effect is gone knowing to stand down keeps the take from being
+    //     placed twice. `addSourceVideo` is idempotent by id, so the library
+    //     survived this before there was anything to place;
+    //   * an unmount mid-import would otherwise have the cleanup revoke an
+    //     array that is still empty, leaving the URLs pushed after it leaked,
+    //     and land a `placeTakeOnTimeline` in a project the editor has left.
+    let cancelled = false;
 
     // Load videos from URL parameters
     if (videos.length > 0) {
@@ -119,29 +208,36 @@ export function useHostIntegration({
       (async () => {
         try {
           const videoData = await getVideo(loadVideoId);
+          // Nothing has been created or written yet, so leaving here costs
+          // nothing and saves the whole import.
+          if (cancelled) return;
           if (videoData) {
             // Check if video is already loaded
             const existingVideos = useEditorStore.getState().sourceVideos;
             if (!existingVideos.some(v => v.id === loadVideoId)) {
-              // Get thumbnail if available
-              let thumbnailUrl: string | undefined;
-              const thumbnailBlob = await getThumbnail(loadVideoId);
-              if (thumbnailBlob) {
-                thumbnailObjectUrl = URL.createObjectURL(thumbnailBlob);
-                thumbnailUrl = thumbnailObjectUrl;
+              // The id names a take's **primary** part, and a take can be
+              // several files sharing a takeId (ESCSUITE-14). Every part joins
+              // the library; every part that can be placed goes on the
+              // timeline, in one undo step — for every take, not only one
+              // recorded as separate tracks (decision 7).
+              const take = await importTake(videoData, addSourceVideo);
+              if (cancelled) {
+                // This effect is gone: its parts are in the library (harmless,
+                // and the run that replaced it adds the same ids), but the
+                // timeline and the toast belong to whoever is still mounted.
+                for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
+                return;
               }
-
-              // Add video to source videos. The stored duration is trusted
-              // unless it is unusable — a CRAFT take whose WebM lost its
-              // Duration element is stored as Infinity — in which case the
-              // length is recovered from the blob.
-              addSourceVideo({
-                ...videoData.metadata,
-                duration: await resolveStoredDuration(videoData.blob, videoData.metadata),
-                thumbnailUrl,
-              });
-
-              showNotification(`Loaded recording: ${videoData.metadata.name}`, 'success');
+              thumbnailObjectUrls.push(...take.thumbnailUrls);
+              pendingTake.current = {
+                clipParts: take.clipParts,
+                name: videoData.metadata.name,
+                missingParts: take.missingParts,
+              };
+              // Once the question is settled this places the take on the same
+              // tick it always did; while it is open this is a no-op and the
+              // effect below drains it when the answer lands.
+              if (!sessionDecisionPendingRef.current) placePendingTake();
             }
           } else {
             console.error('Video not found in IndexedDB:', loadVideoId);
@@ -167,8 +263,16 @@ export function useHostIntegration({
     }
 
     return () => {
+      cancelled = true;
       cleanup();
-      if (thumbnailObjectUrl) URL.revokeObjectURL(thumbnailObjectUrl);
+      for (const url of thumbnailObjectUrls) URL.revokeObjectURL(url);
     };
   }, []);
+
+  // The session question, answered. Runs on mount too, where it is pending and
+  // there is nothing waiting, so this is a no-op both ways round.
+  useEffect(() => {
+    sessionDecisionPendingRef.current = sessionDecisionPending;
+    if (!sessionDecisionPending) placePendingTake();
+  }, [sessionDecisionPending, placePendingTake]);
 }

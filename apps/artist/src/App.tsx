@@ -208,7 +208,19 @@ function App() {
     showNotification,
   });
 
-  useHostIntegration({ urlParams, addSourceVideo, setProject, showNotification });
+  // The handoff holds its take back until the restore question is answered.
+  // `sessionRestored` is that question, not `showSessionPrompt`: the prompt is
+  // still false for the first moments of a load, while `getSessionState()` is
+  // in flight, and a take placed in that window is discarded by the "Restore"
+  // that follows it. Both are this component's own state, so App gains no new
+  // store subscription either way (App.rerender.test.tsx).
+  useHostIntegration({
+    urlParams,
+    addSourceVideo,
+    setProject,
+    showNotification,
+    sessionDecisionPending: !sessionRestored,
+  });
 
   return (
     <div className={styles.app}>

@@ -6,13 +6,14 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { StateCreator } from 'zustand';
-import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation } from './types';
+import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATION } from './types';
 import { cloneClip } from '../utils/deepClone';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
+import { overlayPlacementToTransform } from '../utils/overlayPlacement';
 
-export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
+export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
 
 export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (set) => ({
   // Clip actions
@@ -60,6 +61,96 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           tracks,
           clips: newClips,
           duration: calculateTimelineDuration(newClips),
+        },
+      },
+      history: pushToHistory(state),
+    };
+  }),
+
+  // A whole take at once (ESCSUITE-14). Deliberately not a run of
+  // addClipToTimeline calls: one `set` makes "one undo step" a property of the
+  // code rather than a convention, and every part's position is measured
+  // against the *same* timeline — a run would measure each part against a
+  // timeline the part before it had already lengthened.
+  placeTakeOnTimeline: (parts: TakeClipPart[]) => set((state) => {
+    // Every part missing is a real case (the caller skips a part whose blob is
+    // gone). Placing nothing must not record an undo step that undoes nothing,
+    // or leave an empty track behind.
+    if (parts.length === 0) return state;
+
+    const timeline = state.project.timeline;
+    // Append at the end of whatever is already there. An empty timeline
+    // measures 0, so the ordinary import still starts at 0 and this needs no
+    // special case for it.
+    const takeStart = calculateTimelineDuration(timeline.clips);
+
+    const tracks = [...timeline.tracks];
+    const clips = [...timeline.clips];
+    // The primary takes the track a drop from the media library would take —
+    // the lowest-index empty one — which is addClipToTimeline's own rule. A
+    // companion may never reuse an empty track: the webcam belongs *above* the
+    // screen, and an empty low-index track would put it underneath.
+    const primaryTrack = findEmptyTrack(tracks, clips);
+
+    // The rectangle the overlay sat in a corner of: the primary's own drawn
+    // rect, not the canvas. Every part imports at native pixels centred on the
+    // canvas (scale 1), so a capture smaller or larger than the project is
+    // drawn in a rectangle of its own — and the camera was in a corner of
+    // *that* while recording. A primary with no stored dimensions (nothing
+    // ESCAPECRAFT writes, but IndexedDB is not type-checked) leaves the whole
+    // canvas as the frame, which is `overlayPlacementToTransform`'s default.
+    const resolution = state.project.resolution;
+    const primaryPart = parts[0];
+    const overlayFrame =
+      primaryPart.width > 0 && primaryPart.height > 0
+        ? {
+            left: (resolution.width - primaryPart.width) / 2,
+            top: (resolution.height - primaryPart.height) / 2,
+            width: primaryPart.width,
+            height: primaryPart.height,
+          }
+        : undefined;
+
+    parts.forEach((part, index) => {
+      let trackId: string;
+      if (index === 0 && primaryTrack) {
+        trackId = primaryTrack.id;
+      } else {
+        const created = createTrackAtTop(tracks);
+        tracks.push(created);
+        trackId = created.id;
+      }
+
+      clips.push({
+        id: uuidv4(),
+        sourceVideoId: part.sourceVideoId,
+        name: part.name,
+        startTime: 0,
+        endTime: part.duration,
+        duration: part.duration,
+        trackId,
+        timelinePosition: takeStart + part.startOffset,
+        blendMode: 'normal',
+        // The part that carries the overlay placement is the one the camera was
+        // drawn into; everything else imports at native size, centred, like any
+        // other clip.
+        transform: part.overlayPlacement
+          ? overlayPlacementToTransform(part.overlayPlacement, resolution, part, overlayFrame)
+          : { ...DEFAULT_TRANSFORM },
+        effects: { ...DEFAULT_EFFECTS },
+        transition: { ...DEFAULT_TRANSITION },
+      });
+    });
+
+    return {
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...timeline,
+          tracks,
+          clips,
+          duration: calculateTimelineDuration(clips),
         },
       },
       history: pushToHistory(state),

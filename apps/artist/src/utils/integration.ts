@@ -324,7 +324,22 @@ export function generateShareUrl(
  *   [documented but not currently implemented - parsed, never applied]
  * - autoplay=true - Start playback once loaded
  *   [documented but not currently implemented - parsed, never applied]
- * - loadVideo=<id> - Load a recording from IndexedDB (ESCAPECRAFT handoff)
+ * - loadVideo=<id> - Load a take from IndexedDB (ESCAPECRAFT handoff). The id
+ *   addresses a take's *primary* part. Since ESCSUITE-14 a take can be several
+ *   records sharing a `takeId` (the primary's takeId is its own id), so the
+ *   editor resolves the siblings itself, adds every part to the media library
+ *   and places them on the timeline in one undo step - the primary on a video
+ *   track, the webcam on a track above it at its startOffset with its transform
+ *   seeded from the primary's overlayPlacement, mic and system parts on tracks
+ *   of their own. Placement happens for every handoff, a single-file take
+ *   included; a handoff into a session that already holds clips appends at the
+ *   end of the timeline. A part whose blob is missing is skipped with a notice
+ *   and never costs the take its primary. Unlike LOAD_VIDEO and ?video=, which
+ *   fetch a file into the library and place nothing. The parts join the media
+ *   library as soon as they are read, but the *placement* waits for the
+ *   "Resume Previous Session?" prompt to be answered (restoring replaces the
+ *   project), so a take handed to a session with saved work lands after the
+ *   restored clips rather than being discarded by them.
  * - suppressRestore=1|true - Skip the "Resume Previous Session?" prompt.
  *   ESCAPEARTIST neither offers nor writes the saved session under this flag:
  *   the session autosave is off too, so a host-driven session leaves whatever

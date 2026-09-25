@@ -9,11 +9,12 @@
 // Messages are driven straight through the handler the hook gave
 // `initIntegration`, which is exactly what the host's `postMessage` reaches.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { StrictMode } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { useHostIntegration, type HostIntegrationDeps } from './useHostIntegration'
 import { initIntegration, loadVideoFromUrl, sendMessage } from '../utils/integration'
 import { processVideoFile, resolveStoredDuration } from '../core/videoProcessor'
-import { getThumbnail, getVideo } from '../core/storage'
+import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage'
 import { getTheme, setTheme } from '@escapesuite/shared/theme'
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore'
 import { addClip, resetStoreForTest, store } from '../test/fixtures/projectStore'
@@ -61,12 +62,16 @@ beforeEach(() => {
     Promise.resolve(metadata.duration)
   )
   vi.mocked(getVideo).mockResolvedValue(undefined)
+  vi.mocked(getAllVideoMetadata).mockResolvedValue([])
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
   deps = {
     urlParams: defaultUrlParams(),
     addSourceVideo: vi.fn(),
     setProject: vi.fn(),
     showNotification: vi.fn(),
+    // The settled case: the question is answered, so the take is placed the
+    // moment the import lands, exactly as it always was.
+    sessionDecisionPending: false,
   }
 })
 
@@ -182,6 +187,16 @@ describe('inbound messages', () => {
     })
   })
 
+  it('LOAD_VIDEO adds to the library and places nothing', async () => {
+    await mountIntegration()
+
+    await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/clip.mp4' } })
+
+    // A fetched URL is not a take handoff: it addresses no stored take, and a
+    // host that loads one today must not find its timeline written to.
+    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+  })
+
   it('a message with no case falls through silently', async () => {
     await mountIntegration()
 
@@ -198,6 +213,12 @@ describe('the ?video= parameter', () => {
 
     expect(loadVideoFromUrl).toHaveBeenCalledWith('https://host.example/a.mp4')
     expect(deps.addSourceVideo).toHaveBeenCalledWith(expect.objectContaining({ id: sampleVideo.id }))
+  })
+
+  it('adds to the library and places nothing', async () => {
+    await mountIntegration({ videos: ['https://host.example/a.mp4'] })
+
+    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
   })
 
   it('logs a url it could not load', async () => {
@@ -267,6 +288,18 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 
+  // The sibling above pins that the library is left alone; this pins the half
+  // that matters more since ESCSUITE-14 — the early return also stops a second
+  // copy of the take appearing on the timeline.
+  it('places nothing for a recording the library already holds', async () => {
+    vi.mocked(getVideo).mockResolvedValue({ metadata: { ...sampleVideo } } as never)
+
+    await mountIntegration({ loadVideoId: sampleVideo.id })
+
+    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
   it('says so when the recording is not in storage', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -284,6 +317,296 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
 
     expect(consoleError).toHaveBeenCalledWith('Failed to load video from IndexedDB:', expect.any(Error))
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to load recording', 'error')
+  })
+
+  it('puts a single-file take on the timeline as well as in the library', async () => {
+    vi.mocked(getVideo).mockResolvedValue(recording as never)
+
+    await mountIntegration({ loadVideoId: 'rec-1' })
+
+    // ESCSUITE-14 decision 7: the handoff places clips for *every* take, not
+    // only one recorded as separate tracks. This is the behaviour change.
+    const clips = useEditorStore.getState().project.timeline.clips
+    expect(clips).toHaveLength(1)
+    expect(clips[0].sourceVideoId).toBe('rec-1')
+    expect(clips[0].timelinePosition).toBe(0)
+    expect(deps.showNotification).toHaveBeenCalledWith('Loaded recording: Recording.webm', 'success')
+  })
+
+  describe('a take recorded as separate tracks', () => {
+    const PLACEMENT = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
+
+    const primary = {
+      ...sampleVideo,
+      id: 'take-1',
+      name: 'Screen recording',
+      duration: 6,
+      width: 1920,
+      height: 1080,
+      takeId: 'take-1',
+      role: 'screen' as const,
+      startOffset: 0,
+      overlayPlacement: PLACEMENT,
+    }
+    const webcam = {
+      ...sampleVideo,
+      id: 'take-1-webcam',
+      name: 'Screen recording — webcam',
+      duration: 6,
+      width: 1280,
+      height: 720,
+      takeId: 'take-1',
+      role: 'webcam' as const,
+      startOffset: 0.5,
+    }
+
+    /** Both parts in storage, the way a separate-tracks take is stored. */
+    const seedTake = (parts = [primary, webcam]) => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue(parts)
+      vi.mocked(getVideo).mockImplementation((id) =>
+        Promise.resolve(
+          parts.some((part) => part.id === id)
+            ? { blob: new Blob(['bytes'], { type: 'video/webm' }), metadata: parts.find((p) => p.id === id)! }
+            : undefined
+        ) as never
+      )
+    }
+
+    it('adds both parts and places them on two tracks, one above the other', async () => {
+      seedTake()
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+      const { clips, tracks } = useEditorStore.getState().project.timeline
+      expect(clips.map((c) => c.sourceVideoId)).toEqual(['take-1', 'take-1-webcam'])
+      expect(clips[1].timelinePosition).toBe(0.5)
+      const trackIndex = (id: string) => tracks.find((t) => t.id === id)!.index
+      expect(trackIndex(clips[1].trackId)).toBeGreaterThan(trackIndex(clips[0].trackId))
+      expect(deps.showNotification).toHaveBeenCalledWith(
+        'Loaded recording: Screen recording (2 tracks)',
+        'success'
+      )
+    })
+
+    it('seeds the webcam clip transform from the placement the take was recorded at', async () => {
+      seedTake()
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      const webcamClip = useEditorStore.getState().project.timeline.clips[1]
+      // 1920 x 0.2 = 384 wide at a 30px inset, centred at 1698/1920 across and
+      // (1080 - 30 - 108)/1080 down — the corner the compositor drew in.
+      expect(webcamClip.transform.x).toBeCloseTo(1698 / 1920, 10)
+      expect(webcamClip.transform.y).toBeCloseTo(942 / 1080, 10)
+      expect(webcamClip.transform.scaleX).toBeCloseTo(0.3, 10)
+    })
+
+    it('is one undo step, and undo leaves both parts in the library', async () => {
+      seedTake()
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+      const pastBefore = useEditorStore.getState().history.past.length
+
+      act(() => useEditorStore.getState().undo())
+
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+      expect(useEditorStore.getState().history.past).toHaveLength(pastBefore - 1)
+    })
+
+    it('says a part was skipped when its blob is gone, and still places the rest', async () => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
+      vi.mocked(getVideo).mockImplementation((id) =>
+        Promise.resolve(
+          id === 'take-1'
+            ? { blob: new Blob(['bytes'], { type: 'video/webm' }), metadata: primary }
+            : undefined
+        ) as never
+      )
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(1)
+      expect(deps.showNotification).toHaveBeenCalledWith(
+        'Loaded recording: Screen recording — 1 missing part skipped',
+        'info'
+      )
+    })
+
+    it('revokes every thumbnail it made when the editor goes away', async () => {
+      seedTake()
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+
+      const { unmount } = await mountIntegration({ loadVideoId: 'take-1' })
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+      unmount()
+
+      // One per part: the URLs live as long as the library entries, so the
+      // cleanup is the only place they can be handed back.
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    })
+
+    // StrictMode mounts the effect, tears it down and mounts it again, so two
+    // imports are in flight at once. The library guard cannot separate them —
+    // the first run is still awaiting storage when the second one checks — so
+    // the run whose effect was cleaned up has to bail on its own.
+    it('places the take once under StrictMode, which runs the effect twice', async () => {
+      seedTake()
+      deps = { ...deps, urlParams: { ...defaultUrlParams(), loadVideoId: 'take-1' } }
+
+      renderHook(() => useHostIntegration(deps), { wrapper: StrictMode })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const clips = useEditorStore.getState().project.timeline.clips
+      expect(clips.map((c) => c.sourceVideoId)).toEqual(['take-1', 'take-1-webcam'])
+      expect(deps.showNotification).toHaveBeenCalledTimes(1)
+    })
+
+    it('places nothing and revokes its thumbnails when the editor leaves mid-import', async () => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+      let releaseCompanion: () => void = () => {}
+      const companionArrives = new Promise<void>((resolve) => {
+        releaseCompanion = resolve
+      })
+      vi.mocked(getVideo).mockImplementation((id) =>
+        (id === 'take-1'
+          ? Promise.resolve({ blob: new Blob(['bytes'], { type: 'video/webm' }), metadata: primary })
+          : // The companion's read is still in flight when the editor goes away.
+            companionArrives.then(() => ({
+              blob: new Blob(['bytes'], { type: 'video/webm' }),
+              metadata: webcam,
+            }))) as never
+      )
+
+      const { unmount } = await mountIntegration({ loadVideoId: 'take-1' })
+      unmount()
+      await act(async () => {
+        releaseCompanion()
+        await Promise.resolve()
+      })
+
+      // A take that finished arriving after the editor left is not placed into
+      // a project the user has moved on from, and says nothing about it either.
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+      expect(deps.showNotification).not.toHaveBeenCalled()
+      // Nor does it leak: the cleanup ran before the URLs existed, so the
+      // import's own caller is the only thing that can hand them back.
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    })
+
+    // "Resume Previous Session?" replaces the project and then clears the
+    // history (`app/useSessionRestore.ts`), and ESCAPECRAFT's standalone
+    // "Send to Editor" opens /artist/?loadVideo=<id> with no ?suppressRestore=1
+    // — so a take placed before the prompt is answered is discarded by
+    // "Restore" with no undo step back to it. The take therefore waits: it
+    // joins the library straight away (nothing about the library is at risk)
+    // and goes on the timeline once the prompt is gone, whichever way it was
+    // answered.
+    describe('and a "Resume Previous Session?" prompt in front of it', () => {
+      /** Mount with the prompt already up, the way a saved session leaves it. */
+      const mountBehindPrompt = async () => {
+        deps = { ...deps, urlParams: { ...defaultUrlParams(), loadVideoId: 'take-1' } }
+        const view = renderHook(
+          ({ sessionDecisionPending }: { sessionDecisionPending: boolean }) =>
+            useHostIntegration({ ...deps, sessionDecisionPending }),
+          { initialProps: { sessionDecisionPending: true } }
+        )
+        await act(async () => {
+          await Promise.resolve()
+          await Promise.resolve()
+        })
+        return view
+      }
+
+      /** Answer the prompt — the only thing the hook sees either way. */
+      const closePrompt = async (view: { rerender: (p: { sessionDecisionPending: boolean }) => void }) => {
+        await act(async () => {
+          view.rerender({ sessionDecisionPending: false })
+          await Promise.resolve()
+        })
+      }
+
+      it('holds the take back while the prompt is up, and places it once it closes', async () => {
+        seedTake()
+
+        const view = await mountBehindPrompt()
+
+        // The library is safe either way — restoring re-adds its own source
+        // videos and addSourceVideo is idempotent by id — so the parts go in
+        // now. The timeline is what "Restore" would overwrite.
+        expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+        expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+        // And the toast waits with it: telling the user "Loaded recording"
+        // before anything is on the timeline is the same lie the placement
+        // would have been.
+        expect(deps.showNotification).not.toHaveBeenCalled()
+
+        await closePrompt(view)
+
+        const clips = useEditorStore.getState().project.timeline.clips
+        expect(clips.map((c) => c.sourceVideoId)).toEqual(['take-1', 'take-1-webcam'])
+        expect(deps.showNotification).toHaveBeenCalledTimes(1)
+        expect(deps.showNotification).toHaveBeenCalledWith(
+          'Loaded recording: Screen recording (2 tracks)',
+          'success'
+        )
+      })
+
+      it('appends the take after a restored session instead of losing it', async () => {
+        seedTake()
+
+        const view = await mountBehindPrompt()
+
+        // What "Restore" does: replace the project, then clear the history so
+        // there is nothing to undo back past. Placing before this ran is what
+        // silently discarded the take.
+        act(() => {
+          addClip('restored', 0, 4)
+          useEditorStore.getState().clearHistory()
+        })
+
+        await closePrompt(view)
+
+        const clips = useEditorStore.getState().project.timeline.clips
+        expect(clips.map((c) => c.name)).toEqual([
+          'restored',
+          'Screen recording',
+          'Screen recording — webcam',
+        ])
+        // The append-at-end rule puts it after the restored work rather than on
+        // top of it, and the restore's clearHistory ran first, so the one undo
+        // step the take records still undoes it.
+        expect(clips[1].timelinePosition).toBe(4)
+        expect(useEditorStore.getState().history.past).toHaveLength(1)
+      })
+
+    it('places the take once, however often the question is re-opened', async () => {
+        seedTake()
+
+        const view = await mountBehindPrompt()
+        await closePrompt(view)
+
+        // A full second settle cycle, not a re-render with the same value: the
+        // flag goes back to pending and settles again, so the drain really does
+        // run a second time. It must find nothing — the take was taken out of
+        // the ref, not merely read out of it — or the take is placed twice and
+        // the user is told about it twice.
+        await act(async () => {
+          view.rerender({ sessionDecisionPending: true })
+          await Promise.resolve()
+        })
+        await closePrompt(view)
+
+        expect(useEditorStore.getState().project.timeline.clips).toHaveLength(2)
+        expect(deps.showNotification).toHaveBeenCalledTimes(1)
+      })
+    })
   })
 })
 

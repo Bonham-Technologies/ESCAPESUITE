@@ -6,10 +6,12 @@ import type {
   MediaSource,
   WaveformPeak,
   SourceVideo,
+  RecordingRole,
+  OverlayPlacement,
 } from '@escapesuite/shared/types'
 
 // Re-export shared types
-export type { MediaType, MediaSource, WaveformPeak, SourceVideo }
+export type { MediaType, MediaSource, WaveformPeak, SourceVideo, RecordingRole, OverlayPlacement }
 
 // Default duration for images when added to timeline (seconds)
 export const DEFAULT_IMAGE_DURATION = 5;
@@ -335,6 +337,37 @@ export interface Clip {
   shapeData?: ShapeOverlayData;   // Shape overlay content and styling
 }
 
+/**
+ * One part of a handed-over take, ready to be placed on the timeline
+ * (ESCSUITE-14).
+ *
+ * A take used to be one file. Since ESCAPECRAFT can record the webcam as its
+ * own track it can be several `SourceVideo`s sharing a `takeId`, and this is
+ * what the host handoff reduces each of them to before the store places it:
+ * enough to build a clip, and nothing about roles or storage.
+ */
+export interface TakeClipPart {
+  /** The media library entry this clip plays. */
+  sourceVideoId: string;
+  /** The clip's name — the part's own, so the webcam half says so. */
+  name: string;
+  /** The part's length in seconds, already resolved against its blob. */
+  duration: number;
+  /** Seconds after the take's start at which this part's first frame was captured. */
+  startOffset: number;
+  /** The part's own frame size, for the overlay-placement conversion. */
+  width: number;
+  height: number;
+  /**
+   * Where the webcam overlay sat while recording. Set on the **part it applies
+   * to** — the take's webcam half — even though it is stored on the take's
+   * primary, so the store needs to know nothing about roles: a part that
+   * carries one is seeded from it, and every other part gets the default
+   * transform.
+   */
+  overlayPlacement?: OverlayPlacement;
+}
+
 export interface Timeline {
   tracks: Track[];
   clips: Clip[];
@@ -448,6 +481,16 @@ export interface EditorState {
 
   // Actions - Clips
   addClipToTimeline: (clip: Omit<Clip, 'trackId' | 'timelinePosition' | 'blendMode' | 'transform' | 'effects' | 'transition'>, trackId?: string, position?: number) => void;
+  /**
+   * Place every part of a handed-over take, in one undo step.
+   *
+   * The first part takes the track a drop from the media library would take;
+   * each one after it gets a new track above the last, which is what puts the
+   * webcam over the screen. Positions are measured from the end of whatever the
+   * timeline already holds, so a handoff into a session with work in it appends
+   * rather than lands on top. An empty list places nothing and records nothing.
+   */
+  placeTakeOnTimeline: (parts: TakeClipPart[]) => void;
   removeClipFromTimeline: (clipId: string) => void;
   rippleDeleteClip: (clipId: string) => void;
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => void;
