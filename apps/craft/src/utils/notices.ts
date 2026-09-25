@@ -48,6 +48,17 @@ export const MP4_SAVED_WITHOUT_AUDIO =
 export const mp4ConversionFailed = (message: string) => `Conversion failed: ${message}`
 
 /**
+ * Said when a separate-tracks take's companion (the webcam half) could not be
+ * written — its metadata extraction, thumbnail decode, or either `storeVideo`
+ * / `storeThumbnail` call threw. The spec says a companion may never cost the
+ * take its primary: the screen recording is still saved and listed exactly as
+ * a no-companion take would be, and this is the one line that tells the user
+ * the webcam half did not make it. See `useRecordingSave`.
+ */
+export const WEBCAM_TRACK_NOT_SAVED =
+  'The webcam track could not be saved — the screen recording was kept.'
+
+/**
  * Said when "Upload to host" found nothing to send: the row is drawn from
  * metadata the store still holds, and the bytes it names were not in storage.
  * Only an embedded CRAFT can raise it — see `utils/uploadToHost.ts`. Silence

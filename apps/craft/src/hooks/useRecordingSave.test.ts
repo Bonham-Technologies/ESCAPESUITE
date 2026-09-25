@@ -16,6 +16,7 @@ import { converterModule, thumbnailModule, resetAppDoubles } from '../test/appDo
 import { useRecorderStore } from '../store/recorderStore'
 import { getLastCanvasContext, resetCanvasContextDouble } from '../test/doubles/canvas'
 import { defaultConfig, type Recording, type RecordingConfig, type RecordingState } from '../store/types'
+import { WEBCAM_TRACK_NOT_SAVED } from '../utils/notices'
 
 vi.mock('../core/thumbnailGenerator', async () => (await import('../test/appDoubles')).thumbnailModule)
 vi.mock('../core/converter', async () => (await import('../test/appDoubles')).converterModule)
@@ -411,5 +412,29 @@ describe('useRecordingSave for a separate-tracks take', () => {
     expect('takeId' in stored[0]).toBe(false)
     expect('role' in stored[0]).toBe(false)
     expect(added).toHaveLength(1)
+  })
+
+  // A companion may never cost the take its primary. Here the companion's
+  // own metadata extraction throws (standing in for any failure in its
+  // metadata/thumbnail/storeVideo/storeThumbnail chain) — the primary must
+  // still be saved and listed, and the failure reported once, not lost.
+  it('keeps the primary when the companion cannot be saved, and says so', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    thumbnailModule.extractVideoMetadata.mockImplementation(async (blob: Blob, knownDuration?: number) => {
+      if (blob === COMPANION) throw new Error('decode failed')
+      return { duration: knownDuration ?? 0, width: 1920, height: 1080 }
+    })
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, companionPart)
+
+    expect(added).toHaveLength(1)
+    expect(added[0].role).toBe('screen')
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(1)
+    expect(consoleWarn).toHaveBeenCalledTimes(1)
+    expect(consoleWarn).toHaveBeenCalledWith('Webcam track could not be saved:', expect.any(Error))
+    expect(notices).toEqual([WEBCAM_TRACK_NOT_SAVED])
   })
 })
