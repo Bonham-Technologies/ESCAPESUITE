@@ -504,6 +504,13 @@ describe('useRecordingSave for a separate-tracks take', () => {
     // No thumbnail stored, so the library draws its own empty placeholder and
     // ARTIST treats the missing picture as cosmetic, which it already does.
     await expect(getThumbnail(mic.id)).resolves.toBeUndefined()
+
+    // `buildRecordingEntry` spreads `thumbnailUrl` in only when there is a
+    // blob to make a URL from, so an audio part's library entry has no
+    // `thumbnailUrl` key at all — not the key holding `undefined`, which
+    // `RecordingPreview` would still try to render as a broken image.
+    const micEntry = added.find(entry => entry.role === 'mic')!
+    expect('thumbnailUrl' in micEntry).toBe(false)
   })
 
   it('lists the parts under the primary in role order', async () => {
