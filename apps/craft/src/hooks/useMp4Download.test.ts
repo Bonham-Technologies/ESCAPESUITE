@@ -230,6 +230,30 @@ describe('useMp4Download, start to finish', () => {
     expect(clicks).toEqual([])
     expect(setNotice).not.toHaveBeenCalled()
     expect(result.current.converting).toBeNull()
+
+    // …and the other half of the same state: a record that *is* listed with no
+    // bytes behind it — a half-failed save, or storage cleared under the tab.
+    // One read answers "is there a recording here?" and "are there bytes?"
+    // separately now, so the guard has to ask the second question: handing the
+    // converter an absent blob turns a silent no-op into `Conversion failed`.
+    const db = await getDB()
+    await db.put('videos', {
+      id: 'blobless',
+      blob: undefined as unknown as Blob,
+      metadata: metadata('blobless', 'Blobless Take'),
+    })
+
+    await act(async () => {
+      await result.current.startMp4Download('blobless', 'Blobless Take')
+    })
+
+    expect(converterModule.convertToMP4).not.toHaveBeenCalled()
+    expect(clicks).toEqual([])
+    expect(setNotice).not.toHaveBeenCalled()
+    expect(result.current.converting).toBeNull()
+    // The one conversion slot is free again: this refusal releases it exactly as
+    // the no-record path above does, so the next row's button still works.
+    expect(result.current.blockedReason).toBeNull()
   })
 })
 

@@ -210,7 +210,12 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
       // carries, and neither of which is worth a store field for a value read
       // once per click.
       const record = await getVideo(id)
-      if (!record) return
+      // `?.blob` rather than `!record`: one read now answers two questions where
+      // `getVideoBlob` answered one, and the second is the one that matters here.
+      // A row listed with no bytes behind it — a half-failed save, or storage
+      // cleared under the tab — has always been a silent no-op, and handing an
+      // absent blob to the converter would turn it into `Conversion failed`.
+      if (!record?.blob) return
 
       // A take recorded as separate tracks is put back together here: the MP4
       // is the screen with the camera drawn into the corner it was recorded in
