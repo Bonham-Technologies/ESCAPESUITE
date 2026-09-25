@@ -35,6 +35,7 @@ import {
 } from '../utils/notices'
 import { safeFileName } from '../utils/recordingFormat'
 import type { ConversionProgress } from '../core/converter'
+import type { WebcamCompanionLookup } from '../utils/takeParts'
 import type { Mp4Support } from '../store/types'
 
 /**
@@ -221,11 +222,30 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
       // is the screen with the camera drawn into the corner it was recorded in
       // (ESCSUITE-14 decision 3). M4A asks for none of this — the mix is on the
       // primary, so the audio-only download was already the whole take.
-      const lookup = format === 'mp4'
-        ? await loadWebcamCompanion(record.metadata)
-        : ({ kind: 'none' } as const)
+      let lookup: WebcamCompanionLookup = { kind: 'none' }
+      if (format === 'mp4') {
+        try {
+          lookup = await loadWebcamCompanion(record.metadata)
+        } catch (error) {
+          // A storage read that *throws* — IndexedDB closed under the tab, a
+          // read that failed part-way — is a lost camera part, not a lost
+          // conversion. Refusing here would be defensible (nothing is encoded
+          // yet), but the MP4 the user asked for is still possible, and a
+          // screen-only file they are told about beats `Conversion failed` and
+          // no file at all. It is the ruling "Upload to host" already takes on
+          // the same question (`utils/uploadToHost.ts`): a companion never
+          // costs the primary.
+          console.warn(
+            'Could not read the take’s webcam part; converting the screen alone',
+            error
+          )
+          lookup = { kind: 'unavailable' }
+        }
+      }
       // True when the camera part was *listed* and could not be used — its
-      // bytes were gone (here) or it would not decode (inside the converter).
+      // bytes were gone or unreadable (here), or nothing of it decoded (inside
+      // the converter, which reports either a header that failed or an overlay
+      // that drew no frames).
       // A take whose camera row was deleted is a plain take again and leaves
       // nothing out, so it never sets this.
       let webcamSkipped = lookup.kind === 'unavailable'

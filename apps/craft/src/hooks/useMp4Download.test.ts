@@ -25,10 +25,19 @@ import {
   resetAppDoubles,
   type ConversionProgressLike,
 } from '../test/appDoubles'
+import { loadWebcamCompanion } from '../utils/takeParts'
 import type { Mp4Support, SourceVideo } from '../store/types'
 
 vi.mock('../core/converter', async () => (await import('../test/appDoubles')).converterModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
+// The companion lookup runs for real against real (fake-indexeddb) storage
+// everywhere but one test: a read that *throws* has no seam in that storage, and
+// it is its own outcome — so the lookup is a spy that delegates to the real
+// implementation, and that one test rejects it for a single call.
+vi.mock('../utils/takeParts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/takeParts')>()
+  return { ...actual, loadWebcamCompanion: vi.fn(actual.loadWebcamCompanion) }
+})
 
 let setNotice: ReturnType<typeof vi.fn<(notice: string | null) => void>>
 let clicks: Array<{ href: string; download: string }>
@@ -904,6 +913,33 @@ describe('useMp4Download for a take recorded as separate tracks', () => {
 
     expect(clicks).toHaveLength(1)
     expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_WEBCAM)
+  })
+
+  // A storage read that *throws* — the tab's IndexedDB closed under it, a quota
+  // error mid-read — is not the same fact as a part whose bytes are gone, and it
+  // used to cost the whole download: the rejection escaped to
+  // `mp4ConversionFailed` and no file was written at all, for a conversion the
+  // browser could still have done. "Upload to host" already ruled the other way
+  // on the same question (`utils/uploadToHost.ts`), and this matches it.
+  it('converts the screen alone, and says so, when the companion lookup throws', async () => {
+    await seedTake({ camera: true })
+    vi.mocked(loadWebcamCompanion).mockRejectedValueOnce(new Error('storage blocked'))
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo')
+    })
+
+    // No companion handed to the converter, a real MP4 downloaded, and the user
+    // told what is not in it — the `'unavailable'` outcome exactly.
+    expect(converterModule.convertToMP4.mock.calls[0][3]).toBeUndefined()
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo.mp4' }])
+    expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_WEBCAM)
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Could not read the take’s webcam part; converting the screen alone',
+      expect.any(Error)
+    )
   })
 
   it('says nothing about a webcam when the camera row was simply deleted', async () => {

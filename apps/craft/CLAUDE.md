@@ -1023,9 +1023,16 @@ part alone downloads its WebM from that part's own row.
   plays it, so readiness alone composited its frozen **first frame** over every screen frame
   before the offset — the exact thing the offset exists to prevent. The `play()` that a cancel
   interrupts rejects, and that rejection is swallowed, because cancelling is not a failure.
-- **A camera part that cannot be used costs the overlay and not the file.** Two things reach
-  that: its bytes are gone (`loadWebcamCompanion` answers `'unavailable'`) or its container
-  will not decode (`convertToMP4` warns and calls `onCompanionSkipped`). Either way the
+- **A camera part that cannot be used costs the overlay and not the file.** Three things reach
+  that: its bytes are gone or the read itself failed (`loadWebcamCompanion` answers
+  `'unavailable'`, and a read that *throws* is caught in the hook as that same answer — a
+  companion never costs the primary, the ruling `uploadToHost` already takes); its container
+  will not decode at all (`convertToMP4` warns and calls `onCompanionSkipped`); or its header
+  parses and not one frame of it ever decodes, which no load can see — so the composite loop
+  **counts the frames the overlay drew** and reports zero at `cleanup()`. That count is the only
+  honest question there: `loadedmetadata` fires for a container whose pictures never arrive, and
+  the element's later `error` resolves an already-settled promise. The two reports cannot
+  double up — a load that failed builds no overlay to count. Either way the
   conversion **succeeds** with a screen-only MP4 — refusing after minutes of encoding would
   leave the user with nothing — and the notice channel says
   `MP4_SAVED_WITHOUT_WEBCAM` ("Saved as MP4 — without the webcam: its own track could not be
