@@ -59,6 +59,18 @@ export interface ScriptProcessorDouble {
   disconnect: ReturnType<typeof vi.fn>
 }
 
+/**
+ * A `MediaStreamAudioSourceNode` stand-in. `disconnect` is recorded as well as
+ * `connect` because a source node is only released when the AudioContext
+ * closes, so "every source this take connected was disconnected" is a law the
+ * recorder's teardown has to keep on its own.
+ */
+export interface MediaStreamSourceDouble {
+  readonly stream: MediaStream
+  connect: ReturnType<typeof vi.fn>
+  disconnect: ReturnType<typeof vi.fn>
+}
+
 export interface AnalyserDouble {
   fftSize: number
   readonly frequencyBinCount: number
@@ -111,6 +123,8 @@ export class AudioContextDoubleInstance {
   readonly analysers: AnalyserDouble[] = []
   readonly scriptProcessors: ScriptProcessorDouble[] = []
   readonly mediaStreamSources: MediaStream[] = []
+  /** The source nodes themselves, in creation order. */
+  readonly mediaStreamSourceNodes: MediaStreamSourceDouble[] = []
   readonly resume = vi.fn(async () => {
     this.state = 'running'
   })
@@ -148,9 +162,11 @@ export class AudioContextDoubleInstance {
     return analyser
   }
 
-  createMediaStreamSource(stream: MediaStream) {
+  createMediaStreamSource(stream: MediaStream): MediaStreamSourceDouble {
     this.mediaStreamSources.push(stream)
-    return { connect: vi.fn() }
+    const node: MediaStreamSourceDouble = { stream, connect: vi.fn(), disconnect: vi.fn() }
+    this.mediaStreamSourceNodes.push(node)
+    return node
   }
 
   createMediaStreamDestination() {

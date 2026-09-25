@@ -96,6 +96,15 @@ export class OutputDouble {
   readonly target: BufferTargetDouble
   startCalls = 0
   finalizeCalls = 0
+  cancelCalls = 0
+  /**
+   * The real Output's own lifecycle state, mirrored faithfully because the
+   * recorder reads it: `cleanup()` cancels exactly the outputs still sitting
+   * at `'started'`, and mediabunny warns rather than cancelling once an output
+   * has been finalized. finalize() moves to `'finalizing'` and then either
+   * `'finalized'` or — when it throws — `'canceled'`, as the library does.
+   */
+  state: 'pending' | 'started' | 'canceled' | 'finalizing' | 'finalized' = 'pending'
 
   constructor(options: { format: OutputFormatDouble; target: BufferTargetDouble }) {
     this.format = options.format
@@ -117,15 +126,35 @@ export class OutputDouble {
     state.callLog.push('Output.start')
     this.startCalls++
     if (state.startError) throw state.startError
+    this.state = 'started'
   })
 
   finalize = vi.fn(async () => {
     state.callLog.push('Output.finalize')
     this.finalizeCalls++
-    if (state.finalizeError) throw state.finalizeError
+    this.state = 'finalizing'
+    if (state.finalizeError) {
+      this.state = 'canceled'
+      throw state.finalizeError
+    }
     if (state.producesBuffer) {
       this.target.buffer = new ArrayBuffer(state.finalizedByteLength)
     }
+    this.state = 'finalized'
+  })
+
+  /**
+   * Tell the muxer an output that will never be finalized is over. Idempotent
+   * and a no-op once finalized, exactly as mediabunny's is — a second cancel
+   * is not an error, and cancelling a finished file only earns a warning.
+   */
+  cancel = vi.fn(async () => {
+    if (this.state === 'canceled' || this.state === 'finalizing' || this.state === 'finalized') {
+      return
+    }
+    state.callLog.push('Output.cancel')
+    this.cancelCalls++
+    this.state = 'canceled'
   })
 }
 
