@@ -6,22 +6,7 @@
 // its own. A take is identified by its primary (a primary's `takeId` is its own
 // id, see `utils/recordingMetadata.ts`), so grouping is one equality.
 import type { Recording } from '../store/types';
-
-/**
- * The order a take's companions stack in, mirroring ESCAPEARTIST's
- * `utils/takeParts.ts`: the camera first, then the sound.
- *
- * Typed as plain strings on purpose. `RecordingRole` is a compile-time union
- * and IndexedDB is not type-checked, so "is this a role we know?" has to be a
- * runtime question.
- */
-const COMPANION_ROLE_ORDER: readonly string[] = ['webcam', 'mic', 'system'];
-
-/** Where a companion sits in its take's stack; last for a role we do not know. */
-function companionRank(role: string | undefined): number {
-  const rank = COMPANION_ROLE_ORDER.indexOf(role ?? '');
-  return rank === -1 ? COMPANION_ROLE_ORDER.length : rank;
-}
+import { companionRank } from './companionParts';
 
 /**
  * Newest take first; a take's companions immediately after its primary, in
