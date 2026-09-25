@@ -869,3 +869,237 @@ the figure understates the take's total bytes by the webcam part and the
 microphone part; for scale, the screen-only arm in the same invocation stored
 1,642,586 bytes for a take of the same length, and the microphone's Opus file is
 small next to either video part.
+
+## ESCSUITE-67: preview-only compositor at 15 fps (2026-09-25)
+
+**The question.** In separate-tracks mode the `Compositor` draws for the preview alone
+(`startPreviewOnly()`, no `captureStream`) and still holds 30 fps, on the same main thread as
+two `VideoEncoder`s. Nothing samples that canvas — the recorder reads the raw tracks — so the
+30 is not a sampling rate any more, it is just how often the user's own screen is repainted in
+front of them. Does halving it measurably help the encoders?
+
+**Decision: keep 30.** The main thread got a lot cheaper and the encoders got nothing, because
+on this machine they were never behind. The numbers and the caveats are below; what would have
+to be true to revisit is at the end.
+
+### The change measured
+
+One literal in `apps/craft/src/core/compositor.ts`, and nothing else — in particular the
+composited-recording path (`start(frameRate)`, which a PiP take still calls with the take's own
+rate) was untouched:
+
+```diff
+-  startPreviewOnly(frameRate: number = 30): void {
++  startPreviewOnly(frameRate: number = 15): void {
+```
+
+`useRecordingController` calls `startPreviewOnly()` with no argument, so the default is the whole
+knob.
+
+### Machine, load and method
+
+Same machine and same launch args as everything above, including `--disable-gpu` — which matters
+here more than anywhere else in this file; see "What to distrust".
+
+`uptime` before each round, in order:
+
+| Round | `uptime` load averages |
+|---|---|
+| 30A | `17:37 up 25 days, 11:28, 4 users, load averages: 2.88 5.83 8.44` |
+| 15A | `17:38 … load averages: 2.27 5.14 8.00` |
+| 30B | `17:38 … load averages: 2.48 4.86 7.78` |
+| 15B | `17:39 … load averages: 3.80 4.94 7.71` |
+| 30C | `17:39 … load averages: 4.06 4.85 7.56` |
+| 15C | `17:40 … load averages: 5.07 5.04 7.52` |
+
+Load-1 was 5.15 when the work started, so the first round waited for it to fall under 4; it
+then climbed back from 2.27 to 5.07 over the six rounds. That drift is the reason for the
+alternation and it happens to run *against* the result — see "What to distrust".
+
+**Paired alternation**, the method "The fix (ESCSUITE-54)" above used: 30, 15, 30, 15, 30, 15
+run sequentially against one warm ESCAPECRAFT dev server on 5174, flipping that one literal
+between rounds, only the separate-tracks arm selected. Each round is `PERF_RUNS = 3` takes
+reported as a per-metric median, so the six rounds are **18 takes**, nine per arm. One further
+round was run first and discarded as the warm-up.
+
+```bash
+# Two warm dev servers, started by hand and left running for all six rounds, so
+# playwright's reuseExistingServer never restarts one mid-sequence.
+( cd apps/craft  && pnpm exec vite --port 5174 --strictPort )
+( cd apps/artist && pnpm exec vite --port 5175 --strictPort )
+
+# One round. Run six times, flipping the literal above between rounds.
+cd apps/e2e
+pnpm exec playwright test --config playwright.perf.config.ts craft-recording -g "separate tracks"
+
+# perf-global-setup.ts empties perf-results/ at the start of every invocation, so
+# each round's JSON has to be copied out before the next one runs.
+cp perf-results/craft-separate-tracks-recording.json /tmp/e67-runs/30A.json
+```
+
+`-g "separate tracks"` (with the space) selects exactly one test — the recording arm. The
+composite-conversion benchmark is titled "separate-tracks" with a hyphen and is not matched;
+`--list` confirms one test before starting.
+
+### The change took effect, and the tripwires held
+
+All six rounds passed. `compositedFps` is the tripwire that says the knob was actually turned,
+and `videoDraws` is the one that says the benchmark can still divide by two:
+
+| | 30 fps arm | 15 fps arm |
+|---|---|---|
+| `compositedFps` (median of 9) | **29.97** | **14.98** |
+| `compositedFps` (range of 9) | 29.96 – 30.11 | 14.97 – 14.98 |
+| `videoDraws` | 300 in 8 takes, 302 in one | **150 in all nine** |
+| `videoDraws % 2 === 0` | holds | holds |
+| `videoDraws > 0` | holds | holds |
+| Video encoders (`framesEncodedPerEncoder.length`) | 2 | 2 |
+| Either encoder at zero | never | never |
+| Audio encoders | 2 | 2 |
+| Library rows per take | 3 | 3 |
+
+150 draws is 15 composited frames a second over a 5 s window, each drawing its two videos.
+Note that **`rafPerSecond` does not move** — 119.88 against 119.87 — because the compositor
+still requests an animation frame every frame and the gate simply returns early twice as
+often. The loop count is unchanged; only the draws are halved.
+
+### Per arm, over nine takes each
+
+Medians and ranges over all nine takes of each arm, not the per-round published medians, so the
+spread is the real one:
+
+| Metric | 30 fps (median) | 30 fps (range) | 15 fps (median) | 15 fps (range) | Change |
+|---|---|---|---|---|---|
+| **Renderer task per frame** | **6.152 ms** | 5.989 – 6.201 | **4.847 ms** | 4.694 – 4.904 | **−21.2%** |
+| **Renderer task duration** | **1737.09 ms** | 1710.24 – 1763.74 | **1312.20 ms** | 1299.31 – 1318.52 | **−24.5%** |
+| Long tasks | 0 | 0 – 0 | 0 | 0 – 0 | none to gain |
+| Encoder queue high-water | 0 | 0 – 0 | 0 | 0 – 0 | none to gain |
+| Frames encoded (both pipelines) | 286 | 278 – 290 | 271 | 267 – 279 | −5.2% |
+| Frames encoded (screen / webcam) | 143 / 144 | 134–145 / 141–146 | 135 / 139 | 125–140 / 132–143 | −5.6% / −3.5% |
+| Composited fps | 29.97 | 29.96 – 30.11 | 14.98 | 14.97 – 14.98 | −50.0% |
+| Animation frames/s | 119.88 | 119.83 – 120.26 | 119.87 | 119.81 – 120.26 | flat |
+| Layouts / style recalcs | 305 / 300 | 293–306 / 300–302 | 301 / 300 | 295–306 / 300–301 | flat |
+| Heap delta (bytes) | −586,375 | −682,032 … −182,165 | −387,037 | −716,614 … −252,645 | no signal |
+| Output size (screen part) | 1,568,897 | 1,497,568 – 1,636,970 | 1,528,052 | 1,497,746 – 1,595,312 | tracks the frames |
+
+**The two cost metrics do not overlap at all.** The worst take in the 15 arm (1318.52 ms) is
+still cheaper than the best take in the 30 arm (1710.24 ms), and the same holds per frame
+(4.904 against 5.989). Within-arm spread is 3.1% and 1.5% on the total, 3.4% and 4.3% per
+frame, against gaps of 24.5% and 21.2%. So the bound is not "−24.5% ± noise" but
+**−22.9% to −26.3%** on the total and **−18.1% to −24.3%** per frame, taking the two ranges'
+closest and furthest ends. It clears the noise by a wide margin.
+
+All eighteen takes, so the table above is checkable:
+
+| Arm | Run | screen | webcam | total | `videoDraws` | `compositedFps` | `taskDurationMs` | `taskMsPerFrame` | `rafPerSecond` | LT | queue |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 30A | 1 | 136 | 145 | 281 | 300 | 29.96 | 1743.54 ms | 6.201 ms | 120.26 | 0 | 0 |
+| 30A | 2 | 134 | 144 | 278 | 300 | 29.97 | 1710.24 ms | 6.152 ms | 119.90 | 0 | 0 |
+| 30A | 3 | 145 | 143 | 288 | 300 | 29.97 | 1724.71 ms | 5.989 ms | 119.88 | 0 | 0 |
+| 15A | 1 | 125 | 143 | 268 | 150 | 14.98 | 1299.31 ms | 4.847 ms | 119.82 | 0 | 0 |
+| 15A | 2 | 131 | 139 | 270 | 150 | 14.98 | 1309.92 ms | 4.852 ms | 119.82 | 0 | 0 |
+| 15A | 3 | 138 | 141 | 279 | 150 | 14.98 | 1313.27 ms | 4.706 ms | 119.86 | 0 | 0 |
+| 30B | 1 | 143 | 144 | 287 | 302 | 30.11 | 1739.18 ms | 6.069 ms | 120.05 | 0 | 0 |
+| 30B | 2 | 137 | 143 | 280 | 300 | 29.96 | 1732.98 ms | 6.190 ms | 119.83 | 0 | 0 |
+| 30B | 3 | 144 | 146 | 290 | 300 | 29.97 | 1737.09 ms | 5.989 ms | 119.88 | 0 | 0 |
+| 15B | 1 | 140 | 139 | 279 | 150 | 14.98 | 1309.37 ms | 4.694 ms | 120.26 | 0 | 0 |
+| 15B | 2 | 128 | 143 | 271 | 150 | 14.97 | 1318.52 ms | 4.868 ms | 120.16 | 0 | 0 |
+| 15B | 3 | 135 | 140 | 275 | 150 | 14.98 | 1317.05 ms | 4.789 ms | 119.87 | 0 | 0 |
+| 30C | 1 | 143 | 143 | 286 | 300 | 29.96 | 1747.05 ms | 6.098 ms | 119.85 | 0 | 0 |
+| 30C | 2 | 134 | 145 | 279 | 300 | 29.97 | 1722.44 ms | 6.174 ms | 119.88 | 0 | 0 |
+| 30C | 3 | 145 | 141 | 286 | 300 | 29.97 | 1763.74 ms | 6.167 ms | 119.87 | 0 | 0 |
+| 15C | 1 | 136 | 135 | 271 | 150 | 14.98 | 1317.71 ms | 4.864 ms | 119.87 | 0 | 0 |
+| 15C | 2 | 133 | 134 | 267 | 150 | 14.98 | 1312.20 ms | 4.904 ms | 120.21 | 0 | 0 |
+| 15C | 3 | 139 | 132 | 271 | 150 | 14.98 | 1307.17 ms | 4.825 ms | 119.81 | 0 | 0 |
+
+The first-take step this file's second finding describes is not visible in these rounds: every
+round's three takes are within its arm's ordinary spread, because the dev server and the page
+were already warm from the discarded round and each round loads a fresh page into a warm
+process.
+
+### So what did the encoders gain? Nothing measurable.
+
+The freed time is real and large. Nothing the encoders do moved:
+
+- **`encoderQueueHighWater` is 0 in all eighteen takes.** The queue never held a frame at the
+  moment another was handed over — in *either* arm. Two 720p encoders on the main thread were
+  not behind the capture at 30 fps, so there was no backlog for 15 fps to drain.
+- **`longTaskCount` is 0 in all eighteen takes**, in either arm. No frame was ever handed to an
+  encoder late because something else held the thread for 50 ms.
+- **`framesEncoded` went *down*, not up** — median 286 → 271, −5.2%. Per pipeline the screen
+  half lost 5.6% and the webcam half 3.5%, and the two arms' ranges overlap (278–290 against
+  267–279, meeting at 279). If the encoders had been starved at 30 fps this is the number that
+  would have risen.
+
+That last one wants an explanation rather than a shrug, and the most likely one is the fixture,
+not the app. `mockSyntheticMedia` paints its source canvas on a **33 ms** `setInterval` and
+hands out `canvas.captureStream(30)` — a 33.33 ms cap. Those are the same zero-margin collision
+ESCSUITE-54 was about, one layer down: a paint that lands a hair *early* against the cap is
+dropped rather than captured, and which side of 33.33 ms a 33 ms timer lands on is decided
+entirely by how busy the main thread is. A *busier* thread delays the painter past the boundary
+and lets the frame through; the 15 fps arm's quieter thread fires the timer closer to its ideal
+33 ms and loses a few more to the cap. That is consistent with the direction and the size, and
+with both pipelines reading the same fixture. **It is inferred from the arithmetic, not confirmed
+by a profile** — `PERF_PROFILE=1` would settle it and was not run. Either way it is a property
+of the synthetic capture and not something a user's screen share does, and it means the −21.2%
+per-frame figure is the *conservative* reading of the −24.5% total: its denominator shrank
+while its numerator shrank much more.
+
+### What to distrust
+
+**`--disable-gpu` is in `PERF_LAUNCH_ARGS`, and this is the one benchmark where that is the
+headline caveat.** 425 ms saved over 150 dropped composited frames is **2.83 ms of renderer
+time per 720p composite**, which is the cost of software-rasterising a full-frame
+`drawImage` from a video plus a clipped overlay draw and a stroke. On a user's machine that
+draw is GPU-rasterised and the main thread mostly issues commands. So **the measured saving is
+an upper bound taken on a machine no user has**, and the fraction of it a real separate-tracks
+recording would recover is unknown and smaller. The encoders, by contrast, do the same work in
+both worlds.
+
+**The drift runs against the result, which is the good direction.** Load-1 climbed from 2.27 to
+5.07 across the six rounds and the 15 fps arm always ran *second* within its pair, so a rising
+trend should have made the 15 arm look worse. It looked 24% better instead — the effect is
+anti-correlated with the drift, so drift cannot be what produced it. (It cannot explain the
+frames-encoded dip either: a rising external load would, by the mechanism above, deliver *more*
+capture frames, not fewer.)
+
+**This refines the ESCSUITE-54 note above.** That section measured a *flat* `taskDurationMs`
+when `compositedFps` went 22.4 → 30 and inferred "the composite itself is a small part of what
+the renderer is doing in this window". Halving the rate in *this* mode moves the total 24.5%,
+so the composite is **a quarter of the renderer's task time** here. The two are not in direct
+contradiction — that arm was composited PiP, whose total also carries `captureStream(30)` and
+MediaRecorder's plumbing, and it *raised* the rate by a third rather than halving it, into slack
+that happened to exist. But the earlier section's inference should not be carried over to this
+mode: in separate-tracks mode, with no `captureStream` and no MediaRecorder, the preview loop is
+a large and clearly visible share of the total, and `taskDurationMs` is the number that shows it.
+
+### The decision, and what would have to be true to revisit
+
+**Keep 30. No code change.** The rule for this experiment was to lower the preview rate only if
+the encoders measurably benefit, and they did not: queue high-water 0 → 0, long tasks 0 → 0,
+frames encoded flat to slightly down. What 15 fps buys is **headroom** — a quarter of this
+mode's renderer time, inflated by `--disable-gpu` — and the price is paid by the one thing that
+canvas is still for. The preview is how the user confirms the recording is running and sees
+where the camera overlay sits; halving its smoothness is a visible cost on every separate-tracks
+take, in exchange for slack that nothing measured here needs. The recording itself would not
+change either way — the recorder reads the raw tracks — so there is no output quality to trade,
+only the live view.
+
+Revisit when the encoders are actually the constrained party. Concretely, any of these would
+turn the answer around:
+
+- **A 30 fps arm with a non-zero `encoderQueueHighWater`, a non-zero `longTaskCount`, or a
+  `framesEncodedPerEncoder` visibly short of what the capture delivered — that recovers at 15.**
+  That is the measurement this experiment failed to produce, and it is the whole decision.
+- **A bigger capture.** 1280x720 is what `craft-separate-tracks-recording` uses; two 1080p or
+  4K encoders on the main thread are a different proposition, and the arm would need
+  `CAPTURE_SIZE` raised (there is no env override for it, unlike the preview scene's
+  `PERF_PROJECT_RESOLUTION`).
+- **Fewer cores, or a real GPU.** Dropping `--disable-gpu` would move the preview's share of
+  the total to something like what a user pays and is arguably the more honest arm for this
+  particular question; a weaker machine would show whether the headroom is ever needed.
+- **An adaptive rate instead of a fixed one.** The better shape, if a constrained arm ever turns
+  up, is not a blanket 15 but falling back to it only while the encoder queue is non-empty —
+  which would take the headroom on the machines that need it and leave the preview alone on the
+  machines that do not. That is a bigger change than this experiment's one literal, and it
+  should not be built before there is a measurement showing something to fix.
