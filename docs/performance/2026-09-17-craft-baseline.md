@@ -920,7 +920,10 @@ alternation and it happens to run *against* the result — see "What to distrust
 run sequentially against one warm ESCAPECRAFT dev server on 5174, flipping that one literal
 between rounds, only the separate-tracks arm selected. Each round is `PERF_RUNS = 3` takes
 reported as a per-metric median, so the six rounds are **18 takes**, nine per arm. One further
-round was run first and discarded as the warm-up.
+round was run first and discarded as the warm-up. One collection hiccup, for the record: the
+driver script aborted after the first 30 fps round (it assigned to `status`, which zsh reserves as
+a read-only alias of `$?`); that round had already finished and its JSON was recovered intact from
+`perf-results/`, and the sequence continued contiguously — nothing was re-run or dropped.
 
 ```bash
 # Two warm dev servers, started by hand and left running for all six rounds, so
