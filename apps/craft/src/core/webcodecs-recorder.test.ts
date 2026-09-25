@@ -1369,9 +1369,9 @@ describe('WebCodecsRecorder', () => {
 
       await recorder.stop()
 
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toBeNull()
+      expect(companions).toBeNull()
       expect(callbacks.onError).not.toHaveBeenCalled()
       expect(consoleWarn).toHaveBeenCalledWith(
         'The webcam companion could not be finalized:',
@@ -1395,9 +1395,9 @@ describe('WebCodecsRecorder', () => {
       // before the primary's own finalize, so a rejection there used to skip
       // the finalize altogether and report onError over a finished recording.
       expect(getMediabunnyState().outputs[0].finalizeCalls).toBe(1)
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toBeNull()
+      expect(companions).toBeNull()
       expect(callbacks.onError).not.toHaveBeenCalled()
       expect(consoleWarn).toHaveBeenCalledWith(
         'The webcam companion could not be flushed:',
@@ -1430,9 +1430,9 @@ describe('WebCodecsRecorder', () => {
       expect(screenEncoder().encodes).toHaveLength(2)
 
       await recorder.stop()
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toBeNull()
+      expect(companions).toBeNull()
     })
 
     it('builds no companion when the screen stream never arrived', async () => {
@@ -1455,9 +1455,9 @@ describe('WebCodecsRecorder', () => {
 
       await recorder.stop()
 
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toBeNull()
+      expect(companions).toBeNull()
       // ...and the single listener is the single listener cleanup removes.
       expect(webcamTrack.listenerCount('ended')).toBe(0)
     })
@@ -1486,9 +1486,9 @@ describe('WebCodecsRecorder', () => {
 
       await recorder.stop()
 
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toBeNull()
+      expect(companions).toBeNull()
       expect(callbacks.onError).not.toHaveBeenCalled()
     })
 
@@ -1537,8 +1537,8 @@ describe('WebCodecsRecorder', () => {
       )
       expect(callbacks.onError).not.toHaveBeenCalled()
       // The camera is let go rather than left held by a reader nothing will
-      // ever cancel: with `companion` back to null, neither stop() nor
-      // cleanup() can reach it.
+      // ever cancel: it was never pushed onto `companions`, so neither
+      // stop() nor cleanup() can reach it.
       expect(processor.cancelCalls()).toBe(1)
 
       recorder.start()
@@ -1554,9 +1554,9 @@ describe('WebCodecsRecorder', () => {
 
       await recorder.stop()
 
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toBeNull()
+      expect(companions).toBeNull()
       expect(callbacks.onError).not.toHaveBeenCalled()
     })
 
