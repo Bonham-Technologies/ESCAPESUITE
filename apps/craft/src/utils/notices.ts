@@ -74,3 +74,20 @@ export const SEPARATE_TRACK_NOT_SAVED =
  */
 export const UPLOAD_UNAVAILABLE =
   'That recording could not be read from your library — nothing was sent to the host.'
+
+/**
+ * Said after a conversion that could not include the take's camera part.
+ *
+ * Two things reach it: the part was listed and its bytes were gone
+ * (`utils/takeParts.ts` answers `'unavailable'`), or its container would not
+ * decode (`convertToMP4` calls `onCompanionSkipped`). One sentence for both,
+ * because the fact the user can act on is the same — the MP4 they now have is
+ * the screen alone, and the camera is still downloadable as WebM from its own
+ * row.
+ *
+ * It wins the channel over `MP4_SAVED_WITHOUT_AUDIO` when both are true: the
+ * silent-MP4 warning is said *before* the conversion too, under the library,
+ * where a camera loss cannot yet be known.
+ */
+export const MP4_SAVED_WITHOUT_WEBCAM =
+  'Saved as MP4 — without the webcam: its own track could not be read'

@@ -1,6 +1,11 @@
 // Converting one stored recording — to MP4, or to M4A — and handing it to the
 // browser.
 //
+// A take recorded as separate tracks is put back together on the way out: the
+// MP4 is the screen with the camera drawn back into the corner it was recorded
+// in, resolved out of storage here by `utils/takeParts.ts`. M4A is unchanged —
+// the primary's audio track already is the mix.
+//
 // The whole conversion is local either way: `core/converter` decodes the stored
 // WebM with WebCodecs and muxes the result with Mediabunny, as H.264 + AAC for
 // an MP4 or as AAC alone for an M4A. Both are CPU-bound, which is why only one
@@ -19,11 +24,17 @@
 // it, and `App.mp4rerender.test.tsx` counts that.
 import { useEffect, useRef, useState } from 'react'
 import { convertToMP4, convertToM4A, ConversionAbortedError } from '../core/converter'
-import { getVideoBlob } from '../core/storage'
+import { getVideo } from '../core/storage'
 import { analytics } from '../utils/analytics'
 import { downloadBlob } from '../utils/downloadBlob'
-import { mp4ConversionFailed, MP4_SAVED_WITHOUT_AUDIO } from '../utils/notices'
+import { loadWebcamCompanion } from '../utils/takeParts'
+import {
+  mp4ConversionFailed,
+  MP4_SAVED_WITHOUT_AUDIO,
+  MP4_SAVED_WITHOUT_WEBCAM,
+} from '../utils/notices'
 import { safeFileName } from '../utils/recordingFormat'
+import type { ConversionProgress } from '../core/converter'
 import type { Mp4Support } from '../store/types'
 
 /**
@@ -193,15 +204,46 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
     setConverting({ id, format, message: 'Starting conversion…', progress: 0 })
 
     try {
-      const blob = await getVideoBlob(id)
-      if (!blob) return
+      // The blob *and* its metadata in one read. The metadata is what says
+      // whether this recording is one part of a take and where the overlay sat
+      // while it was recorded — neither of which the in-memory `Recording` row
+      // carries, and neither of which is worth a store field for a value read
+      // once per click.
+      const record = await getVideo(id)
+      if (!record) return
 
-      const convert = format === 'm4a' ? convertToM4A : convertToMP4
-      const converted = await convert(
-        blob,
-        ({ message, progress }) => setConverting({ id, format, message, progress }),
-        controller.signal
-      )
+      // A take recorded as separate tracks is put back together here: the MP4
+      // is the screen with the camera drawn into the corner it was recorded in
+      // (ESCSUITE-14 decision 3). M4A asks for none of this — the mix is on the
+      // primary, so the audio-only download was already the whole take.
+      const lookup = format === 'mp4'
+        ? await loadWebcamCompanion(record.metadata)
+        : ({ kind: 'none' } as const)
+      // True when the camera part was *listed* and could not be used — its
+      // bytes were gone (here) or it would not decode (inside the converter).
+      // A take whose camera row was deleted is a plain take again and leaves
+      // nothing out, so it never sets this.
+      let webcamSkipped = lookup.kind === 'unavailable'
+
+      const report = ({ message, progress }: ConversionProgress) =>
+        setConverting({ id, format, message, progress })
+
+      const converted =
+        format === 'm4a'
+          ? await convertToM4A(record.blob, report, controller.signal)
+          : await convertToMP4(
+              record.blob,
+              report,
+              controller.signal,
+              lookup.kind === 'ready'
+                ? {
+                    companion: lookup.companion,
+                    onCompanionSkipped: () => {
+                      webcamSkipped = true
+                    },
+                  }
+                : undefined
+            )
 
       // Abort does not always reject. `convertToMP4` checks the signal while
       // it encodes, but there is no check between the last frame and the
@@ -217,9 +259,20 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
       // having exactly one. Where the browser had no AAC encoder the file that
       // just landed is silent, and that is what the channel says instead: the
       // same fact the note said beforehand, now about a file they have.
-      // An M4A only ever runs where the probe said AAC is there, so this is
+      // An M4A only ever runs where the probe said AAC is there, so that is
       // `null` for it by construction — the silent-file warning is an MP4 fact.
-      setNotice(mp4Support.audio ? null : MP4_SAVED_WITHOUT_AUDIO)
+      //
+      // A missing camera outranks a missing AAC encoder. Both can be true, and
+      // there is one slot: the silent-MP4 warning was already said under the
+      // library *before* the conversion, where the camera loss could not be
+      // known, so the surprising fact is the one that gets said afterwards.
+      setNotice(
+        webcamSkipped
+          ? MP4_SAVED_WITHOUT_WEBCAM
+          : mp4Support.audio
+            ? null
+            : MP4_SAVED_WITHOUT_AUDIO
+      )
       downloadBlob(converted, `${safeFileName(name)}.${format}`)
     } catch (error) {
       // Cancelling is not a failure — the user asked for it, and there is

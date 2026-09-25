@@ -14,9 +14,10 @@ import {
   MP4_UNSUPPORTED_REASON,
 } from './useMp4Download'
 import type { ConversionFormat } from './useMp4Download'
-import { MP4_SAVED_WITHOUT_AUDIO } from '../utils/notices'
-import { storeVideo } from '../core/storage'
+import { MP4_SAVED_WITHOUT_AUDIO, MP4_SAVED_WITHOUT_WEBCAM } from '../utils/notices'
+import { storeVideo, getDB } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
+import { preserveBlobsInStorage } from '../test/blobStorage'
 import {
   analyticsModule,
   converterModule,
@@ -752,6 +753,211 @@ describe('useMp4Download audio-only (M4A)', () => {
     await waitFor(() => expect(result.current.converting).toBeNull())
     expect(clicks).toEqual([])
     expect(setNotice).not.toHaveBeenCalled()
+  })
+})
+
+describe('useMp4Download for a take recorded as separate tracks', () => {
+  const PLACEMENT = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
+
+  // The camera half is told apart from the screen half by its bytes, so the
+  // bytes have to survive storage — see the fixture for why that needs saying.
+  preserveBlobsInStorage()
+
+  /** Seed a take: the primary with its placement, and the camera half. */
+  async function seedTake(options: { camera: boolean }): Promise<void> {
+    await storeVideo('take-1', new Blob(['screen-bytes'], { type: 'video/webm' }), {
+      ...metadata('take-1', 'Standup Demo'),
+      takeId: 'take-1',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: PLACEMENT,
+      hasWebcam: true,
+      hasAudio: true,
+    })
+    if (options.camera) {
+      await storeVideo('part-2', new Blob(['camera-bytes'], { type: 'video/webm' }), {
+        ...metadata('part-2', 'Standup Demo — webcam'),
+        takeId: 'take-1',
+        role: 'webcam',
+        startOffset: 0,
+        hasWebcam: true,
+        hasAudio: false,
+      })
+    }
+  }
+
+  it('hands the converter the camera half and the take\'s placement', async () => {
+    await seedTake({ camera: true })
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo')
+    })
+
+    const [blob, , , composite] = converterModule.convertToMP4.mock.calls[0]
+    // The screen half's bytes, as always — and the camera's beside them, with
+    // the geometry the take was recorded with.
+    expect(await (blob as Blob).text()).toBe('screen-bytes')
+    expect(await composite!.companion.blob.text()).toBe('camera-bytes')
+    expect(composite!.companion.placement).toEqual(PLACEMENT)
+    expect(composite!.companion.startOffset).toBe(0)
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo.mp4' }])
+    // A composite that worked is not worth a sentence: the file is what was
+    // asked for, and the channel is cleared as it is after any conversion.
+    expect(setNotice.mock.calls).toEqual([[null]])
+  })
+
+  it('asks for no companion at all on a plain take', async () => {
+    await seed('plain', 'Plain Take')
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('plain', 'Plain Take')
+    })
+
+    // Three arguments, exactly as before this feature existed: a recording with
+    // no `takeId` is not a take with parts, and the lookup makes no storage
+    // read to discover that.
+    expect(converterModule.convertToMP4.mock.calls[0][3]).toBeUndefined()
+  })
+
+  it('asks for no companion for an M4A, because the primary is already the mix', async () => {
+    await seedTake({ camera: true })
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo', 'm4a')
+    })
+
+    // convertToM4A takes three arguments and always will: the microphone and
+    // system parts are a second tap on tracks the mix already read, so the
+    // primary's audio track *is* the mix and the audio-only download was
+    // complete the day slice 1 shipped.
+    expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
+    expect(converterModule.convertToM4A.mock.calls[0]).toHaveLength(3)
+  })
+
+  it('says the file has no webcam in it when the camera part is listed and gone', async () => {
+    await seedTake({ camera: true })
+    // The row is in storage; its bytes are not.
+    const db = await getDB()
+    await db.put('videos', {
+      id: 'part-2',
+      blob: undefined as unknown as Blob,
+      metadata: {
+        ...metadata('part-2', 'Standup Demo — webcam'),
+        takeId: 'take-1',
+        role: 'webcam',
+      },
+    })
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo')
+    })
+
+    // The MP4 is still written and still downloaded — a screen-only MP4 is a
+    // real file — and the user is told what is not in it.
+    expect(converterModule.convertToMP4.mock.calls[0][3]).toBeUndefined()
+    expect(clicks).toHaveLength(1)
+    expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_WEBCAM)
+  })
+
+  it('says the same thing when the converter could not decode the camera part', async () => {
+    await seedTake({ camera: true })
+    converterModule.convertToMP4.mockImplementation(async (blob, onProgress, _signal, composite) => {
+      onProgress({ phase: 'preparing', progress: 0, message: 'Preparing conversion...' })
+      // What the real converter does with a camera part that will not load: it
+      // says so and writes the screen alone.
+      composite?.onCompanionSkipped?.()
+      return new Blob([blob as Blob], { type: 'video/mp4' })
+    })
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo')
+    })
+
+    expect(clicks).toHaveLength(1)
+    expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_WEBCAM)
+  })
+
+  it('says nothing about a webcam when the camera row was simply deleted', async () => {
+    await seedTake({ camera: false })
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo')
+    })
+
+    // Deleting the camera row demotes the take to a plain one, so nothing is
+    // left out and there is nothing to report.
+    expect(setNotice.mock.calls).toEqual([[null]])
+  })
+
+  it('says nothing about a missing webcam for a conversion that was cancelled', async () => {
+    // The camera loss is known *before* the encode starts, so it is the one
+    // notice that could outlive a cancellation — a user who cancelled asked for
+    // no file, and being told what is not in the file they do not have is
+    // worse than silence. The abort check guards the notice as well as the
+    // download.
+    await seedTake({ camera: true })
+    const db = await getDB()
+    await db.put('videos', {
+      id: 'part-2',
+      blob: undefined as unknown as Blob,
+      metadata: { ...metadata('part-2', 'webcam'), takeId: 'take-1', role: 'webcam' },
+    })
+    // A conversion that ignores the abort and resolves anyway, as the real one
+    // can between the last encoded frame and the muxer's `finalize()`.
+    let settle: (blob: Blob) => void = () => {}
+    const started = new Promise<void>((resolveStarted) => {
+      converterModule.convertToMP4.mockImplementation(
+        () =>
+          new Promise<Blob>((resolve) => {
+            settle = resolve
+            resolveStarted()
+          })
+      )
+    })
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Standup Demo')
+    })
+    await act(async () => {
+      await started
+    })
+    await act(async () => {
+      result.current.cancelMp4Download()
+    })
+    await act(async () => {
+      settle(new Blob(['mp4-bytes'], { type: 'video/mp4' }))
+    })
+    await waitFor(() => expect(result.current.converting).toBeNull())
+
+    expect(clicks).toEqual([])
+    expect(setNotice).not.toHaveBeenCalled()
+  })
+
+  it('prefers the missing webcam to the missing audio when both are true', async () => {
+    await seedTake({ camera: true })
+    const db = await getDB()
+    await db.put('videos', {
+      id: 'part-2',
+      blob: undefined as unknown as Blob,
+      metadata: { ...metadata('part-2', 'webcam'), takeId: 'take-1', role: 'webcam' },
+    })
+    const { result } = renderMp4Download(MP4_SILENT)
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Standup Demo')
+    })
+
+    // There is one notice channel, and the silent-MP4 warning was already said
+    // *before* the conversion, under the library, where the camera loss could
+    // not yet be known. So the surprising fact wins the one slot.
+    expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_WEBCAM)
   })
 })
 
