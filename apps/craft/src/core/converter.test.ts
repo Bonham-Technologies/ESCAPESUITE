@@ -13,6 +13,7 @@ import {
   MP4_NO_H264_REASON,
   MP4_NO_AUDIO_REASON,
   MP4_PROBE_FAILED_REASON,
+  type CompositeCompanion,
   type ConversionProgress,
 } from './converter'
 import {
@@ -43,6 +44,7 @@ import {
   installVideoElementDouble,
   uninstallVideoElementDouble,
   getLastVideoDouble,
+  getVideoDoubles,
   resetVideoElementDouble,
   type VideoElementDouble,
 } from '../test/doubles/video'
@@ -478,6 +480,262 @@ describe('converter', () => {
       expect(lastVideoEncoder().flushCalls).toBe(1)
       expect(lastVideoEncoder().closeCalls).toBe(1)
       expect(lastVideoEncoder().state).toBe('closed')
+    })
+  })
+
+  // The composite: one MP4 from a take's two video files (ESCSUITE-14 decision
+  // 3). What is asserted is that the camera goes back exactly where the live
+  // compositor had it — the numbers come from `core/overlayGeometry.test.ts`,
+  // which pins the same ones the preview is pinned at — that the take's audio
+  // is the primary's and only the primary's, and that a camera part that
+  // cannot be read costs the overlay and not the file.
+  describe('convertToMP4 for a take with a webcam companion', () => {
+    const COMPANION = new Blob(['webcam'], { type: 'video/webm' })
+
+    const PLACEMENT = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
+
+    interface StartedComposite {
+      promise: Promise<Blob>
+      screen: VideoElementDouble
+      webcam: VideoElementDouble
+      progress: ConversionProgress[]
+      onCompanionSkipped: ReturnType<typeof vi.fn>
+    }
+
+    /**
+     * Start a composite conversion and hand back both elements.
+     *
+     * The screen element is created first and the camera second, so
+     * `getVideoDoubles()` is [screen, camera] — which is why the plain path's
+     * own `start()` helper above, which reaches for the *last* element, still
+     * addresses the right one for a three-argument call.
+     */
+    function startComposite(
+      options: {
+        startOffset?: number
+        placement?: CompositeCompanion['placement']
+        width?: number
+        height?: number
+        duration?: number
+        onCompanionSkipped?: false
+      } = {}
+    ): StartedComposite {
+      const progress: ConversionProgress[] = []
+      const onCompanionSkipped = vi.fn()
+      const promise = convertToMP4(
+        SOURCE,
+        (p) => progress.push(p),
+        undefined,
+        {
+          companion: {
+            blob: COMPANION,
+            placement: options.placement ?? PLACEMENT,
+            startOffset: options.startOffset ?? 0,
+          },
+          // `false` drops the callback entirely, which is the shape a caller
+          // that does not want to be told takes.
+          onCompanionSkipped:
+            options.onCompanionSkipped === false ? undefined : onCompanionSkipped,
+        }
+      )
+      promise.catch(() => {})
+
+      const [screen, webcam] = getVideoDoubles()
+      screen.enableRequestVideoFrameCallback()
+      screen.setMetadata({
+        videoWidth: options.width ?? 1280,
+        videoHeight: options.height ?? 720,
+        duration: options.duration ?? 0.1,
+      })
+      screen.fireLoadedMetadata()
+      return { promise, screen, webcam, progress, onCompanionSkipped }
+    }
+
+    /** Give the camera element a decoded frame and let its metadata land. */
+    function readyWebcam(webcam: VideoElementDouble): void {
+      webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 2, duration: 0.1 })
+      webcam.fireLoadedMetadata()
+    }
+
+    it('draws the screen, then the camera through the take\'s stored placement', async () => {
+      const composite = startComposite()
+      readyWebcam(composite.webcam)
+      await playThroughRvfc(composite.screen, 3)
+      await composite.promise
+
+      const ctx = getLastCanvasContext()!
+      // The screen fills the frame, once per captured frame, exactly as the
+      // plain conversion does.
+      expect(ctx.drawImage).toHaveBeenCalledWith(composite.screen.element, 0, 0, 1280, 720)
+      // …and the camera lands in the circle the take was recorded with: radius
+      // min(256,144)/2 = 72, centre (1132, 628), a landscape source cropped to
+      // 480x480. The same numbers `overlayGeometry.test.ts` pins, which are the
+      // same numbers `compositor.test.ts` pins for the live preview.
+      expect(ctx.arc).toHaveBeenCalledWith(1132, 628, 72, 0, Math.PI * 2)
+      expect(ctx.drawImage).toHaveBeenCalledWith(
+        composite.webcam.element,
+        80,
+        0,
+        480,
+        480,
+        1060,
+        556,
+        144,
+        144
+      )
+    })
+
+    it('scales the recorded 20px inset to the frame it is encoding', async () => {
+      const composite = startComposite({
+        width: 1920,
+        height: 1080,
+        placement: { position: 'top-left', size: 0.2, shape: 'rectangle' },
+      })
+      readyWebcam(composite.webcam)
+      await playThroughRvfc(composite.screen, 2)
+      await composite.promise
+
+      const ctx = getLastCanvasContext()!
+      // 384 = 1920 * 0.2, 216 = 384 * 9/16, and the inset is 30 rather than 20
+      // because the preview measured 20 against a canvas capped at 1280 — see
+      // `overlayPaddingFor`.
+      expect(ctx.drawImage).toHaveBeenCalledWith(composite.webcam.element, 30, 30, 384, 216)
+    })
+
+    it('plays both halves from the same moment and says it is loading the camera', async () => {
+      const composite = startComposite()
+      readyWebcam(composite.webcam)
+      await playThroughRvfc(composite.screen, 2)
+      await composite.promise
+
+      // Started together, from zero, and played rather than seeked: both run at
+      // 1x off the same wall clock, which is what keeps the two pictures
+      // together without a seek per frame.
+      expect(composite.webcam.play).toHaveBeenCalledTimes(1)
+      expect(composite.webcam.element.currentTime).toBe(0)
+      expect(composite.progress.map((p) => p.message)).toContain('Loading the webcam track…')
+    })
+
+    it('holds the camera back until the screen reaches its startOffset', async () => {
+      const composite = startComposite({ startOffset: 0.5, duration: 1 })
+      readyWebcam(composite.webcam)
+      await settle()
+
+      // Fifteen frames takes the screen to 14/30 = 0.466s — not yet.
+      for (let i = 0; i < 15; i++) composite.screen.presentFrame(i / 30)
+      expect(composite.webcam.play).not.toHaveBeenCalled()
+
+      // The sixteenth is 0.5s exactly, which is where this part begins.
+      composite.screen.presentFrame(15 / 30)
+      expect(composite.webcam.play).toHaveBeenCalledTimes(1)
+
+      composite.screen.fireEnded()
+      await settle()
+      await composite.promise
+      // Started once, not once per frame.
+      expect(composite.webcam.play).toHaveBeenCalledTimes(1)
+    })
+
+    it('draws no camera on a frame it has no picture for yet', async () => {
+      const composite = startComposite()
+      // Metadata, but no decoded frame: readyState stays 0.
+      composite.webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 0 })
+      composite.webcam.fireLoadedMetadata()
+      await playThroughRvfc(composite.screen, 3)
+      await composite.promise
+
+      const ctx = getLastCanvasContext()!
+      // The screen frames are still encoded — a screen-only frame is better
+      // than a throw, and the same `readyState >= 2` guard `Compositor.drawFrame`
+      // applies to the live overlay.
+      expect(ctx.drawImage).toHaveBeenCalledTimes(3)
+      expect(ctx.save).not.toHaveBeenCalled()
+    })
+
+    it('takes its audio from the primary alone — that file already is the mix', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const composite = startComposite()
+      readyWebcam(composite.webcam)
+      await playThroughRvfc(composite.screen, 2)
+      await composite.promise
+
+      // Exactly one decode, of the primary's ten bytes. The mic and system
+      // parts are a *second tap* on tracks the mix already read
+      // (`core/webcodecs-recorder.ts`), so the primary's track is the mix —
+      // decoding them would re-derive a buffer that is already in the file.
+      expect(audio.contexts).toHaveLength(1)
+      expect(audio.contexts[0].decodedByteLengths).toEqual([SOURCE.size])
+    })
+
+    it('writes the screen alone, and says so, when the camera part will not load', async () => {
+      const composite = startComposite()
+      composite.webcam.fireError()
+      await playThroughRvfc(composite.screen, 3)
+
+      const blob = await composite.promise
+      // The file is still written: minutes of encoding must not be thrown away
+      // because one of two files would not decode.
+      expect(blob.type).toBe('video/mp4')
+      const ctx = getLastCanvasContext()!
+      expect(ctx.drawImage).toHaveBeenCalledTimes(3)
+      expect(ctx.save).not.toHaveBeenCalled()
+      // …and the caller is told, because the file is not what was asked for.
+      expect(composite.onCompanionSkipped).toHaveBeenCalledTimes(1)
+    })
+
+    it('writes the screen alone for a caller that passed no callback at all', async () => {
+      const composite = startComposite({ onCompanionSkipped: false })
+      composite.webcam.fireError()
+      await playThroughRvfc(composite.screen, 3)
+
+      // `onCompanionSkipped` is optional: a caller that does not want to be
+      // told still gets its screen-only MP4 rather than a TypeError.
+      const blob = await composite.promise
+      expect(blob.type).toBe('video/mp4')
+      expect(composite.onCompanionSkipped).not.toHaveBeenCalled()
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'The webcam track could not be read; converting the screen alone:',
+        expect.any(Error)
+      )
+    })
+
+    it('releases both object URLs however it leaves', async () => {
+      const composite = startComposite()
+      readyWebcam(composite.webcam)
+      await playThroughRvfc(composite.screen, 2)
+      await composite.promise
+
+      // Two elements, two blob URLs, two revokes: the camera's is created
+      // outside the try so the finally can release it whatever happened.
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls).toHaveLength(2)
+    })
+
+    it('stops the camera element when the conversion is cancelled', async () => {
+      const controller = new AbortController()
+      const progress: ConversionProgress[] = []
+      const promise = convertToMP4(
+        SOURCE,
+        (p) => progress.push(p),
+        controller.signal,
+        { companion: { blob: COMPANION, placement: PLACEMENT, startOffset: 0 } }
+      )
+      promise.catch(() => {})
+      const [screen, webcam] = getVideoDoubles()
+      screen.enableRequestVideoFrameCallback()
+      screen.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 1 })
+      screen.fireLoadedMetadata()
+      readyWebcam(webcam)
+      await settle()
+      screen.presentFrame(0)
+
+      controller.abort()
+      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
+
+      // A cancelled conversion leaves neither element playing: the camera is
+      // paused with the screen, in the one cleanup both go through.
+      expect(screen.pause).toHaveBeenCalled()
+      expect(webcam.pause).toHaveBeenCalled()
     })
   })
 

@@ -34,6 +34,7 @@ import {
   installVideoElementDouble,
   uninstallVideoElementDouble,
   getLastVideoDouble,
+  getVideoDoubles,
   resetVideoElementDouble,
   type VideoElementDouble,
 } from '../test/doubles/video'
@@ -180,6 +181,111 @@ describe('audio-only (M4A) per-chunk work', () => {
     expect(VideoEncoderDouble.instances).toHaveLength(0)
     expect(getCreatedFrames('VideoFrame')).toHaveLength(0)
     expect(getLastCanvasContext()).toBeNull()
+    expect(audio.contexts.every((c) => c.state === 'closed')).toBe(true)
+  })
+})
+
+// The composite path's per-frame work (ESCSUITE-14 slice 4).
+//
+// A composite frame is the plain frame plus one overlay: one more `drawImage`,
+// one clip path, one balanced save/restore and one border stroke. The
+// conservation laws here are the ones that would let the composite quietly cost
+// twice what it should — a second pass over the same screen pixels, an overlay
+// drawn more than once, a save() the stroke never restores — and they are
+// exact. The one ceiling that is a cost rather than a law is 2x the measured
+// value, as everywhere else.
+describe('composite (screen + webcam) per-frame work', () => {
+  const COMPANION = new Blob(['webcam-bytes'], { type: 'video/webm' })
+  const PLACEMENT = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
+
+  /** Convert a companion take whose screen half presents `count` frames. */
+  async function convertComposite(count: number): Promise<void> {
+    const promise = convertToMP4(SOURCE, () => {}, undefined, {
+      companion: { blob: COMPANION, placement: PLACEMENT, startOffset: 0 },
+    })
+    promise.catch(() => {})
+
+    const [screen, webcam] = getVideoDoubles()
+    screen.enableRequestVideoFrameCallback()
+    screen.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: count / 30 })
+    screen.fireLoadedMetadata()
+    webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 2, duration: count / 30 })
+    webcam.fireLoadedMetadata()
+
+    await settle()
+    for (let i = 0; i < count; i++) screen.presentFrame(i / 30)
+    screen.fireEnded()
+    await settle()
+
+    await promise
+  }
+
+  it('creates, closes and encodes exactly one frame per presented frame', async () => {
+    await convertComposite(FRAMES)
+
+    const frames = getCreatedFrames('VideoFrame')
+    // Exact, and the same law the plain path is held to: one composited frame
+    // is one `VideoFrame`, and a frame that is not closed again is pixels the
+    // browser cannot reclaim until the tab goes away. Two video elements do not
+    // make two frames.
+    expect(frames).toHaveLength(FRAMES)
+    expect(frames.filter((f) => f.closed)).toHaveLength(FRAMES)
+    expect(allFramesClosed()).toBe(true)
+    expect(lastVideoEncoder().encodes).toHaveLength(FRAMES)
+    expect(lastVideoEncoder().flushCalls).toBe(1)
+  })
+
+  it('draws the screen once and the camera once per encoded frame', async () => {
+    await convertComposite(FRAMES)
+
+    const ctx = getLastCanvasContext()!
+    const draws = ctx.calls.filter((c) => c.method === 'drawImage')
+
+    // Exact: two draws a frame and not three. A third would mean the screen was
+    // passed over twice, which at 1280x720 is the single most expensive thing
+    // this loop could do twice.
+    expect(draws).toHaveLength(FRAMES * 2)
+    // One canvas, not one per layer: a second canvas would be a second
+    // full-frame allocation and a blit between them.
+    expect(ctx.canvas.width).toBe(1280)
+    expect(ctx.canvas.height).toBe(720)
+    // Exact: the screen frame covers the canvas, so nothing clears it first.
+    expect(ctx.calls.filter((c) => c.method === 'fillRect')).toHaveLength(0)
+  })
+
+  it('balances every save with a restore, and stays inside its per-frame ceiling', async () => {
+    await convertComposite(FRAMES)
+
+    const ctx = getLastCanvasContext()!
+    const count = (method: string) => ctx.calls.filter((c) => c.method === method).length
+
+    // Exact: one save and one restore per frame. The overlay strokes its border
+    // *outside* the clip, so the restore comes before the stroke and the pair
+    // has to stay balanced — an extra restore() would pop a state this loop's
+    // caller pushed.
+    expect(count('save')).toBe(FRAMES)
+    expect(count('restore')).toBe(FRAMES)
+    // Exact: one clip path established per frame, and one only.
+    expect(count('clip')).toBe(FRAMES)
+    // Measured 2026-09-26: 11 canvas calls per composite frame — the screen
+    // draw, then save, beginPath, arc, closePath, clip, the camera draw,
+    // restore, beginPath, arc, stroke. (The live compositor measures 12 for the
+    // same overlay: it clears to black first, and the composite has no reason
+    // to, because the screen frame covers the canvas.)
+    expect(ctx.calls.length / FRAMES).toBeLessThanOrEqual(22)
+  })
+
+  it('leaves neither element playing and nothing scheduled', async () => {
+    await convertComposite(FRAMES)
+
+    const [screen, webcam] = getVideoDoubles()
+    expect(screen.pause).toHaveBeenCalled()
+    expect(webcam.pause).toHaveBeenCalled()
+    // The rVFC fast path must not have fallen back to the rAF loop, and one
+    // AudioContext was opened and closed — the camera part is never decoded for
+    // audio, because the primary's track already is the mix.
+    expect(raf.pending()).toBe(0)
+    expect(audio.contexts).toHaveLength(1)
     expect(audio.contexts.every((c) => c.state === 'closed')).toBe(true)
   })
 })

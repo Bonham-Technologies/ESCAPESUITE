@@ -34,6 +34,8 @@ import {
   EncodedPacket,
 } from 'mediabunny';
 import fixWebmDurationImport from 'webm-duration-fix';
+import type { OverlayPlacement } from '@escapesuite/shared/types';
+import { drawOverlay, overlayGeometryFor, type OverlayGeometry } from './overlayGeometry';
 
 /**
  * The one function `webm-duration-fix` provides: repair a WebM container. Taken
@@ -128,6 +130,78 @@ function yieldToMain(): Promise<void> {
 }
 
 /**
+ * The camera half of a separate-tracks take, for the composite MP4.
+ *
+ * A take recorded with "Record webcam as a separate track" is two video files,
+ * and MP4 is the format that puts them back together (ESCSUITE-14 decision 3):
+ * the screen with the camera drawn into the corner it was recorded in. The
+ * screen-only MP4 is deliberately not offered as a second option — a user who
+ * wants one part alone downloads its WebM from its own row.
+ *
+ * There is no audio here on purpose. The primary's own track **is** the mix:
+ * `WebCodecsRecorder` writes the microphone and system companions as a second
+ * tap on tracks the mix is already reading rather than diverting them, so the
+ * MP4's audio (and the whole M4A download) needs nothing from the parts.
+ */
+export interface CompositeCompanion {
+  /** The webcam part's stored WebM. */
+  blob: Blob;
+  /**
+   * Where the overlay sat while the take was recorded — the primary's stored
+   * `overlayPlacement`. It is stored because the picture no longer carries it.
+   */
+  placement: OverlayPlacement;
+  /** Seconds after the take's start at which this part's first frame was captured. */
+  startOffset: number;
+}
+
+export interface CompositeOptions {
+  companion: CompositeCompanion;
+  /**
+   * Called once, before any frame is encoded, when the camera part could not be
+   * used and the MP4 will be the screen alone.
+   *
+   * The conversion still resolves: a screen-only MP4 is a real file, and
+   * refusing to write one would leave the user with nothing after minutes of
+   * encoding. This is how the caller learns the file is not what was asked for
+   * — `hooks/useMp4Download.ts` turns it into a notice.
+   */
+  onCompanionSkipped?: () => void;
+}
+
+/** The second picture a composite frame draws, and where it goes. */
+interface FrameOverlay {
+  video: HTMLVideoElement;
+  geometry: OverlayGeometry;
+  /** Seconds into the screen part at which this picture begins. */
+  startOffset: number;
+}
+
+/**
+ * The camera part mid-load: its element, its object URL, the header read that
+ * is already in flight, and everything `convertToMP4` needs to decide what to
+ * do with it.
+ *
+ * One nullable object rather than a field per value so every use downstream is
+ * a single truthiness check — there is no state in which the element exists and
+ * the URL does not, and spelling that as `composite && video && url` would ask
+ * the reader (and the branch coverage) about combinations that cannot happen.
+ */
+interface CompanionLoad {
+  video: HTMLVideoElement;
+  url: string;
+  /**
+   * Resolves with `null` once the container's header is read, or with the
+   * failure that stopped it. It never rejects: the failure is a decision this
+   * function makes (draw the screen alone), not an error that should escape.
+   */
+  loaded: Promise<Error | null>;
+  placement: OverlayPlacement;
+  startOffset: number;
+  onSkipped?: () => void;
+}
+
+/**
  * Capture frames by playing the video (much faster than seek-based approach).
  * Uses requestVideoFrameCallback if available for precise frame capture.
  */
@@ -140,7 +214,13 @@ async function captureFramesViaPlayback(
   totalFrames: number,
   keyFrameInterval: number,
   signal?: AbortSignal,
-  onProgress?: (frameIndex: number, totalFrames: number) => void
+  onProgress?: (frameIndex: number, totalFrames: number) => void,
+  /**
+   * A second picture to draw on top of each captured frame. Absent for every
+   * conversion but the composite of a separate-tracks take, and absent is what
+   * keeps the plain path's per-frame work exactly one `drawImage`.
+   */
+  overlay?: FrameOverlay
 ): Promise<void> {
   const frameDuration = 1 / frameRate;
   const frameDurationUs = Math.round(frameDuration * 1_000_000);
@@ -163,6 +243,31 @@ async function captureFramesViaPlayback(
     let rvfcHandle: number | null = null;
     let rafHandle: number | null = null;
     let isFinished = false;
+    let overlayPlaying = false;
+
+    /**
+     * Play the camera part, once the screen has played as far as the point
+     * where that part begins.
+     *
+     * Both elements then run at 1x off the same wall clock, so the two pictures
+     * stay together within a frame for the whole conversion and the drift does
+     * not accumulate — which is what lets each captured frame draw whatever the
+     * camera element is currently showing. The alternative is a seek per frame,
+     * which is the minutes-instead-of-real-time cost this whole function exists
+     * to avoid.
+     *
+     * `startOffset` is 0 for every take ESCAPECRAFT records: both parts come
+     * from one `start()` on one clock (`core/webcodecs-recorder.ts`), so this
+     * fires on the call below and the in-loop call never does anything. It is
+     * honoured anyway because it is stored per part, and a recorder that
+     * started them apart would otherwise silently misalign them.
+     */
+    const startOverlayIfDue = (elapsed: number): void => {
+      if (!overlay || overlayPlaying || elapsed < overlay.startOffset) return;
+      overlayPlaying = true;
+      overlay.video.currentTime = 0;
+      void overlay.video.play();
+    };
 
     const cleanup = () => {
       isFinished = true;
@@ -173,6 +278,9 @@ async function captureFramesViaPlayback(
         cancelAnimationFrame(rafHandle);
       }
       video.pause();
+      // The camera element is stopped with the screen: a cancelled conversion
+      // must not leave a second <video> decoding behind a row that is idle.
+      overlay?.video.pause();
     };
 
     const onAbort = () => {
@@ -185,8 +293,18 @@ async function captureFramesViaPlayback(
     const captureCurrentFrame = () => {
       if (frameIndex >= totalFrames || isFinished) return false;
 
+      startOverlayIfDue(video.currentTime);
+
       // Draw current frame to canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // …and the camera on top of it, where it was recorded. Guarded on a
+      // decoded frame exactly as `Compositor.drawFrame` guards the live
+      // overlay: the first frames of a conversion can arrive before the second
+      // element has one, and a screen-only frame is better than a throw.
+      if (overlay && overlay.video.readyState >= 2) {
+        drawOverlay(ctx, overlay.video, canvas, overlay.geometry);
+      }
 
       // Create and encode frame
       const frame = new VideoFrame(canvas, {
@@ -203,6 +321,10 @@ async function captureFramesViaPlayback(
 
       return frameIndex < totalFrames;
     };
+
+    // Both halves start together (see `startOverlayIfDue`): the screen's own
+    // `play()` is a few lines below, in whichever branch runs.
+    startOverlayIfDue(0);
 
     if (hasRVFC) {
       // Use requestVideoFrameCallback for precise frame capture
@@ -677,11 +799,16 @@ async function encodeAudioChunks(
  * @param webmBlob - The WebM blob to convert
  * @param onProgress - Progress callback
  * @param signal - Optional AbortSignal for cancellation
+ * @param composite - The take's camera half, when it has one, to draw back into
+ *   the corner it was recorded in (ESCSUITE-14 decision 3). Absent for every
+ *   other conversion, and absent is what keeps that path's per-frame work and
+ *   its ceilings exactly what they were.
  */
 export async function convertToMP4(
   webmBlob: Blob,
   onProgress: ProgressCallback,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  composite?: CompositeOptions
 ): Promise<Blob> {
   if (!isMP4ConversionSupported()) {
     throw new Error('MP4 conversion requires WebCodecs API (Chrome/Edge)');
@@ -696,6 +823,37 @@ export async function convertToMP4(
   video.preload = 'auto';
 
   const videoUrl = URL.createObjectURL(webmBlob);
+
+  // The camera half's element, URL and header read, set up here rather than
+  // inside the try for two reasons. The `finally` below has to be able to
+  // release the URL however this function leaves; and a media element fires
+  // `loadedmetadata` exactly once whether or not anything is listening, so the
+  // listener has to be attached in the same synchronous step that sets `src`.
+  // Starting the load here rather than awaiting it later also means the two
+  // containers read their headers in parallel instead of one after the other.
+  // `muted` for the same reason the screen element is: this file has no audio
+  // track (the mix is on the primary), and nothing should be able to make a
+  // noise out of a conversion.
+  let companion: CompanionLoad | null = null;
+  if (composite) {
+    const companionVideo = document.createElement('video');
+    companionVideo.playsInline = true;
+    companionVideo.muted = true;
+    companionVideo.preload = 'auto';
+    const companionUrl = URL.createObjectURL(composite.companion.blob);
+    companion = {
+      video: companionVideo,
+      url: companionUrl,
+      loaded: new Promise<Error | null>((resolve) => {
+        companionVideo.onloadedmetadata = () => resolve(null);
+        companionVideo.onerror = () => resolve(new Error('Failed to load the webcam track'));
+        companionVideo.src = companionUrl;
+      }),
+      placement: composite.companion.placement,
+      startOffset: composite.companion.startOffset,
+      onSkipped: composite.onCompanionSkipped,
+    };
+  }
 
   // Declared out here so the finally below can release them however this
   // function leaves — including a cancellation between the two encode passes.
@@ -715,6 +873,30 @@ export async function convertToMP4(
     const duration = video.duration;
     const frameRate = MP4_FRAME_RATE;
     const totalFrames = Math.ceil(duration * frameRate);
+
+    // The camera half, whose header was already being read while the screen's
+    // was. Its geometry is built once, here, from the placement the take was
+    // recorded with and the frame this conversion is actually encoding — see
+    // `overlayGeometryFor`.
+    let overlay: FrameOverlay | undefined;
+    if (companion) {
+      onProgress({ phase: 'preparing', progress: 3, message: 'Loading the webcam track…' });
+      const failure = await companion.loaded;
+      if (failure) {
+        // A camera part that will not decode costs the take its overlay and
+        // nothing else. Refusing here would spend the whole conversion and then
+        // hand back no file at all, which is strictly worse than a screen-only
+        // MP4 the caller is told about.
+        console.warn('The webcam track could not be read; converting the screen alone:', failure);
+        companion.onSkipped?.();
+      } else {
+        overlay = {
+          video: companion.video,
+          geometry: overlayGeometryFor(companion.placement, width),
+          startOffset: companion.startOffset,
+        };
+      }
+    }
 
     onProgress({ phase: 'preparing', progress: 5, message: 'Extracting audio...' });
 
@@ -817,7 +999,8 @@ export async function convertToMP4(
           progress,
           message: `Encoding frame ${frameIndex} of ${total}...`
         });
-      }
+      },
+      overlay
     );
 
     // Flush video encoder
@@ -848,6 +1031,9 @@ export async function convertToMP4(
     return mp4Blob;
   } finally {
     URL.revokeObjectURL(videoUrl);
+    if (companion) {
+      URL.revokeObjectURL(companion.url);
+    }
     // Both encoders are already closed on the success path; this releases them
     // when the conversion left early (cancellation, or a failure part-way).
     if (videoEncoder && videoEncoder.state !== 'closed') {
