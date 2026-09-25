@@ -253,6 +253,23 @@ Three things the import refuses to do, each chosen rather than defaulted:
   refusal has to land before the first write: `importTake` takes an `isInLibrary(id)` lookup
   (the hook lends it `useEditorStore.getState().sourceVideos`, read at call time) and answers
   `alreadyInLibrary`, on which the hook returns without placing or saying anything.
+  **The question is asked twice**, because that first one is asked too early to settle it on
+  the ordinary path: the library is read when the import's storage reads land, which on a load
+  with no `?suppressRestore=1` is *before* `handleRestoreSession` runs
+  `session.sourceVideos.forEach(addSourceVideo)`. So a saved session that already holds the
+  take got past it and the take was appended a second time — whether the user saw a duplicate
+  or a silent skip came down to whether the import lost the race to the prompt click. The
+  second check is in `placePendingTake`, at placement time, and asks the **timeline** rather
+  than the library: by then the restore has re-added every part it holds, so an id lookup can
+  no longer separate "the session already had this take" from "the import just added it", while
+  a clip already playing the part can — and is the thing a second placement would duplicate.
+  A take dropped there is dropped silently and hands its thumbnail URLs back, the restore
+  having re-added its own library entries over the import's.
+  The any-part rule has a cost, and it is deliberate: a take whose primary was deleted from the
+  library while its companion survived **cannot be re-imported at all** until the companion is
+  deleted too. Silence beats a duplicate clip — the library is where a part is visible and
+  deletable, so the way back is open, and the alternative is a take the user cannot get rid of
+  without noticing it arrived twice.
 
 **The effect that runs the import knows when it is gone.** `useHostIntegration`'s
 `?loadVideo=` branch carries an effect-scoped `cancelled` flag, set as the cleanup's first

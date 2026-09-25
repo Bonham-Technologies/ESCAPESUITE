@@ -13,8 +13,10 @@ ESCAPEARTIST imported the camera 10 px from the edge: half as far. `overlayMargi
 mirrors ESCAPECRAFT's `overlayPaddingFor` term for term. Takes recorded at 1280 or wider
 are unaffected, because at or above the cap the two readings agree.
 
-**A take is skipped only if none of its parts is already in the media library.** The guard
-asked about the take's primary part alone, so deleting the primary from the library and
-re-sending the take from ESCAPECRAFT placed the webcam part on the timeline a second time
-(re-adding it to the library was already idempotent by id). The question is now asked about
-every part of the take, and asked before the first part is written.
+**A take is skipped if any of its parts is already in the media library.** The guard asked
+about the take's primary part alone, so deleting the primary from the library and re-sending
+the take from ESCAPECRAFT placed the webcam part on the timeline a second time (re-adding it
+to the library was already idempotent by id). The question is now asked about every part of
+the take, and asked before the first part is written — and asked a second time when the take
+is actually placed, against the timeline, because a take handed over while the "Resume
+Previous Session?" prompt is up reads the library before restoring has filled it.
