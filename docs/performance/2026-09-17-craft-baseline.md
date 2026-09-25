@@ -617,33 +617,58 @@ run read `23:28 up 24 days, 17:19, 4 users, load averages: 18.67 11.74 8.37`
 were not taken on a quiet machine: treat the *shape* below as the finding and
 re-measure before quoting any millisecond figure as a target.
 
-| Metric | Median of 3 |
-|---|---|
-| Frames encoded (screen) | 134 |
-| Frames encoded (webcam) | 133 |
-| Frames encoded (both, `framesEncoded`) | 272 |
-| Frames/s | 54.28 |
-| Composited fps (preview only) | 29.93 |
-| Video draws | 300 |
-| Renderer task duration (ms) | 1856.83 |
-| Renderer task per frame (ms) | 6.83 |
-| Animation frames/s | 119.89 |
-| Layouts / style recalcs | 306 / 301 |
-| Long tasks / total (ms) | 0 / 0 |
-| Encoder queue high-water | 0 |
-| Heap delta (bytes) | −378,267 |
-| Output size (bytes, screen part) | 1,515,266 |
+Every cell below is the **median of its own quantity over the three runs**, taken
+independently of every other cell — which is what `writePerfResult` publishes and
+what `perf-report.json` carries. Two consequences worth stating out loud, because
+both look like arithmetic errors and neither is: no row is necessarily a figure
+any single run produced, and the parts do not have to add up to the whole (see
+below the table). `Encoder queue high-water` is the one exception — a maximum
+over the three runs, not a median, because it is already a maximum within each.
+
+| Metric | Statistic over the 3 runs | Value |
+|---|---|---|
+| Frames encoded (screen) | median of the per-run `framesEncodedPerEncoder[0]` | 134 |
+| Frames encoded (webcam) | median of the per-run `framesEncodedPerEncoder[1]` | 133 |
+| Frames encoded (both, `framesEncoded`) | median of the per-run **totals** | 272 |
+| Frames/s | median | 54.28 |
+| Composited fps (preview only) | median | 29.93 |
+| Video draws | median | 300 |
+| Renderer task duration (ms) | median | 1856.83 |
+| Renderer task per frame (ms) | median | 6.83 |
+| Animation frames/s | median | 119.89 |
+| Layouts / style recalcs | median / median | 306 / 301 |
+| Long tasks / total (ms) | median / median | 0 / 0 |
+| Encoder queue high-water | **max** | 0 |
+| Heap delta (bytes) | median | −378,267 |
+| Output size (bytes, screen part) | median | 1,515,266 |
+
+The three runs behind those cells, so the table can be checked against them:
+
+| Run | screen | webcam | total | renderer task | task/frame | composited fps |
+|---|---|---|---|---|---|---|
+| 1 | 134 | 138 | 272 | 1736.99 ms | 6.382 ms | 29.76 |
+| 2 | 129 | 128 | 257 | 1879.19 ms | 7.298 ms | 29.97 |
+| 3 | 139 | 133 | 272 | 1856.83 ms | 6.830 ms | 29.93 |
 
 The two per-encoder counts are written on all three recording arms so the JSON
 keeps one shape: PiP constructs no `VideoEncoder` at all and reports `0 / 0`, and
 the screen arm runs a single encoder, so its `Frames encoded (screen)` repeats its
 `Frames encoded` (149 here) — which is what that one encoder is.
 
-`framesEncoded` is 272 where the two per-encoder medians sum to 267, and neither
-is wrong: each cell is the median of its own quantity across the three runs, and
-the median of a sum is not the sum of the medians. The two pipelines are within
-one frame of each other in every run, which is the point of running them off one
-clock.
+`Frames encoded (both)` is 272 where the two per-encoder cells sum to 267, and no
+cell is wrong: the median of the per-run totals (`median(272, 257, 272) = 272`) is
+a different statistic from the sum of the two per-encoder medians
+(`median(134, 129, 139) + median(138, 128, 133) = 134 + 133 = 267`), because the
+middling run for a total need not be the middling run for either part — here run 1
+is the median total while run 3 is the median screen count. Both are published
+because both answer a question: the total is what the main thread encoded, and the
+split is what each pipeline contributed.
+
+The split also says the two pipelines stayed together: 134/138, 129/128 and
+139/133 — within a handful of frames of each other in every run, on a window that
+carried ~135 frames per pipeline, which is what running both off one clock is for.
+They are not expected to be frame-identical: the two capture tracks deliver
+independently and only the timestamps are shared.
 
 What the row is *for* is the comparison against `craft-pip-recording` directly
 above it: the same capture, one mode encoding on the main thread twice over and
@@ -662,10 +687,12 @@ The headline is that **two encoders in the page cost less main-thread time than
 one composited MediaRecorder take** here — 1857 ms against 2039 ms in the same
 5 s window, for twice the stored video. The separate-tracks mode drops
 `canvas.captureStream(30)` and MediaRecorder entirely; what remains on the main
-thread is two `MediaStreamTrackProcessor` readers, two `VideoEncoder.encode`
-calls per composited preview frame, and the compositor still drawing the preview
-(300 video draws, 29.93 composited fps — indistinguishable from PiP's, which is
-what says the preview was not degraded to pay for the second encoder). The
+thread is two `MediaStreamTrackProcessor` readers each driving its own
+`VideoEncoder.encode`, plus the compositor still drawing the preview (300 video
+draws, 29.93 composited fps — indistinguishable from PiP's, which is what says the
+preview was not degraded to pay for the second encoder; note the preview
+composited ~150 frames in the window while each pipeline encoded ~135, so the two
+rates are related but not locked). The
 per-frame figure is higher than the screen arm's 4.14 ms because the compositor's
 preview loop is charged to it and the screen arm has no compositor at all; the
 rate is not directly comparable between the two.

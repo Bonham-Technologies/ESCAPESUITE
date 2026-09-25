@@ -232,6 +232,17 @@ function formatValue(key, value) {
   return String(value)
 }
 
+/**
+ * The encode rate, with the wall-time parenthetical only when there is one: a
+ * recording benchmark measures a fixed window rather than a job that finishes, so
+ * it reports no `wallMs` and would otherwise headline "(undefined ms)".
+ */
+function encodeRate(benchmark) {
+  return typeof benchmark.wallMs === 'number'
+    ? `${benchmark.framesPerSecond} frames/s (${benchmark.wallMs} ms)`
+    : `${benchmark.framesPerSecond} frames/s`
+}
+
 /** The one number each benchmark is really about, for the summary table. */
 function headline(benchmark) {
   if (typeof benchmark.renderedFps === 'number') return `${benchmark.renderedFps} rendered fps`
@@ -243,21 +254,14 @@ function headline(benchmark) {
   // — and the rate that describes what it recorded is the encode rate, so that
   // has to be the one tested first.
   if (typeof benchmark.framesPerSecond === 'number' && benchmark.framesPerSecond > 0) {
-    return typeof benchmark.wallMs === 'number'
-      ? `${benchmark.framesPerSecond} frames/s (${benchmark.wallMs} ms)`
-      : `${benchmark.framesPerSecond} frames/s`
+    return encodeRate(benchmark)
   }
   if (typeof benchmark.compositedFps === 'number' && benchmark.compositedFps > 0) {
     return `${benchmark.compositedFps} composited fps`
   }
-  if (typeof benchmark.framesPerSecond === 'number') {
-    // The wall-time parenthetical only when there is one: a recording benchmark
-    // measures a fixed window rather than a job that finishes, so it reports no
-    // `wallMs` and would otherwise headline "(undefined ms)".
-    return typeof benchmark.wallMs === 'number'
-      ? `${benchmark.framesPerSecond} frames/s (${benchmark.wallMs} ms)`
-      : `${benchmark.framesPerSecond} frames/s`
-  }
+  // A zero encode rate still headlines as one when nothing else describes the
+  // benchmark — better an honest "0 frames/s" than the em dash below.
+  if (typeof benchmark.framesPerSecond === 'number') return encodeRate(benchmark)
   // A gesture benchmark has no single rate. Its headline is what one pointer
   // frame of a clip drag costs — the layout count first, because that is the
   // part that does not depend on the runner's CPU.
