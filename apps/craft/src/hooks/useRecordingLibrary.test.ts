@@ -9,20 +9,33 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { act, renderHook } from '@testing-library/react'
 import { useRecordingLibrary } from './useRecordingLibrary'
-import { storeVideo, getVideoBlob } from '../core/storage'
+import { storeVideo, getVideoBlob, deleteVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { analyticsModule, sendToEditorModule, resetAppDoubles } from '../test/appDoubles'
 import type { Recording, SourceVideo } from '../store/types'
 
 vi.mock('../utils/sendToEditor', async () => (await import('../test/appDoubles')).sendToEditorModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
+// `deleteVideo` stays wired to the real (fake-indexeddb) implementation — this
+// suite's other tests rely on it actually deleting — but wrapped in a `vi.fn`
+// so the cascade-delete tests below can read back the order it was called in.
+vi.mock('../core/storage', async () => {
+  const actual = await vi.importActual<typeof import('../core/storage')>('../core/storage')
+  return { ...actual, deleteVideo: vi.fn(actual.deleteVideo) }
+})
 
 let removeRecording: ReturnType<typeof vi.fn<(id: string) => void>>
 let refreshStorageSpace: ReturnType<typeof vi.fn>
 let clicks: Array<{ href: string; download: string }>
+let removed: string[]
 
 function listed(id: string, name: string, duration: number): Recording {
   return { id, name, duration, createdAt: 1_000, size: 1024, hasWebcam: false, hasAudio: true }
+}
+
+/** A recording at a fixed 10s duration — the tests below don't care about it. */
+function recording(id: string, name: string): Recording {
+  return listed(id, name, 10)
 }
 
 function metadata(id: string, name: string): SourceVideo {
@@ -47,11 +60,13 @@ async function seed(id: string, name: string): Promise<void> {
 
 beforeEach(async () => {
   resetAppDoubles()
-  removeRecording = vi.fn<(id: string) => void>()
+  removed = []
+  removeRecording = vi.fn<(id: string) => void>((id) => { removed.push(id) })
   refreshStorageSpace = vi.fn(async () => {})
   clicks = []
   vi.mocked(URL.createObjectURL).mockClear()
   vi.mocked(URL.revokeObjectURL).mockClear()
+  vi.mocked(deleteVideo).mockClear()
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
     clicks.push({ href: this.getAttribute('href') ?? '', download: this.download })
   })
@@ -236,5 +251,30 @@ describe('useRecordingLibrary list actions', () => {
     })
 
     expect(sendToEditorModule.sendToEditor).toHaveBeenCalledWith('take-1')
+  })
+
+  it('deletes a take with its webcam companion', async () => {
+    const primary = recording('take-1', 'Standup Demo')
+    const companion = { ...recording('part-2', 'Standup Demo — webcam'), takeId: 'take-1', role: 'webcam' as const }
+    const { result } = mountLibrary([{ ...primary, takeId: 'take-1', role: 'screen' as const }, companion])
+
+    await act(async () => { await result.current.handleDeleteRecording('take-1') })
+
+    // One take is one thing to delete. A companion left behind would be a
+    // webcam file with no take, taking room the user thought they freed.
+    expect(vi.mocked(deleteVideo).mock.calls.map(([id]) => id)).toEqual(['take-1', 'part-2'])
+    expect(removed).toEqual(['take-1', 'part-2'])
+  })
+
+  it('leaves the primary alone when the companion is deleted', async () => {
+    const companion = { ...recording('part-2', 'Standup Demo — webcam'), takeId: 'take-1', role: 'webcam' as const }
+    const { result } = mountLibrary([{ ...recording('take-1', 'Standup Demo'), takeId: 'take-1', role: 'screen' as const }, companion])
+
+    await act(async () => { await result.current.handleDeleteRecording('part-2') })
+
+    // The primary keeps its own takeId; with nothing grouped under it the row
+    // renders as a plain take, so no stored metadata is rewritten.
+    expect(vi.mocked(deleteVideo).mock.calls.map(([id]) => id)).toEqual(['part-2'])
+    expect(removed).toEqual(['part-2'])
   })
 })

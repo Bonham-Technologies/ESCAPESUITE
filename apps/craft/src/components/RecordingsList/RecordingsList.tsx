@@ -54,6 +54,24 @@ interface RecordingsListProps {
  */
 const MP4_NOTE_ID = 'mp4-note';
 
+/**
+ * Said on the primary row of a take that has a webcam companion, for as long as
+ * MP4 and M4A are the screen part alone.
+ *
+ * Slice 4 of ESCSUITE-14 makes both downloads composite — the converter will
+ * draw the webcam through the take's stored `overlayPlacement` — and this note
+ * goes with it. Until then the interim behaviour is acceptable *only* because
+ * it is visible: a user who asked for a webcam and got an MP4 without one
+ * would otherwise have to find that out by watching the file.
+ */
+export const SEPARATE_TRACKS_MP4_NOTE =
+  'MP4 and M4A cover the screen track only — the webcam track is not included yet.';
+
+/** The id of one row's interim note — one per row, since it is about that take. */
+function separateTracksNoteId(id: string): string {
+  return `separate-tracks-note-${id}`;
+}
+
 /** What each conversion is called on the row that is running it. */
 const FORMAT_LABELS: Record<Mp4Conversion['format'], string> = {
   mp4: 'MP4',
@@ -114,6 +132,14 @@ export function RecordingsList({
   onSendToEditor,
   onDelete,
 }: RecordingsListProps) {
+  // Which takes still have a webcam half in the library. A primary whose
+  // companion was deleted is a plain take again (see `utils/takeOrder.ts`),
+  // so its downloads leave nothing out and it says nothing.
+  const takesWithCompanion = new Set(
+    recordings
+      .filter((recording) => recording.role === 'webcam' && recording.takeId !== undefined)
+      .map((recording) => recording.takeId)
+  );
   return (
     <section className={styles.sidebarSection} style={{ flex: 1, overflow: 'hidden' }}>
       <h2 className={styles.sidebarTitle}>Recordings</h2>
@@ -138,6 +164,15 @@ export function RecordingsList({
             const m4aReason = converting
               ? null
               : m4aBlockedReason ?? (recording.hasAudio ? null : NO_AUDIO_TRACK_REASON);
+            const isCompanion = recording.role === 'webcam';
+            const hasCompanion = takesWithCompanion.has(recording.id);
+            const noteId = hasCompanion ? separateTracksNoteId(recording.id) : null;
+            // Both notes can apply at once: one is about the browser, one about
+            // this take. aria-describedby takes a list.
+            const conversionDescribedBy =
+              [mp4Note && !converting ? MP4_NOTE_ID : null, noteId]
+                .filter((id): id is string => id !== null)
+                .join(' ') || undefined;
             return (
               <div key={recording.id} className={styles.recordingItem}>
                 {recording.thumbnailUrl ? (
@@ -152,6 +187,7 @@ export function RecordingsList({
                 <div className={styles.recordingInfo}>
                   <div className={styles.recordingName}>{recording.name}</div>
                   <div className={styles.recordingMeta}>
+                    {isCompanion && 'Webcam track • '}
                     {formatDuration(recording.duration)} •{' '}
                     {(recording.size / 1024 / 1024).toFixed(1)} MB
                   </div>
@@ -175,34 +211,38 @@ export function RecordingsList({
                       <DownloadIcon />
                     </button>
                   </div>
-                  <button
-                    className={styles.mp4Button}
-                    onClick={() => onDownloadMp4(recording.id, recording.name)}
-                    title={
-                      blockedReason ??
-                      (converting ? `Converting to ${convertingLabel}…` : 'Download MP4')
-                    }
-                    aria-label={`Download ${recording.name} as MP4`}
-                    aria-describedby={mp4Note && !converting ? MP4_NOTE_ID : undefined}
-                    disabled={converting !== null || blockedReason !== null}
-                  >
-                    MP4
-                  </button>
-                  <button
-                    className={styles.mp4Button}
-                    onClick={() => onDownloadM4a(recording.id, recording.name)}
-                    title={
-                      m4aReason ??
-                      (converting
-                        ? `Converting to ${convertingLabel}…`
-                        : 'Download audio only (M4A)')
-                    }
-                    aria-label={`Download ${recording.name} as audio (M4A)`}
-                    aria-describedby={mp4Note && !converting ? MP4_NOTE_ID : undefined}
-                    disabled={converting !== null || m4aReason !== null}
-                  >
-                    M4A
-                  </button>
+                  {!isCompanion && (
+                    <>
+                      <button
+                        className={styles.mp4Button}
+                        onClick={() => onDownloadMp4(recording.id, recording.name)}
+                        title={
+                          blockedReason ??
+                          (converting ? `Converting to ${convertingLabel}…` : 'Download MP4')
+                        }
+                        aria-label={`Download ${recording.name} as MP4`}
+                        aria-describedby={conversionDescribedBy}
+                        disabled={converting !== null || blockedReason !== null}
+                      >
+                        MP4
+                      </button>
+                      <button
+                        className={styles.mp4Button}
+                        onClick={() => onDownloadM4a(recording.id, recording.name)}
+                        title={
+                          m4aReason ??
+                          (converting
+                            ? `Converting to ${convertingLabel}…`
+                            : 'Download audio only (M4A)')
+                        }
+                        aria-label={`Download ${recording.name} as audio (M4A)`}
+                        aria-describedby={conversionDescribedBy}
+                        disabled={converting !== null || m4aReason !== null}
+                      >
+                        M4A
+                      </button>
+                    </>
+                  )}
                   {onUploadToHost && (
                     <button
                       className={styles.iconButton}
@@ -213,9 +253,11 @@ export function RecordingsList({
                       <UploadIcon />
                     </button>
                   )}
+                  {/* One take opens one project: either row hands over the
+                      primary's id and the editor resolves the siblings. */}
                   <button
                     className={styles.iconButton}
-                    onClick={() => onSendToEditor(recording.id)}
+                    onClick={() => onSendToEditor(recording.takeId ?? recording.id)}
                     title="Open in Editor"
                     aria-label={`Open ${recording.name} in Editor`}
                   >
@@ -258,6 +300,11 @@ export function RecordingsList({
                       />
                     </div>
                   </div>
+                )}
+                {noteId && (
+                  <p className={styles.mp4BlockedReason} id={noteId}>
+                    {SEPARATE_TRACKS_MP4_NOTE}
+                  </p>
                 )}
               </div>
             );

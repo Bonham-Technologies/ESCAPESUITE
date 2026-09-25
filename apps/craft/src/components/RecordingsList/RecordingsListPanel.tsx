@@ -83,7 +83,20 @@ export function RecordingsListPanel({
     if (uploadsInFlight.current.has(id)) return;
     uploadsInFlight.current.add(id);
     try {
-      if ((await uploadToHost(id, name)) === 'missing') setNotice(UPLOAD_UNAVAILABLE);
+      // The row's own bytes, with which half of which take it is. The panel
+      // already has the list, so the component does not need a wider prop.
+      // The third argument is passed only when the row actually has a role or
+      // a takeId — a plain take's call stays two arguments, byte-identical to
+      // what a host received before this feature existed.
+      const row = recordings.find((recording) => recording.id === id);
+      const part =
+        row?.role !== undefined || row?.takeId !== undefined
+          ? { role: row.role, takeId: row.takeId }
+          : undefined;
+      const result = part !== undefined
+        ? await uploadToHost(id, name, part)
+        : await uploadToHost(id, name);
+      if (result === 'missing') setNotice(UPLOAD_UNAVAILABLE);
     } catch {
       // `getVideoBlob` reaches `getDB()`, which throws outright where
       // IndexedDB is blocked or unreadable. That is the same answer as an
