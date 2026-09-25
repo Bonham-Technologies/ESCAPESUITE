@@ -1,10 +1,33 @@
 import type { RecordingConfig, WebcamPosition, WebcamShape } from '../../store/types';
 import styles from '../../App.module.css';
 
+/**
+ * What the separate-tracks mode is for and what it costs, said before the
+ * choice rather than after it.
+ *
+ * Two encoders and two files: about twice the CPU while recording and about
+ * twice the bytes afterwards. The wording is pinned by this component's test.
+ */
+export const SEPARATE_TRACKS_HELP =
+  'Records the screen and the webcam as two files, so the webcam can be moved, resized or removed in the editor. Uses about twice the CPU and storage.';
+
+/**
+ * The id the toggle's `aria-describedby` points at — the one paragraph that
+ * carries either the help text or the reason the toggle is disabled. One
+ * paragraph rather than two, because they are never both true.
+ */
+export const SEPARATE_TRACKS_HELP_ID = 'separate-tracks-help';
+
 interface WebcamOverlaySettingsProps {
   config: RecordingConfig;
   /** True while a take is in progress — the overlay is baked in by then. */
   disabled: boolean;
+  /**
+   * Why the webcam cannot be recorded as its own track, or null when it can.
+   * Computed by `WebcamOverlaySettingsPanel` — a fact about the browser and the
+   * storage rather than about this panel.
+   */
+  separateTracksReason: string | null;
   /** A partial config patch, exactly as the store's `setConfig` takes it. */
   onChange: (config: Partial<RecordingConfig>) => void;
 }
@@ -23,7 +46,12 @@ interface WebcamOverlaySettingsProps {
  * "Size" label point at it, and `aria-label` is what names it for a screen
  * reader.
  */
-export function WebcamOverlaySettings({ config, disabled, onChange }: WebcamOverlaySettingsProps) {
+export function WebcamOverlaySettings({
+  config,
+  disabled,
+  separateTracksReason,
+  onChange,
+}: WebcamOverlaySettingsProps) {
   return (
     <section className={styles.sidebarSection}>
       <h2 className={styles.sidebarTitle}>Webcam Overlay</h2>
@@ -75,6 +103,23 @@ export function WebcamOverlaySettings({ config, disabled, onChange }: WebcamOver
             </button>
           ))}
         </div>
+
+        <div className={styles.sourceToggle} title={separateTracksReason ?? SEPARATE_TRACKS_HELP}>
+          <span className={styles.sourceLabel}>Record webcam as a separate track</span>
+          <button
+            className={`${styles.toggle} ${config.separateTracks ? styles.active : ''}`}
+            onClick={() => onChange({ separateTracks: !config.separateTracks })}
+            disabled={disabled || separateTracksReason !== null}
+            aria-pressed={config.separateTracks}
+            aria-label="Record webcam as a separate track"
+            aria-describedby={SEPARATE_TRACKS_HELP_ID}
+          >
+            <span className={styles.toggleKnob} />
+          </button>
+        </div>
+        <p className={styles.mp4BlockedReason} id={SEPARATE_TRACKS_HELP_ID}>
+          {separateTracksReason ?? SEPARATE_TRACKS_HELP}
+        </p>
       </div>
     </section>
   );

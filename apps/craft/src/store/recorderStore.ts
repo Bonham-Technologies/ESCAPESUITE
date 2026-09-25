@@ -27,6 +27,16 @@ import { orderTakes } from '../utils/takeOrder';
  */
 const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
 
+/**
+ * What a separate-tracks take is assumed to cost, as a multiple of a plain one.
+ *
+ * Two `VideoEncoder`s each carry their own bitrate — the webcam is fewer pixels
+ * but VP9 is configured per encoder, not per take — so double is the honest
+ * working figure. `hasSpaceForRecording` applies its own buffer and relative
+ * floor on top of whatever this asks for.
+ */
+const SEPARATE_TRACKS_SIZE_FACTOR = 2;
+
 export const useRecorderStore = create<RecorderStore>((set) => ({
   // Initial state
   state: 'idle',
@@ -89,11 +99,17 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   refreshStorageSpace: async () => {
     try {
-      set({ hasStorageSpace: await hasSpaceForRecording(ESTIMATED_RECORDING_BYTES) });
+      // Both answers from one call each, off the click path: the record button
+      // reads the first and the separate-tracks toggle the second.
+      const [hasStorageSpace, hasSeparateTracksSpace] = await Promise.all([
+        hasSpaceForRecording(ESTIMATED_RECORDING_BYTES),
+        hasSpaceForRecording(ESTIMATED_RECORDING_BYTES * SEPARATE_TRACKS_SIZE_FACTOR),
+      ]);
+      set({ hasStorageSpace, hasSeparateTracksSpace });
     } catch {
       // An estimate that threw is "unknown", and unknown is not full — the
       // same call this whole check errs toward everywhere else.
-      set({ hasStorageSpace: true });
+      set({ hasStorageSpace: true, hasSeparateTracksSpace: true });
     }
   },
 

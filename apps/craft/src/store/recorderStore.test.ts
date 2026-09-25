@@ -429,5 +429,30 @@ describe('recorderStore', () => {
 
       expect(useRecorderStore.getState().hasStorageSpace).toBe(true)
     })
+
+    // ESCSUITE-14. Two encoders write two files, so the separate-tracks toggle
+    // needs its own headroom answer — measured here, off the click path, beside
+    // the one the record button reads.
+    it('measures the headroom for two tracks as well as for one', async () => {
+      vi.mocked(hasSpaceForRecording).mockImplementation(async (size: number) => size < 80 * 1024 * 1024)
+
+      await useRecorderStore.getState().refreshStorageSpace()
+
+      const { hasStorageSpace, hasSeparateTracksSpace } = useRecorderStore.getState()
+      expect(hasStorageSpace).toBe(true)
+      expect(hasSeparateTracksSpace).toBe(false)
+      expect(hasSpaceForRecording).toHaveBeenCalledWith(50 * 1024 * 1024)
+      expect(hasSpaceForRecording).toHaveBeenCalledWith(100 * 1024 * 1024)
+    })
+
+    it('treats an estimate that threw as room for both', async () => {
+      vi.mocked(hasSpaceForRecording).mockRejectedValue(new Error('no estimate'))
+
+      await useRecorderStore.getState().refreshStorageSpace()
+
+      // Unknown is not full — the same direction this check errs in everywhere.
+      expect(useRecorderStore.getState().hasStorageSpace).toBe(true)
+      expect(useRecorderStore.getState().hasSeparateTracksSpace).toBe(true)
+    })
   })
 })

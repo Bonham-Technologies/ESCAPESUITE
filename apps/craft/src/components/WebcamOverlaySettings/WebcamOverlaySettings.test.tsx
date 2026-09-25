@@ -12,12 +12,19 @@ import { WebcamOverlaySettings } from './WebcamOverlaySettings'
 import { defaultConfig, type RecordingConfig } from '../../store/types'
 import styles from '../../App.module.css'
 
-function renderSettings(options: { config?: Partial<RecordingConfig>; disabled?: boolean } = {}) {
+function renderSettings(
+  options: {
+    config?: Partial<RecordingConfig>
+    disabled?: boolean
+    separateTracksReason?: string | null
+  } = {}
+) {
   const onChange = vi.fn<(config: Partial<RecordingConfig>) => void>()
   render(
     <WebcamOverlaySettings
       config={{ ...defaultConfig, ...options.config }}
       disabled={options.disabled ?? false}
+      separateTracksReason={options.separateTracksReason ?? null}
       onChange={onChange}
     />
   )
@@ -123,5 +130,67 @@ describe('WebcamOverlaySettings mid-take', () => {
     for (const [label] of positions) expect(button(label)).toBeEnabled()
     expect(button('circle')).toBeEnabled()
     expect(slider()).toBeEnabled()
+  })
+})
+
+describe('the separate-tracks toggle', () => {
+  it('is off by default, and says what the mode costs', () => {
+    renderSettings({ separateTracksReason: null })
+
+    const toggle = screen.getByRole('button', { name: 'Record webcam as a separate track' })
+    expect(toggle).toBeEnabled()
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    // The cost is said before the choice, not after it — the same shape as the
+    // silent-MP4 note under the library.
+    expect(
+      screen.getByText(
+        'Records the screen and the webcam as two files, so the webcam can be moved, resized or removed in the editor. Uses about twice the CPU and storage.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('reports the config patch when switched on', async () => {
+    const { onChange } = renderSettings({ separateTracksReason: null })
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Record webcam as a separate track' })
+    )
+
+    expect(onChange).toHaveBeenCalledWith({ separateTracks: true })
+  })
+
+  it('marks itself pressed once the config says it is on', () => {
+    renderSettings({ separateTracksReason: null, config: { separateTracks: true } })
+
+    const toggle = screen.getByRole('button', { name: 'Record webcam as a separate track' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle).toHaveClass(styles.active)
+  })
+
+  it('stays on screen, disabled, with the reason said out loud', () => {
+    renderSettings({
+      separateTracksReason: 'This browser cannot record two tracks at once — Chrome or Edge can.',
+    })
+
+    const toggle = screen.getByRole('button', { name: 'Record webcam as a separate track' })
+    expect(toggle).toBeDisabled()
+    // Say why, do not hide: the reason is in the title AND in the paragraph the
+    // toggle's aria-describedby points at, exactly as the record button and the
+    // MP4 button do it.
+    expect(
+      screen.getByText('This browser cannot record two tracks at once — Chrome or Edge can.')
+    ).toBeInTheDocument()
+    expect(toggle).toHaveAttribute(
+      'aria-describedby',
+      screen.getByText('This browser cannot record two tracks at once — Chrome or Edge can.').id
+    )
+  })
+
+  it('is disabled mid-take like every other overlay control', () => {
+    renderSettings({ separateTracksReason: null, disabled: true })
+
+    expect(
+      screen.getByRole('button', { name: 'Record webcam as a separate track' })
+    ).toBeDisabled()
   })
 })

@@ -12,7 +12,7 @@ import { recordBlockedReason } from './utils/recordReadiness';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import type { RecordingSource } from './components/SourceToggles/SourceToggles';
 import { SourceTogglesPanel } from './components/SourceToggles/SourceTogglesPanel';
-import { WebcamOverlaySettings } from './components/WebcamOverlaySettings/WebcamOverlaySettings';
+import { WebcamOverlaySettingsPanel } from './components/WebcamOverlaySettings/WebcamOverlaySettingsPanel';
 import { RecordingsListPanel } from './components/RecordingsList/RecordingsListPanel';
 import { RecordingPreview } from './components/RecordingPreview/RecordingPreview';
 import { RecorderControls } from './components/RecorderControls/RecorderControls';
@@ -205,9 +205,10 @@ function App() {
             onToggleSource={toggleSource}
           />
 
-          {/* Webcam overlay settings */}
+          {/* Webcam overlay settings — the panel owns the separate-tracks gate,
+              so App gains no selector for it. */}
           {config.screenEnabled && config.webcamEnabled && (
-            <WebcamOverlaySettings
+            <WebcamOverlaySettingsPanel
               config={config}
               disabled={isRecordingActive}
               onChange={setConfig}
