@@ -133,6 +133,12 @@ class EncoderDouble {
     }
   }
 
+  // Deliberately lenient about being closed twice, unlike the real API (which
+  // throws InvalidStateError): `converter.ts` closes unguarded on its
+  // asynchronous-error path and three of its tests would fail here rather than
+  // where the bug is. What holds the *recorder's* guards in place instead is
+  // the exact `closeCalls` conservation in webcodecsRecorder.perf.test.ts —
+  // one close per constructed codec per take, which a missing guard breaks.
   close(): void {
     webcodecsCallLog.push(`${this.label}.close`)
     this.closeCalls++

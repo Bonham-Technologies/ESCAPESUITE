@@ -66,6 +66,7 @@ vi.stubGlobal('AudioContext', class AudioContext {
   }))
   createMediaStreamSource = vi.fn(() => ({
     connect: vi.fn(),
+    disconnect: vi.fn(),
   }))
   createMediaStreamDestination = vi.fn(() => ({
     stream: {
