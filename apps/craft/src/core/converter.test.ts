@@ -714,6 +714,58 @@ describe('converter', () => {
       )
     })
 
+    // The failure the header read cannot see. `loadedmetadata` fires for a
+    // container whose pictures never decode, so the load promise resolves with
+    // `null` and the skip report does not fire; the element's own `error` after
+    // that point resolves an already-settled promise, i.e. says nothing either.
+    // A frame count is the only honest question — and this was reaching the user
+    // as a camera-less MP4 with nothing said about it.
+    it('says so when the camera part parses but never decodes a frame', async () => {
+      const composite = startComposite()
+      // Metadata lands; `readyState` never reaches 2, so the per-frame guard
+      // never draws.
+      composite.webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 0 })
+      composite.webcam.fireLoadedMetadata()
+      await playThroughRvfc(composite.screen, 3)
+
+      const blob = await composite.promise
+      // Still a real file, exactly as when the header itself failed.
+      expect(blob.type).toBe('video/mp4')
+      const ctx = getLastCanvasContext()!
+      expect(ctx.drawImage).toHaveBeenCalledTimes(3)
+      expect(ctx.save).not.toHaveBeenCalled()
+      // …and the caller is told, which is the whole point: the take's camera is
+      // not in the file the user just asked for.
+      expect(composite.onCompanionSkipped).toHaveBeenCalledTimes(1)
+    })
+
+    it('says it exactly once when the camera part errors after its header landed', async () => {
+      const composite = startComposite()
+      composite.webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 0 })
+      composite.webcam.fireLoadedMetadata()
+      // The decode failure arrives after the load promise settled, so the
+      // load-failure path cannot report it — and the frame count must not report
+      // it twice.
+      composite.webcam.fireError()
+      await playThroughRvfc(composite.screen, 3)
+      await composite.promise
+
+      expect(composite.onCompanionSkipped).toHaveBeenCalledTimes(1)
+    })
+
+    it('writes the screen alone for a caller with no callback when nothing decodes', async () => {
+      const composite = startComposite({ onCompanionSkipped: false })
+      composite.webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 0 })
+      composite.webcam.fireLoadedMetadata()
+      await playThroughRvfc(composite.screen, 3)
+
+      // The same optionality the load-failure path has: nothing to tell, and no
+      // TypeError for not having anyone to tell.
+      const blob = await composite.promise
+      expect(blob.type).toBe('video/mp4')
+      expect(composite.onCompanionSkipped).not.toHaveBeenCalled()
+    })
+
     it('releases both object URLs however it leaves', async () => {
       const composite = startComposite()
       readyWebcam(composite.webcam)

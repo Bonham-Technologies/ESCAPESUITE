@@ -175,6 +175,13 @@ interface FrameOverlay {
   geometry: OverlayGeometry;
   /** Seconds into the screen part at which this picture begins. */
   startOffset: number;
+  /**
+   * Called when this overlay drew nothing at all — the header parsed, so the
+   * load never reported a failure, and then not one frame of it decoded. The
+   * same callback the load failure uses, and the two cannot both fire: a load
+   * that failed never builds an overlay.
+   */
+  onSkipped?: () => void;
 }
 
 /**
@@ -244,17 +251,23 @@ async function captureFramesViaPlayback(
     let rafHandle: number | null = null;
     let isFinished = false;
     let overlayPlaying = false;
+    // How many frames the overlay actually contributed to. Read once, at
+    // cleanup: zero is the only failure `companion.loaded` cannot see.
+    let overlayFrames = 0;
 
     /**
      * Play the camera part, once the screen has played as far as the point
      * where that part begins.
      *
      * Both elements then run at 1x off the same wall clock, so the two pictures
-     * stay together within a frame for the whole conversion and the drift does
-     * not accumulate — which is what lets each captured frame draw whatever the
-     * camera element is currently showing. The alternative is a seek per frame,
-     * which is the minutes-instead-of-real-time cost this whole function exists
-     * to avoid.
+     * stay within the two elements' start-up latency of each other: both
+     * `play()`s are issued from one synchronous block, nothing re-seeks either
+     * element afterwards, so whatever that difference turns out to be it is
+     * constant for the run rather than accumulating. (It is not bounded by a
+     * frame — nothing here measures it.) That is what lets each captured frame
+     * draw whatever the camera element is currently showing. The alternative is
+     * a seek per frame, which is the minutes-instead-of-real-time cost this
+     * whole function exists to avoid.
      *
      * `startOffset` is 0 for every take ESCAPECRAFT records: both parts come
      * from one `start()` on one clock (`core/webcodecs-recorder.ts`), so this
@@ -285,6 +298,23 @@ async function captureFramesViaPlayback(
       // The camera element is stopped with the screen: a cancelled conversion
       // must not leave a second <video> decoding behind a row that is idle.
       overlay?.video.pause();
+      // An overlay that was configured and drew nothing is a file missing
+      // something the user recorded, and nothing upstream can tell:
+      // `companion.loaded` resolves on `loadedmetadata`, which a container
+      // whose pictures never decode still fires, and the element's `error`
+      // after that point resolves an already-settled promise. The frame count
+      // is the only honest question, and it can only be asked here.
+      //
+      // Said at most once, and never alongside the load-failure report — that
+      // path builds no overlay at all — because the count is pushed past zero
+      // as it is said, so a second `cleanup()` cannot repeat it. A cancelled
+      // conversion reports too, harmlessly: it rejects, and
+      // `hooks/useMp4Download.ts` says nothing about a file the user does not
+      // have.
+      if (overlay && overlayFrames === 0) {
+        overlayFrames = -1;
+        overlay.onSkipped?.();
+      }
     };
 
     const onAbort = () => {
@@ -313,6 +343,7 @@ async function captureFramesViaPlayback(
       // screen-only frame is better than a throw.
       if (overlay && overlayPlaying && overlay.video.readyState >= 2) {
         drawOverlay(ctx, overlay.video, canvas, overlay.geometry);
+        overlayFrames++;
       }
 
       // Create and encode frame
@@ -903,6 +934,10 @@ export async function convertToMP4(
           video: companion.video,
           geometry: overlayGeometryFor(companion.placement, width),
           startOffset: companion.startOffset,
+          // The same report the failure above makes, for the failure that only
+          // a frame count can see (see `cleanup()` in
+          // `captureFramesViaPlayback`).
+          onSkipped: companion.onSkipped,
         };
       }
     }
