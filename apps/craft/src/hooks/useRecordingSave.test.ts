@@ -290,3 +290,126 @@ describe('useRecordingSave list entry', () => {
     expect(await getRecordingsMetadata()).toEqual([])
   })
 })
+
+describe('useRecordingSave for a separate-tracks take', () => {
+  const COMPANION = new Blob(['webcam-bytes'], { type: 'video/webm' })
+
+  /** What the WebCodecs recorder hands over as the take's second half. */
+  const companionPart = { role: 'webcam' as const, blob: COMPANION, startOffset: 0 }
+
+  it('stores both parts under one takeId, the placement on the primary only', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const { result } = mountSave({
+      webcamEnabled: true,
+      separateTracks: true,
+      webcamPosition: 'top-left',
+      webcamSize: 0.3,
+      webcamShape: 'rectangle',
+    })
+
+    await result.current(RAW, 6, companionPart)
+
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(2)
+    const primary = stored.find(m => m.role === 'screen')!
+    const webcam = stored.find(m => m.role === 'webcam')!
+    // One take: the primary names it, the companion points at the primary.
+    expect(primary.takeId).toBe(primary.id)
+    expect(webcam.takeId).toBe(primary.id)
+    expect(webcam.id).not.toBe(primary.id)
+    expect(primary.startOffset).toBe(0)
+    expect(webcam.startOffset).toBe(0)
+    // The overlay geometry is the primary's, copied from the config at save
+    // time: it is what ARTIST seeds the webcam clip's transform from (slice 2)
+    // and what the composite MP4 draws through (slice 4).
+    expect(primary.overlayPlacement).toEqual({
+      position: 'top-left',
+      size: 0.3,
+      shape: 'rectangle',
+    })
+    expect('overlayPlacement' in webcam).toBe(false)
+    // Slice 1 leaves the mixed audio on the primary, so only it claims sound.
+    expect(primary.hasAudio).toBe(true)
+    expect(webcam.hasAudio).toBe(false)
+  })
+
+  it('stores a thumbnail for each part, the companion decoded from its own blob', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    capturedThumbnailRef.current = new Blob(['preview-frame'], { type: 'image/jpeg' })
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, companionPart)
+
+    const stored = await getRecordingsMetadata()
+    for (const part of stored) {
+      await expect(getThumbnail(part.id)).resolves.toBeDefined()
+    }
+    // The pre-captured frame is the *composited* preview, which is not the
+    // webcam alone — so the companion's thumbnail comes out of its own file.
+    expect(thumbnailModule.generateThumbnail).toHaveBeenCalledTimes(1)
+    expect(thumbnailModule.generateThumbnail).toHaveBeenCalledWith(COMPANION)
+  })
+
+  // The pre-captured frame belongs to the primary, so the companion always
+  // decodes its own — and when that decode fails it falls back to the same
+  // placeholder the primary's own fallback chain draws, rather than leaving
+  // the companion with no thumbnail at all.
+  it('draws a placeholder for the companion thumbnail when its own decode fails', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    thumbnailModule.generateThumbnail.mockRejectedValue(new Error('no decoder'))
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, companionPart)
+
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(2)
+    for (const part of stored) {
+      await expect(getThumbnail(part.id)).resolves.toBeDefined()
+    }
+  })
+
+  it('falls back to the timed duration for the companion when its file reports none', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    thumbnailModule.extractVideoMetadata.mockResolvedValue({ duration: 0, width: 640, height: 480 })
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, companionPart)
+
+    const stored = await getRecordingsMetadata()
+    const webcam = stored.find(m => m.role === 'webcam')!
+    expect(webcam.duration).toBe(6)
+  })
+
+  it('puts the companion under its primary in the list, not above it', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, companionPart)
+
+    // addRecording prepends, so the companion is added first: the list ends up
+    // [primary, companion, ...older] and the webcam row is never above the
+    // screen row it belongs to.
+    expect(added.map(entry => entry.role)).toEqual(['webcam', 'screen'])
+  })
+
+  it('never repairs the companion — a WebCodecs take needs none', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, companionPart)
+
+    expect(converterModule.fixWebMMetadata).not.toHaveBeenCalled()
+  })
+
+  it('saves one part when there is no companion, exactly as before', async () => {
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6)
+
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(1)
+    expect('takeId' in stored[0]).toBe(false)
+    expect('role' in stored[0]).toBe(false)
+    expect(added).toHaveLength(1)
+  })
+})
