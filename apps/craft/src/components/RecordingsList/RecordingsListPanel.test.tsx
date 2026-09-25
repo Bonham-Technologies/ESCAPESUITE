@@ -211,4 +211,24 @@ describe('RecordingsListPanel upload to host', () => {
       takeId: 'take-1',
     })
   })
+
+  it('names the take on the primary row, which is what carries every part', async () => {
+    const user = userEvent.setup()
+    isEmbedded.mockReturnValue(true)
+    renderPanel([
+      { ...baseRecording, id: 'take-1', name: 'Standup Demo', takeId: 'take-1', role: 'screen' as const },
+      { ...baseRecording, id: 'part-2', name: 'Standup Demo — webcam', takeId: 'take-1', role: 'webcam' as const },
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'Upload Standup Demo to host' }))
+
+    // `takeId === id` on the primary row is the whole trigger for
+    // `payload.parts` (see `utils/uploadToHost.ts`), so the panel passing the
+    // row's own takeId through is load-bearing rather than incidental — it has
+    // been true since slice 1 and this is what keeps it true.
+    expect(uploadToHostMock).toHaveBeenCalledWith('take-1', 'Standup Demo', {
+      role: 'screen',
+      takeId: 'take-1',
+    })
+  })
 })

@@ -24,9 +24,9 @@ pnpm --filter @escapesuite/craft exec vitest run \
 ## What is measured
 
 `apps/e2e/tests/perf/craft-recording.spec.ts`, plumbing in `apps/e2e/utils/craftPerf.ts`.
-Four benchmarks, because ESCAPECRAFT has four distinct pipelines and they cost entirely
+Five benchmarks, because ESCAPECRAFT has five distinct pipelines and they cost entirely
 different things (the fourth arrived with ESCSUITE-14 slice 1 — see its own section at the
-end of this file; the three below are the original baseline):
+end of this file — and the fifth with slice 4; the three below are the original baseline):
 
 | Benchmark | Path under test | Recorder |
 |---|---|---|
@@ -34,11 +34,12 @@ end of this file; the three below are the original baseline):
 | `craft-pip-recording` | screen + webcam: `Compositor`'s rAF draw loop → `canvas.captureStream(30)` → MediaRecorder, which encodes **off** the main thread | `Recorder` (MediaRecorder) |
 | `craft-separate-tracks-recording` | screen + webcam, opt-in: two `MediaStreamTrackProcessor` readers → two `VideoEncoder.encode` **on the main thread** → two Mediabunny muxes, with the `Compositor` drawing the preview only | `WebCodecsRecorder` |
 | `craft-mp4-conversion` | `convertToMP4`: offscreen `<video>` + `requestVideoFrameCallback` → `drawImage` → `new VideoFrame` → `VideoEncoder.encode` → Mediabunny mux, all in the page | — |
+| `craft-composite-mp4-conversion` | `convertToMP4` again, with the take's camera half in a second `<video>` drawn through `drawOverlay` into the same canvas — the composite of a separate-tracks take (ESCSUITE-14 decision 3) | — |
 
 Each is its own `test()` with its own page load, so one failing leaves the others' numbers
 in the report. Each runs **three times** and reports the median; `PERF_PROFILE=1` adds a
 fourth, discarded, profiled run (`craft-screen`, `craft-pip`, `craft-separate-tracks`,
-`craft-mp4`).
+`craft-mp4`, `craft-composite-mp4`).
 
 A take is six seconds start-click to stop-click, with the **first second discarded** — a
 take's opening frames pay for opening the encoder, sizing the canvas and getting the first
@@ -60,7 +61,7 @@ click Stop, wait for the new row. Every number comes from outside the page:
 - a CDP session for `TaskDuration` / `LayoutCount` / `RecalcStyleCount` and for the
   `HeapProfiler.collectGarbage` that anchors each heap reading.
 
-They assert nothing about speed. The only `expect`s are the ten tripwires that say the
+They assert nothing about speed. The only `expect`s are the eleven tripwires that say the
 benchmark measured the wrong thing — each one pins an invariant the numbers rest on, in
 code rather than in prose:
 
@@ -76,6 +77,7 @@ code rather than in prose:
 | separate tracks | `videoDraws > 0` | the compositor did not draw — the preview the user watches was blank, so the take's main-thread cost is missing the one part of it this arm shares with PiP |
 | separate tracks | `videoDraws % 2 === 0` | as for PiP: a capture element was not decoding for some frames, so the two-draws-per-composited-preview-frame divisor behind `compositedFps` is wrong |
 | conversion | `framesEncoded > 0` | `convertToMP4` resolved past its capture phase with nothing encoded — there is no video in the MP4 to have measured |
+| composite conversion | `videoDraws === 2 × framesEncoded` | either the overlay was never drawn — a plain conversion reported under the composite's name — or the screen was passed over twice, which at this capture size is the most expensive thing the loop could do twice |
 
 ### Capture devices
 
@@ -210,6 +212,45 @@ What varies with the machine, and what a comparison should therefore use, is
 The paired-alternation rule from round 2 still applies to any millisecond claim: swap base
 and patched code round-robin against one warm dev server rather than running a plain
 before/after.
+
+### `craft-composite-mp4-conversion` — convertToMP4 with the overlay, 1280x720 source
+
+First measured 2026-09-25, three runs, median. Produced by:
+
+```bash
+pnpm --filter @escapesuite/e2e exec playwright test --config=playwright.perf.config.ts craft-recording
+node apps/e2e/scripts/perf-report.mjs
+```
+
+| Metric | Median |
+| --- | --- |
+| **Renderer task per frame** | 13.19 ms |
+| Wall time | 6741 ms |
+| Frames encoded | 195 |
+| Frames/s | 28.93 |
+| Video draws | 390 |
+| Renderer task duration | 2571.81 ms |
+| Encoder queue high-water | 1 |
+| Heap delta | 294.4 KB |
+| Output size (MP4) | 983.5 KB |
+
+Read against `craft-mp4-conversion` on the same machine and the same run: the gap in
+**renderer task per frame** is what one overlay costs — one `drawImage` of a 256x144 camera
+frame, one circular clip path and one border stroke — and `Video draws` is exactly twice
+`Frames encoded` by construction (390 in all three runs, not marginally).
+
+The plain arm in that same invocation, for the comparison: **9.52 ms** per frame, 6733 ms wall,
+195 frames at 28.96 f/s, 1857.14 ms renderer task, queue high-water 1, heap delta 311.8 KB,
+851.1 KB out. So the overlay costs **+3.67 ms of renderer task per encoded frame (+38.6%)** and
+**+714.67 ms over the whole 195-frame conversion**, while **wall time does not move** (6741 vs
+6733 ms, +0.1%) — as this file predicts, because `convertToMP4` is paced by
+`requestVideoFrameCallback` and 13 ms a frame still fits inside 33. The MP4 grows ~132 KB
+(851.1 → 983.5 KB): the camera corner's extra detail in the same H.264 configuration.
+
+Machine load at the start of that run: `load averages: 1.71 2.94 3.78` (Darwin 24.6.0, the
+machine at the bottom of this file). Both arms come from one `pnpm perf`-equivalent invocation,
+which is the only way the 3.67 ms gap is a gap rather than two measurements taken on different
+days — the paired-alternation rule above applies to any further claim about it.
 
 ## The three runs inside one invocation, and the first-take step
 
@@ -377,7 +418,7 @@ Two consequences:
 
 - **The two-draws-per-composited-frame assumption behind `compositedFps` holds, and is now
   enforced rather than asserted in prose.** `drawFrame` draws the screen video and
-  `drawWebcamOverlay` draws the webcam video, one `drawImage` each, **inside one synchronous
+  `drawOverlay` (then `Compositor.drawWebcamOverlay`) draws the webcam video, one `drawImage` each, **inside one synchronous
   rAF callback** — so a counter snapshot can never land between them. Each draw is guarded
   on its element's `readyState >= 2` (`compositor.ts:170`, `:175` at `7432e96`), so a frame composited
   while a capture element has no decoded frame yields one draw or none, which would

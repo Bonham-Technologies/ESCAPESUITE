@@ -1,14 +1,21 @@
 // Canvas-based compositor for Picture-in-Picture mode
 // Combines screen capture with webcam overlay
 
-import type { WebcamPosition, WebcamShape } from '../store/types';
+import {
+  COMPOSITOR_MAX_WIDTH,
+  DEFAULT_OVERLAY_PADDING,
+  drawOverlay,
+  type OverlayGeometry,
+} from './overlayGeometry';
 
-export interface CompositorConfig {
-  webcamPosition: WebcamPosition;
-  webcamSize: number; // 0.1 to 0.4 (percentage of screen width)
-  webcamShape: WebcamShape;
-  padding: number; // Padding from edges in pixels
-}
+/**
+ * How the compositor is configured — which is, exactly, where the webcam
+ * overlay goes. The geometry and the function that draws it live in
+ * `overlayGeometry.ts`, shared with the offline composite in
+ * `core/converter.ts` so the two cannot draw the camera in different places;
+ * this alias keeps the name every caller here already uses.
+ */
+export type CompositorConfig = OverlayGeometry;
 
 export class Compositor {
   private canvas: HTMLCanvasElement;
@@ -41,7 +48,7 @@ export class Compositor {
     this.canvas = document.createElement('canvas');
     // Cap compositor resolution to 720p — reduces draw cost by ~55% vs 1080p
     // MediaRecorder re-encodes anyway so full resolution isn't needed here
-    const maxDim = 1280;
+    const maxDim = COMPOSITOR_MAX_WIDTH;
     if (width > maxDim) {
       const scale = maxDim / width;
       this.canvas.width = maxDim;
@@ -63,7 +70,7 @@ export class Compositor {
       webcamShape: config.webcamShape || 'circle',
       // ?? not || — a zero padding is a real choice (overlay flush against the
       // canvas edge), whereas a zero webcam size is nonsense input.
-      padding: config.padding ?? 20,
+      padding: config.padding ?? DEFAULT_OVERLAY_PADDING,
     };
   }
 
@@ -224,122 +231,11 @@ export class Compositor {
       this.ctx.drawImage(this.screenVideo, 0, 0, width, height);
     }
 
-    // Draw webcam overlay
+    // Draw webcam overlay — through the geometry `convertToMP4` also draws
+    // through, so the offline composite of a separate-tracks take puts the
+    // camera exactly where the preview had it.
     if (this.webcamVideo && this.webcamVideo.readyState >= 2) {
-      this.drawWebcamOverlay();
-    }
-  }
-
-  /**
-   * Draw the webcam overlay with the configured position, size, and shape.
-   */
-  private drawWebcamOverlay(): void {
-    if (!this.webcamVideo) return;
-
-    const { width, height } = this.canvas;
-    const { webcamPosition, webcamSize, webcamShape, padding } = this.config;
-
-    // Calculate webcam dimensions
-    const webcamWidth = width * webcamSize;
-    const webcamHeight = (webcamWidth * 9) / 16; // 16:9 aspect ratio
-
-    // Calculate position
-    let x: number, y: number;
-
-    switch (webcamPosition) {
-      case 'top-left':
-        x = padding;
-        y = padding;
-        break;
-      case 'top-right':
-        x = width - webcamWidth - padding;
-        y = padding;
-        break;
-      case 'bottom-left':
-        x = padding;
-        y = height - webcamHeight - padding;
-        break;
-      case 'bottom-right':
-      default:
-        x = width - webcamWidth - padding;
-        y = height - webcamHeight - padding;
-        break;
-    }
-
-    // Save context state. Each branch below restores it again once the webcam
-    // frame is drawn, so the border is stroked outside the clip path — that
-    // restore is the only one, and the pair stays balanced. An extra restore()
-    // on the way out is a no-op on a real canvas, but it is a stack operation
-    // per frame for nothing and it would silently undo a save() made by any
-    // future caller that wrapped this draw.
-    this.ctx.save();
-
-    if (webcamShape === 'circle') {
-      // Draw circular webcam overlay
-      const radius = Math.min(webcamWidth, webcamHeight) / 2;
-      const centerX = x + webcamWidth / 2;
-      const centerY = y + webcamHeight / 2;
-
-      // Create circular clip path
-      this.ctx.beginPath();
-      this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      this.ctx.closePath();
-      this.ctx.clip();
-
-      // Draw webcam video (centered and cropped to circle)
-      const videoAspect = this.webcamVideo.videoWidth / this.webcamVideo.videoHeight;
-      let srcWidth = this.webcamVideo.videoWidth;
-      let srcHeight = this.webcamVideo.videoHeight;
-      let srcX = 0;
-      let srcY = 0;
-
-      // Center crop to square for circle
-      if (videoAspect > 1) {
-        srcWidth = srcHeight;
-        srcX = (this.webcamVideo.videoWidth - srcWidth) / 2;
-      } else {
-        srcHeight = srcWidth;
-        srcY = (this.webcamVideo.videoHeight - srcHeight) / 2;
-      }
-
-      this.ctx.drawImage(
-        this.webcamVideo,
-        srcX,
-        srcY,
-        srcWidth,
-        srcHeight,
-        centerX - radius,
-        centerY - radius,
-        radius * 2,
-        radius * 2
-      );
-
-      // Draw border
-      this.ctx.restore();
-      this.ctx.beginPath();
-      this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-      this.ctx.lineWidth = 3;
-      this.ctx.stroke();
-    } else {
-      // Draw rectangular webcam overlay
-      // Create rounded rectangle clip path
-      const borderRadius = 8;
-      this.ctx.beginPath();
-      this.ctx.roundRect(x, y, webcamWidth, webcamHeight, borderRadius);
-      this.ctx.closePath();
-      this.ctx.clip();
-
-      // Draw webcam video
-      this.ctx.drawImage(this.webcamVideo, x, y, webcamWidth, webcamHeight);
-
-      // Draw border
-      this.ctx.restore();
-      this.ctx.beginPath();
-      this.ctx.roundRect(x, y, webcamWidth, webcamHeight, borderRadius);
-      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-      this.ctx.lineWidth = 3;
-      this.ctx.stroke();
+      drawOverlay(this.ctx, this.webcamVideo, this.canvas, this.config);
     }
   }
 

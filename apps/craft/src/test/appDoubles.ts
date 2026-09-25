@@ -12,7 +12,11 @@
 // delivery). App's own orchestration is never mocked.
 import { vi } from 'vitest'
 import { createRecorderFactoryDouble } from './doubles/recorder'
-import type { EnvironmentCapabilities, DetailedCapabilities } from '../store/types'
+import type {
+  EnvironmentCapabilities,
+  DetailedCapabilities,
+  OverlayPlacement,
+} from '../store/types'
 
 export interface CapabilityDetectionResultLike {
   capabilities: EnvironmentCapabilities
@@ -109,8 +113,32 @@ export interface ConversionProgressLike {
 }
 
 /**
+ * `convertToMP4`'s fourth argument: the camera half of a separate-tracks take
+ * and where to draw it (ESCSUITE-14). Described here rather than imported for
+ * the same reason as everything else in this module — it must stay a leaf — and
+ * it is on the *type* rather than the double because what the tests check is
+ * what the hook passed, not what a double did with it.
+ */
+export interface CompositeOptionsLike {
+  companion: { blob: Blob; placement: OverlayPlacement; startOffset: number }
+  onCompanionSkipped?: () => void
+}
+
+/** What the hook calls, arity included, so a test can read the fourth argument. */
+export type ConvertToMP4Like = (
+  blob: Blob,
+  onProgress: (progress: ConversionProgressLike) => void,
+  signal?: AbortSignal,
+  composite?: CompositeOptionsLike
+) => Promise<Blob>
+
+/**
  * The happy path, start to finish in one turn: two progress reports and an MP4.
  * A test that wants to watch a conversion mid-flight replaces it.
+ *
+ * It takes no composite argument: a double that ignored one would look like a
+ * conversion that dropped the camera, and the four tests about the camera each
+ * supply their own implementation.
  */
 async function convertToMP4Double(
   blob: Blob,
@@ -159,7 +187,7 @@ export const converterModule = {
     supported: true,
     audio: true,
   })),
-  convertToMP4: vi.fn(convertToMP4Double),
+  convertToMP4: vi.fn<ConvertToMP4Like>(convertToMP4Double),
   convertToM4A: vi.fn(convertToM4ADouble),
   ConversionAbortedError,
 }

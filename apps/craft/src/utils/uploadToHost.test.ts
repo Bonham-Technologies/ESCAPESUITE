@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Mock } from 'vitest';
 import { uploadToHost } from './uploadToHost';
-import { getVideoBlob } from '../core/storage';
+import { getAllVideoMetadata, getVideoBlob } from '../core/storage';
 
 vi.mock('../core/storage', () => ({
   getVideoBlob: vi.fn(),
+  getAllVideoMetadata: vi.fn(async () => []),
 }));
 
 const getVideoBlobMock = getVideoBlob as Mock<typeof getVideoBlob>;
+const getAllVideoMetadataMock = getAllVideoMetadata as Mock<typeof getAllVideoMetadata>;
 
 /** Point window.location.search at a query string for one test. */
 function withSearch(search: string): void {
@@ -36,6 +38,10 @@ describe('uploadToHost', () => {
     });
     blob = new Blob(['take bytes'], { type: 'video/webm' });
     getVideoBlobMock.mockResolvedValue(blob);
+    // No take in storage by default, which is what keeps every test below that
+    // passes no `takeId` — or a `takeId` that is not the row's own id —
+    // asserting the exact payload it asserts today.
+    getAllVideoMetadataMock.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -123,5 +129,201 @@ describe('uploadToHost', () => {
 
     expect(result).toBe('missing');
     expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  describe('a take recorded as separate tracks', () => {
+    /** Every part's bytes, keyed by id, as storage would hand them back. */
+    const blobs: Record<string, Blob> = {
+      'take-1': new Blob(['screen'], { type: 'video/webm' }),
+      'part-webcam': new Blob(['camera'], { type: 'video/webm' }),
+      'part-mic': new Blob(['mic'], { type: 'audio/webm' }),
+    };
+
+    beforeEach(() => {
+      getVideoBlobMock.mockImplementation(async (id: string) => blobs[id]);
+      getAllVideoMetadataMock.mockResolvedValue([
+        {
+          id: 'part-mic',
+          name: 'Standup Demo — microphone',
+          takeId: 'take-1',
+          role: 'mic',
+          startOffset: 0,
+        },
+        {
+          id: 'take-1',
+          name: 'Standup Demo',
+          takeId: 'take-1',
+          role: 'screen',
+          startOffset: 0,
+        },
+        {
+          id: 'part-webcam',
+          name: 'Standup Demo — webcam',
+          takeId: 'take-1',
+          role: 'webcam',
+          startOffset: 0,
+        },
+      ] as unknown as Awaited<ReturnType<typeof getAllVideoMetadata>>);
+    });
+
+    it('carries every part of the take, primary first, in one message', async () => {
+      const result = await uploadToHost('take-1', 'Standup Demo', {
+        role: 'screen',
+        takeId: 'take-1',
+      });
+
+      expect(result).toBe('posted');
+      const [message] = postMessage.mock.calls[0] as [
+        {
+          payload: {
+            id: string;
+            name: string;
+            blob: Blob;
+            parts: Array<{
+              id: string;
+              role: string;
+              name: string;
+              blob: Blob;
+              startOffset: number;
+            }>;
+          };
+        },
+        string,
+      ];
+      // The three fields a host that knows nothing of takes reads are exactly
+      // what they always were: the primary's id, name and bytes.
+      expect(message.payload.id).toBe('take-1');
+      expect(message.payload.name).toBe('Standup Demo');
+      expect(message.payload.blob).toBe(blobs['take-1']);
+      // …and `parts` lists every file, the primary included, in role order —
+      // never storage order, which is uuid order because every part of a take
+      // shares one `recordedAt`.
+      expect(message.payload.parts.map((part) => part.role)).toEqual([
+        'screen',
+        'webcam',
+        'mic',
+      ]);
+      expect(message.payload.parts.map((part) => part.id)).toEqual([
+        'take-1',
+        'part-webcam',
+        'part-mic',
+      ]);
+      expect(message.payload.parts[1].name).toBe('Standup Demo — webcam');
+      expect(message.payload.parts[1].startOffset).toBe(0);
+      // The same Blob, not a copy of it: a structured clone of a Blob is a
+      // handle, so listing the primary twice costs a reference and not bytes.
+      expect(message.payload.parts[0].blob).toBe(message.payload.blob);
+    });
+
+    it('reads the primary’s bytes once, and posts that one Blob in both places', async () => {
+      // Real IndexedDB deserialises a *fresh* `Blob` per read (`db.get` every
+      // call), so an identity check against a mock that answers with one object
+      // per id proves nothing: "the same Blob" and "read twice" look alike.
+      // This mock reads like storage does — a new object each time, and a log
+      // of what was asked for — so both halves are visible: the primary is read
+      // once, and the one Blob that came back is what both `payload.blob` and
+      // `parts[0]` carry.
+      const reads: string[] = [];
+      getVideoBlobMock.mockImplementation(async (id: string) => {
+        reads.push(id);
+        return new Blob([id], { type: 'video/webm' });
+      });
+
+      await uploadToHost('take-1', 'Standup Demo', { role: 'screen', takeId: 'take-1' });
+
+      expect(reads).toEqual(['take-1', 'part-webcam', 'part-mic']);
+      const [message] = postMessage.mock.calls[0] as [
+        { payload: { blob: Blob; parts: Array<{ blob: Blob }> } },
+        string,
+      ];
+      expect(message.payload.parts[0].blob).toBe(message.payload.blob);
+    });
+
+    it('posts a companion row on its own, with no parts list', async () => {
+      await uploadToHost('part-webcam', 'Standup Demo — webcam', {
+        role: 'webcam',
+        takeId: 'take-1',
+      });
+
+      // A companion row's `takeId` names a different record, so this row is not
+      // the take — it is one part of it, and it posts itself. Unchanged from
+      // slice 1, and the only way a host that has not adopted `parts` can be
+      // handed one specific part.
+      expect(postMessage).toHaveBeenCalledWith(
+        {
+          type: 'UPLOAD_RECORDING',
+          payload: {
+            id: 'part-webcam',
+            name: 'Standup Demo — webcam',
+            blob: blobs['part-webcam'],
+            role: 'webcam',
+            takeId: 'take-1',
+          },
+        },
+        '*'
+      );
+    });
+
+    it('sends no parts list for a take that is one file', async () => {
+      getAllVideoMetadataMock.mockResolvedValue([
+        { id: 'solo', name: 'Solo', takeId: 'solo', role: 'screen' },
+      ] as unknown as Awaited<ReturnType<typeof getAllVideoMetadata>>);
+      getVideoBlobMock.mockResolvedValue(blob);
+
+      await uploadToHost('solo', 'Solo', { role: 'screen', takeId: 'solo' });
+
+      // `parts` exists to name files the host would not otherwise know about. A
+      // list holding only the blob already on `payload.blob` names none of them
+      // — and would give the host a second code path for nothing.
+      const [message] = postMessage.mock.calls[0] as [
+        { payload: Record<string, unknown> },
+        string,
+      ];
+      expect('parts' in message.payload).toBe(false);
+    });
+
+    it('leaves out a part whose bytes are gone rather than listing it empty', async () => {
+      getVideoBlobMock.mockImplementation(async (id: string) =>
+        id === 'part-mic' ? undefined : blobs[id]
+      );
+
+      await uploadToHost('take-1', 'Standup Demo', { role: 'screen', takeId: 'take-1' });
+
+      const [message] = postMessage.mock.calls[0] as [
+        { payload: { parts: Array<{ role: string }> } },
+        string,
+      ];
+      expect(message.payload.parts.map((part) => part.role)).toEqual(['screen', 'webcam']);
+    });
+
+    it('still posts the primary when reading the take’s parts throws', async () => {
+      // A companion never costs the primary. The row's own bytes are already in
+      // hand at this point, so a failed metadata read downgrades the message to
+      // what slice 1 sent rather than losing the upload the user asked for.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      getAllVideoMetadataMock.mockRejectedValue(new Error('storage blocked'));
+
+      const result = await uploadToHost('take-1', 'Standup Demo', {
+        role: 'screen',
+        takeId: 'take-1',
+      });
+
+      expect(result).toBe('posted');
+      expect(postMessage).toHaveBeenCalledWith(
+        {
+          type: 'UPLOAD_RECORDING',
+          payload: {
+            id: 'take-1',
+            name: 'Standup Demo',
+            blob: blobs['take-1'],
+            role: 'screen',
+            takeId: 'take-1',
+          },
+        },
+        '*'
+      );
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
   });
 });

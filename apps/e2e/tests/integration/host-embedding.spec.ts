@@ -33,6 +33,16 @@ const FIXTURE_MP4 = resolvePath(
 // ESCAPEARTIST's autosave debounce (AUTO_SAVE_DELAY in apps/artist/src/App.tsx).
 const ARTIST_AUTO_SAVE_DELAY = 2000
 
+/** One part of a take as the host page can see it (Blobs reduced to what survives evaluate). */
+interface CapturedPart {
+  id: string
+  role: string
+  name: string
+  startOffset: number
+  blobSize: number
+  blobType: string
+}
+
 /** A message as captured by the host window (Blobs reduced to what survives evaluate). */
 interface CapturedMessage {
   type: string
@@ -41,6 +51,8 @@ interface CapturedMessage {
   id?: string
   blobSize?: number
   blobType?: string
+  /** Every part of a take, since ESCSUITE-14 — absent for a single-file take. */
+  parts?: CapturedPart[]
 }
 
 const HOST_HTML = `<!doctype html>
@@ -119,6 +131,18 @@ function hostMessages(page: Page): Promise<CapturedMessage[]> {
           // A Blob cannot cross the evaluate boundary — measure it in the page.
           blobSize: blob instanceof Blob ? blob.size : undefined,
           blobType: blob instanceof Blob ? blob.type : undefined,
+          // `parts` is a list of Blobs, which cannot cross the evaluate
+          // boundary either — reduced to what a test can assert on.
+          parts: Array.isArray(payload.parts)
+            ? (payload.parts as Record<string, unknown>[]).map((part) => ({
+                id: String(part.id),
+                role: String(part.role),
+                name: String(part.name),
+                startOffset: Number(part.startOffset),
+                blobSize: part.blob instanceof Blob ? part.blob.size : 0,
+                blobType: part.blob instanceof Blob ? part.blob.type : '',
+              }))
+            : undefined,
         }
       })
   })
@@ -262,6 +286,117 @@ async function seedCraftRecording(page: Page, name: string): Promise<string> {
   }, name)
 }
 
+/** Forget everything the host has heard, without dropping the frame. */
+async function clearHostMessages(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    ;(window as unknown as { __hostMessages: unknown[] }).__hostMessages = []
+  })
+}
+
+/**
+ * Write a three-part take into ESCAPECRAFT's storage directly: the screen, the
+ * camera and the microphone, sharing one `takeId`.
+ *
+ * The take is named by its primary — the primary's `takeId` is its own id — so
+ * the ids here are what `payload.parts` has to come back with.
+ */
+async function seedCraftTake(
+  page: Page,
+  name: string
+): Promise<{ primaryId: string; webcamId: string; micId: string }> {
+  return page.evaluate(async (takeName) => {
+    const primaryId = crypto.randomUUID()
+    const webcamId = crypto.randomUUID()
+    const micId = crypto.randomUUID()
+    const recordedAt = Date.now()
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('video-editor-db', 1)
+      request.onupgradeneeded = () => {
+        const db = request.result
+        if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' })
+        if (!db.objectStoreNames.contains('thumbnails')) db.createObjectStore('thumbnails', { keyPath: 'id' })
+        if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' })
+        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings')
+      }
+      request.onerror = () => reject(new Error('open failed'))
+      request.onsuccess = () => {
+        const db = request.result
+        const tx = db.transaction('videos', 'readwrite')
+        const store = tx.objectStore('videos')
+        store.put({
+          id: primaryId,
+          blob: new Blob([new Uint8Array(2048)], { type: 'video/webm' }),
+          metadata: {
+            id: primaryId,
+            name: takeName,
+            duration: 5,
+            width: 64,
+            height: 48,
+            frameRate: 30,
+            mimeType: 'video/webm',
+            size: 2048,
+            mediaType: 'video',
+            source: 'recording',
+            recordedAt,
+            takeId: primaryId,
+            role: 'screen',
+            startOffset: 0,
+            hasAudio: true,
+            hasWebcam: true,
+            overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+          },
+        })
+        store.put({
+          id: webcamId,
+          blob: new Blob([new Uint8Array(1024)], { type: 'video/webm' }),
+          metadata: {
+            id: webcamId,
+            name: `${takeName} — webcam`,
+            duration: 5,
+            width: 32,
+            height: 24,
+            frameRate: 30,
+            mimeType: 'video/webm',
+            size: 1024,
+            mediaType: 'video',
+            source: 'recording',
+            recordedAt,
+            takeId: primaryId,
+            role: 'webcam',
+            startOffset: 0,
+            hasAudio: false,
+            hasWebcam: true,
+          },
+        })
+        store.put({
+          id: micId,
+          blob: new Blob([new Uint8Array(512)], { type: 'audio/webm' }),
+          metadata: {
+            id: micId,
+            name: `${takeName} — microphone`,
+            duration: 5,
+            width: 0,
+            height: 0,
+            frameRate: 0,
+            mimeType: 'audio/webm',
+            size: 512,
+            mediaType: 'audio',
+            source: 'recording',
+            recordedAt,
+            takeId: primaryId,
+            role: 'mic',
+            startOffset: 0,
+            hasAudio: true,
+          },
+        })
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(new Error('write failed'))
+      }
+    })
+    return { primaryId, webcamId, micId }
+  }, name)
+}
+
 test.describe('Host embedding contract', () => {
   // Exporting goes through WebCodecs, and the whole contract is only shipped
   // for Chromium-based hosts (see the WebCodecs constraint in the README).
@@ -386,6 +521,47 @@ test.describe('Host embedding contract', () => {
     // the host page, because a Blob cannot survive the evaluate boundary.
     expect(message.blobSize).toBeGreaterThan(0)
     expect(message.blobType).toContain('webm')
+  })
+
+  test('ESCAPECRAFT hands the host every part of a take in one message', async ({ page }) => {
+    test.setTimeout(60_000)
+
+    await openHostPage(page, CRAFT_ORIGIN)
+    const take = await seedCraftTake(page, 'Seeded Take')
+
+    const frame = await embed(page, '/')
+    const uploadTake = frame.getByRole('button', { name: 'Upload Seeded Take to host' })
+    await expect(uploadTake).toBeVisible({ timeout: 30_000 })
+
+    await uploadTake.click()
+
+    const message = await waitForHostMessage(page, 'UPLOAD_RECORDING')
+    // The three fields a host that knows nothing of takes reads are still the
+    // primary's, byte for byte what they were before ESCSUITE-14.
+    expect(message.id).toBe(take.primaryId)
+    expect(message.name).toBe('Seeded Take')
+    expect(message.blobSize).toBe(2048)
+    expect(message.blobType).toContain('webm')
+    // …and `parts` lists every file of the take, the primary first, each with
+    // real bytes that crossed the frame boundary by structured clone.
+    expect(message.parts?.map((part) => part.role)).toEqual(['screen', 'webcam', 'mic'])
+    expect(message.parts?.map((part) => part.id)).toEqual([
+      take.primaryId,
+      take.webcamId,
+      take.micId,
+    ])
+    expect(message.parts?.map((part) => part.blobSize)).toEqual([2048, 1024, 512])
+    expect(message.parts?.map((part) => part.startOffset)).toEqual([0, 0, 0])
+    expect(message.parts?.[2].blobType).toContain('audio')
+
+    // A companion row still posts itself alone, which is the only way a host
+    // that has not adopted `parts` can be handed one specific part.
+    await clearHostMessages(page)
+    await frame.getByRole('button', { name: 'Upload Seeded Take — webcam to host' }).click()
+
+    const partMessage = await waitForHostMessage(page, 'UPLOAD_RECORDING')
+    expect(partMessage.id).toBe(take.webcamId)
+    expect(partMessage.parts).toBeUndefined()
   })
 
   test('ESCAPECRAFT posts SEND_TO_EDITOR instead of opening a window', async ({
