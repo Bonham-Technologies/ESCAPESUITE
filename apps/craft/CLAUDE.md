@@ -542,14 +542,25 @@ in all three states:
 **A separate-tracks take has up to three companion pipelines, and none of them ends the take.**
 `WebCodecsRecorder` holds `companions: CompanionPipeline[]` — one `kind: 'video'` pipeline for the
 webcam and one `kind: 'audio'` pipeline per audio source the take really has — each with its own
-encoder, its own Mediabunny `Output` and its own `failed` flag. The webcam track's `ended` stops
-only its pipeline (one `'Webcam track ended: …'` warning and `readerActive = false`) while the
-screen keeps recording, and `stop()` then finalizes a shorter webcam file, or none at all if no
-frame ever arrived. Every encoder has its own error handler, because `createVideoEncoder` takes
+encoder, its own Mediabunny `Output` and its own `failed` flag. **Every companion watches its own
+track's `ended`** (`watchCompanionTrack()`, one handler per role): it warns
+`'<Track> track ended: <label>'` and calls `endCompanion()`, which stops that pipeline's capture —
+`readerActive = false` for the camera, `processor.disconnect()` and `processor = null` for an audio
+source — while the screen keeps recording, and `stop()` then finalizes a **shorter** part, or none
+at all if nothing was ever encoded. The encoder is deliberately left open there, because `stop()`
+still has to flush the tail of the part into the file. An unplugged microphone is why the audio
+half exists: a dead `MediaStreamAudioSourceNode` goes on feeding silence to a
+`ScriptProcessorNode` that goes on firing, so without it the part came out as long as the take and
+inaudible for most of it. The `onaudioprocess` gate reads `companion.processor` for exactly this
+reason — a disconnected node is one its pipeline has finished with, and a gate that depends on the
+audio thread noticing the disconnect is not a gate.
+
+`failCompanion()` is `endCompanion()` **plus the `failed` flag** (and, for an audio pipeline, a
+nulled encoder): the difference between the two is whether what was already encoded is still worth
+delivering. Every encoder has its own error handler, because `createVideoEncoder` takes
 the handler as a parameter with no default and each audio pipeline builds its own: the primary's
 still reports through `onError`, a companion's warns (`'<Track> track encoder failed: …'`), calls
-`failCompanion()` — which marks that one pipeline `failed` *and stops its source*, the reader for
-a video companion, the processor and the encoder for an audio one — and reports nothing, because
+`failCompanion()` and reports nothing, because
 `onError` is what makes the controller dispose the recorder and throw away a screen recording that
 is still being made. Flush and finalize are isolated per pipeline (`flushCompanions()`,
 `finalizeCompanions()`, each loop iteration in its own try/catch rather than one around the loop,
@@ -566,6 +577,45 @@ nothing, one that gave up (`failed`), and one whose `finalize()` threw. A pipeli
 set up is never pushed onto the list at all, so `stop()` and `cleanup()` both skip it. An empty
 row in the library and a second ARTIST source with nothing in it are worse than a missing part,
 and none of the four may ever cost the take its primary blob.
+
+**Everything a take acquires is released on the way out, whichever way it ends** (ESCSUITE-66).
+A finished take releases most of it itself — `stop()` flushes and closes every encoder and
+finalizes every output worth storing — but a take that is **cancelled** or that **fails** reaches
+none of that, and a separate-tracks take is holding five codecs, four Mediabunny outputs, five
+`MediaStreamAudioSourceNode`s and two frame readers when it happens. Neither the fields nor
+`companions` can answer "what is still open?", because a pipeline that gave up has its `encoder`
+nulled and `cleanup()` clears the list, so the recorder keeps three construction-order registries
+— `codecs`, `outputs`, `sourceNodes` — and `cleanup()` works through all three:
+
+- **`closeCodecs()`** closes every codec whose `state` is not already `'closed'`. The guard is not
+  optional: `close()` on a closed codec throws `InvalidStateError`. Codecs are registered at
+  *construction* (`registerCodec()`), before their `configure()` is awaited, which is what makes a
+  `dispose()` landing inside that await safe — `this.videoEncoder` is cleared by `cleanup()` and
+  then assigned again by the resolving `createVideoEncoder`, but the encoder itself was already on
+  the list and is already closed
+- **`cancelOutput()`** on every output still sitting at `output.state === 'started'`. Mediabunny
+  holds an unfinalized output's encoders and its target open until it is told the file is over;
+  `'finalized'` and `'canceled'` are done with, and one that never started holds nothing. The same
+  call runs eagerly on the two paths that abandon an output mid-take: a companion whose setup
+  failed (its `Output.start()` already succeeded, and nothing downstream can reach it — it was
+  never pushed onto `companions`) and, in `finalizeCompanions()`, a companion that is `failed` or
+  encoded nothing. A cancel that throws is warned and swallowed — the primary blob may be finished
+  and about to be delivered, and must never be lost to a muxer that will not let go
+- **`disconnect()`** on every source node. A `MediaStreamAudioSourceNode` is otherwise released
+  only when the `AudioContext` closes, which is late for the mix's two taps and never for a
+  companion's — its pipeline is gone long before the take is
+- **`releaseFrameReader()` / `releaseCompanionReader()`** cancel each reader **and null the field**.
+  Dropping it is the point: `stop()` releases the readers and then `cleanup()` runs from its
+  `finally`, so a reader still on the field was being cancelled twice, and the `if (reader)` guards
+  that could never be false were unreachable branches
+
+`webcodecsRecorder.perf.test.ts` pins every one of these as an **exact** conservation law rather
+than a ceiling — codecs closed == codecs constructed, outputs finalized-or-cancelled == outputs
+started (and never both), source nodes disconnected == connected, one cancel per reader — over a
+finished separate-tracks take and over a cancelled one ("one cancelled take"). The `AudioData`
+handed to each audio `encode()` is closed in a `finally` for the same reason: `close()` as the
+next statement leaked the decoded buffer every time `encode()` threw, which for a codec closed
+under the callback is ~11.7 times a second for the rest of the take.
 
 **Audio companions are a second tap, never a diversion.** The primary output keeps the mixed
 `AudioEncoder` and the mixed Opus track exactly as before — a screen-only download still has

@@ -369,10 +369,37 @@ describe('WebCodecsRecorder work ceilings', () => {
         expect(lastAudioEncoder().flushCalls).toBe(1)
         expect(AudioEncoderDouble.instances).toHaveLength(3)
         // The two audio companions are offered no buffer by this suite, so
-        // they encoded nothing and their outputs are abandoned unfinalized on
-        // purpose — an empty Opus file is a library row that plays nothing.
+        // they encoded nothing and their parts are left out on purpose — an
+        // empty Opus file is a library row that plays nothing.
         // The four-finalize case is 'one take of audio companions', below.
         expect(getMediabunnyState().outputs.map(o => o.finalizeCalls)).toEqual([1, 1, 0, 0])
+        // Exact conservation (ESCSUITE-66): every started output is either
+        // finalized or cancelled, exactly once, and never both. A companion
+        // left out of the take still has a muxer holding its encoders and its
+        // target open until Mediabunny is told the file is over.
+        expect(getMediabunnyState().outputs.map(o => o.cancelCalls)).toEqual([0, 0, 1, 1])
+        expect(getMediabunnyState().outputs.map(o => o.state)).toEqual([
+          'finalized',
+          'finalized',
+          'canceled',
+          'canceled',
+        ])
+        // Exact conservation: five codecs constructed, five closed, once each.
+        // `close()` on an already-closed codec throws InvalidStateError, so a
+        // second close is as wrong as none.
+        const codecs = [...VideoEncoderDouble.instances, ...AudioEncoderDouble.instances]
+        expect(codecs).toHaveLength(5)
+        expect(codecs.map(c => c.closeCalls)).toEqual([1, 1, 1, 1, 1])
+        // Exact conservation: five source nodes connected — the mix's two taps
+        // and its destination, plus one per audio companion — and five
+        // disconnected. A MediaStreamAudioSourceNode is otherwise released only
+        // when the AudioContext closes.
+        const sourceNodes = lastAudioContext().mediaStreamSourceNodes
+        expect(sourceNodes).toHaveLength(5)
+        expect(sourceNodes.map(n => n.disconnect.mock.calls.length)).toEqual([1, 1, 1, 1, 1])
+        // Exact conservation: two frame readers, cancelled once each. stop()
+        // releases and drops them, so the cleanup that follows finds nothing.
+        expect(processor.cancelCalls()).toBe(2)
         // Exact: one AudioContext, closed. Two video pipelines must not mean
         // two audio graphs.
         expect(audio.contexts).toHaveLength(1)
@@ -452,6 +479,16 @@ describe('WebCodecsRecorder work ceilings', () => {
           expect(encoder.closeCalls).toBe(1)
         }
         expect(getMediabunnyState().outputs.map(o => o.finalizeCalls)).toEqual([1, 1, 1, 1])
+        // Exact conservation (ESCSUITE-66): four outputs finalized and none
+        // cancelled — every part of this take is worth storing, so `cleanup()`
+        // must not cancel a single finished file behind them.
+        expect(getMediabunnyState().outputs.map(o => o.cancelCalls)).toEqual([0, 0, 0, 0])
+        // Exact conservation: five source nodes — the system tap, the
+        // microphone tap and the mixed destination the primary encoder reads,
+        // plus one per audio companion — disconnected once each.
+        const sourceNodes = lastAudioContext().mediaStreamSourceNodes
+        expect(sourceNodes).toHaveLength(5)
+        expect(sourceNodes.map(n => n.disconnect.mock.calls.length)).toEqual([1, 1, 1, 1, 1])
         // Exact: one AudioContext for the whole take, closed. Three audio
         // pipelines must not mean three audio graphs.
         expect(audio.contexts).toHaveLength(1)
@@ -461,6 +498,77 @@ describe('WebCodecsRecorder work ceilings', () => {
         // store write per animation frame for a meter nothing renders.
         expect(lastAudioContext().analysers).toHaveLength(2)
         expect(raf.pending()).toBe(0)
+      } finally {
+        uninstallTrackProcessorDouble()
+      }
+    })
+  })
+
+  describe('one cancelled take', () => {
+    // The take nobody keeps: a countdown cancelled, a Cancel pressed, an
+    // unmount. It reaches none of stop()'s flushes or finalizes, so everything
+    // it holds is released by cleanup() alone — and a separate-tracks take
+    // holds more than any other (ESCSUITE-66). Every number here is an exact
+    // conservation law, not a ceiling: what was acquired was released, once.
+    it('releases every codec, output, source node and reader it acquired', async () => {
+      const trackProcessor = installTrackProcessorDouble()
+      const webcamStream = createStreamDouble([
+        createTrackDouble('video', { id: 'webcam-video', settings: { width: 640, height: 480 } }),
+      ])
+      try {
+        await recorder.initialize(screenStream, webcamStream, micStream, {
+          ...baseConfig,
+          webcamEnabled: true,
+          separateTracks: true,
+          microphoneEnabled: true,
+          systemAudioEnabled: true,
+        })
+        recorder.start()
+
+        now += 1000 / CAPTURE_FPS
+        trackProcessor.pushFrameTo('screen-video', new VideoFrameDouble({}, { timestamp: 0 }))
+        trackProcessor.pushFrameTo('webcam-video', new VideoFrameDouble({}, { timestamp: 0 }))
+        for (const node of lastAudioContext().scriptProcessors) {
+          node.onaudioprocess!({
+            inputBuffer: createAudioBufferDouble({ length: AUDIO_BUFFER_FRAMES }),
+          })
+        }
+        await flush()
+
+        recorder.dispose()
+        await flush()
+
+        // Five codecs — two VideoEncoders, three AudioEncoders — closed once
+        // each. Each one left open is a hardware encoder session held until the
+        // page goes away, and closing one twice throws InvalidStateError.
+        const codecs = [...VideoEncoderDouble.instances, ...AudioEncoderDouble.instances]
+        expect(codecs).toHaveLength(5)
+        expect(codecs.map(c => c.closeCalls)).toEqual([1, 1, 1, 1, 1])
+        expect(codecs.every(c => c.state === 'closed')).toBe(true)
+        // Four outputs started, four cancelled, none finalized: a cancelled
+        // take has no file to write, and Mediabunny holds each output's
+        // encoders and its target open until it is told so.
+        const outputs = getMediabunnyState().outputs
+        expect(outputs).toHaveLength(4)
+        expect(outputs.map(o => o.startCalls)).toEqual([1, 1, 1, 1])
+        expect(outputs.map(o => o.cancelCalls)).toEqual([1, 1, 1, 1])
+        expect(outputs.map(o => o.finalizeCalls)).toEqual([0, 0, 0, 0])
+        // Five source nodes and three ScriptProcessors, disconnected once each.
+        const sourceNodes = lastAudioContext().mediaStreamSourceNodes
+        expect(sourceNodes).toHaveLength(5)
+        expect(sourceNodes.map(n => n.disconnect.mock.calls.length)).toEqual([1, 1, 1, 1, 1])
+        const processors = lastAudioContext().scriptProcessors
+        expect(processors).toHaveLength(3)
+        expect(processors.map(n => n.disconnect.mock.calls.length)).toEqual([1, 1, 1])
+        // Two frame readers, cancelled once each — the two cameras' worth of
+        // capture this take was reading.
+        expect(trackProcessor.cancelCalls()).toBe(2)
+        // One AudioContext, closed; nothing left scheduled on rAF; and every
+        // VideoFrame and AudioData the take built closed.
+        expect(audio.contexts).toHaveLength(1)
+        expect(audio.contexts.every(c => c.state === 'closed')).toBe(true)
+        expect(raf.pending()).toBe(0)
+        expect(allFramesClosed()).toBe(true)
       } finally {
         uninstallTrackProcessorDouble()
       }

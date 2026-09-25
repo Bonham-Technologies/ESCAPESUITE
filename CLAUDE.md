@@ -517,14 +517,22 @@ three of statements (99.39 → 99.45), branches (97.36 → **97.54**) and functi
 up a fraction — `core/overlayGeometry.ts` and `utils/takeParts.ts` are small, pure and fully
 covered, and the retired note took an uncovered render branch with it — with **no floor crossed**,
 so craft's floors stay 100 / 99 / 97 / 99. The two functions still uncovered are both in
-`core/webcodecs-recorder.ts`, which this slice did not touch.
+`core/webcodecs-recorder.ts`, which this slice did not touch. It was re-measured again
+2026-09-25 after the recorder resource-hygiene work (ESCSUITE-66): those last two functions were
+the `.catch(() => {})` arrows in the old `cleanup()` reader teardown, which the release helpers
+replaced, so **functions reached 100.00** (99.53 → 100.00) and its floor rises 99 → **100**;
+statements and branches each moved up a hundredth (99.45 → 99.46, 97.54 → 97.55) and lines stayed
+at exactly 100.00, no floor crossed. The recorder file's own branch *percentage* fell a
+hundredth (94.55 → 94.48) while covering strictly more: the fix deleted three unreachable
+guards, so the same fourteen pre-existing uncovered branches now sit on a denominator of 254
+rather than 257.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.45 | 97.54 | 99.53 |
+| `@escapesuite/craft` | 100.00 | 99.46 | 97.55 | 100.00 |
 | `@escapesuite/artist` | 99.38 | 98.71 | 93.51 | 98.95 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
