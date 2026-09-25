@@ -72,11 +72,13 @@ export async function recordPipTake(page: Page, url: string): Promise<void> {
   //
   // `exact` is load-bearing, and so is *not* scoping to `[class*="sourceToggle"]`.
   // `getByRole`'s `name` is a case-insensitive substring by default, and
-  // ESCAPECRAFT's "Record webcam as a separate track" toggle (ESCSUITE-14) lives
-  // in a wrapper that reuses the same `sourceToggle` class — so a bare `Webcam`
-  // matches it too, and scope-and-`.last()` stopped addressing the webcam source
-  // the moment that toggle appeared (it is rendered only once screen and webcam
-  // are both on, which is exactly this helper's second step). The exact
+  // ESCAPECRAFT's "Record webcam as a separate track" toggle (ESCSUITE-14)
+  // contains "webcam" — so a bare `Webcam` matches it too, and scope-and-`.last()`
+  // stopped addressing the webcam source the moment that toggle appeared (it is
+  // rendered only once screen and webcam are both on, which is exactly this
+  // helper's second step). That toggle's wrapper no longer shares the source
+  // rows' `sourceToggle` class either (ESCSUITE-68), but the substring match is
+  // the half of the trap a class cannot fix, so `exact` stays. The exact
   // aria-labels ("Screen", "Webcam") are unique app-wide.
   const sourceButton = (label: string) =>
     page.getByRole('button', { name: label, exact: true })

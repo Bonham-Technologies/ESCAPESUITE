@@ -157,10 +157,12 @@ async function recordSeparateTracksTake(page: Page): Promise<void> {
   // `exact` is load-bearing, and so is *not* scoping to `[class*="sourceToggle"]`
   // the way the sibling specs do. `getByRole`'s `name` is a case-insensitive
   // substring by default, and the separate-tracks toggle below — accessible
-  // name "Record webcam as a separate track", inside a wrapper that reuses the
-  // same `sourceToggle` class — matches a bare `Webcam`. Scope-and-`.last()`
-  // therefore stops addressing the webcam source the moment that toggle
-  // appears. The exact aria-labels ("Screen", "Webcam") are unique app-wide.
+  // name "Record webcam as a separate track" — matches a bare `Webcam`.
+  // Scope-and-`.last()` therefore stops addressing the webcam source the moment
+  // that toggle appears. Its wrapper carries its own `separateTracksToggle`
+  // class since ESCSUITE-68, so the scoped shape is no longer ambiguous either —
+  // but the substring name match is the half of the trap a class cannot fix.
+  // The exact aria-labels ("Screen", "Webcam") are unique app-wide.
   const sourceButton = (label: string) =>
     page.getByRole('button', { name: label, exact: true })
 

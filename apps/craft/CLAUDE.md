@@ -1337,14 +1337,18 @@ the outcome, not on the double.
   under one `takeId`: the screen, the webcam, and the two audio parts whose bytes are handed to a
   real `decodeAudioData` in the page, the primary carrying `overlayPlacement`) and the four rows
   the library draws for them, each labelled with the track it is. **Address ESCAPECRAFT's
-  toggles by exact accessible name in e2e code**: the separate-tracks toggle's wrapper reuses
-  the same `sourceToggle` CSS-module class the four source toggles use, and its accessible
+  toggles by exact accessible name in e2e code**: the separate-tracks toggle's accessible
   name — "Record webcam as a separate track" — contains "Webcam", so Playwright's default
   case-insensitive *substring* `name` match silently re-resolved to it the moment the Webcam
   Overlay panel appeared. That is what `apps/e2e/utils/seekable.ts`'s `recordPipTake` (the
   `pip-seekable` guard's own helper, whose second step is the click that reveals the toggle) had
   to stop doing: it now asks for `getByRole('button', { name: label, exact: true })` and scopes
-  to no class at all.
+  to no class at all. Its wrapper also used to reuse the four source rows' `sourceToggle`
+  CSS-module class, which made `[class*="sourceToggle"]` + `hasText: 'Webcam'` — the shape the
+  sibling specs scope with — match it too; since ESCSUITE-68 it carries its own
+  `separateTracksToggle` class (same four declarations, copied not composed: it is a *mode*, not
+  a capture source), pinned by `WebcamOverlaySettings.test.tsx`. The exact-name rule stands
+  regardless — the substring match is the half of the trap a class cannot fix.
 - **Semicolon dialect is mixed, deliberately.** The suites the test decomposition added
   (`src/hooks/*.test.ts`, `src/utils/recordingFormat.test.ts`, and their siblings) omit
   line-ending semicolons; the older files (`src/App.library.test.tsx` and friends) carry them.

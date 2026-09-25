@@ -198,4 +198,24 @@ describe('the separate-tracks toggle', () => {
       screen.getByRole('button', { name: 'Record webcam as a separate track' })
     ).toBeDisabled()
   })
+
+  // ESCSUITE-68. The row was laid out with `sourceToggle`, the class the four
+  // *capture-source* rows use — and this is a mode, not a source. That sharing
+  // was not cosmetic: several e2e specs address a source row as
+  // `[class*="sourceToggle"]` filtered by its text, and this row's own text
+  // contains "webcam", so during ESCSUITE-14 the shared class plus Playwright's
+  // default case-insensitive substring `name` match silently re-pointed two
+  // locators onto this button (fixed there with `exact: true`, which stays).
+  // The class is its own now, so the collision cannot come back by accident.
+  it('is laid out as its own row, not as one of the capture sources', () => {
+    renderSettings({ separateTracksReason: null })
+
+    const row = screen.getByRole('button', { name: 'Record webcam as a separate track' })
+      .parentElement!
+    expect(row).toHaveClass(styles.separateTracksToggle)
+    expect(row).not.toHaveClass(styles.sourceToggle)
+    // The substring is what the e2e locators actually match on, so it is what
+    // has to be absent — not just the exact class.
+    expect(row.className).not.toContain('sourceToggle')
+  })
 })
