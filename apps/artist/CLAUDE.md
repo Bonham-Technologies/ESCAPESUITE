@@ -192,10 +192,16 @@ nothing.
 the import looks like what the user saw while recording and stays editable — which is the
 whole point of the separate track. `utils/overlayPlacement.ts` owns the conversion
 (`overlayPlacementToTransform`) and is pinned against `Compositor.drawWebcamOverlay`'s own
-numbers, with two deliberate differences. The corner inset is `OVERLAY_MARGIN_FRACTION`,
-`20 / 1280` of the **frame width**, not a flat 20 px: the compositor pads by 20 px on a canvas
-capped at 1280 px wide, so the pixel count would put the overlay four times closer to the edge
-on a 4K project than it looked. And the aspect is the **camera's**, not the compositor's
+numbers, with two deliberate differences. The corner inset is `overlayMarginFor(frame.width)`,
+which mirrors ESCAPECRAFT's `overlayPaddingFor` (`apps/craft/src/core/overlayGeometry.ts`)
+exactly: `DEFAULT_OVERLAY_PADDING` (20 px) below and at `COMPOSITOR_MAX_WIDTH` (1280), and
+`frame.width * OVERLAY_MARGIN_FRACTION` (`20 / 1280` of the frame) above it. The compositor caps
+its preview canvas **only above 1280** — it never scales a narrower share up — so both halves are
+the 20 px the user actually saw: a flat 20 px on a 4K project would put the overlay four times
+closer to the edge than it looked, and 20/1280 of a 640-wide share put it 10 px from the edge,
+half as far as the preview and the composited MP4 both did (fixed in ESCSUITE-69; the sub-1280
+case is pinned in `utils/overlayPlacement.test.ts` against craft's own arithmetic). And the
+aspect is the **camera's**, not the compositor's
 hard-coded 16:9 box, which stretches a 4:3 picture — the width, which is the size the user
 chose, is the compositor's exactly. `x`/`y` are the clip's centre as a fraction of the canvas
 and the scale is the drawn width over the part's native width, because that is how
@@ -236,9 +242,34 @@ Three things the import refuses to do, each chosen rather than defaulted:
   IndexedDB is not type-checked; a record written by a newer ESCAPECRAFT is visible and
   deletable rather than placed somewhere arbitrary. (`partRoleRank` answers `Infinity` for such
   a role, which is also what sorts those parts last.)
-- **A take already in the library is skipped whole** — no re-add, no second placement, no
-  notice. That guard predates this work and is what keeps a host re-navigating the same id from
-  placing the take twice.
+- **A take any part of which is already in the library is skipped whole** — no re-add, no
+  second placement, no notice. That guard predates this work and is what keeps a host
+  re-navigating the same id from placing the take twice. It used to ask only about the
+  **primary**, which was a hole a user could walk through: delete the primary from the media
+  library, re-send the take from ESCAPECRAFT, and the companion — still in the library, so
+  re-adding it is idempotent by id — was **placed** a second time, on a second new track
+  (ESCSUITE-69). So the question is asked about every part, and asked in `app/takeImport.ts`
+  rather than in the hook, because the parts are not known until the metadata scan and the
+  refusal has to land before the first write: `importTake` takes an `isInLibrary(id)` lookup
+  (the hook lends it `useEditorStore.getState().sourceVideos`, read at call time) and answers
+  `alreadyInLibrary`, on which the hook returns without placing or saying anything.
+  **The question is asked twice**, because that first one is asked too early to settle it on
+  the ordinary path: the library is read when the import's storage reads land, which on a load
+  with no `?suppressRestore=1` is *before* `handleRestoreSession` runs
+  `session.sourceVideos.forEach(addSourceVideo)`. So a saved session that already holds the
+  take got past it and the take was appended a second time — whether the user saw a duplicate
+  or a silent skip came down to whether the import lost the race to the prompt click. The
+  second check is in `placePendingTake`, at placement time, and asks the **timeline** rather
+  than the library: by then the restore has re-added every part it holds, so an id lookup can
+  no longer separate "the session already had this take" from "the import just added it", while
+  a clip already playing the part can — and is the thing a second placement would duplicate.
+  A take dropped there is dropped silently and hands its thumbnail URLs back, the restore
+  having re-added its own library entries over the import's.
+  The any-part rule has a cost, and it is deliberate: a take whose primary was deleted from the
+  library while its companion survived **cannot be re-imported at all** until the companion is
+  deleted too. Silence beats a duplicate clip — the library is where a part is visible and
+  deletable, so the way back is open, and the alternative is a take the user cannot get rid of
+  without noticing it arrived twice.
 
 **The effect that runs the import knows when it is gone.** `useHostIntegration`'s
 `?loadVideo=` branch carries an effect-scoped `cancelled` flag, set as the cleanup's first
@@ -283,8 +314,12 @@ pass `?suppressRestore=1`, which switches the prompt and the autosave off togeth
 The whole path is pinned by `app/takeImport.test.ts`, `app/useHostIntegration.test.ts`,
 `store/__tests__/projectStore.takePlacement.test.ts` and `utils/overlayPlacement.test.ts` /
 `utils/takeParts.test.ts`, and end to end by `apps/e2e/tests/escapeartist/take-import.spec.ts`,
-which seeds a two-part take straight into the shared database and reads the webcam clip's
-corner back out of the inspector. That spec is skipped in WebKit — Playwright's WebKit cannot
+which seeds two-part takes straight into the shared database and reads the webcam clip's
+corner back out of the inspector — once for a share the size of the project, once for a
+1280x720 share in a 1920x1080 project (76% / 75% at 40%, the corner of the centred picture
+rather than the canvas's 88% / 87% at 60%) — and, in its last case, restores a seeded session
+with one clip on it before answering the prompt, so that the take is seen appending after the
+restored clip and coming off again in a single Ctrl+Z. That spec is skipped in WebKit — Playwright's WebKit cannot
 store a `Blob` in IndexedDB, the same reason `tests/integration/indexeddb-sharing.spec.ts`
 skips there.
 

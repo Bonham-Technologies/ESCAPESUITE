@@ -15,11 +15,16 @@
 // recording can be several parts sharing a `takeId`, so `takeImport.ts` brings
 // them all into the library and `placeTakeOnTimeline` puts them on the timeline
 // in one undo step. The store action is reached through `getState()` rather than
-// taken as a dep, so `App` gains no selector (`App.rerender.test.tsx`).
+// taken as a dep, so `App` gains no selector (`App.rerender.test.tsx`), and so
+// is the media library the "already loaded" guard consults — `importTake` is
+// handed that lookup rather than an answer, because the take's parts are not
+// known until it has scanned for them.
 //
 // Placement is the one thing that does **not** happen the moment the import
 // lands: it waits for the "Resume Previous Session?" prompt. See
-// `placePendingTake` below.
+// `placePendingTake` below — which is also where the "is this take already
+// here?" question is asked the *second* time, of the timeline, because the
+// first one is asked of the library before a restore has filled it.
 import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
 import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
@@ -62,6 +67,15 @@ interface PendingTake {
   /** The take's name, for the toast raised when it is finally placed. */
   name: string;
   missingParts: number;
+  /**
+   * The blob URLs this take's thumbnails were made as.
+   *
+   * Carried here — as well as in the effect's own array, which the cleanup
+   * revokes on unmount — for the one path that ends in neither: a take dropped
+   * at placement time because the restored project already has it. Revoking
+   * twice is a no-op, so the two cost nothing between them.
+   */
+  thumbnailUrls: string[];
 }
 
 export function useHostIntegration({
@@ -91,11 +105,41 @@ export function useHostIntegration({
    * recording" while the timeline is still empty is the same untruth the early
    * placement was. Nulls the ref first, so answering the prompt twice — or a
    * re-render behind it — places the take once.
+   *
+   * **And asks the "already here?" question a second time**, because the first
+   * one was asked too early to answer it on this path. `importTake`'s
+   * `isInLibrary` runs when the import's storage reads land, which on a load
+   * with no `?suppressRestore=1` is *before* `handleRestoreSession` runs
+   * `session.sourceVideos.forEach(addSourceVideo)` — so a saved session that
+   * already holds the take (its parts in the library, its clips on the
+   * timeline) gets past it, and the take would be appended a second time on two
+   * more tracks. Whether the user got a duplicate or a silent skip would come
+   * down to whether the import lost the race to the prompt click.
+   *
+   * The second question is asked of the **timeline**, not the library: by now
+   * the restore has re-added every part it holds, so an id lookup can no longer
+   * separate "the session already had this take" from "the import just added
+   * it a moment ago". A clip already playing the part can, and is the thing a
+   * second placement would duplicate anyway.
+   *
+   * A dropped take is dropped **silently** — the same nothing a take already in
+   * the library has always been answered with — and hands its thumbnail URLs
+   * back, because the restore re-added its own library entries over the
+   * import's and nothing is pointing at them any more.
    */
   const placePendingTake = useCallback(() => {
     const take = pendingTake.current;
     if (!take) return;
     pendingTake.current = null;
+    const placed = useEditorStore.getState().project.timeline.clips;
+    if (
+      take.clipParts.some((part) =>
+        placed.some((clip) => clip.sourceVideoId === part.sourceVideoId)
+      )
+    ) {
+      for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
+      return;
+    }
     useEditorStore.getState().placeTakeOnTimeline(take.clipParts);
     showNotification(
       takeLoadedMessage(take.name, take.clipParts.length, take.missingParts),
@@ -212,33 +256,45 @@ export function useHostIntegration({
           // nothing and saves the whole import.
           if (cancelled) return;
           if (videoData) {
-            // Check if video is already loaded
-            const existingVideos = useEditorStore.getState().sourceVideos;
-            if (!existingVideos.some(v => v.id === loadVideoId)) {
-              // The id names a take's **primary** part, and a take can be
-              // several files sharing a takeId (ESCSUITE-14). Every part joins
-              // the library; every part that can be placed goes on the
-              // timeline, in one undo step — for every take, not only one
-              // recorded as separate tracks (decision 7).
-              const take = await importTake(videoData, addSourceVideo);
-              if (cancelled) {
-                // This effect is gone: its parts are in the library (harmless,
-                // and the run that replaced it adds the same ids), but the
-                // timeline and the toast belong to whoever is still mounted.
-                for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
-                return;
-              }
-              thumbnailObjectUrls.push(...take.thumbnailUrls);
-              pendingTake.current = {
-                clipParts: take.clipParts,
-                name: videoData.metadata.name,
-                missingParts: take.missingParts,
-              };
-              // Once the question is settled this places the take on the same
-              // tick it always did; while it is open this is a no-op and the
-              // effect below drains it when the answer lands.
-              if (!sessionDecisionPendingRef.current) placePendingTake();
+            // The id names a take's **primary** part, and a take can be
+            // several files sharing a takeId (ESCSUITE-14). Every part joins
+            // the library; every part that can be placed goes on the
+            // timeline, in one undo step — for every take, not only one
+            // recorded as separate tracks (decision 7).
+            //
+            // "Already loaded" is a question about the whole take, so it is
+            // asked there rather than here: the parts are not known until the
+            // metadata scan, and a take the library holds *any* part of is
+            // skipped whole. Read through `getState()` at call time, so the
+            // mount-only effect is not answering it from a stale library.
+            //
+            // This one catches the no-session path. The session path is caught
+            // by the second check, in `placePendingTake` — the library here is
+            // read before "Restore" has filled it.
+            const take = await importTake(videoData, addSourceVideo, (id) =>
+              useEditorStore.getState().sourceVideos.some((v) => v.id === id)
+            );
+            if (cancelled) {
+              // This effect is gone: its parts are in the library (harmless,
+              // and the run that replaced it adds the same ids), but the
+              // timeline and the toast belong to whoever is still mounted.
+              for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
+              return;
             }
+            // Nothing was imported, so there is nothing to place and — as ever
+            // for a take already in the library — nothing to say about it.
+            if (take.alreadyInLibrary) return;
+            thumbnailObjectUrls.push(...take.thumbnailUrls);
+            pendingTake.current = {
+              clipParts: take.clipParts,
+              name: videoData.metadata.name,
+              missingParts: take.missingParts,
+              thumbnailUrls: take.thumbnailUrls,
+            };
+            // Once the question is settled this places the take on the same
+            // tick it always did; while it is open this is a no-op and the
+            // effect below drains it when the answer lands.
+            if (!sessionDecisionPendingRef.current) placePendingTake();
           } else {
             console.error('Video not found in IndexedDB:', loadVideoId);
             showNotification('Recording not found', 'error');

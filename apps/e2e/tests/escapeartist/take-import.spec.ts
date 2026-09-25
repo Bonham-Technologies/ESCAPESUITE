@@ -63,6 +63,39 @@ const TAKE_PARTS = [
   },
 ]
 
+/** The take whose screen half is smaller than ESCAPEARTIST's default project. */
+const SMALL_TAKE_ID = 'e2e-small-primary'
+const SMALL_WEBCAM_ID = 'e2e-small-webcam'
+
+/**
+ * A 1280x720 share with a 640x360 camera — a take recorded on a laptop screen,
+ * handed to a 1920x1080 project.
+ *
+ * Its point is the *frame*: every part imports at native pixels centred on the
+ * canvas, so the picture the camera sat in a corner of is a 1280x720 rectangle
+ * inside the canvas rather than the canvas itself.
+ */
+const SMALL_TAKE_PARTS = [
+  {
+    ...TAKE_PARTS[0],
+    id: SMALL_TAKE_ID,
+    name: 'Laptop share',
+    width: 1280,
+    height: 720,
+    recordedAt: 1_700_000_100_000,
+    takeId: SMALL_TAKE_ID,
+  },
+  {
+    ...TAKE_PARTS[1],
+    id: SMALL_WEBCAM_ID,
+    name: 'Laptop share — webcam',
+    width: 640,
+    height: 360,
+    recordedAt: 1_700_000_100_001,
+    takeId: SMALL_TAKE_ID,
+  },
+]
+
 /**
  * Put the take's parts into the shared database, blobs and all.
  *
@@ -74,7 +107,7 @@ const TAKE_PARTS = [
  * settles no IndexedDB work, so depending on that ordering is a race the first
  * slow run would lose — with a version-0 database and no `videos` store.
  */
-async function seedTake(page: Page) {
+async function seedTake(page: Page, parts: typeof TAKE_PARTS) {
   await page.evaluate(
     ({ dbName, dbVersion, parts }) =>
       new Promise<void>((resolve, reject) => {
@@ -105,8 +138,119 @@ async function seedTake(page: Page) {
           tx.onerror = () => reject(new Error(`seed write failed: ${String(tx.error)}`))
         }
       }),
-    { dbName: DB_NAME, dbVersion: DB_VERSION, parts: TAKE_PARTS }
+    { dbName: DB_NAME, dbVersion: DB_VERSION, parts }
   )
+}
+
+/**
+ * Write a saved session into ESCAPEARTIST's storage: one project, one track,
+ * one clip on it.
+ *
+ * The shape is `seedArtistSession`'s (tests/integration/host-embedding.spec.ts)
+ * with a clip added and, unlike it, an explicit `resolution` — the restored
+ * project is what the take's overlay geometry is measured against, so leaving
+ * it to `ensureTimelineHasTracks`'s migration default would make this test's
+ * arithmetic depend on that migration. The prompt only appears for a session
+ * that holds source videos, which is what `seeded-video` is for.
+ */
+async function seedSession(page: Page) {
+  await page.evaluate(
+    ({ dbName, dbVersion }) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open(dbName, dbVersion)
+        request.onupgradeneeded = () => {
+          const db = request.result
+          if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' })
+          if (!db.objectStoreNames.contains('thumbnails')) db.createObjectStore('thumbnails', { keyPath: 'id' })
+          if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' })
+          if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings')
+        }
+        request.onerror = () => reject(new Error(`session open failed: ${String(request.error)}`))
+        request.onsuccess = () => {
+          const db = request.result
+          const tx = db.transaction('settings', 'readwrite')
+          tx.objectStore('settings').put(
+            {
+              project: {
+                id: 'seeded-project',
+                name: 'Seeded Session',
+                created: 1_700_000_000_000,
+                modified: 1_700_000_000_000,
+                resolution: { width: 1920, height: 1080 },
+                timeline: {
+                  tracks: [
+                    {
+                      id: 'seeded-track',
+                      name: 'Track 1',
+                      index: 0,
+                      visible: true,
+                      locked: false,
+                      muted: false,
+                      volume: 1,
+                      height: 60,
+                    },
+                  ],
+                  clips: [
+                    {
+                      id: 'seeded-clip',
+                      sourceVideoId: 'seeded-video',
+                      name: 'Restored clip',
+                      startTime: 0,
+                      endTime: 5,
+                      duration: 5,
+                      trackId: 'seeded-track',
+                      timelinePosition: 0,
+                      blendMode: 'normal',
+                      transform: {
+                        x: 0.5,
+                        y: 0.5,
+                        scaleX: 1,
+                        scaleY: 1,
+                        rotation: 0,
+                        opacity: 1,
+                        scaleLocked: true,
+                      },
+                      effects: { blur: 0 },
+                      transition: { type: 'none', duration: 0.5 },
+                    },
+                  ],
+                  textOverlays: [],
+                  shapeOverlays: [],
+                  duration: 5,
+                },
+              },
+              sourceVideos: [
+                {
+                  id: 'seeded-video',
+                  name: 'seeded.webm',
+                  duration: 5,
+                  width: 1920,
+                  height: 1080,
+                  frameRate: 30,
+                  mimeType: 'video/webm',
+                  size: 1024,
+                },
+              ],
+              currentTime: 0,
+              selectedClipId: null,
+              zoom: 1,
+              timestamp: 1_700_000_000_000,
+            },
+            'current-session'
+          )
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(new Error(`session write failed: ${String(tx.error)}`))
+        }
+      }),
+    { dbName: DB_NAME, dbVersion: DB_VERSION }
+  )
+}
+
+/** The clip element's box on the timeline, which is where its position shows. */
+async function clipBox(page: Page, name: string | RegExp) {
+  const box = await page.locator('[data-clip-id]').filter({ hasText: name }).boundingBox()
+  if (!box) throw new Error(`clip ${String(name)} has no box`)
+  return box
 }
 
 /** The value beside one of the inspector's transform sliders, e.g. "88%". */
@@ -136,7 +280,9 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     // ESCAPEARTIST's. That is all this load is for: `seedTake` creates the
     // schema itself, so nothing here waits on the app having mounted.
     await page.goto(ARTIST_URL)
-    await seedTake(page)
+    // Both takes, so each test names the one it wants: `orderTakeParts` groups
+    // on `takeId`, and only the take that was asked for joins the library.
+    await seedTake(page, [...TAKE_PARTS, ...SMALL_TAKE_PARTS])
   })
 
   test('places both parts on two tracks with the webcam above the screen', async ({ page }) => {
@@ -166,5 +312,87 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     expect(await transformValue(page, 'Pos X')).toBe('88%')
     expect(await transformValue(page, 'Pos Y')).toBe('87%')
     expect(await transformValue(page, 'Scale')).toBe('30%')
+  })
+
+  test('measures the corner from the screen recording, not from a bigger canvas', async ({
+    page,
+  }) => {
+    await page.goto(`${ARTIST_URL}?loadVideo=${SMALL_TAKE_ID}&suppressRestore=1`)
+    await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible({ timeout: 15_000 })
+
+    await page.locator('[data-clip-id]').filter({ hasText: '— webcam' }).click()
+
+    // Every number below, and where it comes from. The project is
+    // ESCAPEARTIST's default 1920x1080 (`createEmptyProject`) and this take's
+    // screen half is 1280x720, so the screen imports at native pixels centred
+    // on the canvas and the picture the camera sat in a corner of is the
+    // rectangle
+    //
+    //   left = (1920 - 1280) / 2 = 320, top = (1080 - 720) / 2 = 180, 1280x720
+    //
+    // `overlayPlacementToTransform` then reads every number off *that*:
+    //
+    //   overlay width = 0.2 x 1280 = 256, and 16:9 so 144 high
+    //   inset         = 20 — the frame is 1280 wide, which is the compositor's
+    //                   cap rather than above it, so the flat padding (the
+    //                   fraction gives the same 20 here; the sub-1280 case
+    //                   where they differ is the unit test's)
+    //   centre x      = 320 + 1280 - 20 - 128 = 1452 -> 1452/1920 = 0.75625
+    //   centre y      = 180 +  720 - 20 -  72 =  808 ->  808/1080 = 0.748148
+    //   scale         = 256 / 640 = 0.4 (the camera's own pixels)
+    //
+    // and the inspector prints `Math.round(value * 100)`% (`TransformSection`),
+    // so 0.75625 -> 76, 0.748148 -> 75, 0.4 -> 40. Measuring from the canvas
+    // instead would read 88% / 87% at 60% (1920 x 0.2 = 384 wide, inset 30),
+    // with the camera over the middle of the picture the user recorded — which
+    // is what this test fails with if the frame is ever dropped.
+    expect(await transformValue(page, 'Pos X')).toBe('76%')
+    expect(await transformValue(page, 'Pos Y')).toBe('75%')
+    expect(await transformValue(page, 'Scale')).toBe('40%')
+  })
+
+  test('appends the take after a restored session, and one undo takes it off again', async ({
+    page,
+  }) => {
+    await seedSession(page)
+
+    // No ?suppressRestore=1: this is what ESCAPECRAFT's standalone "Send to
+    // Editor" opens, so a user with a saved session meets the prompt while the
+    // handoff is still arriving.
+    await page.goto(`${ARTIST_URL}?loadVideo=${TAKE_ID}`)
+
+    await expect(page.getByRole('heading', { name: 'Resume Previous Session?' })).toBeVisible({
+      timeout: 15_000,
+    })
+    // The take is *held* while the question is open. Placing it now would be
+    // replaced by the Restore below — setProject plus clearHistory — with no
+    // undo step back to it, so the timeline is still the empty default's.
+    await expect(page.getByText(/^0 clips · 1 track$/)).toBeVisible()
+
+    await page.getByRole('button', { name: 'Restore Session' }).click()
+
+    // The restored clip, then the take's two parts: the session's one track is
+    // occupied, so neither part can reuse it and each lands on a new one.
+    await expect(page.getByText(/^3 clips · 3 tracks$/)).toBeVisible({ timeout: 15_000 })
+
+    const restored = await clipBox(page, 'Restored clip')
+    const screen = await clipBox(page, /^Handoff take[^—]*$/)
+    const webcam = await clipBox(page, '— webcam')
+    // Append at the end: the take starts at `calculateTimelineDuration` over
+    // the clips already there, which is the restored clip's 5s — so its left
+    // edge is that clip's right edge, to within a subpixel of layout. The
+    // webcam's own 0.5s startOffset puts it later again.
+    expect(Math.abs(screen.x - (restored.x + restored.width))).toBeLessThan(2)
+    expect(webcam.x).toBeGreaterThan(screen.x)
+
+    await page.keyboard.press('Control+z')
+
+    // One step, not two or three: `placeTakeOnTimeline` writes both clips and
+    // both tracks in a single `set` with a single `pushToHistory`, and the
+    // restore's own clearHistory() ran before it, so this is the only step
+    // there is to take.
+    await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible()
+    await expect(page.locator('[data-clip-id]')).toHaveCount(1)
+    await expect(page.locator('[data-clip-id]')).toContainText('Restored clip')
   })
 })

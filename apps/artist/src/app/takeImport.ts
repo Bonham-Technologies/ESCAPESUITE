@@ -27,6 +27,10 @@
 // The primary's own path is untouched by both: its blob is already in hand, and
 // a primary whose length cannot be resolved still throws, because that is the
 // take failing rather than a part of it.
+//
+// One more rule, and the reason the library is a *parameter* here: a take any
+// part of which the library already holds is refused whole, before the first
+// write. `isInLibrary` is how the caller lends this module that question.
 import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage';
 import { resolveStoredDuration } from '../core/videoProcessor';
 import { isPlaceableRole, orderTakeParts } from '../utils/takeParts';
@@ -40,6 +44,12 @@ export interface ImportedTake {
   thumbnailUrls: string[];
   /** Parts the take names whose blob is no longer in storage. */
   missingParts: number;
+  /**
+   * The library already held one of the take's parts, so **nothing** was
+   * imported: no part added, no clip to place, no thumbnail made. The caller
+   * says nothing about it either — see `importTake`.
+   */
+  alreadyInLibrary: boolean;
 }
 
 /**
@@ -70,10 +80,17 @@ async function resolvePartDuration(
  * gone is **skipped and counted** — it never costs the take its screen
  * recording — while a primary that cannot be measured throws, because that is
  * the take failing and the caller already reports it.
+ *
+ * `isInLibrary` answers "does the media library already hold this id?". If it
+ * says yes to **any** of the take's parts the take is refused whole and
+ * `alreadyInLibrary` comes back true, with nothing added and nothing to place —
+ * which is the caller's cue to say nothing at all. It defaults to "no", so a
+ * caller with no library to consult imports unconditionally.
  */
 export async function importTake(
   primary: { blob: Blob; metadata: SourceVideo },
-  addSourceVideo: (video: SourceVideo) => void
+  addSourceVideo: (video: SourceVideo) => void,
+  isInLibrary: (id: string) => boolean = () => false
 ): Promise<ImportedTake> {
   const { metadata } = primary;
   // Only a take that says it has parts costs a second storage read: a plain
@@ -98,6 +115,19 @@ export async function importTake(
             return [];
           })
         );
+
+  // A take already in the library is skipped **whole**: no re-add, no second
+  // placement, no notice. Every part is checked, not only the primary, because
+  // the two can be held separately — delete the primary from the library and
+  // re-send the take from ESCAPECRAFT and the companion is the only part still
+  // there. Re-adding a part is idempotent by id, but *placing* one is not: the
+  // companion would arrive on the timeline a second time, on a second new
+  // track. The check is here rather than in the caller because here is the
+  // first place the take's parts are known, and it has to land before the
+  // first write.
+  if (parts.some((part) => isInLibrary(part.id))) {
+    return { clipParts: [], thumbnailUrls: [], missingParts: 0, alreadyInLibrary: true };
+  }
 
   // The stored duration is trusted unless it is unusable — a CRAFT take whose
   // WebM lost its Duration element is stored as Infinity — in which case the
@@ -166,5 +196,5 @@ export async function importTake(
     throw error;
   }
 
-  return { clipParts, thumbnailUrls, missingParts };
+  return { clipParts, thumbnailUrls, missingParts, alreadyInLibrary: false };
 }

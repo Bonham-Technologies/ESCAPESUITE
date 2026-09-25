@@ -414,6 +414,22 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       expect(useEditorStore.getState().history.past).toHaveLength(pastBefore - 1)
     })
 
+    // The take is skipped whole when ANY of its parts is already held, not only
+    // when the primary is: the user can delete the primary from the library and
+    // then re-send the take from ESCAPECRAFT, which leaves the companion behind
+    // to be found. Adding it again would be idempotent by id, but *placing* it
+    // again is not — a second webcam clip would arrive on a second new track.
+    it('skips the whole take when only its companion is already in the library', async () => {
+      seedTake()
+      act(() => useEditorStore.getState().addSourceVideo(webcam))
+
+      await mountIntegration({ loadVideoId: 'take-1' })
+
+      expect(deps.addSourceVideo).not.toHaveBeenCalled()
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+      expect(deps.showNotification).not.toHaveBeenCalled()
+    })
+
     it('says a part was skipped when its blob is gone, and still places the rest', async () => {
       vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
       vi.mocked(getVideo).mockImplementation((id) =>
@@ -586,7 +602,78 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
         expect(useEditorStore.getState().history.past).toHaveLength(1)
       })
 
-    it('places the take once, however often the question is re-opened', async () => {
+      // The library check runs when the import lands, which on this path is
+      // *before* "Restore" fills the library — so a session that already holds
+      // the take gets past it, and only a second check, at placement time and
+      // against the restored *timeline*, can stop the take arriving twice. The
+      // library cannot answer by then: the restore has re-added every part it
+      // holds, so an id lookup can no longer separate "the session had this
+      // take" from "the import just added it". Its clips can.
+      it('drops the take when the session restored already has it on the timeline', async () => {
+        seedTake()
+        vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+
+        const view = await mountBehindPrompt()
+        // Got past the early guard, as it must: the library was empty when the
+        // import read it.
+        expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+
+        // What "Restore" does, for a session whose timeline already holds this
+        // take: the project comes back with the take's own clips on it.
+        act(() => {
+          store().addClipToTimeline(
+            {
+              id: 'restored-screen',
+              sourceVideoId: 'take-1',
+              name: 'Screen recording',
+              startTime: 0,
+              endTime: 6,
+              duration: 6,
+            },
+            undefined,
+            0
+          )
+          useEditorStore.getState().clearHistory()
+        })
+
+        await closePrompt(view)
+
+        // Silently: the same nothing the early guard answers a take already in
+        // the library with. One clip, the restored one, and no second copy.
+        const clips = useEditorStore.getState().project.timeline.clips
+        expect(clips.map((c) => c.id)).toEqual(['restored-screen'])
+        expect(deps.showNotification).not.toHaveBeenCalled()
+        expect(useEditorStore.getState().history.past).toHaveLength(0)
+        // The thumbnails the dropped take made are handed back at the drop, not
+        // left for the unmount: the restore re-added its own library entries
+        // over the import's, so nothing is pointing at these URLs any more.
+        expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+      })
+
+      // The mirror, so the check above is about the take being there and not
+      // about a restore having happened at all.
+      it('places the take when the session restored does not have it', async () => {
+        seedTake()
+
+        const view = await mountBehindPrompt()
+        act(() => {
+          addClip('restored', 0, 4)
+          useEditorStore.getState().clearHistory()
+        })
+
+        await closePrompt(view)
+
+        const clips = useEditorStore.getState().project.timeline.clips
+        expect(clips.map((c) => c.sourceVideoId)).toEqual([
+          'video1',
+          'take-1',
+          'take-1-webcam',
+        ])
+        expect(deps.showNotification).toHaveBeenCalledTimes(1)
+      })
+
+      it('places the take once, however often the question is re-opened', async () => {
         seedTake()
 
         const view = await mountBehindPrompt()
