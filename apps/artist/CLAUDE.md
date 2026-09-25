@@ -297,8 +297,12 @@ pass `?suppressRestore=1`, which switches the prompt and the autosave off togeth
 The whole path is pinned by `app/takeImport.test.ts`, `app/useHostIntegration.test.ts`,
 `store/__tests__/projectStore.takePlacement.test.ts` and `utils/overlayPlacement.test.ts` /
 `utils/takeParts.test.ts`, and end to end by `apps/e2e/tests/escapeartist/take-import.spec.ts`,
-which seeds a two-part take straight into the shared database and reads the webcam clip's
-corner back out of the inspector. That spec is skipped in WebKit — Playwright's WebKit cannot
+which seeds two-part takes straight into the shared database and reads the webcam clip's
+corner back out of the inspector — once for a share the size of the project, once for a
+1280x720 share in a 1920x1080 project (76% / 75% at 40%, the corner of the centred picture
+rather than the canvas's 88% / 87% at 60%) — and, in its last case, restores a seeded session
+with one clip on it before answering the prompt, so that the take is seen appending after the
+restored clip and coming off again in a single Ctrl+Z. That spec is skipped in WebKit — Playwright's WebKit cannot
 store a `Blob` in IndexedDB, the same reason `tests/integration/indexeddb-sharing.spec.ts`
 skips there.
 
