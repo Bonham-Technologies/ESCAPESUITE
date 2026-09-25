@@ -176,8 +176,13 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   carrying every part of a take is planned as `payload.parts` and will come with its own
   adoption note.
 - **URL params (ARTIST)**: `?video=url` to preload, `?project=base64` for state,
-  `?loadVideo=<id>` for the CRAFT handoff — the id addresses a take's **primary** part;
-  ARTIST resolving its siblings and placing them on the timeline is ESCSUITE-14 slice 2 —
+  `?loadVideo=<id>` for the CRAFT handoff — the id addresses a take's **primary** part, and
+  ARTIST resolves its siblings by `takeId`, adds every part to the media library and places
+  them on the timeline in one undo step: the primary on a video track, the webcam on a track
+  above it at its `startOffset` with its transform seeded from the primary's
+  `overlayPlacement`, and the audio parts on tracks of their own. Placement happens for
+  **every** handoff, a single-file take included (ESCSUITE-14 decision 7); a handoff into a
+  session that already holds clips appends at the end of the timeline —
   `?suppressRestore=1` to skip the
   "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
   the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
@@ -445,6 +450,11 @@ being types alone. Craft was re-measured once more 2026-09-25, when the final re
 fixes landed (the controller reporting a companion lost inside the recorder, and
 `initializeCompanion` warning instead of failing the take): lines still exactly 100.00,
 branches up a hundredth to 96.81, statements and functions unchanged, and again no floor.
+`@escapesuite/artist` was re-measured 2026-09-25 at the end of ESCSUITE-14 slice 2 (the
+handoff resolving a take's parts and placing them on the timeline): all four figures up — lines
+99.38, statements 98.71, functions 98.95 and branches 93.38 → 93.50, the new modules being
+small, pure and fully covered — and **no floor crossed**, so artist's floors stay
+99 / 98 / 93 / 98.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -452,7 +462,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.33 | 96.81 | 99.51 |
-| `@escapesuite/artist` | 99.37 | 98.70 | 93.38 | 98.94 |
+| `@escapesuite/artist` | 99.38 | 98.71 | 93.50 | 98.95 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

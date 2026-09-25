@@ -155,10 +155,111 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`,
 | `?video=<url>` | Load a video from a URL (repeatable) |
 | `?project=<base64>` | Base64-encoded project state — *documented but not currently implemented* (parsed, never applied) |
 | `?autoplay=true` | Start playback once loaded — *documented but not currently implemented* (parsed, never applied) |
-| `?loadVideo=<id>` | Load a recording from IndexedDB (ESCAPECRAFT handoff) |
+| `?loadVideo=<id>` | Load a **take** from IndexedDB (ESCAPECRAFT handoff). The id names the take's primary part; every part of it joins the media library and is placed on the timeline — see "A handed-over take is several files" below |
 | `?suppressRestore=1` | Skip the "Resume Previous Session?" prompt. Accepts `1` or `true`. ESCAPEARTIST **neither offers nor writes** the saved session under this flag — the session autosave is switched off too, so a host-driven session leaves storage exactly as it found it |
 | `?title=<name>` | Initial project name. Trimmed, capped at 120 chars, trimmed again after the cut, blank ignored. Applied only while the project name is still the default `'Untitled Project'`, so it never overrides a name from `?project=` data or a restored session. `clearHistory()` runs right after, so the host naming the project is not an undo step |
 | `?hostOrigin=<origin>` | The host's own origin, e.g. `https://host.example`. **Recommended for production hosts.** Must be a bare origin (a URL whose serialisation equals its own origin); anything else is ignored with one console warning. Outbound posts go to it instead of `'*'`, and inbound messages from any other origin are dropped. It protects the **host's** deployment, *not* against being framed — a hostile page that frames the app also controls this URL and would just supply its own origin. Refusing to be framed is `Content-Security-Policy: frame-ancestors` on the deployment serving the app  The hosted deployment sends `frame-ancestors 'self'` (see `vercel.json`); self-hosted builds must set their own. |
+
+#### A handed-over take is several files
+
+`?loadVideo=<id>` names a take's **primary** part. Since ESCSUITE-14 a take recorded with
+ESCAPECRAFT's "Record webcam as a separate track" is several `SourceVideo`s sharing a
+`takeId` (see the root `CLAUDE.md`'s Data Flow), so the handoff resolves the take before it
+does anything with it — `app/takeImport.ts` reads `getAllVideoMetadata()` and hands the list
+to `utils/takeParts.ts`'s `orderTakeParts`, which keeps the parts whose `takeId` is the
+primary's id. That is the same one equality ESCAPECRAFT groups its library rows by
+(`apps/craft/src/utils/takeOrder.ts`). A take with **no** `takeId` — every recording made
+before ESCSUITE-14 and every composited PiP take after it — costs no second storage read at
+all.
+
+**Every handoff now places clips** (spec decision 7), a single-file take included. It used to
+add the recording to the library and leave the timeline empty for the user to drag it onto.
+The primary lands on the track a drop from the media library would take — `findEmptyTrack`'s
+lowest-index empty one, or a new track at the top if there is none — and each companion on a
+new track **above** the one before it, in role order (`ROLE_ORDER` in `utils/takeParts.ts`:
+`screen`, `webcam`, `mic`, `system`, so slice 3's audio parts need no ARTIST change). The
+whole take is **one undo step**: `store/clipSlice.ts`'s `placeTakeOnTimeline` writes every
+track and every clip in a single `set` with a single `pushToHistory`, so one Ctrl+Z takes the
+take off the timeline and leaves its media in the library. Each clip sits at the take's start
+plus its own `startOffset`, and the take's start is `calculateTimelineDuration` over the clips
+already there — so a handoff into a session that already holds work **appends at the end**
+rather than landing on top of it; an empty timeline measures 0, so the ordinary import still
+starts there and there is no special case for it. An empty list places nothing and records no
+undo step, because a take whose every part was missing must not leave an undo step that undoes
+nothing.
+
+**The webcam clip's transform is seeded from the take's `overlayPlacement`** (decision 8), so
+the import looks like what the user saw while recording and stays editable — which is the
+whole point of the separate track. `utils/overlayPlacement.ts` owns the conversion
+(`overlayPlacementToTransform`) and is pinned against `Compositor.drawWebcamOverlay`'s own
+numbers, with two deliberate differences. The corner inset is `OVERLAY_MARGIN_FRACTION`,
+`20 / 1280` of the **frame width**, not a flat 20 px: the compositor pads by 20 px on a canvas
+capped at 1280 px wide, so the pixel count would put the overlay four times closer to the edge
+on a 4K project than it looked. And the aspect is the **camera's**, not the compositor's
+hard-coded 16:9 box, which stretches a 4:3 picture — the width, which is the size the user
+chose, is the compositor's exactly. `x`/`y` are the clip's centre as a fraction of the canvas
+and the scale is the drawn width over the part's native width, because that is how
+`core/canvasRenderer.ts` reads them: **scale 1 means native pixels**. A part whose stored
+dimensions are unusable (nothing ESCAPECRAFT writes) still lands in its corner: the box falls
+back to 16:9 and the clip to `DEFAULT_TRANSFORM.scaleX`, which beats a clip zero pixels wide.
+The placement's `shape` is carried across from ESCAPECRAFT and **ignored** until ESCSUITE-65
+gives every clip a mask.
+
+Three things the import refuses to do, each chosen rather than defaulted:
+
+- **A part whose blob is gone is skipped and counted**, never fatal — storage cleared between
+  the two writes, or a companion deleted by hand. A companion whose `getVideo` *rejects* is
+  answered the same way: how a part was lost is not the take's business, only that it was, and
+  a half-imported take (the primary in the library, nothing on the timeline, a failure toast)
+  is worse than a take that arrived a track short and said so. The toast then says
+  `Loaded recording: <name> — 1 missing part skipped` (`'info'`) *instead of* the success
+  sentence, because `useNotification` is one slot on a three-second timer and two messages
+  mean the first is never read. A companion whose own length cannot be read borrows the take's
+  instead of being left off, because every part of a take is the same length by construction.
+  The primary's own path is exempt from both: its blob is already in hand, and a primary whose
+  length cannot be resolved still throws, because that is the take failing rather than a part
+  of it. A `getThumbnail` that rejects, for any part including the primary, costs that part its
+  picture and nothing else — a thumbnail is cosmetic — and if the import throws part-way it
+  revokes every thumbnail URL it had made, because its return value is the only way those URLs
+  ever escape.
+- **A companion with a role this build does not know joins the library and nothing else.**
+  IndexedDB is not type-checked; a record written by a newer ESCAPECRAFT is visible and
+  deletable rather than placed somewhere arbitrary. (`partRoleRank` answers `Infinity` for such
+  a role, which is also what sorts those parts last.)
+- **A take already in the library is skipped whole** — no re-add, no second placement, no
+  notice. That guard predates this work and is what keeps a host re-navigating the same id from
+  placing the take twice.
+
+**The effect that runs the import knows when it is gone.** `useHostIntegration`'s
+`?loadVideo=` branch carries an effect-scoped `cancelled` flag, set as the cleanup's first
+statement and read twice — after the `getVideo`, where nothing has been created yet and
+leaving is free, and after `importTake`, where the parts are already in the library (harmless,
+and `addSourceVideo` is idempotent by id) but the timeline and the toast belong to whoever is
+still mounted, so that run revokes its own thumbnail URLs and returns. Two things need it:
+StrictMode, which every dev build runs (`bootstrapApp` wraps `App` in it) and which would
+otherwise place the take twice — the library guard cannot separate the two runs, because the
+first is still awaiting storage when the second checks — and an unmount mid-import, which
+would otherwise have the cleanup revoke an array that is still empty and land a
+`placeTakeOnTimeline` in a project the editor has left.
+
+`LOAD_VIDEO` and `?video=` are **not** take handoffs: they fetch a file from a URL, address no
+stored take, and still only add to the library. Both are pinned as placing nothing.
+
+**One interaction worth knowing**: ESCAPECRAFT's standalone "Send to Editor" opens
+`/artist/?loadVideo=<id>` with no `?suppressRestore=1`, so a user with a saved session can be
+offered "Resume Previous Session?" *after* the take has been placed — and restoring replaces
+the project, so the placed clips go while the media stays in the library (`setProject` plus a
+per-video `addSourceVideo`). That is the pre-existing shape of session restore, newly visible
+now that a handoff puts something on the timeline. A host that drives its own state should
+pass `?suppressRestore=1`, which switches the prompt and the autosave off together.
+
+The whole path is pinned by `app/takeImport.test.ts`, `app/useHostIntegration.test.ts`,
+`store/__tests__/projectStore.takePlacement.test.ts` and `utils/overlayPlacement.test.ts` /
+`utils/takeParts.test.ts`, and end to end by `apps/e2e/tests/escapeartist/take-import.spec.ts`,
+which seeds a two-part take straight into the shared database and reads the webcam clip's
+corner back out of the inspector. That spec is skipped in WebKit — Playwright's WebKit cannot
+store a `Blob` in IndexedDB, the same reason `tests/integration/indexeddb-sharing.spec.ts`
+skips there.
 
 ### Build Configuration
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
@@ -710,7 +811,7 @@ and queries `styles.menuBackdrop`.
 |--------|------|
 | `appConstants.ts` | The shell's plain numbers: the autosave debounce delay, the timeline panel's min/max/default height and the localStorage key it is persisted under. No behaviour, so `timelineHeight.ts`, the hooks and `App` read the same values instead of each spelling them out |
 | `timelineHeight.ts` | The timeline panel's height maths: `clampTimelineHeight` (which propagates `NaN` rather than clamping it), the localStorage read/write pair, and `heightFromPointer`, the resize drag's pointer-to-height conversion. Pure but for the two storage calls, so the maths is testable without a DOM |
-| `appFormat.ts` | The two notification strings: `formatTimeForNotification` (a one-line pass-through to `formatTime`, kept because three call sites read better for it) and `clipCountMessage`, which spells the pluralisation rule once |
+| `appFormat.ts` | The three notification strings: `formatTimeForNotification` (a one-line pass-through to `formatTime`, kept because three call sites read better for it), `clipCountMessage`, which spells the pluralisation rule once, and `takeLoadedMessage`, the handoff's one sentence, which folds "how many tracks" and "what was missing" into the single toast slot |
 | `sessionSnapshot.ts` | `buildSessionSnapshot` — what of the editor's state the autosave writes, and in what shape. Takes the state and the timestamp as values rather than reading `getState()`/`Date.now()` itself, so the call site keeps control of *when* they are read |
 | `useThemeLifecycle.ts` | Starting the shared theme module on mount and stopping it on unmount. The editor's **first** effect, so `App` calls it first |
 | `useNotification.ts` | The transient status toast: one slot, not a queue. `showNotification` overwrites whatever is showing and opens a fresh three-second timer, which is deliberately neither stored nor cleared — carried behaviour, pinned by the App suite. Binds no effect; sits second because every hook after it takes `showNotification` |
@@ -721,6 +822,7 @@ and queries `styles.menuBackdrop`.
 | `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. Above all of it sits `modalOpen`, which stops the cascade dead while a dialog is up (see "Dialogs"). The editor's **fourth** effect. Its deps array is the inline one character for character plus `modalOpen`, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **38 deps, measured and left verbatim** — see below |
 | `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **fifth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
+| `takeImport.ts` | The storage half of the `?loadVideo=` handoff: resolve the take's parts, read each one's blob and thumbnail, add it to the library with a resolved duration, and return the parts to place (`ImportedTake`: `clipParts`, `thumbnailUrls`, `missingParts`). Lives beside the hook rather than inside it because the hook's effect is already the app's longest and these are the arms worth testing on their own |
 | `AppHeader.tsx` | The top bar: the dashboard link (hidden in the standalone build, which this component asks about itself), the wordmark, the project-name field, and the File menu plus the quick Save and Export buttons |
 | `FileMenu.tsx` | The header's File dropdown: the button, the click-outside backdrop, and the four items with their shortcut hints. Each item acts and then closes; what "acts" means belongs to the caller |
 | `MediaLibrarySidebar.tsx` | The left sidebar: its header and collapse button, and — while open — the uploader, the resolution picker and the library listing. Two of its props are pure pass-throughs it has no behaviour of its own for — `onConfirmOpenChange` to `ResolutionPicker` and `onProjectFile` to `VideoUploader` — and both are **required** here, so a caller that forgets to wire either fails to compile (see "Dialogs" for both) |
