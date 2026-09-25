@@ -28,6 +28,7 @@ import {
 } from '../test/doubles/canvas'
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastream'
+import { WEBCAM_TRACK_NOT_SAVED } from '../utils/notices'
 
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
@@ -890,6 +891,56 @@ describe('a separate-tracks take', () => {
       expect.any(Number),
       recorder.companionPart
     )
+  })
+
+  // Three of the four ways the camera half can be lost happen *inside* the
+  // recorder — no frame was encoded, the pipeline gave up, `finalize()` threw —
+  // and all three are delivered as `companion: null`, which the save hook
+  // cannot tell from "this take never asked for one". The controller is the one
+  // layer that still knows the mode the take was resolved on, so it is what
+  // says so; the save hook keeps saying the same sentence for a companion lost
+  // in storage.
+  it('says the webcam track was lost when the recorder delivers no companion', async () => {
+    harness = separateHarness({ countdownSeconds: 0 })
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    // The double's default, and what finalizeCompanion() returns for all three
+    // of the recorder-side losses.
+    expect(recorder.companionPart).toBeNull()
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    // Once, and not as a side effect of the start-of-take clear.
+    expect(
+      setNotice.mock.calls.filter(([notice]) => notice === WEBCAM_TRACK_NOT_SAVED)
+    ).toHaveLength(1)
+    expect(useRecorderStore.getState().notice).toBe(WEBCAM_TRACK_NOT_SAVED)
+    // ...and the screen recording is still saved, exactly as it is today.
+    expect(harness.saveRecording).toHaveBeenCalledWith(
+      recorder.stopBlob,
+      expect.any(Number),
+      null
+    )
+  })
+
+  it('says nothing when a composited take delivers no companion', async () => {
+    harness = separateHarness({ countdownSeconds: 0 })
+    // The mode was refused before the countdown, so this is an ordinary
+    // composited take: a null companion there means there never was one, and
+    // the user asked for nothing that could have been lost.
+    recorderFactory.canRecordSeparateTracks = false
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    expect(setNotice).not.toHaveBeenCalledWith(WEBCAM_TRACK_NOT_SAVED)
+    expect(useRecorderStore.getState().notice).toBeNull()
   })
 
   it('composites into MediaRecorder when the browser cannot serve two tracks', async () => {

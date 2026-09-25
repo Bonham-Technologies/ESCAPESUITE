@@ -24,7 +24,13 @@ import {
   type AnyRecorder,
 } from '../core/recorder-factory';
 import { hasSystemAudio } from '../core/permissions';
-import { CAPTURE_REFUSED, NO_SYSTEM_AUDIO, SAVE_FAILED, START_FAILED } from '../utils/notices';
+import {
+  CAPTURE_REFUSED,
+  NO_SYSTEM_AUDIO,
+  SAVE_FAILED,
+  START_FAILED,
+  WEBCAM_TRACK_NOT_SAVED,
+} from '../utils/notices';
 import { Compositor } from '../core/compositor';
 import { analytics } from '../utils/analytics';
 import { drawThumbnail } from '../utils/previewThumbnail';
@@ -364,6 +370,16 @@ export function useRecordingController({
           // A stop that lands after the take was cancelled or the screen went
           // away is a chunk nobody asked for: drop it rather than save it.
           if (cancelledRef.current) return;
+          // Three of the four ways the camera half can be lost happen inside
+          // the recorder — no frame encoded, the pipeline gave up, the muxer's
+          // finalize threw — and all three arrive here as `companion: null`,
+          // which is exactly what an ordinary take delivers. Only this closure
+          // still knows the take was *resolved* on separate tracks, so this is
+          // the only place that can tell "lost" from "never asked for". The
+          // save hook says the same sentence for a companion lost in storage.
+          if (separateTracks && !companion) {
+            setNotice(WEBCAM_TRACK_NOT_SAVED);
+          }
           // The recorder can finish a take on its own — the capture ended — so
           // nobody has been through handleStopRecording to stop the ticker.
           clearDurationTicker();
