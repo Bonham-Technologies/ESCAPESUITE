@@ -174,7 +174,7 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   decides with `isEmbedded()`; `RecordingsList` is props-only and draws the button exactly when
   it is given `onUploadToHost`. See `apps/craft/src/utils/uploadToHost.ts`.
   Since ESCSUITE-14 a take can be several files, and the payload says so two ways. `role` and
-  `takeId` (both optional, both absent on a single-file take) name **which** part a row's bytes
+  `takeId` (both optional, both absent on a take recorded as one file) name **which** part a row's bytes
   are. And the primary row's message carries `parts` — every file of the take, the primary
   included, in role order:
   `parts?: Array<{ id: string; role: 'screen' | 'webcam' | 'mic' | 'system'; name: string; blob: Blob; startOffset: number }>`.

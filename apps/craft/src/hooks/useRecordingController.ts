@@ -308,7 +308,9 @@ export function useRecordingController({
 
       // Which take this is, decided once and handed to everything below: the
       // compositor's mode, the factory, the recorder type the save path keys
-      // the container repair off, and the config the recorder initializes with.
+      // the container repair off, the config the recorder initializes with, and
+      // — carried on `captured` in `onStop` below (ESCSUITE-68) — the save path,
+      // which would otherwise have to re-read a setting the user can still move.
       // A config that still claimed `separateTracks` in a browser that cannot
       // serve it would have the recorder building a pipeline it cannot read.
       const isPiP = config.screenEnabled && config.webcamEnabled && !!screen && !!webcam;
@@ -410,10 +412,15 @@ export function useRecordingController({
           setCurrentDuration(0);
           stopAllStreams();
           // Save in background
-          // `micAcquired` travels in the closure, not through a ref: it is a
-          // fact about *this* take, and a late onStop must not be given the
-          // next take's answer.
-          saveRecording(blob, recordedDuration, companions, { micAcquired }).then(() => {
+          // Both fields travel in the closure, not through a ref: each is a
+          // fact about *this* take, resolved before the countdown. A late
+          // onStop must not be given the next take's answer — nor the answer
+          // the sidebar gives now, which is what the save path would otherwise
+          // have to read for the mode (ESCSUITE-68).
+          saveRecording(blob, recordedDuration, companions, {
+            micAcquired,
+            separateTracks,
+          }).then(() => {
             setState('idle');
           }).catch((err) => {
             // The save hook rejects rather than swallowing: without this the

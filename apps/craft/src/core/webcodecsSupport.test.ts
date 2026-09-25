@@ -47,7 +47,14 @@ describe('canRecordSeparateTracks', () => {
       expect(isWebCodecsRecordingSupported()).toBe(false)
       expect(canRecordSeparateTracks()).toBe(false)
     } finally {
-      g.VideoEncoder = saved
+      // Put the key back as it was, the way `recorder-factory.test.ts` does it.
+      // Assigning `saved` when there was nothing there leaves an own property
+      // present with the value `undefined`, which is a different global from the
+      // one this test found — and `'X' in globalThis` is a question this module
+      // asks of one of its two globals already.
+      if (saved === undefined) delete g.VideoEncoder
+      else g.VideoEncoder = saved
     }
+    expect('VideoEncoder' in g).toBe(saved !== undefined)
   })
 })

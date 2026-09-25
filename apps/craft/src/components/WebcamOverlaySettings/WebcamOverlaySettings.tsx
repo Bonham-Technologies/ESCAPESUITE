@@ -108,7 +108,10 @@ export function WebcamOverlaySettings({
           ))}
         </div>
 
-        <div className={styles.sourceToggle} title={separateTracksReason ?? SEPARATE_TRACKS_HELP}>
+        <div
+          className={styles.separateTracksToggle}
+          title={separateTracksReason ?? SEPARATE_TRACKS_HELP}
+        >
           <span className={styles.sourceLabel}>Record webcam as a separate track</span>
           <button
             className={`${styles.toggle} ${config.separateTracks ? styles.active : ''}`}

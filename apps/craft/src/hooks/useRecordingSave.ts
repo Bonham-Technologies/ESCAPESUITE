@@ -17,7 +17,7 @@ import {
   buildSourceVideo,
   buildRecordingEntry,
   resolveHasAudio,
-  type CapturedAudio,
+  type CapturedTake,
 } from '../utils/recordingMetadata';
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { NOT_SEEKABLE, SEPARATE_TRACK_NOT_SAVED } from '../utils/notices';
@@ -37,8 +37,8 @@ export interface RecordingSaveDeps {
 
 // The argument type travels with the save signature, so it is re-exported
 // here; it is declared beside `resolveHasAudio`, which is the only thing that
-// reads it.
-export type { CapturedAudio };
+// reads its audio half.
+export type { CapturedTake };
 
 /** Save a finished take. `recordedDuration` is what the recorder timed. */
 export type SaveRecording = (
@@ -50,11 +50,13 @@ export type SaveRecording = (
    */
   companions?: CompanionPart[] | null,
   /**
-   * What the take captured. Optional so the three-argument call still reads,
-   * and it claims no microphone when nothing says otherwise: a default of
-   * `true` would be exactly the bug this argument exists to delete.
+   * What the take was resolved to be. Optional so the three-argument call still
+   * reads, and every field defaults to the modest answer: no microphone,
+   * because a default of `true` would be exactly the bug this argument exists to
+   * delete, and not separate tracks, because a take nobody said that about is
+   * one file.
    */
-  captured?: CapturedAudio
+  captured?: CapturedTake
 ) => Promise<void>;
 
 export function useRecordingSave({
@@ -70,7 +72,7 @@ export function useRecordingSave({
     rawBlob: Blob,
     recordedDuration: number,
     companions?: CompanionPart[] | null,
-    captured: CapturedAudio = { micAcquired: false }
+    captured: CapturedTake = { micAcquired: false, separateTracks: false }
   ) => {
     setState('saving');
 
@@ -163,7 +165,18 @@ export function useRecordingSave({
     // its own, and the camera's part carries `false`. All of them are written
     // here rather than in two passes so a half-saved take cannot reach the
     // library.
-    const isCompanionTake = companions != null && companions.length > 0;
+    // Resolved by the controller before the countdown and carried here, rather
+    // than inferred from the list that arrived (ESCSUITE-68): every way the
+    // recorder can lose *all* of a take's companions delivers the same `null`
+    // an ordinary take delivers, and such a take is still a separate-tracks
+    // take — its primary is still named by its own `takeId`, still carries the
+    // role, and still carries the geometry the camera was framed at, which is
+    // the only record of it that survives. `config.separateTracks` would be a
+    // different question: what the sidebar asks for now. The companions are
+    // still enough on their own — the only caller today always says so, and
+    // the arm is kept for a test that hands parts over without the mode.
+    const isCompanionTake =
+      captured.separateTracks || (companions != null && companions.length > 0);
     const overlayPlacement = isCompanionTake
       ? {
           position: config.webcamPosition,

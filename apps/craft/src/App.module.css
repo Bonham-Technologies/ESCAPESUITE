@@ -599,6 +599,22 @@
   color: var(--text-muted);
 }
 
+/* The "Record webcam as a separate track" row (ESCSUITE-14). Laid out exactly
+   like a source row, but it is not one: it chooses how the take is recorded,
+   not which source it records. The four declarations are copied from
+   `.sourceToggle` rather than composed from it because the two are only
+   coincidentally identical — and because sharing the class was a real trap:
+   several e2e specs address a source row as
+   `[class*="sourceToggle"]` filtered by text, and this row's own text contains
+   "webcam", so the shared class re-pointed two of those locators onto this
+   button during ESCSUITE-14 (ESCSUITE-68). */
+.separateTracksToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+}
+
 .sourceLabel {
   display: flex;
   align-items: center;
