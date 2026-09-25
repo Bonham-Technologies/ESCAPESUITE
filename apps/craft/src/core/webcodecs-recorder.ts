@@ -161,7 +161,12 @@ interface AudioCompanionPipeline extends CompanionPipelineBase {
   readonly role: 'mic' | 'system';
   encoder: AudioEncoder | null;
   packetSource: EncodedAudioPacketSource | null;
-  /** Kept so `cleanup()` can disconnect it; the node is otherwise write-only. */
+  /**
+   * Kept so `cleanup()` can disconnect it — and read by `onaudioprocess` as its
+   * own gate: `null` means this pipeline has finished with the node, which is
+   * how an `ended` track or a failed encoder stops the callback without waiting
+   * for the audio thread to notice the disconnect.
+   */
   processor: ScriptProcessorNode | null;
   /**
    * Microseconds of audio this pipeline has encoded — its own presentation
@@ -238,6 +243,40 @@ export class WebCodecsRecorder {
   // Every extra file this take is producing beside the primary, in role order.
   // Empty for every take that is not in separate-tracks mode.
   private companions: CompanionPipeline[] = [];
+
+  /**
+   * Every codec this take constructed, in construction order, whether or not
+   * it is still reachable through the field that owns it.
+   *
+   * A separate-tracks take builds five — two `VideoEncoder`s and three
+   * `AudioEncoder`s — and `stop()` only closes them on the way to a finished
+   * file. A take that is *cancelled* or that fails never reaches those
+   * flushes, and a pipeline that gives up has its `encoder` field nulled, so
+   * neither the fields nor `companions` can answer "what is still open?".
+   * This list can, and `cleanup()` closes whatever it holds (see
+   * `closeCodecs`).
+   */
+  private codecs: Array<VideoEncoder | AudioEncoder> = [];
+
+  /**
+   * Every Mediabunny `Output` this take constructed, in construction order.
+   *
+   * Same reason: a cancelled take leaves up to four of them started and never
+   * finalized, and Mediabunny holds each one's encoders and its target open
+   * until it is told the file is over. `cleanup()` cancels the ones still
+   * sitting at `'started'`.
+   */
+  private outputs: Output[] = [];
+
+  /**
+   * Every `MediaStreamAudioSourceNode` this take connected — the two taps that
+   * feed the mix, the mixed destination the primary encoder reads, and one per
+   * audio companion.
+   *
+   * A source node is released only when its `AudioContext` closes, so it
+   * outlives the pipeline that built it; `cleanup()` disconnects the lot.
+   */
+  private sourceNodes: MediaStreamAudioSourceNode[] = [];
 
   // Audio capture
   private audioWorklet: ScriptProcessorNode | null = null;
@@ -329,7 +368,8 @@ export class WebCodecsRecorder {
     if (screenStream && config.systemAudioEnabled) {
       const systemAudioTrack = screenStream.getAudioTracks()[0];
       if (systemAudioTrack) {
-        const systemSource = this.audioContext.createMediaStreamSource(
+        const systemSource = this.createSourceNode(
+          this.audioContext,
           new MediaStream([systemAudioTrack])
         );
         systemSource.connect(destination);
@@ -341,7 +381,7 @@ export class WebCodecsRecorder {
 
     // Add microphone audio if available
     if (micStream && config.microphoneEnabled) {
-      const micSource = this.audioContext.createMediaStreamSource(micStream);
+      const micSource = this.createSourceNode(this.audioContext, micStream);
       micSource.connect(destination);
 
       // Set up analyser for microphone
@@ -403,16 +443,18 @@ export class WebCodecsRecorder {
 
     // Set up audio encoder if we have audio
     if (this.audioSource) {
-      this.audioEncoder = new AudioEncoder({
-        output: async (chunk, meta) => {
-          if (this.audioSource) {
-            await this.audioSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-          }
-        },
-        error: (e) => {
-          console.error('Audio encoder error:', e);
-        },
-      });
+      this.audioEncoder = this.registerCodec(
+        new AudioEncoder({
+          output: async (chunk, meta) => {
+            if (this.audioSource) {
+              await this.audioSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+            }
+          },
+          error: (e) => {
+            console.error('Audio encoder error:', e);
+          },
+        })
+      );
 
       await this.audioEncoder.configure({
         codec: 'opus',
@@ -485,15 +527,16 @@ export class WebCodecsRecorder {
     }
 
     const settings = track.getSettings();
-    // The reader is taken before the guarded section on purpose: getting a
-    // reader off a fresh processor's readable cannot fail on its own, and
-    // holding it here means the catch below has exactly one definite thing to
-    // release — the camera — rather than a set of maybes.
+    // The reader and the muxer's object graph are both built before the guarded
+    // section on purpose: neither getting a reader off a fresh processor's
+    // readable nor constructing an Output can fail on its own, and holding them
+    // here means the catch below has exactly two definite things to release —
+    // the camera and the output — rather than a set of maybes.
     const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    const { output, target, packetSource } = this.createVideoOutput();
 
     let companion: VideoCompanionPipeline;
     try {
-      const { output, target, packetSource } = this.createVideoOutput();
       // No audio track: the mix stays on the primary output, and the audio
       // companions are their own outputs.
       await output.start();
@@ -529,9 +572,10 @@ export class WebCodecsRecorder {
     } catch (e) {
       console.warn(`${COMPANION_PARTS.webcam.trackLabel} track could not be set up:`, e);
       // Nothing downstream can reach this half any more — it was never pushed
-      // onto `companions`, so `stop()` and `cleanup()` both skip it — so let
-      // the camera go here. An Output that was started is abandoned
-      // unfinalized, exactly as a companion that encoded no frame is.
+      // onto `companions`, so `stop()` and `cleanup()` both skip it — so
+      // release it here: the camera, and the output, which Mediabunny is
+      // otherwise left holding open for the whole take.
+      await this.cancelOutput(output);
       try {
         await reader.cancel();
       } catch {
@@ -542,12 +586,26 @@ export class WebCodecsRecorder {
 
     this.companions.push(companion);
 
-    // A camera that stops is not a take that stops: end this pipeline and let
-    // the screen keep recording. stop() then finalizes a shorter companion, or
-    // none at all if no frame ever arrived.
+    this.watchCompanionTrack(companion, track);
+  }
+
+  /**
+   * A companion's source stopping is not the take stopping: end that one
+   * pipeline and let the screen keep recording. `stop()` then finalizes a
+   * shorter part, or none at all if nothing was ever encoded — and the
+   * controller, which counted the parts the take asked for, is what tells the
+   * user (`SEPARATE_TRACK_NOT_SAVED`).
+   *
+   * Every companion gets one, camera and microphone alike: an unplugged
+   * microphone leaves a live `MediaStreamAudioSourceNode` feeding silence into
+   * a `ScriptProcessorNode` that goes on firing, so without this the part came
+   * out as long as the take and inaudible for most of it.
+   */
+  private watchCompanionTrack(companion: CompanionPipeline, track: MediaStreamTrack): void {
+    const { trackLabel } = COMPANION_PARTS[companion.role];
     const companionEnded = () => {
-      console.warn(`Webcam track ended: ${track.label}`);
-      companion.readerActive = false;
+      console.warn(`${trackLabel} track ended: ${track.label}`);
+      this.endCompanion(companion);
     };
     track.addEventListener('ended', companionEnded);
     this.trackEndedHandlers.set(track, companionEnded);
@@ -608,15 +666,13 @@ export class WebCodecsRecorder {
     track: MediaStreamTrack
   ): Promise<void> {
     const { trackLabel } = COMPANION_PARTS[role];
+    // Built before the guarded section, exactly as the webcam companion's is:
+    // nothing here can fail on its own, and holding the output out here means
+    // the catch below has one definite thing to release.
+    const { output, target, packetSource } = this.createAudioOutput();
     let companion: AudioCompanionPipeline;
 
     try {
-      const target = new BufferTarget();
-      const output = new Output({ format: new WebMOutputFormat(), target });
-      const packetSource = new EncodedAudioPacketSource('opus');
-      // One audio track and no video track at all: every ARTIST read path and
-      // CRAFT's own converter are single-track by construction.
-      output.addAudioTrack(packetSource);
       await output.start();
 
       companion = {
@@ -632,7 +688,7 @@ export class WebCodecsRecorder {
         failed: false,
       };
 
-      const encoder = new AudioEncoder({
+      const encoder = this.registerCodec(new AudioEncoder({
         output: async (chunk, meta) => {
           // Read through the pipeline rather than captured, because cleanup()
           // nulls it: an encoder output that lands after a take has been torn
@@ -647,7 +703,7 @@ export class WebCodecsRecorder {
           console.warn(`${trackLabel} track encoder failed: ${e.message}`);
           this.failCompanion(companion);
         },
-      });
+      }));
 
       await encoder.configure({
         codec: 'opus',
@@ -658,6 +714,7 @@ export class WebCodecsRecorder {
       companion.encoder = encoder;
     } catch (e) {
       console.warn(`${trackLabel} track could not be set up:`, e);
+      await this.cancelOutput(output);
       return;
     }
 
@@ -666,11 +723,26 @@ export class WebCodecsRecorder {
     // 48kHz, ~85ms chunks — rather than an AudioWorklet, because this class
     // has exactly one audio-capture mechanism and a second one in the same
     // take would be two things to keep in step for no gain.
-    const source = context.createMediaStreamSource(new MediaStream([track]));
+    const source = this.createSourceNode(context, new MediaStream([track]));
     const processor = context.createScriptProcessor(4096, 2, 2);
+    // Owned by the pipeline from the moment it exists, because the callback
+    // below reads it as its gate: a disconnected node is one this pipeline has
+    // finished with, and `endCompanion` / `failCompanion` are what disconnect
+    // it. Chrome stops firing `onaudioprocess` on a node with no downstream
+    // connection, but a gate that depends on the audio thread noticing is not
+    // a gate — and the encoder is deliberately kept alive after an `ended`, so
+    // `stop()` can still flush the tail of the part.
+    companion.processor = processor;
 
     processor.onaudioprocess = (event) => {
-      if (!this.isRecordingActive || this.isPausedState || !companion.encoder) return;
+      if (
+        !this.isRecordingActive ||
+        this.isPausedState ||
+        !companion.processor ||
+        !companion.encoder
+      ) {
+        return;
+      }
 
       const leftChannel = event.inputBuffer.getChannelData(0);
       const rightChannel = event.inputBuffer.getChannelData(1);
@@ -692,8 +764,15 @@ export class WebCodecsRecorder {
           data: planarData,
         });
 
-        companion.encoder.encode(audioData);
-        audioData.close();
+        // try/finally, because `encode()` throws on a codec that has been
+        // closed under us: `close()` as the next statement leaked the decoded
+        // buffer once per callback, ~11.7 times a second, for as long as the
+        // encoder kept refusing.
+        try {
+          companion.encoder.encode(audioData);
+        } finally {
+          audioData.close();
+        }
 
         companion.timestampUs += (numberOfFrames / this.sampleRate) * 1_000_000;
         companion.encodedCount++;
@@ -704,16 +783,19 @@ export class WebCodecsRecorder {
 
     source.connect(processor);
     processor.connect(context.destination);
-    companion.processor = processor;
 
     this.companions.push(companion);
+    this.watchCompanionTrack(companion, track);
   }
 
   /** Read every video companion's track into its own encoder, on the shared clock. */
   private startCompanionCaptures(): void {
     for (const companion of this.companions) {
-      if (companion.kind !== 'video' || !companion.reader) continue;
-      const reader = companion.reader;
+      if (companion.kind !== 'video') continue;
+      // Non-null for a video companion's whole life: `initializeCompanion`
+      // always sets it and only `releaseCompanionReader` clears it, from
+      // `stop()` and `cleanup()` — both of which are after `start()`.
+      const reader = companion.reader!;
       void this.captureFromTrackProcessor(
         reader,
         companion.timing,
@@ -730,29 +812,45 @@ export class WebCodecsRecorder {
    * Give up on one companion without touching the take: stop reading its
    * source, and leave it out of what `stop()` delivers.
    *
-   * Marking it failed is only half of it — the pipeline's own loop has to stop
-   * too, or the cheapest possible failure becomes the most expensive thing in
-   * the take. For a video companion that is `readerActive`, which ends
-   * `captureFromTrackProcessor`. For an audio companion it is the processor and
-   * the encoder: a WebCodecs error *closes* the codec, so every later buffer
-   * would interleave 4096 frames into a fresh 32KB planar array, build an
-   * `AudioData`, throw `InvalidStateError` out of `encode()` — leaking that
-   * `AudioData`, because `close()` is the statement after it — and log once per
-   * buffer, ~11.7 times a second for the rest of the take. Nulling the encoder
-   * stops the callback at its existing gate; disconnecting the node means it is
-   * not left driving a callback that only ever returns at its first line.
+   * Marking it failed is only half of it — the pipeline's own capture has to
+   * stop too, or the cheapest possible failure becomes the most expensive thing
+   * in the take, so this is `endCompanion()` plus the flag. For an audio
+   * companion the encoder is nulled on top: a WebCodecs error *closes* the
+   * codec, so every later buffer would interleave 4096 frames into a fresh 32KB
+   * planar array, build an `AudioData`, throw `InvalidStateError` out of
+   * `encode()` and log once per buffer, ~11.7 times a second for the rest of the
+   * take. (The `AudioData` itself is closed in a `finally` now, so that much no
+   * longer leaks — but the work is still wasted.) An *ended* track, by contrast,
+   * keeps its encoder, because `stop()` still has to flush the tail of a part
+   * that is worth delivering.
    *
    * `flushCompanions` already skips a null encoder and `finalizeCompanions`
    * already skips a failed companion, so nothing downstream changes.
    */
   private failCompanion(companion: CompanionPipeline): void {
     companion.failed = true;
+    this.endCompanion(companion);
+    if (companion.kind === 'audio') companion.encoder = null;
+  }
+
+  /**
+   * Stop one companion's capture without giving up on what it has already
+   * encoded — the difference between this and `failCompanion` is exactly the
+   * `failed` flag, so `stop()` still finalizes a part here and leaves it out
+   * there.
+   *
+   * For a video companion that is `readerActive`, which ends
+   * `captureFromTrackProcessor`; for an audio one it is the
+   * `ScriptProcessorNode`, which only stops firing once it is disconnected
+   * from the graph. The encoder is deliberately left alone: `stop()` still has
+   * to flush it to get the tail of the part into the file.
+   */
+  private endCompanion(companion: CompanionPipeline): void {
     if (companion.kind === 'video') {
       companion.readerActive = false;
     } else {
       companion.processor?.disconnect();
       companion.processor = null;
-      companion.encoder = null;
     }
   }
 
@@ -796,10 +894,19 @@ export class WebCodecsRecorder {
   private async finalizeCompanions(): Promise<CompanionPart[]> {
     const parts: CompanionPart[] = [];
     for (const companion of this.companions) {
-      if (companion.failed || companion.encodedCount === 0) continue;
+      // Both non-null for every companion on this list: only `cleanup()` nulls
+      // them, and it runs after this.
+      const output = companion.output!;
+      if (companion.failed || companion.encodedCount === 0) {
+        // Not a part — but Mediabunny is still holding a started output's
+        // encoders and its target open, and nothing else will ever tell it the
+        // file is over.
+        await this.cancelOutput(output);
+        continue;
+      }
       try {
-        await companion.output?.finalize();
-        const buffer = companion.target?.buffer;
+        await output.finalize();
+        const buffer = companion.target!.buffer;
         if (!buffer) continue;
         parts.push({
           role: companion.role,
@@ -834,7 +941,68 @@ export class WebCodecsRecorder {
     const output = new Output({ format: new WebMOutputFormat(), target });
     const packetSource = new EncodedVideoPacketSource('vp9');
     output.addVideoTrack(packetSource, { frameRate: this.frameRate });
+    this.outputs.push(output);
     return { output, target, packetSource };
+  }
+
+  /**
+   * A WebM output with one Opus audio track and no video track at all: every
+   * ARTIST read path and CRAFT's own converter are single-track by
+   * construction, which is the whole reason an audio companion is its own file.
+   */
+  private createAudioOutput(): {
+    output: Output;
+    target: BufferTarget;
+    packetSource: EncodedAudioPacketSource;
+  } {
+    const target = new BufferTarget();
+    const output = new Output({ format: new WebMOutputFormat(), target });
+    const packetSource = new EncodedAudioPacketSource('opus');
+    output.addAudioTrack(packetSource);
+    this.outputs.push(output);
+    return { output, target, packetSource };
+  }
+
+  /**
+   * Tell Mediabunny that an output which will never be finalized is over,
+   * releasing its encoders and closing its target.
+   *
+   * Swallowed into a warning on purpose: every caller is already on a path
+   * where something was given up, and the primary blob — which may well be
+   * finished and about to be delivered — must never be lost to a muxer that
+   * would not let go. Safe on an output that was never started, and a no-op on
+   * one that is finalizing or finalized, so `cleanup()`'s sweep cannot undo a
+   * finished file.
+   */
+  private async cancelOutput(output: Output): Promise<void> {
+    try {
+      await output.cancel();
+    } catch (e) {
+      console.warn('An abandoned output could not be cancelled:', e);
+    }
+  }
+
+  /**
+   * Remember a codec so `cleanup()` can close it, and hand it straight back.
+   *
+   * Registered at *construction*, before its `configure()` is awaited, which is
+   * what makes a `dispose()` landing inside that await safe: the field it will
+   * be assigned to is cleared by `cleanup()` and then written again, but the
+   * codec itself was already on this list and is already closed.
+   */
+  private registerCodec<T extends VideoEncoder | AudioEncoder>(codec: T): T {
+    this.codecs.push(codec);
+    return codec;
+  }
+
+  /** A source node on this stream, remembered so `cleanup()` can disconnect it. */
+  private createSourceNode(
+    context: AudioContext,
+    stream: MediaStream
+  ): MediaStreamAudioSourceNode {
+    const node = context.createMediaStreamSource(stream);
+    this.sourceNodes.push(node);
+    return node;
   }
 
   /**
@@ -856,15 +1024,17 @@ export class WebCodecsRecorder {
     height: number,
     onEncoderError: (error: DOMException) => void
   ): Promise<VideoEncoder> {
-    const encoder = new VideoEncoder({
-      output: async (chunk, meta) => {
-        const source = sourceOf();
-        if (source) {
-          await source.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-        }
-      },
-      error: onEncoderError,
-    });
+    const encoder = this.registerCodec(
+      new VideoEncoder({
+        output: async (chunk, meta) => {
+          const source = sourceOf();
+          if (source) {
+            await source.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          }
+        },
+        error: onEncoderError,
+      })
+    );
 
     await encoder.configure({
       codec: 'vp09.00.10.08', // VP9 Profile 0
@@ -883,7 +1053,7 @@ export class WebCodecsRecorder {
   private setupAudioCapture(): void {
     if (!this.audioContext || !this.mixedAudioStream) return;
 
-    const source = this.audioContext.createMediaStreamSource(this.mixedAudioStream);
+    const source = this.createSourceNode(this.audioContext, this.mixedAudioStream);
 
     // Use ScriptProcessorNode for audio capture
     // Buffer size of 4096 samples at 48kHz = ~85ms chunks
@@ -913,8 +1083,14 @@ export class WebCodecsRecorder {
           data: planarData,
         });
 
-        this.audioEncoder.encode(audioData);
-        audioData.close();
+        // try/finally for the same reason the audio companion's is: `encode()`
+        // throws on a codec that has been closed under us, and `close()` as the
+        // next statement leaked the decoded buffer once per callback.
+        try {
+          this.audioEncoder.encode(audioData);
+        } finally {
+          audioData.close();
+        }
 
         this.audioTimestamp += (numberOfFrames / this.sampleRate) * 1_000_000;
       } catch (e) {
@@ -1239,21 +1415,10 @@ export class WebCodecsRecorder {
     }
 
     // Cancel frame reader (MediaStreamTrackProcessor-based)
-    if (this.frameReader) {
-      try {
-        await this.frameReader.cancel();
-      } catch {
-        // Ignore cancel errors
-      }
-    }
+    await this.releaseFrameReader();
 
     for (const companion of this.companions) {
-      if (companion.kind !== 'video' || !companion.reader) continue;
-      try {
-        await companion.reader.cancel();
-      } catch {
-        // Ignore cancel errors
-      }
+      if (companion.kind === 'video') await this.releaseCompanionReader(companion);
     }
 
     try {
@@ -1294,6 +1459,54 @@ export class WebCodecsRecorder {
     } finally {
       this.cleanup();
     }
+  }
+
+  /**
+   * Cancel the primary's frame reader and drop it.
+   *
+   * Dropping it is the point: `stop()` releases the reader and then `cleanup()`
+   * runs from its `finally`, and a reader that is still on the field is
+   * cancelled a second time for nothing. It also makes the field's `null`
+   * honest — "released" rather than "never had one".
+   */
+  private async releaseFrameReader(): Promise<void> {
+    const reader = this.frameReader;
+    if (!reader) return;
+    this.frameReader = null;
+    try {
+      await reader.cancel();
+    } catch {
+      // Ignore cancel errors: the reader is being let go either way.
+    }
+  }
+
+  /** The same for one video companion's reader — and the camera behind it. */
+  private async releaseCompanionReader(companion: VideoCompanionPipeline): Promise<void> {
+    const reader = companion.reader;
+    if (!reader) return;
+    companion.reader = null;
+    try {
+      await reader.cancel();
+    } catch {
+      // Ignore cancel errors: the pipeline is being let go either way.
+    }
+  }
+
+  /**
+   * Close every codec this take constructed that is not closed already.
+   *
+   * `stop()` flushes and closes them itself on the way to a finished file, so
+   * on that path this finds nothing to do. Every other way out of a take —
+   * cancelled, a start that failed, a pipeline that gave up — reaches none of
+   * those flushes, and each codec left open is a hardware encoder session held
+   * until the page goes away. The `state` guard is not optional: `close()` on
+   * an already-closed codec throws `InvalidStateError`.
+   */
+  private closeCodecs(): void {
+    for (const codec of this.codecs) {
+      if (codec.state !== 'closed') codec.close();
+    }
+    this.codecs.length = 0;
   }
 
   /**
@@ -1411,20 +1624,31 @@ export class WebCodecsRecorder {
     }
 
     // Clean up MediaStreamTrackProcessor resources
-    if (this.frameReader) {
-      try {
-        this.frameReader.cancel().catch(() => {});
-      } catch {
-        // Ignore errors
-      }
-      this.frameReader = null;
-    }
+    void this.releaseFrameReader();
     this.trackProcessor = null;
+
+    // Every codec and every started output, whichever way the take ended. On a
+    // normal stop() both of these find their work already done — the encoders
+    // are closed and the outputs finalized — and on a cancelled or failed take
+    // they are the only thing that releases them.
+    this.closeCodecs();
+    for (const output of this.outputs) {
+      // Exactly the ones still mid-file: 'finalized' and 'canceled' are done
+      // with, and an output that never started holds nothing.
+      if (output.state === 'started') void this.cancelOutput(output);
+    }
+    this.outputs.length = 0;
 
     if (this.audioWorklet) {
       this.audioWorklet.disconnect();
       this.audioWorklet = null;
     }
+
+    // A source node is released only when the AudioContext closes, which is
+    // late for the mix's taps and never for a companion's — its pipeline is
+    // gone long before the take is.
+    for (const node of this.sourceNodes) node.disconnect();
+    this.sourceNodes.length = 0;
 
     if (this.audioContext) {
       this.audioContext.close();
@@ -1448,15 +1672,10 @@ export class WebCodecsRecorder {
     this.trackEndedHandlers.clear();
 
     for (const companion of this.companions) {
-      if (companion.kind === 'video' && companion.reader) {
-        try {
-          companion.reader.cancel().catch(() => {});
-        } catch {
-          // Ignore errors
-        }
-      }
-      if (companion.kind === 'audio' && companion.processor) {
-        companion.processor.disconnect();
+      if (companion.kind === 'video') {
+        void this.releaseCompanionReader(companion);
+      } else {
+        companion.processor?.disconnect();
         companion.processor = null;
       }
       companion.encoder = null;

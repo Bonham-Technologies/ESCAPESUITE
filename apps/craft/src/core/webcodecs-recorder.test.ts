@@ -805,6 +805,21 @@ describe('WebCodecsRecorder', () => {
       expect(consoleError).toHaveBeenCalledWith('Audio encoding error:', expect.any(Error))
     })
 
+    it('closes the AudioData of a mixed buffer whose encode throws', () => {
+      // The mirror of the audio companion's guard (ESCSUITE-66): `close()` used
+      // to be the statement *after* `encode()`, so a throw leaked the decoded
+      // buffer — once per ScriptProcessor callback, ~11.7 times a second.
+      recorder.start()
+      lastAudioEncoder().failAt = 'encodeThrow'
+      const node = lastAudioContext().scriptProcessors[0]
+
+      node.onaudioprocess!({ inputBuffer: createAudioBufferDouble({ length: 4 }) })
+
+      const audioData = getCreatedFrames('AudioData')
+      expect(audioData).toHaveLength(1)
+      expect(audioData[0].closed).toBe(true)
+    })
+
     it('logs an asynchronous audio encoder error', () => {
       lastAudioEncoder().emitError('audio boom')
       expect(consoleError).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
@@ -1135,6 +1150,34 @@ describe('WebCodecsRecorder', () => {
         recorder.dispose()
         recorder.dispose()
       }).not.toThrow()
+    })
+
+    it('closes an encoder that finishes configuring after dispose()', async () => {
+      // `this.videoEncoder` is assigned only once `configure()` resolves, so a
+      // dispose() that lands inside that await used to clear the field and
+      // then have an *open* encoder assigned straight back over the top of it
+      // — a hardware encoder session nothing would ever close. The encoder is
+      // registered at construction, before the await, so cleanup() already
+      // knows about the one that is still configuring.
+      const g = globalThis as unknown as Record<string, unknown>
+      const Installed = g.VideoEncoder as typeof VideoEncoderDouble
+      class DisposingEncoder extends Installed {
+        configure(config: unknown): void {
+          super.configure(config)
+          // Synchronously inside the `await encoder.configure(...)` that
+          // initialize() is sitting on.
+          recorder.dispose()
+        }
+      }
+      g.VideoEncoder = DisposingEncoder
+      try {
+        await recorder.initialize(screenStream, null, null, defaultConfig)
+      } finally {
+        g.VideoEncoder = Installed
+      }
+
+      expect(lastVideoEncoder().closeCalls).toBe(1)
+      expect(lastVideoEncoder().state).toBe('closed')
     })
 
     it('works without any callbacks registered', async () => {
@@ -1948,6 +1991,265 @@ describe('WebCodecsRecorder', () => {
       for (const node of processors) {
         expect(node.disconnect).toHaveBeenCalledTimes(1)
       }
+    })
+
+    // --- resource hygiene (ESCSUITE-66) -----------------------------------
+    //
+    // None of these is visible to a user who records, stops and saves: they
+    // are what a *cancelled* or *failed* take leaves behind. A separate-tracks
+    // take holds five codecs, four Mediabunny outputs, five audio source nodes
+    // and two frame readers, and every one of them used to survive a dispose()
+    // until the page itself went away.
+
+    it('closes every codec it constructed when the take is cancelled', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      recorder.dispose()
+
+      // Exact conservation: five codecs constructed — the screen's and the
+      // webcam's VideoEncoders, and an AudioEncoder each for the mix, the
+      // microphone and the system audio — and five closed, exactly once each.
+      // A close per codec also proves the guard: close() on an
+      // already-closed codec throws InvalidStateError in a real browser.
+      const codecs = [...VideoEncoderDouble.instances, ...AudioEncoderDouble.instances]
+      expect(codecs).toHaveLength(5)
+      expect(codecs.map(c => c.closeCalls)).toEqual([1, 1, 1, 1, 1])
+      expect(codecs.every(c => c.state === 'closed')).toBe(true)
+    })
+
+    it('closes each codec exactly once when the take is stopped and then disposed', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      await recorder.stop()
+      recorder.dispose()
+
+      // stop() flushes and closes every codec itself, so the teardown that
+      // follows it — twice over, from stop()'s own finally and then from
+      // dispose() — must find nothing left to close.
+      const codecs = [...VideoEncoderDouble.instances, ...AudioEncoderDouble.instances]
+      expect(codecs.map(c => c.closeCalls)).toEqual([1, 1, 1, 1, 1])
+    })
+
+    it('cancels the output of a companion abandoned during setup', async () => {
+      const restore = refuseEncoderConfigure(2)
+      try {
+        await recorder.initialize(screenStream, webcamStream, null, separateConfig)
+      } finally {
+        restore()
+      }
+
+      // The webcam's output was started and nothing downstream can reach it
+      // any more — it was never pushed onto `companions`. Mediabunny is still
+      // holding its encoders and its target open until it is told the file is
+      // over.
+      const [primary, abandoned] = getMediabunnyState().outputs
+      expect(abandoned.startCalls).toBe(1)
+      expect(abandoned.cancelCalls).toBe(1)
+      expect(abandoned.state).toBe('canceled')
+      // ...and the take's own output is untouched.
+      expect(primary.cancelCalls).toBe(0)
+      expect(primary.state).toBe('started')
+    })
+
+    it('cancels the output of a companion that encoded nothing', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      await recorder.stop()
+
+      // Outputs are primary, webcam, microphone, system audio. The webcam and
+      // the microphone encoded nothing, so they are left out of the take —
+      // which is not the same as leaving their muxers running.
+      const outputs = getMediabunnyState().outputs
+      expect(outputs.map(o => o.finalizeCalls)).toEqual([1, 0, 0, 1])
+      expect(outputs.map(o => o.cancelCalls)).toEqual([0, 1, 1, 0])
+      expect(outputs.map(o => o.state)).toEqual([
+        'finalized',
+        'canceled',
+        'canceled',
+        'finalized',
+      ])
+    })
+
+    it('cancels every output a cancelled take started', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      recorder.dispose()
+
+      // Exact: four outputs started, four cancelled, none finalized. A
+      // cancelled take has no file to write, but Mediabunny does not know that
+      // until it is told.
+      const outputs = getMediabunnyState().outputs
+      expect(outputs).toHaveLength(4)
+      expect(outputs.map(o => o.cancelCalls)).toEqual([1, 1, 1, 1])
+      expect(outputs.every(o => o.finalizeCalls === 0)).toBe(true)
+    })
+
+    it('warns when an abandoned output cannot be cancelled', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      await flush()
+
+      // The microphone companion got no buffer, so its output is cancelled
+      // rather than finalized — and a cancel that throws must cost the take
+      // nothing at all.
+      getMediabunnyState().outputs[2].cancel.mockRejectedValueOnce(new Error('muxer wedged'))
+
+      await recorder.stop()
+
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'An abandoned output could not be cancelled:',
+        expect.any(Error)
+      )
+      expect(callbacks.onStop).toHaveBeenCalled()
+      expect(callbacks.onError).not.toHaveBeenCalled()
+    })
+
+    it('cancels each frame reader exactly once, across stop() and cleanup()', async () => {
+      await recorder.initialize(screenStream, webcamStream, null, separateConfig)
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      await flush()
+
+      await recorder.stop()
+      recorder.dispose()
+
+      // Two readers, two cancels: stop() releases each one and *drops* it, so
+      // the two cleanups that follow — stop()'s own finally, then dispose() —
+      // find nothing left to cancel. The reader field being nullable and never
+      // nulled is what made the `if (companion.reader)` guards unreachable.
+      expect(processor.cancelCalls()).toBe(2)
+    })
+
+    it('closes the AudioData of a companion buffer whose encode throws', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      AudioEncoderDouble.instances[1].failAt = 'encodeThrow'
+
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+
+      // Exact conservation: one AudioData built, one closed. `close()` used to
+      // be the statement *after* `encode()`, so a throw skipped it and pinned
+      // a decoded buffer in memory — ~11.7 times a second for as long as the
+      // encoder kept refusing.
+      const audioData = getCreatedFrames('AudioData')
+      expect(audioData).toHaveLength(1)
+      expect(audioData[0].closed).toBe(true)
+      expect(consoleError).toHaveBeenCalledWith('Audio encoding error:', expect.any(Error))
+    })
+
+    it('disconnects every audio source node it connected', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+
+      recorder.dispose()
+
+      // Five source nodes: the system tap and the microphone tap that feed the
+      // mix, the mixed destination the primary encoder reads, and one per
+      // audio companion. Exactly one disconnect each — a
+      // MediaStreamAudioSourceNode is otherwise released only when the
+      // AudioContext closes, and the companions' nodes outlive their own
+      // pipelines.
+      const nodes = lastAudioContext().mediaStreamSourceNodes
+      expect(nodes).toHaveLength(5)
+      for (const node of nodes) expect(node.disconnect).toHaveBeenCalledTimes(1)
+    })
+
+    it('ends the microphone part where the mic died and keeps recording the screen', async () => {
+      const micTrack = createTrackDouble('audio', {
+        id: 'mic-audio',
+        label: 'MacBook Pro Microphone',
+      })
+      await recorder.initialize(screenStream, webcamStream, createStreamDouble([micTrack]), {
+        ...separateConfig,
+        microphoneEnabled: true,
+        systemAudioEnabled: true,
+      })
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+
+      micTrack.end()
+
+      // An unplugged microphone is not a take that stops: this pipeline ends
+      // where its source did, and nothing more reaches its encoder.
+      expect(consoleWarn).toHaveBeenCalledWith('Microphone track ended: MacBook Pro Microphone')
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(1)
+      // ...while the screen take, and every other pipeline, carries on.
+      expect(recorder.isRecording()).toBe(true)
+      expect(consoleWarn).not.toHaveBeenCalledWith(
+        'Video track ended during recording, stopping...'
+      )
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[2].encodes).toHaveLength(1)
+
+      await recorder.stop()
+
+      // The part is finalized *short* rather than thrown away: one buffer of
+      // microphone is still a microphone track. (No webcam frame was ever
+      // pushed, so that companion is the one left out here.)
+      const companions = callbacks.onStop.mock.calls[0][1]
+      expect(companions.map((part: { role: string }) => part.role)).toEqual(['mic', 'system'])
+    })
+
+    it('leaves out a microphone part whose track died before its first buffer', async () => {
+      const micTrack = createTrackDouble('audio', { id: 'mic-audio', label: 'Headset' })
+      await recorder.initialize(screenStream, webcamStream, createStreamDouble([micTrack]), {
+        ...separateConfig,
+        microphoneEnabled: true,
+        systemAudioEnabled: true,
+      })
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+
+      micTrack.end()
+      // A buffer that arrives after the track died — a dead
+      // MediaStreamAudioSourceNode goes on feeding its ScriptProcessor
+      // silence — must not turn "no microphone" into a file full of nothing.
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      await recorder.stop()
+
+      // Nothing was encoded, so there is no part — an empty Opus file is a
+      // library row that plays nothing. The controller, which counted the
+      // parts the take asked for, is what tells the user
+      // (SEPARATE_TRACK_NOT_SAVED); the recorder just delivers a shorter list.
+      const companions = callbacks.onStop.mock.calls[0][1]
+      expect(companions.map((part: { role: string }) => part.role)).toEqual(['webcam', 'system'])
     })
 
     // --- per-role "could not be set up" warning (ESCSUITE-72 item 3) -------
