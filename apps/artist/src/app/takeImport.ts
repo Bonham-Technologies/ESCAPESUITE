@@ -18,7 +18,8 @@
 //     nothing on the timeline and a failure toast — which is worse than a take
 //     that arrived a track short and said so;
 //   * a `getThumbnail` that rejects, for any part including the primary, costs
-//     that part its picture and nothing else. A thumbnail is cosmetic;
+//     that part its picture and nothing else. A thumbnail is cosmetic, and so
+//     is the waveform read beside it;
 //   * a `getAllVideoMetadata` that rejects costs the take its *companions*,
 //     not the take: the scan is only how siblings are found, so a take whose
 //     library cannot be read degrades to the single file every
@@ -34,6 +35,7 @@
 import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage';
 import { resolveStoredDuration } from '../core/videoProcessor';
 import { isPlaceableRole, orderTakeParts } from '../utils/takeParts';
+import { extractWaveformData } from '../utils/waveform';
 import type { SourceVideo, TakeClipPart } from '../store/types';
 
 /** What the handoff produced: what to place, what to revoke, what was lost. */
@@ -70,6 +72,54 @@ async function resolvePartDuration(
   } catch {
     return takeDuration;
   }
+}
+
+/**
+ * The waveform to give a part, and what it says about `hasAudio`.
+ *
+ * The media library computes one for every file it imports — `processVideoFile`
+ * and `processAudioFile` both call `extractWaveformData` before the entry
+ * reaches the store (`core/videoProcessor.ts`) — so the handoff has to as well,
+ * or a take's audio parts sit on the timeline as bare rectangles until
+ * something else asks for one (ESCSUITE-71). The same function, so there is one
+ * waveform implementation; at the same point in the sequence, so the peaks
+ * arrive with the library entry rather than after the clip.
+ *
+ * Three rules:
+ *
+ *   * a part ESCAPECRAFT recorded with **no audio** is not decoded at all. Its
+ *     `hasAudio: false` is the capture's own answer (ESCSUITE-60/62) — the
+ *     webcam half of a separate-tracks take has no audio track by construction,
+ *     the whole mix staying on the primary — and decoding a video file to be
+ *     told that is the one cost worth refusing;
+ *   * `hasAudio` is only ever turned **on**. ESCAPECRAFT's flag says whether
+ *     audio was captured, while the extractor's is a silence heuristic (peaks
+ *     over 0.001), so letting it answer would have a take recorded in a quiet
+ *     room lose the flag slice 3 went to the trouble of persisting. It does
+ *     fill one in where there is none — a recording stored before ESCSUITE-60
+ *     — because `TimelineTrack` needs the flag *and* the peaks, so a waveform
+ *     computed without it would never be drawn;
+ *   * a waveform that cannot be read costs the part its waveform and nothing
+ *     else, exactly like a thumbnail. `extractWaveformData` already answers a
+ *     file with no decodable audio with no peaks rather than throwing, so this
+ *     arm is for the caller's side of the boundary — a blob whose bytes cannot
+ *     be read into memory at all.
+ */
+async function resolvePartWaveform(
+  blob: Blob,
+  part: SourceVideo
+): Promise<Pick<SourceVideo, 'waveformData' | 'hasAudio'> | undefined> {
+  if (part.hasAudio === false) return undefined;
+
+  const { peaks, hasAudio } = await extractWaveformData(blob).catch((error) => {
+    console.warn('Could not read the waveform for a take part:', error);
+    return { peaks: [], hasAudio: false };
+  });
+  // No peaks rather than an empty array: nothing downstream has to tell a
+  // waveform that could not be read from one that is zero samples long.
+  if (peaks.length === 0) return undefined;
+
+  return { waveformData: peaks, hasAudio: hasAudio || part.hasAudio };
 }
 
 /**
@@ -141,6 +191,10 @@ export async function importTake(
   try {
     for (const part of parts) {
       const isPrimary = part.id === metadata.id;
+      // The primary's bytes are already in hand; a companion's are the ones
+      // storage hands back below. Both are needed twice over — for the length
+      // and for the waveform — so the blob is carried rather than re-read.
+      let blob = primary.blob;
       let duration = takeDuration;
 
       if (!isPrimary) {
@@ -156,6 +210,7 @@ export async function importTake(
           missingParts += 1;
           continue;
         }
+        blob = stored.blob;
         duration = await resolvePartDuration(stored.blob, part, takeDuration);
       }
 
@@ -164,7 +219,12 @@ export async function importTake(
       const thumbnailUrl = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : undefined;
       if (thumbnailUrl) thumbnailUrls.push(thumbnailUrl);
 
-      addSourceVideo({ ...part, duration, thumbnailUrl });
+      // Cosmetic in the same way, and computed here so it arrives with the
+      // library entry — which is where the media library's own import path puts
+      // it (ESCSUITE-71).
+      const waveform = await resolvePartWaveform(blob, part);
+
+      addSourceVideo({ ...part, duration, thumbnailUrl, ...waveform });
 
       // A companion with a role this build does not know is in the library, where
       // it can be seen and deleted, and nowhere else: where it belongs on the
