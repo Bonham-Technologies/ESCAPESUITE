@@ -1,0 +1,87 @@
+// The order the library shows takes in.
+//
+// A take can be several rows now (ESCSUITE-14), and a row's neighbours are
+// what say so: the webcam half is meaningful directly under its primary and
+// meaningless three takes away. The ordering is pure over the list so it can be
+// asserted without storage — `loadRecordings` is the only caller.
+import { describe, it, expect } from 'vitest'
+import { orderTakes } from './takeOrder'
+import type { Recording } from '../store/types'
+
+function row(id: string, createdAt: number, extra: Partial<Recording> = {}): Recording {
+  return {
+    id,
+    name: id,
+    duration: 6,
+    createdAt,
+    size: 1024,
+    hasWebcam: false,
+    hasAudio: true,
+    ...extra,
+  }
+}
+
+describe('orderTakes', () => {
+  it('keeps newest-first when every take is a single file', () => {
+    expect(orderTakes([row('older', 1000), row('newer', 3000)]).map(r => r.id)).toEqual([
+      'newer',
+      'older',
+    ])
+  })
+
+  it('puts a companion directly under its primary, wherever the primary sorts', () => {
+    const ordered = orderTakes([
+      row('webcam-of-old', 1001, { takeId: 'old', role: 'webcam', hasWebcam: true }),
+      row('newest', 5000),
+      row('old', 1000, { takeId: 'old', role: 'screen', hasWebcam: true }),
+    ])
+
+    // The companion follows its primary rather than its own timestamp: it was
+    // saved a moment after the primary, so by date alone it would sort above it.
+    expect(ordered.map(r => r.id)).toEqual(['newest', 'old', 'webcam-of-old'])
+  })
+
+  it('demotes a primary whose companion is gone, without touching it', () => {
+    const ordered = orderTakes([row('take', 2000, { takeId: 'take', role: 'screen', hasWebcam: true })])
+
+    // Deleting the companion alone leaves the primary's own takeId in place;
+    // with nothing grouped under it the row is a plain take again, so nothing
+    // has to rewrite stored metadata on a delete.
+    expect(ordered.map(r => r.id)).toEqual(['take'])
+  })
+
+  it('still shows an orphan companion, newest-first, after the takes', () => {
+    const ordered = orderTakes([
+      row('orphan', 4000, { takeId: 'deleted-primary', role: 'webcam', hasWebcam: true }),
+      row('take', 2000),
+    ])
+
+    // A companion whose primary is missing — storage cleared mid-take, or a
+    // half-saved take — is a row rather than a hidden file the user cannot
+    // delete.
+    expect(ordered.map(r => r.id)).toEqual(['take', 'orphan'])
+  })
+
+  it('orders two companions of the same take oldest-first under their primary', () => {
+    // Two companions sharing one takeId, so both the "a group already exists"
+    // branch and the companions' own sort comparator actually run.
+    const ordered = orderTakes([
+      row('second-companion', 1002, { takeId: 'take', role: 'webcam', hasWebcam: true }),
+      row('first-companion', 1001, { takeId: 'take', role: 'webcam', hasWebcam: true }),
+      row('take', 1000, { takeId: 'take', role: 'screen', hasWebcam: true }),
+    ])
+
+    expect(ordered.map(r => r.id)).toEqual(['take', 'first-companion', 'second-companion'])
+  })
+
+  it('sorts multiple orphan companions newest-first', () => {
+    // Two orphans, so the orphan sort's comparator actually runs (Array.sort
+    // never calls a comparator for a single-element array).
+    const ordered = orderTakes([
+      row('older-orphan', 1000, { takeId: 'gone-1', role: 'webcam', hasWebcam: true }),
+      row('newer-orphan', 2000, { takeId: 'gone-2', role: 'webcam', hasWebcam: true }),
+    ])
+
+    expect(ordered.map(r => r.id)).toEqual(['newer-orphan', 'older-orphan'])
+  })
+})

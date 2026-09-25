@@ -16,6 +16,7 @@ import {
   createBlobUrl,
   hasSpaceForRecording,
 } from '../core/storage';
+import { orderTakes } from '../utils/takeOrder';
 
 /**
  * What one take is assumed to cost, for the storage headroom check.
@@ -139,19 +140,24 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
           createdAt: m.recordedAt || 0,
           size: m.size,
           thumbnailUrl,
-          hasWebcam: false, // TODO: Store this in metadata
+          // Written by `buildSourceVideo` since ESCSUITE-14. Before that
+          // nothing stored said whether a take had a camera in it, which is
+          // what the `hasWebcam: false // TODO` here used to admit; a record
+          // saved then keeps the answer it used to get.
+          hasWebcam: m.hasWebcam ?? false,
           // Written by `buildSourceVideo` since ESCSUITE-60. Recordings saved
           // before that have no field at all, and keep the answer they used
           // to get — a take that did have audio would otherwise lose its M4A
           // button for good, which is worse than the stale offer.
           hasAudio: m.hasAudio ?? true,
+          ...(m.takeId !== undefined ? { takeId: m.takeId } : {}),
+          ...(m.role !== undefined ? { role: m.role } : {}),
         };
       })
     );
 
-    // Sort by creation date, newest first
-    recordings.sort((a, b) => b.createdAt - a.createdAt);
-
-    set({ recordings });
+    // Newest take first, each take's companion rows directly under its primary
+    // — the grouping ESCSUITE-14's save path wrote, rebuilt for the panel.
+    set({ recordings: orderTakes(recordings) });
   },
 }));
