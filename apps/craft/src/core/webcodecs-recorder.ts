@@ -15,9 +15,11 @@ import {
 import type {
   AudioLevels,
   CompanionPart,
+  CompanionRole,
   RecorderStopCallback,
   RecordingConfig,
 } from '../store/types';
+import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 
 // Moved to `webcodecsSupport.ts` so a component can ask without importing the
@@ -95,33 +97,58 @@ function newFrameTiming(): FrameTiming {
 }
 
 /**
- * The webcam half of a separate-tracks take: its own encoder, its own
- * Mediabunny output, its own frame reader — and the recorder's *shared* clock,
- * which is what makes the two blobs frame-aligned by construction.
+ * What every companion pipeline has, whatever it is recording: its own
+ * Mediabunny output, its own count of what it encoded, and its own answer to
+ * "is this worth storing?".
+ *
+ * A companion never shares an output with another, which is the whole point:
+ * every ARTIST read path and CRAFT's own converter are single-track by
+ * construction (see the design spec, §2), so a second track inside one file
+ * would be silently lost rather than visibly missing.
+ */
+interface CompanionPipelineBase {
+  readonly role: CompanionRole;
+  output: Output | null;
+  target: BufferTarget | null;
+  /**
+   * Units this pipeline encoded — video frames, or audio buffers. 0 means
+   * there is nothing worth storing: an empty row in the library and a second
+   * ARTIST source with nothing in it are worse than no companion.
+   */
+  encodedCount: number;
+  /**
+   * Set once this pipeline has given up — its encoder errored, or would not
+   * flush. The blob is then not worth delivering, so `stop()` leaves it out of
+   * the list; the take itself is unaffected.
+   */
+  failed: boolean;
+}
+
+/**
+ * The webcam half of a separate-tracks take: its own encoder, its own output,
+ * its own frame reader — and the recorder's *shared* clock, which is what
+ * makes the blobs frame-aligned by construction.
  *
  * Track-processor only, deliberately: the primary pipeline keeps its
  * `<video>`+canvas fallback because a take has to record something, while the
  * opt-in mode is gated on `canRecordSeparateTracks()` and simply records the
  * screen alone where the API is missing.
  */
-interface CompanionPipeline {
+interface VideoCompanionPipeline extends CompanionPipelineBase {
+  readonly kind: 'video';
+  readonly role: 'webcam';
   readonly track: MediaStreamTrack;
   encoder: VideoEncoder | null;
-  output: Output | null;
-  target: BufferTarget | null;
   packetSource: EncodedVideoPacketSource | null;
   reader: ReadableStreamDefaultReader<VideoFrame> | null;
   readerActive: boolean;
   timing: FrameTiming;
-  /** Frames this pipeline encoded; 0 means there is no companion worth storing. */
-  frameCount: number;
-  /**
-   * Set once this pipeline has given up — its encoder errored, or would not
-   * flush. The blob is then not worth delivering, so `stop()` reports no
-   * companion; the take itself is unaffected.
-   */
-  failed: boolean;
 }
+
+// `AudioCompanionPipeline` arrives with the mic and system-audio companions;
+// the union has one member here so nothing in this build pretends to handle a
+// kind that does not exist yet.
+type CompanionPipeline = VideoCompanionPipeline;
 
 /** Bitrate for a video pipeline of this size. */
 function videoBitrateFor(width: number, height: number): number {
@@ -181,8 +208,9 @@ export class WebCodecsRecorder {
   private frameReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
   private frameReaderActive = false;
 
-  // The webcam half of a separate-tracks take, or null for every other take.
-  private companion: CompanionPipeline | null = null;
+  // Every extra file this take is producing beside the primary, in role order.
+  // Empty for every take that is not in separate-tracks mode.
+  private companions: CompanionPipeline[] = [];
 
   // Audio capture
   private audioWorklet: ScriptProcessorNode | null = null;
@@ -430,141 +458,156 @@ export class WebCodecsRecorder {
     // release — the camera — rather than a set of maybes.
     const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
 
+    let companion: VideoCompanionPipeline;
     try {
       const { output, target, packetSource } = this.createVideoOutput();
-      // No audio track: slice 1 keeps the whole mix on the primary output.
+      // No audio track: the mix stays on the primary output, and the audio
+      // companions are their own outputs.
       await output.start();
 
-      this.companion = {
+      companion = {
+        kind: 'video',
+        role: 'webcam',
         track,
-        encoder: await this.createVideoEncoder(
-          () => this.companion?.packetSource ?? null,
-          settings.width || 1280,
-          settings.height || 720,
-          // ...and the companion's encoder dying costs the take its companion
-          // and nothing else. Routing this to onError would have the controller
-          // dispose the recorder and throw away a screen recording that is
-          // still being made.
-          (e) => {
-            console.warn(`Webcam track encoder failed: ${e.message}`);
-            this.failCompanion();
-          }
-        ),
+        encoder: null,
         output,
         target,
         packetSource,
         reader,
         readerActive: false,
         timing: newFrameTiming(),
-        frameCount: 0,
+        encodedCount: 0,
         failed: false,
       };
+
+      companion.encoder = await this.createVideoEncoder(
+        () => companion.packetSource,
+        settings.width || 1280,
+        settings.height || 720,
+        // ...and the companion's encoder dying costs the take its companion
+        // and nothing else. Routing this to onError would have the controller
+        // dispose the recorder and throw away a screen recording that is
+        // still being made.
+        (e) => {
+          console.warn(`${COMPANION_PARTS.webcam.trackLabel} track encoder failed: ${e.message}`);
+          this.failCompanion(companion);
+        }
+      );
     } catch (e) {
-      console.warn('Webcam track could not be set up:', e);
-      // Nothing downstream can reach this half any more — `companion` stays
-      // null, so `stop()` and `cleanup()` both skip it — so let the camera go
-      // here. An Output that was started is abandoned unfinalized, exactly as
-      // a companion that encoded no frame is.
+      console.warn(`${COMPANION_PARTS.webcam.trackLabel} track could not be set up:`, e);
+      // Nothing downstream can reach this half any more — it was never pushed
+      // onto `companions`, so `stop()` and `cleanup()` both skip it — so let
+      // the camera go here. An Output that was started is abandoned
+      // unfinalized, exactly as a companion that encoded no frame is.
       try {
         await reader.cancel();
       } catch {
         // Ignore cancel errors: the pipeline is being abandoned either way.
       }
-      this.companion = null;
       return;
     }
+
+    this.companions.push(companion);
 
     // A camera that stops is not a take that stops: end this pipeline and let
     // the screen keep recording. stop() then finalizes a shorter companion, or
     // none at all if no frame ever arrived.
     const companionEnded = () => {
       console.warn(`Webcam track ended: ${track.label}`);
-      if (this.companion) this.companion.readerActive = false;
+      companion.readerActive = false;
     };
     track.addEventListener('ended', companionEnded);
     this.trackEndedHandlers.set(track, companionEnded);
   }
 
-  /** Read the webcam track into its own encoder, on the shared clock. */
-  private async startCompanionCapture(): Promise<void> {
-    const companion = this.companion;
-    if (!companion?.reader) return;
-
-    await this.captureFromTrackProcessor(
-      companion.reader,
-      companion.timing,
-      () => companion.readerActive,
-      () => companion.encoder,
-      () => {
-        companion.frameCount++;
-      }
-    );
-  }
-
-  /**
-   * Give up on the webcam half without touching the take: stop reading the
-   * camera, and make `stop()` report no companion.
-   */
-  private failCompanion(): void {
-    if (this.companion) {
-      this.companion.readerActive = false;
-      this.companion.failed = true;
+  /** Read every video companion's track into its own encoder, on the shared clock. */
+  private startCompanionCaptures(): void {
+    for (const companion of this.companions) {
+      if (companion.kind !== 'video' || !companion.reader) continue;
+      const reader = companion.reader;
+      void this.captureFromTrackProcessor(
+        reader,
+        companion.timing,
+        () => companion.readerActive,
+        () => companion.encoder,
+        () => {
+          companion.encodedCount++;
+        }
+      );
     }
   }
 
   /**
-   * Flush and close the companion's encoder, giving up the companion rather
-   * than the take if it refuses.
+   * Give up on one companion without touching the take: stop reading its
+   * source, and leave it out of what `stop()` delivers.
+   */
+  private failCompanion(companion: CompanionPipeline): void {
+    companion.failed = true;
+    if (companion.kind === 'video') companion.readerActive = false;
+  }
+
+  /**
+   * Flush and close every companion's encoder, giving up a companion rather
+   * than the take if one refuses.
    *
    * Its own try/catch, and not `stop()`'s: this runs *before* the primary's
    * `output.finalize()`, so a rejection that escaped here would skip the
    * finalize, land in the outer catch and report `onError` over a screen
-   * recording that was already complete.
+   * recording that was already complete. Per companion rather than around the
+   * loop, so one pipeline's refusal does not cost the others theirs.
    */
-  private async flushCompanion(): Promise<void> {
-    const encoder = this.companion?.encoder;
-    if (!encoder || encoder.state === 'closed') return;
-
-    try {
-      await encoder.flush();
-      encoder.close();
-    } catch (e) {
-      console.warn('The webcam companion could not be flushed:', e);
-      this.failCompanion();
+  private async flushCompanions(): Promise<void> {
+    for (const companion of this.companions) {
+      const encoder = companion.encoder;
+      if (!encoder || encoder.state === 'closed') continue;
+      try {
+        await encoder.flush();
+        encoder.close();
+      } catch (e) {
+        console.warn(
+          `The ${COMPANION_PARTS[companion.role].label} companion could not be flushed:`,
+          e
+        );
+        this.failCompanion(companion);
+      }
     }
   }
 
   /**
-   * Finalize the webcam half and hand back its blob, or null when there is
-   * nothing worth storing.
+   * Finalize every companion and hand back the parts worth storing, in the
+   * order the pipelines were built — which is role order.
    *
-   * Three cases end as "no companion" rather than as an empty row in the
-   * library: a webcam that delivered no frame (the take recorded the screen
-   * alone), a pipeline that already gave up (`failed`), and a muxer that could
-   * not write. The last is swallowed into a warning on purpose — the primary
-   * blob is the take, and losing it because the companion's finalize threw
-   * would be the worse outcome by far.
+   * Three cases end as "not a part" rather than as an empty row in the
+   * library: a pipeline that encoded nothing, one that already gave up
+   * (`failed`), and a muxer that could not write. The last is swallowed into a
+   * warning on purpose — the primary blob is the take, and losing it because a
+   * companion's finalize threw would be the worse outcome by far.
    */
-  private async finalizeCompanion(): Promise<CompanionPart | null> {
-    const companion = this.companion;
-    if (!companion || companion.failed || companion.frameCount === 0) return null;
-
-    try {
-      await companion.output?.finalize();
-      const buffer = companion.target?.buffer;
-      if (!buffer) return null;
-      // 0 in this slice: one clock, one start(), both pipelines' first frame
-      // stamped from the same origin. Written down rather than assumed, because
-      // the audio companions (slice 3) will not all start at zero.
-      return {
-        role: 'webcam',
-        blob: new Blob([buffer], { type: 'video/webm' }),
-        startOffset: 0,
-      };
-    } catch (e) {
-      console.warn('The webcam companion could not be finalized:', e);
-      return null;
+  private async finalizeCompanions(): Promise<CompanionPart[]> {
+    const parts: CompanionPart[] = [];
+    for (const companion of this.companions) {
+      if (companion.failed || companion.encodedCount === 0) continue;
+      try {
+        await companion.output?.finalize();
+        const buffer = companion.target?.buffer;
+        if (!buffer) continue;
+        parts.push({
+          role: companion.role,
+          blob: new Blob([buffer], {
+            type: companion.kind === 'video' ? 'video/webm' : 'audio/webm',
+          }),
+          // 0 for every pipeline in this build: one clock, one start(), every
+          // first unit stamped from the same origin.
+          startOffset: 0,
+        });
+      } catch (e) {
+        console.warn(
+          `The ${COMPANION_PARTS[companion.role].label} companion could not be finalized:`,
+          e
+        );
+      }
     }
+    return parts;
   }
 
   /**
@@ -705,12 +748,14 @@ export class WebCodecsRecorder {
       this.startVideoElementCapture(frameDurationUs);
     }
 
-    if (this.companion) {
-      this.companion.timing = newFrameTiming();
-      this.companion.frameCount = 0;
-      this.companion.readerActive = true;
-      void this.startCompanionCapture();
+    for (const companion of this.companions) {
+      companion.encodedCount = 0;
+      if (companion.kind === 'video') {
+        companion.timing = newFrameTiming();
+        companion.readerActive = true;
+      }
     }
+    this.startCompanionCaptures();
 
     this.callbacks.onStart?.();
   }
@@ -971,7 +1016,9 @@ export class WebCodecsRecorder {
 
     this.isRecordingActive = false;
     this.frameReaderActive = false;
-    if (this.companion) this.companion.readerActive = false;
+    for (const companion of this.companions) {
+      if (companion.kind === 'video') companion.readerActive = false;
+    }
 
     // Stop frame capture (setTimeout-based)
     if (this.frameInterval) {
@@ -988,9 +1035,10 @@ export class WebCodecsRecorder {
       }
     }
 
-    if (this.companion?.reader) {
+    for (const companion of this.companions) {
+      if (companion.kind !== 'video' || !companion.reader) continue;
       try {
-        await this.companion.reader.cancel();
+        await companion.reader.cancel();
       } catch {
         // Ignore cancel errors
       }
@@ -1003,7 +1051,7 @@ export class WebCodecsRecorder {
         this.videoEncoder.close();
       }
 
-      await this.flushCompanion();
+      await this.flushCompanions();
 
       if (this.audioEncoder && this.audioEncoder.state !== 'closed') {
         await this.audioEncoder.flush();
@@ -1015,7 +1063,7 @@ export class WebCodecsRecorder {
         await this.output.finalize();
       }
 
-      const companion = await this.finalizeCompanion();
+      const parts = await this.finalizeCompanions();
 
       // Get the result blob
       const buffer = this.target?.buffer;
@@ -1024,7 +1072,7 @@ export class WebCodecsRecorder {
         // A list, because a take can have up to three companions — and `null`
         // rather than `[]` for none, because that is what an ordinary take has
         // always delivered on this callback.
-        this.callbacks.onStop?.(blob, companion ? [companion] : null);
+        this.callbacks.onStop?.(blob, parts.length > 0 ? parts : null);
       } else {
         this.callbacks.onError?.(new Error('Recording failed: no data was written'));
       }
@@ -1187,21 +1235,20 @@ export class WebCodecsRecorder {
     }
     this.trackEndedHandlers.clear();
 
-    if (this.companion) {
-      const { reader } = this.companion;
-      if (reader) {
+    for (const companion of this.companions) {
+      if (companion.kind === 'video' && companion.reader) {
         try {
-          reader.cancel().catch(() => {});
+          companion.reader.cancel().catch(() => {});
         } catch {
           // Ignore errors
         }
       }
-      this.companion.encoder = null;
-      this.companion.output = null;
-      this.companion.target = null;
-      this.companion.packetSource = null;
-      this.companion = null;
+      companion.encoder = null;
+      companion.output = null;
+      companion.target = null;
+      companion.packetSource = null;
     }
+    this.companions.length = 0;
 
     this.videoEncoder = null;
     this.audioEncoder = null;
@@ -1224,7 +1271,9 @@ export class WebCodecsRecorder {
     if (this.isRecordingActive) {
       this.isRecordingActive = false;
       this.frameReaderActive = false;
-      if (this.companion) this.companion.readerActive = false;
+      for (const companion of this.companions) {
+        if (companion.kind === 'video') companion.readerActive = false;
+      }
       if (this.frameInterval) {
         clearTimeout(this.frameInterval);
       }
