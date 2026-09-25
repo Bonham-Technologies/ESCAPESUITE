@@ -751,12 +751,12 @@ the shared `editorUrl()` helper.
 
 **"Upload to host"** is the second host-routed action and the last one: an
 extra icon button on every library row, between the MP4 download and "Open in
-Editor", which posts `UPLOAD_RECORDING { id, name, blob }` to the parent — the
-stored blob itself, by structured clone, with no `arrayBuffer()` copy and no
-network of any kind. Since ESCSUITE-14 the payload may also carry `role` and
-`takeId`, added only for a row that has them, so a host that knows nothing of
-takes receives exactly what it received before (see "A take can be several
-files"). It exists **only** when CRAFT is embedded, because a host
+Editor", which posts `UPLOAD_RECORDING { id, name, blob, role?, takeId?, parts? }` to the
+parent — the stored blob itself, by structured clone, with no `arrayBuffer()`
+copy and no network of any kind. The three optional fields arrived with
+ESCSUITE-14: `role` and `takeId` on a row that has them, `parts` on a take's
+primary row, so a host that knows nothing of takes receives exactly what it
+received before (see "A take can be several files"). It exists **only** when CRAFT is embedded, because a host
 is the only thing that could receive it. `RecordingsListPanel` asks
 `isEmbedded()` and passes `onUploadToHost` only then; `RecordingsList` stays
 props-only and draws the button exactly when it has the prop, so the component
@@ -1013,9 +1013,11 @@ part alone downloads its WebM from that part's own row.
   function makes (draw the screen alone), not an error that escapes.
 - **Sync is a shared start, not a seek per frame.** Both `<video>` elements play at 1× from
   the same moment and each captured frame draws whatever the camera element is currently
-  showing. Drift within a frame is accepted; a seek per frame is the
-  minutes-instead-of-real-time cost `captureFramesViaPlayback` exists to avoid, and 33 ms
-  between two halves of one take is not visible. `startOffset` shifts the camera's time base
+  showing. The two pictures stay within the two elements' start-up latency of each other —
+  both `play()`s are issued from one synchronous block and nothing re-seeks either element
+  afterwards, so that difference is constant for the run rather than accumulating, and the code
+  bounds it no more tightly than that. A seek per frame is the minutes-instead-of-real-time
+  cost `captureFramesViaPlayback` exists to avoid. `startOffset` shifts the camera's time base
   by deferring its `play()` until the screen has played that far — it is 0 for every take
   this recorder writes (one `start()`, one clock) and is honoured because it is stored per
   part. The per-frame guard is `overlay && overlayPlaying && readyState >= 2`, and the middle

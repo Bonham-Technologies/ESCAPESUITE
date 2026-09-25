@@ -267,7 +267,7 @@ describe('composite (screen + webcam) per-frame work', () => {
     expect(count('restore')).toBe(FRAMES)
     // Exact: one clip path established per frame, and one only.
     expect(count('clip')).toBe(FRAMES)
-    // Measured 2026-09-26: 11 canvas calls per composite frame — the screen
+    // Measured 2026-09-25: 11 canvas calls per composite frame — the screen
     // draw, then save, beginPath, arc, closePath, clip, the camera draw,
     // restore, beginPath, arc, stroke. (The live compositor measures 12 for the
     // same overlay: it clears to black first, and the composite has no reason

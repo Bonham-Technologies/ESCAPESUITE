@@ -167,7 +167,7 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   CRAFT's header "Open Editor" button is deliberately *not* routed through the host — it still
   opens the editor itself when embedded. Only "Send to Editor" and "Upload to host" become
   messages.
-- **CRAFT → host (upload)**: `{ type: 'UPLOAD_RECORDING', payload: { id, name, blob } }` from a
+- **CRAFT → host (upload)**: `{ type: 'UPLOAD_RECORDING', payload: { id, name, blob, role?, takeId?, parts? } }` from a
   per-row "Upload to host" button that exists **only** when CRAFT is embedded — the host is the
   only thing that could receive it. The `Blob` goes by structured clone, so a host that cannot
   reach the shared IndexedDB (or would rather not) gets the file itself. `RecordingsListPanel`
