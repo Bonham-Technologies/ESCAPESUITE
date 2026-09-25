@@ -124,6 +124,7 @@ export function useRecordingSave({
       width: metadata.width,
       height: metadata.height,
       hasAudio,
+      hasWebcam: config.webcamEnabled,
     });
 
     await storeVideo(id, blob, sourceVideo);

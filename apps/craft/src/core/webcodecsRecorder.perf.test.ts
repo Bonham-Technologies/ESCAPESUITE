@@ -65,6 +65,7 @@ const baseConfig: RecordingConfig = {
   webcamPosition: 'bottom-right',
   webcamSize: 0.2,
   webcamShape: 'circle',
+  separateTracks: false,
 }
 
 /** Let queued microtasks (encoder outputs, the muxer) settle. */

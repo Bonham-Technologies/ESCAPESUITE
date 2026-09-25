@@ -55,6 +55,7 @@ const defaultConfig: RecordingConfig = {
   webcamPosition: 'bottom-right',
   webcamSize: 0.2,
   webcamShape: 'circle',
+  separateTracks: false,
 }
 
 /** Let queued microtasks (the frame-reader loop, encoder outputs) settle. */

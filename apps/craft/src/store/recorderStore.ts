@@ -51,6 +51,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   notice: null,
   systemAudioShared: true,
   hasStorageSpace: true,
+  hasSeparateTracksSpace: true,
 
   // Current recording data
   currentDuration: 0,

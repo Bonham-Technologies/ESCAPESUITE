@@ -33,6 +33,7 @@ const config: RecordingConfig = {
   webcamPosition: 'bottom-right',
   webcamSize: 0.2,
   webcamShape: 'circle',
+  separateTracks: false,
 }
 
 describe('Recorder audio-level monitor ceilings', () => {

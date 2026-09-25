@@ -94,6 +94,7 @@ const defaultConfig: RecordingConfig = {
   webcamSize: 0.2,
   webcamShape: 'circle',
   countdownSeconds: 3,
+  separateTracks: false,
 }
 
 describe('Recorder', () => {
