@@ -8,17 +8,6 @@
 import type { Recording } from '../store/types';
 
 /**
- * Newest take first; a take's companions immediately after its primary, in
- * role order — webcam, then mic, then system; then any companion whose primary
- * is missing.
- *
- * Sorting companions by their own `createdAt` would break the grouping: every
- * part is saved within the same millisecond or two and the companions are
- * written second, so by date alone a webcam row would float above the screen
- * row it describes — and three companions sharing one `now` would come out in
- * whatever order storage returned them, which is uuid order.
- */
-/**
  * The order a take's companions stack in, mirroring ESCAPEARTIST's
  * `utils/takeParts.ts`: the camera first, then the sound.
  *
@@ -34,6 +23,17 @@ function companionRank(role: string | undefined): number {
   return rank === -1 ? COMPANION_ROLE_ORDER.length : rank;
 }
 
+/**
+ * Newest take first; a take's companions immediately after its primary, in
+ * role order — webcam, then mic, then system; then any companion whose primary
+ * is missing.
+ *
+ * Sorting companions by their own `createdAt` would break the grouping: every
+ * part is saved within the same millisecond or two and the companions are
+ * written second, so by date alone a webcam row would float above the screen
+ * row it describes — and three companions sharing one `now` would come out in
+ * whatever order storage returned them, which is uuid order.
+ */
 export function orderTakes(recordings: Recording[]): Recording[] {
   const companionsByTake = new Map<string, Recording[]>();
   const primaries: Recording[] = [];
