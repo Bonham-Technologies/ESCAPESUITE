@@ -19,9 +19,11 @@ export const SEPARATE_TRACKS_NO_WEBCODECS_REASON =
 /**
  * The storage headroom check, run for roughly double the bitrate.
  *
- * Two encoders write two files, so the same take needs about twice the room.
- * The check errs toward letting you record (see `hasSpaceForRecording`), so
- * reaching this sentence means the browser really did say no.
+ * The two video encoders dominate the size — the webcam and any audio
+ * companions (microphone, system audio) are Opus, a rounding error next to
+ * two VP9 tracks — so the same take needs about twice the room. The check
+ * errs toward letting you record (see `hasSpaceForRecording`), so reaching
+ * this sentence means the browser really did say no.
  */
 export const SEPARATE_TRACKS_NO_SPACE_REASON =
   'Not enough storage for two tracks — delete a recording first.'

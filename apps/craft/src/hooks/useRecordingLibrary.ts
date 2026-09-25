@@ -49,9 +49,11 @@ export function useRecordingLibrary({
   // Delete a recording, and the companions that belong to it
   const handleDeleteRecording = async (id: string) => {
     // A take is one thing to delete even when it is several files: deleting the
-    // screen part takes its webcam part with it. Deleting the companion alone
-    // deletes only the companion — the primary keeps its takeId and renders as
-    // a plain take (see `utils/takeOrder.ts`), so nothing is rewritten.
+    // screen part takes its companion parts — webcam, microphone, system audio,
+    // whichever this take has — with it, cascading on takeId. Deleting a
+    // companion alone deletes only that companion — the primary keeps its
+    // takeId and renders as a plain take (see `utils/takeOrder.ts`), so
+    // nothing is rewritten.
     const companions = recordings.filter((r) => r.takeId === id && r.id !== id);
 
     await deleteVideo(id);

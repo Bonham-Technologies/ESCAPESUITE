@@ -465,9 +465,11 @@ export class WebCodecsRecorder {
    * could not be encoded would be a worse outcome than a take with no
    * companion. `canRecordSeparateTracks()` proves the two APIs exist; nothing
    * can prove in advance that the camera's dimensions are an encodable VP9
-   * config, so the failure this catch exists for is a real one. `stop()` then
-   * delivers `(blob, null)` and the controller — which knows the mode was
-   * resolved on — is what tells the user the webcam track was lost.
+   * config, so the failure this catch exists for is a real one. `stop()`
+   * then delivers whatever companions did finalize — the list in role order,
+   * up to three parts, or `null` if none did — and the controller, which
+   * knows the mode was resolved on, is what tells the user the webcam track
+   * was lost.
    */
   private async initializeCompanion(webcamStream: MediaStream): Promise<void> {
     const track = webcamStream.getVideoTracks()[0];
