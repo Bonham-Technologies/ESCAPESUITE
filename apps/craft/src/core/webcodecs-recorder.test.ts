@@ -1949,5 +1949,58 @@ describe('WebCodecsRecorder', () => {
         expect(node.disconnect).toHaveBeenCalledTimes(1)
       }
     })
+
+    // --- per-role "could not be set up" warning (ESCSUITE-72 item 3) -------
+    //
+    // Each role's setup-failure warning is `${trackLabel} track could not be
+    // set up:`, one template shared across `COMPANION_PARTS`. The webcam and
+    // microphone cases were already pinned by value elsewhere in this file;
+    // this table adds the system-audio case beside them so a fourth role
+    // added to the table later gets the same coverage rather than a grep.
+    it.each([
+      {
+        role: 'webcam',
+        message: 'Webcam track could not be set up:',
+        setup: async () => {
+          const restore = refuseEncoderConfigure(2)
+          try {
+            await recorder.initialize(screenStream, webcamStream, null, separateConfig)
+          } finally {
+            restore()
+          }
+        },
+      },
+      {
+        role: 'microphone',
+        message: 'Microphone track could not be set up:',
+        setup: async () => {
+          const restore = refuseAudioEncoderConfigure(2)
+          try {
+            await initializeWithAudioCompanions()
+          } finally {
+            restore()
+          }
+        },
+      },
+      {
+        role: 'system audio',
+        message: 'System audio track could not be set up:',
+        setup: async () => {
+          const restore = refuseAudioEncoderConfigure(3)
+          try {
+            await initializeWithAudioCompanions()
+          } finally {
+            restore()
+          }
+        },
+      },
+    ])('warns "$message" when the $role pipeline cannot be set up', async ({ setup, message }) => {
+      await setup()
+
+      expect(consoleWarn).toHaveBeenCalledWith(message, expect.any(Error))
+      // A companion that cannot be set up costs that one track, never the
+      // take — the same contract for all three roles.
+      expect(callbacks.onError).not.toHaveBeenCalled()
+    })
   })
 })
