@@ -529,4 +529,29 @@ describe('a take recorded as separate tracks', () => {
 
     expect(screen.queryByText(/not included yet/)).toBeNull()
   })
+
+  it('carries both notes at once when the browser note and the take note both apply', () => {
+    // The app-wide note ("this MP4 will be silent") and the row's own note
+    // ("screen-only for now") are about different things and can both be true
+    // at the same time — aria-describedby has to list both ids, not just the
+    // last one computed.
+    const silent = 'MP4 will have no audio in this browser (no AAC encoder)'
+    renderList([primary, companion], { mp4Note: silent })
+
+    const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' })
+    const describedBy = mp4.getAttribute('aria-describedby')!
+    const ids = describedBy.split(' ')
+    expect(ids).toHaveLength(2)
+
+    const [appWideId, takeNoteId] = ids
+    expect(document.getElementById(appWideId)).toHaveTextContent(silent)
+    expect(document.getElementById(takeNoteId)).toHaveTextContent(
+      'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
+    )
+
+    // M4A carries the same two ids — the two notes are about the take and the
+    // browser, not about which button is being read.
+    const m4a = screen.getByRole('button', { name: 'Download Standup Demo as audio (M4A)' })
+    expect(m4a.getAttribute('aria-describedby')).toBe(describedBy)
+  })
 })
