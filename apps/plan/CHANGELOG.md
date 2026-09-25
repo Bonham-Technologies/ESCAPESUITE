@@ -1,5 +1,12 @@
 # @escapesuite/plan
 
+## 2.7.0
+
+### Patch Changes
+
+- Updated dependencies [7ce6894]
+  - @escapesuite/shared@1.4.0
+
 ## 2.4.2
 
 ### Patch Changes
