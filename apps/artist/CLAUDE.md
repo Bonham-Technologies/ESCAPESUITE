@@ -263,14 +263,22 @@ placed before it and leave no undo step back to it. So the two halves of the imp
 the parts join the **media library** as soon as they are read (restoring re-adds its own source
 videos and `addSourceVideo` is idempotent by id, so nothing there is at risk), while the
 **timeline** placement and its toast are held in a ref and drained by a second effect once
-`sessionPromptOpen` goes false — whichever way the prompt was answered. Declining places the
-take as usual; accepting restores first and then appends the take after the restored clips (the
-append-at-end rule), one undo step, and since the restore's `clearHistory()` has already run
-that step still undoes it. `App` passes its own `showSessionPrompt` — component state, not a
-store selector, so this costs `App` no subscription. With no saved session the prompt never
-opens and the take is placed on the same tick it always was. A host that drives its own state
-should still pass `?suppressRestore=1`, which switches the prompt and the autosave off
-together.
+`sessionDecisionPending` goes false — whichever way the question was answered. Declining places
+the take as usual; accepting restores first and then appends the take after the restored clips
+(the append-at-end rule), one undo step, and since the restore's `clearHistory()` has already
+run that step still undoes it.
+
+`sessionDecisionPending` is `!sessionRestored`, **not** `showSessionPrompt`, and the difference
+is the whole point: for the first moments of a cold load `getSessionState()` has not come back,
+so no prompt is on screen while the question is very much unanswered — and a take placed in
+that window is discarded by the "Restore" the user has not been offered yet. `sessionRestored`
+(`app/useSessionRestore.ts`) is false from the first render until the question settles one of
+five ways: suppressed, nothing stored, the read failed, restored, declined. It is the flag the
+session autosave already gates on, and its own doc comment calls it settled-ness; there is no
+second flag. Both it and `showSessionPrompt` are `App` component state, so this costs `App` no
+store subscription. With the question settled — every `?suppressRestore=1` load included — the
+take is placed on the same tick it always was. A host that drives its own state should still
+pass `?suppressRestore=1`, which switches the prompt and the autosave off together.
 
 The whole path is pinned by `app/takeImport.test.ts`, `app/useHostIntegration.test.ts`,
 `store/__tests__/projectStore.takePlacement.test.ts` and `utils/overlayPlacement.test.ts` /

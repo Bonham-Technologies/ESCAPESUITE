@@ -39,13 +39,21 @@ export interface HostIntegrationDeps {
   setProject: (project: Project) => void;
   showNotification: ShowNotification;
   /**
-   * The "Resume Previous Session?" prompt is up, so the timeline is still
+   * The startup session question is **unanswered**, so the timeline is still
    * being negotiated and a handed-over take must not be written to it yet.
    *
-   * `App`'s own `showSessionPrompt` — component state, not a store selector, so
-   * this costs `App` no new subscription (`App.rerender.test.tsx`).
+   * Deliberately wider than "the prompt is on screen": for the first moments of
+   * a load the prompt has not appeared *yet* — `getSessionState()` has not come
+   * back — and a take placed in that window is discarded by the "Restore" that
+   * follows it just as surely. `App` fills this from `useSessionRestore`'s
+   * `sessionRestored`, which is false from the first render until the question
+   * is settled one of five ways (suppressed, nothing stored, the read failed,
+   * restored, declined), so it covers both halves of the wait.
+   *
+   * Component state in `App`, not a store selector, so this costs `App` no new
+   * subscription (`App.rerender.test.tsx`).
    */
-  sessionPromptOpen: boolean;
+  sessionDecisionPending: boolean;
 }
 
 /** A take that has arrived in the library and is waiting for the timeline. */
@@ -61,7 +69,7 @@ export function useHostIntegration({
   addSourceVideo,
   setProject,
   showNotification,
-  sessionPromptOpen,
+  sessionDecisionPending,
 }: HostIntegrationDeps): void {
   // The take the handoff imported, held until the session question is settled.
   // `useSessionRestore`'s "Restore" does setProject + clearHistory, so a take
@@ -71,8 +79,10 @@ export function useHostIntegration({
   // Waiting is what keeps both: restore first, append after.
   const pendingTake = useRef<PendingTake | null>(null);
   // Read by the import when its storage reads land, so a take that arrives
-  // while the prompt is up parks itself instead of racing it.
-  const sessionPromptOpenRef = useRef(sessionPromptOpen);
+  // before the question is answered parks itself instead of racing it. It
+  // starts `true` on a cold load, which is what stops an import that beats the
+  // session read to the finish from being placed and then replaced.
+  const sessionDecisionPendingRef = useRef(sessionDecisionPending);
 
   /**
    * Put the waiting take on the timeline, and only then say so.
@@ -224,10 +234,10 @@ export function useHostIntegration({
                 name: videoData.metadata.name,
                 missingParts: take.missingParts,
               };
-              // With no saved session the prompt never opens, so this places
-              // the take on the same tick it always did; with one up, it is a
-              // no-op and the effect below drains it when the answer lands.
-              if (!sessionPromptOpenRef.current) placePendingTake();
+              // Once the question is settled this places the take on the same
+              // tick it always did; while it is open this is a no-op and the
+              // effect below drains it when the answer lands.
+              if (!sessionDecisionPendingRef.current) placePendingTake();
             }
           } else {
             console.error('Video not found in IndexedDB:', loadVideoId);
@@ -259,11 +269,10 @@ export function useHostIntegration({
     };
   }, []);
 
-  // The session question, answered. Runs on mount too (the prompt starts
-  // closed and opens only once storage has been read), where there is nothing
-  // waiting and this is a no-op.
+  // The session question, answered. Runs on mount too, where it is pending and
+  // there is nothing waiting, so this is a no-op both ways round.
   useEffect(() => {
-    sessionPromptOpenRef.current = sessionPromptOpen;
-    if (!sessionPromptOpen) placePendingTake();
-  }, [sessionPromptOpen, placePendingTake]);
+    sessionDecisionPendingRef.current = sessionDecisionPending;
+    if (!sessionDecisionPending) placePendingTake();
+  }, [sessionDecisionPending, placePendingTake]);
 }

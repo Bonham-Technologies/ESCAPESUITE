@@ -69,9 +69,9 @@ beforeEach(() => {
     addSourceVideo: vi.fn(),
     setProject: vi.fn(),
     showNotification: vi.fn(),
-    // No saved session is the ordinary case: the prompt never opens, so the
-    // take is placed the moment the import lands, exactly as it always was.
-    sessionPromptOpen: false,
+    // The settled case: the question is answered, so the take is placed the
+    // moment the import lands, exactly as it always was.
+    sessionDecisionPending: false,
   }
 })
 
@@ -513,9 +513,9 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       const mountBehindPrompt = async () => {
         deps = { ...deps, urlParams: { ...defaultUrlParams(), loadVideoId: 'take-1' } }
         const view = renderHook(
-          ({ sessionPromptOpen }: { sessionPromptOpen: boolean }) =>
-            useHostIntegration({ ...deps, sessionPromptOpen }),
-          { initialProps: { sessionPromptOpen: true } }
+          ({ sessionDecisionPending }: { sessionDecisionPending: boolean }) =>
+            useHostIntegration({ ...deps, sessionDecisionPending }),
+          { initialProps: { sessionDecisionPending: true } }
         )
         await act(async () => {
           await Promise.resolve()
@@ -525,9 +525,9 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       }
 
       /** Answer the prompt — the only thing the hook sees either way. */
-      const closePrompt = async (view: { rerender: (p: { sessionPromptOpen: boolean }) => void }) => {
+      const closePrompt = async (view: { rerender: (p: { sessionDecisionPending: boolean }) => void }) => {
         await act(async () => {
-          view.rerender({ sessionPromptOpen: false })
+          view.rerender({ sessionDecisionPending: false })
           await Promise.resolve()
         })
       }
@@ -586,13 +586,21 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
         expect(useEditorStore.getState().history.past).toHaveLength(1)
       })
 
-      it('places the take once even if the prompt is answered twice', async () => {
+    it('places the take once, however often the question is re-opened', async () => {
         seedTake()
 
         const view = await mountBehindPrompt()
         await closePrompt(view)
-        // A re-render with the prompt still closed must not place it again:
-        // the pending take is drained, not re-read.
+
+        // A full second settle cycle, not a re-render with the same value: the
+        // flag goes back to pending and settles again, so the drain really does
+        // run a second time. It must find nothing — the take was taken out of
+        // the ref, not merely read out of it — or the take is placed twice and
+        // the user is told about it twice.
+        await act(async () => {
+          view.rerender({ sessionDecisionPending: true })
+          await Promise.resolve()
+        })
         await closePrompt(view)
 
         expect(useEditorStore.getState().project.timeline.clips).toHaveLength(2)
