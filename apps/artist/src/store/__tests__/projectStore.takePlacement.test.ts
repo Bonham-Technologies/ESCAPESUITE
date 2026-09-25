@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { store, resetStoreForTest, video } from '../../test/fixtures/projectStore'
 import { overlayPlacementToTransform } from '../../utils/overlayPlacement'
+import { DEFAULT_TRANSFORM } from '../types'
 import type { Clip, TakeClipPart } from '../types'
 
 const screenPart: TakeClipPart = {
@@ -25,6 +26,23 @@ const webcamPart: TakeClipPart = {
   width: 1280,
   height: 720,
   overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+}
+
+/**
+ * The microphone half of a separate-tracks take (ESCSUITE-14 slice 3).
+ *
+ * `width: 0, height: 0` is what ESCAPECRAFT stores for a part with no picture,
+ * and `mediaType: 'audio'` is what says so — the dimensions are a consequence,
+ * not the signal (ESCSUITE-71).
+ */
+const micPart: TakeClipPart = {
+  sourceVideoId: 'mic-part',
+  name: 'Recording 1/1/2026 — microphone',
+  duration: 6,
+  startOffset: 0,
+  width: 0,
+  height: 0,
+  mediaType: 'audio',
 }
 
 /** The clips on the timeline, in the order they were placed. */
@@ -137,15 +155,68 @@ describe('placeTakeOnTimeline', () => {
     )
   })
 
+  // ESCSUITE-71. An audio part has no picture, and every consequence of that
+  // used to be an accident: it arrives 0x0, which happened to miss the frame
+  // rectangle and happened to fall through to the default transform. Both are
+  // now decisions, and `mediaType` is what states them.
+  it('gives an audio part the default transform and nothing derived from a picture', () => {
+    store().placeTakeOnTimeline([screenPart, webcamPart, micPart])
+
+    // `previewGeometry` answers no bounds for an audio clip and the renderers
+    // never draw one, so this transform is never read — but `Clip.transform` is
+    // a required field, so the clip carries the whole default rather than
+    // nothing.
+    expect(placedClips()[2].transform).toEqual({ ...DEFAULT_TRANSFORM })
+  })
+
+  it('never gives an audio part a picture transform, even one carrying a placement', () => {
+    // Nothing ESCAPECRAFT writes: the placement is stored on the primary and
+    // `takeImport` carries it onto the webcam part alone. IndexedDB is not
+    // type-checked, though, and the question this settles is which of the two
+    // fields decides — the placement or the part having no picture at all.
+    const misfiled: TakeClipPart = { ...micPart, overlayPlacement: webcamPart.overlayPlacement }
+
+    store().placeTakeOnTimeline([screenPart, misfiled])
+
+    expect(placedClips()[1].transform).toEqual({ ...DEFAULT_TRANSFORM })
+  })
+
+  it('measures the webcam corner from the take picture, not from a part that has none', () => {
+    // `takeImport` hands the primary over first, and the frame is the primary's
+    // drawn rectangle. Deriving it from `parts[0]` made that contract
+    // load-bearing in a second place: a take whose parts arrived in any other
+    // order would measure the camera's corner against a 0x0 audio part — which
+    // silently means "the whole canvas" and puts the camera in the wrong place
+    // on every take whose capture is smaller than the project.
+    const smallScreen: TakeClipPart = { ...screenPart, width: 1280, height: 720 }
+
+    store().placeTakeOnTimeline([micPart, smallScreen, webcamPart])
+
+    const webcam = placedClips()[2]
+    expect(webcam.transform).toEqual(
+      overlayPlacementToTransform(
+        webcamPart.overlayPlacement!,
+        store().project.resolution,
+        { width: webcamPart.width, height: webcamPart.height },
+        { left: 320, top: 180, width: 1280, height: 720 }
+      )
+    )
+  })
+
+  it('places a take with no picture in it at all', () => {
+    // The action assumes nothing about what a take contains: with no part that
+    // has a frame there is no rectangle to measure, and the clips are placed
+    // regardless.
+    store().placeTakeOnTimeline([micPart, { ...micPart, sourceVideoId: 'system-part' }])
+
+    expect(placedClips()).toHaveLength(2)
+    expect(placedClips().map((clip) => clip.transform)).toEqual([
+      { ...DEFAULT_TRANSFORM },
+      { ...DEFAULT_TRANSFORM },
+    ])
+  })
+
   it('gives every part its own track, in the order it was handed them', () => {
-    const micPart: TakeClipPart = {
-      sourceVideoId: 'mic-part',
-      name: 'Recording — microphone',
-      duration: 6,
-      startOffset: 0,
-      width: 0,
-      height: 0,
-    }
     store().placeTakeOnTimeline([screenPart, webcamPart, micPart])
 
     const tracks = placedClips().map((clip) => trackOf(clip).index)

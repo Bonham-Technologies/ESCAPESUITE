@@ -18,7 +18,8 @@
 //     nothing on the timeline and a failure toast — which is worse than a take
 //     that arrived a track short and said so;
 //   * a `getThumbnail` that rejects, for any part including the primary, costs
-//     that part its picture and nothing else. A thumbnail is cosmetic;
+//     that part its picture and nothing else. A thumbnail is cosmetic, and so
+//     is the waveform read beside it;
 //   * a `getAllVideoMetadata` that rejects costs the take its *companions*,
 //     not the take: the scan is only how siblings are found, so a take whose
 //     library cannot be read degrades to the single file every
@@ -34,6 +35,7 @@
 import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage';
 import { resolveStoredDuration } from '../core/videoProcessor';
 import { isPlaceableRole, orderTakeParts } from '../utils/takeParts';
+import { extractWaveformData } from '../utils/waveform';
 import type { SourceVideo, TakeClipPart } from '../store/types';
 
 /** What the handoff produced: what to place, what to revoke, what was lost. */
@@ -70,6 +72,62 @@ async function resolvePartDuration(
   } catch {
     return takeDuration;
   }
+}
+
+/** The two library fields a part's waveform decides, or nothing to change. */
+type PartWaveform = Pick<SourceVideo, 'waveformData' | 'hasAudio'> | undefined;
+
+/**
+ * The waveform to give a part, and what it says about `hasAudio`.
+ *
+ * The media library computes one for every file it imports — `processVideoFile`
+ * and `processAudioFile` both call `extractWaveformData` before the entry
+ * reaches the store (`core/videoProcessor.ts`) — so the handoff has to as well
+ * (ESCSUITE-71). Nothing recomputes one: those two import paths are the only
+ * writers of `waveformData`, so a part that arrived without one never got one,
+ * and a take's audio sat on the timeline as a bare rectangle for good. The same
+ * function, so there is one waveform implementation; at the same point in the
+ * sequence, so the peaks arrive with the library entry rather than after the
+ * clip.
+ *
+ * Three rules:
+ *
+ *   * a part ESCAPECRAFT recorded with **no audio** is not decoded at all. Its
+ *     `hasAudio: false` is the capture's own answer (ESCSUITE-60/62) — the
+ *     webcam half of a separate-tracks take has no audio track by construction,
+ *     the whole mix staying on the primary — and decoding a video file to be
+ *     told that is the one cost worth refusing;
+ *   * **`hasAudio` is the flag ESCAPECRAFT persisted where there is one, and
+ *     the peaks otherwise.** The flag says whether audio was *captured*, which
+ *     is what the field means; the extractor's own `hasAudio` is a silence
+ *     heuristic (peaks over 0.001) and is deliberately not consulted here — it
+ *     would have a take recorded in a quiet room lose the flag slice 3 went to
+ *     the trouble of persisting, and leave a *pre*-ESCSUITE-60 quiet part with
+ *     no flag at all, which is peaks `TimelineTrack` would never draw (it needs
+ *     the flag **and** the peaks). Peaks that decoded at all mean the file has
+ *     an audio track, silent or not, so they are the better answer where the
+ *     flag is missing;
+ *   * a waveform that cannot be read costs the part its waveform and nothing
+ *     else, exactly like a thumbnail. `extractWaveformData` already answers a
+ *     file with no decodable audio with no peaks rather than throwing, so this
+ *     arm is for the caller's side of the boundary — a blob whose bytes cannot
+ *     be read into memory at all.
+ */
+async function resolvePartWaveform(
+  blob: Blob,
+  part: SourceVideo
+): Promise<PartWaveform> {
+  if (part.hasAudio === false) return undefined;
+
+  const { peaks } = await extractWaveformData(blob).catch((error) => {
+    console.warn('Could not read the waveform for a take part:', error);
+    return { peaks: [] };
+  });
+  // No peaks rather than an empty array: nothing downstream has to tell a
+  // waveform that could not be read from one that is zero samples long.
+  if (peaks.length === 0) return undefined;
+
+  return { waveformData: peaks, hasAudio: part.hasAudio ?? peaks.length > 0 };
 }
 
 /**
@@ -139,8 +197,27 @@ export async function importTake(
   let missingParts = 0;
 
   try {
+    // Read the take in two passes, because the waveforms are the one expensive
+    // thing here and they do not depend on each other (ESCSUITE-71). The first
+    // pass reads storage part by part — as it always did — and *starts* each
+    // part's waveform without waiting for it; the second writes the library
+    // once every waveform has landed. So a four-part take costs one decode's
+    // wait rather than four, and the peaks still arrive **with** the library
+    // entry: one `addSourceVideo` per part, no second write, no extra undo step,
+    // and the take is placed complete.
+    const resolved: {
+      part: SourceVideo;
+      duration: number;
+      thumbnailUrl: string | undefined;
+      waveform: Promise<PartWaveform>;
+    }[] = [];
+
     for (const part of parts) {
       const isPrimary = part.id === metadata.id;
+      // The primary's bytes are already in hand; a companion's are the ones
+      // storage hands back below. Both are needed twice over — for the length
+      // and for the waveform — so the blob is carried rather than re-read.
+      let blob = primary.blob;
       let duration = takeDuration;
 
       if (!isPrimary) {
@@ -156,6 +233,7 @@ export async function importTake(
           missingParts += 1;
           continue;
         }
+        blob = stored.blob;
         duration = await resolvePartDuration(stored.blob, part, takeDuration);
       }
 
@@ -164,12 +242,20 @@ export async function importTake(
       const thumbnailUrl = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : undefined;
       if (thumbnailUrl) thumbnailUrls.push(thumbnailUrl);
 
-      addSourceVideo({ ...part, duration, thumbnailUrl });
+      // Not awaited: `resolvePartWaveform` swallows its own failures, so this
+      // promise never rejects and the parts' decodes overlap instead of queuing.
+      resolved.push({ part, duration, thumbnailUrl, waveform: resolvePartWaveform(blob, part) });
+    }
+
+    const waveforms = await Promise.all(resolved.map((entry) => entry.waveform));
+
+    for (const [index, { part, duration, thumbnailUrl }] of resolved.entries()) {
+      addSourceVideo({ ...part, duration, thumbnailUrl, ...waveforms[index] });
 
       // A companion with a role this build does not know is in the library, where
       // it can be seen and deleted, and nowhere else: where it belongs on the
       // timeline is not a question this build can answer.
-      if (!isPrimary && !isPlaceableRole(part.role)) continue;
+      if (part.id !== metadata.id && !isPlaceableRole(part.role)) continue;
 
       clipParts.push({
         sourceVideoId: part.id,
@@ -178,6 +264,13 @@ export async function importTake(
         startOffset: part.startOffset ?? 0,
         width: part.width,
         height: part.height,
+        // "This part has no picture", which is what the store needs to give an
+        // audio clip no picture transform and to keep one out of the rectangle
+        // the webcam corner is measured against (ESCSUITE-71). Carried as the
+        // stored `mediaType` rather than as the role, so the store stays free of
+        // roles, and absent on a part that *has* a picture, the way `role` and
+        // `takeId` are absent on a single-file take.
+        ...(part.mediaType === 'audio' ? { mediaType: 'audio' as const } : {}),
         // The overlay geometry is stored on the take's primary and applies to its
         // camera, so it travels onto that part here — which is what lets the
         // store place a take without knowing what a role is.

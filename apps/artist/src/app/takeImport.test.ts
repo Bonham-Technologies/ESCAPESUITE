@@ -7,13 +7,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { importTake } from './takeImport'
 import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage'
 import { resolveStoredDuration } from '../core/videoProcessor'
+import { extractWaveformData } from '../utils/waveform'
 import { sampleVideo } from '../test/appDoubles'
+import {
+  createAudioBufferDouble,
+  installAudioContextDouble,
+  type AudioContextDoubles,
+} from '../test/doubles/audio'
 import type { SourceVideo } from '../store/types'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
 vi.mock('../core/videoProcessor', async () =>
   (await import('../test/appDoubles')).videoProcessorDouble()
 )
+// The real extractor, wrapped: the waveforms below are the ones the media
+// library's own import path computes (`core/videoProcessor.ts` calls this same
+// function), decoded through the AudioContext double. The wrapper is only so
+// one test can make the call itself fail, which the extractor's own internal
+// catch otherwise makes unreachable.
+vi.mock('../utils/waveform', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/waveform')>()
+  return { ...actual, extractWaveformData: vi.fn(actual.extractWaveformData) }
+})
 
 const PLACEMENT = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
 
@@ -29,6 +44,7 @@ const primaryMetadata: SourceVideo = {
   startOffset: 0,
   overlayPlacement: PLACEMENT,
   hasWebcam: true,
+  hasAudio: true,
 }
 
 const webcamMetadata: SourceVideo = {
@@ -44,15 +60,57 @@ const webcamMetadata: SourceVideo = {
   hasAudio: false,
 }
 
+/**
+ * The microphone companion (ESCSUITE-14 slice 3): stored as audio, with no
+ * dimensions, no thumbnail and no picture of any kind.
+ */
+const micMetadata: SourceVideo = {
+  ...sampleVideo,
+  id: 'take-1-mic',
+  name: 'Screen recording — microphone',
+  duration: 6,
+  width: 0,
+  height: 0,
+  frameRate: 0,
+  mediaType: 'audio',
+  takeId: 'take-1',
+  role: 'mic',
+  startOffset: 0,
+  hasAudio: true,
+}
+
 const primary = { blob: new Blob(['screen'], { type: 'video/webm' }), metadata: primaryMetadata }
+
+/** Hand each companion its own blob, so a test can tell which was read. */
+const storedBlobs: Record<string, Blob> = {
+  'take-1-webcam': new Blob(['webcam'], { type: 'video/webm' }),
+  'take-1-mic': new Blob(['mic'], { type: 'audio/webm' }),
+}
 
 let added: SourceVideo[]
 const addSourceVideo = (video: SourceVideo) => {
   added.push(video)
 }
 
+/**
+ * A tenth of a second of sample data at 48 kHz, which is ten peaks at
+ * `extractWaveformData`'s 100-per-second — enough to be a waveform and small
+ * enough to read. Alternating, because the extractor answers `hasAudio` from
+ * the peaks it finds and silence is not audio to it.
+ */
+const PEAKS_PER_TENTH = 10
+function samples(amplitude: number): Float32Array {
+  const data = new Float32Array(4800)
+  for (let i = 0; i < data.length; i += 1) data[i] = i % 2 === 0 ? amplitude : -amplitude
+  return data
+}
+
+/** Web Audio is the browser's, so every test in this file decodes through the double. */
+let audio: AudioContextDoubles
+
 beforeEach(() => {
   added = []
+  audio = installAudioContextDouble(createAudioBufferDouble([samples(0.5)], 48000))
   vi.mocked(getAllVideoMetadata).mockResolvedValue([primaryMetadata, webcamMetadata])
   vi.mocked(getVideo).mockResolvedValue({
     blob: new Blob(['webcam'], { type: 'video/webm' }),
@@ -65,6 +123,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  audio.uninstall()
+  // The real extractor back — including any `...Once` implementation a test
+  // queued and did not consume, which `clearAllMocks` leaves in place and which
+  // would hang the next test's first decode.
+  vi.mocked(extractWaveformData).mockReset()
   vi.clearAllMocks()
 })
 
@@ -108,6 +171,27 @@ describe('importTake', () => {
         overlayPlacement: PLACEMENT,
       },
     ])
+  })
+
+  it('says which of a take parts have no picture', async () => {
+    vi.mocked(getAllVideoMetadata).mockResolvedValue([primaryMetadata, webcamMetadata, micMetadata])
+    vi.mocked(getVideo).mockImplementation((id: string) =>
+      Promise.resolve({
+        blob: storedBlobs[id],
+        metadata: id === 'take-1-mic' ? micMetadata : webcamMetadata,
+      })
+    )
+
+    const take = await importTake(primary, addSourceVideo)
+
+    // The store gives an audio part the default transform and never measures
+    // the webcam corner against it (ESCSUITE-71), and it can only do either if
+    // the handoff says which parts those are. The `width: 0, height: 0` such a
+    // part arrives with is a consequence and not a signal — a video part
+    // stored 0x0 is a corrupt record, not a sound file. Absent rather than
+    // `'video'` on the parts that have a picture, the way `role` and `takeId`
+    // are absent on a single-file take.
+    expect(take.clipParts.map((part) => part.mediaType)).toEqual([undefined, undefined, 'audio'])
   })
 
   it('refuses a take whose companion the library already holds, before it writes anything', async () => {
@@ -276,5 +360,165 @@ describe('importTake', () => {
     // The caller turns this into "Failed to load recording", which is what it
     // has always done — a take with no screen recording is not a take.
     await expect(importTake(primary, addSourceVideo)).rejects.toThrow('no duration')
+  })
+
+  /**
+   * The waveform (ESCSUITE-71).
+   *
+   * The media library computes one for every file it imports — both
+   * `processVideoFile` and `processAudioFile` call `extractWaveformData` before
+   * the entry reaches the store — and the handoff did not, so a take's audio
+   * parts sat on the timeline as bare rectangles. Same function, one
+   * implementation, and the same place in the sequence: with the library entry,
+   * before the take is placed.
+   */
+  describe('the waveform a part arrives with', () => {
+    beforeEach(() => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([
+        primaryMetadata,
+        webcamMetadata,
+        micMetadata,
+      ])
+      vi.mocked(getVideo).mockImplementation((id: string) =>
+        Promise.resolve({
+          blob: storedBlobs[id],
+          metadata: id === 'take-1-mic' ? micMetadata : webcamMetadata,
+        })
+      )
+    })
+
+    it('reads each part own bytes through the media library own extractor', async () => {
+      await importTake(primary, addSourceVideo)
+
+      // The primary's blob is the one already in hand; each companion's is the
+      // one storage handed back for that id. A part decoded from the wrong blob
+      // would draw a waveform belonging to another track.
+      expect(vi.mocked(extractWaveformData).mock.calls.map(([blob]) => blob)).toEqual([
+        primary.blob,
+        storedBlobs['take-1-mic'],
+      ])
+      expect(added.map((v) => v.waveformData?.length)).toEqual([
+        PEAKS_PER_TENTH,
+        undefined,
+        PEAKS_PER_TENTH,
+      ])
+      // The primary's own mixed audio too, not just the audio companions: the
+      // library's import path gives a *video* a waveform, and a handed-over
+      // take must not be the one import that looks different.
+      expect(added[0].waveformData).toEqual(added[2].waveformData)
+    })
+
+    it('never decodes a part ESCAPECRAFT recorded with no audio', async () => {
+      await importTake(primary, addSourceVideo)
+
+      // The webcam half of a separate-tracks take has no audio track by
+      // construction — the whole mix stays on the primary — and its
+      // `hasAudio: false` is the capture's own answer (ESCSUITE-60/62). Decoding
+      // a whole video file to be told that is the one cost worth refusing.
+      expect(audio.decodeCalls).toHaveLength(2)
+      expect(added[1].waveformData).toBeUndefined()
+      expect(added[1].hasAudio).toBe(false)
+    })
+
+    it('fills in hasAudio for a part stored before ESCAPECRAFT wrote it', async () => {
+      const older = { ...micMetadata, hasAudio: undefined }
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primaryMetadata, older])
+
+      await importTake(primary, addSourceVideo)
+
+      // `TimelineTrack` needs both — the flag and the peaks — so a recording
+      // made before the flag existed would otherwise have its waveform computed
+      // and never drawn.
+      expect(added[1].hasAudio).toBe(true)
+      expect(added[1].waveformData).toHaveLength(PEAKS_PER_TENTH)
+    })
+
+    it('reads the parts waveforms at the same time, not one after another', async () => {
+      // Two deferred extractions: both have to be *in flight* before either
+      // answers. The handoff is an automatic path — with `?suppressRestore=1`
+      // there is not even a prompt in front of it — so the wait it costs is one
+      // decode, not one per part.
+      const answer: Array<(value: Awaited<ReturnType<typeof extractWaveformData>>) => void> = []
+      const deferred = () =>
+        new Promise<Awaited<ReturnType<typeof extractWaveformData>>>((resolve) => {
+          answer.push(resolve)
+        })
+      // Once each, so the wrapped real extractor is back for the next test.
+      vi.mocked(extractWaveformData).mockImplementationOnce(deferred).mockImplementationOnce(deferred)
+
+      const importing = importTake(primary, addSourceVideo)
+      await vi.waitFor(() => expect(answer).toHaveLength(2))
+
+      // Nothing is in the library yet either: the peaks arrive *with* the entry,
+      // so a part is written once and placing the take is still one undo step.
+      expect(added).toEqual([])
+      answer.forEach((resolve) => resolve({ peaks: [{ min: -0.5, max: 0.5 }], hasAudio: true }))
+      await importing
+
+      expect(added.map((v) => v.waveformData?.length)).toEqual([1, undefined, 1])
+    })
+
+    it('fills hasAudio in from the peaks, not from whether they are loud', async () => {
+      // The fill-in rule's own case: a part stored before ESCSUITE-60 carries no
+      // flag, and a quiet room is exactly when the extractor's `hasAudio` says
+      // false. Answering from it would store peaks `TimelineTrack` never draws,
+      // which is the bug the rule exists to prevent.
+      audio.buffer = createAudioBufferDouble([samples(0)], 48000)
+      const older = { ...micMetadata, hasAudio: undefined }
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primaryMetadata, older])
+
+      await importTake(primary, addSourceVideo)
+
+      expect(added[1].hasAudio).toBe(true)
+      expect(added[1].waveformData).toHaveLength(PEAKS_PER_TENTH)
+    })
+
+    it('keeps the recorded hasAudio when the take turns out to be silent', async () => {
+      audio.buffer = createAudioBufferDouble([samples(0)], 48000)
+
+      await importTake(primary, addSourceVideo)
+
+      // The extractor's `hasAudio` is a silence heuristic (peaks over 0.001),
+      // so it may only ever turn the flag *on*: a take recorded in a quiet room
+      // must not lose the flag ESCAPECRAFT went to the trouble of persisting.
+      // The flat waveform is still drawn, which is the truth about the track.
+      expect(added.map((v) => v.hasAudio)).toEqual([true, false, true])
+      expect(added[0].waveformData).toHaveLength(PEAKS_PER_TENTH)
+    })
+
+    it('leaves a part with no decodable audio without a waveform', async () => {
+      audio.buffer = null
+
+      const take = await importTake(primary, addSourceVideo)
+
+      // No peaks rather than an empty array: nothing downstream has to tell a
+      // waveform that could not be read from one that is zero samples long.
+      expect(added.every((v) => v.waveformData === undefined)).toBe(true)
+      expect(added.map((v) => v.hasAudio)).toEqual([true, false, true])
+      expect(take.clipParts).toHaveLength(3)
+    })
+
+    it('places a part whose waveform cannot be read at all', async () => {
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.mocked(extractWaveformData).mockRejectedValueOnce(new Error('out of memory'))
+
+      const take = await importTake(primary, addSourceVideo)
+
+      // A waveform is cosmetic, exactly like a thumbnail: losing one costs a
+      // picture of the sound, never the track. Said out loud, because the
+      // extractor's own catch means only a caller can make this happen — and it
+      // is one part's loss and not the take's, which is what keeps the
+      // `Promise.all` the parts' decodes are gathered by from being poisoned by
+      // any one of them (the primary's is the one that fails here; the
+      // microphone still gets its peaks).
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'Could not read the waveform for a take part:',
+        expect.any(Error)
+      )
+      expect(added[0].waveformData).toBeUndefined()
+      expect(added[2].waveformData).toHaveLength(PEAKS_PER_TENTH)
+      expect(take.clipParts).toHaveLength(3)
+      expect(take.missingParts).toBe(0)
+    })
   })
 })
