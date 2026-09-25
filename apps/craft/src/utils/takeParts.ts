@@ -96,7 +96,21 @@ function partRank(role: string | undefined): number {
  * host would not otherwise know about, and a list holding only the blob already
  * on `payload.blob` names none of them.
  */
-export async function loadTakeParts(takeId: string): Promise<UploadPart[]> {
+export async function loadTakeParts(
+  takeId: string,
+  /**
+   * Bytes the caller already has, so they are not read a second time.
+   *
+   * `uploadToHost` holds the primary's blob before it asks for the take — it
+   * needs it to decide there is anything to post at all — and the primary is
+   * one of the take's records, so without this the take's largest file is read
+   * twice. A real IndexedDB read deserialises a *fresh* `Blob` every call, so
+   * the second read is not just wasted work: the message would carry the
+   * primary's bytes as two unrelated objects rather than one handle in two
+   * places.
+   */
+  inHand?: { primaryBlob?: Blob }
+): Promise<UploadPart[]> {
   const records = (await getAllVideoMetadata()).filter(
     (metadata) => metadata.takeId === takeId
   );
@@ -112,7 +126,11 @@ export async function loadTakeParts(takeId: string): Promise<UploadPart[]> {
 
   const parts: UploadPart[] = [];
   for (const record of ordered) {
-    const blob = await getVideoBlob(record.id);
+    // The primary is the take: its id *is* the takeId, which is also what makes
+    // it the one record a caller can already be holding.
+    const blob =
+      (record.id === takeId ? inHand?.primaryBlob : undefined) ??
+      (await getVideoBlob(record.id));
     // A part whose bytes are gone is left out rather than listed with nothing
     // in it: a host reading `parts` iterates blobs, and an entry it cannot read
     // is worse than an entry that is not there.

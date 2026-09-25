@@ -215,6 +215,30 @@ describe('uploadToHost', () => {
       expect(message.payload.parts[0].blob).toBe(message.payload.blob);
     });
 
+    it('reads the primary’s bytes once, and posts that one Blob in both places', async () => {
+      // Real IndexedDB deserialises a *fresh* `Blob` per read (`db.get` every
+      // call), so an identity check against a mock that answers with one object
+      // per id proves nothing: "the same Blob" and "read twice" look alike.
+      // This mock reads like storage does — a new object each time, and a log
+      // of what was asked for — so both halves are visible: the primary is read
+      // once, and the one Blob that came back is what both `payload.blob` and
+      // `parts[0]` carry.
+      const reads: string[] = [];
+      getVideoBlobMock.mockImplementation(async (id: string) => {
+        reads.push(id);
+        return new Blob([id], { type: 'video/webm' });
+      });
+
+      await uploadToHost('take-1', 'Standup Demo', { role: 'screen', takeId: 'take-1' });
+
+      expect(reads).toEqual(['take-1', 'part-webcam', 'part-mic']);
+      const [message] = postMessage.mock.calls[0] as [
+        { payload: { blob: Blob; parts: Array<{ blob: Blob }> } },
+        string,
+      ];
+      expect(message.payload.parts[0].blob).toBe(message.payload.blob);
+    });
+
     it('posts a companion row on its own, with no parts list', async () => {
       await uploadToHost('part-webcam', 'Standup Demo — webcam', {
         role: 'webcam',

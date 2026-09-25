@@ -183,6 +183,32 @@ describe('loadTakeParts', () => {
     expect(await parts[1].blob.text()).toBe('part-webcam')
   })
 
+  it('uses the primary\'s bytes the caller already holds instead of reading them again', async () => {
+    await seedTake()
+    // Deliberately not what storage holds: which Blob comes back is the only
+    // way to see whether the record was read a second time. `uploadToHost` has
+    // the primary's bytes in hand before it asks for the take — re-reading them
+    // is a second full read of (often) the take's largest file, and in a real
+    // browser it also yields a *different* `Blob` object, so the message would
+    // carry the same bytes twice over.
+    const inHand = new Blob(['in-hand'], { type: 'video/webm' })
+
+    const parts = await loadTakeParts('take-1', { primaryBlob: inHand })
+
+    expect(parts[0].id).toBe('take-1')
+    expect(parts[0].blob).toBe(inHand)
+    expect(await parts[0].blob.text()).toBe('in-hand')
+    // Only the primary: every companion is still read from storage, because
+    // nobody is holding those.
+    expect(parts.map((part) => part.id)).toEqual([
+      'take-1',
+      'part-webcam',
+      'part-mic',
+      'part-system',
+    ])
+    expect(await parts[1].blob.text()).toBe('part-webcam')
+  })
+
   it('lists nothing for a take that is one file', async () => {
     await seed('solo', 'screen', { takeId: 'solo', overlayPlacement: PLACEMENT })
 

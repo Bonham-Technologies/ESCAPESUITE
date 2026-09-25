@@ -54,7 +54,12 @@ export const uploadToHost = async (
   let parts: UploadPart[] = [];
   if (part?.takeId === id) {
     try {
-      parts = await loadTakeParts(id);
+      // The primary's bytes are already in hand, and `loadTakeParts` would
+      // otherwise read them again — a second full read of (often) the take's
+      // largest file, and one that a real IndexedDB answers with a *different*
+      // `Blob` object, so the message would carry the primary's bytes twice
+      // over instead of one handle in two places.
+      parts = await loadTakeParts(id, { primaryBlob: blob });
     } catch (error) {
       // A companion never costs the primary. The row's own bytes are already in
       // hand, so a second read that fails downgrades this message to the one
