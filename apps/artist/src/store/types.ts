@@ -6,10 +6,12 @@ import type {
   MediaSource,
   WaveformPeak,
   SourceVideo,
+  RecordingRole,
+  OverlayPlacement,
 } from '@escapesuite/shared/types'
 
 // Re-export shared types
-export type { MediaType, MediaSource, WaveformPeak, SourceVideo }
+export type { MediaType, MediaSource, WaveformPeak, SourceVideo, RecordingRole, OverlayPlacement }
 
 // Default duration for images when added to timeline (seconds)
 export const DEFAULT_IMAGE_DURATION = 5;
