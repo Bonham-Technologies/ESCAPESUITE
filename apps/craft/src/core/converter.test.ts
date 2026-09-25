@@ -620,20 +620,35 @@ describe('converter', () => {
       const composite = startComposite({ startOffset: 0.5, duration: 1 })
       readyWebcam(composite.webcam)
       await settle()
+      const ctx = getLastCanvasContext()!
 
       // Fifteen frames takes the screen to 14/30 = 0.466s — not yet.
       for (let i = 0; i < 15; i++) composite.screen.presentFrame(i / 30)
       expect(composite.webcam.play).not.toHaveBeenCalled()
+      // …and not drawn either. `preload='auto'` gets the element to
+      // `readyState >= 2` well before anything plays it, so a guard that asked
+      // only about readiness would composite the camera's frozen *first* frame
+      // over every screen frame before the offset — the one thing the offset
+      // exists to prevent. Fifteen screen draws, no overlay work at all.
+      expect(ctx.drawImage).toHaveBeenCalledTimes(15)
+      expect(ctx.save).not.toHaveBeenCalled()
 
       // The sixteenth is 0.5s exactly, which is where this part begins.
       composite.screen.presentFrame(15 / 30)
       expect(composite.webcam.play).toHaveBeenCalledTimes(1)
+      // …and from that frame on the camera is composited: the sixteenth frame
+      // is the first with two draws in it.
+      expect(ctx.save).toHaveBeenCalledTimes(1)
+      expect(ctx.drawImage).toHaveBeenCalledTimes(17)
 
       composite.screen.fireEnded()
       await settle()
       await composite.promise
       // Started once, not once per frame.
       expect(composite.webcam.play).toHaveBeenCalledTimes(1)
+      // 30 frames owed: 15 screen-only, then 15 with the camera on them.
+      expect(ctx.drawImage).toHaveBeenCalledTimes(45)
+      expect(ctx.save).toHaveBeenCalledTimes(15)
     })
 
     it('draws no camera on a frame it has no picture for yet', async () => {
@@ -709,6 +724,65 @@ describe('converter', () => {
       // outside the try so the finally can release it whatever happened.
       expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
       expect(vi.mocked(URL.revokeObjectURL).mock.calls).toHaveLength(2)
+    })
+
+    it('swallows the camera play() that cancelling interrupts', async () => {
+      // `cleanup()` pauses the camera element, and a pause() that lands while
+      // play() is still resolving rejects that play() promise with AbortError —
+      // which is exactly what a cancelled composite conversion does. The screen
+      // element's play() is already `.catch`ed; the camera's must be too, or
+      // every cancelled take leaves an unhandled rejection in the page.
+      //
+      // What is asserted is that a rejection *handler is attached*, not that no
+      // unhandled rejection was reported: under vitest's worker pool a discarded
+      // rejection reaches neither `process.on('unhandledRejection')` nor the
+      // reporter, so the consequence is unobservable here and the cause is. The
+      // doubles' play() resolves by default, which is the other half of why this
+      // had to be asked for explicitly.
+      const handlers: string[] = []
+      const interruptedPlay = {
+        then(): unknown {
+          handlers.push('then')
+          return interruptedPlay
+        },
+        catch(onRejected?: (reason: unknown) => void): unknown {
+          handlers.push('catch')
+          // Hand the handler the rejection a real interrupted play() would, so
+          // what is pinned is that the converter swallows it rather than merely
+          // that it asked for it.
+          onRejected?.(
+            new DOMException('The play() request was interrupted by a call to pause().', 'AbortError')
+          )
+          return interruptedPlay
+        },
+        finally(): unknown {
+          handlers.push('finally')
+          return interruptedPlay
+        },
+      }
+
+      const controller = new AbortController()
+      const promise = convertToMP4(SOURCE, () => {}, controller.signal, {
+        companion: { blob: COMPANION, placement: PLACEMENT, startOffset: 0 },
+      })
+      promise.catch(() => {})
+      const [screen, webcam] = getVideoDoubles()
+      screen.enableRequestVideoFrameCallback()
+      screen.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 1 })
+      screen.fireLoadedMetadata()
+      readyWebcam(webcam)
+      webcam.play.mockReturnValueOnce(interruptedPlay)
+
+      await settle()
+      expect(webcam.play).toHaveBeenCalledTimes(1)
+      // Attached before the cancellation, because the rejection can arrive the
+      // moment pause() does.
+      expect(handlers).toContain('catch')
+
+      controller.abort()
+      // The cancellation is still the only thing the caller hears about.
+      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
+      expect(webcam.pause).toHaveBeenCalled()
     })
 
     it('stops the camera element when the conversion is cancelled', async () => {

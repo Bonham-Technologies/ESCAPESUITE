@@ -266,7 +266,11 @@ async function captureFramesViaPlayback(
       if (!overlay || overlayPlaying || elapsed < overlay.startOffset) return;
       overlayPlaying = true;
       overlay.video.currentTime = 0;
-      void overlay.video.play();
+      // Caught, not discarded: `cleanup()`'s pause() rejects a play() that is
+      // still resolving with AbortError, which is what cancelling a composite
+      // conversion does — the screen element's play() is handled the same way,
+      // a few lines below.
+      overlay.video.play().catch(() => {});
     };
 
     const cleanup = () => {
@@ -298,11 +302,16 @@ async function captureFramesViaPlayback(
       // Draw current frame to canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // …and the camera on top of it, where it was recorded. Guarded on a
-      // decoded frame exactly as `Compositor.drawFrame` guards the live
-      // overlay: the first frames of a conversion can arrive before the second
-      // element has one, and a screen-only frame is better than a throw.
-      if (overlay && overlay.video.readyState >= 2) {
+      // …and the camera on top of it, where it was recorded. Guarded on the
+      // part having *started* as well as on a decoded frame (which is how
+      // `Compositor.drawFrame` guards the live overlay): `preload='auto'` gets
+      // the element to `readyState >= 2` long before anything plays it, so
+      // asking only about readiness would composite its frozen first frame over
+      // every screen frame before `startOffset` — the one thing the offset
+      // exists to prevent. Readiness is still asked because the first frames of
+      // a conversion can arrive before the second element has a picture, and a
+      // screen-only frame is better than a throw.
+      if (overlay && overlayPlaying && overlay.video.readyState >= 2) {
         drawOverlay(ctx, overlay.video, canvas, overlay.geometry);
       }
 
