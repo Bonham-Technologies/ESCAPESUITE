@@ -156,6 +156,36 @@ describe('recorder-factory', () => {
   })
 })
 
+describe('recorder-factory without MediaStreamTrackProcessor', () => {
+  // The real gate, asked of this module rather than of the factory double that
+  // the controller suite mocks: a browser can have WebCodecs and still not be
+  // able to read a second pipeline, and only `canRecordSeparateTracks()` knows
+  // it. Without a test here, the double's hand-copied rule could drift from
+  // canUseWebCodecsRecorder and the controller suite would stay green.
+  const g = globalThis as { MediaStreamTrackProcessor?: unknown }
+  const original = g.MediaStreamTrackProcessor
+
+  beforeEach(() => {
+    delete g.MediaStreamTrackProcessor
+  })
+
+  afterEach(() => {
+    // Put the key back as it was. Assigning `undefined` would leave the key
+    // present, and `'MediaStreamTrackProcessor' in globalThis` — which is what
+    // canRecordSeparateTracks() asks — would then answer true.
+    if (original === undefined) delete g.MediaStreamTrackProcessor
+    else g.MediaStreamTrackProcessor = original
+  })
+
+  it('refuses separate tracks when WebCodecs is there but the track processor is not', () => {
+    // WebCodecs itself is still present, so a single-source take is unaffected:
+    // the refusal below is the track processor's absence and nothing else.
+    expect(canUseWebCodecsRecorder(false, true)).toBe(true)
+    expect(canUseWebCodecsRecorder(true, true, true)).toBe(false)
+    expect(getRecorderType(true, true, true)).toBe('mediarecorder')
+  })
+})
+
 describe('recorder-factory without WebCodecs', () => {
   const originalVideoEncoder = globalThis.VideoEncoder
   const originalVideoFrame = globalThis.VideoFrame

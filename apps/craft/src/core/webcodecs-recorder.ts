@@ -230,9 +230,13 @@ export class WebCodecsRecorder {
     this.width = settings.width || 1920;
     this.height = settings.height || 1080;
 
-    // Safe to re-enable: WebCodecsRecorder is only used for non-PiP modes (factory enforces this).
-    // The original PiP frame capture issue (PR #93) was caused by the compositor's hidden video
-    // elements, not by MediaStreamTrackProcessor itself. For direct screen/webcam streams, it works.
+    // Safe to re-enable: no take that reaches this recorder captures frames
+    // through the compositor. Composited PiP never gets here — the factory still
+    // forces MediaRecorder for it — and a separate-tracks take, which does
+    // (ESCSUITE-14), is handed the RAW screen and webcam tracks while the
+    // compositor only draws the preview. The original PiP frame capture issue
+    // (PR #93) was caused by the compositor's hidden video elements, not by
+    // MediaStreamTrackProcessor itself. For direct screen/webcam streams, it works.
     const hasTrackProcessor = typeof MediaStreamTrackProcessor !== 'undefined';
 
     if (hasTrackProcessor && typeof MediaStreamTrackProcessor !== 'undefined') {
