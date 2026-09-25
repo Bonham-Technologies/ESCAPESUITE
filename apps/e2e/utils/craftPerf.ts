@@ -349,6 +349,26 @@ export async function recordPlainTake(page: Page): Promise<void> {
   await stopTake(page, rowsBefore + 1)
 }
 
+/**
+ * Record one separate-tracks take, measuring nothing.
+ *
+ * The composite MP4 benchmark needs a take with a camera half in it and does
+ * not care what making it cost — `craft-separate-tracks-recording` is the arm
+ * that measures that. Driven through the same two helpers `measureTake` uses,
+ * so the files it converts are the files the recording benchmarks produce.
+ *
+ * Three rows, not one: the screen, the camera and the microphone, which is what
+ * `openCraft(page, { webcam: true, separateTracks: true })` asks for with
+ * ESCAPECRAFT's defaults left alone (system audio is off). Waiting for fewer
+ * would pass on a transient half-saved library.
+ */
+export async function recordSeparateTracksTake(page: Page): Promise<void> {
+  const rowsBefore = await recordingRows(page).count()
+  await startTake(page)
+  await page.waitForTimeout(TAKE_SECONDS * 1000)
+  await stopTake(page, rowsBefore + 3)
+}
+
 /** Size of the newest stored recording, read straight out of IndexedDB. */
 async function readNewestRecordingBytes(page: Page): Promise<number> {
   return page.evaluate(
@@ -747,6 +767,15 @@ export interface Mp4ConversionMeasurement {
   encoderQueueHighWater: number
   /** Size of the MP4 the browser handed over. */
   outputBytes: number
+  /**
+   * `drawImage(<video>)` calls inside the conversion. One per encoded frame for
+   * a plain conversion; **two** for the composite of a separate-tracks take —
+   * the screen and then the camera. Nothing else in the page draws a video
+   * while a conversion runs (the compositor stops at Stop, and thumbnailing
+   * happens before the counters are reset), so this is the converter's own
+   * count.
+   */
+  videoDraws: number
 }
 
 /**
@@ -768,11 +797,25 @@ export interface Mp4ConversionMeasurement {
  * A precondition, not a step: the page must already hold a recording (see
  * {@link recordPlainTake}), and the caller must have established that this
  * browser can encode H.264 (`canConvertToMp4`).
+ *
+ * With `composite: true` the newest take is a separate-tracks one and the
+ * conversion re-composites it (ESCSUITE-14 decision 3): the same encode loop
+ * with a second `<video>` drawn through `drawOverlay` into the same canvas. The
+ * cost difference is one `drawImage` and one clip path per frame, which is what
+ * `taskMsPerFrame` between the two arms measures.
  */
 export async function measureMp4Conversion(
   page: Page,
   cdp: CDPSession,
-  profileName?: string
+  options: {
+    /**
+     * Whether the newest take is a separate-tracks one, so the conversion is
+     * the composite. Turns on the two-draws-per-frame tripwire below; the plain
+     * arm's assertions are untouched by it.
+     */
+    composite?: boolean
+    profileName?: string
+  } = {}
 ): Promise<Mp4ConversionMeasurement> {
   // The newest recording is the first row — the library sorts newest first —
   // and it is the one every run of this benchmark converts.
@@ -784,7 +827,7 @@ export async function measureMp4Conversion(
   const cdpStart = await readCdpTimedMetrics(cdp)
 
   const startedAt = Date.now()
-  const download: Download = await withCpuProfile(page, cdp, profileName, async () => {
+  const download: Download = await withCpuProfile(page, cdp, options.profileName, async () => {
     const downloadPromise = page.waitForEvent('download', { timeout: 600_000 })
     await mp4Button.click()
     return downloadPromise
@@ -795,6 +838,7 @@ export async function measureMp4Conversion(
   const counters = await page.evaluate(() => ({
     framesEncoded: window.__perf.encodeCount,
     encoderQueueHighWater: window.__perf.encodeQueueHighWater,
+    videoDraws: window.__perfCraft.videoDraws,
   }))
   const heapEnd = await readHeapAfterGc(page, cdp)
 
@@ -814,6 +858,19 @@ export async function measureMp4Conversion(
     counters.framesEncoded,
     'the conversion encoded no frames — there is nothing in the MP4 to have measured'
   ).toBeGreaterThan(0)
+
+  if (options.composite) {
+    // Exact, and the whole reason this arm exists: a composite frame is the
+    // screen drawn once and the camera drawn once. Anything else means either
+    // the overlay was never drawn — in which case this is a plain conversion
+    // reported under the composite's name — or the screen was passed over
+    // twice, which at this capture size is the most expensive thing the loop
+    // could do twice.
+    expect(
+      counters.videoDraws,
+      'the composite did not draw exactly two videos per encoded frame'
+    ).toBe(counters.framesEncoded * 2)
+  }
 
   // Back to idle before the next run starts: the row's progress bar gone and
   // its button live again. One conversion runs at a time, so starting the next
@@ -840,5 +897,6 @@ export async function measureMp4Conversion(
     heapDeltaBytes: heapEnd - heapStart,
     encoderQueueHighWater: counters.encoderQueueHighWater,
     outputBytes,
+    videoDraws: counters.videoDraws,
   }
 }

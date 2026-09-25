@@ -48,6 +48,7 @@ const ORDER = [
   'craft-pip-recording',
   'craft-separate-tracks-recording',
   'craft-mp4-conversion',
+  'craft-composite-mp4-conversion',
   'headless-kit-render',
 ]
 
@@ -164,6 +165,7 @@ const PROFILE_LABELS = {
   'craft-screen': 'ESCAPECRAFT screen recording',
   'craft-pip': 'ESCAPECRAFT PiP recording',
   'craft-mp4': 'ESCAPECRAFT MP4 conversion',
+  'craft-composite-mp4': 'ESCAPECRAFT composite MP4 conversion',
 }
 
 /** Order profile sections appear in, whichever of them exist. */
@@ -177,6 +179,7 @@ const PROFILE_ORDER = [
   'craft-screen',
   'craft-pip',
   'craft-mp4',
+  'craft-composite-mp4',
 ]
 
 /**

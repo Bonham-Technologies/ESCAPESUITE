@@ -8,6 +8,7 @@ import {
   measureTake,
   openCraft,
   recordPlainTake,
+  recordSeparateTracksTake,
   type Mp4ConversionMeasurement,
   type TakeMeasurement,
 } from '../../utils/craftPerf'
@@ -18,7 +19,7 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * Benchmarks: what ESCAPECRAFT costs while it is recording, and while it is
  * converting a recording to MP4.
  *
- * Four benchmarks, one per pipeline the app actually has:
+ * Five benchmarks, one per pipeline the app actually has:
  *
  * | Benchmark | Path under test |
  * |---|---|
@@ -26,6 +27,7 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * | `craft-pip-recording` | `Compositor` + MediaRecorder — an rAF draw loop on the main thread, encoding off it |
  * | `craft-separate-tracks-recording` | `WebCodecsRecorder` with **two** `VideoEncoder`s on one clock, and the `Compositor` drawing the preview only |
  * | `craft-mp4-conversion` | `convertToMP4` — decode, draw, `VideoFrame`, encode, mux, all in the page |
+ * | `craft-composite-mp4-conversion` | `convertToMP4` again, with a second `<video>` drawn through `drawOverlay` into the same canvas — the composite of a separate-tracks take |
  *
  * Each is its own `test()` with its own page load, so one failing (no H.264
  * encoder on a runner, a capture device that would not open) still leaves the
@@ -33,7 +35,7 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * benchmarks.
  *
  * They assert nothing about speed. The only `expect`s are inside
- * `utils/craftPerf.ts`, and every one of the eleven says the benchmark measured
+ * `utils/craftPerf.ts`, and every one of the twelve says the benchmark measured
  * the wrong thing rather than that the machine was slow: a take that stopped
  * mid-window; a "WebCodecs" take that encoded nothing, or that drew video into
  * a canvas at all (which would mean `WebCodecsRecorder` had taken its
@@ -45,7 +47,9 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * encoders (the mix on the primary plus the microphone companion), with the same
  * two draw checks over the compositor now that it is drawing the preview only —
  * two encoders' frames counted, and the compositor drawing for the preview only;
- * and a conversion that encoded no frames.
+ * a conversion that encoded no frames; and a composite conversion whose two
+ * videos were not drawn once each per encoded frame (either the overlay was
+ * never drawn, or the screen was passed over twice).
  *
  * The capture devices are `mockSyntheticMedia`'s canvas and oscillator, which
  * means a 33 ms `setInterval` painting the source canvas runs on the page's own
@@ -229,7 +233,60 @@ test.describe('perf: ESCAPECRAFT MP4 conversion', () => {
     console.log('craft-mp4-conversion runs:', JSON.stringify(measurements))
 
     if (PERF_PROFILE) {
-      await measureMp4Conversion(page, cdp, 'craft-mp4')
+      await measureMp4Conversion(page, cdp, { profileName: 'craft-mp4' })
+    }
+  })
+})
+
+test.describe('perf: ESCAPECRAFT composite MP4 conversion', () => {
+  test(`converts a ${TAKE_SECONDS}s separate-tracks take to one MP4, ${PERF_RUNS} times`, async ({
+    page,
+  }) => {
+    await installCraftPerfInstrumentation(page)
+    await openCraft(page, { webcam: true, separateTracks: true })
+
+    test.skip(!(await canConvertToMp4(page)), 'This browser cannot encode H.264')
+
+    // One take, converted three times, exactly as the plain arm does: the
+    // conversion is bound by the take's own length, so re-recording between
+    // runs would add six seconds a run and change nothing measured.
+    await recordSeparateTracksTake(page)
+
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Performance.enable')
+
+    const measurements: Mp4ConversionMeasurement[] = []
+    for (let run = 0; run < PERF_RUNS; run++) {
+      measurements.push(await measureMp4Conversion(page, cdp, { composite: true }))
+    }
+
+    const at = (key: keyof Mp4ConversionMeasurement) => measurements.map((m) => m[key])
+
+    writePerfResult({
+      name: 'craft-composite-mp4-conversion',
+      runs: PERF_RUNS,
+      captureSize: CAPTURE_SIZE_LABEL,
+      takeSeconds: TAKE_SECONDS,
+      wallMs: round(median(at('wallMs'))),
+      framesEncoded: median(at('framesEncoded')),
+      framesPerSecond: round(median(at('framesPerSecond'))),
+      // Published here and nowhere else: the plain arm's is one per frame by
+      // construction, and this arm's is the two the overlay costs.
+      videoDraws: median(at('videoDraws')),
+      taskDurationMs: round(median(at('taskDurationMs'))),
+      taskMsPerFrame: round(median(at('taskMsPerFrame')), 3),
+      heapDeltaBytes: median(at('heapDeltaBytes')),
+      encoderQueueHighWater: Math.max(...at('encoderQueueHighWater')),
+      outputBytes: median(at('outputBytes')),
+    })
+
+    console.log('craft-composite-mp4-conversion runs:', JSON.stringify(measurements))
+
+    if (PERF_PROFILE) {
+      await measureMp4Conversion(page, cdp, {
+        composite: true,
+        profileName: 'craft-composite-mp4',
+      })
     }
   })
 })

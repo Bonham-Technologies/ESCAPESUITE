@@ -267,13 +267,13 @@ readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is empt
 perf project's `globalSetup` first, so a stale result can never be reported as current.
 All three outputs are gitignored.
 
-Nine benchmarks, each run three times and reported as the median: four
-ESCAPEARTIST, four ESCAPECRAFT, and the headless kit render. The four
+Ten benchmarks, each run three times and reported as the median: four
+ESCAPEARTIST, five ESCAPECRAFT, and the headless kit render. The four
 ESCAPEARTIST ones run against **one deterministic 12-clip, 13-second scene** (14 clips
 over 4 tracks at 1280x720, clips scaled to fill the frame — scale 1 means native pixel
 size here) built in-test from `apps/e2e/fixtures/headless/source.mp4` and loaded through
 the documented integration API (`GET_STATE` for the imported source's id, then
-`LOAD_PROJECT`); the four ESCAPECRAFT ones drive real takes through the recorder's own
+`LOAD_PROJECT`); the five ESCAPECRAFT ones drive real takes through the recorder's own
 UI against `mockSyntheticMedia`'s canvas-and-oscillator capture devices at 1280x720.
 There is no app code for the benchmarks' sake in either app:
 
@@ -329,11 +329,19 @@ There is no app code for the benchmarks' sake in either app:
   per frame, encoder queue high-water, heap delta and the MP4's size. The conversion is
   bound to playback speed by `requestVideoFrameCallback`, so its wall time has a floor of
   roughly the take's length and **`taskMsPerFrame` is the number a converter change moves**.
+- **`craft-composite-mp4-conversion`** — the same conversion over a **separate-tracks** take,
+  which `convertToMP4` re-composites: a second `<video>` for the camera half drawn through
+  `core/overlayGeometry.ts`'s `drawOverlay` into the same encode canvas, so **two**
+  `drawImage(<video>)` per encoded frame. Same metrics as the plain arm plus `videoDraws`, and
+  the gap between the two arms' `taskMsPerFrame` is what one overlay costs. Its tripwire is
+  exact — `videoDraws === 2 x framesEncoded` — because anything else means either the overlay
+  was never drawn (a plain conversion reported under this arm's name) or the screen was passed
+  over twice.
 - **`headless-kit-render`** — `services/headless-artist` rendering
   `fixtures/headless/project.json`, Chromium launch included.
 
 The ESCAPECRAFT benchmarks assert nothing about speed either; their only `expect`s are the
-eleven tripwires saying the benchmark measured the wrong thing — a take that stopped
+twelve tripwires saying the benchmark measured the wrong thing — a take that stopped
 mid-window; a "WebCodecs" take that encoded nothing, or that drew video into a canvas at all
 (which would mean `WebCodecsRecorder` had taken its `startVideoElementCapture` fallback, a
 different pipeline under the same name); a PiP take that composited nothing, or whose
@@ -342,9 +350,10 @@ frames, so the two-draws-per-composited-frame divisor is wrong); a separate-trac
 did not run exactly two video encoders, or one of whose two encoded nothing, or that did not
 run exactly two **audio** encoders (the mix on the primary plus the microphone companion — a
 mode that quietly recorded its sound into the mix alone would look right in every published
-number), plus the same two compositor checks now that it is drawing the preview; and a
-conversion that encoded no frames. The separate-tracks arm's wait for **three** library rows
-after Stop is a twelfth check in all but name: a take that stored a different number of parts
+number), plus the same two compositor checks now that it is drawing the preview; a
+conversion that encoded no frames; and a composite conversion that did not draw exactly two
+videos per encoded frame. The separate-tracks arm's wait for **three** library rows
+after Stop is a thirteenth check in all but name: a take that stored a different number of parts
 fails there rather than reporting a heap delta read mid-write.
 
 `PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
