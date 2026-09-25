@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildSourceVideo, buildRecordingEntry } from './recordingMetadata'
+import { buildSourceVideo, buildRecordingEntry, resolveHasAudio } from './recordingMetadata'
 
 describe('buildSourceVideo', () => {
   it('builds the SourceVideo literal from the blob and caller-supplied duration', () => {
@@ -335,4 +335,42 @@ describe('buildRecordingEntry carries hasWebcam rather than the config', () => {
     // list draws its empty placeholder rather than a broken <img>.
     expect(entry.thumbnailUrl).toBeUndefined()
   })
+})
+
+// The one expression both of a take's records are given. Neither half is a
+// toggle: the microphone is the track the take really acquired (ESCSUITE-70)
+// and the system half is the toggle AND what the browser's share dialog
+// answered (ESCSUITE-62). All eight combinations, because the whole point of
+// the function is that nothing derives this rule twice.
+describe('resolveHasAudio', () => {
+  const rows: Array<{
+    micAcquired: boolean
+    systemAudioEnabled: boolean
+    systemAudioShared: boolean
+    hasAudio: boolean
+  }> = [
+    // A microphone that really opened is audio on its own, whatever the share
+    // dialog did about system audio.
+    { micAcquired: true, systemAudioEnabled: false, systemAudioShared: false, hasAudio: true },
+    { micAcquired: true, systemAudioEnabled: false, systemAudioShared: true, hasAudio: true },
+    { micAcquired: true, systemAudioEnabled: true, systemAudioShared: false, hasAudio: true },
+    { micAcquired: true, systemAudioEnabled: true, systemAudioShared: true, hasAudio: true },
+    // Without one, system audio has to be both asked for and shared.
+    { micAcquired: false, systemAudioEnabled: true, systemAudioShared: true, hasAudio: true },
+    { micAcquired: false, systemAudioEnabled: true, systemAudioShared: false, hasAudio: false },
+    { micAcquired: false, systemAudioEnabled: false, systemAudioShared: true, hasAudio: false },
+    { micAcquired: false, systemAudioEnabled: false, systemAudioShared: false, hasAudio: false },
+  ]
+
+  for (const row of rows) {
+    it(`is ${row.hasAudio} for mic ${row.micAcquired}, system ${row.systemAudioEnabled}/${row.systemAudioShared}`, () => {
+      expect(
+        resolveHasAudio(
+          { micAcquired: row.micAcquired },
+          row.systemAudioEnabled,
+          row.systemAudioShared
+        )
+      ).toBe(row.hasAudio)
+    })
+  }
 })

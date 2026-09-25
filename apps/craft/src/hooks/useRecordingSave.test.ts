@@ -200,7 +200,7 @@ describe('useRecordingSave list entry', () => {
   it('stores the same answer about audio in the metadata a reload reads back', async () => {
     const { result } = mountSave({ webcamEnabled: false, microphoneEnabled: true, systemAudioEnabled: false })
 
-    await result.current(RAW, 4)
+    await result.current(RAW, 4, null, { micAcquired: true })
 
     const [meta] = await getRecordingsMetadata()
     expect(meta.hasAudio).toBe(true)
@@ -250,11 +250,52 @@ describe('useRecordingSave list entry', () => {
     useRecorderStore.setState({ systemAudioShared: false })
     const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: true })
 
-    await result.current(RAW, 4)
+    await result.current(RAW, 4, null, { micAcquired: true })
 
     expect(added[0].hasAudio).toBe(true)
     const [meta] = await getRecordingsMetadata()
     expect(meta.hasAudio).toBe(true)
+  })
+
+  // ESCSUITE-70. The microphone half used to be the config's alone, on the
+  // grounds that asking for a microphone and getting one are the same event.
+  // They are not: `acquireStreams` hands back `mic: null` whenever the toggle
+  // is on and the capability is missing — a machine with no microphone at all —
+  // so the take is recorded with no sound in it while both records claimed it
+  // had some, and the M4A button offered an audio download of silence that
+  // then failed honestly into the notice. The controller resolves the question
+  // once, when the take starts, from the stream it really acquired, and hands
+  // the answer here.
+  it('marks a take whose microphone never opened as silent', async () => {
+    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
+
+    await result.current(RAW, 4, null, { micAcquired: false })
+
+    expect(added[0].hasAudio).toBe(false)
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(false)
+  })
+
+  it('marks a take whose microphone did open as audible', async () => {
+    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
+
+    await result.current(RAW, 4, null, { micAcquired: true })
+
+    expect(added[0].hasAudio).toBe(true)
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(true)
+  })
+
+  // A caller that says nothing about the microphone is taken to have opened
+  // none — the system half then answers on its own. Nothing in the app takes
+  // that path (the controller always says), and a default of `true` would be
+  // ESCSUITE-70 again, reached by leaving an argument out.
+  it('claims no microphone when the caller says nothing about one', async () => {
+    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
+
+    await result.current(RAW, 4)
+
+    expect(added[0].hasAudio).toBe(false)
   })
 
   // The flag is read with `getState()` on the save path, not selected: this
@@ -313,7 +354,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
       webcamShape: 'rectangle',
     })
 
-    await result.current(RAW, 6, [companionPart])
+    await result.current(RAW, 6, [companionPart], { micAcquired: true })
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(2)

@@ -29,6 +29,9 @@ import {
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastream'
 import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
+// The save path's own expression, not a copy of it: if `resolveHasAudio`
+// changed, the agreement table below would change with it.
+import { resolveHasAudio } from '../utils/recordingMetadata'
 
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
@@ -551,7 +554,9 @@ describe('useRecordingController running a take', () => {
 
     // The MediaRecorder path calls onStop with the blob alone, so the save gets
     // no companion argument at all — which it reads as a single-part take.
-    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 9, undefined)
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 9, undefined, {
+      micAcquired: false,
+    })
     expect(useRecorderStore.getState().currentDuration).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -594,7 +599,9 @@ describe('useRecordingController stopping a take', () => {
     expect(harness.deps.capturedThumbnailRef.current).toBeInstanceOf(Blob)
     expect(recorder.stop).toHaveBeenCalledTimes(1)
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Completed', { duration: 8 })
-    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 8, null)
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 8, null, {
+      micAcquired: false,
+    })
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
     expect(useRecorderStore.getState().currentDuration).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
@@ -688,7 +695,9 @@ describe('useRecordingController stopping a take', () => {
 
     await act(async () => { await result.current.handleStopRecording() })
 
-    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 42, null)
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 42, null, {
+      micAcquired: false,
+    })
   })
 
   it('reports a save that failed and still returns to idle', async () => {
@@ -808,6 +817,60 @@ describe('useRecordingController picture-in-picture', () => {
   })
 })
 
+// ESCSUITE-70. The save path used to answer "did this take capture audio?"
+// from the config, which only says what was *asked* for. The controller is the
+// layer that knows what arrived, so it resolves the microphone half once, when
+// the take starts, and hands it over with the blob.
+describe('useRecordingController what the take captured', () => {
+  /** Run a take to its save, and hand back the acquired-audio argument. */
+  async function capturedAudioOf(
+    config: Partial<RecordingConfig>,
+    acquired?: Partial<AcquiredDoubles>
+  ): Promise<{ micAcquired: boolean }> {
+    const { result } = mountController({ countdownSeconds: 0, ...config }, acquired)
+    await startTake(result)
+    const recorder = recorderFactory.last()
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    const [, , , captured] = harness.saveRecording.mock.calls[0] as [
+      Blob, number, unknown, { micAcquired: boolean },
+    ]
+    expect(recorder.stop).toHaveBeenCalledTimes(1)
+    return captured
+  }
+
+  it('says a microphone was captured when one really was acquired', async () => {
+    expect(
+      await capturedAudioOf({ microphoneEnabled: true }, { mic: micStreamWithTrack() })
+    ).toEqual({ micAcquired: true })
+  })
+
+  // The toggle is on and the machine has no microphone, so `acquireStreams`
+  // came back without one. Nothing recorded a microphone, and the stored
+  // recording must not claim it did.
+  it('says none when the microphone the toggle asked for never arrived', async () => {
+    expect(await capturedAudioOf({ microphoneEnabled: true }, { mic: null })).toEqual({
+      micAcquired: false,
+    })
+  })
+
+  // The same pair the recorder asks when it wires the mix: a stream is not a
+  // track. A capture that came back with its audio track already gone records
+  // nothing either.
+  it('says none for a microphone stream with no track in it', async () => {
+    expect(
+      await capturedAudioOf({ microphoneEnabled: true }, { mic: createStreamDouble([]) })
+    ).toEqual({ micAcquired: false })
+  })
+
+  it('says none when the microphone was never asked for', async () => {
+    expect(
+      await capturedAudioOf({ microphoneEnabled: false }, { mic: micStreamWithTrack() })
+    ).toEqual({ micAcquired: false })
+  })
+})
+
 describe('a separate-tracks take', () => {
   let raf: RafDouble
 
@@ -894,7 +957,8 @@ describe('a separate-tracks take', () => {
     expect(harness.saveRecording).toHaveBeenCalledWith(
       recorder.stopBlob,
       expect.any(Number),
-      recorder.companionParts
+      recorder.companionParts,
+      { micAcquired: false }
     )
   })
 
@@ -927,7 +991,8 @@ describe('a separate-tracks take', () => {
     expect(harness.saveRecording).toHaveBeenCalledWith(
       recorder.stopBlob,
       expect.any(Number),
-      null
+      null,
+      { micAcquired: false }
     )
   })
 
@@ -1083,6 +1148,110 @@ describe('a separate-tracks take', () => {
       setNotice.mock.calls.filter(([notice]) => notice === SEPARATE_TRACK_NOT_SAVED)
     ).toHaveLength(1)
   })
+  // ESCSUITE-70. Two answers to one question — "did this take capture any
+  // sound?" — are resolved here from the same two facts, four lines apart: how
+  // many companions the take is counted as asking for, and the `micAcquired`
+  // the save path turns into the stored `hasAudio` (its other half, the system
+  // one, is the store flag this hook wrote at take start). They used to be
+  // computed from different things, so they could disagree — a microphone
+  // toggle with no device behind it was correctly counted as asking for no
+  // companion and still stored as audible. This walks all sixteen combinations
+  // of the four inputs and asserts they agree: the take asks for an audio part
+  // exactly when the recording claims audio.
+  const AUDIO_COMBINATIONS = [false, true].flatMap(micEnabled =>
+    [false, true].flatMap(micArrived =>
+      [false, true].flatMap(systemEnabled =>
+        [false, true].map(systemShared => ({
+          micEnabled,
+          micArrived,
+          systemEnabled,
+          systemShared,
+        }))
+      )
+    )
+  )
+
+  type AudioCombination = (typeof AUDIO_COMBINATIONS)[number]
+
+  /** The roles a take can deliver, in the order the recorder builds them. */
+  const COMPANION_ROLES = ['webcam', 'mic', 'system'] as const
+
+  /**
+   * One separate-tracks take built from a combination, delivering exactly
+   * `companionCount` parts — so the caller can put the take's own count either
+   * side of the number and read the notice for the answer.
+   */
+  async function runSeparateTake(combination: AudioCombination, companionCount: number) {
+    harness = separateHarness({
+      countdownSeconds: 0,
+      microphoneEnabled: combination.micEnabled,
+      systemAudioEnabled: combination.systemEnabled,
+    })
+    harness.streams.screen = combination.systemShared ? screenStreamWithAudio() : screenStream()
+    harness.streams.mic = combination.micArrived ? micStreamWithTrack() : null
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result, unmount } = renderHook(() => useRecordingController(harness.deps))
+
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    recorder.companionParts = COMPANION_ROLES.slice(0, companionCount).map(role => ({
+      role,
+      blob: new Blob([role], { type: role === 'webcam' ? 'video/webm' : 'audio/webm' }),
+      startOffset: 0,
+    }))
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    const [, , , captured] = harness.saveRecording.mock.calls[0] as [
+      Blob,
+      number,
+      unknown,
+      { micAcquired: boolean },
+    ]
+    const result_ = {
+      captured,
+      systemAudioShared: useRecorderStore.getState().systemAudioShared,
+      lossesReported: setNotice.mock.calls.filter(
+        ([notice]) => notice === SEPARATE_TRACK_NOT_SAVED
+      ).length,
+    }
+    harness.deps.compositorRef.current?.dispose()
+    unmount()
+    return result_
+  }
+
+  for (const combination of AUDIO_COMBINATIONS) {
+    const expectsMic = combination.micEnabled && combination.micArrived
+    const expectsSystem = combination.systemEnabled && combination.systemShared
+    const audioParts = (expectsMic ? 1 : 0) + (expectsSystem ? 1 : 0)
+    const description =
+      `microphone ${combination.micEnabled ? 'on' : 'off'} and ` +
+      `${combination.micArrived ? 'acquired' : 'absent'}, ` +
+      `system audio ${combination.systemEnabled ? 'on' : 'off'} and ` +
+      `${combination.systemShared ? 'shared' : 'silent'}`
+
+    it(`counts ${audioParts} audio part(s) and stores the same answer — ${description}`, async () => {
+      // One short of what the take asked for, then exactly what it asked for:
+      // between them they pin the count rather than bounding it on one side.
+      const short = await runSeparateTake(combination, audioParts)
+      const whole = await runSeparateTake(combination, audioParts + 1)
+
+      expect(short.lossesReported).toBe(1)
+      expect(whole.lossesReported).toBe(0)
+
+      // What the save path is handed, and the `hasAudio` the save path derives
+      // from it — through the same function it calls, so this cannot agree with
+      // a rule the app no longer follows.
+      expect(whole.captured.micAcquired).toBe(expectsMic)
+      const hasAudio = resolveHasAudio(
+        whole.captured,
+        combination.systemEnabled,
+        whole.systemAudioShared
+      )
+      expect(hasAudio).toBe(audioParts > 0)
+    })
+  }
 })
 
 describe('useRecordingController teardown', () => {

@@ -13,7 +13,12 @@ import { generateThumbnail, extractVideoMetadata } from '../core/thumbnailGenera
 import { fixWebMMetadata } from '../core/converter';
 import { useRecorderStore } from '../store/recorderStore';
 import { createPlaceholderThumbnail } from '../utils/previewThumbnail';
-import { buildSourceVideo, buildRecordingEntry } from '../utils/recordingMetadata';
+import {
+  buildSourceVideo,
+  buildRecordingEntry,
+  resolveHasAudio,
+  type CapturedAudio,
+} from '../utils/recordingMetadata';
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { NOT_SEEKABLE, SEPARATE_TRACK_NOT_SAVED } from '../utils/notices';
 import type { CompanionPart, Recording, RecordingConfig, RecordingState } from '../store/types';
@@ -30,6 +35,11 @@ export interface RecordingSaveDeps {
   setNotice: (notice: string | null) => void;
 }
 
+// The argument type travels with the save signature, so it is re-exported
+// here; it is declared beside `resolveHasAudio`, which is the only thing that
+// reads it.
+export type { CapturedAudio };
+
 /** Save a finished take. `recordedDuration` is what the recorder timed. */
 export type SaveRecording = (
   rawBlob: Blob,
@@ -38,7 +48,13 @@ export type SaveRecording = (
    * The take's other parts, when the recorder produced any. Only the
    * separate-tracks mode does — see `core/webcodecs-recorder.ts`.
    */
-  companions?: CompanionPart[] | null
+  companions?: CompanionPart[] | null,
+  /**
+   * What the take captured. Optional so the three-argument call still reads,
+   * and it claims no microphone when nothing says otherwise: a default of
+   * `true` would be exactly the bug this argument exists to delete.
+   */
+  captured?: CapturedAudio
 ) => Promise<void>;
 
 export function useRecordingSave({
@@ -53,7 +69,8 @@ export function useRecordingSave({
   const saveRecording = useCallback(async (
     rawBlob: Blob,
     recordedDuration: number,
-    companions?: CompanionPart[] | null
+    companions?: CompanionPart[] | null,
+    captured: CapturedAudio = { micAcquired: false }
   ) => {
     setState('saving');
 
@@ -111,23 +128,32 @@ export function useRecordingSave({
     // Whether the take actually captured any audio — one answer, written to
     // both records below so the stored metadata and the list entry cannot
     // disagree (ESCSUITE-60), and the M4A button stays truthful after a reload.
+    // The expression itself is `resolveHasAudio`, so the pins on it and this
+    // call site cannot drift apart.
     //
-    // The microphone half is the config's to answer: asking for it and getting
-    // it are the same event, and a refused permission never starts a take.
-    // System audio is not: ticking it only *asks*, because the tick box that
-    // decides is in the browser's own share dialog, so a take recorded with it
-    // clear has no sound at all (ESCSUITE-62). `systemAudioShared` is what the
-    // controller read off the display stream's tracks when this take started —
-    // it is reset to `true` only when the *next* one starts, so at save time it
-    // still describes the take being saved.
+    // Neither half is the config's alone, because a toggle only *asks* — but
+    // the two halves are not resolved at the same moment, and that is worth
+    // being exact about:
+    //
+    // - `micAcquired` is the controller's answer about the stream it acquired,
+    //   resolved when the take started and carried here in `onStop`'s own
+    //   closure. It therefore always describes *this* take (ESCSUITE-70).
+    // - `systemAudioShared` is read from the store here, at save time. The
+    //   controller writes it at take start and resets it only when the *next*
+    //   take starts, so it describes this take for as long as no other take
+    //   has begun (ESCSUITE-62). The limit that leaves: a recorder that
+    //   flushed its last chunk so late that a new take is already running
+    //   would pair this take's microphone answer with the new take's system
+    //   answer. The cancelled flag drops a stop from a take the user threw
+    //   away, but not this one; nothing observed it, and closing it would mean
+    //   threading the flag through the save signature as well.
     //
     // Read through `getState()` rather than selected: this hook renders inside
     // `App`, and a subscription here would re-render the whole screen on a
-    // field the save path reads once. Still the config rather than the blob —
-    // reading the file back would mean a decode on the save path.
+    // field the save path reads once. Still the streams' answer rather than the
+    // blob's — reading the file back would mean a decode on the save path.
     const { systemAudioShared } = useRecorderStore.getState();
-    const hasAudio =
-      config.microphoneEnabled || (config.systemAudioEnabled && systemAudioShared);
+    const hasAudio = resolveHasAudio(captured, config.systemAudioEnabled, systemAudioShared);
 
     // A companion take is one take in several files: the primary names it (its
     // own id is the takeId), carries the mixed audio and the overlay geometry,

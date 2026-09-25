@@ -319,6 +319,16 @@ export function useRecordingController({
       // one the take is audio only, which the WebCodecs recorder cannot serve.
       const hasVideoSource = (config.screenEnabled && !!screen) || (config.webcamEnabled && !!webcam);
 
+      // Whether this take really has a microphone in it: the toggle AND a track
+      // that arrived. `acquireStreams` hands back `mic: null` when the toggle
+      // is on and the capability is missing — a machine with no microphone —
+      // and the config alone cannot tell that from a take that recorded one.
+      // Resolved once here, like the mode above, and handed to both of the
+      // things that have to agree about it: how many parts the take is counted
+      // as asking for, and the `hasAudio` the save path stores (ESCSUITE-70).
+      const micAcquired =
+        config.microphoneEnabled && (mic?.getAudioTracks().length ?? 0) > 0;
+
       // How many extra files this take is asking for: the camera, and one per
       // audio source it really has. The same two questions the recorder asks
       // when it builds the pipelines — a stream with a track in it AND its
@@ -326,9 +336,7 @@ export function useRecordingController({
       // knows the number: the recorder delivers `null` or a short list for a
       // lost part and for a take that never asked, and they look identical.
       const expectedCompanions = separateTracks
-        ? 1 +
-          (config.microphoneEnabled && (mic?.getAudioTracks().length ?? 0) > 0 ? 1 : 0) +
-          (config.systemAudioEnabled && systemAudioShared ? 1 : 0)
+        ? 1 + (micAcquired ? 1 : 0) + (config.systemAudioEnabled && systemAudioShared ? 1 : 0)
         : 0;
 
       // Set up preview
@@ -402,7 +410,10 @@ export function useRecordingController({
           setCurrentDuration(0);
           stopAllStreams();
           // Save in background
-          saveRecording(blob, recordedDuration, companions).then(() => {
+          // `micAcquired` travels in the closure, not through a ref: it is a
+          // fact about *this* take, and a late onStop must not be given the
+          // next take's answer.
+          saveRecording(blob, recordedDuration, companions, { micAcquired }).then(() => {
             setState('idle');
           }).catch((err) => {
             // The save hook rejects rather than swallowing: without this the
