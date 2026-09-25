@@ -1179,6 +1179,31 @@ describe('WebCodecsRecorder', () => {
     const screenEncoder = () => VideoEncoderDouble.instances[0]
     const webcamEncoder = () => VideoEncoderDouble.instances[1]
 
+    /**
+     * Make the Nth VideoEncoder the recorder constructs refuse its
+     * `configure()`, as a browser that will not encode those dimensions does.
+     * Subclassing the installed double rather than reaching for an instance,
+     * because both encoders are constructed inside one `initialize()` await
+     * chain — there is no moment between them for a test to reach in. Hands
+     * back the restore.
+     */
+    function refuseEncoderConfigure(nth: 1 | 2): () => void {
+      const g = globalThis as unknown as Record<string, unknown>
+      const Installed = g.VideoEncoder as typeof VideoEncoderDouble
+      class RefusingEncoder extends Installed {
+        constructor(...args: ConstructorParameters<typeof VideoEncoderDouble>) {
+          super(...args)
+          // The base constructor has already registered `this`, so the count
+          // is this encoder's own ordinal.
+          if (VideoEncoderDouble.instances.length === nth) this.failAt = 'configure'
+        }
+      }
+      g.VideoEncoder = RefusingEncoder
+      return () => {
+        g.VideoEncoder = Installed
+      }
+    }
+
     it('builds a second encoder and a second WebM output, the webcam one silent', async () => {
       await recorder.initialize(screenStream, webcamStream, micStream, {
         ...separateConfig,
@@ -1458,6 +1483,69 @@ describe('WebCodecsRecorder', () => {
       expect(VideoEncoderDouble.instances).toHaveLength(1)
       expect(consoleWarn).toHaveBeenCalledWith(
         'No MediaStreamTrackProcessor — recording the screen alone'
+      )
+    })
+
+    it('records the screen alone when the webcam pipeline cannot be set up', async () => {
+      // `canRecordSeparateTracks()` proves the two APIs exist; it cannot prove
+      // the camera's dimensions are an encodable VP9 config. A refusal here
+      // used to reject initialize() and cost the user the whole take —
+      // START_FAILED, back to idle, and no way to record at all until they
+      // found the toggle and un-ticked it.
+      const restore = refuseEncoderConfigure(2)
+      try {
+        await expect(
+          recorder.initialize(screenStream, webcamStream, null, separateConfig)
+        ).resolves.toBeUndefined()
+      } finally {
+        restore()
+      }
+
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'Webcam track could not be set up:',
+        expect.any(Error)
+      )
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      // The camera is let go rather than left held by a reader nothing will
+      // ever cancel: with `companion` back to null, neither stop() nor
+      // cleanup() can reach it.
+      expect(processor.cancelCalls()).toBe(1)
+
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      await flush()
+
+      // Exactly one encoder is capturing — the refused one is closed and gets
+      // no frames — and the take is an ordinary single-file one.
+      expect(VideoEncoderDouble.instances).toHaveLength(2)
+      expect(screenEncoder().encodes).toHaveLength(1)
+      expect(webcamEncoder().encodes).toHaveLength(0)
+
+      await recorder.stop()
+
+      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      expect(blob).toBeInstanceOf(Blob)
+      expect(companion).toBeNull()
+      expect(callbacks.onError).not.toHaveBeenCalled()
+    })
+
+    it('still fails the take when the screen encoder refuses its configuration', async () => {
+      // The guard above is the companion's alone. The primary pipeline *is*
+      // the take: a screen that cannot be encoded has to fail loudly, so the
+      // controller says START_FAILED rather than recording nothing.
+      const restore = refuseEncoderConfigure(1)
+      try {
+        await expect(
+          recorder.initialize(screenStream, webcamStream, null, separateConfig)
+        ).rejects.toThrow('VideoEncoder configuration failed')
+      } finally {
+        restore()
+      }
+
+      expect(consoleWarn).not.toHaveBeenCalledWith(
+        'Webcam track could not be set up:',
+        expect.any(Error)
       )
     })
 

@@ -117,8 +117,8 @@ selector contract above.
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
 | `hooks/useCapabilityBootstrap.ts` | The way in: capability detection, the MP4 codec probe (`probeMP4Support()` → `store.mp4Support`) and the initial `loadRecordings()`, all in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
-| `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. A separate-tracks take's second blob is written here too — its own id, its own decoded thumbnail, `role: 'webcam'`, `hasAudio: false` — inside one try/catch, so a companion that cannot be saved costs the take nothing but `WEBCAM_TRACK_NOT_SAVED`. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier. Owns the one `hasAudio` expression both records are given — `microphoneEnabled || (systemAudioEnabled && systemAudioShared)`, the flag read through `getState()` so the hook adds no render |
-| `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
+| `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. A separate-tracks take's second blob is written here too — its own id, its own decoded thumbnail, `role: 'webcam'`, `hasAudio: false` — inside one try/catch, so a companion that cannot be saved costs the take nothing but `WEBCAM_TRACK_NOT_SAVED`. That is the **storage** half of the loss only: a companion lost inside the recorder arrives as `null`, which this hook cannot tell from a take that never asked for one, so the controller raises the same notice for it (see "Recorder lifecycle"). Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier. Owns the one `hasAudio` expression both records are given — `microphoneEnabled || (systemAudioEnabled && systemAudioShared)`, the flag read through `getState()` so the hook adds no render |
+| `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using. It resolves which mode the take is before the countdown, which makes it the only layer that can read a `null` companion as a *loss*: `onStop` raises `WEBCAM_TRACK_NOT_SAVED` for one, and nothing for a composited take |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
 | `hooks/useMp4Download.ts` | One conversion at a time — MP4 or M4A, one shared slot: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, format, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the button reasons for each format (still checking, cannot, busy — plus, for M4A only, a browser with no AAC encoder), the separate visible `note` (the silent-MP4 warning, or the blocking reason when there is one worth saying), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App` |
 | `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete — which cascades, taking a take's companions with its primary, and re-reads the storage headroom afterwards — and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
@@ -414,7 +414,8 @@ the bitrate (`hasSeparateTracksSpace`, computed beside the record button's own
 `hasStorageSpace` by one `refreshStorageSpace()`). The webcam pipeline is deliberately
 track-processor only: the primary keeps its `<video>`+canvas fallback because a take must
 record *something*, and where the processor is missing the recorder warns and records the
-screen alone. The toggle exists only while screen **and** webcam are both on, because a
+screen alone — as it does for **every** way the webcam half can refuse to be built, including a
+muxer or an encoder that will not start (see "Recorder lifecycle"). The toggle exists only while screen **and** webcam are both on, because a
 webcam-only take already *is* the webcam — the recorder ignores the flag for one.
 
 Which sources are captured is `src/hooks/useMediaStreams.ts`; what is done with them — countdown,
@@ -525,14 +526,27 @@ through `onError`; the companion's warns, calls `failCompanion()` and reports no
 `onError` is what makes the controller dispose the recorder and throw away a screen recording
 that is still being made. The companion's flush and finalize are isolated too
 (`flushCompanion()`, `finalizeCompanion()`, each with its own try/catch, the flush deliberately
-outside `stop()`'s so a rejection cannot skip the primary's `output.finalize()`). **Three cases
-are delivered as `null`**: a companion that encoded no frames, one that gave up (`failed`), and
-one whose `finalize()` threw. An empty row in the library and a second ARTIST source with
-nothing in it are worse than no companion, and none of them may ever cost the take its primary
-blob. `useRecordingSave` keeps the same promise one level up — a companion whose metadata,
-thumbnail or storage write throws is caught, warned and said out loud as
-`WEBCAM_TRACK_NOT_SAVED`, and the primary is stored and listed exactly as a no-companion take
-would be.
+outside `stop()`'s so a rejection cannot skip the primary's `output.finalize()`). **Four cases
+are delivered as `null`**: a companion that could not be *set up* at all (`initializeCompanion`
+is wrapped in its own try/catch — an `Output.start()` or a `configure()` the browser refuses
+warns, lets the camera reader go and records the screen alone, because
+`canRecordSeparateTracks()` proves the two APIs exist and nothing can prove the camera's
+dimensions are an encodable VP9 config), one that encoded no frames, one that gave up
+(`failed`), and one whose `finalize()` threw. An empty row in the library and a second ARTIST
+source with nothing in it are worse than no companion, and none of them may ever cost the take
+its primary blob.
+
+**A lost companion is said out loud, from whichever layer knows.** `null` on this callback is
+also what an ordinary take delivers, so the recorder cannot be the one to report the loss and
+`useRecordingSave` cannot tell the two apart (`companion != null` is its whole test). The
+**controller** can: it resolved the mode before the countdown, so `onStop` raises
+`WEBCAM_TRACK_NOT_SAVED` when `separateTracks && !companion` — and says nothing for a
+composited take, which asked for no companion in the first place. `useRecordingSave` raises
+**the same notice** for the other half of the same promise: a companion lost in *storage* —
+metadata, thumbnail or a write that throws — is caught, warned and reported there, and the
+primary is stored and listed exactly as a no-companion take would be. Recorder-side loss is the
+controller's sentence; storage-side loss is the save hook's; the user reads one string either
+way.
 
 `onStop` is uniform on the WebCodecs path: `(blob, companion)` for every take, with `null` where
 there is no companion, so an ordinary take reports that it had none rather than saying nothing.

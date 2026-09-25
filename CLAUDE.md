@@ -441,14 +441,17 @@ functions down a few hundredths — the separate-tracks work enlarges every deno
 second recording pipeline's defensive arms are the shape that costs branches — with **no floor
 crossed**, so craft's floors stay 100 / 99 / 96 / 99. `@escapesuite/shared` was re-measured
 the same day for the five optional `SourceVideo` fields and came back unchanged, the change
-being types alone.
+being types alone. Craft was re-measured once more 2026-09-25, when the final review's two
+fixes landed (the controller reporting a companion lost inside the recorder, and
+`initializeCompanion` warning instead of failing the take): lines still exactly 100.00,
+branches up a hundredth to 96.81, statements and functions unchanged, and again no floor.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.33 | 96.80 | 99.51 |
+| `@escapesuite/craft` | 100.00 | 99.33 | 96.81 | 99.51 |
 | `@escapesuite/artist` | 99.37 | 98.70 | 93.38 | 98.94 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |

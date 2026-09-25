@@ -400,9 +400,15 @@ export class WebCodecsRecorder {
   /**
    * Build the webcam pipeline, or record the screen alone and say why.
    *
-   * Both refusals are warnings rather than throws: the take the user asked for
-   * is mostly the screen, and losing it because the camera track was missing
-   * would be a worse outcome than a take with no companion.
+   * Every refusal here is a warning rather than a throw — the missing track,
+   * the missing API, and a muxer or an encoder that will not start: the take
+   * the user asked for is mostly the screen, and losing it because the camera
+   * could not be encoded would be a worse outcome than a take with no
+   * companion. `canRecordSeparateTracks()` proves the two APIs exist; nothing
+   * can prove in advance that the camera's dimensions are an encodable VP9
+   * config, so the failure this catch exists for is a real one. `stop()` then
+   * delivers `(blob, null)` and the controller — which knows the mode was
+   * resolved on — is what tells the user the webcam track was lost.
    */
   private async initializeCompanion(webcamStream: MediaStream): Promise<void> {
     const track = webcamStream.getVideoTracks()[0];
@@ -418,34 +424,55 @@ export class WebCodecsRecorder {
     }
 
     const settings = track.getSettings();
-    const { output, target, packetSource } = this.createVideoOutput();
-    // No audio track: slice 1 keeps the whole mix on the primary output.
-    await output.start();
+    // The reader is taken before the guarded section on purpose: getting a
+    // reader off a fresh processor's readable cannot fail on its own, and
+    // holding it here means the catch below has exactly one definite thing to
+    // release — the camera — rather than a set of maybes.
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
 
-    this.companion = {
-      track,
-      encoder: await this.createVideoEncoder(
-        () => this.companion?.packetSource ?? null,
-        settings.width || 1280,
-        settings.height || 720,
-        // ...and the companion's encoder dying costs the take its companion and
-        // nothing else. Routing this to onError would have the controller
-        // dispose the recorder and throw away a screen recording that is still
-        // being made.
-        (e) => {
-          console.warn(`Webcam track encoder failed: ${e.message}`);
-          this.failCompanion();
-        }
-      ),
-      output,
-      target,
-      packetSource,
-      reader: new MediaStreamTrackProcessor({ track }).readable.getReader(),
-      readerActive: false,
-      timing: newFrameTiming(),
-      frameCount: 0,
-      failed: false,
-    };
+    try {
+      const { output, target, packetSource } = this.createVideoOutput();
+      // No audio track: slice 1 keeps the whole mix on the primary output.
+      await output.start();
+
+      this.companion = {
+        track,
+        encoder: await this.createVideoEncoder(
+          () => this.companion?.packetSource ?? null,
+          settings.width || 1280,
+          settings.height || 720,
+          // ...and the companion's encoder dying costs the take its companion
+          // and nothing else. Routing this to onError would have the controller
+          // dispose the recorder and throw away a screen recording that is
+          // still being made.
+          (e) => {
+            console.warn(`Webcam track encoder failed: ${e.message}`);
+            this.failCompanion();
+          }
+        ),
+        output,
+        target,
+        packetSource,
+        reader,
+        readerActive: false,
+        timing: newFrameTiming(),
+        frameCount: 0,
+        failed: false,
+      };
+    } catch (e) {
+      console.warn('Webcam track could not be set up:', e);
+      // Nothing downstream can reach this half any more — `companion` stays
+      // null, so `stop()` and `cleanup()` both skip it — so let the camera go
+      // here. An Output that was started is abandoned unfinalized, exactly as
+      // a companion that encoded no frame is.
+      try {
+        await reader.cancel();
+      } catch {
+        // Ignore cancel errors: the pipeline is being abandoned either way.
+      }
+      this.companion = null;
+      return;
+    }
 
     // A camera that stops is not a take that stops: end this pipeline and let
     // the screen keep recording. stop() then finalizes a shorter companion, or
