@@ -30,6 +30,24 @@ export interface RecordingSaveDeps {
   setNotice: (notice: string | null) => void;
 }
 
+/**
+ * What the take actually captured, as opposed to what its config asked for.
+ *
+ * Resolved once by `useRecordingController` when the take starts, from the
+ * streams it really acquired, and handed over with the blob — the same
+ * resolve-once discipline the separate-tracks mode gets, and for the same
+ * reason: a fact about this take, not about the settings as they stand now.
+ */
+export interface CapturedAudio {
+  /**
+   * A microphone stream with a track in it was really acquired — the toggle
+   * AND the device. That is the pair the recorder asks when it wires the mix
+   * and the pair the controller counts the take's parts with, so the stored
+   * `hasAudio` cannot disagree with either (ESCSUITE-70).
+   */
+  micAcquired: boolean;
+}
+
 /** Save a finished take. `recordedDuration` is what the recorder timed. */
 export type SaveRecording = (
   rawBlob: Blob,
@@ -38,7 +56,13 @@ export type SaveRecording = (
    * The take's other parts, when the recorder produced any. Only the
    * separate-tracks mode does — see `core/webcodecs-recorder.ts`.
    */
-  companions?: CompanionPart[] | null
+  companions?: CompanionPart[] | null,
+  /**
+   * What the take captured. Optional so the three-argument call still reads,
+   * and it claims no microphone when nothing says otherwise: a default of
+   * `true` would be exactly the bug this argument exists to delete.
+   */
+  captured?: CapturedAudio
 ) => Promise<void>;
 
 export function useRecordingSave({
@@ -53,7 +77,8 @@ export function useRecordingSave({
   const saveRecording = useCallback(async (
     rawBlob: Blob,
     recordedDuration: number,
-    companions?: CompanionPart[] | null
+    companions?: CompanionPart[] | null,
+    captured: CapturedAudio = { micAcquired: false }
   ) => {
     setState('saving');
 
@@ -112,22 +137,24 @@ export function useRecordingSave({
     // both records below so the stored metadata and the list entry cannot
     // disagree (ESCSUITE-60), and the M4A button stays truthful after a reload.
     //
-    // The microphone half is the config's to answer: asking for it and getting
-    // it are the same event, and a refused permission never starts a take.
-    // System audio is not: ticking it only *asks*, because the tick box that
-    // decides is in the browser's own share dialog, so a take recorded with it
-    // clear has no sound at all (ESCSUITE-62). `systemAudioShared` is what the
-    // controller read off the display stream's tracks when this take started —
-    // it is reset to `true` only when the *next* one starts, so at save time it
-    // still describes the take being saved.
+    // Neither half is the config's alone, because a toggle only *asks*. The
+    // microphone half is `micAcquired`: the controller's own answer about the
+    // stream it acquired, because a machine with no microphone leaves the
+    // toggle on and hands back `mic: null`, and a take recorded that way has
+    // no sound in it (ESCSUITE-70). System audio is the tick box in the
+    // browser's own share dialog, so a take recorded with it clear has none
+    // either (ESCSUITE-62); `systemAudioShared` is what the controller read
+    // off the display stream's tracks when this take started — it is reset to
+    // `true` only when the *next* one starts, so at save time it still
+    // describes the take being saved.
     //
     // Read through `getState()` rather than selected: this hook renders inside
     // `App`, and a subscription here would re-render the whole screen on a
-    // field the save path reads once. Still the config rather than the blob —
-    // reading the file back would mean a decode on the save path.
+    // field the save path reads once. Still the streams' answer rather than the
+    // blob's — reading the file back would mean a decode on the save path.
     const { systemAudioShared } = useRecorderStore.getState();
     const hasAudio =
-      config.microphoneEnabled || (config.systemAudioEnabled && systemAudioShared);
+      captured.micAcquired || (config.systemAudioEnabled && systemAudioShared);
 
     // A companion take is one take in several files: the primary names it (its
     // own id is the takeId), carries the mixed audio and the overlay geometry,

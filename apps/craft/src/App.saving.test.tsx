@@ -11,6 +11,7 @@ import {
   thumbnailModule,
   converterModule,
   analyticsModule,
+  detectionResult,
   resetAppDoubles,
 } from './test/appDoubles';
 import {
@@ -237,6 +238,38 @@ describe('App saving a recording', () => {
     // ...and the copy a reload reads back agrees.
     const [meta] = await getRecordingsMetadata();
     expect(meta.hasAudio).toBe(false);
+  });
+
+  // ESCSUITE-70. The microphone half of `hasAudio` was the config's answer, and
+  // the config only says what was *asked* for. A machine with no microphone
+  // reports the capability missing, `acquireStreams` hands back `mic: null`,
+  // and the take is recorded with no sound in it — while both records said it
+  // had some and the M4A button offered a download of that silence.
+  it('marks a take whose microphone never opened as having none', async () => {
+    permissionsOverrides.detectCapabilities.mockResolvedValue(
+      detectionResult({ microphone: false }, { microphone: { available: false, reason: 'no_device' } })
+    );
+    resetRecorderStore({ countdownSeconds: 0, microphoneEnabled: true, systemAudioEnabled: false });
+    await recordATake({ systemAudio: false });
+
+    expect(permissionsOverrides.requestMicrophone).not.toHaveBeenCalled();
+    expect(useRecorderStore.getState().recordings[0]).toMatchObject({ hasAudio: false });
+    const [meta] = await getRecordingsMetadata();
+    expect(meta.hasAudio).toBe(false);
+    // ...and the row's M4A button says why, rather than starting a conversion
+    // that can only fail.
+    const m4a = screen.getByRole('button', { name: /as audio \(M4A\)$/ });
+    expect(m4a).toBeDisabled();
+    expect(m4a).toHaveAttribute('title', 'This recording has no audio');
+  });
+
+  it('marks a take whose microphone did open as having audio', async () => {
+    resetRecorderStore({ countdownSeconds: 0, microphoneEnabled: true, systemAudioEnabled: false });
+    await recordATake({ systemAudio: false });
+
+    expect(permissionsOverrides.requestMicrophone).toHaveBeenCalledTimes(1);
+    expect(useRecorderStore.getState().recordings[0]).toMatchObject({ hasAudio: true });
+    expect(screen.getByRole('button', { name: /as audio \(M4A\)$/ })).toBeEnabled();
   });
 
   it('ignores a recorder stop that arrives after the take was cancelled', async () => {
