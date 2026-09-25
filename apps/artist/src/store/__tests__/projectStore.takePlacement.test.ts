@@ -129,11 +129,13 @@ describe('placeTakeOnTimeline', () => {
 
   it('is one undo step for the whole take, and undo leaves the media alone', () => {
     const before = store().history.past.length
+    const tracksBefore = store().project.timeline.tracks.length
 
     store().placeTakeOnTimeline([screenPart, webcamPart])
 
     expect(store().history.past).toHaveLength(before + 1)
     expect(placedClips()).toHaveLength(2)
+    expect(store().project.timeline.tracks.length).toBeGreaterThan(tracksBefore)
 
     store().undo()
 
@@ -142,6 +144,18 @@ describe('placeTakeOnTimeline', () => {
     // the library does.
     expect(placedClips()).toHaveLength(0)
     expect(store().sourceVideos.map((v) => v.id)).toContain(video.id)
+    // A take brings tracks as well as clips, so undoing it must take those back
+    // too. Asserting only the clips would stay green under a refactor that
+    // created the companion tracks outside the action's one `set` — which would
+    // leave an orphan empty track behind on every undone handoff.
+    expect(store().project.timeline.tracks).toHaveLength(tracksBefore)
+
+    // And it is one *redo* step as well: the whole take comes back, tracks
+    // included, rather than being half-restored.
+    expect(store().history.future).toHaveLength(1)
+    store().redo()
+    expect(placedClips()).toHaveLength(2)
+    expect(store().project.timeline.tracks).toHaveLength(tracksBefore + 1)
   })
 
   it('does nothing at all when there is nothing to place', () => {
