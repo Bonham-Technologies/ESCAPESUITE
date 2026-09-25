@@ -118,7 +118,7 @@ dist/
 - Core modules in `src/core/`: `recorder.ts`, `webcodecs-recorder.ts`, `recorder-factory.ts`, `webcodecsSupport.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
 - Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for composited PiP, audio-only takes and browsers without it
-- **"Record webcam as a separate track"** (ESCSUITE-14, opt-in, off by default) is the one PiP take that reaches WebCodecs: one `WebCodecsRecorder` runs two `VideoEncoder`s and two Mediabunny outputs off one clock, so the screen and the webcam are two frame-aligned files instead of one composited overlay, and the `Compositor` draws the preview only. It costs about twice the CPU and storage, needs `MediaStreamTrackProcessor` as well as WebCodecs (Chromium/Edge), and is disabled with a visible reason where either that or the storage headroom for two tracks is missing. MP4 and M4A cover the screen part alone until slice 4. See `apps/craft/CLAUDE.md`'s "Recording Modes" and "A take can be several files"
+- **"Record webcam as a separate track"** (ESCSUITE-14, opt-in, off by default) is the one PiP take that reaches WebCodecs: one `WebCodecsRecorder` runs two `VideoEncoder`s and two Mediabunny outputs off one clock, so the screen and the webcam are two frame-aligned files instead of one composited overlay, and the `Compositor` draws the preview only. It costs about twice the CPU and storage, needs `MediaStreamTrackProcessor` as well as WebCodecs (Chromium/Edge), and is disabled with a visible reason where either that or the storage headroom for two tracks is missing. MP4 re-composites such a take into one file with the camera back in the corner it was recorded in, and M4A was always the whole take's sound. See `apps/craft/CLAUDE.md`'s "Recording Modes" and "A take can be several files"
 - Outputs WebM either way, but only the MediaRecorder path needs repairing: `useRecordingSave` runs `webm-duration-fix` over MediaRecorder output at save time, and writes WebCodecs output through untouched (Mediabunny already emits Duration and Cues)
 - Three downloads per recording: **WebM** is the stored blob handed straight back, instant and always available; **MP4** (H.264 + AAC) is `converter.ts` re-encoding it in the page with WebCodecs + Mediabunny; **M4A** (`convertToM4A`, `audio/mp4`) is the take's audio alone, AAC in an MP4 container, for a mic-only take that should come out as an audio file. The two conversions share one slot — one at a time whichever it is — with a phase-and-percentage progress row, a Cancel button, and a disabled button carrying a visible reason wherever a conversion is refused. Nothing is uploaded by any of the three; a failed conversion raises the app's one notice and leaves the WebM download untouched
 - The two conversions are gated differently, because they fail differently: no AAC encoder makes an MP4 *silent* (still offered, with a note) and an M4A *impossible* (disabled, with the same sentence as its reason), and a take with no audio in it disables M4A alone. See `apps/craft/CLAUDE.md`'s "Download Formats"
@@ -173,11 +173,31 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   reach the shared IndexedDB (or would rather not) gets the file itself. `RecordingsListPanel`
   decides with `isEmbedded()`; `RecordingsList` is props-only and draws the button exactly when
   it is given `onUploadToHost`. See `apps/craft/src/utils/uploadToHost.ts`.
-  Since ESCSUITE-14 the payload may also carry `role` and `takeId` (both optional, both
-  absent on a single-file take), because a take can be several files and each row posts its
-  own bytes. A host that ignores them receives exactly what it received before. One message
-  carrying every part of a take is planned as `payload.parts` and will come with its own
-  adoption note.
+  Since ESCSUITE-14 a take can be several files, and the payload says so two ways. `role` and
+  `takeId` (both optional, both absent on a single-file take) name **which** part a row's bytes
+  are. And the primary row's message carries `parts` — every file of the take, the primary
+  included, in role order:
+  `parts?: Array<{ id: string; role: 'screen' | 'webcam' | 'mic' | 'system'; name: string; blob: Blob; startOffset: number }>`.
+  `startOffset` is seconds after the take's start at which that part's first frame was captured
+  (0 for every part ESCAPECRAFT records today — one recorder, one clock). A part whose bytes are
+  gone is left out rather than listed with nothing in it.
+
+  **Adopting `parts`.** It is additive and nothing about the existing fields moved.
+  - *An older host* reads `payload.id`, `payload.name` and `payload.blob` and gets exactly what
+    it has always got: the **screen** part's bytes, under the take's name. It never sees `parts`
+    and needs no change. Every host that shipped against slice 1 keeps working.
+  - *A new host* reads `payload.parts` when it is there and falls back to `payload.blob` when it
+    is not — `parts` is **absent** for a take that is one file, so `payload.parts ?? [{ id,
+    name, blob, role: 'screen', startOffset: 0 }]` is the whole adoption. Each entry's `id`
+    addresses the same record in the shared IndexedDB that `payload.id` does.
+  - *Message size* is not a concern: a `Blob` crosses a structured clone as a handle, not a
+    copy, so a four-part take's message is four references and the primary appearing in both
+    `blob` and `parts[0]` costs nothing — they are literally the same `Blob` object, because
+    `uploadToHost` hands the bytes it already holds to `loadTakeParts` rather than letting it
+    read them again. The bytes are never read into the heap on either side.
+  - *The per-row buttons stay.* A companion row's own "Upload to host" still posts that row
+    alone, with `role` and `takeId` and no `parts`. It is redundant for a host that adopted
+    `parts` and is the only way a host that has not can be handed one specific part.
 - **URL params (ARTIST)**: `?video=url` to preload, `?project=base64` for state,
   `?loadVideo=<id>` for the CRAFT handoff — the id addresses a take's **primary** part, and
   ARTIST resolves its siblings by `takeId`, adds every part to the media library and places
@@ -491,13 +511,20 @@ lines still exactly 100.00, statements 99.33 → 99.39, functions unchanged at 9
 callback and one failure arm each, all three reachable from the doubles. The craft row was also a
 hundredth stale on two figures — it read 96.81 branches / 99.51 functions, while the commit this
 slice started from measures 96.82 / 99.52 — and is corrected here along with the rest of the row.
+`@escapesuite/craft` was re-measured 2026-09-25 at the end of ESCSUITE-14 slice 4 (the composite
+MP4, `UPLOAD_RECORDING.parts`, the retired interim note): lines still exactly 100.00, and all
+three of statements (99.39 → 99.45), branches (97.36 → **97.54**) and functions (99.52 → 99.53)
+up a fraction — `core/overlayGeometry.ts` and `utils/takeParts.ts` are small, pure and fully
+covered, and the retired note took an uncovered render branch with it — with **no floor crossed**,
+so craft's floors stay 100 / 99 / 97 / 99. The two functions still uncovered are both in
+`core/webcodecs-recorder.ts`, which this slice did not touch.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.39 | 97.36 | 99.52 |
+| `@escapesuite/craft` | 100.00 | 99.45 | 97.54 | 99.53 |
 | `@escapesuite/artist` | 99.38 | 98.71 | 93.51 | 98.95 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |

@@ -304,19 +304,40 @@ export function generateShareUrl(
  *   CRAFT's header "Open Editor" button is deliberately NOT routed through the
  *   host - it still opens the editor itself, embedded or not. Only "Send to
  *   Editor", which hands over a specific recording, becomes a message.
- * - UPLOAD_RECORDING: { id: string, name: string, blob: Blob } - A recording's
- *   own bytes, handed to the host to do what it likes with (upload, attach,
- *   keep). Posted only when CRAFT is embedded, from a per-row "Upload to host"
- *   button that standalone CRAFT does not draw at all - there would be no one
- *   to post to. The Blob crosses by structured clone, so the host receives the
- *   file itself and does not need to reach into the shared IndexedDB; `id`
- *   still addresses the same record there, and `name` is the recording's name
- *   in the library, without an extension. Unlike SEND_TO_EDITOR, whose id is
- *   useless to a page that cannot reach CRAFT's origin, this message carries
- *   the file itself - so with no ?hostOrigin= the '*' fallback hands the bytes
- *   to whatever page is framing CRAFT, and a host that ships this action
- *   should name its origin and set frame-ancestors. See
+ * - UPLOAD_RECORDING: { id: string, name: string, blob: Blob, role?, takeId?,
+ *   parts? } - A recording's own bytes, handed to the host to do what it likes
+ *   with (upload, attach, keep). Posted only when CRAFT is embedded, from a
+ *   per-row "Upload to host" button that standalone CRAFT does not draw at all -
+ *   there would be no one to post to. The Blob crosses by structured clone, so
+ *   the host receives the file itself and does not need to reach into the shared
+ *   IndexedDB; `id` still addresses the same record there, and `name` is the
+ *   recording's name in the library, without an extension. Unlike
+ *   SEND_TO_EDITOR, whose id is useless to a page that cannot reach CRAFT's
+ *   origin, this message carries the file itself - so with no ?hostOrigin= the
+ *   '*' fallback hands the bytes to whatever page is framing CRAFT, and a host
+ *   that ships this action should name its origin and set frame-ancestors. See
  *   apps/craft/src/utils/uploadToHost.ts.
+ *
+ *   Since ESCSUITE-14 a take can be several files. `role`
+ *   ('screen' | 'webcam' | 'mic' | 'system') and `takeId` are optional and
+ *   absent on a single-file take, and say which part a row's bytes are. On the
+ *   take's PRIMARY row the message also carries every part at once:
+ *     parts?: Array<{ id: string, role: RecordingRole, name: string,
+ *                     blob: Blob, startOffset: number }>
+ *   - primary first, then the camera, then the sound, `startOffset` in seconds
+ *   after the take's start (0 for every part CRAFT records today). A part whose
+ *   bytes are gone is left out rather than listed empty.
+ *
+ *   ADOPTING parts: it is additive. An older host reads id/name/blob and gets
+ *   exactly what it always got - the screen part, under the take's name - and
+ *   needs no change. A new host reads `payload.parts` when present and falls
+ *   back to `payload.blob` when not; `parts` is absent for a take that is one
+ *   file. Message size is not a concern, because a Blob crosses a structured
+ *   clone as a handle rather than a copy: the primary appearing in both `blob`
+ *   and `parts[0]` is one object in two places. A companion row's own button
+ *   still posts that row alone, with no `parts` - redundant for a host that
+ *   adopted `parts`, and the only way one that has not can be handed a single
+ *   part.
  *
  * URL parameters (read once at startup, see parseUrlParams):
  * - video=<url> - Load a video from a URL (repeatable)
