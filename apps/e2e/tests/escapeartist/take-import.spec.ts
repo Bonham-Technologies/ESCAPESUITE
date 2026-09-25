@@ -63,6 +63,39 @@ const TAKE_PARTS = [
   },
 ]
 
+/** The take whose screen half is smaller than ESCAPEARTIST's default project. */
+const SMALL_TAKE_ID = 'e2e-small-primary'
+const SMALL_WEBCAM_ID = 'e2e-small-webcam'
+
+/**
+ * A 1280x720 share with a 640x360 camera — a take recorded on a laptop screen,
+ * handed to a 1920x1080 project.
+ *
+ * Its point is the *frame*: every part imports at native pixels centred on the
+ * canvas, so the picture the camera sat in a corner of is a 1280x720 rectangle
+ * inside the canvas rather than the canvas itself.
+ */
+const SMALL_TAKE_PARTS = [
+  {
+    ...TAKE_PARTS[0],
+    id: SMALL_TAKE_ID,
+    name: 'Laptop share',
+    width: 1280,
+    height: 720,
+    recordedAt: 1_700_000_100_000,
+    takeId: SMALL_TAKE_ID,
+  },
+  {
+    ...TAKE_PARTS[1],
+    id: SMALL_WEBCAM_ID,
+    name: 'Laptop share — webcam',
+    width: 640,
+    height: 360,
+    recordedAt: 1_700_000_100_001,
+    takeId: SMALL_TAKE_ID,
+  },
+]
+
 /**
  * Put the take's parts into the shared database, blobs and all.
  *
@@ -74,7 +107,7 @@ const TAKE_PARTS = [
  * settles no IndexedDB work, so depending on that ordering is a race the first
  * slow run would lose — with a version-0 database and no `videos` store.
  */
-async function seedTake(page: Page) {
+async function seedTake(page: Page, parts: typeof TAKE_PARTS) {
   await page.evaluate(
     ({ dbName, dbVersion, parts }) =>
       new Promise<void>((resolve, reject) => {
@@ -105,7 +138,7 @@ async function seedTake(page: Page) {
           tx.onerror = () => reject(new Error(`seed write failed: ${String(tx.error)}`))
         }
       }),
-    { dbName: DB_NAME, dbVersion: DB_VERSION, parts: TAKE_PARTS }
+    { dbName: DB_NAME, dbVersion: DB_VERSION, parts }
   )
 }
 
@@ -136,7 +169,9 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     // ESCAPEARTIST's. That is all this load is for: `seedTake` creates the
     // schema itself, so nothing here waits on the app having mounted.
     await page.goto(ARTIST_URL)
-    await seedTake(page)
+    // Both takes, so each test names the one it wants: `orderTakeParts` groups
+    // on `takeId`, and only the take that was asked for joins the library.
+    await seedTake(page, [...TAKE_PARTS, ...SMALL_TAKE_PARTS])
   })
 
   test('places both parts on two tracks with the webcam above the screen', async ({ page }) => {
@@ -166,5 +201,42 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     expect(await transformValue(page, 'Pos X')).toBe('88%')
     expect(await transformValue(page, 'Pos Y')).toBe('87%')
     expect(await transformValue(page, 'Scale')).toBe('30%')
+  })
+
+  test('measures the corner from the screen recording, not from a bigger canvas', async ({
+    page,
+  }) => {
+    await page.goto(`${ARTIST_URL}?loadVideo=${SMALL_TAKE_ID}&suppressRestore=1`)
+    await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible({ timeout: 15_000 })
+
+    await page.locator('[data-clip-id]').filter({ hasText: '— webcam' }).click()
+
+    // Every number below, and where it comes from. The project is
+    // ESCAPEARTIST's default 1920x1080 (`createEmptyProject`) and this take's
+    // screen half is 1280x720, so the screen imports at native pixels centred
+    // on the canvas and the picture the camera sat in a corner of is the
+    // rectangle
+    //
+    //   left = (1920 - 1280) / 2 = 320, top = (1080 - 720) / 2 = 180, 1280x720
+    //
+    // `overlayPlacementToTransform` then reads every number off *that*:
+    //
+    //   overlay width = 0.2 x 1280 = 256, and 16:9 so 144 high
+    //   inset         = 20 — the frame is 1280 wide, which is the compositor's
+    //                   cap rather than above it, so the flat padding (the
+    //                   fraction gives the same 20 here; the sub-1280 case
+    //                   where they differ is the unit test's)
+    //   centre x      = 320 + 1280 - 20 - 128 = 1452 -> 1452/1920 = 0.75625
+    //   centre y      = 180 +  720 - 20 -  72 =  808 ->  808/1080 = 0.748148
+    //   scale         = 256 / 640 = 0.4 (the camera's own pixels)
+    //
+    // and the inspector prints `Math.round(value * 100)`% (`TransformSection`),
+    // so 0.75625 -> 76, 0.748148 -> 75, 0.4 -> 40. Measuring from the canvas
+    // instead would read 88% / 87% at 60% (1920 x 0.2 = 384 wide, inset 30),
+    // with the camera over the middle of the picture the user recorded — which
+    // is what this test fails with if the frame is ever dropped.
+    expect(await transformValue(page, 'Pos X')).toBe('76%')
+    expect(await transformValue(page, 'Pos Y')).toBe('75%')
+    expect(await transformValue(page, 'Scale')).toBe('40%')
   })
 })
