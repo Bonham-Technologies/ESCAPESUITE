@@ -1812,6 +1812,10 @@ describe('WebCodecsRecorder', () => {
       processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
       await flush()
 
+      const micNode = processorFor(1)
+      const encodesBefore = AudioEncoderDouble.instances[1].encodes.length
+      const audioDataBefore = getCreatedFrames('AudioData').length
+
       AudioEncoderDouble.instances[1].emitError('mic encoder died')
       await flush()
 
@@ -1820,6 +1824,30 @@ describe('WebCodecsRecorder', () => {
       expect(callbacks.onError).not.toHaveBeenCalled()
       expect(consoleWarn).toHaveBeenCalledWith('Microphone track encoder failed: mic encoder died')
       expect(recorder.isRecording()).toBe(true)
+
+      // ...and the dead pipeline stops working, the way the webcam's reader
+      // does. A WebCodecs error closes the codec, so every later buffer would
+      // interleave 4096 frames into a fresh 32KB planar array, build an
+      // AudioData, throw InvalidStateError out of encode() — leaking that
+      // AudioData, because close() is the statement after it — and log once
+      // per buffer, ~11.7 times a second for the rest of the take. The
+      // cheapest possible failure must not be the take's most expensive thing.
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(encodesBefore)
+      expect(getCreatedFrames('AudioData')).toHaveLength(audioDataBefore)
+      expect(getCreatedFrames('AudioData').every(f => f.closed)).toBe(true)
+      expect(consoleError).not.toHaveBeenCalled()
+      // The node itself is let go too, rather than left driving a callback that
+      // only ever returns at its first line.
+      expect(micNode.disconnect).toHaveBeenCalledTimes(1)
+
+      // The other two audio pipelines are untouched — still connected, still
+      // encoding. Isolation is the whole point of a per-pipeline failure.
+      expect(processorFor(0).disconnect).not.toHaveBeenCalled()
+      expect(processorFor(2).disconnect).not.toHaveBeenCalled()
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[2].encodes).toHaveLength(2)
 
       await recorder.stop()
 

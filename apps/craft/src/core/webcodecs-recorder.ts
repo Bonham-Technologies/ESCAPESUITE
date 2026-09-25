@@ -713,10 +713,31 @@ export class WebCodecsRecorder {
   /**
    * Give up on one companion without touching the take: stop reading its
    * source, and leave it out of what `stop()` delivers.
+   *
+   * Marking it failed is only half of it — the pipeline's own loop has to stop
+   * too, or the cheapest possible failure becomes the most expensive thing in
+   * the take. For a video companion that is `readerActive`, which ends
+   * `captureFromTrackProcessor`. For an audio companion it is the processor and
+   * the encoder: a WebCodecs error *closes* the codec, so every later buffer
+   * would interleave 4096 frames into a fresh 32KB planar array, build an
+   * `AudioData`, throw `InvalidStateError` out of `encode()` — leaking that
+   * `AudioData`, because `close()` is the statement after it — and log once per
+   * buffer, ~11.7 times a second for the rest of the take. Nulling the encoder
+   * stops the callback at its existing gate; disconnecting the node means it is
+   * not left driving a callback that only ever returns at its first line.
+   *
+   * `flushCompanions` already skips a null encoder and `finalizeCompanions`
+   * already skips a failed companion, so nothing downstream changes.
    */
   private failCompanion(companion: CompanionPipeline): void {
     companion.failed = true;
-    if (companion.kind === 'video') companion.readerActive = false;
+    if (companion.kind === 'video') {
+      companion.readerActive = false;
+    } else {
+      companion.processor?.disconnect();
+      companion.processor = null;
+      companion.encoder = null;
+    }
   }
 
   /**
