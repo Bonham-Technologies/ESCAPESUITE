@@ -36,6 +36,21 @@ export interface PixelSize {
 }
 
 /**
+ * A rectangle in canvas pixels: the picture the overlay sat in a corner of.
+ *
+ * Not the canvas. ARTIST imports the take's screen recording at **native
+ * pixels centred on the canvas** (scale 1 — `core/canvasRenderer.ts`), so the
+ * picture the user recorded is only the whole canvas when the two happen to
+ * match. Measuring the corner from the canvas instead would put the camera over
+ * the middle of that picture on every take whose capture is not the project's
+ * own size.
+ */
+export interface PixelFrame extends PixelSize {
+  left: number;
+  top: number;
+}
+
+/**
  * The transform a webcam clip is imported with.
  *
  * The overlay's **width** is the compositor's exactly (`size` x the frame's
@@ -48,16 +63,30 @@ export interface PixelSize {
  * the drawn width over the part's native width, because that is how
  * `core/canvasRenderer.ts` reads them: scale 1 means native pixels in ARTIST.
  *
+ * `frame` is the rectangle the overlay sat in a corner **of** — the take's
+ * screen recording as it is drawn, which is what the camera was actually
+ * positioned against. It defaults to the whole canvas, which is what the frame
+ * *is* whenever the capture and the project are the same size. Both the inset
+ * and the overlay's width are fractions of `frame.width`, and the corners are
+ * the frame's corners; `x`/`y` still come back as fractions of the canvas,
+ * because that is the only thing a transform can be expressed in.
+ *
  * `placement.shape` is read and **ignored** — a mask on every clip is
  * ESCSUITE-65, and when it exists the circle maps onto it here.
  */
 export function overlayPlacementToTransform(
   placement: OverlayPlacement,
   projectResolution: PixelSize,
-  partSize: PixelSize
+  partSize: PixelSize,
+  frame: PixelFrame = {
+    left: 0,
+    top: 0,
+    width: projectResolution.width,
+    height: projectResolution.height,
+  }
 ): ClipTransform {
-  const overlayWidth = projectResolution.width * placement.size;
-  const margin = projectResolution.width * OVERLAY_MARGIN_FRACTION;
+  const overlayWidth = frame.width * placement.size;
+  const margin = frame.width * OVERLAY_MARGIN_FRACTION;
 
   // A part with no dimensions was not written by ESCAPECRAFT. It still belongs
   // in its corner: the box falls back to the compositor's 16:9 and the clip to
@@ -71,11 +100,11 @@ export function overlayPlacementToTransform(
   const isTop = placement.position === 'top-left' || placement.position === 'top-right';
 
   const centreX = isLeft
-    ? margin + overlayWidth / 2
-    : projectResolution.width - margin - overlayWidth / 2;
+    ? frame.left + margin + overlayWidth / 2
+    : frame.left + frame.width - margin - overlayWidth / 2;
   const centreY = isTop
-    ? margin + overlayHeight / 2
-    : projectResolution.height - margin - overlayHeight / 2;
+    ? frame.top + margin + overlayHeight / 2
+    : frame.top + frame.height - margin - overlayHeight / 2;
 
   return {
     ...DEFAULT_TRANSFORM,

@@ -92,6 +92,25 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     // screen, and an empty low-index track would put it underneath.
     const primaryTrack = findEmptyTrack(tracks, clips);
 
+    // The rectangle the overlay sat in a corner of: the primary's own drawn
+    // rect, not the canvas. Every part imports at native pixels centred on the
+    // canvas (scale 1), so a capture smaller or larger than the project is
+    // drawn in a rectangle of its own — and the camera was in a corner of
+    // *that* while recording. A primary with no stored dimensions (nothing
+    // ESCAPECRAFT writes, but IndexedDB is not type-checked) leaves the whole
+    // canvas as the frame, which is `overlayPlacementToTransform`'s default.
+    const resolution = state.project.resolution;
+    const primaryPart = parts[0];
+    const overlayFrame =
+      primaryPart.width > 0 && primaryPart.height > 0
+        ? {
+            left: (resolution.width - primaryPart.width) / 2,
+            top: (resolution.height - primaryPart.height) / 2,
+            width: primaryPart.width,
+            height: primaryPart.height,
+          }
+        : undefined;
+
     parts.forEach((part, index) => {
       let trackId: string;
       if (index === 0 && primaryTrack) {
@@ -116,7 +135,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         // drawn into; everything else imports at native size, centred, like any
         // other clip.
         transform: part.overlayPlacement
-          ? overlayPlacementToTransform(part.overlayPlacement, state.project.resolution, part)
+          ? overlayPlacementToTransform(part.overlayPlacement, resolution, part, overlayFrame)
           : { ...DEFAULT_TRANSFORM },
         effects: { ...DEFAULT_EFFECTS },
         transition: { ...DEFAULT_TRANSITION },

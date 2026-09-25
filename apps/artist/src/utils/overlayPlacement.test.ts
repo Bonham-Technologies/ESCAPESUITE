@@ -123,6 +123,32 @@ describe('overlayPlacementToTransform', () => {
     expect(transform.y).toBeCloseTo((30 + 108) / 1080, 10)
   })
 
+  it('measures the corner from the frame it is given, not from the canvas', () => {
+    // The screen recording is what the camera sat in a corner *of*, and ARTIST
+    // places it at native pixels centred on the canvas (scale 1). So a 1280x720
+    // take in a 1920x1080 project is drawn in a 1280x720 rectangle inset
+    // (1920-1280)/2 = 320 across and (1080-720)/2 = 180 down — and the overlay
+    // belongs in THAT rectangle's bottom-right corner, not the canvas's, or the
+    // camera lands over the middle of the picture the user recorded.
+    const project = { width: 1920, height: 1080 }
+    const frame = { left: 320, top: 180, width: 1280, height: 720 }
+    const camera = { width: 1280, height: 720 }
+
+    const transform = overlayPlacementToTransform(placement('bottom-right'), project, camera, frame)
+
+    const rect = drawnRect(transform, project, camera)
+    // Every number is the frame's: 1280 x 0.2 = 256 wide, 20px inset (the
+    // compositor's own, because the frame is the compositor's own width).
+    expect(rect.width).toBeCloseTo(256, 6)
+    expect(rect.height).toBeCloseTo(144, 6)
+    expect(rect.left).toBeCloseTo(frame.left + frame.width - 20 - 256, 6)
+    expect(rect.top).toBeCloseTo(frame.top + frame.height - 20 - 144, 6)
+    // x/y stay fractions of the CANVAS, which is how canvasRenderer reads them.
+    expect(transform.x).toBeCloseTo(1452 / 1920, 10)
+    expect(transform.y).toBeCloseTo(808 / 1080, 10)
+    expect(transform.scaleX).toBeCloseTo(0.2, 10)
+  })
+
   it('leaves rotation, opacity and the aspect lock at their defaults', () => {
     const transform = overlayPlacementToTransform(
       placement('bottom-right'),

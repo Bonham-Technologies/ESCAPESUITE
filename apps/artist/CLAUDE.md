@@ -205,6 +205,16 @@ back to 16:9 and the clip to `DEFAULT_TRANSFORM.scaleX`, which beats a clip zero
 The placement's `shape` is carried across from ESCAPECRAFT and **ignored** until ESCSUITE-65
 gives every clip a mask.
 
+**The corner is the screen recording's, not the canvas's.** `overlayPlacementToTransform`
+takes an optional fourth argument — the **frame**, a rectangle in canvas pixels — and both the
+inset and the overlay's width are fractions of `frame.width`. `placeTakeOnTimeline` computes it
+from the take's primary: every part imports at native pixels centred on the canvas, so a
+1280x720 screen recording in a 1920x1080 project is drawn in a rectangle 320 across and 180
+down, and the camera sat in a corner of *that* while recording. Measuring from the canvas
+instead would drop the camera over the middle of the picture on every take whose capture is not
+the project's own size. The frame defaults to the whole canvas — which is what it *is* when the
+two match, and what a primary with no stored dimensions falls back to.
+
 Three things the import refuses to do, each chosen rather than defaulted:
 
 - **A part whose blob is gone is skipped and counted**, never fatal — storage cleared between

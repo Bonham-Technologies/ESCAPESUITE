@@ -93,6 +93,50 @@ describe('placeTakeOnTimeline', () => {
     expect(placedClips()[0].transform.scaleX).toBe(1)
   })
 
+  it('measures the webcam corner from the primary drawn rectangle, not the canvas', () => {
+    // The primary is placed at native pixels centred on the canvas (scale 1 =
+    // native, `core/canvasRenderer.ts`), so a 1280x720 screen recording in a
+    // 1920x1080 project is drawn in a rectangle inset (1920-1280)/2 = 320
+    // across and (1080-720)/2 = 180 down. The camera sat in a corner of *that*
+    // rectangle while recording, so that is the frame the placement converts
+    // against — measuring from the canvas would drop the camera over the middle
+    // of the picture the user actually recorded.
+    const smallScreen: TakeClipPart = { ...screenPart, width: 1280, height: 720 }
+
+    store().placeTakeOnTimeline([smallScreen, webcamPart])
+
+    const webcam = placedClips()[1]
+    // 1280 x 0.2 = 256 wide at the compositor's own 20px inset, centred at
+    // 320 + 1280 - 20 - 128 = 1452 across and 180 + 720 - 20 - 72 = 808 down.
+    expect(webcam.transform.x).toBeCloseTo(1452 / 1920, 10)
+    expect(webcam.transform.y).toBeCloseTo(808 / 1080, 10)
+    expect(webcam.transform.scaleX).toBeCloseTo(0.2, 10)
+    expect(webcam.transform).toEqual(
+      overlayPlacementToTransform(
+        webcamPart.overlayPlacement!,
+        store().project.resolution,
+        { width: webcamPart.width, height: webcamPart.height },
+        { left: 320, top: 180, width: 1280, height: 720 }
+      )
+    )
+  })
+
+  it('falls back to the whole canvas when the primary has no dimensions', () => {
+    // Nothing ESCAPECRAFT writes, but IndexedDB is not type-checked: with no
+    // rectangle to measure from, the canvas is the only frame there is.
+    const sizeless: TakeClipPart = { ...screenPart, width: 0, height: 0 }
+
+    store().placeTakeOnTimeline([sizeless, webcamPart])
+
+    expect(placedClips()[1].transform).toEqual(
+      overlayPlacementToTransform(
+        webcamPart.overlayPlacement!,
+        store().project.resolution,
+        { width: webcamPart.width, height: webcamPart.height }
+      )
+    )
+  })
+
   it('gives every part its own track, in the order it was handed them', () => {
     const micPart: TakeClipPart = {
       sourceVideoId: 'mic-part',
