@@ -39,7 +39,7 @@ export const COMPANION_PARTS: Record<CompanionRole, CompanionPartDescriptor> = {
 export function companionPartFor(
   role: RecordingRole | undefined
 ): CompanionPartDescriptor | null {
-  return role === undefined || role === 'screen' ? null : COMPANION_PARTS[role]
+  return role === undefined || role === 'screen' ? null : (COMPANION_PARTS[role] ?? null)
 }
 
 /**

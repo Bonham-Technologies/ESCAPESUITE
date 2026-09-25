@@ -362,6 +362,10 @@ describe('WebCodecsRecorder work ceilings', () => {
         // primary's, which is what keeps a screen-only download audible.
         expect(screen.flushCalls).toBe(1)
         expect(webcam.flushCalls).toBe(1)
+        // Audio encoders are constructed mix, then mic, then system
+        // (`initializeAudioCompanion`'s call order), so `lastAudioEncoder()`
+        // here is the system companion's, not the mix's — every audio
+        // encoder flushes exactly once regardless of which one this checks.
         expect(lastAudioEncoder().flushCalls).toBe(1)
         expect(AudioEncoderDouble.instances).toHaveLength(3)
         // The two audio companions are offered no buffer by this suite, so

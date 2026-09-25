@@ -137,9 +137,13 @@ export function buildRecordingEntry({
     duration: sourceVideo.duration,
     createdAt: now,
     size,
-    thumbnailUrl,
     hasWebcam,
     hasAudio,
+    // Genuinely absent, not present-and-undefined — an audio part has no
+    // picture to decode a thumbnail from, and the list's empty placeholder
+    // is drawn from the key being missing, the same way `takeId` and `role`
+    // are missing on a single-file take.
+    ...(thumbnailUrl !== undefined ? { thumbnailUrl } : {}),
     // Same rule as the stored record: absent on a single-file take, so the
     // library's grouping sees nothing to group.
     ...(sourceVideo.takeId !== undefined ? { takeId: sourceVideo.takeId } : {}),
