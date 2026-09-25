@@ -8,6 +8,21 @@
 // It lives beside the hook rather than inside it for two reasons: the hook's
 // effect is already the app's longest, and this is the half with the storage
 // reads and the failure arms worth testing on their own.
+//
+// Two rules about storage failing, both deliberate, because how a part was lost
+// is not the take's business — only that it was:
+//
+//   * a companion whose `getVideo` **rejects** is treated exactly as one that
+//     resolves `undefined`: skipped and counted, never fatal. The alternative
+//     is a half-imported take — the primary already in the media library,
+//     nothing on the timeline and a failure toast — which is worse than a take
+//     that arrived a track short and said so;
+//   * a `getThumbnail` that rejects, for any part including the primary, costs
+//     that part its picture and nothing else. A thumbnail is cosmetic.
+//
+// The primary's own path is untouched by both: its blob is already in hand, and
+// a primary whose length cannot be resolved still throws, because that is the
+// take failing rather than a part of it.
 import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage';
 import { resolveStoredDuration } from '../core/videoProcessor';
 import { isPlaceableRole, orderTakeParts } from '../utils/takeParts';
@@ -79,47 +94,62 @@ export async function importTake(
   const thumbnailUrls: string[] = [];
   let missingParts = 0;
 
-  for (const part of parts) {
-    const isPrimary = part.id === metadata.id;
-    let duration = takeDuration;
+  try {
+    for (const part of parts) {
+      const isPrimary = part.id === metadata.id;
+      let duration = takeDuration;
 
-    if (!isPrimary) {
-      const stored = await getVideo(part.id);
-      if (!stored) {
-        // The take names a part storage no longer holds — cleared between the
-        // two writes, or deleted by hand. Say so, and carry on: the screen
-        // recording is the take's point.
-        missingParts += 1;
-        continue;
+      if (!isPrimary) {
+        // A rejection here is a storage error — an aborted transaction, a
+        // corrupt row — and is answered the same way as a row that is simply
+        // gone, because the take cannot tell the difference and neither can
+        // the user.
+        const stored = await getVideo(part.id).catch(() => undefined);
+        if (!stored) {
+          // The take names a part storage no longer holds — cleared between the
+          // two writes, or deleted by hand. Say so, and carry on: the screen
+          // recording is the take's point.
+          missingParts += 1;
+          continue;
+        }
+        duration = await resolvePartDuration(stored.blob, part, takeDuration);
       }
-      duration = await resolvePartDuration(stored.blob, part, takeDuration);
+
+      // Cosmetic, so never fatal: a part with no picture is still a part.
+      const thumbnailBlob = await getThumbnail(part.id).catch(() => undefined);
+      const thumbnailUrl = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : undefined;
+      if (thumbnailUrl) thumbnailUrls.push(thumbnailUrl);
+
+      addSourceVideo({ ...part, duration, thumbnailUrl });
+
+      // A companion with a role this build does not know is in the library, where
+      // it can be seen and deleted, and nowhere else: where it belongs on the
+      // timeline is not a question this build can answer.
+      if (!isPrimary && !isPlaceableRole(part.role)) continue;
+
+      clipParts.push({
+        sourceVideoId: part.id,
+        name: part.name,
+        duration,
+        startOffset: part.startOffset ?? 0,
+        width: part.width,
+        height: part.height,
+        // The overlay geometry is stored on the take's primary and applies to its
+        // camera, so it travels onto that part here — which is what lets the
+        // store place a take without knowing what a role is.
+        ...(part.role === 'webcam' && metadata.overlayPlacement !== undefined
+          ? { overlayPlacement: metadata.overlayPlacement }
+          : {}),
+      });
     }
-
-    const thumbnailBlob = await getThumbnail(part.id);
-    const thumbnailUrl = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : undefined;
-    if (thumbnailUrl) thumbnailUrls.push(thumbnailUrl);
-
-    addSourceVideo({ ...part, duration, thumbnailUrl });
-
-    // A companion with a role this build does not know is in the library, where
-    // it can be seen and deleted, and nowhere else: where it belongs on the
-    // timeline is not a question this build can answer.
-    if (!isPrimary && !isPlaceableRole(part.role)) continue;
-
-    clipParts.push({
-      sourceVideoId: part.id,
-      name: part.name,
-      duration,
-      startOffset: part.startOffset ?? 0,
-      width: part.width,
-      height: part.height,
-      // The overlay geometry is stored on the take's primary and applies to its
-      // camera, so it travels onto that part here — which is what lets the
-      // store place a take without knowing what a role is.
-      ...(part.role === 'webcam' && metadata.overlayPlacement !== undefined
-        ? { overlayPlacement: metadata.overlayPlacement }
-        : {}),
-    });
+  } catch (error) {
+    // The URLs escape only on the success path, so a throw is the last moment
+    // anything can see them: the caller revokes what it was returned, and a
+    // rejected import returns nothing. (The hook this was lifted out of kept
+    // its one URL in an effect-scoped variable its cleanup always saw; this is
+    // what replaces that.)
+    for (const url of thumbnailUrls) URL.revokeObjectURL(url);
+    throw error;
   }
 
   return { clipParts, thumbnailUrls, missingParts };

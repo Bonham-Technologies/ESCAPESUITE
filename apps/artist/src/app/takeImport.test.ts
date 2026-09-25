@@ -173,6 +173,57 @@ describe('importTake', () => {
     expect(take.missingParts).toBe(0)
   })
 
+  it('revokes every thumbnail URL it made when the take fails part-way', async () => {
+    vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
+    vi.mocked(URL.createObjectURL)
+      .mockImplementationOnce(() => 'blob:thumb-1')
+      .mockImplementationOnce(() => 'blob:thumb-2')
+    const failing = vi.fn((video: SourceVideo) => {
+      added.push(video)
+      if (added.length === 2) throw new Error('library full')
+    })
+
+    await expect(importTake(primary, failing)).rejects.toThrow('library full')
+
+    // The URLs escape only on the success path, so a throw is the one moment
+    // nothing else will ever see them: the hook's cleanup revokes what
+    // importTake returned, and a rejected importTake returns nothing. The hook
+    // this module was lifted out of kept its one URL in an effect-scoped
+    // variable its cleanup always saw — this is what replaces that.
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.flat()).toEqual([
+      'blob:thumb-1',
+      'blob:thumb-2',
+    ])
+  })
+
+  it('counts a companion whose storage read fails as a missing part', async () => {
+    vi.mocked(getVideo).mockRejectedValue(new Error('transaction aborted'))
+
+    const take = await importTake(primary, addSourceVideo)
+
+    // How storage lost the companion is not the take's business: an aborted
+    // transaction and a deleted row are the same missing part, and neither may
+    // cost the take its screen recording — the half-state (primary in the
+    // library, nothing on the timeline, "Failed to load recording") is worse
+    // than the missing track.
+    expect(added.map((v) => v.id)).toEqual(['take-1'])
+    expect(take.clipParts.map((part) => part.sourceVideoId)).toEqual(['take-1'])
+    expect(take.missingParts).toBe(1)
+  })
+
+  it('brings a part in without its thumbnail when the thumbnail read fails', async () => {
+    vi.mocked(getThumbnail).mockRejectedValue(new Error('transaction aborted'))
+
+    const take = await importTake(primary, addSourceVideo)
+
+    // A thumbnail is cosmetic: losing one costs a picture, never a track.
+    expect(added.map((v) => v.id)).toEqual(['take-1', 'take-1-webcam'])
+    expect(added[0].thumbnailUrl).toBeUndefined()
+    expect(take.clipParts).toHaveLength(2)
+    expect(take.thumbnailUrls).toEqual([])
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+  })
+
   it('lets a primary that cannot be measured fail the take', async () => {
     vi.mocked(resolveStoredDuration).mockRejectedValue(new Error('no duration'))
 
