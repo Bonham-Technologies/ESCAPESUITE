@@ -18,7 +18,11 @@
 //     nothing on the timeline and a failure toast — which is worse than a take
 //     that arrived a track short and said so;
 //   * a `getThumbnail` that rejects, for any part including the primary, costs
-//     that part its picture and nothing else. A thumbnail is cosmetic.
+//     that part its picture and nothing else. A thumbnail is cosmetic;
+//   * a `getAllVideoMetadata` that rejects costs the take its *companions*,
+//     not the take: the scan is only how siblings are found, so a take whose
+//     library cannot be read degrades to the single file every
+//     pre-ESCSUITE-14 recording already is.
 //
 // The primary's own path is untouched by both: its blob is already in hand, and
 // a primary whose length cannot be resolved still throws, because that is the
@@ -80,10 +84,20 @@ export async function importTake(
   // groups on `part.takeId === primary.id`. This is its only caller, and what
   // it passes is the `?loadVideo=` record, which is the primary by definition;
   // keep it that way.
+  //
+  // A scan that fails is answered the same way a missing companion is: the
+  // primary's blob is already in hand, so refusing the whole take over a
+  // *metadata* read would be the half-state this module exists to avoid.
   const parts =
     metadata.takeId === undefined
       ? [metadata]
-      : orderTakeParts(metadata, await getAllVideoMetadata());
+      : orderTakeParts(
+          metadata,
+          await getAllVideoMetadata().catch((error) => {
+            console.warn('Could not scan the library for the take companions:', error);
+            return [];
+          })
+        );
 
   // The stored duration is trusted unless it is unusable — a CRAFT take whose
   // WebM lost its Duration element is stored as Infinity — in which case the

@@ -224,6 +224,28 @@ describe('importTake', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()
   })
 
+  it('treats a library scan it cannot read as a take of one file', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(getAllVideoMetadata).mockRejectedValue(new Error('transaction aborted'))
+
+    const take = await importTake(primary, addSourceVideo)
+
+    // The scan is how companions are *found*, not how the primary arrives — its
+    // blob is already in hand. A scan that fails therefore degrades the take to
+    // what every pre-ESCSUITE-14 recording already is, one file, rather than
+    // costing the user the screen recording the module's own rule protects
+    // against every other storage failure.
+    expect(added.map((v) => v.id)).toEqual(['take-1'])
+    expect(take.clipParts.map((part) => part.sourceVideoId)).toEqual(['take-1'])
+    // Nothing was *known* to be missing: an unread scan names no parts, so
+    // there is nothing to tell the user they lost.
+    expect(take.missingParts).toBe(0)
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Could not scan the library for the take companions:',
+      expect.any(Error)
+    )
+  })
+
   it('lets a primary that cannot be measured fail the take', async () => {
     vi.mocked(resolveStoredDuration).mockRejectedValue(new Error('no duration'))
 
