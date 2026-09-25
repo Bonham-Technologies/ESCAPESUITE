@@ -17,6 +17,8 @@ import { ARTIST_URL } from '../../utils/artist'
  */
 
 const DB_NAME = 'video-editor-db'
+/** `DB_VERSION` in `packages/shared/src/storage`, whose four stores the seed builds. */
+const DB_VERSION = 1
 const TAKE_ID = 'e2e-take-primary'
 const WEBCAM_ID = 'e2e-take-webcam'
 
@@ -61,13 +63,33 @@ const TAKE_PARTS = [
   },
 ]
 
-/** Put the take's parts into the shared database, blobs and all. */
+/**
+ * Put the take's parts into the shared database, blobs and all.
+ *
+ * The schema is created here rather than waited for: opening at the shared
+ * layer's own `DB_VERSION` and building the four stores exactly as
+ * `packages/shared/src/storage` does (the shape `seedArtistSession` in
+ * tests/integration/host-embedding.spec.ts mirrors) means the seed does not
+ * depend on the app having mounted and opened the database first. A page load
+ * settles no IndexedDB work, so depending on that ordering is a race the first
+ * slow run would lose — with a version-0 database and no `videos` store.
+ */
 async function seedTake(page: Page) {
   await page.evaluate(
-    ({ dbName, parts }) =>
+    ({ dbName, dbVersion, parts }) =>
       new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open(dbName)
-        request.onerror = () => reject(request.error)
+        const request = indexedDB.open(dbName, dbVersion)
+        request.onupgradeneeded = () => {
+          const db = request.result
+          if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' })
+          if (!db.objectStoreNames.contains('thumbnails')) db.createObjectStore('thumbnails', { keyPath: 'id' })
+          if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' })
+          if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings')
+        }
+        // Report what actually went wrong: an IDB error object stringifies to
+        // "null" through Playwright, which hides (for instance) WebKit's
+        // refusal to store a Blob at all.
+        request.onerror = () => reject(new Error(`seed open failed: ${String(request.error)}`))
         request.onsuccess = () => {
           const db = request.result
           const tx = db.transaction('videos', 'readwrite')
@@ -80,10 +102,10 @@ async function seedTake(page: Page) {
             })
           }
           tx.oncomplete = () => resolve()
-          tx.onerror = () => reject(tx.error)
+          tx.onerror = () => reject(new Error(`seed write failed: ${String(tx.error)}`))
         }
       }),
-    { dbName: DB_NAME, parts: TAKE_PARTS }
+    { dbName: DB_NAME, dbVersion: DB_VERSION, parts: TAKE_PARTS }
   )
 }
 
@@ -110,10 +132,10 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
   )
 
   test.beforeEach(async ({ page }) => {
-    // The app creates the database on mount (it looks for a saved session), so
-    // it has to load once before the seed can open it without a version.
+    // IndexedDB is per origin, so the seed needs a document served from
+    // ESCAPEARTIST's. That is all this load is for: `seedTake` creates the
+    // schema itself, so nothing here waits on the app having mounted.
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
     await seedTake(page)
   })
 
