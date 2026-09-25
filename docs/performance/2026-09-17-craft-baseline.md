@@ -24,18 +24,21 @@ pnpm --filter @escapesuite/craft exec vitest run \
 ## What is measured
 
 `apps/e2e/tests/perf/craft-recording.spec.ts`, plumbing in `apps/e2e/utils/craftPerf.ts`.
-Three benchmarks, because ESCAPECRAFT has three distinct pipelines and they cost entirely
-different things:
+Four benchmarks, because ESCAPECRAFT has four distinct pipelines and they cost entirely
+different things (the fourth arrived with ESCSUITE-14 slice 1 — see its own section at the
+end of this file; the three below are the original baseline):
 
 | Benchmark | Path under test | Recorder |
 |---|---|---|
 | `craft-screen-recording` | screen-only take: `MediaStreamTrackProcessor` → `VideoEncoder.encode` **on the main thread** → Mediabunny mux | `WebCodecsRecorder` |
 | `craft-pip-recording` | screen + webcam: `Compositor`'s rAF draw loop → `canvas.captureStream(30)` → MediaRecorder, which encodes **off** the main thread | `Recorder` (MediaRecorder) |
+| `craft-separate-tracks-recording` | screen + webcam, opt-in: two `MediaStreamTrackProcessor` readers → two `VideoEncoder.encode` **on the main thread** → two Mediabunny muxes, with the `Compositor` drawing the preview only | `WebCodecsRecorder` |
 | `craft-mp4-conversion` | `convertToMP4`: offscreen `<video>` + `requestVideoFrameCallback` → `drawImage` → `new VideoFrame` → `VideoEncoder.encode` → Mediabunny mux, all in the page | — |
 
 Each is its own `test()` with its own page load, so one failing leaves the others' numbers
 in the report. Each runs **three times** and reports the median; `PERF_PROFILE=1` adds a
-fourth, discarded, profiled run (`craft-screen`, `craft-pip`, `craft-mp4`).
+fourth, discarded, profiled run (`craft-screen`, `craft-pip`, `craft-separate-tracks`,
+`craft-mp4`).
 
 A take is six seconds start-click to stop-click, with the **first second discarded** — a
 take's opening frames pay for opening the encoder, sizing the canvas and getting the first
@@ -57,17 +60,21 @@ click Stop, wait for the new row. Every number comes from outside the page:
 - a CDP session for `TaskDuration` / `LayoutCount` / `RecalcStyleCount` and for the
   `HeapProfiler.collectGarbage` that anchors each heap reading.
 
-They assert nothing about speed. The only `expect`s are the six tripwires that say the
+They assert nothing about speed. The only `expect`s are the ten tripwires that say the
 benchmark measured the wrong thing — each one pins an invariant the numbers rest on, in
 code rather than in prose:
 
 | Arm | Tripwire | What a failure means |
 |---|---|---|
-| both takes | still "Pause recording" when the window closed | the take died mid-window; every rate is an average over a stretch that was not capturing |
+| every take | still "Pause recording" when the window closed | the take died mid-window; every rate is an average over a stretch that was not capturing |
 | screen | `framesEncoded > 0` | the take did not go through `WebCodecsRecorder` — nothing encoded on the main thread |
 | screen | `videoDraws === 0` | `WebCodecsRecorder` is on its `startVideoElementCapture` fallback (no `MediaStreamTrackProcessor`), which is a different pipeline reported under this one's name |
 | PiP | `videoDraws > 0` | the take did not composite — the webcam never arrived |
 | PiP | `videoDraws % 2 === 0` | a capture track was not ready for some frames, so the two-draws-per-composited-frame divisor is wrong (see the compositor finding below) |
+| separate tracks | `framesEncodedPerEncoder.length === 2` | the take did not run two encoders — the webcam pipeline was never built, or the mode fell back to composited PiP, either way reported under this arm's name |
+| separate tracks | `min(framesEncodedPerEncoder) > 0` | one of the two pipelines encoded nothing: a companion that never started leaves the other doing all the work at a respectable-looking rate, and a blob with no frames in it is not a track |
+| separate tracks | `videoDraws > 0` | the compositor did not draw — the preview the user watches was blank, so the take's main-thread cost is missing the one part of it this arm shares with PiP |
+| separate tracks | `videoDraws % 2 === 0` | as for PiP: a capture element was not decoding for some frames, so the two-draws-per-composited-preview-frame divisor behind `compositedFps` is wrong |
 | conversion | `framesEncoded > 0` | `convertToMP4` resolved past its capture phase with nothing encoded — there is no video in the MP4 to have measured |
 
 ### Capture devices
@@ -595,3 +602,83 @@ other number in the tables is definitionally unchanged.
 3. **`mockSyntheticMedia` leaks a capture painter per take.** Harmless at three runs
    (measured flat), but it is a confound that grows with run count and the helper is shared
    with the functional E2E suites. Clearing the interval when the track ends would remove it.
+
+## craft-separate-tracks-recording — first measurement, 2026-09-25
+
+Added by ESCSUITE-14 slice 1. Same machine, same launch args and the same
+three-runs-median as the numbers above; `pnpm perf` reports it beside the other
+three.
+
+Taken in one invocation of
+`playwright test --config=playwright.perf.config.ts craft-recording`, against a
+warm dev server, with the machine under real load — `uptime` at the start of the
+run read `23:28 up 24 days, 17:19, 4 users, load averages: 18.67 11.74 8.37`
+(one `rustc` pinning a core throughout). These numbers are informational and
+were not taken on a quiet machine: treat the *shape* below as the finding and
+re-measure before quoting any millisecond figure as a target.
+
+| Metric | Median of 3 |
+|---|---|
+| Frames encoded (screen) | 134 |
+| Frames encoded (webcam) | 133 |
+| Frames encoded (both, `framesEncoded`) | 272 |
+| Frames/s | 54.28 |
+| Composited fps (preview only) | 29.93 |
+| Video draws | 300 |
+| Renderer task duration (ms) | 1856.83 |
+| Renderer task per frame (ms) | 6.83 |
+| Animation frames/s | 119.89 |
+| Layouts / style recalcs | 306 / 301 |
+| Long tasks / total (ms) | 0 / 0 |
+| Encoder queue high-water | 0 |
+| Heap delta (bytes) | −378,267 |
+| Output size (bytes, screen part) | 1,515,266 |
+
+The two per-encoder counts are written on all three recording arms so the JSON
+keeps one shape: PiP constructs no `VideoEncoder` at all and reports `0 / 0`, and
+the screen arm runs a single encoder, so its `Frames encoded (screen)` repeats its
+`Frames encoded` (149 here) — which is what that one encoder is.
+
+`framesEncoded` is 272 where the two per-encoder medians sum to 267, and neither
+is wrong: each cell is the median of its own quantity across the three runs, and
+the median of a sum is not the sum of the medians. The two pipelines are within
+one frame of each other in every run, which is the point of running them off one
+clock.
+
+What the row is *for* is the comparison against `craft-pip-recording` directly
+above it: the same capture, one mode encoding on the main thread twice over and
+the other handing one composited stream to MediaRecorder. Side by side, from the
+same invocation:
+
+| | screen only | PiP | separate tracks |
+|---|---|---|---|
+| Renderer task duration | 611.08 ms | 2039.16 ms | **1856.83 ms** |
+| Renderer task per frame | 4.14 ms (per encoded frame) | 13.51 ms (per *composited* frame) | 6.83 ms (per encoded frame) |
+| Composited fps | — | 29.97 | 29.93 |
+| Animation frames/s | 59.94 | 119.88 | 119.89 |
+| Video tracks stored | 1 | 1 | 2 |
+
+The headline is that **two encoders in the page cost less main-thread time than
+one composited MediaRecorder take** here — 1857 ms against 2039 ms in the same
+5 s window, for twice the stored video. The separate-tracks mode drops
+`canvas.captureStream(30)` and MediaRecorder entirely; what remains on the main
+thread is two `MediaStreamTrackProcessor` readers, two `VideoEncoder.encode`
+calls per composited preview frame, and the compositor still drawing the preview
+(300 video draws, 29.93 composited fps — indistinguishable from PiP's, which is
+what says the preview was not degraded to pay for the second encoder). The
+per-frame figure is higher than the screen arm's 4.14 ms because the compositor's
+preview loop is charged to it and the screen arm has no compositor at all; the
+rate is not directly comparable between the two.
+
+Also worth noting: 0 long tasks and an encoder queue high-water of **0** across
+all three runs. Two 720p encoders on the main thread never fell behind the
+capture on this machine, even loaded — the queue never held a frame at the moment
+one was handed over.
+
+`outputBytes` is the **screen** part alone. Both parts of a take are written with
+the same `recordedAt` (one `now` for the pair), so `readNewestRecordingBytes`
+breaks the tie towards the primary rather than leaving a coin toss between the
+two halves in the report; it therefore understates the take's total bytes by
+roughly the webcam part — which is the "about twice the storage" the toggle warns
+about. For scale, the screen-only arm in the same invocation stored 1,642,328
+bytes for a take of the same length.

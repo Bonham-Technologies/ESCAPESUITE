@@ -46,6 +46,7 @@ const ORDER = [
   'export-webm',
   'craft-screen-recording',
   'craft-pip-recording',
+  'craft-separate-tracks-recording',
   'craft-mp4-conversion',
   'headless-kit-render',
 ]
@@ -98,6 +99,8 @@ const METRICS = {
   wallMs: { label: 'Wall time', unit: 'ms' },
   framesEncoded: { label: 'Frames encoded' },
   framesPerSecond: { label: 'Frames/s' },
+  screenFramesEncoded: { label: 'Frames encoded (screen)' },
+  webcamFramesEncoded: { label: 'Frames encoded (webcam)' },
   encoderQueueHighWater: { label: 'Encoder queue high-water' },
   heapDeltaBytes: { label: 'Heap delta', bytes: true },
   outputBytes: { label: 'Output size', bytes: true },
@@ -232,10 +235,18 @@ function formatValue(key, value) {
 /** The one number each benchmark is really about, for the summary table. */
 function headline(benchmark) {
   if (typeof benchmark.renderedFps === 'number') return `${benchmark.renderedFps} rendered fps`
-  // A PiP take encodes off the main thread (MediaRecorder), so its rate is the
-  // compositor's and its `framesPerSecond` is 0 by construction. Tested first,
-  // and for a non-zero value, so the screen take — which composites nothing and
-  // reports `compositedFps: 0` — still headlines its encode rate below.
+  // Encode rate first, and only for a non-zero value. A PiP take encodes off the
+  // main thread (MediaRecorder), so its `framesPerSecond` is 0 by construction
+  // and it falls through to the compositor's rate below; a screen take
+  // composites nothing and reports `compositedFps: 0`. The separate-tracks take
+  // is the one that reports **both** — it encodes in the page and draws a preview
+  // — and the rate that describes what it recorded is the encode rate, so that
+  // has to be the one tested first.
+  if (typeof benchmark.framesPerSecond === 'number' && benchmark.framesPerSecond > 0) {
+    return typeof benchmark.wallMs === 'number'
+      ? `${benchmark.framesPerSecond} frames/s (${benchmark.wallMs} ms)`
+      : `${benchmark.framesPerSecond} frames/s`
+  }
   if (typeof benchmark.compositedFps === 'number' && benchmark.compositedFps > 0) {
     return `${benchmark.compositedFps} composited fps`
   }

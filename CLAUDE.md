@@ -242,13 +242,13 @@ readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is empt
 perf project's `globalSetup` first, so a stale result can never be reported as current.
 All three outputs are gitignored.
 
-Eight benchmarks, each run three times and reported as the median: four
-ESCAPEARTIST, three ESCAPECRAFT, and the headless kit render. The four
+Nine benchmarks, each run three times and reported as the median: four
+ESCAPEARTIST, four ESCAPECRAFT, and the headless kit render. The four
 ESCAPEARTIST ones run against **one deterministic 12-clip, 13-second scene** (14 clips
 over 4 tracks at 1280x720, clips scaled to fill the frame — scale 1 means native pixel
 size here) built in-test from `apps/e2e/fixtures/headless/source.mp4` and loaded through
 the documented integration API (`GET_STATE` for the imported source's id, then
-`LOAD_PROJECT`); the three ESCAPECRAFT ones drive real takes through the recorder's own
+`LOAD_PROJECT`); the four ESCAPECRAFT ones drive real takes through the recorder's own
 UI against `mockSyntheticMedia`'s canvas-and-oscillator capture devices at 1280x720.
 There is no app code for the benchmarks' sake in either app:
 
@@ -278,6 +278,18 @@ There is no app code for the benchmarks' sake in either app:
   by wrapping `CanvasRenderingContext2D.prototype.drawImage` and halving the calls whose
   first argument is an `HTMLVideoElement` — a composited frame is exactly one screen draw
   plus one webcam draw.
+- **`craft-separate-tracks-recording`** — the same take with the webcam on *and* the opt-in
+  "Record webcam as a separate track" toggle clicked (ESCSUITE-14), which keeps
+  `WebCodecsRecorder` but runs **two** `VideoEncoder`s on one clock into two Mediabunny
+  outputs, with the `Compositor` drawing the preview only. `framesEncoded` is both
+  pipelines' frames and `framesEncodedPerEncoder` splits them — attributed by encoder
+  **instance identity** (a `WeakMap` keyed on the encoder, numbered in first-encode order),
+  because both synthetic devices are 1280x720 and a frame's `codedWidth` cannot say which
+  pipeline it came from; the screen pipeline is built and started first, so index 0 is the
+  screen. Reported as `screenFramesEncoded` / `webcamFramesEncoded` beside the shared
+  metrics, and it is the only arm that reports a real encode rate *and* a real
+  `compositedFps`. First numbers in
+  [docs/performance/2026-09-17-craft-baseline.md](docs/performance/2026-09-17-craft-baseline.md).
 - **`craft-mp4-conversion`** — one 6 s take converted to MP4 in the page by `convertToMP4`,
   driven through the recording row's own button: wall time, frames encoded, renderer task
   per frame, encoder queue high-water, heap delta and the MP4's size. The conversion is
@@ -287,13 +299,15 @@ There is no app code for the benchmarks' sake in either app:
   `fixtures/headless/project.json`, Chromium launch included.
 
 The ESCAPECRAFT benchmarks assert nothing about speed either; their only `expect`s are the
-six tripwires saying the benchmark measured the wrong thing — a take that stopped
+ten tripwires saying the benchmark measured the wrong thing — a take that stopped
 mid-window; a "WebCodecs" take that encoded nothing, or that drew video into a canvas at all
 (which would mean `WebCodecsRecorder` had taken its `startVideoElementCapture` fallback, a
 different pipeline under the same name); a PiP take that composited nothing, or whose
 `drawImage` count came out odd (which would mean a capture track was not ready for some
-frames, so the two-draws-per-composited-frame divisor is wrong); and a conversion that
-encoded no frames.
+frames, so the two-draws-per-composited-frame divisor is wrong); a separate-tracks take that
+did not run exactly two encoders, or one of whose two encoded nothing, plus the same two
+compositor checks now that it is drawing the preview; and a conversion that encoded no
+frames.
 
 `PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
 project resolution for `preview-playback` only — the export benchmarks always render 720p
