@@ -115,6 +115,12 @@ interface CompanionPipeline {
   timing: FrameTiming;
   /** Frames this pipeline encoded; 0 means there is no companion worth storing. */
   frameCount: number;
+  /**
+   * Set once this pipeline has given up — its encoder errored, or would not
+   * flush. The blob is then not worth delivering, so `stop()` reports no
+   * companion; the take itself is unaffected.
+   */
+  failed: boolean;
 }
 
 /** Bitrate for a video pipeline of this size. */
@@ -327,7 +333,13 @@ export class WebCodecsRecorder {
     this.videoEncoder = await this.createVideoEncoder(
       () => this.videoSource,
       this.width,
-      this.height
+      this.height,
+      // The primary's encoder dying is the take dying: there is nothing else
+      // being recorded, so the caller has to be told.
+      (e) => {
+        console.error('Video encoder error:', e);
+        this.callbacks.onError?.(new Error(`Video encoder error: ${e.message}`));
+      }
     );
 
     // Set up audio encoder if we have audio
@@ -358,9 +370,19 @@ export class WebCodecsRecorder {
     // A separate-tracks take (ESCSUITE-14): the webcam gets its own encoder and
     // its own output, stamped from the same clock as the screen's. Only a
     // screen+webcam take can have one — a webcam-only take *is* the webcam.
+    //
+    // `screenStream` is part of the question, not just `config.screenEnabled`:
+    // a take can be configured for the screen and started without one (see
+    // useMediaStreams, which asks for display capture only where it can, and
+    // recordReadiness, which starts a take on any one available source). The
+    // primary above is then the webcam itself, and a companion would be a
+    // second encoder on that same track — one camera in two files, and a
+    // second 'ended' listener that cleanup() could not remove because
+    // trackEndedHandlers is keyed by track.
     if (
       config.separateTracks &&
       config.screenEnabled &&
+      screenStream &&
       config.webcamEnabled &&
       webcamStream
     ) {
@@ -401,7 +423,15 @@ export class WebCodecsRecorder {
       encoder: await this.createVideoEncoder(
         () => this.companion?.packetSource ?? null,
         settings.width || 1280,
-        settings.height || 720
+        settings.height || 720,
+        // ...and the companion's encoder dying costs the take its companion and
+        // nothing else. Routing this to onError would have the controller
+        // dispose the recorder and throw away a screen recording that is still
+        // being made.
+        (e) => {
+          console.warn(`Webcam track encoder failed: ${e.message}`);
+          this.failCompanion();
+        }
       ),
       output,
       target,
@@ -410,6 +440,7 @@ export class WebCodecsRecorder {
       readerActive: false,
       timing: newFrameTiming(),
       frameCount: 0,
+      failed: false,
     };
 
     // A camera that stops is not a take that stops: end this pipeline and let
@@ -440,18 +471,52 @@ export class WebCodecsRecorder {
   }
 
   /**
+   * Give up on the webcam half without touching the take: stop reading the
+   * camera, and make `stop()` report no companion.
+   */
+  private failCompanion(): void {
+    if (this.companion) {
+      this.companion.readerActive = false;
+      this.companion.failed = true;
+    }
+  }
+
+  /**
+   * Flush and close the companion's encoder, giving up the companion rather
+   * than the take if it refuses.
+   *
+   * Its own try/catch, and not `stop()`'s: this runs *before* the primary's
+   * `output.finalize()`, so a rejection that escaped here would skip the
+   * finalize, land in the outer catch and report `onError` over a screen
+   * recording that was already complete.
+   */
+  private async flushCompanion(): Promise<void> {
+    const encoder = this.companion?.encoder;
+    if (!encoder || encoder.state === 'closed') return;
+
+    try {
+      await encoder.flush();
+      encoder.close();
+    } catch (e) {
+      console.warn('The webcam companion could not be flushed:', e);
+      this.failCompanion();
+    }
+  }
+
+  /**
    * Finalize the webcam half and hand back its blob, or null when there is
    * nothing worth storing.
    *
-   * Two cases end as "no companion" rather than as an empty row in the library:
-   * a webcam that delivered no frame (the take recorded the screen alone), and
-   * a muxer that could not write. The second is swallowed into a warning on
-   * purpose — the primary blob is the take, and losing it because the
-   * companion's finalize threw would be the worse outcome by far.
+   * Three cases end as "no companion" rather than as an empty row in the
+   * library: a webcam that delivered no frame (the take recorded the screen
+   * alone), a pipeline that already gave up (`failed`), and a muxer that could
+   * not write. The last is swallowed into a warning on purpose — the primary
+   * blob is the take, and losing it because the companion's finalize threw
+   * would be the worse outcome by far.
    */
   private async finalizeCompanion(): Promise<CompanionPart | null> {
     const companion = this.companion;
-    if (!companion || companion.frameCount === 0) return null;
+    if (!companion || companion.failed || companion.frameCount === 0) return null;
 
     try {
       await companion.output?.finalize();
@@ -495,11 +560,17 @@ export class WebCodecsRecorder {
    * `cleanup()` nulls it: an encoder output that lands after a take has been
    * torn down must find nothing to add to rather than write into a finalized
    * muxer.
+   *
+   * `onEncoderError` is per pipeline and has no default, because what an
+   * encoder failure *means* differs by pipeline: the primary's is the end of
+   * the take, the companion's is the end of the companion. A shared handler
+   * made a webcam hiccup throw away the screen recording.
    */
   private async createVideoEncoder(
     sourceOf: () => EncodedVideoPacketSource | null,
     width: number,
-    height: number
+    height: number,
+    onEncoderError: (error: DOMException) => void
   ): Promise<VideoEncoder> {
     const encoder = new VideoEncoder({
       output: async (chunk, meta) => {
@@ -508,10 +579,7 @@ export class WebCodecsRecorder {
           await source.add(EncodedPacket.fromEncodedChunk(chunk), meta);
         }
       },
-      error: (e) => {
-        console.error('Video encoder error:', e);
-        this.callbacks.onError?.(new Error(`Video encoder error: ${e.message}`));
-      },
+      error: onEncoderError,
     });
 
     await encoder.configure({
@@ -904,11 +972,7 @@ export class WebCodecsRecorder {
         this.videoEncoder.close();
       }
 
-      const companionEncoder = this.companion?.encoder;
-      if (companionEncoder && companionEncoder.state !== 'closed') {
-        await companionEncoder.flush();
-        companionEncoder.close();
-      }
+      await this.flushCompanion();
 
       if (this.audioEncoder && this.audioEncoder.state !== 'closed') {
         await this.audioEncoder.flush();

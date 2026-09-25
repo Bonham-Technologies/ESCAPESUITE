@@ -1324,6 +1324,89 @@ describe('WebCodecsRecorder', () => {
       )
     })
 
+    it('still delivers the primary when the companion encoder will not flush', async () => {
+      await recorder.initialize(screenStream, webcamStream, null, separateConfig)
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      await flush()
+
+      webcamEncoder().failAt = 'flush'
+
+      await recorder.stop()
+
+      // The companion's flush is the take's last chance to be lost: it runs
+      // before the primary's own finalize, so a rejection there used to skip
+      // the finalize altogether and report onError over a finished recording.
+      expect(getMediabunnyState().outputs[0].finalizeCalls).toBe(1)
+      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      expect(blob).toBeInstanceOf(Blob)
+      expect(companion).toBeNull()
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'The webcam companion could not be flushed:',
+        expect.any(Error)
+      )
+    })
+
+    it('keeps recording the screen when the companion encoder errors', async () => {
+      await recorder.initialize(screenStream, webcamStream, null, separateConfig)
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      await flush()
+
+      webcamEncoder().emitError('camera encoder died')
+      await flush()
+
+      // The primary's encoder dying *is* the take dying, so its error goes to
+      // onError — which disposes the recorder. The webcam's must not: a camera
+      // hiccup at minute four of a screen recording cannot throw the screen
+      // recording away.
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      expect(consoleWarn).toHaveBeenCalledWith('Webcam track encoder failed: camera encoder died')
+      expect(recorder.isRecording()).toBe(true)
+
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      await flush()
+      expect(screenEncoder().encodes).toHaveLength(2)
+
+      await recorder.stop()
+      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      expect(blob).toBeInstanceOf(Blob)
+      expect(companion).toBeNull()
+    })
+
+    it('builds no companion when the screen stream never arrived', async () => {
+      // `screenEnabled` with no screen stream is a real state: useMediaStreams
+      // only asks for display capture when it can, and a take may start with
+      // just one of its enabled sources. The primary is then the webcam itself
+      // — a companion on that same track would encode one camera into two
+      // files and leave a second 'ended' listener attached for good.
+      await recorder.initialize(null, webcamStream, null, separateConfig)
+
+      expect(VideoEncoderDouble.instances).toHaveLength(1)
+      expect(getMediabunnyState().outputs).toHaveLength(1)
+      expect(webcamTrack.listenerCount('ended')).toBe(1)
+
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      await flush()
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+
+      await recorder.stop()
+
+      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      expect(blob).toBeInstanceOf(Blob)
+      expect(companion).toBeNull()
+      // ...and the single listener is the single listener cleanup removes.
+      expect(webcamTrack.listenerCount('ended')).toBe(0)
+    })
+
     it('sizes a companion the camera gives no dimensions for at 1280x720', async () => {
       // The primary falls back to 1920x1080 because a screen capture is a
       // screen; a webcam that will not say is far likelier to be 720p.
