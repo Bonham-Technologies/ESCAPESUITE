@@ -8,8 +8,9 @@ Two fixes to the audio parts of an ESCAPECRAFT take (ESCSUITE-71).
 media library draws one for every file you import, audio and video alike, but a take arriving
 from ESCAPECRAFT's "Send to Editor" skipped that step — so its microphone and system-audio
 tracks sat on the timeline as bare rectangles, and the screen recording's own mixed audio had
-no waveform either, until something else happened to ask for one. Every part of a handed-over
-take now arrives with the same waveform the library's own import computes. A part ESCAPECRAFT
+no waveform either. Nothing else ever filled them in: the waveform is computed once, when the
+media arrives, so a handed-over part simply never had one. Every part of a handed-over take now
+arrives with the same waveform the library's own import computes. A part ESCAPECRAFT
 recorded with no audio in it is left alone rather than decoded, a take recorded in a quiet
 room keeps the "has audio" flag ESCAPECRAFT saved for it, and a waveform that cannot be read
 costs that part its waveform and nothing else — the take is still imported and still placed.

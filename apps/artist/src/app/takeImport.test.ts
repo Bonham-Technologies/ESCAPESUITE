@@ -124,6 +124,10 @@ beforeEach(() => {
 
 afterEach(() => {
   audio.uninstall()
+  // The real extractor back — including any `...Once` implementation a test
+  // queued and did not consume, which `clearAllMocks` leaves in place and which
+  // would hang the next test's first decode.
+  vi.mocked(extractWaveformData).mockReset()
   vi.clearAllMocks()
 })
 
@@ -429,6 +433,46 @@ describe('importTake', () => {
       expect(added[1].waveformData).toHaveLength(PEAKS_PER_TENTH)
     })
 
+    it('reads the parts waveforms at the same time, not one after another', async () => {
+      // Two deferred extractions: both have to be *in flight* before either
+      // answers. The handoff is an automatic path — with `?suppressRestore=1`
+      // there is not even a prompt in front of it — so the wait it costs is one
+      // decode, not one per part.
+      const answer: Array<(value: Awaited<ReturnType<typeof extractWaveformData>>) => void> = []
+      const deferred = () =>
+        new Promise<Awaited<ReturnType<typeof extractWaveformData>>>((resolve) => {
+          answer.push(resolve)
+        })
+      // Once each, so the wrapped real extractor is back for the next test.
+      vi.mocked(extractWaveformData).mockImplementationOnce(deferred).mockImplementationOnce(deferred)
+
+      const importing = importTake(primary, addSourceVideo)
+      await vi.waitFor(() => expect(answer).toHaveLength(2))
+
+      // Nothing is in the library yet either: the peaks arrive *with* the entry,
+      // so a part is written once and placing the take is still one undo step.
+      expect(added).toEqual([])
+      answer.forEach((resolve) => resolve({ peaks: [{ min: -0.5, max: 0.5 }], hasAudio: true }))
+      await importing
+
+      expect(added.map((v) => v.waveformData?.length)).toEqual([1, undefined, 1])
+    })
+
+    it('fills hasAudio in from the peaks, not from whether they are loud', async () => {
+      // The fill-in rule's own case: a part stored before ESCSUITE-60 carries no
+      // flag, and a quiet room is exactly when the extractor's `hasAudio` says
+      // false. Answering from it would store peaks `TimelineTrack` never draws,
+      // which is the bug the rule exists to prevent.
+      audio.buffer = createAudioBufferDouble([samples(0)], 48000)
+      const older = { ...micMetadata, hasAudio: undefined }
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primaryMetadata, older])
+
+      await importTake(primary, addSourceVideo)
+
+      expect(added[1].hasAudio).toBe(true)
+      expect(added[1].waveformData).toHaveLength(PEAKS_PER_TENTH)
+    })
+
     it('keeps the recorded hasAudio when the take turns out to be silent', async () => {
       audio.buffer = createAudioBufferDouble([samples(0)], 48000)
 
@@ -462,7 +506,11 @@ describe('importTake', () => {
 
       // A waveform is cosmetic, exactly like a thumbnail: losing one costs a
       // picture of the sound, never the track. Said out loud, because the
-      // extractor's own catch means only a caller can make this happen.
+      // extractor's own catch means only a caller can make this happen — and it
+      // is one part's loss and not the take's, which is what keeps the
+      // `Promise.all` the parts' decodes are gathered by from being poisoned by
+      // any one of them (the primary's is the one that fails here; the
+      // microphone still gets its peaks).
       expect(consoleWarn).toHaveBeenCalledWith(
         'Could not read the waveform for a take part:',
         expect.any(Error)

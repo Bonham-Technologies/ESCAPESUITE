@@ -164,8 +164,8 @@ describe('placeTakeOnTimeline', () => {
 
     // `previewGeometry` answers no bounds for an audio clip and the renderers
     // never draw one, so this transform is never read — but `Clip.transform` is
-    // required and the inspector reads `clip.transform.scaleX` with no
-    // fallback, so the clip carries the whole default rather than nothing.
+    // a required field, so the clip carries the whole default rather than
+    // nothing.
     expect(placedClips()[2].transform).toEqual({ ...DEFAULT_TRANSFORM })
   })
 

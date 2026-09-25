@@ -146,10 +146,9 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         // It is never drawn — `previewGeometry.getOverlayBounds` answers no
         // bounds for one and both renderers skip it — so the numbers here are
         // never read; it carries the whole default rather than nothing because
-        // `Clip.transform` is required and the inspector reads
-        // `clip.transform.scaleX` with no fallback of its own. Stated rather
-        // than left to the 0x0 dimensions such a part arrives with, which
-        // reached the same place by accident.
+        // `Clip.transform` is a required field. Stated rather than left to the
+        // 0x0 dimensions such a part arrives with, which reached the same place
+        // by accident.
         transform:
           part.mediaType !== 'audio' && part.overlayPlacement
             ? overlayPlacementToTransform(part.overlayPlacement, resolution, part, overlayFrame)

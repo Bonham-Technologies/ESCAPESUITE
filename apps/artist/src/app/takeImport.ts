@@ -74,16 +74,21 @@ async function resolvePartDuration(
   }
 }
 
+/** The two library fields a part's waveform decides, or nothing to change. */
+type PartWaveform = Pick<SourceVideo, 'waveformData' | 'hasAudio'> | undefined;
+
 /**
  * The waveform to give a part, and what it says about `hasAudio`.
  *
  * The media library computes one for every file it imports — `processVideoFile`
  * and `processAudioFile` both call `extractWaveformData` before the entry
- * reaches the store (`core/videoProcessor.ts`) — so the handoff has to as well,
- * or a take's audio parts sit on the timeline as bare rectangles until
- * something else asks for one (ESCSUITE-71). The same function, so there is one
- * waveform implementation; at the same point in the sequence, so the peaks
- * arrive with the library entry rather than after the clip.
+ * reaches the store (`core/videoProcessor.ts`) — so the handoff has to as well
+ * (ESCSUITE-71). Nothing recomputes one: those two import paths are the only
+ * writers of `waveformData`, so a part that arrived without one never got one,
+ * and a take's audio sat on the timeline as a bare rectangle for good. The same
+ * function, so there is one waveform implementation; at the same point in the
+ * sequence, so the peaks arrive with the library entry rather than after the
+ * clip.
  *
  * Three rules:
  *
@@ -92,13 +97,16 @@ async function resolvePartDuration(
  *     webcam half of a separate-tracks take has no audio track by construction,
  *     the whole mix staying on the primary — and decoding a video file to be
  *     told that is the one cost worth refusing;
- *   * `hasAudio` is only ever turned **on**. ESCAPECRAFT's flag says whether
- *     audio was captured, while the extractor's is a silence heuristic (peaks
- *     over 0.001), so letting it answer would have a take recorded in a quiet
- *     room lose the flag slice 3 went to the trouble of persisting. It does
- *     fill one in where there is none — a recording stored before ESCSUITE-60
- *     — because `TimelineTrack` needs the flag *and* the peaks, so a waveform
- *     computed without it would never be drawn;
+ *   * **`hasAudio` is the flag ESCAPECRAFT persisted where there is one, and
+ *     the peaks otherwise.** The flag says whether audio was *captured*, which
+ *     is what the field means; the extractor's own `hasAudio` is a silence
+ *     heuristic (peaks over 0.001) and is deliberately not consulted here — it
+ *     would have a take recorded in a quiet room lose the flag slice 3 went to
+ *     the trouble of persisting, and leave a *pre*-ESCSUITE-60 quiet part with
+ *     no flag at all, which is peaks `TimelineTrack` would never draw (it needs
+ *     the flag **and** the peaks). Peaks that decoded at all mean the file has
+ *     an audio track, silent or not, so they are the better answer where the
+ *     flag is missing;
  *   * a waveform that cannot be read costs the part its waveform and nothing
  *     else, exactly like a thumbnail. `extractWaveformData` already answers a
  *     file with no decodable audio with no peaks rather than throwing, so this
@@ -108,18 +116,18 @@ async function resolvePartDuration(
 async function resolvePartWaveform(
   blob: Blob,
   part: SourceVideo
-): Promise<Pick<SourceVideo, 'waveformData' | 'hasAudio'> | undefined> {
+): Promise<PartWaveform> {
   if (part.hasAudio === false) return undefined;
 
-  const { peaks, hasAudio } = await extractWaveformData(blob).catch((error) => {
+  const { peaks } = await extractWaveformData(blob).catch((error) => {
     console.warn('Could not read the waveform for a take part:', error);
-    return { peaks: [], hasAudio: false };
+    return { peaks: [] };
   });
   // No peaks rather than an empty array: nothing downstream has to tell a
   // waveform that could not be read from one that is zero samples long.
   if (peaks.length === 0) return undefined;
 
-  return { waveformData: peaks, hasAudio: hasAudio || part.hasAudio };
+  return { waveformData: peaks, hasAudio: part.hasAudio ?? peaks.length > 0 };
 }
 
 /**
@@ -189,6 +197,21 @@ export async function importTake(
   let missingParts = 0;
 
   try {
+    // Read the take in two passes, because the waveforms are the one expensive
+    // thing here and they do not depend on each other (ESCSUITE-71). The first
+    // pass reads storage part by part — as it always did — and *starts* each
+    // part's waveform without waiting for it; the second writes the library
+    // once every waveform has landed. So a four-part take costs one decode's
+    // wait rather than four, and the peaks still arrive **with** the library
+    // entry: one `addSourceVideo` per part, no second write, no extra undo step,
+    // and the take is placed complete.
+    const resolved: {
+      part: SourceVideo;
+      duration: number;
+      thumbnailUrl: string | undefined;
+      waveform: Promise<PartWaveform>;
+    }[] = [];
+
     for (const part of parts) {
       const isPrimary = part.id === metadata.id;
       // The primary's bytes are already in hand; a companion's are the ones
@@ -219,17 +242,20 @@ export async function importTake(
       const thumbnailUrl = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : undefined;
       if (thumbnailUrl) thumbnailUrls.push(thumbnailUrl);
 
-      // Cosmetic in the same way, and computed here so it arrives with the
-      // library entry — which is where the media library's own import path puts
-      // it (ESCSUITE-71).
-      const waveform = await resolvePartWaveform(blob, part);
+      // Not awaited: `resolvePartWaveform` swallows its own failures, so this
+      // promise never rejects and the parts' decodes overlap instead of queuing.
+      resolved.push({ part, duration, thumbnailUrl, waveform: resolvePartWaveform(blob, part) });
+    }
 
-      addSourceVideo({ ...part, duration, thumbnailUrl, ...waveform });
+    const waveforms = await Promise.all(resolved.map((entry) => entry.waveform));
+
+    for (const [index, { part, duration, thumbnailUrl }] of resolved.entries()) {
+      addSourceVideo({ ...part, duration, thumbnailUrl, ...waveforms[index] });
 
       // A companion with a role this build does not know is in the library, where
       // it can be seen and deleted, and nowhere else: where it belongs on the
       // timeline is not a question this build can answer.
-      if (!isPrimary && !isPlaceableRole(part.role)) continue;
+      if (part.id !== metadata.id && !isPlaceableRole(part.role)) continue;
 
       clipParts.push({
         sourceVideoId: part.id,

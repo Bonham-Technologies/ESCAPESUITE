@@ -232,22 +232,30 @@ picture rather than `parts[0]`. Both used to be true by accident: an audio part 
 `previewGeometry.getOverlayBounds` answers `null` for an audio source) and, had a part ever
 arrived before the primary, would have measured the camera against a rectangle that silently
 means "the whole canvas". The clip carries the whole default rather than no transform at all
-because `Clip.transform` is required and the inspector reads `clip.transform.scaleX` with no
-fallback of its own (`components/ClipEditor/`).
+because `Clip.transform` is a required field.
 
 **Every part arrives with its waveform**, computed by the same `extractWaveformData`
 (`utils/waveform.ts`) the media library's own import path calls for every file, at the same
 point in the sequence — with the library entry, before the take is placed (ESCSUITE-71). It
 is *not* only the audio parts: `processVideoFile` gives a video a waveform too, so the
 primary's own mixed audio gets one and a handed-over take is not the one import that looks
-different. Three rules: a part ESCAPECRAFT recorded with `hasAudio: false` is never decoded
-(the capture's own answer since ESCSUITE-60/62 — the webcam half of a separate-tracks take
-has no audio track by construction, the whole mix staying on the primary); `hasAudio` is only
-ever turned **on**, because the extractor's flag is a silence heuristic and a take recorded
-in a quiet room must not lose the flag slice 3 persisted, while a part stored before that
-flag existed needs one filled in (`TimelineTrack` draws a waveform only when the source has
-the flag **and** non-empty peaks); and a waveform that cannot be read costs the part its
-waveform and nothing else, exactly like a thumbnail.
+different. And it had to be done here, because nothing recomputes one: those two import paths
+are the only writers of `waveformData`, so a part that arrived without one never got one.
+
+Three rules, and a shape. A part ESCAPECRAFT recorded with `hasAudio: false` is **never
+decoded** — that flag is the capture's own answer (ESCSUITE-60/62), the webcam half of a
+separate-tracks take having no audio track by construction with the whole mix staying on the
+primary. `hasAudio` is **the persisted flag where there is one and the peaks otherwise**
+(`part.hasAudio ?? peaks.length > 0`): the extractor's own `hasAudio` is a silence heuristic
+and is deliberately not consulted, because it would cost a take recorded in a quiet room the
+flag slice 3 persisted *and* leave a pre-ESCSUITE-60 quiet part with no flag at all — which is
+peaks `TimelineTrack` would never draw, since it needs the flag **and** non-empty peaks. A
+waveform that cannot be read costs the part its waveform and nothing else, exactly like a
+thumbnail. The shape is two passes: the storage reads stay serial, part by part, but each
+part's waveform is *started* rather than awaited and the library is written after one
+`Promise.all` — so a four-part take waits one decode instead of four, while the peaks still
+arrive with the entry (one `addSourceVideo` per part, so placing the take is still one undo
+step, and it is placed complete).
 
 Three things the import refuses to do, each chosen rather than defaulted:
 
@@ -1176,10 +1184,11 @@ The inspector panel (ClipEditor) adapts to different screen sizes. `App.tsx` own
 **Where the peaks come from**: `utils/waveform.ts`'s `extractWaveformData`, the one
 implementation — called by `core/videoProcessor.ts` for every file the media library imports
 (audio *and* video) and by `app/takeImport.ts` for every part of a handed-over take
-(ESCSUITE-71). `TimelineTrack` draws a waveform only when the source carries **both**
-`hasAudio` and a non-empty `waveformData`, so a source with peaks and no flag shows nothing —
-which is why the take import fills the flag in for a recording stored before ESCAPECRAFT
-wrote one.
+(ESCSUITE-71). Those are the only two writers, and neither recomputes: a source's peaks are
+computed once, when the media arrives, so a source that arrived without them never gets any.
+`TimelineTrack` draws a waveform only when the source carries **both** `hasAudio` and a
+non-empty `waveformData`, so a source with peaks and no flag shows nothing — which is why the
+take import fills the flag in for a recording stored before ESCAPECRAFT wrote one.
 
 Waveform visualization adapts to clip selection state:
 - **Default colors**: Purple (`rgba(138, 43, 226, 0.6)`) for audio, blue tint for video with audio
