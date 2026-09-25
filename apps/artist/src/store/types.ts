@@ -359,6 +359,19 @@ export interface TakeClipPart {
   width: number;
   height: number;
   /**
+   * `'audio'` for a part with no picture — a take's microphone and system-audio
+   * companions (ESCSUITE-14 slice 3). Absent, like `'video'`, means the part is
+   * drawn.
+   *
+   * It is a field of its own rather than a reading of `width === 0` because two
+   * decisions turn on it and neither should be inferred from a consequence
+   * (ESCSUITE-71): an audio clip takes no picture transform, and the rectangle
+   * the webcam corner is measured against is the take's *picture*, whatever
+   * order the parts arrive in. The same three roles the rest of the handoff
+   * stays clear of — this says "no picture", not which capture it came from.
+   */
+  mediaType?: 'video' | 'audio';
+  /**
    * Where the webcam overlay sat while recording. Set on the **part it applies
    * to** — the take's webcam half — even though it is stored on the take's
    * primary, so the store needs to know nothing about roles: a part that

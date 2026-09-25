@@ -178,6 +178,13 @@ export async function importTake(
         startOffset: part.startOffset ?? 0,
         width: part.width,
         height: part.height,
+        // "This part has no picture", which is what the store needs to give an
+        // audio clip no picture transform and to keep one out of the rectangle
+        // the webcam corner is measured against (ESCSUITE-71). Carried as the
+        // stored `mediaType` rather than as the role, so the store stays free of
+        // roles, and absent on a part that *has* a picture, the way `role` and
+        // `takeId` are absent on a single-file take.
+        ...(part.mediaType === 'audio' ? { mediaType: 'audio' as const } : {}),
         // The overlay geometry is stored on the take's primary and applies to its
         // camera, so it travels onto that part here — which is what lets the
         // store place a take without knowing what a role is.

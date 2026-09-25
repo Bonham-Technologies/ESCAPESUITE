@@ -99,15 +99,22 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     // *that* while recording. A primary with no stored dimensions (nothing
     // ESCAPECRAFT writes, but IndexedDB is not type-checked) leaves the whole
     // canvas as the frame, which is `overlayPlacementToTransform`'s default.
+    // Which part that is, is asked of the parts rather than taken as `parts[0]`
+    // (ESCSUITE-71). The primary *is* first, by `app/takeImport.ts`'s contract,
+    // but a take's audio companions have no picture at all — they arrive 0x0 —
+    // and an audio part read as the frame means "the whole canvas", which is a
+    // wrong answer that looks like a default. So the frame comes from the
+    // take's first part that has a picture, which on every take ESCAPECRAFT
+    // writes is the primary.
     const resolution = state.project.resolution;
-    const primaryPart = parts[0];
+    const framePart = parts.find((part) => part.mediaType !== 'audio');
     const overlayFrame =
-      primaryPart.width > 0 && primaryPart.height > 0
+      framePart !== undefined && framePart.width > 0 && framePart.height > 0
         ? {
-            left: (resolution.width - primaryPart.width) / 2,
-            top: (resolution.height - primaryPart.height) / 2,
-            width: primaryPart.width,
-            height: primaryPart.height,
+            left: (resolution.width - framePart.width) / 2,
+            top: (resolution.height - framePart.height) / 2,
+            width: framePart.width,
+            height: framePart.height,
           }
         : undefined;
 
@@ -134,9 +141,19 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         // The part that carries the overlay placement is the one the camera was
         // drawn into; everything else imports at native size, centred, like any
         // other clip.
-        transform: part.overlayPlacement
-          ? overlayPlacementToTransform(part.overlayPlacement, resolution, part, overlayFrame)
-          : { ...DEFAULT_TRANSFORM },
+        //
+        // **An audio part takes the default transform, always** (ESCSUITE-71).
+        // It is never drawn — `previewGeometry.getOverlayBounds` answers no
+        // bounds for one and both renderers skip it — so the numbers here are
+        // never read; it carries the whole default rather than nothing because
+        // `Clip.transform` is required and the inspector reads
+        // `clip.transform.scaleX` with no fallback of its own. Stated rather
+        // than left to the 0x0 dimensions such a part arrives with, which
+        // reached the same place by accident.
+        transform:
+          part.mediaType !== 'audio' && part.overlayPlacement
+            ? overlayPlacementToTransform(part.overlayPlacement, resolution, part, overlayFrame)
+            : { ...DEFAULT_TRANSFORM },
         effects: { ...DEFAULT_EFFECTS },
         transition: { ...DEFAULT_TRANSITION },
       });

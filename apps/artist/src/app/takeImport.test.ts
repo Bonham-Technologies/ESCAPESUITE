@@ -44,7 +44,32 @@ const webcamMetadata: SourceVideo = {
   hasAudio: false,
 }
 
+/**
+ * The microphone companion (ESCSUITE-14 slice 3): stored as audio, with no
+ * dimensions, no thumbnail and no picture of any kind.
+ */
+const micMetadata: SourceVideo = {
+  ...sampleVideo,
+  id: 'take-1-mic',
+  name: 'Screen recording — microphone',
+  duration: 6,
+  width: 0,
+  height: 0,
+  frameRate: 0,
+  mediaType: 'audio',
+  takeId: 'take-1',
+  role: 'mic',
+  startOffset: 0,
+  hasAudio: true,
+}
+
 const primary = { blob: new Blob(['screen'], { type: 'video/webm' }), metadata: primaryMetadata }
+
+/** Hand each companion its own blob, so a test can tell which was read. */
+const storedBlobs: Record<string, Blob> = {
+  'take-1-webcam': new Blob(['webcam'], { type: 'video/webm' }),
+  'take-1-mic': new Blob(['mic'], { type: 'audio/webm' }),
+}
 
 let added: SourceVideo[]
 const addSourceVideo = (video: SourceVideo) => {
@@ -108,6 +133,27 @@ describe('importTake', () => {
         overlayPlacement: PLACEMENT,
       },
     ])
+  })
+
+  it('says which of a take parts have no picture', async () => {
+    vi.mocked(getAllVideoMetadata).mockResolvedValue([primaryMetadata, webcamMetadata, micMetadata])
+    vi.mocked(getVideo).mockImplementation((id: string) =>
+      Promise.resolve({
+        blob: storedBlobs[id],
+        metadata: id === 'take-1-mic' ? micMetadata : webcamMetadata,
+      })
+    )
+
+    const take = await importTake(primary, addSourceVideo)
+
+    // The store gives an audio part the default transform and never measures
+    // the webcam corner against it (ESCSUITE-71), and it can only do either if
+    // the handoff says which parts those are. The `width: 0, height: 0` such a
+    // part arrives with is a consequence and not a signal — a video part
+    // stored 0x0 is a corrupt record, not a sound file. Absent rather than
+    // `'video'` on the parts that have a picture, the way `role` and `takeId`
+    // are absent on a single-file take.
+    expect(take.clipParts.map((part) => part.mediaType)).toEqual([undefined, undefined, 'audio'])
   })
 
   it('refuses a take whose companion the library already holds, before it writes anything', async () => {
