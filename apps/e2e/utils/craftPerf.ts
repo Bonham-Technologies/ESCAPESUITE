@@ -101,6 +101,17 @@ interface CraftPerfCounters {
    * benchmark's tripwire is what fails if that stops being true.
    */
   encodesByEncoder: number[]
+  /**
+   * Buffers handed to each `AudioEncoder`, in the order the encoders first
+   * encoded one.
+   *
+   * Attributed by **instance identity**, exactly as the video ones are, and for
+   * the same reason: nothing about a buffer says which pipeline it belongs to. A
+   * separate-tracks take runs one for the mix on the primary output and one per
+   * audio companion, all on the main thread; only the *count* of encoders that
+   * encoded anything is read, as a tripwire (see {@link measureTake}).
+   */
+  audioEncodesByEncoder: number[]
 }
 
 declare global {
@@ -153,10 +164,18 @@ export async function installCraftPerfInstrumentation(page: Page): Promise<void>
   await installPerfInstrumentation(page)
 
   await page.addInitScript(() => {
-    const counters: CraftPerfCounters = { videoDraws: 0, encodesByEncoder: [] }
+    const counters: CraftPerfCounters = {
+      videoDraws: 0,
+      encodesByEncoder: [],
+      audioEncodesByEncoder: [],
+    }
     window.__perfCraft = counters
 
     let encoderIndices = new WeakMap<object, number>()
+    // Audio encoders that actually encoded something, attributed the same way
+    // the video ones are. A separate-tracks take runs one for the mix on the
+    // primary output and one per audio companion, all on the main thread.
+    let audioEncoderIndices = new WeakMap<object, number>()
 
     // Chained, not replaced. Init scripts run in the order they were added, so
     // `installPerfInstrumentation`'s bag and its reset already exist here; a
@@ -170,6 +189,8 @@ export async function installCraftPerfInstrumentation(page: Page): Promise<void>
       // A fresh map with the array: an index kept across a reset would point
       // past the end of it.
       encoderIndices = new WeakMap<object, number>()
+      counters.audioEncodesByEncoder.length = 0
+      audioEncoderIndices = new WeakMap<object, number>()
     }
 
     // `drawImage` is overloaded three ways (3, 5 and 9 arguments), which no
@@ -205,6 +226,24 @@ export async function installCraftPerfInstrumentation(page: Page): Promise<void>
         }
         counters.encodesByEncoder[index]++
         return chainedEncode.apply(this, args)
+      }
+    }
+
+    const audioEncoder = (window as unknown as { AudioEncoder?: typeof AudioEncoder }).AudioEncoder
+    if (audioEncoder) {
+      const nativeAudioEncode = audioEncoder.prototype.encode
+      audioEncoder.prototype.encode = function countedAudioEncode(
+        this: AudioEncoder,
+        ...args: Parameters<AudioEncoder['encode']>
+      ) {
+        let index = audioEncoderIndices.get(this)
+        if (index === undefined) {
+          index = counters.audioEncodesByEncoder.length
+          audioEncoderIndices.set(this, index)
+          counters.audioEncodesByEncoder.push(0)
+        }
+        counters.audioEncodesByEncoder[index]++
+        return nativeAudioEncode.apply(this, args)
       }
     }
   })
@@ -348,16 +387,21 @@ async function readNewestRecordingBytes(page: Page): Promise<number> {
             // `getAll` returns key order and the key is a uuid, which says
             // nothing about when a take was made.
             //
-            // A separate-tracks take writes **two** records carrying the
-            // identical `recordedAt` — one `now` for both halves of one take —
-            // so the timestamp cannot order them and store order is uuid order,
-            // i.e. a coin toss between the screen part and the webcam part. The
-            // tie is broken towards the primary (anything but `role: 'webcam'`),
-            // so `outputBytes` is always the same part of the take and two runs
-            // of the benchmark are comparable. Every other arm stores one record
-            // per take and never reaches the tie-break.
-            const rank = (record: { metadata?: { recordedAt?: number; role?: string } }) =>
-              [record.metadata?.recordedAt ?? 0, record.metadata?.role === 'webcam' ? 0 : 1] as const
+            // A separate-tracks take writes up to four records carrying the
+            // identical `recordedAt` — one `now` for the whole take — so the
+            // timestamp cannot order them and store order is uuid order, i.e.
+            // a coin toss between the parts. The tie is broken towards the
+            // **primary**, which is the part with no role or the role
+            // 'screen', so `outputBytes` is always the same part of the take
+            // and two runs of the benchmark are comparable. Every other arm
+            // stores one record per take and never reaches the tie-break.
+            const rank = (record: { metadata?: { recordedAt?: number; role?: string } }) => {
+              const role = record.metadata?.role
+              return [
+                record.metadata?.recordedAt ?? 0,
+                role === undefined || role === 'screen' ? 1 : 0,
+              ] as const
+            }
             const newest = records.reduce((newestSoFar, record) => {
               const [time, primary] = rank(record)
               const [bestTime, bestPrimary] = rank(newestSoFar)
@@ -451,6 +495,13 @@ export interface TakeMeasurement {
  *   watches — but nothing captures its canvas, so `videoDraws` is non-zero here
  *   without being the recording path.
  *
+ *   Slice 3 gave the take's sound companions too, so the microphone is written
+ *   as its own Opus file beside the mix on the primary: **two** `AudioEncoder`s
+ *   on the same main thread, and **three** library rows per take. Neither is
+ *   published — the audio encoders are counted only as a tripwire below, and
+ *   the row count only so the wait after Stop is for this take's last part
+ *   rather than its first.
+ *
  *   What licenses the two divisors: `Compositor.drawFrame` draws the screen video and
  *   `drawWebcamOverlay` draws the webcam video, both inside **one synchronous
  *   rAF callback**, so no `page.evaluate` can ever observe a half-drawn frame.
@@ -477,11 +528,13 @@ export async function measureTake(
   profileName?: string
 ): Promise<TakeMeasurement> {
   const rowsBefore = await recordingRows(page).count()
-  // A separate-tracks take is one take in two files, so it lands as two library
-  // rows (`useRecordingSave` writes the companion and the primary in one pass).
-  // Waiting for one row would either time out or, worse, pass on a transient
-  // half-saved library.
-  const rowsPerTake = options.separateTracks ? 2 : 1
+  // A separate-tracks take is one take in several files, so it lands as
+  // several library rows (`useRecordingSave` writes every part in one pass).
+  // Three here: the screen, the webcam and the microphone — `openCraft`
+  // leaves ESCAPECRAFT's defaults alone and the microphone is one of them,
+  // while system audio is off. Waiting for fewer would either time out or,
+  // worse, pass on a transient half-saved library.
+  const rowsPerTake = options.separateTracks ? 3 : 1
 
   // Reset before the click rather than after, so the encoder queue high-water
   // below covers the take from its very first frame. It is a maximum and not a
@@ -500,6 +553,7 @@ export async function measureTake(
     encode: window.__perf.encodeCount,
     videoDraws: window.__perfCraft.videoDraws,
     encodesByEncoder: [...window.__perfCraft.encodesByEncoder],
+    audioEncodesByEncoder: [...window.__perfCraft.audioEncodesByEncoder],
     now: performance.now(),
   }))
 
@@ -518,6 +572,7 @@ export async function measureTake(
       encode: window.__perf.encodeCount,
       videoDraws: window.__perfCraft.videoDraws,
       encodesByEncoder: [...window.__perfCraft.encodesByEncoder],
+      audioEncodesByEncoder: [...window.__perfCraft.audioEncodesByEncoder],
       encoderQueueHighWater: window.__perf.encodeQueueHighWater,
       now: performance.now(),
       longTaskCount: inWindow.length,
@@ -544,6 +599,13 @@ export async function measureTake(
   const framesEncodedPerEncoder = end.encodesByEncoder.map(
     (total, index) => total - (start.encodesByEncoder[index] ?? 0)
   )
+  // Encoders that encoded at least one buffer inside the window. Local to the
+  // tripwire and deliberately not returned: it is an invariant the numbers
+  // rest on rather than a number worth publishing, so `perf-report.mjs` and
+  // the result schema are untouched.
+  const audioEncoders = end.audioEncodesByEncoder.filter(
+    (total, index) => total - (start.audioEncodesByEncoder[index] ?? 0) > 0
+  ).length
 
   // Each mode has ways of being wrong that would otherwise look fine: a screen
   // take that quietly fell back to MediaRecorder still produces a file and
@@ -575,6 +637,15 @@ export async function measureTake(
       videoDraws % 2,
       `the separate-tracks take drew ${videoDraws} videos — an odd count means a capture track was not ready for some frames, so the two-draws-per-composited-frame divisor is wrong`
     ).toBe(0)
+    // The audio half of the same claim. A mode that recorded its sound into
+    // the mix alone would still run two video encoders, still composite for
+    // the preview and still look right in every number above — and would have
+    // silently stopped producing the microphone file this arm is meant to
+    // cost. Two: the mix on the primary output, and the microphone companion.
+    expect(
+      audioEncoders,
+      `the separate-tracks take ran ${audioEncoders} audio encoder(s), not 2 — the microphone companion was not built, or the mix stopped being written to the primary`
+    ).toBe(2)
   } else if (options.webcam) {
     expect(
       videoDraws,

@@ -310,7 +310,13 @@ There is no app code for the benchmarks' sake in either app:
   pipeline it came from; the screen pipeline is built and started first, so index 0 is the
   screen. Reported as `screenFramesEncoded` / `webcamFramesEncoded` beside the shared
   metrics, and it is the only arm that reports a real encode rate *and* a real
-  `compositedFps`. First numbers in
+  `compositedFps`. Since slice 3 the take's sound has companions too — the microphone as its
+  own Opus file beside the mix on the primary — so the arm also runs **two `AudioEncoder`s**
+  and stores **three** library rows per take (screen, webcam, microphone; system audio is off
+  by default and the synthetic display stream carries no audio track, so there is no fourth).
+  Neither is published: the audio encoders are counted by instance identity as a tripwire and
+  the row count only so the wait after Stop is for the take's last part. First numbers, and
+  the re-measurement with the audio companions, in
   [docs/performance/2026-09-17-craft-baseline.md](docs/performance/2026-09-17-craft-baseline.md).
 - **`craft-mp4-conversion`** — one 6 s take converted to MP4 in the page by `convertToMP4`,
   driven through the recording row's own button: wall time, frames encoded, renderer task
@@ -321,15 +327,19 @@ There is no app code for the benchmarks' sake in either app:
   `fixtures/headless/project.json`, Chromium launch included.
 
 The ESCAPECRAFT benchmarks assert nothing about speed either; their only `expect`s are the
-ten tripwires saying the benchmark measured the wrong thing — a take that stopped
+eleven tripwires saying the benchmark measured the wrong thing — a take that stopped
 mid-window; a "WebCodecs" take that encoded nothing, or that drew video into a canvas at all
 (which would mean `WebCodecsRecorder` had taken its `startVideoElementCapture` fallback, a
 different pipeline under the same name); a PiP take that composited nothing, or whose
 `drawImage` count came out odd (which would mean a capture track was not ready for some
 frames, so the two-draws-per-composited-frame divisor is wrong); a separate-tracks take that
-did not run exactly two encoders, or one of whose two encoded nothing, plus the same two
-compositor checks now that it is drawing the preview; and a conversion that encoded no
-frames.
+did not run exactly two video encoders, or one of whose two encoded nothing, or that did not
+run exactly two **audio** encoders (the mix on the primary plus the microphone companion — a
+mode that quietly recorded its sound into the mix alone would look right in every published
+number), plus the same two compositor checks now that it is drawing the preview; and a
+conversion that encoded no frames. The separate-tracks arm's wait for **three** library rows
+after Stop is a twelfth check in all but name: a take that stored a different number of parts
+fails there rather than reporting a heap delta read mid-write.
 
 `PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
 project resolution for `preview-playback` only — the export benchmarks always render 720p
