@@ -173,8 +173,8 @@ export function useRecordingSave({
     // role, and still carries the geometry the camera was framed at, which is
     // the only record of it that survives. `config.separateTracks` would be a
     // different question: what the sidebar asks for now. The companions are
-    // still enough on their own, so a caller that hands parts over without
-    // saying so is not quietly demoted to a single-file take.
+    // still enough on their own — the only caller today always says so, and
+    // the arm is kept for a test that hands parts over without the mode.
     const isCompanionTake =
       captured.separateTracks || (companions != null && companions.length > 0);
     const overlayPlacement = isCompanionTake
