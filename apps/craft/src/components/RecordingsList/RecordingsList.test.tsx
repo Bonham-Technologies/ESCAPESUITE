@@ -499,29 +499,29 @@ describe('a take recorded as separate tracks', () => {
     expect(calls.onSendToEditor.mock.calls).toEqual([['take-1'], ['take-1']])
   })
 
-  it('says on the primary row that its MP4 is screen-only for now', () => {
+  it('claims nothing about a missing webcam on the primary row', () => {
     renderList([primary, companion])
 
-    const note = screen.getByText(
-      'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
-    )
+    // The interim note — "MP4 and M4A cover the screen track only" — is gone
+    // because both halves of it stopped being true: MP4 draws the camera back
+    // into the corner it was recorded in, and M4A always had the whole mix (the
+    // audio parts are a second tap, not a diversion). The one case where a file
+    // really is missing the camera is a fact about a file the user already has,
+    // and it goes through the notice channel as MP4_SAVED_WITHOUT_WEBCAM.
+    expect(screen.queryByText(/not included yet/)).toBeNull()
     const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' })
-    // Enabled: a screen-only MP4 is a real file, and slice 4 makes it a
-    // composite. What is not allowed is offering it silently.
     expect(mp4).toBeEnabled()
-    expect(mp4.getAttribute('aria-describedby')).toContain(note.id)
+    // Nothing describes it, because there is nothing app-wide to say either.
+    expect(mp4.getAttribute('aria-describedby')).toBeNull()
   })
 
-  it('drops the note once the companion is gone', () => {
+  it('says nothing of the sort on a take whose camera row is gone either', () => {
     renderList([primary])
 
-    // The note is about a webcam the download leaves out. With no companion in
-    // the list there is nothing left out.
+    expect(screen.queryByText(/not included yet/)).toBeNull()
     expect(
-      screen.queryByText(
-        'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
-      )
-    ).toBeNull()
+      screen.getByRole('button', { name: 'Download Standup Demo as MP4' })
+    ).toBeEnabled()
   })
 
   it('says nothing of the sort on a plain take', () => {
@@ -530,27 +530,19 @@ describe('a take recorded as separate tracks', () => {
     expect(screen.queryByText(/not included yet/)).toBeNull()
   })
 
-  it('carries both notes at once when the browser note and the take note both apply', () => {
-    // The app-wide note ("this MP4 will be silent") and the row's own note
-    // ("screen-only for now") are about different things and can both be true
-    // at the same time — aria-describedby has to list both ids, not just the
-    // last one computed.
+  it('is described by the app-wide note alone, on both conversion buttons', () => {
+    // There used to be two notes to list here — one about the browser, one
+    // about the take. The take's is retired, so `aria-describedby` is one id
+    // again, and both buttons carry it because every sentence the app-wide note
+    // can hold is true of both formats.
     const silent = 'MP4 will have no audio in this browser (no AAC encoder)'
     renderList([primary, companion], { mp4Note: silent })
 
     const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' })
     const describedBy = mp4.getAttribute('aria-describedby')!
-    const ids = describedBy.split(' ')
-    expect(ids).toHaveLength(2)
+    expect(describedBy.split(' ')).toHaveLength(1)
+    expect(document.getElementById(describedBy)).toHaveTextContent(silent)
 
-    const [appWideId, takeNoteId] = ids
-    expect(document.getElementById(appWideId)).toHaveTextContent(silent)
-    expect(document.getElementById(takeNoteId)).toHaveTextContent(
-      'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
-    )
-
-    // M4A carries the same two ids — the two notes are about the take and the
-    // browser, not about which button is being read.
     const m4a = screen.getByRole('button', { name: 'Download Standup Demo as audio (M4A)' })
     expect(m4a.getAttribute('aria-describedby')).toBe(describedBy)
   })
@@ -608,16 +600,11 @@ describe('a take recorded as separate tracks', () => {
     expect(calls.onSendToEditor.mock.calls).toEqual([['take-1']])
   })
 
-  it('keeps the interim MP4 note on the take with a camera in it', () => {
+  it('claims nothing about a missing webcam however many parts the take has', () => {
     renderList([primary, companion, micRow, systemRow])
 
-    // The note is about the webcam not being in the composite. The mix is
-    // still on the primary, so the audio parts change nothing about what the
-    // MP4 and M4A contain — and the note must not appear four times.
-    expect(
-      screen.getAllByText(
-        'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
-      )
-    ).toHaveLength(1)
+    // Four rows, four chances to say something no longer true.
+    expect(screen.queryByText(/not included yet/)).toBeNull()
+    expect(screen.queryByText(/screen track only/)).toBeNull()
   })
 })

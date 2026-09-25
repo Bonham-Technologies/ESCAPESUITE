@@ -256,9 +256,9 @@ test.describe('ESCAPECRAFT separate-tracks recording', () => {
     await expect(page.getByText(/^Webcam track • /)).toHaveCount(1)
     await expect(page.getByText(/^Microphone track • /)).toHaveCount(1)
     await expect(page.getByText(/^System audio track • /)).toHaveCount(1)
-    await expect(
-      page.getByText('MP4 and M4A cover the screen track only — the webcam track is not included yet.')
-    ).toHaveCount(1)
+    // Nothing on the primary row claims the downloads leave the camera out:
+    // slice 4 made MP4 the composite, and M4A always had the whole mix.
+    await expect(page.getByText(/not included yet/)).toHaveCount(0)
     // Conversions on the primary row only — one MP4 and one M4A in the whole
     // library, however many parts the take has.
     await expect(page.getByRole('button', { name: /Download .+ as MP4/ })).toHaveCount(1)
