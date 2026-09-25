@@ -221,6 +221,34 @@ instead would drop the camera over the middle of the picture on every take whose
 the project's own size. The frame defaults to the whole canvas — which is what it *is* when the
 two match, and what a primary with no stored dimensions falls back to.
 
+**An audio part carries no picture, and now says so.** A take's microphone and
+system-audio companions are stored as `mediaType: 'audio'` with no dimensions at all
+(ESCSUITE-14 slice 3), and `TakeClipPart` carries that one field through to the store, where
+two decisions turn on it (ESCSUITE-71): such a clip takes `DEFAULT_TRANSFORM`, **always** —
+even one that somehow arrived carrying an `overlayPlacement` — and it can never be the
+rectangle the webcam corner is measured against, which is the take's first part *with* a
+picture rather than `parts[0]`. Both used to be true by accident: an audio part arrives
+`0x0`, which fell through to the default transform (right, for a clip nothing ever draws —
+`previewGeometry.getOverlayBounds` answers `null` for an audio source) and, had a part ever
+arrived before the primary, would have measured the camera against a rectangle that silently
+means "the whole canvas". The clip carries the whole default rather than no transform at all
+because `Clip.transform` is required and the inspector reads `clip.transform.scaleX` with no
+fallback of its own (`components/ClipEditor/`).
+
+**Every part arrives with its waveform**, computed by the same `extractWaveformData`
+(`utils/waveform.ts`) the media library's own import path calls for every file, at the same
+point in the sequence — with the library entry, before the take is placed (ESCSUITE-71). It
+is *not* only the audio parts: `processVideoFile` gives a video a waveform too, so the
+primary's own mixed audio gets one and a handed-over take is not the one import that looks
+different. Three rules: a part ESCAPECRAFT recorded with `hasAudio: false` is never decoded
+(the capture's own answer since ESCSUITE-60/62 — the webcam half of a separate-tracks take
+has no audio track by construction, the whole mix staying on the primary); `hasAudio` is only
+ever turned **on**, because the extractor's flag is a silence heuristic and a take recorded
+in a quiet room must not lose the flag slice 3 persisted, while a part stored before that
+flag existed needs one filled in (`TimelineTrack` draws a waveform only when the source has
+the flag **and** non-empty peaks); and a waveform that cannot be read costs the part its
+waveform and nothing else, exactly like a thumbnail.
+
 Three things the import refuses to do, each chosen rather than defaulted:
 
 - **A part whose blob is gone is skipped and counted**, never fatal — storage cleared between
@@ -1144,6 +1172,15 @@ The inspector panel (ClipEditor) adapts to different screen sizes. `App.tsx` own
 - **Auto-collapse**: Left sidebar collapses automatically on small screens
 
 ### Audio Waveform Visibility (`src/components/Timeline/AudioWaveform.tsx`)
+
+**Where the peaks come from**: `utils/waveform.ts`'s `extractWaveformData`, the one
+implementation — called by `core/videoProcessor.ts` for every file the media library imports
+(audio *and* video) and by `app/takeImport.ts` for every part of a handed-over take
+(ESCSUITE-71). `TimelineTrack` draws a waveform only when the source carries **both**
+`hasAudio` and a non-empty `waveformData`, so a source with peaks and no flag shows nothing —
+which is why the take import fills the flag in for a recording stored before ESCAPECRAFT
+wrote one.
+
 Waveform visualization adapts to clip selection state:
 - **Default colors**: Purple (`rgba(138, 43, 226, 0.6)`) for audio, blue tint for video with audio
 - **Selected state**: White (`rgba(255, 255, 255, 0.85)`) for high contrast against blue selection background
