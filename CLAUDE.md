@@ -452,7 +452,7 @@ fixes landed (the controller reporting a companion lost inside the recorder, and
 branches up a hundredth to 96.81, statements and functions unchanged, and again no floor.
 `@escapesuite/artist` was re-measured 2026-09-25 at the end of ESCSUITE-14 slice 2 (the
 handoff resolving a take's parts and placing them on the timeline): all four figures up — lines
-99.38, statements 98.71, functions 98.95 and branches 93.38 → 93.50, the new modules being
+99.38, statements 98.71, functions 98.95 and branches 93.38 → 93.51, the new modules being
 small, pure and fully covered — and **no floor crossed**, so artist's floors stay
 99 / 98 / 93 / 98.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
@@ -462,7 +462,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.33 | 96.81 | 99.51 |
-| `@escapesuite/artist` | 99.38 | 98.71 | 93.50 | 98.95 |
+| `@escapesuite/artist` | 99.38 | 98.71 | 93.51 | 98.95 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
