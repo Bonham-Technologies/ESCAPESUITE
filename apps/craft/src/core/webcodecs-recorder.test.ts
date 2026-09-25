@@ -1274,13 +1274,17 @@ describe('WebCodecsRecorder', () => {
       expect(screenEncoder().flushCalls).toBe(1)
       expect(webcamEncoder().flushCalls).toBe(1)
       expect(getMediabunnyState().outputs.every(o => o.finalizeCalls === 1)).toBe(true)
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toEqual({
-        role: 'webcam',
-        blob: expect.any(Blob),
-        startOffset: 0,
-      })
+      // A take can have up to three companions now (ESCSUITE-14 slice 3), so
+      // the callback carries a list in role order — webcam, mic, system.
+      expect(companions).toEqual([
+        {
+          role: 'webcam',
+          blob: expect.any(Blob),
+          startOffset: 0,
+        },
+      ])
     })
 
     it('keeps recording the screen when the webcam dies mid-take', async () => {
@@ -1309,7 +1313,7 @@ describe('WebCodecsRecorder', () => {
       expect(webcamEncoder().encodes).toHaveLength(1)
 
       await recorder.stop()
-      expect(callbacks.onStop.mock.calls[0][1]).toMatchObject({ role: 'webcam' })
+      expect(callbacks.onStop.mock.calls[0][1]).toMatchObject([{ role: 'webcam' }])
     })
 
     it('delivers no companion when the webcam never produced a frame', async () => {

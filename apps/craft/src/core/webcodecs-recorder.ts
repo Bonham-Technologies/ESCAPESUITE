@@ -29,9 +29,9 @@ export interface WebCodecsRecorderCallbacks {
   onPause?: () => void;
   onResume?: () => void;
   /**
-   * The finished take. A separate-tracks take delivers its webcam half as the
-   * second argument (see `CompanionPart`); every other take delivers the blob
-   * alone, and so does `Recorder`.
+   * The finished take. A separate-tracks take delivers its companions as the
+   * second argument — a list, in role order (see `CompanionPart`); every other
+   * take delivers the blob alone, and so does `Recorder`.
    */
   onStop?: RecorderStopCallback;
   onError?: (error: Error) => void;
@@ -1021,7 +1021,10 @@ export class WebCodecsRecorder {
       const buffer = this.target?.buffer;
       if (buffer) {
         const blob = new Blob([buffer], { type: 'video/webm' });
-        this.callbacks.onStop?.(blob, companion);
+        // A list, because a take can have up to three companions — and `null`
+        // rather than `[]` for none, because that is what an ordinary take has
+        // always delivered on this callback.
+        this.callbacks.onStop?.(blob, companion ? [companion] : null);
       } else {
         this.callbacks.onError?.(new Error('Recording failed: no data was written'));
       }

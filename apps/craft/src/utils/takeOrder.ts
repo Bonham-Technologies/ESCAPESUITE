@@ -8,14 +8,32 @@
 import type { Recording } from '../store/types';
 
 /**
- * Newest take first; a take's companions immediately after its primary, oldest
- * companion first; then any companion whose primary is missing.
+ * Newest take first; a take's companions immediately after its primary, in
+ * role order — webcam, then mic, then system; then any companion whose primary
+ * is missing.
  *
- * Sorting companions by their own `createdAt` would break the grouping: both
- * parts are saved within the same millisecond or two and the companion is
+ * Sorting companions by their own `createdAt` would break the grouping: every
+ * part is saved within the same millisecond or two and the companions are
  * written second, so by date alone a webcam row would float above the screen
- * row it describes.
+ * row it describes — and three companions sharing one `now` would come out in
+ * whatever order storage returned them, which is uuid order.
  */
+/**
+ * The order a take's companions stack in, mirroring ESCAPEARTIST's
+ * `utils/takeParts.ts`: the camera first, then the sound.
+ *
+ * Typed as plain strings on purpose. `RecordingRole` is a compile-time union
+ * and IndexedDB is not type-checked, so "is this a role we know?" has to be a
+ * runtime question.
+ */
+const COMPANION_ROLE_ORDER: readonly string[] = ['webcam', 'mic', 'system'];
+
+/** Where a companion sits in its take's stack; last for a role we do not know. */
+function companionRank(role: string | undefined): number {
+  const rank = COMPANION_ROLE_ORDER.indexOf(role ?? '');
+  return rank === -1 ? COMPANION_ROLE_ORDER.length : rank;
+}
+
 export function orderTakes(recordings: Recording[]): Recording[] {
   const companionsByTake = new Map<string, Recording[]>();
   const primaries: Recording[] = [];
@@ -39,7 +57,17 @@ export function orderTakes(recordings: Recording[]): Recording[] {
     ordered.push(primary);
     const companions = companionsByTake.get(primary.id);
     if (companions) {
-      companions.sort((a, b) => a.createdAt - b.createdAt);
+      // Role first: every part of a take is saved with one `now`, so the date
+      // cannot order three companions and storage returns them in uuid order.
+      // Date second, for two companions of one role saved in two takes' worth
+      // of milliseconds. The id last, so the answer never depends on what the
+      // engine's sort happened to do.
+      companions.sort(
+        (a, b) =>
+          companionRank(a.role) - companionRank(b.role) ||
+          a.createdAt - b.createdAt ||
+          a.id.localeCompare(b.id)
+      );
       ordered.push(...companions);
       companionsByTake.delete(primary.id);
     }

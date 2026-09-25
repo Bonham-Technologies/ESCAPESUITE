@@ -42,16 +42,23 @@ export interface RecordingConfig {
 }
 
 /**
- * The second blob a separate-tracks take produces, handed to the save path by
- * the recorder's `onStop`.
+ * Which half of a take a companion file is. The primary is not one of these —
+ * it is the take.
+ */
+export type CompanionRole = 'webcam' | 'mic' | 'system';
+
+/**
+ * One of the extra blobs a separate-tracks take produces, handed to the save
+ * path by the recorder's `onStop`.
  *
- * `startOffset` is 0 in slice 1 and is carried anyway: both parts are stamped
- * from one clock by one `start()`, so "the webcam begins where the screen
- * does" is a fact worth writing down rather than one to rediscover when the
- * audio companions (slice 3) start later than the video.
+ * `startOffset` is 0 for every part in this build: one clock, one `start()`,
+ * every pipeline's first unit stamped from the same origin. It is carried
+ * rather than assumed because it is a fact about a take worth writing down —
+ * and because a future pipeline that genuinely starts late (a source attached
+ * mid-take) would have nowhere else to say so.
  */
 export interface CompanionPart {
-  role: 'webcam';
+  role: CompanionRole;
   blob: Blob;
   startOffset: number;
 }
@@ -59,12 +66,22 @@ export interface CompanionPart {
 /**
  * What a recorder calls when a take is finished.
  *
+ * The second argument is the take's companions, in role order — webcam, then
+ * mic, then system — or `null` when there are none. `null` rather than an
+ * empty array because that is what "this take is one file" has always meant on
+ * this callback, and because the recorder cannot tell "never asked for one"
+ * from "asked and lost them all": only the controller, which resolved the mode
+ * before the countdown, knows how many the take asked for.
+ *
  * Both recorders declare this signature even though only `WebCodecsRecorder`
- * ever passes a companion: one type means the controller's single `onStop` is
+ * ever passes companions: one type means the controller's single `onStop` is
  * assignable to either recorder's callbacks, with no union narrowing at the
  * call site. `Recorder` (MediaRecorder) calls it with the blob alone.
  */
-export type RecorderStopCallback = (blob: Blob, companion?: CompanionPart | null) => void;
+export type RecorderStopCallback = (
+  blob: Blob,
+  companions?: CompanionPart[] | null
+) => void;
 
 export interface EnvironmentCapabilities {
   screenCapture: boolean;

@@ -878,18 +878,18 @@ describe('a separate-tracks take', () => {
     await act(async () => { await result.current.handleStartRecording() })
     const recorder = recorderFactory.last()
     expect(recorder.isRecording()).toBe(true)
-    recorder.companionPart = {
+    recorder.companionParts = [{
       role: 'webcam',
       blob: new Blob(['webcam'], { type: 'video/webm' }),
       startOffset: 0,
-    }
+    }]
 
     await act(async () => { await result.current.handleStopRecording() })
 
     expect(harness.saveRecording).toHaveBeenCalledWith(
       recorder.stopBlob,
       expect.any(Number),
-      recorder.companionPart
+      recorder.companionParts
     )
   })
 
@@ -909,7 +909,7 @@ describe('a separate-tracks take', () => {
     const recorder = recorderFactory.last()
     // The double's default, and what finalizeCompanion() returns for all three
     // of the recorder-side losses.
-    expect(recorder.companionPart).toBeNull()
+    expect(recorder.companionParts).toBeNull()
 
     await act(async () => { await result.current.handleStopRecording() })
 

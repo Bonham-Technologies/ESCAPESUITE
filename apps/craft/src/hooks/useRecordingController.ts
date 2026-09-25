@@ -366,7 +366,7 @@ export function useRecordingController({
         },
         onPause: () => setState('paused'),
         onResume: () => setState('recording'),
-        onStop: (blob, companion) => {
+        onStop: (blob, companions) => {
           // A stop that lands after the take was cancelled or the screen went
           // away is a chunk nobody asked for: drop it rather than save it.
           if (cancelledRef.current) return;
@@ -377,7 +377,7 @@ export function useRecordingController({
           // still knows the take was *resolved* on separate tracks, so this is
           // the only place that can tell "lost" from "never asked for". The
           // save hook says the same sentence for a companion lost in storage.
-          if (separateTracks && !companion) {
+          if (separateTracks && !companions) {
             setNotice(WEBCAM_TRACK_NOT_SAVED);
           }
           // The recorder can finish a take on its own — the capture ended — so
@@ -391,7 +391,7 @@ export function useRecordingController({
           setCurrentDuration(0);
           stopAllStreams();
           // Save in background
-          saveRecording(blob, recordedDuration, companion).then(() => {
+          saveRecording(blob, recordedDuration, companions).then(() => {
             setState('idle');
           }).catch((err) => {
             // The save hook rejects rather than swallowing: without this the

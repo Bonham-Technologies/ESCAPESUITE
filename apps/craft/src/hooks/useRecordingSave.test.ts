@@ -308,7 +308,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
       webcamShape: 'rectangle',
     })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(2)
@@ -339,7 +339,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     capturedThumbnailRef.current = new Blob(['preview-frame'], { type: 'image/jpeg' })
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     for (const part of stored) {
@@ -360,7 +360,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     thumbnailModule.generateThumbnail.mockRejectedValue(new Error('no decoder'))
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(2)
@@ -374,7 +374,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     thumbnailModule.extractVideoMetadata.mockResolvedValue({ duration: 0, width: 640, height: 480 })
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     const webcam = stored.find(m => m.role === 'webcam')!
@@ -385,7 +385,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     recorderTypeRef.current = 'webcodecs'
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     // addRecording prepends, so the companion is added first: the list ends up
     // [primary, companion, ...older] and the webcam row is never above the
@@ -397,7 +397,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     recorderTypeRef.current = 'webcodecs'
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     expect(converterModule.fixWebMMetadata).not.toHaveBeenCalled()
   })
@@ -427,7 +427,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     })
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     expect(added).toHaveLength(1)
     expect(added[0].role).toBe('screen')

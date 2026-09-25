@@ -34,10 +34,10 @@ export type SaveRecording = (
   rawBlob: Blob,
   recordedDuration: number,
   /**
-   * The take's second half, when the recorder produced one. Only the
+   * The take's other parts, when the recorder produced any. Only the
    * separate-tracks mode does — see `core/webcodecs-recorder.ts`.
    */
-  companion?: CompanionPart | null
+  companions?: CompanionPart[] | null
 ) => Promise<void>;
 
 export function useRecordingSave({
@@ -52,7 +52,7 @@ export function useRecordingSave({
   const saveRecording = useCallback(async (
     rawBlob: Blob,
     recordedDuration: number,
-    companion?: CompanionPart | null
+    companions?: CompanionPart[] | null
   ) => {
     setState('saving');
 
@@ -128,11 +128,11 @@ export function useRecordingSave({
     const hasAudio =
       config.microphoneEnabled || (config.systemAudioEnabled && systemAudioShared);
 
-    // A companion take is one take in two files: the primary names it (its own
-    // id is the takeId), carries the mixed audio and the overlay geometry, and
-    // the companion carries the camera. Both are written here rather than in
-    // two passes so a half-saved take cannot reach the library.
-    const isCompanionTake = companion != null;
+    // A companion take is one take in several files: the primary names it (its
+    // own id is the takeId), carries the mixed audio and the overlay geometry,
+    // and the companions carry the camera. All of them are written here rather
+    // than in two passes so a half-saved take cannot reach the library.
+    const isCompanionTake = companions != null && companions.length > 0;
     const overlayPlacement = isCompanionTake
       ? {
           position: config.webcamPosition,
@@ -158,7 +158,7 @@ export function useRecordingSave({
     await storeVideo(id, blob, sourceVideo);
     await storeThumbnail(id, thumbnail);
 
-    if (companion) {
+    for (const companion of companions ?? []) {
       // A companion may never cost the take its primary: the primary's own
       // storeVideo/storeThumbnail already ran above, so any failure from here
       // down — a bad decode, a storage write that throws — is caught and
@@ -209,7 +209,7 @@ export function useRecordingSave({
           now,
           size: companion.blob.size,
           thumbnailUrl: createBlobUrl(companionThumbnail),
-          config,
+          hasWebcam: true,
           hasAudio: false,
         }));
       } catch (error) {
@@ -223,7 +223,7 @@ export function useRecordingSave({
       now,
       size: blob.size,
       thumbnailUrl: createBlobUrl(thumbnail),
-      config,
+      hasWebcam: config.webcamEnabled,
       hasAudio,
     }));
   }, [setState, addRecording, setNotice, config, recorderTypeRef, capturedThumbnailRef]);

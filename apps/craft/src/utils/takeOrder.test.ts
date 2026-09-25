@@ -84,4 +84,56 @@ describe('orderTakes', () => {
 
     expect(ordered.map(r => r.id)).toEqual(['newer-orphan', 'older-orphan'])
   })
+
+  it('orders a take three companions deep by role, not by the order storage returned', () => {
+    // Every part of a take is saved with one `now`, so `createdAt` cannot order
+    // them and `getRecordingsMetadata()` returns key order, which is uuid order
+    // — a coin toss. The role is what says which track is which.
+    const ordered = orderTakes([
+      row('system-part', 1000, { takeId: 'take', role: 'system', hasAudio: true }),
+      row('take', 1000, { takeId: 'take', role: 'screen', hasWebcam: true }),
+      row('mic-part', 1000, { takeId: 'take', role: 'mic', hasAudio: true }),
+      row('webcam-part', 1000, { takeId: 'take', role: 'webcam', hasWebcam: true }),
+    ])
+
+    expect(ordered.map(r => r.id)).toEqual([
+      'take',
+      'webcam-part',
+      'mic-part',
+      'system-part',
+    ])
+  })
+
+  it('falls back to the id for two companions of one role saved in one millisecond', () => {
+    // Rank and date both tie, so something has to decide, and it must not be
+    // whatever the engine's sort happened to do.
+    const ordered = orderTakes([
+      row('b-part', 1000, { takeId: 'take', role: 'webcam', hasWebcam: true }),
+      row('a-part', 1000, { takeId: 'take', role: 'webcam', hasWebcam: true }),
+      row('take', 1000, { takeId: 'take', role: 'screen', hasWebcam: true }),
+    ])
+
+    expect(ordered.map(r => r.id)).toEqual(['take', 'a-part', 'b-part'])
+  })
+
+  it('sorts a companion whose role is missing or unrecognised after the roles it knows', () => {
+    // IndexedDB is not type-checked, so "is this a role we know?" is a runtime
+    // question: a row can carry a takeId with no role at all, and a build newer
+    // than this one could store a role this one has never heard of. Both sort
+    // last rather than first, so an unknown part cannot push the webcam row off
+    // the top of its own take.
+    const ordered = orderTakes([
+      row('roleless-part', 1000, { takeId: 'take' }),
+      row('mystery-part', 1000, { takeId: 'take', role: 'haptics' as unknown as Recording['role'] }),
+      row('webcam-part', 1000, { takeId: 'take', role: 'webcam', hasWebcam: true }),
+      row('take', 1000, { takeId: 'take', role: 'screen', hasWebcam: true }),
+    ])
+
+    expect(ordered.map(r => r.id)).toEqual([
+      'take',
+      'webcam-part',
+      'mystery-part',
+      'roleless-part',
+    ])
+  })
 })

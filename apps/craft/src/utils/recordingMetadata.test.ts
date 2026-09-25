@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { buildSourceVideo, buildRecordingEntry } from './recordingMetadata'
-import type { RecordingConfig } from '../store/types'
 
 describe('buildSourceVideo', () => {
   it('builds the SourceVideo literal from the blob and caller-supplied duration', () => {
@@ -71,15 +70,14 @@ describe('buildSourceVideo', () => {
 
 describe('buildRecordingEntry', () => {
   const sourceVideo = { id: 'rec-1', name: 'Recording 1/1/2026', duration: 42 }
-  const baseConfig: Pick<RecordingConfig, 'webcamEnabled'> = { webcamEnabled: true }
 
-  it('carries the id/name/duration from sourceVideo and hasWebcam from config', () => {
+  it('carries the id/name/duration from sourceVideo and the hasWebcam it is given', () => {
     const entry = buildRecordingEntry({
       sourceVideo,
       now: 123,
       size: 456,
       thumbnailUrl: 'blob:thumb',
-      config: baseConfig,
+      hasWebcam: true,
       hasAudio: false,
     })
 
@@ -105,7 +103,7 @@ describe('buildRecordingEntry', () => {
       now: 123,
       size: 456,
       thumbnailUrl: 'blob:thumb',
-      config: baseConfig,
+      hasWebcam: true,
       hasAudio: true,
     })
 
@@ -118,7 +116,7 @@ describe('buildRecordingEntry', () => {
       now: 123,
       size: 456,
       thumbnailUrl: 'blob:thumb',
-      config: baseConfig,
+      hasWebcam: true,
       hasAudio: false,
     })
 
@@ -215,12 +213,126 @@ describe('buildRecordingEntry for a separate-tracks take', () => {
       now: 123,
       size: 456,
       thumbnailUrl: 'blob:thumb',
-      config: { webcamEnabled: true },
+      hasWebcam: true,
       hasAudio: false,
     })
 
     // The library groups and labels from the list entry, so both facts have to
     // survive the trip out of storage and into memory.
     expect(entry).toMatchObject({ takeId: 'take-1', role: 'webcam' })
+  })
+})
+
+describe('buildSourceVideo for an audio companion', () => {
+  const base = {
+    now: 1_700_000_000_000,
+    duration: 6,
+    // An audio file has no picture, and saying 1920x1080 would be a lie the
+    // editor reads. This is the exact shape ESCAPEARTIST's own audio importer
+    // produces (core/videoProcessor.ts extractAudioMetadata).
+    width: 0,
+    height: 0,
+    hasAudio: true,
+    hasWebcam: false,
+    takeId: 'take-1',
+    startOffset: 0,
+  }
+
+  it('stores the microphone part as audio, named after its take', () => {
+    const sourceVideo = buildSourceVideo({
+      ...base,
+      id: 'part-mic',
+      blob: new Blob(['mic'], { type: 'audio/webm' }),
+      role: 'mic',
+    })
+
+    expect(sourceVideo.name).toBe(
+      `Recording ${new Date(base.now).toLocaleString()} — microphone`
+    )
+    expect(sourceVideo).toMatchObject({
+      mediaType: 'audio',
+      frameRate: 0,
+      width: 0,
+      height: 0,
+      mimeType: 'audio/webm',
+      hasAudio: true,
+      hasWebcam: false,
+      role: 'mic',
+      takeId: 'take-1',
+    })
+  })
+
+  it('stores the system-audio part as audio, named after its take', () => {
+    const sourceVideo = buildSourceVideo({
+      ...base,
+      id: 'part-system',
+      blob: new Blob(['system'], { type: 'audio/webm' }),
+      role: 'system',
+    })
+
+    expect(sourceVideo.name).toBe(
+      `Recording ${new Date(base.now).toLocaleString()} — system audio`
+    )
+    expect(sourceVideo.mediaType).toBe('audio')
+    expect(sourceVideo.frameRate).toBe(0)
+  })
+
+  it('leaves the webcam part and the primary as video', () => {
+    const webcam = buildSourceVideo({
+      ...base,
+      id: 'part-webcam',
+      blob: new Blob(['webcam'], { type: 'video/webm' }),
+      width: 640,
+      height: 480,
+      hasAudio: false,
+      hasWebcam: true,
+      role: 'webcam',
+    })
+    const primary = buildSourceVideo({
+      ...base,
+      id: 'take-1',
+      blob: new Blob(['screen'], { type: 'video/webm' }),
+      width: 1280,
+      height: 720,
+      hasWebcam: true,
+      role: 'screen',
+    })
+
+    expect(webcam.mediaType).toBe('video')
+    expect(webcam.frameRate).toBe(30)
+    expect(primary.mediaType).toBe('video')
+    expect(primary.frameRate).toBe(30)
+  })
+})
+
+describe('buildRecordingEntry carries hasWebcam rather than the config', () => {
+  it('takes the answer it is given, so a part can differ from the take', () => {
+    // The audio halves of a webcam take have no camera in them, and the list
+    // entry has to say the same thing the stored record does — the same rule
+    // `hasAudio` has followed since ESCSUITE-60.
+    const entry = buildRecordingEntry({
+      sourceVideo: {
+        id: 'part-mic',
+        name: 'Recording — microphone',
+        duration: 6,
+        takeId: 'take-1',
+        role: 'mic',
+      },
+      now: 1_700_000_000_000,
+      size: 2048,
+      hasWebcam: false,
+      hasAudio: true,
+    })
+
+    expect(entry).toMatchObject({
+      id: 'part-mic',
+      takeId: 'take-1',
+      role: 'mic',
+      hasWebcam: false,
+      hasAudio: true,
+    })
+    // No thumbnail is stored for an audio part, so the row has none — and the
+    // list draws its empty placeholder rather than a broken <img>.
+    expect(entry.thumbnailUrl).toBeUndefined()
   })
 })
