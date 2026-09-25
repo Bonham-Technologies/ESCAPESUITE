@@ -446,3 +446,112 @@ describe('RecordingsList upload to host', () => {
     ])
   })
 })
+
+describe('a take recorded as separate tracks', () => {
+  const primary = makeRecording({
+    id: 'take-1',
+    name: 'Standup Demo',
+    takeId: 'take-1',
+    role: 'screen',
+    hasWebcam: true,
+  })
+  const companion = makeRecording({
+    id: 'part-2',
+    name: 'Standup Demo — webcam',
+    takeId: 'take-1',
+    role: 'webcam',
+    hasWebcam: true,
+    hasAudio: false,
+  })
+
+  it('labels the companion row as the webcam half of its take', () => {
+    renderList([primary, companion])
+
+    // The row's own name already ends in "— webcam"; the meta line says what
+    // the row *is*, next to the numbers that say how big it is.
+    expect(screen.getByText(/^Webcam track • /)).toBeInTheDocument()
+  })
+
+  it('offers the companion play, WebM and delete — and no conversions', () => {
+    renderList([primary, companion])
+
+    expect(screen.getByRole('button', { name: 'Play Standup Demo — webcam' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Standup Demo — webcam' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Delete Standup Demo — webcam' })).toBeEnabled()
+    // MP4 and M4A live on the primary row only: they are the take's downloads,
+    // not the part's.
+    expect(
+      screen.queryByRole('button', { name: 'Download Standup Demo — webcam as MP4' })
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Download Standup Demo — webcam as audio (M4A)' })
+    ).toBeNull()
+  })
+
+  it('sends the take, not the part, to the editor from either row', async () => {
+    const { calls } = renderList([primary, companion])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open Standup Demo — webcam in Editor' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Open Standup Demo in Editor' }))
+
+    // One take opens one project: the editor is handed the primary's id both
+    // times, and resolves the siblings itself (slice 2).
+    expect(calls.onSendToEditor.mock.calls).toEqual([['take-1'], ['take-1']])
+  })
+
+  it('says on the primary row that its MP4 is screen-only for now', () => {
+    renderList([primary, companion])
+
+    const note = screen.getByText(
+      'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
+    )
+    const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' })
+    // Enabled: a screen-only MP4 is a real file, and slice 4 makes it a
+    // composite. What is not allowed is offering it silently.
+    expect(mp4).toBeEnabled()
+    expect(mp4.getAttribute('aria-describedby')).toContain(note.id)
+  })
+
+  it('drops the note once the companion is gone', () => {
+    renderList([primary])
+
+    // The note is about a webcam the download leaves out. With no companion in
+    // the list there is nothing left out.
+    expect(
+      screen.queryByText(
+        'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
+      )
+    ).toBeNull()
+  })
+
+  it('says nothing of the sort on a plain take', () => {
+    renderList([makeRecording()])
+
+    expect(screen.queryByText(/not included yet/)).toBeNull()
+  })
+
+  it('carries both notes at once when the browser note and the take note both apply', () => {
+    // The app-wide note ("this MP4 will be silent") and the row's own note
+    // ("screen-only for now") are about different things and can both be true
+    // at the same time — aria-describedby has to list both ids, not just the
+    // last one computed.
+    const silent = 'MP4 will have no audio in this browser (no AAC encoder)'
+    renderList([primary, companion], { mp4Note: silent })
+
+    const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' })
+    const describedBy = mp4.getAttribute('aria-describedby')!
+    const ids = describedBy.split(' ')
+    expect(ids).toHaveLength(2)
+
+    const [appWideId, takeNoteId] = ids
+    expect(document.getElementById(appWideId)).toHaveTextContent(silent)
+    expect(document.getElementById(takeNoteId)).toHaveTextContent(
+      'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
+    )
+
+    // M4A carries the same two ids — the two notes are about the take and the
+    // browser, not about which button is being read.
+    const m4a = screen.getByRole('button', { name: 'Download Standup Demo as audio (M4A)' })
+    expect(m4a.getAttribute('aria-describedby')).toBe(describedBy)
+  })
+})

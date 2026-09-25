@@ -28,8 +28,11 @@ import {
   lastAudioEncoder,
   getCreatedFrames,
   allFramesClosed,
+  AudioEncoderDouble,
+  VideoEncoderDouble,
+  VideoFrameDouble,
 } from '../test/doubles/webcodecs'
-import { resetMediabunnyDouble } from '../test/doubles/mediabunny'
+import { getMediabunnyState, resetMediabunnyDouble } from '../test/doubles/mediabunny'
 import {
   installAudioContextDouble,
   uninstallAudioContextDouble,
@@ -41,7 +44,12 @@ import {
 import { installVideoElementDouble, uninstallVideoElementDouble } from '../test/doubles/video'
 import { getCanvasContext } from '../test/doubles/canvas'
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
-import { createTrackDouble, createStreamDouble } from '../test/doubles/mediastream'
+import {
+  createTrackDouble,
+  createStreamDouble,
+  installTrackProcessorDouble,
+  uninstallTrackProcessorDouble,
+} from '../test/doubles/mediastream'
 
 vi.mock('mediabunny', async () => {
   const { createMediabunnyDouble } = await import('../test/doubles/mediabunny')
@@ -65,6 +73,7 @@ const baseConfig: RecordingConfig = {
   webcamPosition: 'bottom-right',
   webcamSize: 0.2,
   webcamShape: 'circle',
+  separateTracks: false,
 }
 
 /** Let queued microtasks (encoder outputs, the muxer) settle. */
@@ -292,6 +301,75 @@ describe('WebCodecsRecorder work ceilings', () => {
       expect(lastAudioContext().close).toHaveBeenCalledTimes(1)
       // ...and the monitor is not left scheduled behind it.
       expect(raf.pending()).toBe(0)
+    })
+  })
+
+  describe('one take of separate tracks', () => {
+    /**
+     * Frames offered to each pipeline. The track-processor path is driven by
+     * hand here (rather than the setTimeout canvas path the suites above use),
+     * because what is being counted is per-encoder conservation and this is the
+     * path a real separate-tracks take runs on.
+     */
+    const FRAMES_PER_TRACK = 30
+
+    it('encodes each frame once per encoder, closes every frame, flushes twice', async () => {
+      const processor = installTrackProcessorDouble()
+      const webcamStream = createStreamDouble([
+        createTrackDouble('video', { id: 'webcam-video', settings: { width: 640, height: 480 } }),
+      ])
+      try {
+        await recorder.initialize(screenStream, webcamStream, micStream, {
+          ...baseConfig,
+          webcamEnabled: true,
+          separateTracks: true,
+          microphoneEnabled: true,
+          systemAudioEnabled: true,
+        })
+        recorder.start()
+
+        for (let i = 0; i < FRAMES_PER_TRACK; i++) {
+          now += 1000 / CAPTURE_FPS
+          processor.pushFrameTo('screen-video', new VideoFrameDouble({}, { timestamp: 0 }))
+          processor.pushFrameTo('webcam-video', new VideoFrameDouble({}, { timestamp: 0 }))
+          await flush()
+        }
+
+        const [screen, webcam] = VideoEncoderDouble.instances
+        // Exact conservation, per encoder: one encode per frame offered, and
+        // nothing encoded twice. A frame counted on the wrong encoder is a
+        // frame in the wrong file.
+        expect(VideoEncoderDouble.instances).toHaveLength(2)
+        expect(screen.encodes).toHaveLength(FRAMES_PER_TRACK)
+        expect(webcam.encodes).toHaveLength(FRAMES_PER_TRACK)
+        // Exact: every VideoFrame the take made is closed — the source frames
+        // the reader handed over and the re-stamped ones handed to the encoders.
+        // A VideoFrame that outlives its encode pins a decoded image in memory,
+        // and this mode makes two of them per tick.
+        expect(allFramesClosed()).toBe(true)
+        // Measured 2026-09-25: 120 VideoFrames for 60 offered (one source frame
+        // plus one re-stamped frame per pipeline per tick). Ceiling at 2x.
+        expect(getCreatedFrames('VideoFrame').length).toBeLessThanOrEqual(
+          4 * 2 * FRAMES_PER_TRACK
+        )
+
+        await recorder.stop()
+
+        // Exact: one flush per encoder, one finalize per output, one audio
+        // encoder for the whole take — the mix belongs to the primary.
+        expect(screen.flushCalls).toBe(1)
+        expect(webcam.flushCalls).toBe(1)
+        expect(lastAudioEncoder().flushCalls).toBe(1)
+        expect(AudioEncoderDouble.instances).toHaveLength(1)
+        expect(getMediabunnyState().outputs.map(o => o.finalizeCalls)).toEqual([1, 1])
+        // Exact: one AudioContext, closed. Two video pipelines must not mean
+        // two audio graphs.
+        expect(audio.contexts).toHaveLength(1)
+        expect(audio.contexts.every(c => c.state === 'closed')).toBe(true)
+        expect(raf.pending()).toBe(0)
+      } finally {
+        uninstallTrackProcessorDouble()
+      }
     })
   })
 })

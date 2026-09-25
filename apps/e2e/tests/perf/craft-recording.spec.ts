@@ -18,12 +18,13 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * Benchmarks: what ESCAPECRAFT costs while it is recording, and while it is
  * converting a recording to MP4.
  *
- * Three benchmarks, one per pipeline the app actually has:
+ * Four benchmarks, one per pipeline the app actually has:
  *
  * | Benchmark | Path under test |
  * |---|---|
  * | `craft-screen-recording` | `WebCodecsRecorder` — every captured frame handed to `VideoEncoder.encode` on the main thread |
  * | `craft-pip-recording` | `Compositor` + MediaRecorder — an rAF draw loop on the main thread, encoding off it |
+ * | `craft-separate-tracks-recording` | `WebCodecsRecorder` with **two** `VideoEncoder`s on one clock, and the `Compositor` drawing the preview only |
  * | `craft-mp4-conversion` | `convertToMP4` — decode, draw, `VideoFrame`, encode, mux, all in the page |
  *
  * Each is its own `test()` with its own page load, so one failing (no H.264
@@ -32,14 +33,18 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * benchmarks.
  *
  * They assert nothing about speed. The only `expect`s are inside
- * `utils/craftPerf.ts`, and every one of the six says the benchmark measured
+ * `utils/craftPerf.ts`, and every one of the ten says the benchmark measured
  * the wrong thing rather than that the machine was slow: a take that stopped
  * mid-window; a "WebCodecs" take that encoded nothing, or that drew video into
  * a canvas at all (which would mean `WebCodecsRecorder` had taken its
  * `startVideoElementCapture` fallback); a PiP take that composited nothing, or
  * whose `videoDraws` came out odd (which would mean a capture track was not
  * ready for some frames, so the two-draws-per-composited-frame divisor is
- * wrong); and a conversion that encoded no frames.
+ * wrong); a separate-tracks take that did not run exactly two encoders, or one
+ * of whose two encoded nothing, with the same two draw checks over the
+ * compositor now that it is drawing the preview only — two encoders' frames
+ * counted, and the compositor drawing for the preview only; and a conversion
+ * that encoded no frames.
  *
  * The capture devices are `mockSyntheticMedia`'s canvas and oscillator, which
  * means a 33 ms `setInterval` painting the source canvas runs on the page's own
@@ -53,6 +58,7 @@ const TAKE_MODES = [
     name: 'craft-screen-recording',
     title: 'screen',
     webcam: false,
+    separateTracks: false,
     mode: 'screen',
     recorder: 'webcodecs',
     profile: 'craft-screen',
@@ -61,9 +67,19 @@ const TAKE_MODES = [
     name: 'craft-pip-recording',
     title: 'PiP (screen + webcam)',
     webcam: true,
+    separateTracks: false,
     mode: 'screen + webcam (PiP)',
     recorder: 'mediarecorder',
     profile: 'craft-pip',
+  },
+  {
+    name: 'craft-separate-tracks-recording',
+    title: 'separate tracks (screen + webcam)',
+    webcam: true,
+    separateTracks: true,
+    mode: 'screen + webcam (separate tracks)',
+    recorder: 'webcodecs',
+    profile: 'craft-separate-tracks',
   },
 ] as const
 
@@ -73,7 +89,7 @@ for (const arm of TAKE_MODES) {
       page,
     }) => {
       await installCraftPerfInstrumentation(page)
-      await openCraft(page, { webcam: arm.webcam })
+      await openCraft(page, { webcam: arm.webcam, separateTracks: arm.separateTracks })
 
       const cdp = await page.context().newCDPSession(page)
       await cdp.send('Performance.enable')
@@ -85,10 +101,18 @@ for (const arm of TAKE_MODES) {
         // sees too. Nothing is cleared between runs on purpose: a benchmark
         // that reset the library every time would measure a state only the
         // first take of a session is ever in.
-        measurements.push(await measureTake(page, cdp, { webcam: arm.webcam }))
+        measurements.push(
+          await measureTake(page, cdp, {
+            webcam: arm.webcam,
+            separateTracks: arm.separateTracks,
+          })
+        )
       }
 
-      const at = (key: keyof TakeMeasurement) => measurements.map((m) => m[key])
+      // Generic in the key, not `keyof TakeMeasurement` collapsed to a union:
+      // `framesEncodedPerEncoder` is a `number[]`, so a non-generic helper would
+      // hand `median()` a `(number | number[])[]`.
+      const at = <K extends keyof TakeMeasurement>(key: K) => measurements.map((m) => m[key])
 
       writePerfResult({
         name: arm.name,
@@ -97,16 +121,26 @@ for (const arm of TAKE_MODES) {
         recorder: arm.recorder,
         captureSize: CAPTURE_SIZE_LABEL,
         windowSeconds: TAKE_WINDOW_SECONDS,
-        // Three of the six numbers below are a hard zero in each mode —
+        // Several of the numbers below are a hard zero in each mode —
         // `framesEncoded`/`framesPerSecond`/`encoderQueueHighWater` for PiP,
-        // `compositedFps`/`videoDraws`/`videoDrawsPerSecond` for screen — and
-        // they are written out anyway so both rows have the same JSON shape.
-        // A reader of the table has six rows to skip; a reader of the JSON has
-        // one schema instead of two, and `headline()` can pick the mode's real
-        // rate by asking which of them is non-zero. `measureTake` explains why
-        // each zero is a zero rather than an unobservable.
+        // `compositedFps`/`videoDraws`/`videoDrawsPerSecond` for screen, and the
+        // two per-encoder counts for both of them — and they are written out
+        // anyway so all three rows have the same JSON shape. A reader of the
+        // table has a few rows to skip; a reader of the JSON has one schema
+        // instead of three, and `headline()` can pick the mode's real rate by
+        // asking which of them is non-zero. `measureTake` explains why each zero
+        // is a zero rather than an unobservable. Only the separate-tracks arm
+        // reports every one of them non-zero, because it is the only mode that
+        // both encodes in the page and composites.
         framesEncoded: median(at('framesEncoded')),
         framesPerSecond: round(median(at('framesPerSecond'))),
+        // Per-encoder, screen first: a mode whose whole point is two encoders
+        // should report what each of them did. Written on every arm so the three
+        // rows keep one JSON shape — the screen arm runs a single encoder and so
+        // repeats `framesEncoded` under `screenFramesEncoded`, which is what that
+        // encoder is, and PiP constructs no `VideoEncoder` at all so both are 0.
+        screenFramesEncoded: median(at('framesEncodedPerEncoder').map((per) => per[0] ?? 0)),
+        webcamFramesEncoded: median(at('framesEncodedPerEncoder').map((per) => per[1] ?? 0)),
         videoDraws: median(at('videoDraws')),
         videoDrawsPerSecond: round(median(at('videoDrawsPerSecond'))),
         compositedFps: round(median(at('compositedFps'))),
@@ -133,7 +167,12 @@ for (const arm of TAKE_MODES) {
       // report, so it must not be one of the three. It exists only to produce
       // `perf-results/${arm.profile}.cpuprofile`.
       if (PERF_PROFILE) {
-        await measureTake(page, cdp, { webcam: arm.webcam }, arm.profile)
+        await measureTake(
+          page,
+          cdp,
+          { webcam: arm.webcam, separateTracks: arm.separateTracks },
+          arm.profile
+        )
       }
     })
   })

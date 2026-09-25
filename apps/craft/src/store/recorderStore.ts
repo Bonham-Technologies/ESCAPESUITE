@@ -16,6 +16,7 @@ import {
   createBlobUrl,
   hasSpaceForRecording,
 } from '../core/storage';
+import { orderTakes } from '../utils/takeOrder';
 
 /**
  * What one take is assumed to cost, for the storage headroom check.
@@ -25,6 +26,16 @@ import {
  * figure rather than an estimate.
  */
 const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
+
+/**
+ * What a separate-tracks take is assumed to cost, as a multiple of a plain one.
+ *
+ * Two `VideoEncoder`s each carry their own bitrate — the webcam is fewer pixels
+ * but VP9 is configured per encoder, not per take — so double is the honest
+ * working figure. `hasSpaceForRecording` applies its own buffer and relative
+ * floor on top of whatever this asks for.
+ */
+const SEPARATE_TRACKS_SIZE_FACTOR = 2;
 
 export const useRecorderStore = create<RecorderStore>((set) => ({
   // Initial state
@@ -51,6 +62,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   notice: null,
   systemAudioShared: true,
   hasStorageSpace: true,
+  hasSeparateTracksSpace: true,
 
   // Current recording data
   currentDuration: 0,
@@ -87,11 +99,17 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   refreshStorageSpace: async () => {
     try {
-      set({ hasStorageSpace: await hasSpaceForRecording(ESTIMATED_RECORDING_BYTES) });
+      // Both answers from one call each, off the click path: the record button
+      // reads the first and the separate-tracks toggle the second.
+      const [hasStorageSpace, hasSeparateTracksSpace] = await Promise.all([
+        hasSpaceForRecording(ESTIMATED_RECORDING_BYTES),
+        hasSpaceForRecording(ESTIMATED_RECORDING_BYTES * SEPARATE_TRACKS_SIZE_FACTOR),
+      ]);
+      set({ hasStorageSpace, hasSeparateTracksSpace });
     } catch {
       // An estimate that threw is "unknown", and unknown is not full — the
       // same call this whole check errs toward everywhere else.
-      set({ hasStorageSpace: true });
+      set({ hasStorageSpace: true, hasSeparateTracksSpace: true });
     }
   },
 
@@ -138,19 +156,24 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
           createdAt: m.recordedAt || 0,
           size: m.size,
           thumbnailUrl,
-          hasWebcam: false, // TODO: Store this in metadata
+          // Written by `buildSourceVideo` since ESCSUITE-14. Before that
+          // nothing stored said whether a take had a camera in it, which is
+          // what the `hasWebcam: false // TODO` here used to admit; a record
+          // saved then keeps the answer it used to get.
+          hasWebcam: m.hasWebcam ?? false,
           // Written by `buildSourceVideo` since ESCSUITE-60. Recordings saved
           // before that have no field at all, and keep the answer they used
           // to get — a take that did have audio would otherwise lose its M4A
           // button for good, which is worse than the stale offer.
           hasAudio: m.hasAudio ?? true,
+          ...(m.takeId !== undefined ? { takeId: m.takeId } : {}),
+          ...(m.role !== undefined ? { role: m.role } : {}),
         };
       })
     );
 
-    // Sort by creation date, newest first
-    recordings.sort((a, b) => b.createdAt - a.createdAt);
-
-    set({ recordings });
+    // Newest take first, each take's companion rows directly under its primary
+    // — the grouping ESCSUITE-14's save path wrote, rebuilt for the panel.
+    set({ recordings: orderTakes(recordings) });
   },
 }));

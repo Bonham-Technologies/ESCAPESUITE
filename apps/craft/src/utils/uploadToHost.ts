@@ -15,10 +15,21 @@
 
 import { parseHostOrigin } from '@escapesuite/shared/config';
 import { getVideoBlob } from '../core/storage';
+import type { RecordingRole } from '../store/types';
 
 export const uploadToHost = async (
   id: string,
-  name: string
+  name: string,
+  /**
+   * Which half of which take this row is, when it is one.
+   *
+   * Slice 1 keeps the message per row: each row posts its own bytes, and these
+   * two optional fields say what the host is holding. A host that knows nothing
+   * of takes receives exactly the payload it always did, because the fields are
+   * only added when the row has them. `payload.parts` — one message listing
+   * every part — is slice 4, with its own adoption note.
+   */
+  part?: { role?: RecordingRole; takeId?: string }
 ): Promise<'posted' | 'missing'> => {
   const blob = await getVideoBlob(id);
   // The row is drawn from store metadata, which can outlive the blob — a
@@ -30,7 +41,16 @@ export const uploadToHost = async (
   // that origin; otherwise it goes to whoever is framing us.
   const targetOrigin = parseHostOrigin() ?? '*';
   window.parent.postMessage(
-    { type: 'UPLOAD_RECORDING', payload: { id, name, blob } },
+    {
+      type: 'UPLOAD_RECORDING',
+      payload: {
+        id,
+        name,
+        blob,
+        ...(part?.role !== undefined ? { role: part.role } : {}),
+        ...(part?.takeId !== undefined ? { takeId: part.takeId } : {}),
+      },
+    },
     targetOrigin
   );
   return 'posted';

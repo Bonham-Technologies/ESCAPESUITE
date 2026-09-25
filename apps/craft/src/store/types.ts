@@ -3,7 +3,11 @@ export type {
   MediaType,
   MediaSource,
   SourceVideo,
+  RecordingRole,
+  OverlayPlacement,
 } from '@escapesuite/shared/types'
+
+import type { RecordingRole } from '@escapesuite/shared/types'
 
 // Recording-specific types
 
@@ -28,7 +32,39 @@ export interface RecordingConfig {
 
   // Recording settings
   countdownSeconds: number;
+
+  /**
+   * Record the webcam as its own file instead of compositing it into the
+   * screen (ESCSUITE-14). Off by default; only ever true for a screen+webcam
+   * take in a browser with WebCodecs and room for two tracks.
+   */
+  separateTracks: boolean;
 }
+
+/**
+ * The second blob a separate-tracks take produces, handed to the save path by
+ * the recorder's `onStop`.
+ *
+ * `startOffset` is 0 in slice 1 and is carried anyway: both parts are stamped
+ * from one clock by one `start()`, so "the webcam begins where the screen
+ * does" is a fact worth writing down rather than one to rediscover when the
+ * audio companions (slice 3) start later than the video.
+ */
+export interface CompanionPart {
+  role: 'webcam';
+  blob: Blob;
+  startOffset: number;
+}
+
+/**
+ * What a recorder calls when a take is finished.
+ *
+ * Both recorders declare this signature even though only `WebCodecsRecorder`
+ * ever passes a companion: one type means the controller's single `onStop` is
+ * assignable to either recorder's callbacks, with no union narrowing at the
+ * call site. `Recorder` (MediaRecorder) calls it with the blob alone.
+ */
+export type RecorderStopCallback = (blob: Blob, companion?: CompanionPart | null) => void;
 
 export interface EnvironmentCapabilities {
   screenCapture: boolean;
@@ -120,6 +156,10 @@ export interface Recording {
   thumbnailUrl?: string;
   hasWebcam: boolean;
   hasAudio: boolean;
+  /** The take this row belongs to; absent on a single-file take. */
+  takeId?: string;
+  /** Which half of the take this row is; absent on a single-file take. */
+  role?: RecordingRole;
 }
 
 export interface RecorderStore {
@@ -158,6 +198,12 @@ export interface RecorderStore {
    * between the click and `getDisplayMedia`.
    */
   hasStorageSpace: boolean;
+  /**
+   * Whether there is room for a take at roughly double the bitrate — the
+   * separate-tracks toggle's second gate. Measured beside `hasStorageSpace`,
+   * off the click path, by the same `refreshStorageSpace()`.
+   */
+  hasSeparateTracksSpace: boolean;
 
   // Current recording data
   currentDuration: number;
@@ -198,4 +244,5 @@ export const defaultConfig: RecordingConfig = {
   webcamSize: 0.2,
   webcamShape: 'circle',
   countdownSeconds: 3,
+  separateTracks: false,
 };

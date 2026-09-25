@@ -86,25 +86,38 @@ export function createStreamDouble(tracks: MediaStreamTrack[]): MediaStream {
 
 // --- MediaStreamTrackProcessor ---------------------------------------------
 
-export interface TrackProcessorControl {
-  /** Tracks the processor was constructed for, oldest first. */
-  readonly tracks: MediaStreamTrack[]
-  /** Hand the next pending (or future) read() this frame. */
-  pushFrame(frame: unknown): void
-  /** End the stream: the next read() resolves { done: true }. */
-  finish(): void
-  /** Make the next read() reject, as a torn-down track does. */
-  failNextRead(error: Error): void
-  /** How many times the consumer called reader.cancel(). */
-  cancelCalls(): number
-  /** Resolve any read the consumer is currently blocked on (used by cancel). */
-  readonly pendingReads: number
-}
-
 interface QueuedItem {
   type: 'frame' | 'done' | 'error'
   value?: unknown
   error?: Error
+}
+
+/** One processor's own queue, reader and waiters. */
+interface ProcessorLane {
+  track: MediaStreamTrack
+  queue: QueuedItem[]
+  waiters: Array<(item: QueuedItem) => void>
+  reader: { read(): Promise<{ value?: unknown; done: boolean }>; cancel(): Promise<void> }
+  cancels: number
+}
+
+export interface TrackProcessorControl {
+  /** Tracks the processor was constructed for, oldest first. */
+  readonly tracks: MediaStreamTrack[]
+  /** Hand the next pending (or future) read() on the FIRST processor this frame. */
+  pushFrame(frame: unknown): void
+  /** The same, addressed to the processor built for the track with this id. */
+  pushFrameTo(trackId: string, frame: unknown): void
+  /** End every processor's stream: the next read() resolves { done: true }. */
+  finish(): void
+  /** End one processor's stream, as a single capture track dying does. */
+  finishTrack(trackId: string): void
+  /** Make the next read() on the first processor reject, as a torn-down track does. */
+  failNextRead(error: Error): void
+  /** How many times consumers called reader.cancel(), across every processor. */
+  cancelCalls(): number
+  /** Reads currently blocked, across every processor. */
+  readonly pendingReads: number
 }
 
 let control: TrackProcessorControl | null = null
@@ -112,35 +125,57 @@ let originalTrackProcessor: unknown
 let installed = false
 
 export function installTrackProcessorDouble(): TrackProcessorControl {
-  const queue: QueuedItem[] = []
-  const waiters: Array<(item: QueuedItem) => void> = []
-  const tracks: MediaStreamTrack[] = []
-  let cancels = 0
+  // A lane per constructed processor rather than one shared queue: a
+  // separate-tracks take builds two processors and reads them in two loops, so
+  // a shared queue would hand the screen's frame to whichever loop happened to
+  // be waiting. With one processor this behaves exactly as it did before.
+  const lanes: ProcessorLane[] = []
 
-  const deliver = (item: QueuedItem) => {
-    const waiter = waiters.shift()
+  const deliver = (lane: ProcessorLane, item: QueuedItem) => {
+    const waiter = lane.waiters.shift()
     if (waiter) waiter(item)
-    else queue.push(item)
+    else lane.queue.push(item)
   }
 
-  const reader = {
-    async read(): Promise<{ value?: unknown; done: boolean }> {
-      const item = queue.shift() ?? (await new Promise<QueuedItem>(resolve => waiters.push(resolve)))
-      if (item.type === 'error') throw item.error
-      if (item.type === 'done') return { value: undefined, done: true }
-      return { value: item.value, done: false }
-    },
-    async cancel(): Promise<void> {
-      cancels++
-      // A cancelled reader releases anything blocked on it.
-      while (waiters.length > 0) waiters.shift()!({ type: 'done' })
-    },
+  const laneFor = (trackId: string): ProcessorLane => {
+    const lane = lanes.find(l => l.track.id === trackId)
+    if (!lane) throw new Error(`No MediaStreamTrackProcessor was built for track '${trackId}'`)
+    return lane
+  }
+
+  const firstLane = (): ProcessorLane => {
+    const lane = lanes[0]
+    if (!lane) throw new Error('No MediaStreamTrackProcessor has been constructed')
+    return lane
   }
 
   class MediaStreamTrackProcessorDouble {
-    readonly readable = { getReader: () => reader }
+    readonly readable: { getReader: () => ProcessorLane['reader'] }
+
     constructor(options: { track: MediaStreamTrack }) {
-      tracks.push(options.track)
+      const lane: ProcessorLane = {
+        track: options.track,
+        queue: [],
+        waiters: [],
+        cancels: 0,
+        reader: {
+          async read(): Promise<{ value?: unknown; done: boolean }> {
+            const item =
+              lane.queue.shift() ??
+              (await new Promise<QueuedItem>(resolve => lane.waiters.push(resolve)))
+            if (item.type === 'error') throw item.error
+            if (item.type === 'done') return { value: undefined, done: true }
+            return { value: item.value, done: false }
+          },
+          async cancel(): Promise<void> {
+            lane.cancels++
+            // A cancelled reader releases anything blocked on it.
+            while (lane.waiters.length > 0) lane.waiters.shift()!({ type: 'done' })
+          },
+        },
+      }
+      lanes.push(lane)
+      this.readable = { getReader: () => lane.reader }
     }
   }
 
@@ -152,19 +187,27 @@ export function installTrackProcessorDouble(): TrackProcessorControl {
   g.MediaStreamTrackProcessor = MediaStreamTrackProcessorDouble
 
   control = {
-    tracks,
+    get tracks() {
+      return lanes.map(lane => lane.track)
+    },
     pushFrame(frame) {
-      deliver({ type: 'frame', value: frame })
+      deliver(firstLane(), { type: 'frame', value: frame })
+    },
+    pushFrameTo(trackId, frame) {
+      deliver(laneFor(trackId), { type: 'frame', value: frame })
     },
     finish() {
-      deliver({ type: 'done' })
+      for (const lane of lanes) deliver(lane, { type: 'done' })
+    },
+    finishTrack(trackId) {
+      deliver(laneFor(trackId), { type: 'done' })
     },
     failNextRead(error) {
-      deliver({ type: 'error', error })
+      deliver(firstLane(), { type: 'error', error })
     },
-    cancelCalls: () => cancels,
+    cancelCalls: () => lanes.reduce((total, lane) => total + lane.cancels, 0),
     get pendingReads() {
-      return waiters.length
+      return lanes.reduce((total, lane) => total + lane.waiters.length, 0)
     },
   }
   return control

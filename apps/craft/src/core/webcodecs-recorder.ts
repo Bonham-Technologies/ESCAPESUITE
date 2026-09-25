@@ -12,27 +12,30 @@ import {
   EncodedAudioPacketSource,
   EncodedPacket,
 } from 'mediabunny';
-import type { RecordingConfig, AudioLevels } from '../store/types';
+import type {
+  AudioLevels,
+  CompanionPart,
+  RecorderStopCallback,
+  RecordingConfig,
+} from '../store/types';
+import { isWebCodecsRecordingSupported } from './webcodecsSupport';
+
+// Moved to `webcodecsSupport.ts` so a component can ask without importing the
+// muxer; re-exported here because this is where every caller imports it from.
+export { isWebCodecsRecordingSupported } from './webcodecsSupport';
 
 export interface WebCodecsRecorderCallbacks {
   onStart?: () => void;
   onPause?: () => void;
   onResume?: () => void;
-  onStop?: (blob: Blob) => void;
+  /**
+   * The finished take. A separate-tracks take delivers its webcam half as the
+   * second argument (see `CompanionPart`); every other take delivers the blob
+   * alone, and so does `Recorder`.
+   */
+  onStop?: RecorderStopCallback;
   onError?: (error: Error) => void;
   onAudioLevels?: (levels: AudioLevels) => void;
-}
-
-/**
- * Check if WebCodecs recording is supported
- */
-export function isWebCodecsRecordingSupported(): boolean {
-  return (
-    typeof VideoEncoder !== 'undefined' &&
-    typeof VideoFrame !== 'undefined' &&
-    typeof AudioEncoder !== 'undefined' &&
-    typeof AudioContext !== 'undefined'
-  );
 }
 
 // Type for MediaStreamTrackProcessor (not yet in TypeScript lib)
@@ -66,6 +69,67 @@ interface LevelMeter {
  * `recorder.perf.test.ts` and `webcodecsRecorder.perf.test.ts`.
  */
 const AUDIO_LEVEL_INTERVAL_MS = 80;
+
+/**
+ * One encoder's presentation bookkeeping.
+ *
+ * The recording **clock** is shared — one `startTime`, one `pausedDuration`,
+ * read by `nextFrameTiming()` for every pipeline — and that shared clock is
+ * what makes a separate-tracks take's two blobs aligned by construction rather
+ * than by measurement. These two numbers are per encoder, because each encoder
+ * is fed its own monotonically increasing presentation timeline and owes its
+ * own viewer a keyframe once a second; sharing them would have two interleaved
+ * pipelines pushing each other's timestamps forward and handing the second
+ * pipeline only the keyframes the first did not claim.
+ */
+interface FrameTiming {
+  /** Microsecond timestamp of the last frame handed to this encoder; -1 before
+   *  the first, so a take that starts on the clock's own zero still stamps 0. */
+  lastFrameTimestampUs: number;
+  /** Recording-clock microsecond mark at which this encoder's next keyframe is due. */
+  nextKeyFrameUs: number;
+}
+
+function newFrameTiming(): FrameTiming {
+  return { lastFrameTimestampUs: -1, nextKeyFrameUs: 0 };
+}
+
+/**
+ * The webcam half of a separate-tracks take: its own encoder, its own
+ * Mediabunny output, its own frame reader — and the recorder's *shared* clock,
+ * which is what makes the two blobs frame-aligned by construction.
+ *
+ * Track-processor only, deliberately: the primary pipeline keeps its
+ * `<video>`+canvas fallback because a take has to record something, while the
+ * opt-in mode is gated on `canRecordSeparateTracks()` and simply records the
+ * screen alone where the API is missing.
+ */
+interface CompanionPipeline {
+  readonly track: MediaStreamTrack;
+  encoder: VideoEncoder | null;
+  output: Output | null;
+  target: BufferTarget | null;
+  packetSource: EncodedVideoPacketSource | null;
+  reader: ReadableStreamDefaultReader<VideoFrame> | null;
+  readerActive: boolean;
+  timing: FrameTiming;
+  /** Frames this pipeline encoded; 0 means there is no companion worth storing. */
+  frameCount: number;
+  /**
+   * Set once this pipeline has given up — its encoder errored, or would not
+   * flush. The blob is then not worth delivering, so `stop()` reports no
+   * companion; the take itself is unaffected.
+   */
+  failed: boolean;
+}
+
+/** Bitrate for a video pipeline of this size. */
+function videoBitrateFor(width: number, height: number): number {
+  const pixels = width * height;
+  if (pixels >= 1920 * 1080) return 8_000_000; // 8 Mbps for 1080p+
+  if (pixels >= 1280 * 720) return 5_000_000; // 5 Mbps for 720p
+  return 2_500_000; // 2.5 Mbps for smaller
+}
 
 export class WebCodecsRecorder {
   private callbacks: WebCodecsRecorderCallbacks = {};
@@ -102,11 +166,8 @@ export class WebCodecsRecorder {
    *  one running count of a take's captured frames, for the next thing that
    *  wants recorder stats. It no longer decides timing (see nextFrameTiming). */
   private frameCount = 0;
-  /** Microsecond timestamp of the last frame handed to the encoder; -1 before
-   *  the first, so a take that starts on the clock's own zero still stamps 0. */
-  private lastFrameTimestampUs = -1;
-  /** Recording-clock microsecond mark at which the next keyframe is due. */
-  private nextKeyFrameUs = 0;
+  /** The primary (screen or webcam) pipeline's own frame bookkeeping. */
+  private screenTiming: FrameTiming = newFrameTiming();
   private audioTimestamp = 0;
 
   // Frame capture (for fallback method)
@@ -119,6 +180,9 @@ export class WebCodecsRecorder {
   private trackProcessor: MediaStreamTrackProcessor | null = null;
   private frameReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
   private frameReaderActive = false;
+
+  // The webcam half of a separate-tracks take, or null for every other take.
+  private companion: CompanionPipeline | null = null;
 
   // Audio capture
   private audioWorklet: ScriptProcessorNode | null = null;
@@ -166,9 +230,13 @@ export class WebCodecsRecorder {
     this.width = settings.width || 1920;
     this.height = settings.height || 1080;
 
-    // Safe to re-enable: WebCodecsRecorder is only used for non-PiP modes (factory enforces this).
-    // The original PiP frame capture issue (PR #93) was caused by the compositor's hidden video
-    // elements, not by MediaStreamTrackProcessor itself. For direct screen/webcam streams, it works.
+    // Safe to re-enable: no take that reaches this recorder captures frames
+    // through the compositor. Composited PiP never gets here — the factory still
+    // forces MediaRecorder for it — and a separate-tracks take, which does
+    // (ESCSUITE-14), is handed the RAW screen and webcam tracks while the
+    // compositor only draws the preview. The original PiP frame capture issue
+    // (PR #93) was caused by the compositor's hidden video elements, not by
+    // MediaStreamTrackProcessor itself. For direct screen/webcam streams, it works.
     const hasTrackProcessor = typeof MediaStreamTrackProcessor !== 'undefined';
 
     if (hasTrackProcessor && typeof MediaStreamTrackProcessor !== 'undefined') {
@@ -251,15 +319,10 @@ export class WebCodecsRecorder {
     this.trackEndedHandlers.set(this.videoTrack, handler);
 
     // Set up Mediabunny output
-    this.target = new BufferTarget();
-    this.output = new Output({
-      format: new WebMOutputFormat(),
-      target: this.target,
-    });
-
-    // Create video packet source (VP9)
-    this.videoSource = new EncodedVideoPacketSource('vp9');
-    this.output.addVideoTrack(this.videoSource, { frameRate: this.frameRate });
+    const primary = this.createVideoOutput();
+    this.target = primary.target;
+    this.output = primary.output;
+    this.videoSource = primary.packetSource;
 
     // Create audio packet source (Opus) if we have audio
     if (this.mixedAudioStream.getAudioTracks().length > 0) {
@@ -271,36 +334,17 @@ export class WebCodecsRecorder {
     await this.output.start();
 
     // Set up video encoder
-    this.videoEncoder = new VideoEncoder({
-      output: async (chunk, meta) => {
-        if (this.videoSource) {
-          await this.videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-        }
-      },
-      error: (e) => {
+    this.videoEncoder = await this.createVideoEncoder(
+      () => this.videoSource,
+      this.width,
+      this.height,
+      // The primary's encoder dying is the take dying: there is nothing else
+      // being recorded, so the caller has to be told.
+      (e) => {
         console.error('Video encoder error:', e);
         this.callbacks.onError?.(new Error(`Video encoder error: ${e.message}`));
-      },
-    });
-
-    // Determine video bitrate based on resolution
-    const pixels = this.width * this.height;
-    let videoBitrate: number;
-    if (pixels >= 1920 * 1080) {
-      videoBitrate = 8_000_000; // 8 Mbps for 1080p+
-    } else if (pixels >= 1280 * 720) {
-      videoBitrate = 5_000_000; // 5 Mbps for 720p
-    } else {
-      videoBitrate = 2_500_000; // 2.5 Mbps for smaller
-    }
-
-    await this.videoEncoder.configure({
-      codec: 'vp09.00.10.08', // VP9 Profile 0
-      width: this.width,
-      height: this.height,
-      bitrate: videoBitrate,
-      framerate: this.frameRate,
-    });
+      }
+    );
 
     // Set up audio encoder if we have audio
     if (this.audioSource) {
@@ -327,8 +371,257 @@ export class WebCodecsRecorder {
       this.setupAudioCapture();
     }
 
+    // A separate-tracks take (ESCSUITE-14): the webcam gets its own encoder and
+    // its own output, stamped from the same clock as the screen's. Only a
+    // screen+webcam take can have one — a webcam-only take *is* the webcam.
+    //
+    // `screenStream` is part of the question, not just `config.screenEnabled`:
+    // a take can be configured for the screen and started without one (see
+    // useMediaStreams, which asks for display capture only where it can, and
+    // recordReadiness, which starts a take on any one available source). The
+    // primary above is then the webcam itself, and a companion would be a
+    // second encoder on that same track — one camera in two files, and a
+    // second 'ended' listener that cleanup() could not remove because
+    // trackEndedHandlers is keyed by track.
+    if (
+      config.separateTracks &&
+      config.screenEnabled &&
+      screenStream &&
+      config.webcamEnabled &&
+      webcamStream
+    ) {
+      await this.initializeCompanion(webcamStream);
+    }
+
     // Start audio level monitoring
     this.startAudioLevelMonitoring();
+  }
+
+  /**
+   * Build the webcam pipeline, or record the screen alone and say why.
+   *
+   * Every refusal here is a warning rather than a throw — the missing track,
+   * the missing API, and a muxer or an encoder that will not start: the take
+   * the user asked for is mostly the screen, and losing it because the camera
+   * could not be encoded would be a worse outcome than a take with no
+   * companion. `canRecordSeparateTracks()` proves the two APIs exist; nothing
+   * can prove in advance that the camera's dimensions are an encodable VP9
+   * config, so the failure this catch exists for is a real one. `stop()` then
+   * delivers `(blob, null)` and the controller — which knows the mode was
+   * resolved on — is what tells the user the webcam track was lost.
+   */
+  private async initializeCompanion(webcamStream: MediaStream): Promise<void> {
+    const track = webcamStream.getVideoTracks()[0];
+    if (!track) {
+      console.warn(
+        'Separate tracks asked for, but the webcam stream has no video track — recording the screen alone'
+      );
+      return;
+    }
+    if (typeof MediaStreamTrackProcessor === 'undefined') {
+      console.warn('No MediaStreamTrackProcessor — recording the screen alone');
+      return;
+    }
+
+    const settings = track.getSettings();
+    // The reader is taken before the guarded section on purpose: getting a
+    // reader off a fresh processor's readable cannot fail on its own, and
+    // holding it here means the catch below has exactly one definite thing to
+    // release — the camera — rather than a set of maybes.
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+
+    try {
+      const { output, target, packetSource } = this.createVideoOutput();
+      // No audio track: slice 1 keeps the whole mix on the primary output.
+      await output.start();
+
+      this.companion = {
+        track,
+        encoder: await this.createVideoEncoder(
+          () => this.companion?.packetSource ?? null,
+          settings.width || 1280,
+          settings.height || 720,
+          // ...and the companion's encoder dying costs the take its companion
+          // and nothing else. Routing this to onError would have the controller
+          // dispose the recorder and throw away a screen recording that is
+          // still being made.
+          (e) => {
+            console.warn(`Webcam track encoder failed: ${e.message}`);
+            this.failCompanion();
+          }
+        ),
+        output,
+        target,
+        packetSource,
+        reader,
+        readerActive: false,
+        timing: newFrameTiming(),
+        frameCount: 0,
+        failed: false,
+      };
+    } catch (e) {
+      console.warn('Webcam track could not be set up:', e);
+      // Nothing downstream can reach this half any more — `companion` stays
+      // null, so `stop()` and `cleanup()` both skip it — so let the camera go
+      // here. An Output that was started is abandoned unfinalized, exactly as
+      // a companion that encoded no frame is.
+      try {
+        await reader.cancel();
+      } catch {
+        // Ignore cancel errors: the pipeline is being abandoned either way.
+      }
+      this.companion = null;
+      return;
+    }
+
+    // A camera that stops is not a take that stops: end this pipeline and let
+    // the screen keep recording. stop() then finalizes a shorter companion, or
+    // none at all if no frame ever arrived.
+    const companionEnded = () => {
+      console.warn(`Webcam track ended: ${track.label}`);
+      if (this.companion) this.companion.readerActive = false;
+    };
+    track.addEventListener('ended', companionEnded);
+    this.trackEndedHandlers.set(track, companionEnded);
+  }
+
+  /** Read the webcam track into its own encoder, on the shared clock. */
+  private async startCompanionCapture(): Promise<void> {
+    const companion = this.companion;
+    if (!companion?.reader) return;
+
+    await this.captureFromTrackProcessor(
+      companion.reader,
+      companion.timing,
+      () => companion.readerActive,
+      () => companion.encoder,
+      () => {
+        companion.frameCount++;
+      }
+    );
+  }
+
+  /**
+   * Give up on the webcam half without touching the take: stop reading the
+   * camera, and make `stop()` report no companion.
+   */
+  private failCompanion(): void {
+    if (this.companion) {
+      this.companion.readerActive = false;
+      this.companion.failed = true;
+    }
+  }
+
+  /**
+   * Flush and close the companion's encoder, giving up the companion rather
+   * than the take if it refuses.
+   *
+   * Its own try/catch, and not `stop()`'s: this runs *before* the primary's
+   * `output.finalize()`, so a rejection that escaped here would skip the
+   * finalize, land in the outer catch and report `onError` over a screen
+   * recording that was already complete.
+   */
+  private async flushCompanion(): Promise<void> {
+    const encoder = this.companion?.encoder;
+    if (!encoder || encoder.state === 'closed') return;
+
+    try {
+      await encoder.flush();
+      encoder.close();
+    } catch (e) {
+      console.warn('The webcam companion could not be flushed:', e);
+      this.failCompanion();
+    }
+  }
+
+  /**
+   * Finalize the webcam half and hand back its blob, or null when there is
+   * nothing worth storing.
+   *
+   * Three cases end as "no companion" rather than as an empty row in the
+   * library: a webcam that delivered no frame (the take recorded the screen
+   * alone), a pipeline that already gave up (`failed`), and a muxer that could
+   * not write. The last is swallowed into a warning on purpose — the primary
+   * blob is the take, and losing it because the companion's finalize threw
+   * would be the worse outcome by far.
+   */
+  private async finalizeCompanion(): Promise<CompanionPart | null> {
+    const companion = this.companion;
+    if (!companion || companion.failed || companion.frameCount === 0) return null;
+
+    try {
+      await companion.output?.finalize();
+      const buffer = companion.target?.buffer;
+      if (!buffer) return null;
+      // 0 in this slice: one clock, one start(), both pipelines' first frame
+      // stamped from the same origin. Written down rather than assumed, because
+      // the audio companions (slice 3) will not all start at zero.
+      return {
+        role: 'webcam',
+        blob: new Blob([buffer], { type: 'video/webm' }),
+        startOffset: 0,
+      };
+    } catch (e) {
+      console.warn('The webcam companion could not be finalized:', e);
+      return null;
+    }
+  }
+
+  /**
+   * A WebM output with one VP9 video track. The caller adds any audio track and
+   * then starts it, because the primary output mixes audio in and the webcam
+   * companion does not.
+   */
+  private createVideoOutput(): {
+    output: Output;
+    target: BufferTarget;
+    packetSource: EncodedVideoPacketSource;
+  } {
+    const target = new BufferTarget();
+    const output = new Output({ format: new WebMOutputFormat(), target });
+    const packetSource = new EncodedVideoPacketSource('vp9');
+    output.addVideoTrack(packetSource, { frameRate: this.frameRate });
+    return { output, target, packetSource };
+  }
+
+  /**
+   * A configured VP9 encoder writing into `sourceOf()`'s packet source.
+   *
+   * The source is read through a function rather than captured, because
+   * `cleanup()` nulls it: an encoder output that lands after a take has been
+   * torn down must find nothing to add to rather than write into a finalized
+   * muxer.
+   *
+   * `onEncoderError` is per pipeline and has no default, because what an
+   * encoder failure *means* differs by pipeline: the primary's is the end of
+   * the take, the companion's is the end of the companion. A shared handler
+   * made a webcam hiccup throw away the screen recording.
+   */
+  private async createVideoEncoder(
+    sourceOf: () => EncodedVideoPacketSource | null,
+    width: number,
+    height: number,
+    onEncoderError: (error: DOMException) => void
+  ): Promise<VideoEncoder> {
+    const encoder = new VideoEncoder({
+      output: async (chunk, meta) => {
+        const source = sourceOf();
+        if (source) {
+          await source.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+        }
+      },
+      error: onEncoderError,
+    });
+
+    await encoder.configure({
+      codec: 'vp09.00.10.08', // VP9 Profile 0
+      width,
+      height,
+      bitrate: videoBitrateFor(width, height),
+      framerate: this.frameRate,
+    });
+
+    return encoder;
   }
 
   /**
@@ -398,8 +691,7 @@ export class WebCodecsRecorder {
     this.startTime = performance.now();
     this.pausedDuration = 0;
     this.frameCount = 0;
-    this.lastFrameTimestampUs = -1;
-    this.nextKeyFrameUs = 0;
+    this.screenTiming = newFrameTiming();
     this.audioTimestamp = 0;
 
     const frameDurationUs = Math.round((1 / this.frameRate) * 1_000_000);
@@ -411,6 +703,13 @@ export class WebCodecsRecorder {
     } else if (usingVideoElement) {
       // Fallback to video element + canvas approach
       this.startVideoElementCapture(frameDurationUs);
+    }
+
+    if (this.companion) {
+      this.companion.timing = newFrameTiming();
+      this.companion.frameCount = 0;
+      this.companion.readerActive = true;
+      void this.startCompanionCapture();
     }
 
     this.callbacks.onStart?.();
@@ -449,16 +748,23 @@ export class WebCodecsRecorder {
    * has one: the track-processor path reads `performance.now()` for its
    * throttle a few lines earlier, and reading it twice per frame both costs
    * something per frame and lets the throttle and the stamp disagree.
+   *
+   * `timing` is the calling pipeline's own bookkeeping; the clock it is
+   * measured against is the recorder's, which is what keeps two pipelines'
+   * frames on one timeline.
    */
-  private nextFrameTiming(now = performance.now()): { timestamp: number; keyFrame: boolean } {
+  private nextFrameTiming(
+    timing: FrameTiming,
+    now = performance.now()
+  ): { timestamp: number; keyFrame: boolean } {
     const elapsedUs = Math.round((now - this.startTime - this.pausedDuration) * 1000);
     const timestamp =
-      elapsedUs > this.lastFrameTimestampUs ? elapsedUs : this.lastFrameTimestampUs + 1;
-    this.lastFrameTimestampUs = timestamp;
+      elapsedUs > timing.lastFrameTimestampUs ? elapsedUs : timing.lastFrameTimestampUs + 1;
+    timing.lastFrameTimestampUs = timestamp;
 
-    const keyFrame = timestamp >= this.nextKeyFrameUs;
+    const keyFrame = timestamp >= timing.nextKeyFrameUs;
     if (keyFrame) {
-      this.nextKeyFrameUs = timestamp + 1_000_000;
+      timing.nextKeyFrameUs = timestamp + 1_000_000;
     }
 
     return { timestamp, keyFrame };
@@ -470,12 +776,39 @@ export class WebCodecsRecorder {
   private async startTrackProcessorCapture(): Promise<void> {
     if (!this.frameReader || !this.videoEncoder) return;
 
+    await this.captureFromTrackProcessor(
+      this.frameReader,
+      this.screenTiming,
+      () => this.frameReaderActive,
+      () => this.videoEncoder,
+      () => {
+        this.frameCount++;
+      }
+    );
+  }
+
+  /**
+   * Read one track's frames, re-stamp each with the recording clock and hand it
+   * to that track's encoder, until the pipeline is stopped or the track ends.
+   *
+   * Parameterised rather than written twice: a separate-tracks take runs this
+   * loop once per video track, and the throttle (`lastFrameTime`) is a local so
+   * each track is throttled against its own delivery rate rather than against
+   * the other's.
+   */
+  private async captureFromTrackProcessor(
+    reader: ReadableStreamDefaultReader<VideoFrame>,
+    timing: FrameTiming,
+    active: () => boolean,
+    encoderOf: () => VideoEncoder | null,
+    onFrameEncoded: () => void
+  ): Promise<void> {
     const targetFrameInterval = 1000 / this.frameRate;
     let lastFrameTime = 0;
 
     try {
-      while (this.frameReaderActive && this.isRecordingActive) {
-        const { value: sourceFrame, done } = await this.frameReader.read();
+      while (active() && this.isRecordingActive) {
+        const { value: sourceFrame, done } = await reader.read();
 
         if (done) break;
         if (!sourceFrame) continue;
@@ -493,20 +826,21 @@ export class WebCodecsRecorder {
           continue;
         }
 
-        if (this.videoEncoder && this.videoEncoder.state !== 'closed') {
+        const encoder = encoderOf();
+        if (encoder && encoder.state !== 'closed') {
           try {
             // Re-stamp the frame with the recording clock (see nextFrameTiming),
             // reusing the reading the throttle above already took.
-            const { timestamp, keyFrame } = this.nextFrameTiming(now);
+            const { timestamp, keyFrame } = this.nextFrameTiming(timing, now);
             const frame = new VideoFrame(sourceFrame, { timestamp });
             // Close source frame immediately - we've copied the data we need
             sourceFrame.close();
 
-            this.videoEncoder.encode(frame, { keyFrame });
+            encoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies the data it needs
             frame.close();
 
-            this.frameCount++;
+            onFrameEncoded();
           } catch (e) {
             console.error('Frame encoding error:', e);
             sourceFrame.close();
@@ -543,7 +877,7 @@ export class WebCodecsRecorder {
             // Create VideoFrame from canvas, stamped with the recording clock
             // (see nextFrameTiming). `duration` stays nominal: the muxer
             // derives the real packet durations from the timestamps.
-            const { timestamp, keyFrame } = this.nextFrameTiming();
+            const { timestamp, keyFrame } = this.nextFrameTiming(this.screenTiming);
             const frame = new VideoFrame(this.canvas, {
               timestamp,
               duration: frameDurationUs,
@@ -584,7 +918,7 @@ export class WebCodecsRecorder {
             // Create VideoFrame from canvas, stamped with the recording clock
             // (see nextFrameTiming). `duration` stays nominal: the muxer
             // derives the real packet durations from the timestamps.
-            const { timestamp, keyFrame } = this.nextFrameTiming();
+            const { timestamp, keyFrame } = this.nextFrameTiming(this.screenTiming);
             const frame = new VideoFrame(this.canvas, {
               timestamp,
               duration: frameDurationUs,
@@ -637,6 +971,7 @@ export class WebCodecsRecorder {
 
     this.isRecordingActive = false;
     this.frameReaderActive = false;
+    if (this.companion) this.companion.readerActive = false;
 
     // Stop frame capture (setTimeout-based)
     if (this.frameInterval) {
@@ -653,12 +988,22 @@ export class WebCodecsRecorder {
       }
     }
 
+    if (this.companion?.reader) {
+      try {
+        await this.companion.reader.cancel();
+      } catch {
+        // Ignore cancel errors
+      }
+    }
+
     try {
       // Flush encoders
       if (this.videoEncoder && this.videoEncoder.state !== 'closed') {
         await this.videoEncoder.flush();
         this.videoEncoder.close();
       }
+
+      await this.flushCompanion();
 
       if (this.audioEncoder && this.audioEncoder.state !== 'closed') {
         await this.audioEncoder.flush();
@@ -670,11 +1015,13 @@ export class WebCodecsRecorder {
         await this.output.finalize();
       }
 
+      const companion = await this.finalizeCompanion();
+
       // Get the result blob
       const buffer = this.target?.buffer;
       if (buffer) {
         const blob = new Blob([buffer], { type: 'video/webm' });
-        this.callbacks.onStop?.(blob);
+        this.callbacks.onStop?.(blob, companion);
       } else {
         this.callbacks.onError?.(new Error('Recording failed: no data was written'));
       }
@@ -837,6 +1184,22 @@ export class WebCodecsRecorder {
     }
     this.trackEndedHandlers.clear();
 
+    if (this.companion) {
+      const { reader } = this.companion;
+      if (reader) {
+        try {
+          reader.cancel().catch(() => {});
+        } catch {
+          // Ignore errors
+        }
+      }
+      this.companion.encoder = null;
+      this.companion.output = null;
+      this.companion.target = null;
+      this.companion.packetSource = null;
+      this.companion = null;
+    }
+
     this.videoEncoder = null;
     this.audioEncoder = null;
     this.output = null;
@@ -858,6 +1221,7 @@ export class WebCodecsRecorder {
     if (this.isRecordingActive) {
       this.isRecordingActive = false;
       this.frameReaderActive = false;
+      if (this.companion) this.companion.readerActive = false;
       if (this.frameInterval) {
         clearTimeout(this.frameInterval);
       }

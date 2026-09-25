@@ -43,7 +43,9 @@ whole-store subscription re-renders `App`, every component below it and every ho
 that moves two meter bars. The three fields nothing outside the Sources panel reads
 (`detailedCapabilities`, `audioLevels`, `systemAudioShared`) are not in `App` at all:
 `SourceTogglesPanel` subscribes to them and renders the props-only `SourceToggles`, because a
-field `App` merely passes through still re-renders `App`. `App.rerender.test.tsx` is the net,
+field `App` merely passes through still re-renders `App`. `hasSeparateTracksSpace` is the same
+shape one panel further down: `WebcamOverlaySettingsPanel` subscribes to it, turns it into the
+disabled toggle's reason and renders the props-only `WebcamOverlaySettings` (ESCSUITE-14). `App.rerender.test.tsx` is the net,
 and nothing else is: it counts each component's renders across 12 level pushes and asserts the
 five non-subscribers at exactly 0 (measured 2026-09-16, before → after: `App` 12 → 0,
 `AppHeader` 12 → 0, `RecordingsList` 12 → 0, `RecorderControls` 12 → 0, `RecordingPreview`
@@ -92,16 +94,19 @@ selector contract above.
 | `App.tsx` | The composition: the per-field store selectors, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `toggleSource`, `modalOpen` (`showHelpModal \|\| playbackUrl !== null`), the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
 | `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
-| `utils/notices.ts` | The app's whole vocabulary of notices — eight strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
+| `utils/notices.ts` | The app's whole vocabulary of notices — ten strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
 | `utils/downloadBlob.ts` | The anchor both downloads share: object URL, `<a download>`, click, remove, deferred revoke. No naming logic of its own — the caller hands it a finished filename |
 | `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace`. Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
-| `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. Both carry `hasAudio`, the one answer its caller computed, so the stored copy and the in-memory one cannot disagree — neither builder derives it (see `useRecordingSave`). No store, and no blob-URL creation |
+| `utils/separateTracksReadiness.ts` | `separateTracksBlockedReason` — whether "Record webcam as a separate track" may be switched on, and the sentence the toggle says when it may not. Pure, over two booleans: what the browser can do (`canRecordSeparateTracks()`) and whether there is room for two tracks (`hasSeparateTracksSpace`). The browser's answer wins when both are false, because nobody can act on "not enough storage" in Safari. Owns both reasons, beside their gate for the same reason `NO_STORAGE_SPACE` is |
+| `utils/takeOrder.ts` | `orderTakes` — newest take first, each take's companion rows directly under the primary they belong to, orphaned companions last. Pure over the list; `loadRecordings` is its only caller |
+| `utils/recordingMetadata.ts` | The two records a finished take writes — the shared `SourceVideo` stored beside the blob and the recorder's own `Recording` list entry — built from values the caller already computed. Both carry `hasAudio`, the one answer its caller computed, so the stored copy and the in-memory one cannot disagree — neither builder derives it (see `useRecordingSave`). Since ESCSUITE-14 `hasWebcam` is the second such required answer, and the take fields (`takeId`, `role`, `startOffset`, `overlayPlacement`) are **spread in only when present**, so a single-file take's record has no companion keys at all. `role: 'webcam'` is also what names the companion — `<take name> — webcam`. No store, and no blob-URL creation |
 | `components/icons.tsx` | The inline SVG icon set, every path drawn in `currentColor`. The source icons take a `className` because their size is per call site; the action icons are `aria-hidden` and sized entirely by their button |
 | `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region — carrying both the recorder state and the app's one `notice` — and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
 | `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
 | `components/SourceToggles/SourceTogglesPanel.tsx` | The Sources panel's subscription: the five store fields `SourceToggles` draws, selected here rather than in `App` so the ~12-a-second `audioLevels` push redraws this panel and nothing else. Takes only `isRecordingActive` and `onToggleSource` as props. `SourceToggles` itself stays driven by props alone, which is what its own test asserts |
-| `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, every control reporting a config patch. It draws unconditionally; whether the panel exists at all is the caller's decision |
-| `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its six action buttons, each labelled with the recording's own name — plus the conversion's progress row (named after the format actually running) and the one visible note the MP4 and M4A buttons are described by (`mp4Note`, which is not the same thing as `mp4BlockedReason` — see "Download Formats"). The one gate it decides for itself is `recording.hasAudio`, which disables M4A: a fact about the row rather than about the app. Props only; it touches no storage and holds no state |
+| `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, plus the "Record webcam as a separate track" toggle and the one paragraph under it that carries either `SEPARATE_TRACKS_HELP` or the reason the toggle is disabled — never both, so it is one `<p>` and one `aria-describedby` target. Every control reports a config patch; `separateTracksReason` arrives as a prop, so this stays props-only. It draws unconditionally; whether the panel exists at all is the caller's decision |
+| `components/WebcamOverlaySettings/WebcamOverlaySettingsPanel.tsx` | The overlay panel's one subscription: `hasSeparateTracksSpace`, turned into `separateTracksReason` with `canRecordSeparateTracks()`. Selected here rather than in `App` for the same reason `SourceTogglesPanel` owns `audioLevels` — a field `App` merely passes through still re-renders `App` and every hook it calls |
+| `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its six action buttons (four on a webcam companion row, which carries neither MP4 nor M4A — see "A take can be several files"), each labelled with the recording's own name — plus the conversion's progress row (named after the format actually running) and the one visible note the MP4 and M4A buttons are described by (`mp4Note`, which is not the same thing as `mp4BlockedReason` — see "Download Formats"). The one gate it decides for itself is `recording.hasAudio`, which disables M4A: a fact about the row rather than about the app. It also derives, from the list it is given, which primary rows still have a companion — and so which of them show `SEPARATE_TRACKS_MP4_NOTE` and hand `onSendToEditor` the take (`recording.takeId ?? recording.id`). Props only; it touches no storage and holds no state |
 | `components/RecordingsList/RecordingsListPanel.tsx` | The library's own subscription and state: `useMp4Download` lives here rather than in `App`, so a progress report redraws the list and nothing else. It is also where the *format* is chosen — `onDownloadMp4` and `onDownloadM4a` are the same `startMp4Download` with a different last argument. Selects only `setNotice`, which is a stable action. The other four handlers still come down from `App`, because `useRecordingLibrary` owns the playback dialog the shortcuts need |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
 | `components/RecordingPreview/CountdownOverlay.tsx` | The 3-2-1 overlay and its own subscription to `countdownValue`, so a countdown tick re-renders one digit rather than the preview stage and everything above it. `state` stays a prop — `App` derives it for the transport bar too, and it changes once per transition rather than on a tick |
@@ -112,11 +117,11 @@ selector contract above.
 | `hooks/useThemeLifecycle.ts` | One effect: `initTheme` on mount, `cleanupTheme` on unmount. Called first because it was the first effect in the file |
 | `hooks/useCapabilityBootstrap.ts` | The way in: capability detection, the MP4 codec probe (`probeMP4Support()` → `store.mp4Support`) and the initial `loadRecordings()`, all in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
-| `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier. Owns the one `hasAudio` expression both records are given — `microphoneEnabled || (systemAudioEnabled && systemAudioShared)`, the flag read through `getState()` so the hook adds no render |
-| `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using |
+| `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. A separate-tracks take's second blob is written here too — its own id, its own decoded thumbnail, `role: 'webcam'`, `hasAudio: false` — inside one try/catch, so a companion that cannot be saved costs the take nothing but `WEBCAM_TRACK_NOT_SAVED`. That is the **storage** half of the loss only: a companion lost inside the recorder arrives as `null`, which this hook cannot tell from a take that never asked for one, so the controller raises the same notice for it (see "Recorder lifecycle"). Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier. Owns the one `hasAudio` expression both records are given — `microphoneEnabled || (systemAudioEnabled && systemAudioShared)`, the flag read through `getState()` so the hook adds no render |
+| `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using. It resolves which mode the take is before the countdown, which makes it the only layer that can read a `null` companion as a *loss*: `onStop` raises `WEBCAM_TRACK_NOT_SAVED` for one, and nothing for a composited take |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
 | `hooks/useMp4Download.ts` | One conversion at a time — MP4 or M4A, one shared slot: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, format, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the button reasons for each format (still checking, cannot, busy — plus, for M4A only, a browser with no AAC encoder), the separate visible `note` (the silent-MP4 warning, or the blocking reason when there is one worth saying), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App` |
-| `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete (re-reading the storage headroom after it), and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
+| `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete — which cascades, taking a take's companions with its primary, and re-reads the storage headroom afterwards — and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
 
 ### Errors and notices
 
@@ -125,8 +130,8 @@ in `recorderStore` is the whole notification surface: `AppHeader` renders it ins
 header's existing `aria-live="polite" aria-atomic="true"` region, and
 `handleStartRecording` clears it when the next take begins. Every string lives in
 `src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`, `START_FAILED`,
-`LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO` and
-`mp4ConversionFailed()` —
+`LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`,
+`UPLOAD_UNAVAILABLE`, `WEBCAM_TRACK_NOT_SAVED` and `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
 is still one string through the same `setNotice`, and it says "Conversion failed: …" rather
@@ -293,18 +298,29 @@ the Help button.
 - `storage.ts`: Shared IndexedDB layer (same database as ESCAPEARTIST: `video-editor-db`)
 - `recorder.ts`: MediaRecorder wrapper with audio mixing and level monitoring (see
   "Audio level meters" for the 80 ms gate both recorders apply)
-- `webcodecs-recorder.ts`: VideoEncoder/AudioEncoder + Mediabunny recorder for non-PiP takes
-  (see "Frame timestamps and keyframes" for the recording clock every frame is stamped with)
+- `webcodecs-recorder.ts`: VideoEncoder/AudioEncoder + Mediabunny recorder for every take that
+  is neither composited PiP nor audio-only
+  (see "Frame timestamps and keyframes" for the recording clock every frame is stamped with) —
+  and, for a separate-tracks take, a second `VideoEncoder` and a second Mediabunny output for
+  the webcam on that same clock (`CompanionPipeline`, one `FrameTiming` each)
+- `webcodecsSupport.ts`: `isWebCodecsRecordingSupported()` and `canRecordSeparateTracks()` — the
+  two synchronous capability questions, in a module that imports nothing, so a *component* can
+  ask one without pulling `mediabunny` into its graph (`WebcamOverlaySettingsPanel` does).
+  `webcodecs-recorder.ts` re-exports the first, which is where it used to live
 - `recorder-factory.ts`: `createRecorder()` / `canUseWebCodecsRecorder()` /
   `getRecorderType()` — picks between the two recorders for a take. WebCodecs unless the
-  take is PiP (the compositor's hidden video elements break its frame capture) or has no
-  video track at all (an audio-only take, which `WebCodecsRecorder` cannot serve);
-  MediaRecorder otherwise. `getRecorderType()` returns that same decision as
+  take is **composited** PiP (the compositor's hidden video elements break its frame capture)
+  or has no video track at all (an audio-only take, which `WebCodecsRecorder` cannot serve);
+  MediaRecorder otherwise. `separateTracks` is the third input and the one case where a PiP
+  take *does* reach WebCodecs — nothing captures frames through the compositor there, so the
+  reason for the exclusion does not apply. `getRecorderType()` returns that same decision as
   `'webcodecs' | 'mediarecorder'`, which is what the controller puts in `recorderTypeRef`
   and what the save path branches on to decide whether the blob needs repairing
 - `permissions.ts`: Environment capability detection with detailed unavailability reasons
 - `compositor.ts`: Canvas-based PiP compositing for webcam overlay on screen, throttled to
-  the take's target frame rate by the deadline gate described under "The PiP frame gate"
+  the take's target frame rate by the deadline gate described under "The PiP frame gate".
+  `start()` returns the recorded `captureStream`; `startPreviewOnly()` is the same draw loop
+  with no capture, for a separate-tracks take where the canvas is only what the user watches
 - `thumbnailGenerator.ts`: Thumbnail generation and video metadata extraction. Its size, type
   and quality constants are **imported from `utils/previewThumbnail.ts`**, not declared here:
   five suites (`App.settings`, `App.saving`, `App.recording`, `App.library`,
@@ -367,13 +383,50 @@ Enhanced capability detection with detailed unavailability reasons:
 - **Screen + Both**: Display with mic and system audio
 - **Webcam Only**: Camera with microphone
 - **Picture-in-Picture**: Screen with webcam overlay (adjustable position, size, shape)
+- **Picture-in-Picture, separate tracks** (opt-in): the same sources recorded as **two**
+  files — the screen and the webcam — instead of one composited overlay
+
+**The two PiP modes are two pipelines, and only one of them is the default.** Composited
+PiP is unchanged: the `Compositor` draws the overlay, `canvas.captureStream(30)` feeds
+MediaRecorder, and `fixWebMMetadata()` repairs the container at save time — which is what
+the `pip-seekable` specs guard. **Separate tracks** (ESCSUITE-14, off by default, toggled in
+the Webcam Overlay panel) routes the take through `WebCodecsRecorder` instead: one recorder
+holding **two `VideoEncoder`s and two Mediabunny outputs**, both stamped by the one
+`nextFrameTiming()` clock, so the two blobs are frame-aligned by construction rather than by
+measurement — which is exactly what two MediaRecorders started back to back could not give.
+The compositor still runs in that mode but **only for the preview**
+(`Compositor.startPreviewOnly()`, no `captureStream`); the preview *stream* the store holds is
+then the raw screen, because the canvas itself is what `RecordingPreview` puts on screen.
+
+**Which mode a take is, is decided once and handed to everything.**
+`useRecordingController` computes `config.separateTracks && isPiP &&
+canUseWebCodecsRecorder(true, true, true)` before the countdown, and that one answer drives the
+compositor's mode, `createRecorder`, `getRecorderType()` (which is what the save path keys the
+container repair off) and the config the recorder is initialized with. So a take cannot change
+pipeline half-way, and a browser that cannot serve the mode cannot be left with a recorder
+building a pipeline it cannot read.
+
+The mode is **Chromium/Edge only** and says so: `canRecordSeparateTracks()`
+(`core/webcodecsSupport.ts`) wants WebCodecs *and* `MediaStreamTrackProcessor`, and
+`utils/separateTracksReadiness.ts` turns a "no" into the sentence on the disabled toggle —
+the browser's answer first, then the storage headroom, which is measured for roughly double
+the bitrate (`hasSeparateTracksSpace`, computed beside the record button's own
+`hasStorageSpace` by one `refreshStorageSpace()`). The webcam pipeline is deliberately
+track-processor only: the primary keeps its `<video>`+canvas fallback because a take must
+record *something*, and where the processor is missing the recorder warns and records the
+screen alone — as it does for **every** way the webcam half can refuse to be built, including a
+muxer or an encoder that will not start (see "Recorder lifecycle"). The toggle exists only while screen **and** webcam are both on, because a
+webcam-only take already *is* the webcam — the recorder ignores the flag for one.
 
 Which sources are captured is `src/hooks/useMediaStreams.ts`; what is done with them — countdown,
 start, pause, resume, stop, cancel and teardown — is `src/hooks/useRecordingController.ts`.
 
 ### The PiP frame gate
 
-Only Picture-in-Picture composites. `Compositor.render` requests an animation frame every
+Only Picture-in-Picture composites — including a separate-tracks take, which still draws the
+overlay for the preview (`startPreviewOnly()`) while the recorder reads the raw tracks, so the
+gate there bounds what the preview costs rather than what a `captureStream` throws away.
+`Compositor.render` requests an animation frame every
 frame — 60 a second on an ordinary display — and draws on a fraction of them, because
 `canvas.captureStream(frameRate)` samples the canvas at the take's frame rate (30 by
 default) and drawing faster is work thrown away.
@@ -463,9 +516,49 @@ in all three states:
   lands in that window, and reporting it as an error would have the controller dispose the muxer
   mid-finalize and lose the recording
 
-**Picture-in-Picture is the gap**: the stream handed to the recorder there is the compositor's
-canvas track, not the screen track, so none of the above fires when the user stops sharing during a
-PiP take. Fixing that means watching the source tracks in `compositor.ts`.
+**A separate-tracks take has a second capture track, and it does not end the take.** The webcam
+track's `ended` stops only the companion pipeline — one `'Webcam track ended: …'` warning and
+`readerActive = false` — while the screen keeps recording, and `stop()` then finalizes a shorter
+webcam file, or none at all if no frame ever arrived. The companion's encoder has its own error
+handler for the same reason: `createVideoEncoder` takes the handler as a parameter with no
+default, because what an encoder failure *means* differs by pipeline. The primary's still reports
+through `onError`; the companion's warns, calls `failCompanion()` and reports nothing, because
+`onError` is what makes the controller dispose the recorder and throw away a screen recording
+that is still being made. The companion's flush and finalize are isolated too
+(`flushCompanion()`, `finalizeCompanion()`, each with its own try/catch, the flush deliberately
+outside `stop()`'s so a rejection cannot skip the primary's `output.finalize()`). **Four cases
+are delivered as `null`**: a companion that could not be *set up* at all (`initializeCompanion`
+is wrapped in its own try/catch — an `Output.start()` or a `configure()` the browser refuses
+warns, lets the camera reader go and records the screen alone, because
+`canRecordSeparateTracks()` proves the two APIs exist and nothing can prove the camera's
+dimensions are an encodable VP9 config), one that encoded no frames, one that gave up
+(`failed`), and one whose `finalize()` threw. An empty row in the library and a second ARTIST
+source with nothing in it are worse than no companion, and none of them may ever cost the take
+its primary blob.
+
+**A lost companion is said out loud, from whichever layer knows.** `null` on this callback is
+also what an ordinary take delivers, so the recorder cannot be the one to report the loss and
+`useRecordingSave` cannot tell the two apart (`companion != null` is its whole test). The
+**controller** can: it resolved the mode before the countdown, so `onStop` raises
+`WEBCAM_TRACK_NOT_SAVED` when `separateTracks && !companion` — and says nothing for a
+composited take, which asked for no companion in the first place. `useRecordingSave` raises
+**the same notice** for the other half of the same promise: a companion lost in *storage* —
+metadata, thumbnail or a write that throws — is caught, warned and reported there, and the
+primary is stored and listed exactly as a no-companion take would be. Recorder-side loss is the
+controller's sentence; storage-side loss is the save hook's; the user reads one string either
+way.
+
+`onStop` is uniform on the WebCodecs path: `(blob, companion)` for every take, with `null` where
+there is no companion, so an ordinary take reports that it had none rather than saying nothing.
+`Recorder` (MediaRecorder) still calls it with the blob alone. One `RecorderStopCallback`
+(`store/types.ts`) types both, which is what makes the controller's single callback assignable
+to either recorder.
+
+**Composited Picture-in-Picture is the gap**: the stream handed to the recorder there is the
+compositor's canvas track, not the screen track, so none of the above fires when the user stops
+sharing during a composited PiP take. Fixing that means watching the source tracks in
+`compositor.ts`. A *separate-tracks* PiP take is not affected — its recorder holds the raw
+screen track, so every row of the list above applies to it as it does to a screen-only take.
 
 **Audio-only takes use the MediaRecorder path.** `SourceToggles` lets both video sources be switched
 off; `WebCodecsRecorder` is built around a video track and throws
@@ -473,7 +566,11 @@ off; `WebCodecsRecorder` is built around a video track and throws
 / `getRecorderType` take `hasVideoSource` alongside `isPiP` for exactly this, and the controller
 computes it as `(config.screenEnabled && !!screen) || (config.webcamEnabled && !!webcam)` — the same
 "a stream AND its toggle" test both recorders apply when they pick a video track, since a capability
-the browser lacks yields a `null` stream with the toggle still on. `getRecorderType` gets it too:
+the browser lacks yields a `null` stream with the toggle still on. (`separateTracks` is the third
+argument all three take, and the recorder asks the same "a stream AND its toggle" question of the
+screen before it builds a companion at all: a take configured for the screen but started without
+one is recording the *webcam* as its primary, and a companion there would be one camera in two
+files.) `getRecorderType` gets it too:
 its answer is what `useRecordingSave` keys the `fixWebMMetadata` repair off, so an audio-only take
 would otherwise be saved as unseekable WebM.
 
@@ -516,6 +613,16 @@ would otherwise be saved as unseekable WebM.
 - **`recorder.ts` (MediaRecorder) is untouched.** It stamps no frames of its own — MediaRecorder
   times them — so its `getDuration()` still measures with `Date.now()`; there is nothing for it to
   keep in step with
+
+**One clock, one bookkeeping record per encoder.** `nextFrameTiming(timing, now)` reads the
+recorder's shared `startTime` and `pausedDuration` — which is what makes two pipelines' frames
+one timeline — while the strictly-increasing guard and the once-a-second keyframe rule live in a
+per-pipeline `FrameTiming` (`newFrameTiming()`: one for the screen, one for the companion, both
+reset by `start()`). Sharing those two numbers would have interleaved pipelines pushing each
+other's timestamps forward and handing the second stream only the keyframes the first did not
+claim. `webcodecs-recorder.test.ts` pins the property directly — "stamps both encoders from the
+one clock — same tick, same timestamp": two frames captured at one clock reading carry the same
+timestamp, each stream's first frame is a keyframe, and a pause is excluded from both.
 
 `webcodecs-recorder.test.ts` pins all of it against a scripted `performance.now()`: a 30 fps
 source, a 15 fps source (the bug above), the strictly-increasing guard under a frozen clock,
@@ -563,7 +670,10 @@ assertion to flip when it is hoisted.
 ### Integration with ESCAPEARTIST
 - Both apps share `video-editor-db` IndexedDB database
 - Recordings stored with `source: 'recording'` and `recordedAt` timestamp
-- "Send to Editor" opens ESCAPEARTIST with `?loadVideo=<id>` parameter
+- "Send to Editor" opens ESCAPEARTIST with `?loadVideo=<id>` parameter — the id of a take's
+  **primary** part, whichever row was clicked (`takeId ?? id`). ARTIST resolving the siblings and
+  placing them on the timeline is ESCSUITE-14 slice 2; today it opens the one source it was
+  given
 - Same-origin deployment (Vercel) enables seamless data sharing
 
 ### Embedding
@@ -582,7 +692,10 @@ the shared `editorUrl()` helper.
 extra icon button on every library row, between the MP4 download and "Open in
 Editor", which posts `UPLOAD_RECORDING { id, name, blob }` to the parent — the
 stored blob itself, by structured clone, with no `arrayBuffer()` copy and no
-network of any kind. It exists **only** when CRAFT is embedded, because a host
+network of any kind. Since ESCSUITE-14 the payload may also carry `role` and
+`takeId`, added only for a row that has them, so a host that knows nothing of
+takes receives exactly what it received before (see "A take can be several
+files"). It exists **only** when CRAFT is embedded, because a host
 is the only thing that could receive it. `RecordingsListPanel` asks
 `isEmbedded()` and passes `onUploadToHost` only then; `RecordingsList` stays
 props-only and draws the button exactly when it has the prop, so the component
@@ -798,6 +911,59 @@ VP9 + Opus re-encode into a freshly-muxed container). It is present and tested a
 calls it; the WebM that is already in storage is seekable, so it has no user-visible job
 that the instant download does not already do.
 
+### A take can be several files
+
+**Storage.** `SourceVideo` (`packages/shared/src/types`) carries five optional fields for this
+(ESCSUITE-14): `takeId`, `role: 'screen' | 'webcam' | 'mic' | 'system'`, `startOffset` (seconds),
+`hasWebcam`, and — on the primary only — `overlayPlacement: { position, size, shape }` copied from
+the `RecordingConfig` at save time, which is the geometry ARTIST will seed the webcam clip's
+transform from (slice 2) and the composite MP4 will draw through (slice 4). All optional, so
+**`DB_VERSION` stays 1** and a take stored before this keeps behaving as a single file. **The take
+is named by its primary**: the primary's `takeId` is its own id, so grouping is one equality and
+the cascade delete is `takeId === deletedId` minus the row already being deleted. A plain take is
+stored with *no* companion keys at all — absent, not `undefined`, because `buildSourceVideo`
+spreads each one in only when it is given it — so a reader cannot mistake one for the other. `hasAudio` is per part, and in slice 1
+the webcam part is stored `hasAudio: false`, because the whole mix stays on the primary output.
+The companion's stored `name` is the take's name with its half named — `Recording <date> —
+webcam` — which is what its own WebM download is called and what ARTIST will show as the source's
+name.
+
+`hasWebcam` is the field that retired the `hasWebcam: false // TODO` in `loadRecordings`: nothing
+stored said whether a take had a camera in it. It is written from the config by `buildSourceVideo`
+exactly as `hasAudio` has been since ESCSUITE-60, and read back as `m.hasWebcam ?? false` for
+records saved before it. Nothing is gated on it, so the fallback costs a legacy row nothing.
+
+**Library.** `loadRecordings` orders through `orderTakes` (`utils/takeOrder.ts`): newest take
+first, a take's companions directly under its primary (placed by the primary's date, never by the
+companion's own — both parts are saved within a millisecond or two and the companion is written
+second, so by date alone a webcam row would float above the screen row it describes), and an
+orphan companion still shown, because a row nobody can see is a file nobody can delete. Within
+the session that recorded it the same order comes out of the save path instead: the companion is
+`addRecording`ed **first**, and `addRecording` prepends, so the primary lands on top of it.
+
+The companion row's meta line is prefixed `Webcam track • `. It is playable, WebM-downloadable
+and deletable on its own, and carries **no** MP4 or M4A button — those are the take's downloads
+and live on the primary row. "Open in Editor" on either row hands over `takeId ?? id`, i.e. the
+take. Deleting the primary deletes its companions (`useRecordingLibrary.handleDeleteRecording`);
+deleting the companion alone **demotes the primary by construction** — its own `takeId` stays,
+and with nothing grouped under it the row renders as a plain take, so no stored metadata is
+rewritten on a delete.
+
+**Interim, until slice 4:** MP4 and M4A on a take that has a companion convert the **screen part
+alone**. That is acceptable only because it is said out loud — the primary row of such a take
+carries `SEPARATE_TRACKS_MP4_NOTE`, "MP4 and M4A cover the screen track only — the webcam track
+is not included yet.", and both buttons' `aria-describedby` point at it, space-separated
+alongside the app-wide `mp4Note` when that applies too (one test resolves both ids to pin it).
+The buttons stay **enabled**: a screen-only MP4 is a real file. The note goes away when the
+composite lands, and it goes away for a row whose companion was deleted, because then nothing is
+left out.
+
+**`UPLOAD_RECORDING` is still per row** in slice 1: each row posts its own bytes, with `role` and
+`takeId` added to the payload only when the row has them — `RecordingsListPanel` calls
+`uploadToHost` with **two** arguments for a plain take and three for a part, so a host that knows
+nothing of takes receives exactly the `{ id, name, blob }` it always did. One message listing
+every part (`payload.parts`) is slice 4, with the adoption note for embedders.
+
 ### WebM Handling
 - MediaRecorder produces WebM without proper seek metadata
 - `webm-duration-fix` library adds Duration, SeekHead, and Cues elements
@@ -806,7 +972,8 @@ that the instant download does not already do.
 - **The repair runs on MediaRecorder output only**, once, at save time.
   `useRecordingSave` branches on `recorderTypeRef`: a `'webcodecs'` take is written through
   untouched, because `WebCodecsRecorder` muxes with Mediabunny, which already emits Duration
-  and Cues. Everything else — PiP takes, audio-only takes, and any browser without WebCodecs
+  and Cues. Everything else — composited PiP takes, audio-only takes, and any browser without
+  WebCodecs
   — goes through `fixWebMMetadata()` first. Either way what reaches storage is seekable, but
   only one of the two paths repairs anything; a take that will not scrub is a question about
   *which recorder produced it* before it is a question about the repair
@@ -832,8 +999,9 @@ that the instant download does not already do.
   `vi.mock('webm-duration-fix')`, and vitest's own pipeline resolves the default the old way.
   The guard is therefore a browser test — `apps/e2e/tests/escapecraft/pip-seekable.spec.ts`
   against the dev server and `apps/e2e/tests/production/pip-seekable.spec.ts` against the
-  combined `dist/` — which records a real **PiP** take (the only mode that reaches MediaRecorder
-  in Chromium) and requires the stored blob to report a finite `duration` in a `<video>`.
+  combined `dist/` — which records a real **composited PiP** take (the only mode that reaches
+  MediaRecorder in Chromium, and still what a PiP take is unless the separate-tracks toggle is
+  on) and requires the stored blob to report a finite `duration` in a `<video>`.
   `src/core/converterInterop.test.ts` is the one suite that imports the real module, and pins
   both arms of the resolver
 
@@ -899,13 +1067,29 @@ the outcome, not on the double.
 - **The milliseconds come from `pnpm perf`, not from here.** `apps/e2e/tests/perf/
   craft-recording.spec.ts` records real takes in Chromium and reports what they cost in
   time: `craft-screen-recording` (a screen take through `WebCodecsRecorder`),
-  `craft-pip-recording` (a PiP take through the `Compositor` into MediaRecorder, whose rate
-  is `compositedFps` because its encoding is off the main thread) and
+  `craft-pip-recording` (a composited PiP take through the `Compositor` into MediaRecorder,
+  whose rate is `compositedFps` because its encoding is off the main thread),
+  `craft-separate-tracks-recording` (the same take with the separate-tracks toggle on: two
+  `VideoEncoder`s on one clock, split by encoder identity into `screenFramesEncoded` /
+  `webcamFramesEncoded`, with the compositor drawing the preview only) and
   `craft-mp4-conversion` (`convertToMP4` driven through the row's own MP4 button). They
   measure and never assert; the ceilings above are the half that is enforced. Numbers, and
   the two findings the first measurement produced — the compositor's frame gate, **fixed**
   by ESCSUITE-54 with the paired before/after in that file, and the first-take step, still
   open — are in `docs/performance/2026-09-17-craft-baseline.md`.
+- **The separate-tracks mode's end-to-end proof is
+  `apps/e2e/tests/escapecraft/separate-tracks.spec.ts`** — a real Chromium take against the
+  synthetic capture devices, asserting what reached `video-editor-db` (two blobs under one
+  `takeId`, each loading in a `<video>` with a finite duration, the primary carrying
+  `overlayPlacement`) and the two rows the library draws for them. **Address ESCAPECRAFT's
+  toggles by exact accessible name in e2e code**: the separate-tracks toggle's wrapper reuses
+  the same `sourceToggle` CSS-module class the four source toggles use, and its accessible
+  name — "Record webcam as a separate track" — contains "Webcam", so Playwright's default
+  case-insensitive *substring* `name` match silently re-resolved to it the moment the Webcam
+  Overlay panel appeared. That is what `apps/e2e/utils/seekable.ts`'s `recordPipTake` (the
+  `pip-seekable` guard's own helper, whose second step is the click that reveals the toggle) had
+  to stop doing: it now asks for `getByRole('button', { name: label, exact: true })` and scopes
+  to no class at all.
 - **Semicolon dialect is mixed, deliberately.** The suites the test decomposition added
   (`src/hooks/*.test.ts`, `src/utils/recordingFormat.test.ts`, and their siblings) omit
   line-ending semicolons; the older files (`src/App.library.test.tsx` and friends) carry them.
@@ -922,6 +1106,10 @@ the outcome, not on the double.
 - WebCodecs API only works in Chrome/Edge. Where it is missing, `recorder-factory.ts` falls
   back to MediaRecorder, so recording still works — it is the WebCodecs recorder and the
   (currently unwired) conversion paths in `converter.ts` that are Chrome/Edge only
+- Recording the webcam as a separate track needs `MediaStreamTrackProcessor` on top of
+  WebCodecs (`canRecordSeparateTracks()`). It is the one feature with no fallback: the toggle
+  stays on screen and `disabled`, carrying the reason, and the take is recorded as a composited
+  overlay instead
 
 ## Keyboard Shortcuts
 

@@ -88,6 +88,19 @@ export const CAPTURE_SIZE_LABEL = `${CAPTURE_SIZE.width}x${CAPTURE_SIZE.height}`
 /** The extra counter bag this module's init script installs on `window`. */
 interface CraftPerfCounters {
   videoDraws: number
+  /**
+   * Frames handed to each `VideoEncoder`, in the order the encoders first
+   * encoded one.
+   *
+   * A separate-tracks take runs two encoders on the main thread and the shared
+   * `encodeCount` cannot tell them apart. Attribution is by **instance
+   * identity**, not by the frame's size: both synthetic capture devices here
+   * are {@link CAPTURE_SIZE}, so `codedWidth` is the same on both pipelines'
+   * frames. The screen pipeline is built and started first
+   * (`WebCodecsRecorder.initialize`), so index 0 is the screen — and the
+   * benchmark's tripwire is what fails if that stops being true.
+   */
+  encodesByEncoder: number[]
 }
 
 declare global {
@@ -131,13 +144,19 @@ declare global {
  * So the screen arm asserts `videoDraws === 0` and the PiP arm asserts it is
  * even; between them they pin the invariant instead of trusting this comment
  * (see {@link measureTake}).
+ *
+ * A separate-tracks take draws into the compositor canvas **and** encodes on the
+ * main thread, which is why `videoDraws` and `framesEncoded` are both non-zero
+ * there and neither is a fallback signal on its own.
  */
 export async function installCraftPerfInstrumentation(page: Page): Promise<void> {
   await installPerfInstrumentation(page)
 
   await page.addInitScript(() => {
-    const counters: CraftPerfCounters = { videoDraws: 0 }
+    const counters: CraftPerfCounters = { videoDraws: 0, encodesByEncoder: [] }
     window.__perfCraft = counters
+
+    let encoderIndices = new WeakMap<object, number>()
 
     // Chained, not replaced. Init scripts run in the order they were added, so
     // `installPerfInstrumentation`'s bag and its reset already exist here; a
@@ -147,6 +166,10 @@ export async function installCraftPerfInstrumentation(page: Page): Promise<void>
     window.__perfReset = () => {
       resetShared()
       counters.videoDraws = 0
+      counters.encodesByEncoder.length = 0
+      // A fresh map with the array: an index kept across a reset would point
+      // past the end of it.
+      encoderIndices = new WeakMap<object, number>()
     }
 
     // `drawImage` is overloaded three ways (3, 5 and 9 arguments), which no
@@ -163,6 +186,27 @@ export async function installCraftPerfInstrumentation(page: Page): Promise<void>
       if (args[0] instanceof HTMLVideoElement) counters.videoDraws++
       return nativeDrawImage.apply(this, args)
     }
+
+    const videoEncoder = (window as unknown as { VideoEncoder?: typeof VideoEncoder }).VideoEncoder
+    if (videoEncoder) {
+      // Chained on top of `installPerfInstrumentation`'s wrapper — init scripts
+      // run in the order they were added — so the shared `encodeCount` is
+      // unchanged and this only adds the attribution.
+      const chainedEncode = videoEncoder.prototype.encode
+      videoEncoder.prototype.encode = function attributedEncode(
+        this: VideoEncoder,
+        ...args: Parameters<VideoEncoder['encode']>
+      ) {
+        let index = encoderIndices.get(this)
+        if (index === undefined) {
+          index = counters.encodesByEncoder.length
+          encoderIndices.set(this, index)
+          counters.encodesByEncoder.push(0)
+        }
+        counters.encodesByEncoder[index]++
+        return chainedEncode.apply(this, args)
+      }
+    }
   })
 }
 
@@ -171,18 +215,22 @@ export async function installCraftPerfInstrumentation(page: Page): Promise<void>
  * wants switched on.
  *
  * Screen is on by ESCAPECRAFT's own default and the microphone with it, so a
- * screen take needs no clicking at all and a PiP take needs exactly one — the
- * Webcam toggle. Leaving the defaults alone is deliberate: the benchmark should
- * measure the take a user gets, and the live microphone is what keeps the
- * recorders' audio-level rAF loop running, which is a real part of what a take
- * costs the main thread.
+ * screen take needs no clicking at all, a PiP take needs exactly one — the
+ * Webcam toggle — and a separate-tracks take needs that one plus the opt-in
+ * toggle, which only exists once the webcam is on. Leaving the defaults alone is
+ * deliberate: the benchmark should measure the take a user gets, and the live
+ * microphone is what keeps the recorders' audio-level rAF loop running, which is
+ * a real part of what a take costs the main thread.
  *
  * The wait before the first click is not optional. Capability detection is
  * async and the source toggles stay `disabled` until it answers; a take started
  * before then acquires no stream, and a benchmark would report the cost of
  * recording nothing.
  */
-export async function openCraft(page: Page, options: { webcam: boolean }): Promise<void> {
+export async function openCraft(
+  page: Page,
+  options: { webcam: boolean; separateTracks?: boolean }
+): Promise<void> {
   await mockSyntheticMedia(page, CAPTURE_SIZE)
   await grantMediaPermissions(page)
 
@@ -202,6 +250,17 @@ export async function openCraft(page: Page, options: { webcam: boolean }): Promi
     // a click that did not land would silently downgrade the benchmark to a
     // second screen take reported under the PiP name.
     await expect(webcamToggle).toHaveAttribute('aria-pressed', 'true')
+
+    if (options.separateTracks) {
+      // The opt-in mode (ESCSUITE-14): one recorder, two VideoEncoders, two
+      // Mediabunny outputs, and the compositor drawing for the preview only.
+      // Confirmed rather than assumed — a click that did not land would report
+      // a composited PiP take under this benchmark's name.
+      const separate = page.getByRole('button', { name: 'Record webcam as a separate track' })
+      await expect(separate).toBeEnabled({ timeout: 30_000 })
+      await separate.click()
+      await expect(separate).toHaveAttribute('aria-pressed', 'true')
+    }
   }
 }
 
@@ -279,7 +338,7 @@ async function readNewestRecordingBytes(page: Page): Promise<number> {
           getAll.onsuccess = () => {
             const records = getAll.result as {
               blob: Blob
-              metadata?: { recordedAt?: number }
+              metadata?: { recordedAt?: number; role?: string }
             }[]
             if (records.length === 0) {
               reject(new Error('no recording was stored'))
@@ -288,11 +347,23 @@ async function readNewestRecordingBytes(page: Page): Promise<number> {
             // Newest by the timestamp the recorder wrote, not by store order:
             // `getAll` returns key order and the key is a uuid, which says
             // nothing about when a take was made.
-            const newest = records.reduce((newestSoFar, record) =>
-              (record.metadata?.recordedAt ?? 0) >= (newestSoFar.metadata?.recordedAt ?? 0)
-                ? record
-                : newestSoFar
-            )
+            //
+            // A separate-tracks take writes **two** records carrying the
+            // identical `recordedAt` — one `now` for both halves of one take —
+            // so the timestamp cannot order them and store order is uuid order,
+            // i.e. a coin toss between the screen part and the webcam part. The
+            // tie is broken towards the primary (anything but `role: 'webcam'`),
+            // so `outputBytes` is always the same part of the take and two runs
+            // of the benchmark are comparable. Every other arm stores one record
+            // per take and never reaches the tie-break.
+            const rank = (record: { metadata?: { recordedAt?: number; role?: string } }) =>
+              [record.metadata?.recordedAt ?? 0, record.metadata?.role === 'webcam' ? 0 : 1] as const
+            const newest = records.reduce((newestSoFar, record) => {
+              const [time, primary] = rank(record)
+              const [bestTime, bestPrimary] = rank(newestSoFar)
+              if (time !== bestTime) return time > bestTime ? record : newestSoFar
+              return primary >= bestPrimary ? record : newestSoFar
+            })
             // `blob.size` only — reading the bytes back would base64 a
             // multi-megabyte file through the CDP connection for a number the
             // Blob already knows.
@@ -304,10 +375,19 @@ async function readNewestRecordingBytes(page: Page): Promise<number> {
 }
 
 export interface TakeMeasurement {
-  /** `VideoEncoder.encode` calls inside the window. Zero for a PiP take. */
+  /**
+   * `VideoEncoder.encode` calls inside the window. Zero for a PiP take; both
+   * pipelines' frames together for a separate-tracks one.
+   */
   framesEncoded: number
   /** Encoded frames per second. Reported as 0 for PiP — see {@link measureTake}. */
   framesPerSecond: number
+  /**
+   * Frames handed to each encoder inside the window, screen first. One entry for
+   * a screen take, two for a separate-tracks one, and empty for a MediaRecorder
+   * take, which constructs no `VideoEncoder` at all.
+   */
+  framesEncodedPerEncoder: number[]
   /** `drawImage(<video>)` calls inside the window. Zero for a screen take. */
   videoDraws: number
   /** Video draws per second. */
@@ -347,8 +427,9 @@ export interface TakeMeasurement {
  * `perf-results/<profileName>.cpuprofile` (see `withCpuProfile`); the
  * measurement it returns is then profiler-skewed and should be discarded.
  *
- * The two modes are measured with the same instruments but the headline number
- * is not the same quantity, because the two recorders are not the same design:
+ * The three modes are measured with the same instruments but the headline
+ * number is not the same quantity, because the pipelines are not the same
+ * design:
  *
  * - **screen** goes through `WebCodecsRecorder`. A `MediaStreamTrackProcessor`
  *   reader hands every captured `VideoFrame` to `VideoEncoder.encode` **on the
@@ -361,7 +442,16 @@ export interface TakeMeasurement {
  *   as such; the main thread's work is the compositor's, counted as video draws
  *   and divided by two.
  *
- *   What licenses the two: `Compositor.drawFrame` draws the screen video and
+ * - **separate tracks** (ESCSUITE-14, opt-in) goes through `WebCodecsRecorder`
+ *   too, but with **two** encoders on one clock: a `MediaStreamTrackProcessor`
+ *   reader per pipeline, both handing frames to `VideoEncoder.encode` on the
+ *   main thread, into two Mediabunny outputs. `framesEncoded` is both
+ *   pipelines' frames together and `framesEncodedPerEncoder` splits them, screen
+ *   first. The `Compositor` still runs — it draws the **preview** the user
+ *   watches — but nothing captures its canvas, so `videoDraws` is non-zero here
+ *   without being the recording path.
+ *
+ *   What licenses the two divisors: `Compositor.drawFrame` draws the screen video and
  *   `drawWebcamOverlay` draws the webcam video, both inside **one synchronous
  *   rAF callback**, so no `page.evaluate` can ever observe a half-drawn frame.
  *   But each draw is guarded on its element's `readyState >= 2`
@@ -376,15 +466,22 @@ export interface TakeMeasurement {
  * for a take is more than one loop: both recorders drive the audio level
  * monitor from rAF (gated to one store write per 80 ms, but scheduled every
  * frame), and PiP adds the compositor's own loop on top. So ~60/s for a screen
- * take and ~120/s for PiP is the expected shape, not a doubled compositor.
+ * take and ~120/s for PiP is the expected shape, not a doubled compositor. A
+ * separate-tracks take is ~120/s too — the compositor still runs, for the
+ * preview — even though nothing captures its canvas.
  */
 export async function measureTake(
   page: Page,
   cdp: CDPSession,
-  options: { webcam: boolean },
+  options: { webcam: boolean; separateTracks?: boolean },
   profileName?: string
 ): Promise<TakeMeasurement> {
   const rowsBefore = await recordingRows(page).count()
+  // A separate-tracks take is one take in two files, so it lands as two library
+  // rows (`useRecordingSave` writes the companion and the primary in one pass).
+  // Waiting for one row would either time out or, worse, pass on a transient
+  // half-saved library.
+  const rowsPerTake = options.separateTracks ? 2 : 1
 
   // Reset before the click rather than after, so the encoder queue high-water
   // below covers the take from its very first frame. It is a maximum and not a
@@ -402,6 +499,7 @@ export async function measureTake(
     raf: window.__perf.rafCount,
     encode: window.__perf.encodeCount,
     videoDraws: window.__perfCraft.videoDraws,
+    encodesByEncoder: [...window.__perfCraft.encodesByEncoder],
     now: performance.now(),
   }))
 
@@ -419,6 +517,7 @@ export async function measureTake(
       raf: window.__perf.rafCount,
       encode: window.__perf.encodeCount,
       videoDraws: window.__perfCraft.videoDraws,
+      encodesByEncoder: [...window.__perfCraft.encodesByEncoder],
       encoderQueueHighWater: window.__perf.encodeQueueHighWater,
       now: performance.now(),
       longTaskCount: inWindow.length,
@@ -437,11 +536,14 @@ export async function measureTake(
     'the take stopped before the measured window closed — nothing was being recorded for part of it'
   ).toBeVisible({ timeout: 1000 })
 
-  await stopTake(page, rowsBefore + 1)
+  await stopTake(page, rowsBefore + rowsPerTake)
   const heapEnd = await readHeapAfterGc(page, cdp)
 
   const framesEncoded = end.encode - start.encode
   const videoDraws = end.videoDraws - start.videoDraws
+  const framesEncodedPerEncoder = end.encodesByEncoder.map(
+    (total, index) => total - (start.encodesByEncoder[index] ?? 0)
+  )
 
   // Each mode has ways of being wrong that would otherwise look fine: a screen
   // take that quietly fell back to MediaRecorder still produces a file and
@@ -449,7 +551,31 @@ export async function measureTake(
   // the screen. Both would report plausible numbers for the wrong pipeline,
   // under the name of the right one. So each arm pins what it believes about
   // its own pipeline, in both directions.
-  if (options.webcam) {
+  if (options.separateTracks) {
+    // This arm's whole claim is "two encoders ran on the main thread and the
+    // compositor only drew the preview". Both halves are pinned, because both
+    // have a plausible-looking failure: a mode that silently fell back to
+    // composited PiP encodes nothing here, and a companion that never started
+    // leaves one encoder doing all the work at a respectable rate.
+    expect(
+      framesEncodedPerEncoder.length,
+      `the separate-tracks take ran ${framesEncodedPerEncoder.length} encoder(s), not 2 — the webcam pipeline was not built, or the take fell back to composited PiP`
+    ).toBe(2)
+    expect(
+      Math.min(...framesEncodedPerEncoder),
+      `one pipeline encoded nothing (${framesEncodedPerEncoder.join(' / ')}) — a blob with no frames in it is not a track`
+    ).toBeGreaterThan(0)
+    expect(
+      videoDraws,
+      'the separate-tracks take did not composite for the preview — the user was watching nothing'
+    ).toBeGreaterThan(0)
+    // The same /2 divisor as the PiP arm, for the same reason: one screen draw
+    // plus one webcam draw per composited preview frame.
+    expect(
+      videoDraws % 2,
+      `the separate-tracks take drew ${videoDraws} videos — an odd count means a capture track was not ready for some frames, so the two-draws-per-composited-frame divisor is wrong`
+    ).toBe(0)
+  } else if (options.webcam) {
     expect(
       videoDraws,
       'the PiP take did not composite — no video was drawn into the compositor canvas'
@@ -494,18 +620,27 @@ export async function measureTake(
   const cdpSeconds = cdpEnd.Timestamp - cdpStart.Timestamp
   // Two `drawImage(<video>)` calls per composited frame; see the class comment.
   const compositedFrames = videoDraws / 2
-  const framesForCost = options.webcam ? compositedFrames : framesEncoded
+  // A separate-tracks take encodes on the main thread like the screen arm does,
+  // so its cost divides by frames encoded (both pipelines' frames) rather than
+  // by composited preview frames.
+  const framesForCost =
+    options.webcam && !options.separateTracks ? compositedFrames : framesEncoded
   const framesPerSecondForCost = framesForCost / elapsedSeconds
 
   return {
     framesEncoded,
     // A PiP take's frames belong to MediaRecorder's own encoder thread and are
     // not observable from here. Reported as 0 rather than as a real-looking
-    // rate derived from the zero encodes the main thread made.
-    framesPerSecond: options.webcam ? 0 : round(framesEncoded / elapsedSeconds),
+    // rate derived from the zero encodes the main thread made. A separate-tracks
+    // take encodes in the page, so its rate is real and is reported.
+    framesPerSecond:
+      options.webcam && !options.separateTracks ? 0 : round(framesEncoded / elapsedSeconds),
+    framesEncodedPerEncoder,
     videoDraws,
     videoDrawsPerSecond: round(videoDraws / elapsedSeconds),
-    // A screen take composites nothing, so there is no frame rate to halve.
+    // A screen take composites nothing, so there is no frame rate to halve. On a
+    // separate-tracks take the compositor is drawing the preview rather than the
+    // recording, and the rate it holds is still worth reporting.
     compositedFps: options.webcam ? round(compositedFrames / elapsedSeconds) : 0,
     rafPerSecond: round((end.raf - start.raf) / elapsedSeconds),
     taskDurationMs: round(taskDurationMs),

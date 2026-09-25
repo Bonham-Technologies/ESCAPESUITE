@@ -115,9 +115,10 @@ dist/
 
 ### ESCAPECRAFT (apps/craft)
 - Zustand store in `src/store/recorderStore.ts`
-- Core modules in `src/core/`: `recorder.ts`, `webcodecs-recorder.ts`, `recorder-factory.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
+- Core modules in `src/core/`: `recorder.ts`, `webcodecs-recorder.ts`, `recorder-factory.ts`, `webcodecsSupport.ts`, `compositor.ts`, `permissions.ts`, `thumbnailGenerator.ts`, `storage.ts`, `converter.ts`
 - Recording modes: screen, webcam, PiP (screen + webcam overlay), with mic/system audio options
-- Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for PiP, audio-only takes and browsers without it
+- Two recorders, chosen per take by `recorder-factory.ts`: WebCodecs where it is available, MediaRecorder for composited PiP, audio-only takes and browsers without it
+- **"Record webcam as a separate track"** (ESCSUITE-14, opt-in, off by default) is the one PiP take that reaches WebCodecs: one `WebCodecsRecorder` runs two `VideoEncoder`s and two Mediabunny outputs off one clock, so the screen and the webcam are two frame-aligned files instead of one composited overlay, and the `Compositor` draws the preview only. It costs about twice the CPU and storage, needs `MediaStreamTrackProcessor` as well as WebCodecs (Chromium/Edge), and is disabled with a visible reason where either that or the storage headroom for two tracks is missing. MP4 and M4A cover the screen part alone until slice 4. See `apps/craft/CLAUDE.md`'s "Recording Modes" and "A take can be several files"
 - Outputs WebM either way, but only the MediaRecorder path needs repairing: `useRecordingSave` runs `webm-duration-fix` over MediaRecorder output at save time, and writes WebCodecs output through untouched (Mediabunny already emits Duration and Cues)
 - Three downloads per recording: **WebM** is the stored blob handed straight back, instant and always available; **MP4** (H.264 + AAC) is `converter.ts` re-encoding it in the page with WebCodecs + Mediabunny; **M4A** (`convertToM4A`, `audio/mp4`) is the take's audio alone, AAC in an MP4 container, for a mic-only take that should come out as an audio file. The two conversions share one slot — one at a time whichever it is — with a phase-and-percentage progress row, a Cancel button, and a disabled button carrying a visible reason wherever a conversion is refused. Nothing is uploaded by any of the three; a failed conversion raises the app's one notice and leaves the WebM download untouched
 - The two conversions are gated differently, because they fail differently: no AAC encoder makes an MP4 *silent* (still offered, with a note) and an M4A *impossible* (disabled, with the same sentence as its reason), and a take with no audio in it disables M4A alone. See `apps/craft/CLAUDE.md`'s "Download Formats"
@@ -141,6 +142,15 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
                     Shared videos, thumbnails, projects
 ```
 
+A **take** is not always one file. Since ESCSUITE-14 a recording made with "Record webcam as
+a separate track" is several `SourceVideo`s sharing a `takeId`, each with a `role`
+(`'screen' | 'webcam' | 'mic' | 'system'`) and a `startOffset`; the take is named by its
+primary (the primary's `takeId` is its own id), and the primary carries the
+`overlayPlacement` the webcam was recorded at. Every field is optional and `DB_VERSION` stays
+1, so a single-file take — which is every recording made before it and every composited PiP
+take after it — is read exactly as before. A consumer that resolves one id should expect
+siblings: `getAllVideoMetadata()` filtered on `takeId`.
+
 ### Integration API (embedding CRAFT / ARTIST in a host page)
 Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) — true whenever
 `window.parent !== window` — and talk to the host over `postMessage`. The full protocol lives in
@@ -160,8 +170,15 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   reach the shared IndexedDB (or would rather not) gets the file itself. `RecordingsListPanel`
   decides with `isEmbedded()`; `RecordingsList` is props-only and draws the button exactly when
   it is given `onUploadToHost`. See `apps/craft/src/utils/uploadToHost.ts`.
+  Since ESCSUITE-14 the payload may also carry `role` and `takeId` (both optional, both
+  absent on a single-file take), because a take can be several files and each row posts its
+  own bytes. A host that ignores them receives exactly what it received before. One message
+  carrying every part of a take is planned as `payload.parts` and will come with its own
+  adoption note.
 - **URL params (ARTIST)**: `?video=url` to preload, `?project=base64` for state,
-  `?loadVideo=<id>` for the CRAFT handoff, `?suppressRestore=1` to skip the
+  `?loadVideo=<id>` for the CRAFT handoff — the id addresses a take's **primary** part;
+  ARTIST resolving its siblings and placing them on the timeline is ESCSUITE-14 slice 2 —
+  `?suppressRestore=1` to skip the
   "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
   the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
   applied only while the name is still the default `Untitled Project`).
@@ -242,13 +259,13 @@ readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is empt
 perf project's `globalSetup` first, so a stale result can never be reported as current.
 All three outputs are gitignored.
 
-Eight benchmarks, each run three times and reported as the median: four
-ESCAPEARTIST, three ESCAPECRAFT, and the headless kit render. The four
+Nine benchmarks, each run three times and reported as the median: four
+ESCAPEARTIST, four ESCAPECRAFT, and the headless kit render. The four
 ESCAPEARTIST ones run against **one deterministic 12-clip, 13-second scene** (14 clips
 over 4 tracks at 1280x720, clips scaled to fill the frame — scale 1 means native pixel
 size here) built in-test from `apps/e2e/fixtures/headless/source.mp4` and loaded through
 the documented integration API (`GET_STATE` for the imported source's id, then
-`LOAD_PROJECT`); the three ESCAPECRAFT ones drive real takes through the recorder's own
+`LOAD_PROJECT`); the four ESCAPECRAFT ones drive real takes through the recorder's own
 UI against `mockSyntheticMedia`'s canvas-and-oscillator capture devices at 1280x720.
 There is no app code for the benchmarks' sake in either app:
 
@@ -278,6 +295,18 @@ There is no app code for the benchmarks' sake in either app:
   by wrapping `CanvasRenderingContext2D.prototype.drawImage` and halving the calls whose
   first argument is an `HTMLVideoElement` — a composited frame is exactly one screen draw
   plus one webcam draw.
+- **`craft-separate-tracks-recording`** — the same take with the webcam on *and* the opt-in
+  "Record webcam as a separate track" toggle clicked (ESCSUITE-14), which keeps
+  `WebCodecsRecorder` but runs **two** `VideoEncoder`s on one clock into two Mediabunny
+  outputs, with the `Compositor` drawing the preview only. `framesEncoded` is both
+  pipelines' frames and `framesEncodedPerEncoder` splits them — attributed by encoder
+  **instance identity** (a `WeakMap` keyed on the encoder, numbered in first-encode order),
+  because both synthetic devices are 1280x720 and a frame's `codedWidth` cannot say which
+  pipeline it came from; the screen pipeline is built and started first, so index 0 is the
+  screen. Reported as `screenFramesEncoded` / `webcamFramesEncoded` beside the shared
+  metrics, and it is the only arm that reports a real encode rate *and* a real
+  `compositedFps`. First numbers in
+  [docs/performance/2026-09-17-craft-baseline.md](docs/performance/2026-09-17-craft-baseline.md).
 - **`craft-mp4-conversion`** — one 6 s take converted to MP4 in the page by `convertToMP4`,
   driven through the recording row's own button: wall time, frames encoded, renderer task
   per frame, encoder queue high-water, heap delta and the MP4's size. The conversion is
@@ -287,13 +316,15 @@ There is no app code for the benchmarks' sake in either app:
   `fixtures/headless/project.json`, Chromium launch included.
 
 The ESCAPECRAFT benchmarks assert nothing about speed either; their only `expect`s are the
-six tripwires saying the benchmark measured the wrong thing — a take that stopped
+ten tripwires saying the benchmark measured the wrong thing — a take that stopped
 mid-window; a "WebCodecs" take that encoded nothing, or that drew video into a canvas at all
 (which would mean `WebCodecsRecorder` had taken its `startVideoElementCapture` fallback, a
 different pipeline under the same name); a PiP take that composited nothing, or whose
 `drawImage` count came out odd (which would mean a capture track was not ready for some
-frames, so the two-draws-per-composited-frame divisor is wrong); and a conversion that
-encoded no frames.
+frames, so the two-draws-per-composited-frame divisor is wrong); a separate-tracks take that
+did not run exactly two encoders, or one of whose two encoded nothing, plus the same two
+compositor checks now that it is drawing the preview; and a conversion that encoded no
+frames.
 
 `PERF_PROJECT_RESOLUTION=WxH` (e.g. `1920x1080`, `3840x2160`) overrides the preview scene's
 project resolution for `preview-playback` only — the export benchmarks always render 720p
@@ -404,14 +435,23 @@ functions each up a fraction, and no floor. `@escapesuite/artist` was re-measure
 after the resolution-change confirm adopted `useDialogBehaviour` and `VideoUploader`'s duplicate
 project-load dialog was deleted: statements and branches up a few hundredths (the deleted
 duplication took uncovered branches with it), lines down a hundredth, functions unchanged, and no
-floor crossed either way.
+floor crossed either way. It was re-measured once more 2026-09-24, at the end of ESCSUITE-14
+slice 1 (the webcam recorded as its own track): statements up a hundredth, branches and
+functions down a few hundredths — the separate-tracks work enlarges every denominator, and the
+second recording pipeline's defensive arms are the shape that costs branches — with **no floor
+crossed**, so craft's floors stay 100 / 99 / 96 / 99. `@escapesuite/shared` was re-measured
+the same day for the five optional `SourceVideo` fields and came back unchanged, the change
+being types alone. Craft was re-measured once more 2026-09-25, when the final review's two
+fixes landed (the controller reporting a companion lost inside the recorder, and
+`initializeCompanion` warning instead of failing the take): lines still exactly 100.00,
+branches up a hundredth to 96.81, statements and functions unchanged, and again no floor.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.32 | 96.85 | 99.73 |
+| `@escapesuite/craft` | 100.00 | 99.33 | 96.81 | 99.51 |
 | `@escapesuite/artist` | 99.37 | 98.70 | 93.38 | 98.94 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
@@ -460,9 +500,10 @@ never above what the suite actually achieves:
 
 - WebCodecs API (ESCAPEARTIST exports) only works in Chrome/Edge
 - MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
-  end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; PiP takes, audio-only
-  takes and any browser without WebCodecs all reach that path, but a PiP take is the only one the
-  specs can drive in headless Chromium)
+  end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; composited PiP takes,
+  audio-only takes and any browser without WebCodecs all reach that path, but a composited PiP
+  take is the only one the specs can drive in headless Chromium. A separate-tracks PiP take is
+  recorded by `WebCodecsRecorder` and needs no repair)
 - AudioContext needs `resume()` call due to Chrome autoplay policy
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
 

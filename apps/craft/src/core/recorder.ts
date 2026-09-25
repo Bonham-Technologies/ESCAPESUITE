@@ -1,13 +1,18 @@
 // Core recording engine using MediaRecorder API
 
 import { getSupportedMimeType, stopStream } from './permissions';
-import type { RecordingConfig, AudioLevels } from '../store/types';
+import type { AudioLevels, RecorderStopCallback, RecordingConfig } from '../store/types';
 
 export interface RecorderCallbacks {
   onStart?: () => void;
   onPause?: () => void;
   onResume?: () => void;
-  onStop?: (blob: Blob) => void;
+  /**
+   * The finished take. Shared with `WebCodecsRecorder` so one controller
+   * callback is assignable to either recorder; MediaRecorder never produces a
+   * companion, so this class always calls it with the blob alone.
+   */
+  onStop?: RecorderStopCallback;
   onError?: (error: Error) => void;
   onAudioLevels?: (levels: AudioLevels) => void;
 }

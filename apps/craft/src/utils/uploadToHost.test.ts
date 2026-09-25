@@ -95,6 +95,27 @@ describe('uploadToHost', () => {
     warn.mockRestore();
   });
 
+  it('names the part when the row is half of a take', async () => {
+    // Slice 1 keeps UPLOAD_RECORDING per row: each row posts its own bytes, and
+    // the two new fields say which half the host is being handed. Slice 4 adds
+    // `payload.parts` and the adoption note for hosts that want the whole take.
+    await uploadToHost('part-2', 'Standup Demo — webcam', { role: 'webcam', takeId: 'take-1' });
+
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        type: 'UPLOAD_RECORDING',
+        payload: {
+          id: 'part-2',
+          name: 'Standup Demo — webcam',
+          blob,
+          role: 'webcam',
+          takeId: 'take-1',
+        },
+      },
+      '*'
+    );
+  });
+
   it('reports the recording as missing, and posts nothing, when storage has no blob', async () => {
     getVideoBlobMock.mockResolvedValue(undefined);
 

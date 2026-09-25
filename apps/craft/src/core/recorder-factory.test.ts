@@ -32,6 +32,9 @@ vi.stubGlobal('VideoEncoder', mockVideoEncoder)
 vi.stubGlobal('AudioEncoder', mockAudioEncoder)
 vi.stubGlobal('VideoFrame', mockVideoFrame)
 vi.stubGlobal('AudioData', mockAudioData)
+// A separate-tracks take needs the track processor as well as WebCodecs — the
+// webcam pipeline reads frames from one and has no <video> fallback.
+vi.stubGlobal('MediaStreamTrackProcessor', class MediaStreamTrackProcessorStub {})
 
 // Mock webm-duration-fix for Recorder
 vi.mock('webm-duration-fix', () => ({
@@ -84,6 +87,19 @@ describe('recorder-factory', () => {
     it('should return false for an audio-only take, even with WebCodecs present', () => {
       expect(canUseWebCodecsRecorder(false, false)).toBe(false)
     })
+
+    it('lets a PiP take reach WebCodecs when it is recording separate tracks', () => {
+      // The compositor's hidden <video> elements are what break WebCodecs frame
+      // capture, and a separate-tracks take does not capture through it: the
+      // recorder reads the raw screen and webcam tracks, and the compositor
+      // only draws the preview.
+      expect(canUseWebCodecsRecorder(true, true, true)).toBe(true)
+      expect(getRecorderType(true, true, true)).toBe('webcodecs')
+    })
+
+    it('still refuses an audio-only take that asks for separate tracks', () => {
+      expect(canUseWebCodecsRecorder(false, false, true)).toBe(false)
+    })
   })
 
   describe('getRecorderType', () => {
@@ -131,6 +147,42 @@ describe('recorder-factory', () => {
       expect(recorder).toBeInstanceOf(Recorder)
       recorder.dispose()
     })
+
+    it('should create WebCodecsRecorder for a separate-tracks PiP take', () => {
+      const recorder = createRecorder(callbacks, true, true, true)
+      expect(recorder).toBeInstanceOf(WebCodecsRecorder)
+      recorder.dispose()
+    })
+  })
+})
+
+describe('recorder-factory without MediaStreamTrackProcessor', () => {
+  // The real gate, asked of this module rather than of the factory double that
+  // the controller suite mocks: a browser can have WebCodecs and still not be
+  // able to read a second pipeline, and only `canRecordSeparateTracks()` knows
+  // it. Without a test here, the double's hand-copied rule could drift from
+  // canUseWebCodecsRecorder and the controller suite would stay green.
+  const g = globalThis as { MediaStreamTrackProcessor?: unknown }
+  const original = g.MediaStreamTrackProcessor
+
+  beforeEach(() => {
+    delete g.MediaStreamTrackProcessor
+  })
+
+  afterEach(() => {
+    // Put the key back as it was. Assigning `undefined` would leave the key
+    // present, and `'MediaStreamTrackProcessor' in globalThis` — which is what
+    // canRecordSeparateTracks() asks — would then answer true.
+    if (original === undefined) delete g.MediaStreamTrackProcessor
+    else g.MediaStreamTrackProcessor = original
+  })
+
+  it('refuses separate tracks when WebCodecs is there but the track processor is not', () => {
+    // WebCodecs itself is still present, so a single-source take is unaffected:
+    // the refusal below is the track processor's absence and nothing else.
+    expect(canUseWebCodecsRecorder(false, true)).toBe(true)
+    expect(canUseWebCodecsRecorder(true, true, true)).toBe(false)
+    expect(getRecorderType(true, true, true)).toBe('mediarecorder')
   })
 })
 

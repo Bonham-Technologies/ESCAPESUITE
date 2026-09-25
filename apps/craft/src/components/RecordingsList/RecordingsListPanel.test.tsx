@@ -34,7 +34,7 @@ vi.mock('../../core/converter', async () => (await import('../../test/appDoubles
 const uploadToHostMock = vi.mocked(uploadToHost)
 const { convertToMP4, convertToM4A } = converterModule
 
-const recording: Recording = {
+const baseRecording: Recording = {
   id: 'r7',
   name: 'Take Seven',
   duration: 5,
@@ -45,10 +45,10 @@ const recording: Recording = {
   hasAudio: true,
 }
 
-function renderPanel() {
+function renderPanel(recordings: Recording[] = [baseRecording]) {
   return render(
     <RecordingsListPanel
-      recordings={[recording]}
+      recordings={recordings}
       onPlay={vi.fn()}
       onDownload={vi.fn()}
       onSendToEditor={vi.fn()}
@@ -196,5 +196,19 @@ describe('RecordingsListPanel upload to host', () => {
     await user.click(screen.getByRole('button', { name: 'Upload Take Seven to host' }))
 
     expect(useRecorderStore.getState().notice).toBe(UPLOAD_UNAVAILABLE)
+  })
+
+  it('hands the host the part it clicked, named', async () => {
+    const user = userEvent.setup()
+    isEmbedded.mockReturnValue(true)
+    const companion = { ...baseRecording, id: 'part-2', name: 'Take — webcam', takeId: 'take-1', role: 'webcam' as const }
+    renderPanel([{ ...baseRecording, id: 'take-1', takeId: 'take-1', role: 'screen' as const }, companion])
+
+    await user.click(screen.getByRole('button', { name: 'Upload Take — webcam to host' }))
+
+    expect(uploadToHostMock).toHaveBeenCalledWith('part-2', 'Take — webcam', {
+      role: 'webcam',
+      takeId: 'take-1',
+    })
   })
 })

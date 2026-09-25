@@ -6,13 +6,13 @@
 // transitions) so a consumer such as App.tsx can be driven through a whole
 // recording without any real media, while every call it made stays inspectable.
 import { vi } from 'vitest'
-import type { RecordingConfig } from '../../store/types'
+import type { CompanionPart, RecordingConfig } from '../../store/types'
 
 export interface RecorderCallbacksLike {
   onStart?: () => void
   onPause?: () => void
   onResume?: () => void
-  onStop?: (blob: Blob) => void
+  onStop?: (blob: Blob, companion?: CompanionPart | null) => void
   onError?: (error: Error) => void
   onAudioLevels?: (levels: { microphone: number; system: number }) => void
 }
@@ -29,6 +29,8 @@ export interface RecorderDouble {
   readonly isPiP: boolean
   /** Whether the take had a video source at all (false = audio-only). */
   readonly hasVideoSource: boolean
+  /** Whether the take records the webcam as its own file. */
+  readonly separateTracks: boolean
   /** Arguments of every initialize() call, oldest first. */
   readonly initializeCalls: InitializeCall[]
   readonly initialize: ReturnType<typeof vi.fn>
@@ -42,6 +44,8 @@ export interface RecorderDouble {
   isPaused(): boolean
   /** Blob handed to onStop. */
   stopBlob: Blob
+  /** The companion handed to onStop, or null for a single-file take. */
+  companionPart: CompanionPart | null
   /** What getDuration() reports. */
   duration: number
   /** When set, the next initialize() rejects with it. */
@@ -55,7 +59,8 @@ export interface RecorderDouble {
 function createRecorderDouble(
   callbacks: RecorderCallbacksLike,
   isPiP: boolean,
-  hasVideoSource: boolean
+  hasVideoSource: boolean,
+  separateTracks: boolean
 ): RecorderDouble {
   let recording = false
   let paused = false
@@ -64,8 +69,10 @@ function createRecorderDouble(
     callbacks,
     isPiP,
     hasVideoSource,
+    separateTracks,
     initializeCalls: [],
     stopBlob: new Blob(['recorded-bytes'], { type: 'video/webm' }),
+    companionPart: null,
     duration: 0,
     initializeError: null,
 
@@ -104,7 +111,7 @@ function createRecorderDouble(
       if (!recording) return
       recording = false
       paused = false
-      callbacks.onStop?.(double.stopBlob)
+      callbacks.onStop?.(double.stopBlob, double.companionPart)
     }),
 
     dispose: vi.fn(() => {
@@ -138,6 +145,16 @@ export interface RecorderFactoryDouble {
   last(): RecorderDouble
   /** What getRecorderType() reports for a take that can use WebCodecs. */
   recorderType: 'webcodecs' | 'mediarecorder'
+  /**
+   * Whether the browser can serve two video pipelines at once.
+   *
+   * The real gate is `canRecordSeparateTracks()` — WebCodecs *plus*
+   * `MediaStreamTrackProcessor` — which is a second, stricter question than
+   * `recorderType`: Chrome answers yes to both, and a browser with WebCodecs
+   * but no track processor answers yes to the first and no to this one. It
+   * defaults to false, as jsdom's own answer is.
+   */
+  canRecordSeparateTracks: boolean
   /** When set, the next recorder handed out rejects its first initialize(). */
   nextInitializeError: Error | null
   readonly createRecorder: ReturnType<typeof vi.fn>
@@ -156,6 +173,7 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
   const factory: RecorderFactoryDouble = {
     recorders,
     recorderType: 'mediarecorder',
+    canRecordSeparateTracks: false,
     nextInitializeError: null,
 
     last() {
@@ -167,9 +185,10 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
     createRecorder: vi.fn((
       callbacks: RecorderCallbacksLike,
       isPiP: boolean = false,
-      hasVideoSource: boolean = true
+      hasVideoSource: boolean = true,
+      separateTracks: boolean = false
     ) => {
-      const recorder = createRecorderDouble(callbacks, isPiP, hasVideoSource)
+      const recorder = createRecorderDouble(callbacks, isPiP, hasVideoSource, separateTracks)
       recorder.initializeError = factory.nextInitializeError
       factory.nextInitializeError = null
       recorders.push(recorder)
@@ -180,15 +199,32 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
     // that an audio-only or PiP take is labelled 'mediarecorder' — the label
     // useRecordingSave keys the fixWebMMetadata repair off — even on a machine
     // (or in a test) where WebCodecs is otherwise available.
-    getRecorderType: vi.fn((isPiP: boolean = false, hasVideoSource: boolean = true) =>
-      isPiP || !hasVideoSource ? 'mediarecorder' : factory.recorderType
+    getRecorderType: vi.fn((
+      isPiP: boolean = false,
+      hasVideoSource: boolean = true,
+      separateTracks: boolean = false
+    ) =>
+      !hasVideoSource || (isPiP && !separateTracks) ? 'mediarecorder' : factory.recorderType
     ),
 
-    canUseWebCodecsRecorder: vi.fn(() => factory.recorderType === 'webcodecs'),
+    // The real rule, with the two capability questions behind the two knobs: a
+    // separate-tracks take asks canRecordSeparateTracks(), everything else asks
+    // isWebCodecsRecordingSupported(). Arguments omitted (the single-source
+    // default) answer off `recorderType`, exactly as before.
+    canUseWebCodecsRecorder: vi.fn((
+      isPiP: boolean = false,
+      hasVideoSource: boolean = true,
+      separateTracks: boolean = false
+    ) => {
+      if (!hasVideoSource) return false
+      if (isPiP && !separateTracks) return false
+      return separateTracks ? factory.canRecordSeparateTracks : factory.recorderType === 'webcodecs'
+    }),
 
     reset() {
       recorders.length = 0
       factory.recorderType = 'mediarecorder'
+      factory.canRecordSeparateTracks = false
       factory.nextInitializeError = null
       factory.createRecorder.mockClear()
       factory.getRecorderType.mockClear()

@@ -15,6 +15,7 @@ describe('buildSourceVideo', () => {
       width: 1280,
       height: 720,
       hasAudio: true,
+      hasWebcam: false,
     })
 
     expect(sourceVideo).toEqual({
@@ -30,6 +31,7 @@ describe('buildSourceVideo', () => {
       source: 'recording',
       recordedAt: now,
       hasAudio: true,
+      hasWebcam: false,
     })
   })
 
@@ -45,6 +47,7 @@ describe('buildSourceVideo', () => {
       width: 1,
       height: 1,
       hasAudio: false,
+      hasWebcam: false,
     })
 
     expect(sourceVideo.hasAudio).toBe(false)
@@ -59,6 +62,7 @@ describe('buildSourceVideo', () => {
       width: 1,
       height: 1,
       hasAudio: true,
+      hasWebcam: false,
     })
 
     expect(sourceVideo.duration).toBe(0)
@@ -119,5 +123,104 @@ describe('buildRecordingEntry', () => {
     })
 
     expect(entry.hasAudio).toBe(false)
+  })
+})
+
+describe('buildSourceVideo for a separate-tracks take', () => {
+  const placement = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
+
+  it('writes takeId, role, startOffset and the overlay placement on the primary', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'take-1',
+      now: 0,
+      blob: new Blob(['screen'], { type: 'video/webm' }),
+      duration: 6,
+      width: 1280,
+      height: 720,
+      hasAudio: true,
+      hasWebcam: true,
+      takeId: 'take-1',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: placement,
+    })
+
+    // The take is named by its primary, so the primary's takeId is its own id.
+    expect(sourceVideo).toMatchObject({
+      takeId: 'take-1',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: placement,
+      hasWebcam: true,
+    })
+  })
+
+  it('names the webcam half after its take and carries no overlay placement', () => {
+    const now = 1_700_000_000_000
+    const sourceVideo = buildSourceVideo({
+      id: 'part-2',
+      now,
+      blob: new Blob(['webcam'], { type: 'video/webm' }),
+      duration: 6,
+      width: 640,
+      height: 480,
+      // Slice 1: the mixed audio stays on the primary, so the webcam half is
+      // silent and must be stored as such — its M4A button is never offered,
+      // and ARTIST will read this back in slice 2.
+      hasAudio: false,
+      hasWebcam: true,
+      takeId: 'take-1',
+      role: 'webcam',
+      startOffset: 0,
+    })
+
+    expect(sourceVideo.name).toBe(`Recording ${new Date(now).toLocaleString()} — webcam`)
+    expect(sourceVideo.hasAudio).toBe(false)
+    expect('overlayPlacement' in sourceVideo).toBe(false)
+  })
+
+  it('leaves a plain take with no companion fields at all', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'r',
+      now: 0,
+      blob: new Blob(),
+      duration: 1,
+      width: 1,
+      height: 1,
+      hasAudio: true,
+      hasWebcam: false,
+    })
+
+    // Absent keys rather than `undefined` ones: a reader (ARTIST, slice 2) must
+    // not have to tell a real absence from a written undefined, and this is
+    // what keeps a composited take's stored record what it has always been.
+    expect('takeId' in sourceVideo).toBe(false)
+    expect('role' in sourceVideo).toBe(false)
+    expect('startOffset' in sourceVideo).toBe(false)
+    expect('overlayPlacement' in sourceVideo).toBe(false)
+    expect(sourceVideo.hasWebcam).toBe(false)
+  })
+})
+
+describe('buildRecordingEntry for a separate-tracks take', () => {
+  it('carries takeId and role from the stored record onto the list entry', () => {
+    const entry = buildRecordingEntry({
+      sourceVideo: {
+        id: 'part-2',
+        name: 'Recording 1/1/2026 — webcam',
+        duration: 42,
+        takeId: 'take-1',
+        role: 'webcam',
+      },
+      now: 123,
+      size: 456,
+      thumbnailUrl: 'blob:thumb',
+      config: { webcamEnabled: true },
+      hasAudio: false,
+    })
+
+    // The library groups and labels from the list entry, so both facts have to
+    // survive the trip out of storage and into memory.
+    expect(entry).toMatchObject({ takeId: 'take-1', role: 'webcam' })
   })
 })

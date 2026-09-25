@@ -310,6 +310,50 @@ describe('recorderStore', () => {
       expect(recordings[0].hasAudio).toBe(true)
     })
 
+    // ESCSUITE-14. Two stored records, one take: the library has to rebuild the
+    // grouping the save path wrote, and `hasWebcam` — a hard-coded `false` with
+    // a TODO beside it until now — has to come back from the metadata.
+    it('rebuilds a take from its parts and reads hasWebcam back', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        {
+          id: 'webcam-part',
+          name: 'Recording — webcam',
+          duration: 6,
+          size: 200,
+          recordedAt: 2001,
+          takeId: 'screen-part',
+          role: 'webcam',
+          hasAudio: false,
+          hasWebcam: true,
+        } as SourceVideo,
+        { id: 'plain', name: 'Plain', duration: 3, size: 50, recordedAt: 5000 } as SourceVideo,
+        {
+          id: 'screen-part',
+          name: 'Recording',
+          duration: 6,
+          size: 900,
+          recordedAt: 2000,
+          takeId: 'screen-part',
+          role: 'screen',
+          hasAudio: true,
+          hasWebcam: true,
+          overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+        } as SourceVideo,
+      ])
+      vi.mocked(getThumbnail).mockResolvedValue(undefined)
+
+      await useRecorderStore.getState().loadRecordings()
+
+      const { recordings } = useRecorderStore.getState()
+      expect(recordings.map(r => r.id)).toEqual(['plain', 'screen-part', 'webcam-part'])
+      expect(recordings.map(r => r.role)).toEqual([undefined, 'screen', 'webcam'])
+      expect(recordings[1].takeId).toBe('screen-part')
+      // The `hasWebcam: false // TODO` this replaces: a PiP take came back
+      // claiming no camera however it was recorded.
+      expect(recordings[1].hasWebcam).toBe(true)
+      expect(recordings[0].hasWebcam).toBe(false)
+    })
+
     // ESCSUITE-60. `hasAudio` gates the M4A button. It is written into the
     // stored metadata at save time, so a reloaded screen-only take must come
     // back silent rather than as the hard-coded `true` this used to return —
@@ -384,6 +428,31 @@ describe('recorderStore', () => {
       await useRecorderStore.getState().refreshStorageSpace()
 
       expect(useRecorderStore.getState().hasStorageSpace).toBe(true)
+    })
+
+    // ESCSUITE-14. Two encoders write two files, so the separate-tracks toggle
+    // needs its own headroom answer — measured here, off the click path, beside
+    // the one the record button reads.
+    it('measures the headroom for two tracks as well as for one', async () => {
+      vi.mocked(hasSpaceForRecording).mockImplementation(async (size: number) => size < 80 * 1024 * 1024)
+
+      await useRecorderStore.getState().refreshStorageSpace()
+
+      const { hasStorageSpace, hasSeparateTracksSpace } = useRecorderStore.getState()
+      expect(hasStorageSpace).toBe(true)
+      expect(hasSeparateTracksSpace).toBe(false)
+      expect(hasSpaceForRecording).toHaveBeenCalledWith(50 * 1024 * 1024)
+      expect(hasSpaceForRecording).toHaveBeenCalledWith(100 * 1024 * 1024)
+    })
+
+    it('treats an estimate that threw as room for both', async () => {
+      vi.mocked(hasSpaceForRecording).mockRejectedValue(new Error('no estimate'))
+
+      await useRecorderStore.getState().refreshStorageSpace()
+
+      // Unknown is not full — the same direction this check errs in everywhere.
+      expect(useRecorderStore.getState().hasStorageSpace).toBe(true)
+      expect(useRecorderStore.getState().hasSeparateTracksSpace).toBe(true)
     })
   })
 })
