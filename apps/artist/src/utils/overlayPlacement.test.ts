@@ -11,14 +11,19 @@
 //   y            = padding                              (top corners)
 //                = canvasHeight - webcamHeight - padding (bottom corners)
 //
-// with `padding` 20 on a canvas capped at 1280 wide. This helper has to put the
-// clip in the same place, so every case below reconstructs the drawn rectangle
-// from the transform and compares it with those literals. ARTIST cannot import
-// craft's compositor (different app), so the numbers are written out here with
-// the formula that produced them; slice 4 extracts a shared `drawOverlay` and
-// this is the test that will be pointed at it.
+// with `padding` 20 on a canvas it caps only *above* 1280 wide, so a narrower
+// share keeps the flat 20 (craft's `overlayPaddingFor`). This helper has to put
+// the clip in the same place, so every case below reconstructs the drawn
+// rectangle from the transform and compares it with those literals. ARTIST
+// cannot import craft's compositor (different app), so the numbers are written
+// out here with the formula that produced them; slice 4 extracts a shared
+// `drawOverlay` and this is the test that will be pointed at it.
 import { describe, it, expect } from 'vitest'
-import { overlayPlacementToTransform, OVERLAY_MARGIN_FRACTION } from './overlayPlacement'
+import {
+  overlayMarginFor,
+  overlayPlacementToTransform,
+  OVERLAY_MARGIN_FRACTION,
+} from './overlayPlacement'
 import { DEFAULT_TRANSFORM } from '../store/types'
 import type { OverlayPlacement } from '@escapesuite/shared/types'
 
@@ -147,6 +152,43 @@ describe('overlayPlacementToTransform', () => {
     expect(transform.x).toBeCloseTo(1452 / 1920, 10)
     expect(transform.y).toBeCloseTo(808 / 1080, 10)
     expect(transform.scaleX).toBeCloseTo(0.2, 10)
+  })
+
+  it('insets a frame narrower than the compositor cap by the flat 20px it was recorded with', () => {
+    // The compositor caps its canvas *above* 1280 and never scales a narrower
+    // share up, so a 640-wide share is previewed at 640 with a flat 20px
+    // padding — `overlayPaddingFor` (apps/craft/src/core/overlayGeometry.ts) is
+    // 20 x 640 / min(640, 1280) = 20, and the composited MP4 draws it there
+    // too. Reading the inset as 20/1280 of the frame put the camera 10px from
+    // the edge instead: half as far as both of the things the user saw.
+    const project = { width: 640, height: 360 }
+    const camera = { width: 640, height: 360 }
+
+    const transform = overlayPlacementToTransform(placement('bottom-right'), project, camera)
+
+    const rect = drawnRect(transform, project, camera)
+    expect(rect.width).toBeCloseTo(128, 6)
+    expect(rect.height).toBeCloseTo(72, 6)
+    expect(rect.left).toBeCloseTo(640 - 128 - 20, 6)
+    expect(rect.top).toBeCloseTo(360 - 72 - 20, 6)
+  })
+
+  // The same arithmetic ESCAPECRAFT's `overlayPaddingFor` does, at the widths
+  // that separate the two arms of it: below and at the cap the preview was not
+  // capped at all, so the inset is the 20px the user saw; above it the padding
+  // is that same fraction of a wider frame.
+  it.each([
+    // A frame with no width has no corners. Unreachable here — the frame
+    // defaults to the project resolution and `placeTakeOnTimeline` only passes
+    // one whose width is positive — but answered the way CRAFT answers it
+    // rather than with NaN.
+    [0, 20],
+    [640, 20],
+    [1280, 20],
+    [1920, 30],
+    [3840, 60],
+  ])('insets a %ipx-wide frame by %ipx, exactly as the compositor did', (frameWidth, expected) => {
+    expect(overlayMarginFor(frameWidth)).toBe(expected)
   })
 
   it('leaves rotation, opacity and the aspect lock at their defaults', () => {

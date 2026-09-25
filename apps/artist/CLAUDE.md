@@ -192,10 +192,16 @@ nothing.
 the import looks like what the user saw while recording and stays editable — which is the
 whole point of the separate track. `utils/overlayPlacement.ts` owns the conversion
 (`overlayPlacementToTransform`) and is pinned against `Compositor.drawWebcamOverlay`'s own
-numbers, with two deliberate differences. The corner inset is `OVERLAY_MARGIN_FRACTION`,
-`20 / 1280` of the **frame width**, not a flat 20 px: the compositor pads by 20 px on a canvas
-capped at 1280 px wide, so the pixel count would put the overlay four times closer to the edge
-on a 4K project than it looked. And the aspect is the **camera's**, not the compositor's
+numbers, with two deliberate differences. The corner inset is `overlayMarginFor(frame.width)`,
+which mirrors ESCAPECRAFT's `overlayPaddingFor` (`apps/craft/src/core/overlayGeometry.ts`)
+exactly: `DEFAULT_OVERLAY_PADDING` (20 px) below and at `COMPOSITOR_MAX_WIDTH` (1280), and
+`frame.width * OVERLAY_MARGIN_FRACTION` (`20 / 1280` of the frame) above it. The compositor caps
+its preview canvas **only above 1280** — it never scales a narrower share up — so both halves are
+the 20 px the user actually saw: a flat 20 px on a 4K project would put the overlay four times
+closer to the edge than it looked, and 20/1280 of a 640-wide share put it 10 px from the edge,
+half as far as the preview and the composited MP4 both did (fixed in ESCSUITE-69; the sub-1280
+case is pinned in `utils/overlayPlacement.test.ts` against craft's own arithmetic). And the
+aspect is the **camera's**, not the compositor's
 hard-coded 16:9 box, which stretches a 4:3 picture — the width, which is the size the user
 chose, is the compositor's exactly. `x`/`y` are the clip's centre as a fraction of the canvas
 and the scale is the drawn width over the part's native width, because that is how

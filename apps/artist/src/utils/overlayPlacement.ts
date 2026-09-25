@@ -13,14 +13,51 @@
 import { DEFAULT_TRANSFORM, type ClipTransform, type OverlayPlacement } from '../store/types';
 
 /**
- * The compositor's corner inset, as a fraction of the frame's width.
+ * The widest the compositor lets its preview canvas be, in pixels.
  *
- * `Compositor` pads by a flat 20 px on a canvas capped at 1280 px wide
- * (`apps/craft/src/core/compositor.ts`), so what the user saw is 20/1280 of the
- * frame. Carrying the *pixel* count across would put the overlay four times
- * closer to the edge on a 4K project than it looked while recording.
+ * ESCAPECRAFT's `COMPOSITOR_MAX_WIDTH` (`apps/craft/src/core/overlayGeometry.ts`),
+ * written out here because ARTIST cannot import craft's modules.
  */
-export const OVERLAY_MARGIN_FRACTION = 20 / 1280;
+export const COMPOSITOR_MAX_WIDTH = 1280;
+
+/** The inset a take is recorded with: craft's `DEFAULT_OVERLAY_PADDING`. */
+export const DEFAULT_OVERLAY_PADDING = 20;
+
+/**
+ * The compositor's corner inset as a fraction of the frame's width, for a frame
+ * at least `COMPOSITOR_MAX_WIDTH` wide.
+ *
+ * `Compositor` pads by a flat `DEFAULT_OVERLAY_PADDING` on a canvas it caps
+ * **above** `COMPOSITOR_MAX_WIDTH` (`apps/craft/src/core/compositor.ts`), so on
+ * a capped preview what the user saw is 20/1280 of the frame. Carrying the
+ * *pixel* count across would put the overlay four times closer to the edge on a
+ * 4K project than it looked while recording. Below the cap the fraction is the
+ * wrong way to read it — see `overlayMarginFor`.
+ */
+export const OVERLAY_MARGIN_FRACTION = DEFAULT_OVERLAY_PADDING / COMPOSITOR_MAX_WIDTH;
+
+/**
+ * The inset that reproduces the recorded 20 px inset in a frame this wide.
+ *
+ * The compositor caps its canvas only **above** `COMPOSITOR_MAX_WIDTH`: it never
+ * scales a narrower share up, so a 640-wide share was previewed at 640 with a
+ * flat 20 px, and the composited MP4 draws it there too
+ * (`overlayPaddingFor` in `apps/craft/src/core/overlayGeometry.ts`, which this
+ * mirrors — `20 x frameWidth / min(frameWidth, 1280)`, written the other way
+ * round). Reading the inset as a fraction at every width was the bug: it put
+ * the camera 10 px from the edge on a 640-wide take, half as far as both the
+ * preview and the downloaded file put it.
+ *
+ * A frame with no width has no corners, and answering the padding keeps this
+ * total rather than returning NaN — the same answer craft's guard gives. It is
+ * unreachable from here: the frame defaults to the project resolution and
+ * `placeTakeOnTimeline` only passes one whose width is positive.
+ */
+export function overlayMarginFor(frameWidth: number): number {
+  return frameWidth <= COMPOSITOR_MAX_WIDTH
+    ? DEFAULT_OVERLAY_PADDING
+    : frameWidth * OVERLAY_MARGIN_FRACTION;
+}
 
 /**
  * The aspect used when a part's stored dimensions are unusable — the
@@ -86,7 +123,7 @@ export function overlayPlacementToTransform(
   }
 ): ClipTransform {
   const overlayWidth = frame.width * placement.size;
-  const margin = frame.width * OVERLAY_MARGIN_FRACTION;
+  const margin = overlayMarginFor(frame.width);
 
   // A part with no dimensions was not written by ESCAPECRAFT. It still belongs
   // in its corner: the box falls back to the compositor's 16:9 and the clip to
