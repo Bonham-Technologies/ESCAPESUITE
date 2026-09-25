@@ -109,6 +109,23 @@ export function useHostIntegration({
     // can be several parts since ESCSUITE-14, so there can be several.
     const thumbnailObjectUrls: string[] = [];
 
+    // Set by the cleanup, read by the import once its storage reads land. The
+    // import is far longer than the effect it belongs to can be relied on to
+    // outlive — a metadata scan plus a getVideo and a getThumbnail per part —
+    // and two things go wrong without it:
+    //
+    //   * StrictMode (every dev build: `bootstrapApp` wraps App in it) mounts
+    //     the effect, cleans it up and mounts it again, so two imports run at
+    //     once. The library guard below cannot separate them, because the first
+    //     is still awaiting storage when the second one checks; only the run
+    //     whose effect is gone knowing to stand down keeps the take from being
+    //     placed twice. `addSourceVideo` is idempotent by id, so the library
+    //     survived this before there was anything to place;
+    //   * an unmount mid-import would otherwise have the cleanup revoke an
+    //     array that is still empty, leaving the URLs pushed after it leaked,
+    //     and land a `placeTakeOnTimeline` in a project the editor has left.
+    let cancelled = false;
+
     // Load videos from URL parameters
     if (videos.length > 0) {
       videos.forEach(async (url) => {
@@ -128,6 +145,9 @@ export function useHostIntegration({
       (async () => {
         try {
           const videoData = await getVideo(loadVideoId);
+          // Nothing has been created or written yet, so leaving here costs
+          // nothing and saves the whole import.
+          if (cancelled) return;
           if (videoData) {
             // Check if video is already loaded
             const existingVideos = useEditorStore.getState().sourceVideos;
@@ -138,6 +158,13 @@ export function useHostIntegration({
               // timeline, in one undo step — for every take, not only one
               // recorded as separate tracks (decision 7).
               const take = await importTake(videoData, addSourceVideo);
+              if (cancelled) {
+                // This effect is gone: its parts are in the library (harmless,
+                // and the run that replaced it adds the same ids), but the
+                // timeline and the toast belong to whoever is still mounted.
+                for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
+                return;
+              }
               thumbnailObjectUrls.push(...take.thumbnailUrls);
               useEditorStore.getState().placeTakeOnTimeline(take.clipParts);
 
@@ -176,6 +203,7 @@ export function useHostIntegration({
     }
 
     return () => {
+      cancelled = true;
       cleanup();
       for (const url of thumbnailObjectUrls) URL.revokeObjectURL(url);
     };

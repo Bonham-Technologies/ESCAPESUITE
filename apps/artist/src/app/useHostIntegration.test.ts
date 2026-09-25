@@ -9,6 +9,7 @@
 // Messages are driven straight through the handler the hook gave
 // `initIntegration`, which is exactly what the host's `postMessage` reaches.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { StrictMode } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { useHostIntegration, type HostIntegrationDeps } from './useHostIntegration'
 import { initIntegration, loadVideoFromUrl, sendMessage } from '../utils/integration'
@@ -284,6 +285,18 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 
+  // The sibling above pins that the library is left alone; this pins the half
+  // that matters more since ESCSUITE-14 — the early return also stops a second
+  // copy of the take appearing on the timeline.
+  it('places nothing for a recording the library already holds', async () => {
+    vi.mocked(getVideo).mockResolvedValue({ metadata: { ...sampleVideo } } as never)
+
+    await mountIntegration({ loadVideoId: sampleVideo.id })
+
+    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
   it('says so when the recording is not in storage', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -428,6 +441,59 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
 
       // One per part: the URLs live as long as the library entries, so the
       // cleanup is the only place they can be handed back.
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    })
+
+    // StrictMode mounts the effect, tears it down and mounts it again, so two
+    // imports are in flight at once. The library guard cannot separate them —
+    // the first run is still awaiting storage when the second one checks — so
+    // the run whose effect was cleaned up has to bail on its own.
+    it('places the take once under StrictMode, which runs the effect twice', async () => {
+      seedTake()
+      deps = { ...deps, urlParams: { ...defaultUrlParams(), loadVideoId: 'take-1' } }
+
+      renderHook(() => useHostIntegration(deps), { wrapper: StrictMode })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const clips = useEditorStore.getState().project.timeline.clips
+      expect(clips.map((c) => c.sourceVideoId)).toEqual(['take-1', 'take-1-webcam'])
+      expect(deps.showNotification).toHaveBeenCalledTimes(1)
+    })
+
+    it('places nothing and revokes its thumbnails when the editor leaves mid-import', async () => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+      let releaseCompanion: () => void = () => {}
+      const companionArrives = new Promise<void>((resolve) => {
+        releaseCompanion = resolve
+      })
+      vi.mocked(getVideo).mockImplementation((id) =>
+        (id === 'take-1'
+          ? Promise.resolve({ blob: new Blob(['bytes'], { type: 'video/webm' }), metadata: primary })
+          : // The companion's read is still in flight when the editor goes away.
+            companionArrives.then(() => ({
+              blob: new Blob(['bytes'], { type: 'video/webm' }),
+              metadata: webcam,
+            }))) as never
+      )
+
+      const { unmount } = await mountIntegration({ loadVideoId: 'take-1' })
+      unmount()
+      await act(async () => {
+        releaseCompanion()
+        await Promise.resolve()
+      })
+
+      // A take that finished arriving after the editor left is not placed into
+      // a project the user has moved on from, and says nothing about it either.
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+      expect(deps.showNotification).not.toHaveBeenCalled()
+      // Nor does it leak: the cleanup ran before the URLs existed, so the
+      // import's own caller is the only thing that can hand them back.
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
       expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
     })
   })
