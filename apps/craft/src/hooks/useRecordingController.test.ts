@@ -1057,6 +1057,32 @@ describe('a separate-tracks take', () => {
       setNotice.mock.calls.filter(([notice]) => notice === SEPARATE_TRACK_NOT_SAVED)
     ).toHaveLength(1)
   })
+
+  it('counts the system audio the share dialog did tick, with no microphone in the take', async () => {
+    // The case that can only pass if the system term is counted: no microphone
+    // at all, so the take asks for exactly two parts — the camera and the
+    // system audio — and one delivered is one short. Drop the system term from
+    // `expectedCompanions` and this becomes 1 < 1, which says nothing.
+    harness = separateHarness({
+      countdownSeconds: 0,
+      microphoneEnabled: false,
+      systemAudioEnabled: true,
+    })
+    const setNotice = vi.fn(harness.deps.setNotice)
+    harness.deps.setNotice = setNotice
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    recorder.companionParts = [
+      { role: 'webcam', blob: new Blob(['webcam'], { type: 'video/webm' }), startOffset: 0 },
+    ]
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    expect(
+      setNotice.mock.calls.filter(([notice]) => notice === SEPARATE_TRACK_NOT_SAVED)
+    ).toHaveLength(1)
+  })
 })
 
 describe('useRecordingController teardown', () => {

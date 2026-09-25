@@ -131,8 +131,12 @@ export function useRecordingSave({
 
     // A companion take is one take in several files: the primary names it (its
     // own id is the takeId), carries the mixed audio and the overlay geometry,
-    // and the companions carry the camera. All of them are written here rather
-    // than in two passes so a half-saved take cannot reach the library.
+    // and the companions carry the camera and each audio source the take
+    // recorded. The mix staying on the primary is slice 1's rule, and it is why
+    // the `hasAudio` above is the *primary's* answer: each audio part carries
+    // its own, and the camera's part carries `false`. All of them are written
+    // here rather than in two passes so a half-saved take cannot reach the
+    // library.
     const isCompanionTake = companions != null && companions.length > 0;
     const overlayPlacement = isCompanionTake
       ? {

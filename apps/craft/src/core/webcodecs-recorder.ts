@@ -555,10 +555,23 @@ export class WebCodecsRecorder {
    * One Opus-only WebM per audio source the take is actually recording.
    *
    * The two conditions are the same two `initialize` already asked when it
-   * wired the mix — a stream with an audio track in it AND its toggle — so
-   * the set of audio companions and the mix can never disagree about what the
-   * take is recording, and neither can `useRecordingSave`'s `hasAudio`
-   * (`microphoneEnabled || (systemAudioEnabled && systemAudioShared)`).
+   * wired the mix — a stream with an audio track in it AND its toggle — so the
+   * set of audio companions and the mix can never disagree about what the take
+   * is recording. `useRecordingController`'s `expectedCompanions` asks the same
+   * pair, so the number of parts the take is counted as asking for cannot
+   * disagree with the number built here either.
+   *
+   * `useRecordingSave`'s `hasAudio` CAN disagree, and does: it is the config
+   * alone (`microphoneEnabled || (systemAudioEnabled && systemAudioShared)`),
+   * with no track in it. A take whose microphone toggle is on but whose
+   * `acquireStreams` came back with `mic: null` — a machine with no microphone,
+   * where `capabilities.microphone` is false — records no mic source, builds no
+   * mic companion, is correctly counted as asking for none, and is still stored
+   * as having audio. That predates the companions (ESCSUITE-60/62 wrote the
+   * expression); aligning its microphone half on the same "toggle AND a track"
+   * test is a follow-up for the save path, not something this code may assume
+   * has already happened.
+   *
    * Microphone before system audio, so the companion list is in role order.
    */
   private async initializeAudioCompanions(
