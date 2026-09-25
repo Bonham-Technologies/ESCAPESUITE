@@ -69,12 +69,17 @@ export async function recordPipTake(page: Page, url: string): Promise<void> {
 
   // Capability detection is async; the source toggles stay disabled until it
   // finishes and a take started before then acquires no stream.
+  //
+  // `exact` is load-bearing, and so is *not* scoping to `[class*="sourceToggle"]`.
+  // `getByRole`'s `name` is a case-insensitive substring by default, and
+  // ESCAPECRAFT's "Record webcam as a separate track" toggle (ESCSUITE-14) lives
+  // in a wrapper that reuses the same `sourceToggle` class — so a bare `Webcam`
+  // matches it too, and scope-and-`.last()` stopped addressing the webcam source
+  // the moment that toggle appeared (it is rendered only once screen and webcam
+  // are both on, which is exactly this helper's second step). The exact
+  // aria-labels ("Screen", "Webcam") are unique app-wide.
   const sourceButton = (label: string) =>
-    page
-      .locator('[class*="sourceToggle"]')
-      .filter({ hasText: label })
-      .last()
-      .getByRole('button', { name: label })
+    page.getByRole('button', { name: label, exact: true })
 
   await expect(sourceButton('Screen')).toBeEnabled({ timeout: 30_000 })
   const webcam = sourceButton('Webcam')
