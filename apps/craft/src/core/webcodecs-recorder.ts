@@ -13,6 +13,11 @@ import {
   EncodedPacket,
 } from 'mediabunny';
 import type { RecordingConfig, AudioLevels } from '../store/types';
+import { isWebCodecsRecordingSupported } from './webcodecsSupport';
+
+// Moved to `webcodecsSupport.ts` so a component can ask without importing the
+// muxer; re-exported here because this is where every caller imports it from.
+export { isWebCodecsRecordingSupported } from './webcodecsSupport';
 
 export interface WebCodecsRecorderCallbacks {
   onStart?: () => void;
@@ -21,18 +26,6 @@ export interface WebCodecsRecorderCallbacks {
   onStop?: (blob: Blob) => void;
   onError?: (error: Error) => void;
   onAudioLevels?: (levels: AudioLevels) => void;
-}
-
-/**
- * Check if WebCodecs recording is supported
- */
-export function isWebCodecsRecordingSupported(): boolean {
-  return (
-    typeof VideoEncoder !== 'undefined' &&
-    typeof VideoFrame !== 'undefined' &&
-    typeof AudioEncoder !== 'undefined' &&
-    typeof AudioContext !== 'undefined'
-  );
 }
 
 // Type for MediaStreamTrackProcessor (not yet in TypeScript lib)
@@ -66,6 +59,38 @@ interface LevelMeter {
  * `recorder.perf.test.ts` and `webcodecsRecorder.perf.test.ts`.
  */
 const AUDIO_LEVEL_INTERVAL_MS = 80;
+
+/**
+ * One encoder's presentation bookkeeping.
+ *
+ * The recording **clock** is shared — one `startTime`, one `pausedDuration`,
+ * read by `nextFrameTiming()` for every pipeline — and that shared clock is
+ * what makes a separate-tracks take's two blobs aligned by construction rather
+ * than by measurement. These two numbers are per encoder, because each encoder
+ * is fed its own monotonically increasing presentation timeline and owes its
+ * own viewer a keyframe once a second; sharing them would have two interleaved
+ * pipelines pushing each other's timestamps forward and handing the second
+ * pipeline only the keyframes the first did not claim.
+ */
+interface FrameTiming {
+  /** Microsecond timestamp of the last frame handed to this encoder; -1 before
+   *  the first, so a take that starts on the clock's own zero still stamps 0. */
+  lastFrameTimestampUs: number;
+  /** Recording-clock microsecond mark at which this encoder's next keyframe is due. */
+  nextKeyFrameUs: number;
+}
+
+function newFrameTiming(): FrameTiming {
+  return { lastFrameTimestampUs: -1, nextKeyFrameUs: 0 };
+}
+
+/** Bitrate for a video pipeline of this size. */
+function videoBitrateFor(width: number, height: number): number {
+  const pixels = width * height;
+  if (pixels >= 1920 * 1080) return 8_000_000; // 8 Mbps for 1080p+
+  if (pixels >= 1280 * 720) return 5_000_000; // 5 Mbps for 720p
+  return 2_500_000; // 2.5 Mbps for smaller
+}
 
 export class WebCodecsRecorder {
   private callbacks: WebCodecsRecorderCallbacks = {};
@@ -102,11 +127,8 @@ export class WebCodecsRecorder {
    *  one running count of a take's captured frames, for the next thing that
    *  wants recorder stats. It no longer decides timing (see nextFrameTiming). */
   private frameCount = 0;
-  /** Microsecond timestamp of the last frame handed to the encoder; -1 before
-   *  the first, so a take that starts on the clock's own zero still stamps 0. */
-  private lastFrameTimestampUs = -1;
-  /** Recording-clock microsecond mark at which the next keyframe is due. */
-  private nextKeyFrameUs = 0;
+  /** The primary (screen or webcam) pipeline's own frame bookkeeping. */
+  private screenTiming: FrameTiming = newFrameTiming();
   private audioTimestamp = 0;
 
   // Frame capture (for fallback method)
@@ -251,15 +273,10 @@ export class WebCodecsRecorder {
     this.trackEndedHandlers.set(this.videoTrack, handler);
 
     // Set up Mediabunny output
-    this.target = new BufferTarget();
-    this.output = new Output({
-      format: new WebMOutputFormat(),
-      target: this.target,
-    });
-
-    // Create video packet source (VP9)
-    this.videoSource = new EncodedVideoPacketSource('vp9');
-    this.output.addVideoTrack(this.videoSource, { frameRate: this.frameRate });
+    const primary = this.createVideoOutput();
+    this.target = primary.target;
+    this.output = primary.output;
+    this.videoSource = primary.packetSource;
 
     // Create audio packet source (Opus) if we have audio
     if (this.mixedAudioStream.getAudioTracks().length > 0) {
@@ -271,36 +288,11 @@ export class WebCodecsRecorder {
     await this.output.start();
 
     // Set up video encoder
-    this.videoEncoder = new VideoEncoder({
-      output: async (chunk, meta) => {
-        if (this.videoSource) {
-          await this.videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-        }
-      },
-      error: (e) => {
-        console.error('Video encoder error:', e);
-        this.callbacks.onError?.(new Error(`Video encoder error: ${e.message}`));
-      },
-    });
-
-    // Determine video bitrate based on resolution
-    const pixels = this.width * this.height;
-    let videoBitrate: number;
-    if (pixels >= 1920 * 1080) {
-      videoBitrate = 8_000_000; // 8 Mbps for 1080p+
-    } else if (pixels >= 1280 * 720) {
-      videoBitrate = 5_000_000; // 5 Mbps for 720p
-    } else {
-      videoBitrate = 2_500_000; // 2.5 Mbps for smaller
-    }
-
-    await this.videoEncoder.configure({
-      codec: 'vp09.00.10.08', // VP9 Profile 0
-      width: this.width,
-      height: this.height,
-      bitrate: videoBitrate,
-      framerate: this.frameRate,
-    });
+    this.videoEncoder = await this.createVideoEncoder(
+      () => this.videoSource,
+      this.width,
+      this.height
+    );
 
     // Set up audio encoder if we have audio
     if (this.audioSource) {
@@ -329,6 +321,60 @@ export class WebCodecsRecorder {
 
     // Start audio level monitoring
     this.startAudioLevelMonitoring();
+  }
+
+  /**
+   * A WebM output with one VP9 video track. The caller adds any audio track and
+   * then starts it, because the primary output mixes audio in and the webcam
+   * companion does not.
+   */
+  private createVideoOutput(): {
+    output: Output;
+    target: BufferTarget;
+    packetSource: EncodedVideoPacketSource;
+  } {
+    const target = new BufferTarget();
+    const output = new Output({ format: new WebMOutputFormat(), target });
+    const packetSource = new EncodedVideoPacketSource('vp9');
+    output.addVideoTrack(packetSource, { frameRate: this.frameRate });
+    return { output, target, packetSource };
+  }
+
+  /**
+   * A configured VP9 encoder writing into `sourceOf()`'s packet source.
+   *
+   * The source is read through a function rather than captured, because
+   * `cleanup()` nulls it: an encoder output that lands after a take has been
+   * torn down must find nothing to add to rather than write into a finalized
+   * muxer.
+   */
+  private async createVideoEncoder(
+    sourceOf: () => EncodedVideoPacketSource | null,
+    width: number,
+    height: number
+  ): Promise<VideoEncoder> {
+    const encoder = new VideoEncoder({
+      output: async (chunk, meta) => {
+        const source = sourceOf();
+        if (source) {
+          await source.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+        }
+      },
+      error: (e) => {
+        console.error('Video encoder error:', e);
+        this.callbacks.onError?.(new Error(`Video encoder error: ${e.message}`));
+      },
+    });
+
+    await encoder.configure({
+      codec: 'vp09.00.10.08', // VP9 Profile 0
+      width,
+      height,
+      bitrate: videoBitrateFor(width, height),
+      framerate: this.frameRate,
+    });
+
+    return encoder;
   }
 
   /**
@@ -398,8 +444,7 @@ export class WebCodecsRecorder {
     this.startTime = performance.now();
     this.pausedDuration = 0;
     this.frameCount = 0;
-    this.lastFrameTimestampUs = -1;
-    this.nextKeyFrameUs = 0;
+    this.screenTiming = newFrameTiming();
     this.audioTimestamp = 0;
 
     const frameDurationUs = Math.round((1 / this.frameRate) * 1_000_000);
@@ -449,16 +494,23 @@ export class WebCodecsRecorder {
    * has one: the track-processor path reads `performance.now()` for its
    * throttle a few lines earlier, and reading it twice per frame both costs
    * something per frame and lets the throttle and the stamp disagree.
+   *
+   * `timing` is the calling pipeline's own bookkeeping; the clock it is
+   * measured against is the recorder's, which is what keeps two pipelines'
+   * frames on one timeline.
    */
-  private nextFrameTiming(now = performance.now()): { timestamp: number; keyFrame: boolean } {
+  private nextFrameTiming(
+    timing: FrameTiming,
+    now = performance.now()
+  ): { timestamp: number; keyFrame: boolean } {
     const elapsedUs = Math.round((now - this.startTime - this.pausedDuration) * 1000);
     const timestamp =
-      elapsedUs > this.lastFrameTimestampUs ? elapsedUs : this.lastFrameTimestampUs + 1;
-    this.lastFrameTimestampUs = timestamp;
+      elapsedUs > timing.lastFrameTimestampUs ? elapsedUs : timing.lastFrameTimestampUs + 1;
+    timing.lastFrameTimestampUs = timestamp;
 
-    const keyFrame = timestamp >= this.nextKeyFrameUs;
+    const keyFrame = timestamp >= timing.nextKeyFrameUs;
     if (keyFrame) {
-      this.nextKeyFrameUs = timestamp + 1_000_000;
+      timing.nextKeyFrameUs = timestamp + 1_000_000;
     }
 
     return { timestamp, keyFrame };
@@ -470,12 +522,39 @@ export class WebCodecsRecorder {
   private async startTrackProcessorCapture(): Promise<void> {
     if (!this.frameReader || !this.videoEncoder) return;
 
+    await this.captureFromTrackProcessor(
+      this.frameReader,
+      this.screenTiming,
+      () => this.frameReaderActive,
+      () => this.videoEncoder,
+      () => {
+        this.frameCount++;
+      }
+    );
+  }
+
+  /**
+   * Read one track's frames, re-stamp each with the recording clock and hand it
+   * to that track's encoder, until the pipeline is stopped or the track ends.
+   *
+   * Parameterised rather than written twice: a separate-tracks take runs this
+   * loop once per video track, and the throttle (`lastFrameTime`) is a local so
+   * each track is throttled against its own delivery rate rather than against
+   * the other's.
+   */
+  private async captureFromTrackProcessor(
+    reader: ReadableStreamDefaultReader<VideoFrame>,
+    timing: FrameTiming,
+    active: () => boolean,
+    encoderOf: () => VideoEncoder | null,
+    onFrameEncoded: () => void
+  ): Promise<void> {
     const targetFrameInterval = 1000 / this.frameRate;
     let lastFrameTime = 0;
 
     try {
-      while (this.frameReaderActive && this.isRecordingActive) {
-        const { value: sourceFrame, done } = await this.frameReader.read();
+      while (active() && this.isRecordingActive) {
+        const { value: sourceFrame, done } = await reader.read();
 
         if (done) break;
         if (!sourceFrame) continue;
@@ -493,20 +572,21 @@ export class WebCodecsRecorder {
           continue;
         }
 
-        if (this.videoEncoder && this.videoEncoder.state !== 'closed') {
+        const encoder = encoderOf();
+        if (encoder && encoder.state !== 'closed') {
           try {
             // Re-stamp the frame with the recording clock (see nextFrameTiming),
             // reusing the reading the throttle above already took.
-            const { timestamp, keyFrame } = this.nextFrameTiming(now);
+            const { timestamp, keyFrame } = this.nextFrameTiming(timing, now);
             const frame = new VideoFrame(sourceFrame, { timestamp });
             // Close source frame immediately - we've copied the data we need
             sourceFrame.close();
 
-            this.videoEncoder.encode(frame, { keyFrame });
+            encoder.encode(frame, { keyFrame });
             // Close frame after encoding - encoder copies the data it needs
             frame.close();
 
-            this.frameCount++;
+            onFrameEncoded();
           } catch (e) {
             console.error('Frame encoding error:', e);
             sourceFrame.close();
@@ -543,7 +623,7 @@ export class WebCodecsRecorder {
             // Create VideoFrame from canvas, stamped with the recording clock
             // (see nextFrameTiming). `duration` stays nominal: the muxer
             // derives the real packet durations from the timestamps.
-            const { timestamp, keyFrame } = this.nextFrameTiming();
+            const { timestamp, keyFrame } = this.nextFrameTiming(this.screenTiming);
             const frame = new VideoFrame(this.canvas, {
               timestamp,
               duration: frameDurationUs,
@@ -584,7 +664,7 @@ export class WebCodecsRecorder {
             // Create VideoFrame from canvas, stamped with the recording clock
             // (see nextFrameTiming). `duration` stays nominal: the muxer
             // derives the real packet durations from the timestamps.
-            const { timestamp, keyFrame } = this.nextFrameTiming();
+            const { timestamp, keyFrame } = this.nextFrameTiming(this.screenTiming);
             const frame = new VideoFrame(this.canvas, {
               timestamp,
               duration: frameDurationUs,
