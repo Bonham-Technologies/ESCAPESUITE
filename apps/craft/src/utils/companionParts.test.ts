@@ -6,6 +6,7 @@
 // one entry rather than a grep.
 import { describe, it, expect } from 'vitest'
 import { COMPANION_PARTS, companionPartFor } from './companionParts'
+import type { RecordingRole } from '../store/types'
 
 describe('COMPANION_PARTS', () => {
   it('names each role twice — mid-sentence and sentence-initial', () => {
@@ -39,5 +40,14 @@ describe('companionPartFor', () => {
     // ESCSUITE-14 has no role stored. Both are "this row is the take".
     expect(companionPartFor('screen')).toBeNull()
     expect(companionPartFor(undefined)).toBeNull()
+  })
+
+  it('answers exactly null — not undefined — for a role a newer ESCAPECRAFT wrote', () => {
+    // IndexedDB is not type-checked, so a role outside the table (a fifth
+    // companion added by a newer build, read by this one) is a runtime
+    // possibility even though `RecordingRole` is a closed union. The
+    // signature promises `| null`; `toBeNull()` fails on `undefined` too, so
+    // this pins the exact value, not just falsiness.
+    expect(companionPartFor('future-role' as unknown as RecordingRole)).toBeNull()
   })
 })
