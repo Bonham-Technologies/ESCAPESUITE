@@ -345,7 +345,7 @@ describe('useRecordingController starting a take', () => {
     expect(useRecorderStore.getState().screenStream).toBe(harness.streams.screen)
     expect(harness.setPreviewStream).toHaveBeenCalledWith(harness.streams.screen)
     expect(harness.setIsPiPActive).not.toHaveBeenCalled()
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false)
     expect(recorderFactory.last().start).toHaveBeenCalledTimes(1)
     expect(state()).toBe('recording')
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Started', undefined)
@@ -375,7 +375,7 @@ describe('useRecordingController starting a take', () => {
 
     await startTake(result)
 
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, false)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, false, false)
     expect(recorderFactory.last().hasVideoSource).toBe(false)
     // The label useRecordingSave keys the WebM metadata repair off: a
     // MediaRecorder take needs it even on a WebCodecs-capable machine.
@@ -543,7 +543,9 @@ describe('useRecordingController running a take', () => {
     // through handleStopRecording, so nothing else clears the ticker.
     await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob) })
 
-    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 9)
+    // The MediaRecorder path calls onStop with the blob alone, so the save gets
+    // no companion argument at all — which it reads as a single-part take.
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 9, undefined)
     expect(useRecorderStore.getState().currentDuration).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -586,7 +588,7 @@ describe('useRecordingController stopping a take', () => {
     expect(harness.deps.capturedThumbnailRef.current).toBeInstanceOf(Blob)
     expect(recorder.stop).toHaveBeenCalledTimes(1)
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Completed', { duration: 8 })
-    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 8)
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 8, null)
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
     expect(useRecorderStore.getState().currentDuration).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
@@ -680,7 +682,7 @@ describe('useRecordingController stopping a take', () => {
 
     await act(async () => { await result.current.handleStopRecording() })
 
-    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 42)
+    expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 42, null)
   })
 
   it('reports a save that failed and still returns to idle', async () => {
@@ -765,7 +767,12 @@ describe('useRecordingController picture-in-picture', () => {
     expect(compositor).toBeTruthy()
     expect(compositor.getCanvas().width).toBe(1280)
     expect(harness.setIsPiPActive).toHaveBeenCalledWith(true)
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true, true)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(
+      expect.any(Object),
+      true,
+      true,
+      false
+    )
 
     // The recorder gets the composited video plus the screen's own audio.
     const initialized = recorderFactory.last().initializeCalls[0]
@@ -792,6 +799,118 @@ describe('useRecordingController picture-in-picture', () => {
 
     act(() => { result.current.handleCancelRecording() })
     compositor.dispose()
+  })
+})
+
+describe('a separate-tracks take', () => {
+  let raf: RafDouble
+
+  beforeEach(() => {
+    installCanvasCaptureStreamDouble()
+    raf = installRafDouble()
+    // The compositor mirrors each source into a <video>; jsdom implements no
+    // media playback and logs "not implemented" for every play() call.
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    harness.deps.compositorRef.current?.dispose()
+    raf.uninstall()
+    uninstallCanvasCaptureStreamDouble()
+  })
+
+  /** The take the toggle asks for: screen + webcam, separateTracks on. */
+  function separateHarness(extra: Partial<RecordingConfig> = {}): Harness {
+    // A browser that can serve two pipelines: WebCodecs (recorderType) *and*
+    // MediaStreamTrackProcessor (canRecordSeparateTracks), which is the
+    // stricter of the two questions the real factory asks.
+    recorderFactory.recorderType = 'webcodecs'
+    recorderFactory.canRecordSeparateTracks = true
+    return makeHarness(
+      { screenEnabled: true, webcamEnabled: true, separateTracks: true, ...extra },
+      { screen: screenStreamWithAudio(), webcam: webcamStream() }
+    )
+  }
+
+  it('hands the recorder the raw screen and webcam tracks', async () => {
+    harness = separateHarness()
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+
+    await act(async () => { await result.current.handleStartRecording() })
+
+    const recorder = recorderFactory.last()
+    expect(recorder.separateTracks).toBe(true)
+    const [call] = recorder.initializeCalls
+    // The raw display capture, not the compositor's canvas track: the whole
+    // point of the mode is that the webcam is never drawn into the recording.
+    expect(call.screen).toBe(harness.streams.screen)
+    expect(call.webcam).toBe(harness.streams.webcam)
+    expect(call.config.separateTracks).toBe(true)
+  })
+
+  it('runs the compositor for the preview only', async () => {
+    harness = separateHarness()
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+
+    await act(async () => { await result.current.handleStartRecording() })
+
+    // The canvas is still the preview (useMediaStreams appends it), so PiP is
+    // still "active" — but nothing captures a stream off it.
+    expect(harness.setIsPiPActive).toHaveBeenCalledWith(true)
+    expect(harness.deps.compositorRef.current!.getOutputStream()).toBeNull()
+    expect(harness.setPreviewStream).toHaveBeenCalledWith(harness.streams.screen)
+  })
+
+  it('labels the take webcodecs, so the save path repairs nothing', async () => {
+    harness = separateHarness()
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+
+    await act(async () => { await result.current.handleStartRecording() })
+
+    expect(harness.deps.recorderTypeRef.current).toBe('webcodecs')
+  })
+
+  it('passes the companion through to the save', async () => {
+    // No countdown, so the take is running the moment the click returns.
+    harness = separateHarness({ countdownSeconds: 0 })
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorder = recorderFactory.last()
+    expect(recorder.isRecording()).toBe(true)
+    recorder.companionPart = {
+      role: 'webcam',
+      blob: new Blob(['webcam'], { type: 'video/webm' }),
+      startOffset: 0,
+    }
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    expect(harness.saveRecording).toHaveBeenCalledWith(
+      recorder.stopBlob,
+      expect.any(Number),
+      recorder.companionPart
+    )
+  })
+
+  it('composites into MediaRecorder when the browser cannot serve two tracks', async () => {
+    harness = separateHarness()
+    // WebCodecs is there, the track processor is not — Firefox and Safari, and
+    // jsdom itself. The real gate answers no, so the mode is refused.
+    recorderFactory.canRecordSeparateTracks = false
+    const { result } = renderHook(() => useRecordingController(harness.deps))
+
+    await act(async () => { await result.current.handleStartRecording() })
+
+    const recorder = recorderFactory.last()
+    // The mode is resolved ONCE and handed to everything: the factory, the
+    // recorder type and the config the recorder initializes with. A config that
+    // still said `true` here would have the recorder building a pipeline the
+    // browser cannot read.
+    expect(recorder.separateTracks).toBe(false)
+    expect(recorder.initializeCalls[0].config.separateTracks).toBe(false)
+    expect(harness.deps.recorderTypeRef.current).toBe('mediarecorder')
+    // ...and the compositor is back in the recording path, as today.
+    expect(recorder.initializeCalls[0].screen).not.toBe(harness.streams.screen)
   })
 })
 

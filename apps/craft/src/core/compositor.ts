@@ -111,6 +111,25 @@ export class Compositor {
    * Start compositing and return the output stream.
    */
   start(frameRate: number = 30): MediaStream {
+    this.beginRender(frameRate);
+    this.outputStream = this.canvas.captureStream(frameRate);
+    return this.outputStream;
+  }
+
+  /**
+   * Start compositing for the preview alone — no `captureStream`.
+   *
+   * A separate-tracks take (ESCSUITE-14) records the raw screen and webcam
+   * tracks, and the preview is already the canvas itself (`useMediaStreams`
+   * appends it to the preview container). Capturing a stream nothing records
+   * would sample the canvas 30 times a second for no reader.
+   */
+  startPreviewOnly(frameRate: number = 30): void {
+    this.beginRender(frameRate);
+  }
+
+  /** The draw loop both entry points share. */
+  private beginRender(frameRate: number): void {
     // A start() on a running compositor replaces its loop. Without this the
     // new chain's handle overwrote the old one's, so stop() cancelled only the
     // newer chain and the first kept drawing until the page went away
@@ -124,9 +143,7 @@ export class Compositor {
     this.targetFrameRate = frameRate;
     // 0 is always in the past, so the first render draws immediately.
     this.nextFrameDue = 0;
-    this.outputStream = this.canvas.captureStream(frameRate);
     this.render();
-    return this.outputStream;
   }
 
   /**

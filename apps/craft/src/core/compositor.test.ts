@@ -541,6 +541,26 @@ describe('Compositor', () => {
     })
   })
 
+  it('startPreviewOnly draws without capturing a stream', () => {
+    const compositor = new Compositor(1280, 720)
+    const ctx = ctxOf(compositor)
+    attachScreen(compositor)
+
+    compositor.startPreviewOnly()
+
+    // A separate-tracks take records the raw tracks, so the canvas is only what
+    // the preview shows: captureStream() would sample 30 frames a second into a
+    // MediaStream track nothing reads.
+    expect(getCapturedCanvasStreams()).toHaveLength(0)
+    expect(compositor.getOutputStream()).toBeNull()
+    // It still draws, and the loop it started is cancellable like start()'s.
+    expect(ctx.drawImage).toHaveBeenCalled()
+    expect(pendingFrameCount()).toBe(1)
+
+    compositor.stop()
+    expect(pendingFrameCount()).toBe(0)
+  })
+
   it('detaches both hidden video elements from the DOM on stop()', () => {
     const compositor = new Compositor(1280, 720)
     const screen = attachScreen(compositor)

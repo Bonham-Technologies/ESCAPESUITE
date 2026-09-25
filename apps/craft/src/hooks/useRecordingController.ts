@@ -17,7 +17,12 @@
 // after useMediaStreams so that the stopAllStreams mirror is already being
 // kept up to date when the teardown reaches for it.
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import { createRecorder, getRecorderType, type AnyRecorder } from '../core/recorder-factory';
+import {
+  canUseWebCodecsRecorder,
+  createRecorder,
+  getRecorderType,
+  type AnyRecorder,
+} from '../core/recorder-factory';
 import { hasSystemAudio } from '../core/permissions';
 import { CAPTURE_REFUSED, NO_SYSTEM_AUDIO, SAVE_FAILED, START_FAILED } from '../utils/notices';
 import { Compositor } from '../core/compositor';
@@ -295,10 +300,23 @@ export function useRecordingController({
         setNotice(NO_SYSTEM_AUDIO);
       }
 
+      // Which take this is, decided once and handed to everything below: the
+      // compositor's mode, the factory, the recorder type the save path keys
+      // the container repair off, and the config the recorder initializes with.
+      // A config that still claimed `separateTracks` in a browser that cannot
+      // serve it would have the recorder building a pipeline it cannot read.
+      const isPiP = config.screenEnabled && config.webcamEnabled && !!screen && !!webcam;
+      const separateTracks =
+        isPiP && config.separateTracks && canUseWebCodecsRecorder(true, true, true);
+      // Whether there is a video track to encode at all — the same test both
+      // recorders apply when they pick one (a stream AND its toggle). Without
+      // one the take is audio only, which the WebCodecs recorder cannot serve.
+      const hasVideoSource = (config.screenEnabled && !!screen) || (config.webcamEnabled && !!webcam);
+
       // Set up preview
       // This avoids canvas.captureStream() issues with hidden video elements
 
-      if (config.screenEnabled && config.webcamEnabled && screen && webcam) {
+      if (isPiP && screen && webcam) {
         const videoTrack = screen.getVideoTracks()[0];
         const settings = videoTrack.getSettings();
         compositorRef.current = new Compositor(
@@ -312,8 +330,14 @@ export function useRecordingController({
         );
         compositorRef.current.setScreenStream(screen);
         compositorRef.current.setWebcamStream(webcam);
-        const composedStream = compositorRef.current.start();
-        setPreviewStream(composedStream);
+        if (separateTracks) {
+          // The overlay is only what the user watches: the recorder takes the
+          // raw tracks, so there is no reader for a canvas capture stream.
+          compositorRef.current.startPreviewOnly();
+          setPreviewStream(screen);
+        } else {
+          setPreviewStream(compositorRef.current.start());
+        }
         setIsPiPActive(true);
       } else if (screen) {
         setPreviewStream(screen);
@@ -321,14 +345,8 @@ export function useRecordingController({
         setPreviewStream(webcam);
       }
 
-      // Determine if we're in PiP mode (screen + webcam with compositor)
-      const isPiP = config.screenEnabled && config.webcamEnabled && !!compositorRef.current;
-      // Whether there is a video track to encode at all — the same test both
-      // recorders apply when they pick one (a stream AND its toggle). Without
-      // one the take is audio only, which the WebCodecs recorder cannot serve.
-      const hasVideoSource = (config.screenEnabled && !!screen) || (config.webcamEnabled && !!webcam);
-
-      // Initialize recorder (uses WebCodecs for non-PiP if available)
+      // Initialize recorder (WebCodecs unless the take is composited PiP or
+      // audio only — see canUseWebCodecsRecorder)
       recorderRef.current = createRecorder({
         onStart: () => {
           setState('recording');
@@ -342,7 +360,7 @@ export function useRecordingController({
         },
         onPause: () => setState('paused'),
         onResume: () => setState('recording'),
-        onStop: (blob) => {
+        onStop: (blob, companion) => {
           // A stop that lands after the take was cancelled or the screen went
           // away is a chunk nobody asked for: drop it rather than save it.
           if (cancelledRef.current) return;
@@ -357,7 +375,7 @@ export function useRecordingController({
           setCurrentDuration(0);
           stopAllStreams();
           // Save in background
-          saveRecording(blob, recordedDuration).then(() => {
+          saveRecording(blob, recordedDuration, companion).then(() => {
             setState('idle');
           }).catch((err) => {
             // The save hook rejects rather than swallowing: without this the
@@ -386,14 +404,14 @@ export function useRecordingController({
           stopAllStreams();
         },
         onAudioLevels: setAudioLevels,
-      }, isPiP, hasVideoSource);
-      recorderTypeRef.current = getRecorderType(isPiP, hasVideoSource);
+      }, isPiP, hasVideoSource, separateTracks);
+      recorderTypeRef.current = getRecorderType(isPiP, hasVideoSource, separateTracks);
 
       // This avoids canvas.captureStream() issues with hidden video elements
       let recordingScreen: MediaStream | null = screen;
 
-      if (config.screenEnabled && config.webcamEnabled && compositorRef.current) {
-        // PiP mode - use compositor's existing output stream (already created by start())
+      if (isPiP && !separateTracks && compositorRef.current) {
+        // Composited PiP - use compositor's existing output stream (already created by start())
         // Avoids calling captureStream() a second time, which would double CPU cost
         const compositorStream = compositorRef.current.getOutputStream();
         if (compositorStream) {
@@ -403,9 +421,13 @@ export function useRecordingController({
           ]);
         }
       }
-      // For single-source recordings (screen-only or webcam-only), use raw stream
+      // For single-source recordings (screen-only or webcam-only), and for a
+      // separate-tracks take, the recorder gets the raw streams.
 
-      await recorderRef.current.initialize(recordingScreen, webcam, mic, config);
+      await recorderRef.current.initialize(recordingScreen, webcam, mic, {
+        ...config,
+        separateTracks,
+      });
 
       // Start countdown or record immediately
       if (config.countdownSeconds > 0) {
