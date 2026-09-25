@@ -48,15 +48,22 @@ export const MP4_SAVED_WITHOUT_AUDIO =
 export const mp4ConversionFailed = (message: string) => `Conversion failed: ${message}`
 
 /**
- * Said when a separate-tracks take's companion (the webcam half) could not be
- * written — its metadata extraction, thumbnail decode, or either `storeVideo`
- * / `storeThumbnail` call threw. The spec says a companion may never cost the
- * take its primary: the screen recording is still saved and listed exactly as
- * a no-companion take would be, and this is the one line that tells the user
- * the webcam half did not make it. See `useRecordingSave`.
+ * Said when a separate-tracks take produced fewer parts than it asked for —
+ * the camera, the microphone or the system audio did not make it.
+ *
+ * One sentence for any of them, and for any number of them, because there is
+ * exactly one notice channel and "which track" is not something the user can
+ * act on differently; the console carries the per-role detail. The spec says a
+ * companion may never cost the take its primary: the screen recording is
+ * still saved and listed exactly as a no-companion take would be, and this is
+ * the one line that says something else was not. Raised from two places —
+ * `useRecordingController` for a part lost inside the recorder, and
+ * `useRecordingSave` for one lost in storage — because only the controller
+ * knows how many parts the take asked for, and only the save hook knows which
+ * write threw.
  */
-export const WEBCAM_TRACK_NOT_SAVED =
-  'The webcam track could not be saved — the screen recording was kept.'
+export const SEPARATE_TRACK_NOT_SAVED =
+  'A separate track could not be saved — the screen recording was kept.'
 
 /**
  * Said when "Upload to host" found nothing to send: the row is drawn from

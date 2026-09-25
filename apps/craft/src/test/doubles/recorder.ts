@@ -12,7 +12,7 @@ export interface RecorderCallbacksLike {
   onStart?: () => void
   onPause?: () => void
   onResume?: () => void
-  onStop?: (blob: Blob, companion?: CompanionPart | null) => void
+  onStop?: (blob: Blob, companions?: CompanionPart[] | null) => void
   onError?: (error: Error) => void
   onAudioLevels?: (levels: { microphone: number; system: number }) => void
 }
@@ -44,8 +44,8 @@ export interface RecorderDouble {
   isPaused(): boolean
   /** Blob handed to onStop. */
   stopBlob: Blob
-  /** The companion handed to onStop, or null for a single-file take. */
-  companionPart: CompanionPart | null
+  /** The companions handed to onStop, or null for a single-file take. */
+  companionParts: CompanionPart[] | null
   /** What getDuration() reports. */
   duration: number
   /** When set, the next initialize() rejects with it. */
@@ -72,7 +72,7 @@ function createRecorderDouble(
     separateTracks,
     initializeCalls: [],
     stopBlob: new Blob(['recorded-bytes'], { type: 'video/webm' }),
-    companionPart: null,
+    companionParts: null,
     duration: 0,
     initializeError: null,
 
@@ -111,7 +111,7 @@ function createRecorderDouble(
       if (!recording) return
       recording = false
       paused = false
-      callbacks.onStop?.(double.stopBlob, double.companionPart)
+      callbacks.onStop?.(double.stopBlob, double.companionParts)
     }),
 
     dispose: vi.fn(() => {

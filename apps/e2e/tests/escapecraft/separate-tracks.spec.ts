@@ -2,15 +2,27 @@ import { test, expect, type Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 
 /**
- * ESCAPECRAFT records the webcam as its own file (ESCSUITE-14, slice 1).
+ * ESCAPECRAFT records the webcam and each audio source as its own file
+ * (ESCSUITE-14, slices 1 and 3).
  *
  * The take is real: `mockSyntheticMedia` hands the app an animated canvas for
- * the screen, a second one for the camera and an oscillator for the microphone,
- * so `WebCodecsRecorder` genuinely runs two `VideoEncoder`s and two Mediabunny
- * outputs off one clock. What is asserted is the user-visible outcome on both
- * sides of storage: two blobs under one `takeId`, each loading in a `<video>`
- * with a finite duration, and two library rows with the right labels and the
- * right buttons.
+ * the screen, a second one for the camera and an oscillator for each of the
+ * microphone and the system audio, so `WebCodecsRecorder` genuinely runs two
+ * `VideoEncoder`s, three `AudioEncoder`s and four Mediabunny outputs off one
+ * clock. What is asserted is the user-visible outcome on both sides of storage:
+ * four blobs under one `takeId`, the video halves loading in a `<video>` with a
+ * finite duration and the audio halves decoding through Web Audio — which is
+ * exactly what ESCAPEARTIST's mixer and waveform pass will do to them, so a
+ * badly muxed Opus-only WebM fails here rather than in the editor — and four
+ * library rows with the right labels and the right buttons.
+ *
+ * The fourth part needs asking for. System audio is off by default, and
+ * `mockSyntheticMedia`'s `getDisplayMedia` adds its oscillator track only when
+ * the capture asked for audio — which `requestScreenCapture(withSystemAudio)`
+ * does exactly when that toggle is on. So this spec clicks it, and the
+ * separate-tracks *benchmark* (`tests/perf/craft-recording.spec.ts`), which
+ * never touches the source toggles, correctly counts three parts rather than
+ * four: same app, one source fewer.
  *
  * Chromium only, and that is the feature rather than the test: the mode needs
  * `VideoEncoder` and `MediaStreamTrackProcessor`, and in a browser without them
@@ -26,14 +38,24 @@ interface StoredPart {
   role?: string
   hasAudio?: boolean
   hasWebcam?: boolean
+  mediaType?: string
+  mimeType: string
+  width: number
+  height: number
   overlayPlacement?: { position: string; size: number; shape: string }
   size: number
-  /** What a <video> made of the stored blob: a real number, or "Infinity". */
+  /**
+   * What the browser makes of the stored blob: a `<video>`'s duration for a
+   * video part, `decodeAudioData`'s for an audio one. A real number, or
+   * "Infinity". Decoding rather than probing, for the audio parts, because
+   * "an audio file the browser will not decode" is exactly the failure a
+   * badly muxed Opus-only WebM would be.
+   */
   reportedDuration: string
 }
 
 /**
- * Every stored recording, with what a `<video>` makes of its blob.
+ * Every stored recording, with what the browser makes of its blob.
  *
  * Read from the page rather than from the app's store: the claim is about what
  * reached IndexedDB, which is what ESCAPEARTIST will open (slice 2).
@@ -56,7 +78,7 @@ async function readStoredParts(page: Page): Promise<StoredPart[]> {
           getAll.onerror = () => reject(new Error('could not read the videos store'))
           getAll.onsuccess = async () => {
             const records = getAll.result as { id: string; blob: Blob; metadata: Record<string, unknown> }[]
-            const probe = (blob: Blob) =>
+            const probeVideo = (blob: Blob) =>
               new Promise<string>((done, fail) => {
                 const video = document.createElement('video')
                 video.preload = 'metadata'
@@ -71,6 +93,19 @@ async function readStoredParts(page: Page): Promise<StoredPart[]> {
                 }
                 video.src = url
               })
+
+            const probeAudio = async (blob: Blob) => {
+              const context = new AudioContext()
+              try {
+                const decoded = await context.decodeAudioData(await blob.arrayBuffer())
+                return String(decoded.duration)
+              } finally {
+                await context.close()
+              }
+            }
+
+            const probe = (blob: Blob) =>
+              blob.type.startsWith('audio/') ? probeAudio(blob) : probeVideo(blob)
             try {
               resolve(
                 await Promise.all(
@@ -80,6 +115,10 @@ async function readStoredParts(page: Page): Promise<StoredPart[]> {
                     role: record.metadata.role as string | undefined,
                     hasAudio: record.metadata.hasAudio as boolean | undefined,
                     hasWebcam: record.metadata.hasWebcam as boolean | undefined,
+                    mediaType: record.metadata.mediaType as string | undefined,
+                    mimeType: record.metadata.mimeType as string,
+                    width: record.metadata.width as number,
+                    height: record.metadata.height as number,
                     overlayPlacement: record.metadata.overlayPlacement as StoredPart['overlayPlacement'],
                     size: record.blob.size,
                     reportedDuration: await probe(record.blob),
@@ -101,7 +140,7 @@ test.describe('ESCAPECRAFT separate-tracks recording', () => {
     'The mode needs WebCodecs and MediaStreamTrackProcessor, and only Chromium can be granted camera permission headlessly'
   )
 
-  test('stores the screen and the webcam as two parts of one take', async ({ page }) => {
+  test('stores the screen, the webcam and each audio source as parts of one take', async ({ page }) => {
     test.setTimeout(120_000)
 
     await mockSyntheticMedia(page)
@@ -136,51 +175,95 @@ test.describe('ESCAPECRAFT separate-tracks recording', () => {
     await separateTracks.click()
     await expect(separateTracks).toHaveAttribute('aria-pressed', 'true')
 
+    // The microphone is on by ESCAPECRAFT's own default, and the mic part is
+    // asserted below — so the default is stated here rather than assumed: if it
+    // ever flips, this fails where it is legible instead of as a missing part.
+    await expect(sourceButton('Microphone')).toHaveAttribute('aria-pressed', 'true')
+
+    // System audio is off by default, and `mockSyntheticMedia`'s
+    // getDisplayMedia only adds an oscillator track when the capture asked for
+    // one — which `requestScreenCapture(withSystemAudio)` does exactly when
+    // this toggle is on. With it on, the take has all four sources: screen,
+    // camera, microphone and system audio.
+    const systemAudio = sourceButton('System Audio')
+    await expect(systemAudio).toBeEnabled({ timeout: 30_000 })
+    await systemAudio.click()
+    await expect(systemAudio).toHaveAttribute('aria-pressed', 'true')
+
     await page.getByRole('button', { name: 'Start recording' }).click()
     await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 30_000 })
     await page.waitForTimeout(3000)
     await page.getByRole('button', { name: 'Stop recording' }).click()
 
-    // Two rows, so both parts were saved.
-    await expect(page.getByRole('button', { name: /Open .+ in Editor/ })).toHaveCount(2, {
+    // Four rows, so every part was saved.
+    await expect(page.getByRole('button', { name: /Open .+ in Editor/ })).toHaveCount(4, {
       timeout: 60_000,
     })
 
     const parts = await readStoredParts(page)
-    expect(parts).toHaveLength(2)
+    expect(parts).toHaveLength(4)
     const primary = parts.find((part) => part.role === 'screen')!
-    const companion = parts.find((part) => part.role === 'webcam')!
-    // One take in two files.
+    const webcamPart = parts.find((part) => part.role === 'webcam')!
+    const mic = parts.find((part) => part.role === 'mic')!
+    const system = parts.find((part) => part.role === 'system')!
+
+    // One take in four files.
     expect(primary.takeId).toBe(primary.id)
-    expect(companion.takeId).toBe(primary.id)
-    // Both are real, seekable WebM — Mediabunny writes Duration and Cues, so
-    // neither needs the MediaRecorder repair.
-    for (const part of [primary, companion]) {
+    for (const part of [webcamPart, mic, system]) {
+      expect(part.takeId).toBe(primary.id)
+      expect(part.id).not.toBe(primary.id)
+    }
+
+    // Every part is real and the browser can read it: the video halves load in
+    // a <video> with a finite duration (Mediabunny writes Duration and Cues,
+    // so neither needs the MediaRecorder repair), and the audio halves decode
+    // through Web Audio, which is what ARTIST's audioMixer and waveform pass
+    // will do to them.
+    for (const part of [primary, webcamPart, mic, system]) {
       expect(part.size).toBeGreaterThan(1000)
       expect(Number.isFinite(Number(part.reportedDuration))).toBe(true)
       expect(Number(part.reportedDuration)).toBeGreaterThan(0)
     }
-    // Slice 1 leaves the mixed audio on the primary; the webcam half is silent.
+
+    // The mix stays on the primary — a screen-only download still has sound —
+    // and each audio source is its own file besides.
     expect(primary.hasAudio).toBe(true)
-    expect(companion.hasAudio).toBe(false)
+    expect(webcamPart.hasAudio).toBe(false)
     expect(primary.hasWebcam).toBe(true)
-    // The overlay geometry the take was recorded with, for ARTIST (slice 2) and
-    // for the composite MP4 (slice 4).
+    for (const part of [mic, system]) {
+      expect(part.hasAudio).toBe(true)
+      expect(part.hasWebcam).toBe(false)
+      // Stored as audio, with no dimensions — the shape ESCAPEARTIST's own
+      // audio importer produces, so an imported part behaves like an
+      // uploaded one.
+      expect(part.mediaType).toBe('audio')
+      expect(part.mimeType).toBe('audio/webm')
+      expect(part.width).toBe(0)
+      expect(part.height).toBe(0)
+      expect(part.overlayPlacement).toBeUndefined()
+    }
+
+    // The overlay geometry the take was recorded with, for ARTIST and for the
+    // composite MP4 (slice 4).
     expect(primary.overlayPlacement).toEqual({
       position: 'bottom-right',
       size: 0.2,
       shape: 'circle',
     })
-    expect(companion.overlayPlacement).toBeUndefined()
+    expect(webcamPart.overlayPlacement).toBeUndefined()
 
     // ...and the library says which row is which, with the right buttons.
     await expect(page.getByText(/^Webcam track • /)).toHaveCount(1)
+    await expect(page.getByText(/^Microphone track • /)).toHaveCount(1)
+    await expect(page.getByText(/^System audio track • /)).toHaveCount(1)
     await expect(
       page.getByText('MP4 and M4A cover the screen track only — the webcam track is not included yet.')
     ).toHaveCount(1)
-    await expect(page.getByRole('button', { name: /Download .+ — webcam as MP4/ })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: /Download .+ — webcam as audio \(M4A\)/ })).toHaveCount(0)
-    // One WebM download per row, so the webcam file is reachable on its own.
-    await expect(page.getByRole('button', { name: /^Download (?!.*as ).+/ })).toHaveCount(2)
+    // Conversions on the primary row only — one MP4 and one M4A in the whole
+    // library, however many parts the take has.
+    await expect(page.getByRole('button', { name: /Download .+ as MP4/ })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: /Download .+ as audio \(M4A\)/ })).toHaveCount(1)
+    // One WebM download per row, so every part is reachable on its own.
+    await expect(page.getByRole('button', { name: /^Download (?!.*as ).+/ })).toHaveCount(4)
   })
 })

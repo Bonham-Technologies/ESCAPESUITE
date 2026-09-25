@@ -32,8 +32,11 @@ const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
  *
  * Two `VideoEncoder`s each carry their own bitrate — the webcam is fewer pixels
  * but VP9 is configured per encoder, not per take — so double is the honest
- * working figure. `hasSpaceForRecording` applies its own buffer and relative
- * floor on top of whatever this asks for.
+ * working figure for the two video parts, which dominate the total. The mode
+ * can also write up to two audio companions (microphone, system audio), but
+ * those are Opus at a fraction of a video bitrate — a rounding error next to
+ * the two video parts, not worth a factor of their own. `hasSpaceForRecording`
+ * applies its own buffer and relative floor on top of whatever this asks for.
  */
 const SEPARATE_TRACKS_SIZE_FACTOR = 2;
 

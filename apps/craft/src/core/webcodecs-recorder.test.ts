@@ -1204,6 +1204,28 @@ describe('WebCodecsRecorder', () => {
       }
     }
 
+    /**
+     * Make the Nth AudioEncoder the recorder constructs refuse its
+     * `configure()`. The mirror of `refuseEncoderConfigure`, and subclassing
+     * for the same reason: every encoder in a take is constructed inside one
+     * `initialize()` await chain, so there is no moment between them for a
+     * test to reach in. Hands back the restore.
+     */
+    function refuseAudioEncoderConfigure(nth: 1 | 2 | 3): () => void {
+      const g = globalThis as unknown as Record<string, unknown>
+      const Installed = g.AudioEncoder as typeof AudioEncoderDouble
+      class RefusingAudioEncoder extends Installed {
+        constructor(...args: ConstructorParameters<typeof AudioEncoderDouble>) {
+          super(...args)
+          if (AudioEncoderDouble.instances.length === nth) this.failAt = 'configure'
+        }
+      }
+      g.AudioEncoder = RefusingAudioEncoder
+      return () => {
+        g.AudioEncoder = Installed
+      }
+    }
+
     it('builds a second encoder and a second WebM output, the webcam one silent', async () => {
       await recorder.initialize(screenStream, webcamStream, micStream, {
         ...separateConfig,
@@ -1212,17 +1234,21 @@ describe('WebCodecsRecorder', () => {
       })
 
       const state = getMediabunnyState()
-      expect(state.outputs).toHaveLength(2)
-      expect(state.formats.map(f => f.name)).toEqual(['webm', 'webm'])
+      // Four outputs and three audio encoders, because this take really has
+      // three audio pipelines since slice 3: the mix on the primary, and one
+      // file each for the microphone and the system audio. The two *video*
+      // pipelines are what this test is about, and they are unchanged.
+      expect(state.outputs).toHaveLength(4)
+      expect(state.formats.map(f => f.name)).toEqual(['webm', 'webm', 'webm', 'webm'])
       expect(VideoEncoderDouble.instances).toHaveLength(2)
       // Sized from its own track, not from the screen's.
       expect(screenEncoder().configureCalls[0]).toMatchObject({ width: 1920, height: 1080 })
       expect(webcamEncoder().configureCalls[0]).toMatchObject({ width: 640, height: 480 })
-      // Slice 1: the mix stays on the primary. One audio track in the take,
-      // and it is on the screen output.
+      // Slice 1, and still true: the mix stays on the primary, and the webcam
+      // companion is silent.
       expect(state.outputs[0].addAudioTrack).toHaveBeenCalledTimes(1)
       expect(state.outputs[1].addAudioTrack).not.toHaveBeenCalled()
-      expect(AudioEncoderDouble.instances).toHaveLength(1)
+      expect(AudioEncoderDouble.instances).toHaveLength(3)
     })
 
     it('stamps both encoders from the one clock — same tick, same timestamp', async () => {
@@ -1274,13 +1300,17 @@ describe('WebCodecsRecorder', () => {
       expect(screenEncoder().flushCalls).toBe(1)
       expect(webcamEncoder().flushCalls).toBe(1)
       expect(getMediabunnyState().outputs.every(o => o.finalizeCalls === 1)).toBe(true)
-      const [blob, companion] = callbacks.onStop.mock.calls[0]
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
-      expect(companion).toEqual({
-        role: 'webcam',
-        blob: expect.any(Blob),
-        startOffset: 0,
-      })
+      // A take can have up to three companions now (ESCSUITE-14 slice 3), so
+      // the callback carries a list in role order — webcam, mic, system.
+      expect(companions).toEqual([
+        {
+          role: 'webcam',
+          blob: expect.any(Blob),
+          startOffset: 0,
+        },
+      ])
     })
 
     it('keeps recording the screen when the webcam dies mid-take', async () => {
@@ -1309,7 +1339,7 @@ describe('WebCodecsRecorder', () => {
       expect(webcamEncoder().encodes).toHaveLength(1)
 
       await recorder.stop()
-      expect(callbacks.onStop.mock.calls[0][1]).toMatchObject({ role: 'webcam' })
+      expect(callbacks.onStop.mock.calls[0][1]).toMatchObject([{ role: 'webcam' }])
     })
 
     it('delivers no companion when the webcam never produced a frame', async () => {
@@ -1558,6 +1588,366 @@ describe('WebCodecsRecorder', () => {
       // There is nothing to separate the webcam *from*: it is the take.
       expect(VideoEncoderDouble.instances).toHaveLength(1)
       expect(getMediabunnyState().outputs).toHaveLength(1)
+    })
+
+    // --- audio companions (slice 3) ---------------------------------------
+
+    /** A separate-tracks take with both audio sources really present. */
+    async function initializeWithAudioCompanions(): Promise<void> {
+      await recorder.initialize(screenStream, webcamStream, micStream, {
+        ...separateConfig,
+        microphoneEnabled: true,
+        systemAudioEnabled: true,
+      })
+    }
+
+    /** The ScriptProcessor each pipeline drives: 0 is the mix, then mic, then system. */
+    const processorFor = (index: number) => lastAudioContext().scriptProcessors[index]
+    const audioBuffer = (length = 4) =>
+      createAudioBufferDouble({ length, sample: (c, i) => c * 10 + i })
+
+    it('gives the microphone and the system audio an Opus-only WebM each', async () => {
+      await initializeWithAudioCompanions()
+
+      const state = getMediabunnyState()
+      // Primary, webcam, mic, system — in that order, so the webcam companion
+      // is still outputs[1] for every test that addresses it that way.
+      expect(state.outputs).toHaveLength(4)
+      expect(state.formats.map(f => f.name)).toEqual(['webm', 'webm', 'webm', 'webm'])
+      // The two audio companions carry one audio track and no video track at
+      // all: every ARTIST read path and CRAFT's own converter are single-track
+      // by construction, which is the whole reason these are separate files.
+      for (const output of [state.outputs[2], state.outputs[3]]) {
+        expect(output.tracks.map(t => t.kind)).toEqual(['audio'])
+        expect(output.startCalls).toBe(1)
+      }
+      expect(state.audioSources.map(s => s.codec)).toEqual(['opus', 'opus', 'opus'])
+      // ...and the mix is exactly where it was: on the primary.
+      expect(state.outputs[0].addAudioTrack).toHaveBeenCalledTimes(1)
+      expect(state.outputs[1].addAudioTrack).not.toHaveBeenCalled()
+      // One encoder for the mix, one per companion.
+      expect(AudioEncoderDouble.instances).toHaveLength(3)
+      for (const encoder of AudioEncoderDouble.instances) {
+        expect(encoder.configureCalls[0]).toMatchObject({
+          codec: 'opus',
+          sampleRate: 48000,
+          numberOfChannels: 2,
+        })
+      }
+    })
+
+    it('feeds each audio companion its own source, through its own processor', async () => {
+      await initializeWithAudioCompanions()
+
+      const ctx = lastAudioContext()
+      // The mix's processor, then the microphone's, then the system audio's.
+      expect(ctx.scriptProcessors).toHaveLength(3)
+      for (const node of ctx.scriptProcessors) {
+        expect(node.bufferSize).toBe(4096)
+        expect(node.connect).toHaveBeenCalledWith(ctx.destination)
+      }
+      // Two analysers and no more: the meters read the mix's own sources, and
+      // a companion must not add a third meter to a panel that draws two.
+      expect(ctx.analysers).toHaveLength(2)
+    })
+
+    it('stamps every pipeline from the same origin, one buffer at a time', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+
+      for (const index of [0, 1, 2]) {
+        processorFor(index).onaudioprocess!({ inputBuffer: audioBuffer() })
+        processorFor(index).onaudioprocess!({ inputBuffer: audioBuffer() })
+      }
+
+      const [mix, mic, system] = AudioEncoderDouble.instances
+      for (const encoder of [mix, mic, system]) {
+        expect(encoder.encodes).toHaveLength(2)
+        // Every pipeline's first buffer is the take's zero, and every
+        // pipeline's second is one buffer later — 4 frames at 48kHz. One
+        // origin and one sample-rate arithmetic is what "the same clock"
+        // means here; a shared counter would have three callbacks stamping
+        // each other's audio.
+        expect(encoder.encodes[0].data.init!.timestamp).toBe(0)
+        expect(encoder.encodes[1].data.init!.timestamp).toBeCloseTo(
+          (4 / 48000) * 1_000_000,
+          5
+        )
+        expect(encoder.encodes[0].data.init!.format).toBe('f32-planar')
+        // Planar layout, interleaved input: [L0..L3, R0..R3].
+        expect(Array.from(encoder.encodes[0].data.init!.data as Float32Array)).toEqual([
+          0, 1, 2, 3, 10, 11, 12, 13,
+        ])
+      }
+      expect(getCreatedFrames('AudioData').every(f => f.closed)).toBe(true)
+    })
+
+    it('ignores audio companion callbacks before start and while paused', async () => {
+      await initializeWithAudioCompanions()
+
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(0)
+
+      recorder.start()
+      recorder.pause()
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(0)
+
+      recorder.resume()
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(1)
+      // Paused time is excluded from every pipeline the same way: the buffers
+      // dropped while paused were never counted, so the first buffer after a
+      // resume is still the second buffer of the recording.
+      expect(AudioEncoderDouble.instances[1].encodes[0].data.init!.timestamp).toBe(0)
+    })
+
+    it("muxes each companion's audio into its own Opus packet source", async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      const [mixSource, micSource, systemSource] = getMediabunnyState().audioSources
+      expect(mixSource.packets).toHaveLength(0)
+      expect(micSource.packets).toHaveLength(1)
+      expect(systemSource.packets).toHaveLength(1)
+    })
+
+    it('delivers the take as four parts, in role order', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      await recorder.stop()
+
+      const [blob, companions] = callbacks.onStop.mock.calls[0]
+      expect(blob).toBeInstanceOf(Blob)
+      expect(companions).toEqual([
+        { role: 'webcam', blob: expect.any(Blob), startOffset: 0 },
+        { role: 'mic', blob: expect.any(Blob), startOffset: 0 },
+        { role: 'system', blob: expect.any(Blob), startOffset: 0 },
+      ])
+      // An audio companion is an audio file, and the save path reads the
+      // blob's own type into the stored mimeType.
+      expect(companions[1].blob.type).toBe('audio/webm')
+      expect(companions[2].blob.type).toBe('audio/webm')
+      expect(companions[0].blob.type).toBe('video/webm')
+    })
+
+    it('builds a companion only for the audio sources the take really has', async () => {
+      // The microphone is on but was never acquired, and system audio is off.
+      // The mix asks the same two questions, so the companions and the mix can
+      // never disagree about what the take is recording.
+      await recorder.initialize(screenStream, webcamStream, null, {
+        ...separateConfig,
+        microphoneEnabled: true,
+        systemAudioEnabled: false,
+      })
+
+      // One encoder — the mix's own, which the AudioContext double's mixed
+      // destination always offers a track for — and no companion's. Two
+      // outputs: the screen and the webcam.
+      expect(AudioEncoderDouble.instances).toHaveLength(1)
+      expect(getMediabunnyState().outputs).toHaveLength(2)
+    })
+
+    it('builds a system companion only when the display capture carries audio', async () => {
+      // Ticking "System Audio" only *asks* for it: the browser's share dialog
+      // has the tick box, and the stream comes back with no audio track when
+      // the user leaves it clear (ESCSUITE-62).
+      const silentScreen = createStreamDouble([videoTrack])
+      await recorder.initialize(silentScreen, webcamStream, micStream, {
+        ...separateConfig,
+        microphoneEnabled: true,
+        systemAudioEnabled: true,
+      })
+
+      // The mix (mic only) and the microphone companion. No system anything.
+      expect(AudioEncoderDouble.instances).toHaveLength(2)
+      expect(getMediabunnyState().outputs).toHaveLength(3)
+    })
+
+    it('logs an audio companion encode failure instead of throwing out of the callback', async () => {
+      // The mirror of the mix's own guard: a ScriptProcessor callback that
+      // throws tears the node's whole graph down, which for this take would
+      // take the mix and the other companion with it.
+      await initializeWithAudioCompanions()
+      recorder.start()
+      AudioEncoderDouble.instances[1].failAt = 'encodeThrow'
+
+      expect(() =>
+        processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      ).not.toThrow()
+
+      expect(consoleError).toHaveBeenCalledWith('Audio encoding error:', expect.any(Error))
+      expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(0)
+
+      // The buffer that threw advanced neither the count nor the clock, so the
+      // next one is still this pipeline's first — an encoder that recovers must
+      // not leave a hole where the failed buffer was.
+      AudioEncoderDouble.instances[1].failAt = null
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[1].encodes[0].data.init!.timestamp).toBe(0)
+      // ...and the other pipelines never noticed.
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[2].encodes).toHaveLength(1)
+      expect(recorder.isRecording()).toBe(true)
+    })
+
+    it('keeps the take when an audio companion encoder gives up', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      const micNode = processorFor(1)
+      const encodesBefore = AudioEncoderDouble.instances[1].encodes.length
+      const audioDataBefore = getCreatedFrames('AudioData').length
+
+      AudioEncoderDouble.instances[1].emitError('mic encoder died')
+      await flush()
+
+      // A microphone hiccup at minute four of a screen recording cannot throw
+      // the screen recording — or the camera, or the system audio — away.
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      expect(consoleWarn).toHaveBeenCalledWith('Microphone track encoder failed: mic encoder died')
+      expect(recorder.isRecording()).toBe(true)
+
+      // ...and the dead pipeline stops working, the way the webcam's reader
+      // does. A WebCodecs error closes the codec, so every later buffer would
+      // interleave 4096 frames into a fresh 32KB planar array, build an
+      // AudioData, throw InvalidStateError out of encode() — leaking that
+      // AudioData, because close() is the statement after it — and log once
+      // per buffer, ~11.7 times a second for the rest of the take. The
+      // cheapest possible failure must not be the take's most expensive thing.
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(encodesBefore)
+      expect(getCreatedFrames('AudioData')).toHaveLength(audioDataBefore)
+      expect(getCreatedFrames('AudioData').every(f => f.closed)).toBe(true)
+      expect(consoleError).not.toHaveBeenCalled()
+      // The node itself is let go too, rather than left driving a callback that
+      // only ever returns at its first line.
+      expect(micNode.disconnect).toHaveBeenCalledTimes(1)
+
+      // The other two audio pipelines are untouched — still connected, still
+      // encoding. Isolation is the whole point of a per-pipeline failure.
+      expect(processorFor(0).disconnect).not.toHaveBeenCalled()
+      expect(processorFor(2).disconnect).not.toHaveBeenCalled()
+      processorFor(2).onaudioprocess!({ inputBuffer: audioBuffer() })
+      expect(AudioEncoderDouble.instances[2].encodes).toHaveLength(2)
+
+      await recorder.stop()
+
+      const companions = callbacks.onStop.mock.calls[0][1]
+      expect(companions.map((part: { role: string }) => part.role)).toEqual([
+        'webcam',
+        'system',
+      ])
+    })
+
+    it('leaves out an audio companion that never got a buffer', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      await recorder.stop()
+
+      // A take shorter than one 4096-sample buffer, or a source that went
+      // silent at the socket: an empty Opus file is a library row that plays
+      // nothing.
+      const companions = callbacks.onStop.mock.calls[0][1]
+      expect(companions.map((part: { role: string }) => part.role)).toEqual([
+        'webcam',
+        'mic',
+      ])
+    })
+
+    it('still delivers the take when an audio companion will not flush', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      processorFor(1).onaudioprocess!({ inputBuffer: audioBuffer() })
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      await flush()
+
+      AudioEncoderDouble.instances[1].failAt = 'flush'
+
+      await recorder.stop()
+
+      expect(getMediabunnyState().outputs[0].finalizeCalls).toBe(1)
+      expect(callbacks.onError).not.toHaveBeenCalled()
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'The microphone companion could not be flushed:',
+        expect.any(Error)
+      )
+      expect(callbacks.onStop.mock.calls[0][1]).toBeNull()
+    })
+
+    it('records the take without the microphone when its pipeline cannot be set up', async () => {
+      // `canRecordSeparateTracks()` proves WebCodecs is there; it cannot prove
+      // this browser will configure a third Opus encoder. A refusal here costs
+      // one track, never the take.
+      const restore = refuseAudioEncoderConfigure(2)
+      try {
+        await expect(initializeWithAudioCompanions()).resolves.toBeUndefined()
+      } finally {
+        restore()
+      }
+
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'Microphone track could not be set up:',
+        expect.any(Error)
+      )
+      expect(callbacks.onError).not.toHaveBeenCalled()
+
+      recorder.start()
+      now += 40
+      processor.pushFrameTo('screen-video', sourceFrame())
+      processor.pushFrameTo('webcam-video', sourceFrame())
+      // The system companion is the third processor no more — the microphone's
+      // was never connected.
+      lastAudioContext().scriptProcessors[1].onaudioprocess!({ inputBuffer: audioBuffer() })
+      await flush()
+
+      await recorder.stop()
+
+      const companions = callbacks.onStop.mock.calls[0][1]
+      expect(companions.map((part: { role: string }) => part.role)).toEqual([
+        'webcam',
+        'system',
+      ])
+    })
+
+    it('disconnects every audio companion processor when the take is torn down', async () => {
+      await initializeWithAudioCompanions()
+      recorder.start()
+      const processors = [...lastAudioContext().scriptProcessors]
+
+      recorder.dispose()
+
+      // Three processors, three disconnects — the mix's included. A live
+      // ScriptProcessorNode keeps its whole graph running after the recording
+      // is over, and this take builds three of them.
+      for (const node of processors) {
+        expect(node.disconnect).toHaveBeenCalledTimes(1)
+      }
     })
   })
 })

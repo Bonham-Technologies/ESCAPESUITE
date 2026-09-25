@@ -14,7 +14,8 @@ import { fixWebMMetadata } from '../core/converter';
 import { useRecorderStore } from '../store/recorderStore';
 import { createPlaceholderThumbnail } from '../utils/previewThumbnail';
 import { buildSourceVideo, buildRecordingEntry } from '../utils/recordingMetadata';
-import { NOT_SEEKABLE, WEBCAM_TRACK_NOT_SAVED } from '../utils/notices';
+import { COMPANION_PARTS } from '../utils/companionParts';
+import { NOT_SEEKABLE, SEPARATE_TRACK_NOT_SAVED } from '../utils/notices';
 import type { CompanionPart, Recording, RecordingConfig, RecordingState } from '../store/types';
 
 export interface RecordingSaveDeps {
@@ -34,10 +35,10 @@ export type SaveRecording = (
   rawBlob: Blob,
   recordedDuration: number,
   /**
-   * The take's second half, when the recorder produced one. Only the
+   * The take's other parts, when the recorder produced any. Only the
    * separate-tracks mode does — see `core/webcodecs-recorder.ts`.
    */
-  companion?: CompanionPart | null
+  companions?: CompanionPart[] | null
 ) => Promise<void>;
 
 export function useRecordingSave({
@@ -52,7 +53,7 @@ export function useRecordingSave({
   const saveRecording = useCallback(async (
     rawBlob: Blob,
     recordedDuration: number,
-    companion?: CompanionPart | null
+    companions?: CompanionPart[] | null
   ) => {
     setState('saving');
 
@@ -128,11 +129,15 @@ export function useRecordingSave({
     const hasAudio =
       config.microphoneEnabled || (config.systemAudioEnabled && systemAudioShared);
 
-    // A companion take is one take in two files: the primary names it (its own
-    // id is the takeId), carries the mixed audio and the overlay geometry, and
-    // the companion carries the camera. Both are written here rather than in
-    // two passes so a half-saved take cannot reach the library.
-    const isCompanionTake = companion != null;
+    // A companion take is one take in several files: the primary names it (its
+    // own id is the takeId), carries the mixed audio and the overlay geometry,
+    // and the companions carry the camera and each audio source the take
+    // recorded. The mix staying on the primary is slice 1's rule, and it is why
+    // the `hasAudio` above is the *primary's* answer: each audio part carries
+    // its own, and the camera's part carries `false`. All of them are written
+    // here rather than in two passes so a half-saved take cannot reach the
+    // library.
+    const isCompanionTake = companions != null && companions.length > 0;
     const overlayPlacement = isCompanionTake
       ? {
           position: config.webcamPosition,
@@ -158,72 +163,101 @@ export function useRecordingSave({
     await storeVideo(id, blob, sourceVideo);
     await storeThumbnail(id, thumbnail);
 
-    if (companion) {
-      // A companion may never cost the take its primary: the primary's own
-      // storeVideo/storeThumbnail already ran above, so any failure from here
-      // down — a bad decode, a storage write that throws — is caught and
-      // reported rather than left to reject the whole save and orphan the
-      // already-persisted primary in IndexedDB, invisible until a reload.
+    // A companion may never cost the take another part: the primary's own
+    // storeVideo/storeThumbnail already ran above, and each companion is
+    // written inside its own try/catch, so a bad decode or a storage write
+    // that throws costs exactly the part it happened to and nothing else. One
+    // notice covers however many were lost — there is one channel, and which
+    // one it was is what the console is for.
+    let lostAPart = false;
+
+    // Reverse role order, because `addRecording` prepends: adding system,
+    // then mic, then webcam, then the primary leaves the list as
+    // [primary, webcam, mic, system] — the order `orderTakes` rebuilds after
+    // a reload.
+    for (const companion of [...(companions ?? [])].reverse()) {
+      const part = COMPANION_PARTS[companion.role];
       try {
         const companionId = uuidv4();
-        const companionMetadata = await extractVideoMetadata(companion.blob, recordedDuration);
-        // The frame grabbed off the live preview is the *composited* picture,
-        // so it is the primary's thumbnail and not this part's. Decode one
-        // from the companion's own file, with the same placeholder behind it
-        // as the primary's fallback chain.
-        let companionThumbnail: Blob;
-        try {
-          companionThumbnail = await generateThumbnail(companion.blob);
-        } catch {
-          companionThumbnail = await createPlaceholderThumbnail();
+        let companionSourceVideo;
+        let companionThumbnail: Blob | null = null;
+
+        if (part.isAudio) {
+          // No metadata probe and no thumbnail. `extractVideoMetadata`
+          // reports `videoWidth || 1920`, so probing an audio file would
+          // store it as 1920x1080, and `generateThumbnail` would decode a
+          // file with no picture and land on the placeholder. The length is
+          // the recorder's own: every part of a take is the same length by
+          // construction — one recorder, one clock, one start, one stop.
+          companionSourceVideo = buildSourceVideo({
+            id: companionId,
+            now,
+            blob: companion.blob,
+            duration: recordedDuration,
+            width: 0,
+            height: 0,
+            hasAudio: true,
+            hasWebcam: false,
+            takeId: id,
+            role: companion.role,
+            startOffset: companion.startOffset,
+          });
+        } else {
+          const companionMetadata = await extractVideoMetadata(companion.blob, recordedDuration);
+          // The frame grabbed off the live preview is the *composited*
+          // picture, so it is the primary's thumbnail and not this part's.
+          // Decode one from the companion's own file, with the same
+          // placeholder behind it as the primary's fallback chain.
+          try {
+            companionThumbnail = await generateThumbnail(companion.blob);
+          } catch {
+            companionThumbnail = await createPlaceholderThumbnail();
+          }
+          companionSourceVideo = buildSourceVideo({
+            id: companionId,
+            now,
+            blob: companion.blob,
+            duration:
+              Number.isFinite(companionMetadata.duration) && companionMetadata.duration > 0
+                ? companionMetadata.duration
+                : recordedDuration,
+            width: companionMetadata.width,
+            height: companionMetadata.height,
+            // The whole mix stays on the primary output, so the camera's own
+            // file has no audio track at all.
+            hasAudio: false,
+            hasWebcam: true,
+            takeId: id,
+            role: companion.role,
+            startOffset: companion.startOffset,
+          });
         }
-        const companionSourceVideo = buildSourceVideo({
-          id: companionId,
-          now,
-          blob: companion.blob,
-          duration:
-            Number.isFinite(companionMetadata.duration) && companionMetadata.duration > 0
-              ? companionMetadata.duration
-              : recordedDuration,
-          width: companionMetadata.width,
-          height: companionMetadata.height,
-          // Slice 1 keeps the whole mix on the primary output, so this half
-          // has no audio track at all — and must not be offered an M4A
-          // download.
-          hasAudio: false,
-          hasWebcam: true,
-          takeId: id,
-          role: 'webcam',
-          startOffset: companion.startOffset,
-        });
 
         await storeVideo(companionId, companion.blob, companionSourceVideo);
-        await storeThumbnail(companionId, companionThumbnail);
+        if (companionThumbnail) await storeThumbnail(companionId, companionThumbnail);
 
-        // Added FIRST because `addRecording` prepends: the primary then lands
-        // on top of it and the webcam row sits directly under the take it
-        // belongs to, which is the order `loadRecordings` rebuilds after a
-        // reload.
         addRecording(buildRecordingEntry({
           sourceVideo: companionSourceVideo,
           now,
           size: companion.blob.size,
-          thumbnailUrl: createBlobUrl(companionThumbnail),
-          config,
-          hasAudio: false,
+          ...(companionThumbnail ? { thumbnailUrl: createBlobUrl(companionThumbnail) } : {}),
+          hasWebcam: !part.isAudio,
+          hasAudio: part.isAudio,
         }));
       } catch (error) {
-        console.warn('Webcam track could not be saved:', error);
-        setNotice(WEBCAM_TRACK_NOT_SAVED);
+        console.warn(`${part.trackLabel} track could not be saved:`, error);
+        lostAPart = true;
       }
     }
+
+    if (lostAPart) setNotice(SEPARATE_TRACK_NOT_SAVED);
 
     addRecording(buildRecordingEntry({
       sourceVideo,
       now,
       size: blob.size,
       thumbnailUrl: createBlobUrl(thumbnail),
-      config,
+      hasWebcam: config.webcamEnabled,
       hasAudio,
     }));
   }, [setState, addRecording, setNotice, config, recorderTypeRef, capturedThumbnailRef]);

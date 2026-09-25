@@ -355,17 +355,107 @@ describe('WebCodecsRecorder work ceilings', () => {
 
         await recorder.stop()
 
-        // Exact: one flush per encoder, one finalize per output, one audio
-        // encoder for the whole take — the mix belongs to the primary.
+        // Exact: one flush per encoder, one finalize per output. Three audio
+        // encoders and four outputs, because this take really has three audio
+        // pipelines — the mix on the primary, and one file each for the
+        // microphone and the system audio (slice 3). The mix is still the
+        // primary's, which is what keeps a screen-only download audible.
         expect(screen.flushCalls).toBe(1)
         expect(webcam.flushCalls).toBe(1)
         expect(lastAudioEncoder().flushCalls).toBe(1)
-        expect(AudioEncoderDouble.instances).toHaveLength(1)
-        expect(getMediabunnyState().outputs.map(o => o.finalizeCalls)).toEqual([1, 1])
+        expect(AudioEncoderDouble.instances).toHaveLength(3)
+        // The two audio companions are offered no buffer by this suite, so
+        // they encoded nothing and their outputs are abandoned unfinalized on
+        // purpose — an empty Opus file is a library row that plays nothing.
+        // The four-finalize case is 'one take of audio companions', below.
+        expect(getMediabunnyState().outputs.map(o => o.finalizeCalls)).toEqual([1, 1, 0, 0])
         // Exact: one AudioContext, closed. Two video pipelines must not mean
         // two audio graphs.
         expect(audio.contexts).toHaveLength(1)
         expect(audio.contexts.every(c => c.state === 'closed')).toBe(true)
+        expect(raf.pending()).toBe(0)
+      } finally {
+        uninstallTrackProcessorDouble()
+      }
+    })
+  })
+
+  describe('one take of audio companions', () => {
+    /** Buffers offered to each audio pipeline. */
+    const BUFFERS_PER_PIPELINE = 12
+
+    it('encodes each buffer once per pipeline, closes every AudioData, flushes each encoder once', async () => {
+      const processor = installTrackProcessorDouble()
+      const webcamStream = createStreamDouble([
+        createTrackDouble('video', { id: 'webcam-video', settings: { width: 640, height: 480 } }),
+      ])
+      try {
+        await recorder.initialize(screenStream, webcamStream, micStream, {
+          ...baseConfig,
+          webcamEnabled: true,
+          separateTracks: true,
+          microphoneEnabled: true,
+          systemAudioEnabled: true,
+        })
+        recorder.start()
+
+        // One frame down each video pipeline, so both have something worth
+        // finalizing and this suite counts four outputs rather than two.
+        now += 1000 / CAPTURE_FPS
+        processor.pushFrameTo('screen-video', new VideoFrameDouble({}, { timestamp: 0 }))
+        processor.pushFrameTo('webcam-video', new VideoFrameDouble({}, { timestamp: 0 }))
+        await flush()
+
+        const nodes = lastAudioContext().scriptProcessors
+        for (let i = 0; i < BUFFERS_PER_PIPELINE; i++) {
+          for (const node of nodes) {
+            node.onaudioprocess!({
+              inputBuffer: createAudioBufferDouble({ length: AUDIO_BUFFER_FRAMES }),
+            })
+          }
+        }
+        await flush()
+
+        const [mix, mic, system] = AudioEncoderDouble.instances
+        const audioData = getCreatedFrames('AudioData')
+
+        // Exact conservation, per pipeline: one AudioData per callback, each
+        // encoded once by its own encoder and closed. An AudioData that
+        // outlives its encode pins a decoded buffer in memory, and this mode
+        // makes three of them per buffer period.
+        expect(AudioEncoderDouble.instances).toHaveLength(3)
+        expect(lastAudioContext().scriptProcessors).toHaveLength(3)
+        for (const encoder of [mix, mic, system]) {
+          expect(encoder.encodes).toHaveLength(BUFFERS_PER_PIPELINE)
+        }
+        expect(audioData).toHaveLength(3 * BUFFERS_PER_PIPELINE)
+        expect(audioData.every(d => d.closed)).toBe(true)
+        // Measured 2026-09-26: one Float32Array per callback per pipeline — the
+        // interleave of the two input channels into planar layout — so 36 for
+        // 36 callbacks. The ScriptProcessor fires ~11 times a second at 4096
+        // samples, so this is not a per-frame cost; a scratch buffer reused
+        // across callbacks would take it to zero. Ceiling at 2x.
+        const planarBuffers = new Set(audioData.map(d => d.source))
+        expect(planarBuffers.size).toBeLessThanOrEqual(2 * 3 * BUFFERS_PER_PIPELINE)
+        expect(planarBuffers.size).toBe(audioData.length)
+
+        await recorder.stop()
+
+        // Exact: one flush per encoder, one finalize per output. Four outputs:
+        // screen, webcam, microphone, system audio.
+        for (const encoder of [mix, mic, system]) {
+          expect(encoder.flushCalls).toBe(1)
+          expect(encoder.closeCalls).toBe(1)
+        }
+        expect(getMediabunnyState().outputs.map(o => o.finalizeCalls)).toEqual([1, 1, 1, 1])
+        // Exact: one AudioContext for the whole take, closed. Three audio
+        // pipelines must not mean three audio graphs.
+        expect(audio.contexts).toHaveLength(1)
+        expect(audio.contexts.every(c => c.state === 'closed')).toBe(true)
+        // Exact: two analysers, the mix's own. A companion adds a tap, never a
+        // meter — the Sources panel draws two bars and a third would be a
+        // store write per animation frame for a meter nothing renders.
+        expect(lastAudioContext().analysers).toHaveLength(2)
         expect(raf.pending()).toBe(0)
       } finally {
         uninstallTrackProcessorDouble()

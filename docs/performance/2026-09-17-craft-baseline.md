@@ -709,3 +709,122 @@ two halves in the report; it therefore understates the take's total bytes by
 roughly the webcam part — which is the "about twice the storage" the toggle warns
 about. For scale, the screen-only arm in the same invocation stored 1,642,328
 bytes for a take of the same length.
+
+## craft-separate-tracks-recording — re-measured for the audio companions, 2026-09-25
+
+ESCSUITE-14 slice 3 gave the microphone its own `AudioEncoder` and its own
+Mediabunny output, so this arm now runs **two video encoders and two audio
+encoders** on the main thread (the mix on the primary, the microphone companion
+beside it) and writes three files instead of two. The first measurement above
+describes the two-file take and is kept for comparison, not superseded.
+
+Three files, not four: `openCraft` leaves ESCAPECRAFT's defaults alone, and the
+microphone is on by default while system audio is off — so the take asks
+`getDisplayMedia` for no audio, `mockSyntheticMedia`'s synthetic display stream
+carries no audio track, and no system part is built. The take therefore lands as
+the screen primary (carrying the mixed audio), the webcam companion and the
+microphone companion. That the count is exactly three is enforced, not assumed:
+`measureTake` waits for `rowsBefore + 3` library rows after Stop, so a fourth
+part or a missing one fails the benchmark instead of letting the heap reading be
+taken mid-write.
+
+The two audio encoders are counted the same way the video ones are — a `WeakMap`
+keyed on the encoder instance, in first-encode order — and the count is **not
+published**: it is read inside `measureTake` as a tripwire (`toBe(2)`) and
+dropped, because it is an invariant the numbers rest on rather than a number
+worth a row in the report. A mode that quietly recorded its sound into the mix
+alone would still run two video encoders, still composite for the preview, and
+still look right in every cell below.
+
+Same machine, same launch args, same three-runs-median, taken in one invocation
+of `playwright test --config=playwright.perf.config.ts craft-recording` against
+a warm dev server. `uptime` at the start of the run read
+`6:05 up 24 days, 23:57, 4 users, load averages: 2.54 3.45 4.18` — a quieter
+machine than the first measurement's (which carried a load average of 18.67 and
+a `rustc` pinning a core), so the millisecond figures below are *lower* than the
+ones above for reasons that have nothing to do with the audio companions. The
+shape is the finding; re-measure before quoting any millisecond figure as a
+target, and do not read the difference between the two sections as a change in
+cost.
+
+Every cell below is the **median of its own quantity over the three runs**, taken
+independently of every other cell, exactly as in the first measurement.
+`Encoder queue high-water` is the one exception — a maximum over the three runs,
+not a median, because it is already a maximum within each.
+
+| Metric | Statistic over the 3 runs | Value |
+|---|---|---|
+| Frames encoded (screen) | median of the per-run `framesEncodedPerEncoder[0]` | 144 |
+| Frames encoded (webcam) | median of the per-run `framesEncodedPerEncoder[1]` | 143 |
+| Frames encoded (both, `framesEncoded`) | median of the per-run **totals** | 288 |
+| Frames/s | median | 57.54 |
+| Composited fps (preview only) | median | 29.96 |
+| Video draws | median | 300 |
+| Renderer task duration (ms) | median | 1724.09 |
+| Renderer task per frame (ms) | median | 6.04 |
+| Animation frames/s | median | 119.85 |
+| Layouts / style recalcs | median / median | 305 / 300 |
+| Long tasks / total (ms) | median / median | 0 / 0 |
+| Encoder queue high-water | **max** | 0 |
+| Heap delta (bytes) | median | −386,946 |
+| Output size (bytes, screen part) | median | 1,635,196 |
+
+The three runs behind those cells, so the table can be checked against them:
+
+| Run | screen | webcam | total | renderer task | task/frame | composited fps |
+|---|---|---|---|---|---|---|
+| 1 | 136 | 143 | 279 | 1724.09 ms | 6.180 ms | 29.96 |
+| 2 | 144 | 149 | 293 | 1697.81 ms | 5.795 ms | 29.96 |
+| 3 | 146 | 142 | 288 | 1739.13 ms | 6.039 ms | 29.97 |
+
+The same per-cell-median arithmetic as the first measurement applies, and shows
+again: `Frames encoded (both)` is 288 where the two per-encoder cells sum to 287,
+because the median of the per-run totals (`median(279, 293, 288) = 288`, run 3)
+is a different statistic from the sum of the two per-encoder medians
+(`median(136, 144, 146) + median(143, 149, 142) = 144 + 143 = 287`, runs 2 and 1).
+Neither cell is wrong; see the first measurement for why both are published.
+
+The split says the two video pipelines stayed together with the audio companions
+running beside them: 136/143, 144/149 and 146/142, within a handful of frames of
+each other in every run on a window carrying ~145 frames per pipeline. They are
+not expected to be frame-identical — the two capture tracks deliver
+independently and only the timestamps are shared.
+
+Side by side with the other two arms, from the same invocation:
+
+| | screen only | PiP | separate tracks |
+|---|---|---|---|
+| Renderer task duration | 703.00 ms | 1991.62 ms | **1724.09 ms** |
+| Renderer task per frame | 4.77 ms (per encoded frame) | 13.28 ms (per *composited* frame) | 6.04 ms (per encoded frame) |
+| Composited fps | — | 29.95 | 29.96 |
+| Animation frames/s | 59.94 | 120.08 | 119.85 |
+| Video encoders on the main thread | 1 | 0 | 2 |
+| Audio encoders on the main thread | 1 | 0 | 2 |
+| Files stored per take | 1 | 1 | 3 |
+
+The slice 1 headline holds with the audio companions in place: **two video
+encoders and two audio encoders in the page still cost less main-thread time
+than one composited MediaRecorder take** — 1724 ms against 1992 ms in the same
+5 s window, for twice the stored video and the microphone as its own file. The
+preview was not degraded to pay for any of it (300 video draws, 29.96 composited
+fps, indistinguishable from PiP's 29.95), the animation-frame rate is unchanged
+at ~120/s, and the layout and style-recalc counts are within a few of PiP's — the
+three extra library rows are written after the measured window closes, so the
+saving path does not appear in these numbers at all.
+
+Also unchanged: 0 long tasks and an encoder queue high-water of **0** across all
+three runs. Four encoders on the main thread never fell behind the capture on
+this machine — the queue never held a frame at the moment one was handed over.
+The Opus encodes are cheap next to the two 720p video ones, which is what that
+says.
+
+`outputBytes` is the **screen** part alone, and now for a sharper reason: a
+separate-tracks take writes three records carrying the identical `recordedAt`
+(one `now` for the whole take), so the timestamp cannot order them and store
+order is uuid order. The tie is broken towards the **primary** — the part with no
+role, or the role `screen` — rather than "anything but the webcam", which was
+deterministic while a take had two parts and a coin toss once it had three. So
+the figure understates the take's total bytes by the webcam part and the
+microphone part; for scale, the screen-only arm in the same invocation stored
+1,642,586 bytes for a take of the same length, and the microphone's Opus file is
+small next to either video part.

@@ -33,18 +33,19 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * benchmarks.
  *
  * They assert nothing about speed. The only `expect`s are inside
- * `utils/craftPerf.ts`, and every one of the ten says the benchmark measured
+ * `utils/craftPerf.ts`, and every one of the eleven says the benchmark measured
  * the wrong thing rather than that the machine was slow: a take that stopped
  * mid-window; a "WebCodecs" take that encoded nothing, or that drew video into
  * a canvas at all (which would mean `WebCodecsRecorder` had taken its
  * `startVideoElementCapture` fallback); a PiP take that composited nothing, or
  * whose `videoDraws` came out odd (which would mean a capture track was not
  * ready for some frames, so the two-draws-per-composited-frame divisor is
- * wrong); a separate-tracks take that did not run exactly two encoders, or one
- * of whose two encoded nothing, with the same two draw checks over the
- * compositor now that it is drawing the preview only — two encoders' frames
- * counted, and the compositor drawing for the preview only; and a conversion
- * that encoded no frames.
+ * wrong); a separate-tracks take that did not run exactly two video encoders, or
+ * one of whose two encoded nothing, or that did not run exactly two **audio**
+ * encoders (the mix on the primary plus the microphone companion), with the same
+ * two draw checks over the compositor now that it is drawing the preview only —
+ * two encoders' frames counted, and the compositor drawing for the preview only;
+ * and a conversion that encoded no frames.
  *
  * The capture devices are `mockSyntheticMedia`'s canvas and oscillator, which
  * means a 33 ms `setInterval` painting the source canvas runs on the page's own

@@ -554,4 +554,70 @@ describe('a take recorded as separate tracks', () => {
     const m4a = screen.getByRole('button', { name: 'Download Standup Demo as audio (M4A)' })
     expect(m4a.getAttribute('aria-describedby')).toBe(describedBy)
   })
+
+  const micRow = makeRecording({
+    id: 'part-3',
+    name: 'Standup Demo — microphone',
+    takeId: 'take-1',
+    role: 'mic',
+    hasWebcam: false,
+    hasAudio: true,
+  })
+  const systemRow = makeRecording({
+    id: 'part-4',
+    name: 'Standup Demo — system audio',
+    takeId: 'take-1',
+    role: 'system',
+    hasWebcam: false,
+    hasAudio: true,
+  })
+
+  it('labels each audio row as the track it is', () => {
+    renderList([primary, companion, micRow, systemRow])
+
+    expect(screen.getByText(/^Webcam track • /)).toBeInTheDocument()
+    expect(screen.getByText(/^Microphone track • /)).toBeInTheDocument()
+    expect(screen.getByText(/^System audio track • /)).toBeInTheDocument()
+  })
+
+  it('offers an audio row play, WebM and delete — and no conversions', () => {
+    renderList([primary, companion, micRow, systemRow])
+
+    expect(screen.getByRole('button', { name: 'Play Standup Demo — microphone' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Standup Demo — microphone' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Delete Standup Demo — microphone' })).toBeEnabled()
+    // No M4A on an audio row either: the row's own bytes are already an audio
+    // file, downloadable as they stand, and the take's conversions live on the
+    // primary. Offering a conversion of a part would be slice 4's composite
+    // pretending to exist.
+    expect(
+      screen.queryByRole('button', { name: 'Download Standup Demo — microphone as audio (M4A)' })
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Download Standup Demo — system audio as MP4' })
+    ).toBeNull()
+  })
+
+  it('sends the take to the editor from an audio row too', async () => {
+    const { calls } = renderList([primary, micRow])
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Open Standup Demo — microphone in Editor' })
+    )
+
+    expect(calls.onSendToEditor.mock.calls).toEqual([['take-1']])
+  })
+
+  it('keeps the interim MP4 note on the take with a camera in it', () => {
+    renderList([primary, companion, micRow, systemRow])
+
+    // The note is about the webcam not being in the composite. The mix is
+    // still on the primary, so the audio parts change nothing about what the
+    // MP4 and M4A contain — and the note must not appear four times.
+    expect(
+      screen.getAllByText(
+        'MP4 and M4A cover the screen track only — the webcam track is not included yet.'
+      )
+    ).toHaveLength(1)
+  })
 })

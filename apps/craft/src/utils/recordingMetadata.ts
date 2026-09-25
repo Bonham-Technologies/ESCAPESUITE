@@ -6,10 +6,10 @@
 import type {
   SourceVideo,
   Recording,
-  RecordingConfig,
   RecordingRole,
   OverlayPlacement,
 } from '../store/types';
+import { companionPartFor } from './companionParts';
 
 export interface BuildSourceVideoInput {
   id: string;
@@ -57,19 +57,29 @@ export function buildSourceVideo({
   overlayPlacement,
 }: BuildSourceVideoInput): SourceVideo {
   const takeName = `Recording ${new Date(now).toLocaleString()}`;
+  // The role's own noun, from the one table that has it. Both parts of a take
+  // are saved with the same `now`, so a companion's name is the take's name
+  // with its half named — which is what its own WebM download is called and
+  // what ARTIST shows as the source's name.
+  const part = companionPartFor(role);
   return {
     id,
-    // Both parts of a take are saved with the same `now`, so the webcam half's
-    // name is the take's name with its half named — which is what its own WebM
-    // download is called and what ARTIST will show as the source's name.
-    name: role === 'webcam' ? `${takeName} — webcam` : takeName,
+    name: part ? `${takeName} — ${part.label}` : takeName,
     duration,
     width,
     height,
-    frameRate: 30,
+    // An audio part has no frames to rate. 0 rather than 30 because that is
+    // what ESCAPEARTIST's own audio importer writes (core/videoProcessor.ts),
+    // and a part that arrived from a recording should be indistinguishable
+    // from one that arrived from a file.
+    frameRate: part?.isAudio ? 0 : 30,
     mimeType: blob.type,
     size: blob.size,
-    mediaType: 'video',
+    // Everything in ARTIST that decides whether to draw a clip, decode a
+    // frame or export a video track branches on this. A mic part written as
+    // 'video' would be a black rectangle in the preview and a wasted encode
+    // in the export.
+    mediaType: part?.isAudio ? 'audio' : 'video',
     source: 'recording',
     recordedAt: now,
     // The list entry's `hasAudio` only lives as long as the tab. This is the
@@ -91,13 +101,23 @@ export interface BuildRecordingEntryInput {
   sourceVideo: Pick<SourceVideo, 'id' | 'name' | 'duration' | 'takeId' | 'role'>;
   now: number;
   size: number;
-  thumbnailUrl: string;
-  config: Pick<RecordingConfig, 'webcamEnabled'>;
   /**
-   * Whether the take captured any audio — the same value `buildSourceVideo`
-   * was given. Passed in rather than derived from the config here, because the
-   * config cannot answer it: ticking "System Audio" only *asks* for it, and
-   * the browser's share dialog has the last word (ESCSUITE-62).
+   * Absent for a part with no thumbnail — an audio companion, which has no
+   * picture to decode one from. The list draws its own empty placeholder.
+   */
+  thumbnailUrl?: string;
+  /**
+   * Whether this part captured the webcam. Passed in rather than read off the
+   * config, for the same reason `hasAudio` is: the config describes the
+   * *take*, and the parts of one take do not all answer alike — the audio
+   * halves of a webcam take have no camera in them.
+   */
+  hasWebcam: boolean;
+  /**
+   * Whether this part captured any audio — the same value `buildSourceVideo`
+   * was given. The config cannot answer it: ticking "System Audio" only
+   * *asks* for it, and the browser's share dialog has the last word
+   * (ESCSUITE-62).
    */
   hasAudio: boolean;
 }
@@ -108,7 +128,7 @@ export function buildRecordingEntry({
   now,
   size,
   thumbnailUrl,
-  config,
+  hasWebcam,
   hasAudio,
 }: BuildRecordingEntryInput): Recording {
   return {
@@ -118,7 +138,7 @@ export function buildRecordingEntry({
     createdAt: now,
     size,
     thumbnailUrl,
-    hasWebcam: config.webcamEnabled,
+    hasWebcam,
     hasAudio,
     // Same rule as the stored record: absent on a single-file take, so the
     // library's grouping sees nothing to group.

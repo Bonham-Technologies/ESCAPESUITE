@@ -16,7 +16,7 @@ import { converterModule, thumbnailModule, resetAppDoubles } from '../test/appDo
 import { useRecorderStore } from '../store/recorderStore'
 import { getLastCanvasContext, resetCanvasContextDouble } from '../test/doubles/canvas'
 import { defaultConfig, type Recording, type RecordingConfig, type RecordingState } from '../store/types'
-import { WEBCAM_TRACK_NOT_SAVED } from '../utils/notices'
+import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
 
 vi.mock('../core/thumbnailGenerator', async () => (await import('../test/appDoubles')).thumbnailModule)
 vi.mock('../core/converter', async () => (await import('../test/appDoubles')).converterModule)
@@ -298,6 +298,11 @@ describe('useRecordingSave for a separate-tracks take', () => {
   /** What the WebCodecs recorder hands over as the take's second half. */
   const companionPart = { role: 'webcam' as const, blob: COMPANION, startOffset: 0 }
 
+  const MIC = new Blob(['mic-bytes'], { type: 'audio/webm' })
+  const SYSTEM = new Blob(['system-bytes'], { type: 'audio/webm' })
+  const micPart = { role: 'mic' as const, blob: MIC, startOffset: 0 }
+  const systemPart = { role: 'system' as const, blob: SYSTEM, startOffset: 0 }
+
   it('stores both parts under one takeId, the placement on the primary only', async () => {
     recorderTypeRef.current = 'webcodecs'
     const { result } = mountSave({
@@ -308,7 +313,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
       webcamShape: 'rectangle',
     })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(2)
@@ -339,7 +344,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     capturedThumbnailRef.current = new Blob(['preview-frame'], { type: 'image/jpeg' })
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     for (const part of stored) {
@@ -360,7 +365,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     thumbnailModule.generateThumbnail.mockRejectedValue(new Error('no decoder'))
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(2)
@@ -374,7 +379,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     thumbnailModule.extractVideoMetadata.mockResolvedValue({ duration: 0, width: 640, height: 480 })
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     const stored = await getRecordingsMetadata()
     const webcam = stored.find(m => m.role === 'webcam')!
@@ -385,7 +390,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     recorderTypeRef.current = 'webcodecs'
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     // addRecording prepends, so the companion is added first: the list ends up
     // [primary, companion, ...older] and the webcam row is never above the
@@ -397,7 +402,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     recorderTypeRef.current = 'webcodecs'
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     expect(converterModule.fixWebMMetadata).not.toHaveBeenCalled()
   })
@@ -427,7 +432,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
     })
     const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
 
-    await result.current(RAW, 6, companionPart)
+    await result.current(RAW, 6, [companionPart])
 
     expect(added).toHaveLength(1)
     expect(added[0].role).toBe('screen')
@@ -435,6 +440,110 @@ describe('useRecordingSave for a separate-tracks take', () => {
     expect(stored).toHaveLength(1)
     expect(consoleWarn).toHaveBeenCalledTimes(1)
     expect(consoleWarn).toHaveBeenCalledWith('Webcam track could not be saved:', expect.any(Error))
-    expect(notices).toEqual([WEBCAM_TRACK_NOT_SAVED])
+    expect(notices).toEqual([SEPARATE_TRACK_NOT_SAVED])
+  })
+
+  it('stores four parts under one takeId, the audio parts as audio', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const { result } = mountSave({
+      webcamEnabled: true,
+      separateTracks: true,
+      microphoneEnabled: true,
+      systemAudioEnabled: true,
+    })
+
+    await result.current(RAW, 6, [companionPart, micPart, systemPart])
+
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(4)
+    const primary = stored.find(m => m.role === 'screen')!
+    const mic = stored.find(m => m.role === 'mic')!
+    const system = stored.find(m => m.role === 'system')!
+
+    for (const part of [mic, system]) {
+      expect(part.takeId).toBe(primary.id)
+      expect(part.startOffset).toBe(0)
+      // The shape ESCAPEARTIST's own audio importer produces: a part that
+      // arrived from a recording should be indistinguishable from one that
+      // arrived from a file.
+      expect(part.mediaType).toBe('audio')
+      expect(part.frameRate).toBe(0)
+      expect(part.width).toBe(0)
+      expect(part.height).toBe(0)
+      expect(part.mimeType).toBe('audio/webm')
+      // hasAudio is per part now: the audio parts are the audio.
+      expect(part.hasAudio).toBe(true)
+      expect(part.hasWebcam).toBe(false)
+      expect('overlayPlacement' in part).toBe(false)
+      // Every part of a take is the same length by construction: one
+      // recorder, one clock, one start, one stop.
+      expect(part.duration).toBe(6)
+    }
+    expect(mic.name).toMatch(/ — microphone$/)
+    expect(system.name).toMatch(/ — system audio$/)
+  })
+
+  it('decodes nothing for an audio part — no metadata probe, no thumbnail', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    capturedThumbnailRef.current = new Blob(['preview-frame'], { type: 'image/jpeg' })
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, [companionPart, micPart, systemPart])
+
+    // extractVideoMetadata reports `width: videoWidth || 1920`, so probing an
+    // audio file would store it as 1920x1080; generateThumbnail would decode a
+    // file with no picture and land on the placeholder. Neither is asked.
+    const probed = thumbnailModule.extractVideoMetadata.mock.calls.map(call => call[0])
+    expect(probed).not.toContain(MIC)
+    expect(probed).not.toContain(SYSTEM)
+    expect(thumbnailModule.generateThumbnail).toHaveBeenCalledTimes(1)
+    expect(thumbnailModule.generateThumbnail).toHaveBeenCalledWith(COMPANION)
+
+    const stored = await getRecordingsMetadata()
+    const mic = stored.find(m => m.role === 'mic')!
+    // No thumbnail stored, so the library draws its own empty placeholder and
+    // ARTIST treats the missing picture as cosmetic, which it already does.
+    await expect(getThumbnail(mic.id)).resolves.toBeUndefined()
+  })
+
+  it('lists the parts under the primary in role order', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, [companionPart, micPart, systemPart])
+
+    // addRecording prepends, so the companions are added in reverse: the list
+    // ends up [primary, webcam, mic, system], which is the order
+    // `orderTakes` rebuilds after a reload.
+    expect(added.map(entry => entry.role)).toEqual(['system', 'mic', 'webcam', 'screen'])
+    expect(added.find(entry => entry.role === 'mic')!.hasWebcam).toBe(false)
+    expect(added.find(entry => entry.role === 'mic')!.hasAudio).toBe(true)
+  })
+
+  it('loses one part without losing the others, and says so once', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    thumbnailModule.generateThumbnail.mockRejectedValue(new Error('no decoder'))
+    // The webcam part's own thumbnail fallback would rescue it, so break the
+    // part that has no fallback: its metadata probe.
+    thumbnailModule.extractVideoMetadata.mockImplementation(async (blob: Blob, known?: number) => {
+      if (blob === COMPANION) throw new Error('decode failed')
+      return { duration: known ?? 0, width: 1920, height: 1080 }
+    })
+    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+
+    await result.current(RAW, 6, [companionPart, micPart, systemPart])
+
+    const stored = await getRecordingsMetadata()
+    // The camera is gone; the screen, the microphone and the system audio are
+    // not. A companion may never cost the take another part.
+    expect(stored.map(m => m.role).sort()).toEqual(['mic', 'screen', 'system'])
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Webcam track could not be saved:',
+      expect.any(Error)
+    )
+    // One sentence however many parts were lost: there is one notice channel,
+    // and "which one" is what the log is for.
+    expect(notices).toEqual([SEPARATE_TRACK_NOT_SAVED])
   })
 })
