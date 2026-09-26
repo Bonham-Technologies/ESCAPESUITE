@@ -402,7 +402,7 @@ describe('projectStore remaining behaviours', () => {
 
     it('names an auto-created text track "Text"', () => {
       addClip('clip1', 0)
-      const overlay = store().addTextOverlayClip({ text: 'Hi' })
+      const overlay = store().addTextOverlayClip({ text: 'Hi' })!
 
       const track = store().project.timeline.tracks.find((t) => t.id === overlay.trackId)!
       expect(track.name).toBe('Text')
@@ -410,14 +410,14 @@ describe('projectStore remaining behaviours', () => {
 
     it('names an auto-created shape track after the shape', () => {
       addClip('clip1', 0)
-      const ellipse = store().addShapeOverlayClip({ type: 'ellipse' })
+      const ellipse = store().addShapeOverlayClip({ type: 'ellipse' })!
 
       expect(store().project.timeline.tracks.find((t) => t.id === ellipse.trackId)!.name).toBe('Ellipse')
     })
 
     it('names an auto-created blur track "Blur" and gives it blur defaults', () => {
       addClip('clip1', 0)
-      const blur = store().addShapeOverlayClip({ type: 'blur' })
+      const blur = store().addShapeOverlayClip({ type: 'blur' })!
 
       expect(store().project.timeline.tracks.find((t) => t.id === blur.trackId)!.name).toBe('Blur')
       expect(blur.name).toBe('Blur Region')

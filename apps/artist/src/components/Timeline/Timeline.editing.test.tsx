@@ -606,14 +606,14 @@ describe('Timeline clip appearance', () => {
   })
 
   it('marks a text overlay clip', () => {
-    const clip = store().addTextOverlayClip()
+    const clip = store().addTextOverlayClip()!
     const view = renderTimeline()
 
     expect(view.clip(clip.id)).toHaveClass(styles.clipText)
   })
 
   it.each(['blur', 'rectangle'] as const)('marks a %s shape overlay clip', (type) => {
-    const clip = store().addShapeOverlayClip({ type })
+    const clip = store().addShapeOverlayClip({ type })!
     const view = renderTimeline()
 
     expect(view.clip(clip.id)).toHaveClass(styles.clipShape)

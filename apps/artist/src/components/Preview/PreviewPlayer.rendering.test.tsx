@@ -44,7 +44,7 @@ afterEach(() => {
  * selected.
  */
 const addText = (data: Partial<TextOverlayData>, duration = 4): Clip => {
-  const clip = store().addTextOverlayClip(data, undefined, 0, duration)
+  const clip = store().addTextOverlayClip(data, undefined, 0, duration)!
   store().setSelectedClipId(null)
   return clip
 }

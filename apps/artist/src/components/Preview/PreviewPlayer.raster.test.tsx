@@ -104,7 +104,7 @@ describe('PreviewPlayer raster', () => {
   })
 
   const addShape = (data: Partial<ShapeOverlayData> = {}) =>
-    store().addShapeOverlayClip(data, undefined, 0, 4)
+    store().addShapeOverlayClip(data, undefined, 0, 4)!
 
   /** The box the harness lays the canvas out in, delivered as a resize. */
   const DISPLAY_BOX = { width: DEFAULT_RECT.width!, height: DEFAULT_RECT.height! }

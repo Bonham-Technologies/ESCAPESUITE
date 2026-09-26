@@ -43,7 +43,7 @@ afterEach(() => {
 const SHAPE = { halfW: 192, halfH: 108 }
 
 const addShape = (data: Partial<ShapeOverlayData> = {}): Clip => {
-  const clip = store().addShapeOverlayClip(data, undefined, 0, 4)
+  const clip = store().addShapeOverlayClip(data, undefined, 0, 4)!
   store().setSelectedClipId(clip.id)
   return clip
 }

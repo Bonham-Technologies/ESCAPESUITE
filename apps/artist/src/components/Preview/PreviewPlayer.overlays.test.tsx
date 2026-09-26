@@ -47,13 +47,13 @@ afterEach(() => {
  * selected; the handles have their own file.
  */
 const addText = (data: Partial<TextOverlayData>, duration = 4): Clip => {
-  const clip = store().addTextOverlayClip(data, undefined, 0, duration)
+  const clip = store().addTextOverlayClip(data, undefined, 0, duration)!
   store().setSelectedClipId(null)
   return clip
 }
 
 const addShape = (data: Partial<ShapeOverlayData>, duration = 4): Clip => {
-  const clip = store().addShapeOverlayClip(data, undefined, 0, duration)
+  const clip = store().addShapeOverlayClip(data, undefined, 0, duration)!
   store().setSelectedClipId(null)
   return clip
 }

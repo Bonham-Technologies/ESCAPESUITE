@@ -64,7 +64,7 @@ describe('App keyboard shortcuts', () => {
     })
 
     it('ignores a shortcut aimed at a textarea', async () => {
-      const clip = store().addTextOverlayClip()
+      const clip = store().addTextOverlayClip()!
       await renderApp()
       const textarea = screen.getByPlaceholderText('Enter text...')
 

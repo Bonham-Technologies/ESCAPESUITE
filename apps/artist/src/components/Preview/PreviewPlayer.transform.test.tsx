@@ -49,13 +49,13 @@ const TEXT = { halfW: 50, halfH: 28.8 }
 const clipOf = (id: string): Clip => store().project.timeline.clips.find((c) => c.id === id)!
 
 const addShape = (data: Partial<ShapeOverlayData> = {}): Clip => {
-  const clip = store().addShapeOverlayClip(data, undefined, 0, 4)
+  const clip = store().addShapeOverlayClip(data, undefined, 0, 4)!
   store().setSelectedClipId(clip.id)
   return clip
 }
 
 const addText = (data: Partial<TextOverlayData> = {}): Clip => {
-  const clip = store().addTextOverlayClip(data, undefined, 0, 4)
+  const clip = store().addTextOverlayClip(data, undefined, 0, 4)!
   store().setSelectedClipId(clip.id)
   return clip
 }

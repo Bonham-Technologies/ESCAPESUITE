@@ -80,4 +80,52 @@ describe('keyframe actions and the undo stack', () => {
       expect(store().project.modified).toBeGreaterThan(0)
     })
   })
+
+  describe('a locked track (ESCSUITE-84)', () => {
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    const lock = () => {
+      const trackId = store().project.timeline.clips[0].trackId
+      store().updateTrack(trackId, { locked: true })
+    }
+
+    /** Assert the action wrote nothing: same clips array, no history entry. */
+    const refuses = (act: () => void) => {
+      const before = clipsRef(); const entries = past()
+      act()
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
+    it('refuses to set a keyframe on a clip on it', () => {
+      lock()
+
+      refuses(() => store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' }))
+    })
+
+    it('refuses to remove a keyframe on a clip on it', () => {
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      lock()
+
+      refuses(() => store().removeClipKeyframe('clip1', 'opacity', 1))
+      expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
+    })
+
+    it('refuses to move a keyframe on a clip on it', () => {
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      lock()
+
+      refuses(() => store().moveClipKeyframe('clip1', 'opacity', 1, 2))
+      expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
+    })
+
+    it('refuses to clear the keyframes of a clip on it', () => {
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      lock()
+
+      refuses(() => store().clearClipKeyframes('clip1'))
+      expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
+    })
+  })
 })
