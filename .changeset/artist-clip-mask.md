@@ -15,10 +15,10 @@ look like the recording you had just watched. It does now — and because the sh
 border are ordinary clip properties, you can change either one, or take them off.
 
 Two details worth knowing. The corner radius is a proportion of the clip rather than a number
-of pixels, and the border's width is a proportion of the frame, so changing a project's
-resolution keeps a masked clip looking the way you left it instead of quietly restyling it.
-And neither can be animated: a mask that changed shape halfway through a clip is not a thing
-this release does.
+of pixels, so the corners stay as round as you set them whatever the project's resolution;
+the border's width is a proportion of the frame, so it scales with the frame rather than
+staying a fixed pixel count. And neither can be animated: a mask that changed shape halfway
+through a clip is not a thing this release does.
 
 The mask and the border are drawn on the clip's picture only. The selection box and the click
 target in the preview stay rectangular; the timeline shows no picture of a clip yet, masked or
