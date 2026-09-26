@@ -86,10 +86,15 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     // was ctrl+clicked into the selection; checked against newClips (the
     // landing) protects a locked row from receiving clips moved onto it. Both
     // arrays are in the same order (.map preserves it), so walking them by
-    // index compares each clip's before and after.
+    // index compares each clip's before and after — but only for a selected
+    // clip: an unselected clip's origin and landing trackId are identical
+    // (moveSelectedClips leaves it untouched), so testing it too would refuse
+    // the whole move whenever ANY clip anywhere sits on a locked track,
+    // selected or not.
     const locked = lockedTrackIds(tracks);
     const original = state.project.timeline.clips;
     for (let i = 0; i < original.length; i++) {
+      if (!state.selectedClipIds.has(original[i].id)) continue;
       if (locked.has(original[i].trackId) || locked.has(newClips[i].trackId)) return state;
     }
 

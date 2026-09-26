@@ -750,6 +750,31 @@ describe('Multi-Select Store', () => {
       expect(state.history.past.length).toBe(0)
     })
 
+    it('moveSelectedClips still moves a selected free clip when an UNSELECTED clip sits on a separately locked track (control)', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0 }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1, locked: true }),
+      ]
+      const clips = [
+        createTestClip({ id: 'clip-1', trackId: 'track-1', timelinePosition: 0 }),
+        createTestClip({ id: 'clip-2', trackId: 'track-2', timelinePosition: 5 }),
+      ]
+      setupStore(clips, tracks)
+
+      // Only clip-1 (the free one) is selected; clip-2 sits untouched on the
+      // locked track and must not veto a move that never reaches it.
+      useEditorStore.getState().toggleClipSelection('clip-1')
+
+      useEditorStore.getState().moveSelectedClips(5, 0)
+
+      const state = useEditorStore.getState()
+      const clip1 = state.project.timeline.clips.find(c => c.id === 'clip-1')!
+      const clip2 = state.project.timeline.clips.find(c => c.id === 'clip-2')!
+      expect(clip1.timelinePosition).toBe(5)
+      expect(clip2.timelinePosition).toBe(5) // unselected locked-row clip did not move
+      expect(state.history.past.length).toBe(1)
+    })
+
     it('muteSelectedClips still mutes a locked track (control — a track property)', () => {
       const tracks = [createTestTrack({ id: 'track-1', locked: true })]
       const clips = [createTestClip({ id: 'clip-1', trackId: 'track-1' })]
