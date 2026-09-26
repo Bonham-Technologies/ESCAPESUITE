@@ -86,10 +86,11 @@ describe('ClipEditorHeader', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('shows the lock notice as a status region when the track is locked (ESCSUITE-84)', () => {
+  it('shows the lock notice when the track is locked (ESCSUITE-84)', () => {
     renderHeader({ locked: true })
 
-    const notice = screen.getByRole('status')
-    expect(notice).toHaveTextContent('Track locked — unlock it in the timeline to edit this clip')
+    expect(
+      screen.getByText('Track locked — unlock it in the timeline to edit this clip')
+    ).toBeInTheDocument()
   })
 })

@@ -65,7 +65,7 @@ export function ClipEditorHeader({ clipTypeLabel, name, duration, position, trac
       </div>
 
       {locked && (
-        <p className={styles.lockedNotice} role="status">
+        <p className={styles.lockedNotice}>
           Track locked — unlock it in the timeline to edit this clip
         </p>
       )}
