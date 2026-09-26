@@ -59,6 +59,8 @@ export interface RecordingCanvasRenderingContext2D {
   readonly ellipse: ReturnType<typeof vi.fn>
   readonly arc: ReturnType<typeof vi.fn>
   readonly rect: ReturnType<typeof vi.fn>
+  readonly roundRect: ReturnType<typeof vi.fn>
+  readonly arcTo: ReturnType<typeof vi.fn>
   readonly fill: ReturnType<typeof vi.fn>
   readonly stroke: ReturnType<typeof vi.fn>
   readonly clip: ReturnType<typeof vi.fn>
@@ -157,6 +159,8 @@ function createContext(
     ellipse: record('ellipse'),
     arc: record('arc'),
     rect: record('rect'),
+    roundRect: record('roundRect'),
+    arcTo: record('arcTo'),
     fill: record('fill'),
     stroke: record('stroke'),
     clip: record('clip'),
