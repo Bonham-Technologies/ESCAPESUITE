@@ -157,21 +157,51 @@ export async function mockSyntheticMedia(
           ctx.fillText(`E2E ${frame}`, 40, height / 2)
         }
 
+        // ESCSUITE-86: stop painting when the track stops. Before this, every
+        // `getDisplayMedia`/`getUserMedia` call started a new loop and the
+        // previous one — from a track a test had already stopped — kept
+        // painting (and, for the interval painter, kept an interval alive) for
+        // the rest of the page's life; a test that opened the mock more than
+        // once leaked one loop per open. It was invisible for the interval
+        // painter, whose rate nothing here counts, but the rAF painter's loop
+        // calls `requestAnimationFrame` itself, and the paired benchmark's own
+        // `rafPerSecond` counter (a `requestAnimationFrame` wrapper) saw every
+        // leaked loop's callbacks alongside the live one's — see the
+        // `rafPerSecond` readings of 120/180/240 across a round's three takes
+        // in the ESCSUITE-86 baseline note. `stop()` is the normal path, but a
+        // recorder can also end a track another way, so `ended` is covered too.
+        let running = true
+        let intervalId: ReturnType<typeof setInterval> | undefined
+        const stopPainting = () => {
+          running = false
+          if (intervalId !== undefined) clearInterval(intervalId)
+        }
+
         if (painter === 'raf') {
           const loop = () => {
+            if (!running) return
             paint()
             requestAnimationFrame(loop)
           }
           requestAnimationFrame(loop)
         } else {
-          setInterval(paint, 33)
+          intervalId = setInterval(paint, 33)
         }
 
-        return (canvas as HTMLCanvasElement & {
+        const track = (canvas as HTMLCanvasElement & {
           captureStream(fps?: number): MediaStream
         })
           .captureStream(30)
           .getVideoTracks()[0]
+
+        const nativeStop = track.stop.bind(track)
+        track.stop = () => {
+          stopPainting()
+          nativeStop()
+        }
+        track.addEventListener('ended', stopPainting)
+
+        return track
       }
 
       const makeAudioTrack = (): MediaStreamTrack => {

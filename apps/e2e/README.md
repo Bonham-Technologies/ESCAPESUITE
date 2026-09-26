@@ -158,6 +158,14 @@ through the recorder's own UI exactly as `tests/escapecraft/mp4-download.spec.ts
 one, against `mockSyntheticMedia`'s canvas-and-oscillator capture devices at 1280x720.
 Nothing was added to ESCAPECRAFT for them either.
 
+`PERF_PAINTER=raf` swaps `mockSyntheticMedia`'s synthetic source canvas from its default
+`setInterval(…, 33)` painter to a `requestAnimationFrame` one (ESCSUITE-86); left unset, the
+benchmarks keep the historical painter every existing number was taken under.
+`scripts/perf-paired.mjs [rounds=3]` runs the screen-take benchmark alone, alternating the two
+painters round-robin, to settle a question about the *recorded frame rate* specifically — see
+the ESCSUITE-86 note in the ESCAPECRAFT baseline doc linked below for what it found and why the
+default stays `setInterval`.
+
 Everything else is measured from outside the page: `addInitScript` wrappers count
 `requestAnimationFrame` callbacks, `VideoEncoder.prototype.encode` calls and (for the
 compositor, which never touches `VideoEncoder`) `drawImage` calls whose source is a
