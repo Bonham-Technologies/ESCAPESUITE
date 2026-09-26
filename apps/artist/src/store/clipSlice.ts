@@ -11,6 +11,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATI
 import { cloneClip } from '../utils/deepClone';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
+import { clipOnLockedTrack, isTrackLocked } from './trackLock';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
@@ -21,7 +22,15 @@ export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTime
 
 export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (set) => ({
   // Clip actions
+  // ESCSUITE-84: a locked track's contents are frozen. Every mutating action
+  // below asks `trackLock.ts`'s questions before touching state, and returns
+  // `state` unchanged (no new clips array, no history entry) when the answer
+  // is yes — see the spec at
+  // .superpowers/sdd/2026-09-26-escsuite-84-track-lock/.
   addClipToTimeline: (clipData, trackId?, position?) => set((state) => {
+    // Only an explicit id can be locked — findEmptyTrack already skips locked
+    // tracks (Task 1), so an omitted trackId can never land on one.
+    if (isTrackLocked(state.project.timeline.tracks, trackId)) return state; // ESCSUITE-84
     let tracks = [...state.project.timeline.tracks];
     let targetTrackId = trackId;
 
@@ -196,6 +205,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   }),
 
   removeClipFromTimeline: (clipId: string) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.filter((c) => c.id !== clipId);
     return {
       project: {
@@ -214,6 +224,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
 
   // Ripple delete: remove clip and shift all subsequent clips on the same track
   rippleDeleteClip: (clipId: string) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const clipToDelete = state.project.timeline.clips.find((c) => c.id === clipId);
     if (!clipToDelete) return state;
 
@@ -261,6 +272,12 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => set((state) => {
     if (delta === 0) return state;
 
+    // A locked track holds its clips where they are (ESCSUITE-84). One row is
+    // the whole question here: the shift below only moves clips whose
+    // `trackId` matches, so an undefined `trackId` moves nothing and has
+    // nothing to refuse.
+    if (isTrackLocked(state.project.timeline.tracks, trackId)) return state; // ESCSUITE-84
+
     const newClips = state.project.timeline.clips.map((clip) => {
       // Shift clips on the same track that start at or after the given time
       if (clip.trackId === trackId && clip.timelinePosition >= afterTime) {
@@ -292,6 +309,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // the rest of the drag passes `true`. Optional and last, so every existing
   // caller is a single undo step exactly as before.
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map((clip) => {
       if (clip.id !== clipId) return clip;
 
@@ -318,6 +336,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   }),
 
   splitClip: (clipId: string, splitTime: number) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const clip = state.project.timeline.clips.find((c) => c.id === clipId);
     if (!clip) return state;
 
@@ -366,6 +385,8 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   }),
 
   moveClipToTrack: (clipId: string, trackId: string) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
+    if (isTrackLocked(state.project.timeline.tracks, trackId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip =>
       clip.id === clipId ? { ...clip, trackId } : clip
     );
@@ -392,6 +413,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // row, a state the user had never seen. Optional and last, so a call that omits
   // it is one undo step exactly as before.
   setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip =>
       clip.id === clipId ? { ...clip, timelinePosition: Math.max(0, position) } : clip
     );
@@ -411,6 +433,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   }),
 
   updateClipTransform: (clipId: string, transformUpdates: Partial<ClipTransform>, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       return {
@@ -433,6 +456,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   }),
 
   updateClipBlendMode: (clipId: string, blendMode: BlendMode) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip =>
       clip.id === clipId ? { ...clip, blendMode } : clip
     );
@@ -454,6 +478,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // the Effects section's blur slider steps in halves from 0 to 50, so a full
   // drag is around a hundred writes and exactly one undo entry.
   updateClipEffects: (clipId: string, effectsUpdates: Partial<ClipEffects>, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       return {
@@ -480,6 +505,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // section's duration slider writes on every `input` event, so the gesture's
   // first write pushes the undo entry and the rest of the drag passes `true`.
   updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       // Seed from DEFAULT_TRANSITION the way updateClipAnimation seeds from DEFAULT_ANIMATION:
@@ -509,6 +535,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // preset and easing selects reach this action too and never pass the flag, so
   // they keep their own entry each.
   updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION };
@@ -539,6 +566,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   }),
 
   duplicateClip: (clipId: string) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const clip = state.project.timeline.clips.find(c => c.id === clipId);
     if (!clip) return state;
 

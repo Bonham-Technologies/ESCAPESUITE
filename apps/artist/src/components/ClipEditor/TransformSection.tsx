@@ -38,6 +38,12 @@ interface TransformSectionProps {
    * them at a time and the rule is the same for each.
    */
   sliderGesture: SliderGestureHandlers;
+  /**
+   * Freeze the section's controls — the clip's track is locked (ESCSUITE-84).
+   * Reset writes the transform too, and it sits in the header rather than the
+   * body, so it carries the flag itself.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -70,12 +76,18 @@ export function TransformSection({
   onResetToDefaults,
   onReset,
   sliderGesture,
+  disabled,
 }: TransformSectionProps) {
   return (
     <CollapsibleSection
       title="Transform"
+      disabled={disabled}
       headerRight={
-        <button className={styles.resetButton} onClick={(e) => { e.stopPropagation(); onReset(); }}>
+        <button
+          className={styles.resetButton}
+          disabled={disabled}
+          onClick={(e) => { e.stopPropagation(); onReset(); }}
+        >
           Reset
         </button>
       }

@@ -35,6 +35,12 @@ interface AnimationSectionProps {
    * single changes and take no listeners.
    */
   sliderGesture: SliderGestureHandlers;
+  /**
+   * Freeze the preset controls — the clip's track is locked (ESCSUITE-84).
+   * The keyframe-editor button is not one of them: it opens a panel rather
+   * than editing the clip, so it goes through `footer`, outside the fieldset.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -59,6 +65,7 @@ export function AnimationSection({
   onOutDurationChange,
   onOutEasingChange,
   sliderGesture,
+  disabled,
 }: AnimationSectionProps) {
   return (
     <CollapsibleSection
@@ -66,6 +73,24 @@ export function AnimationSection({
       badge={hasAnimation(animation) && (
         <span className={styles.animationBadge}>Active</span>
       )}
+      disabled={disabled}
+      footer={
+        /* Keyframe Editor Button */
+        <button
+          className={`${styles.keyframeButton} ${keyframePanelOpen ? styles.active : ''}`}
+          onClick={onKeyframePanelToggle}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2L15 9L22 9L17 14L19 22L12 17L5 22L7 14L2 9L9 9Z" />
+          </svg>
+          {keyframePanelOpen ? 'Close Keyframe Editor' : 'Open Keyframe Editor'}
+          {hasAnimation(animation) && !keyframePanelOpen && (
+            <span className={styles.keyframeBadge}>
+              {keyframeCount(animation)}
+            </span>
+          )}
+        </button>
+      }
     >
       {/* Animate In */}
       <div className={styles.animationGroup}>
@@ -164,22 +189,6 @@ export function AnimationSection({
           </>
         )}
       </div>
-
-      {/* Keyframe Editor Button */}
-      <button
-        className={`${styles.keyframeButton} ${keyframePanelOpen ? styles.active : ''}`}
-        onClick={onKeyframePanelToggle}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M12 2L15 9L22 9L17 14L19 22L12 17L5 22L7 14L2 9L9 9Z" />
-        </svg>
-        {keyframePanelOpen ? 'Close Keyframe Editor' : 'Open Keyframe Editor'}
-        {hasAnimation(animation) && !keyframePanelOpen && (
-          <span className={styles.keyframeBadge}>
-            {keyframeCount(animation)}
-          </span>
-        )}
-      </button>
     </CollapsibleSection>
   );
 }

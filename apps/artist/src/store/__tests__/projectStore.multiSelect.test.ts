@@ -616,4 +616,175 @@ describe('Multi-Select Store', () => {
       expect(useEditorStore.getState().project.timeline.clips[0].timelinePosition).toBe(5)
     })
   })
+
+  describe('a locked track (ESCSUITE-84)', () => {
+    it('deleteSelectedClips removes nothing when the selection holds a clip on a locked track', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0 }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1, locked: true }),
+      ]
+      const clips = [
+        createTestClip({ id: 'clip-1', trackId: 'track-1', timelinePosition: 0 }),
+        createTestClip({ id: 'clip-2', trackId: 'track-2', timelinePosition: 5 }),
+      ]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().toggleClipSelection('clip-2')
+      const clipsBefore = useEditorStore.getState().project.timeline.clips
+      const selectionBefore = useEditorStore.getState().selectedClipIds
+
+      useEditorStore.getState().deleteSelectedClips()
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.clips).toBe(clipsBefore)
+      expect(state.project.timeline.clips).toHaveLength(2)
+      expect(state.selectedClipIds).toBe(selectionBefore)
+      expect(state.history.past.length).toBe(0)
+    })
+
+    it('deleteSelectedClips still removes clips when none are on a locked track (control)', () => {
+      const tracks = [createTestTrack()]
+      const clips = [
+        createTestClip({ id: 'clip-1', timelinePosition: 0 }),
+        createTestClip({ id: 'clip-2', timelinePosition: 5 }),
+      ]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().deleteSelectedClips()
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.clips).toHaveLength(1)
+      expect(state.project.timeline.clips[0].id).toBe('clip-2')
+    })
+
+    it('pasteClips does nothing after copying a clip from a track that is then locked', () => {
+      const tracks = [createTestTrack({ id: 'track-1' })]
+      const clips = [createTestClip({ id: 'clip-1', trackId: 'track-1', timelinePosition: 0 })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().copySelectedClips()
+
+      useEditorStore.getState().updateTrack('track-1', { locked: true })
+      // updateTrack pushes its own history entry; clear it so the assertion
+      // below is about paste's own effect (or lack of it), not the lock.
+      useEditorStore.setState({ history: { past: [], future: [] } })
+      const clipsBefore = useEditorStore.getState().project.timeline.clips
+      const selectionBefore = useEditorStore.getState().selectedClipIds
+
+      useEditorStore.getState().pasteClips()
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.clips).toBe(clipsBefore)
+      expect(state.project.timeline.clips).toHaveLength(1)
+      expect(state.selectedClipIds).toBe(selectionBefore)
+      expect(state.history.past.length).toBe(0)
+    })
+
+    it('pasteClips does nothing when the clipboard holds one free-track and one locked-track clip', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0 }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1, locked: true }),
+      ]
+      const clips = [
+        createTestClip({ id: 'clip-1', trackId: 'track-1', timelinePosition: 0 }),
+        createTestClip({ id: 'clip-2', trackId: 'track-2', timelinePosition: 5 }),
+      ]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().toggleClipSelection('clip-2')
+      useEditorStore.getState().copySelectedClips()
+
+      const clipsBefore = useEditorStore.getState().project.timeline.clips
+      const selectionBefore = useEditorStore.getState().selectedClipIds
+
+      useEditorStore.getState().pasteClips()
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.clips).toBe(clipsBefore)
+      expect(state.project.timeline.clips).toHaveLength(2)
+      expect(state.selectedClipIds).toBe(selectionBefore)
+      expect(state.history.past.length).toBe(0)
+    })
+
+    it('moveSelectedClips(1, 0) moves nothing when a selected clip sits on a locked track', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0 }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1, locked: true }),
+        createTestTrack({ id: 'track-3', name: 'Track 3', index: 2 }),
+      ]
+      const clips = [createTestClip({ id: 'clip-1', trackId: 'track-2', timelinePosition: 5 })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      const clipsBefore = useEditorStore.getState().project.timeline.clips
+
+      useEditorStore.getState().moveSelectedClips(1, 0)
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.clips).toBe(clipsBefore)
+      expect(state.project.timeline.clips[0].timelinePosition).toBe(5)
+      expect(state.history.past.length).toBe(0)
+    })
+
+    it('moveSelectedClips(0, 1) moves nothing when a free clip would land on a locked track', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0 }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1, locked: true }),
+        createTestTrack({ id: 'track-3', name: 'Track 3', index: 2 }),
+      ]
+      const clips = [createTestClip({ id: 'clip-1', trackId: 'track-1', timelinePosition: 0 })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      const clipsBefore = useEditorStore.getState().project.timeline.clips
+
+      useEditorStore.getState().moveSelectedClips(0, 1)
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.clips).toBe(clipsBefore)
+      expect(state.project.timeline.clips[0].trackId).toBe('track-1')
+      expect(state.history.past.length).toBe(0)
+    })
+
+    it('moveSelectedClips still moves a selected free clip when an UNSELECTED clip sits on a separately locked track (control)', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0 }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1, locked: true }),
+      ]
+      const clips = [
+        createTestClip({ id: 'clip-1', trackId: 'track-1', timelinePosition: 0 }),
+        createTestClip({ id: 'clip-2', trackId: 'track-2', timelinePosition: 5 }),
+      ]
+      setupStore(clips, tracks)
+
+      // Only clip-1 (the free one) is selected; clip-2 sits untouched on the
+      // locked track and must not veto a move that never reaches it.
+      useEditorStore.getState().toggleClipSelection('clip-1')
+
+      useEditorStore.getState().moveSelectedClips(5, 0)
+
+      const state = useEditorStore.getState()
+      const clip1 = state.project.timeline.clips.find(c => c.id === 'clip-1')!
+      const clip2 = state.project.timeline.clips.find(c => c.id === 'clip-2')!
+      expect(clip1.timelinePosition).toBe(5)
+      expect(clip2.timelinePosition).toBe(5) // unselected locked-row clip did not move
+      expect(state.history.past.length).toBe(1)
+    })
+
+    it('muteSelectedClips still mutes a locked track (control — a track property)', () => {
+      const tracks = [createTestTrack({ id: 'track-1', locked: true })]
+      const clips = [createTestClip({ id: 'clip-1', trackId: 'track-1' })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().muteSelectedClips()
+
+      const track = useEditorStore.getState().project.timeline.tracks[0]
+      expect(track.muted).toBe(true)
+    })
+  })
 })

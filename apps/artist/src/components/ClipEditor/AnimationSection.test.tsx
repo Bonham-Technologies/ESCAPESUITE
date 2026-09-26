@@ -229,4 +229,28 @@ describe('AnimationSection', () => {
       expect(screen.queryByText('1')).not.toBeInTheDocument()
     })
   })
+
+  // ESCSUITE-84: a locked track freezes the presets, but opening the keyframe
+  // editor is reading, not editing, so that button goes on working.
+  describe('on a locked track', () => {
+    it('disables the preset controls', () => {
+      renderSection({ disabled: true, animation: withIn({}) })
+
+      for (const select of group('Animate In').getAllByRole('combobox')) {
+        expect(select).toBeDisabled()
+      }
+      expect(group('Animate In').getByRole('slider')).toBeDisabled()
+    })
+
+    it('still opens the keyframe editor', async () => {
+      const user = userEvent.setup()
+      const { onKeyframePanelToggle } = renderSection({ disabled: true })
+      const button = screen.getByRole('button', { name: /Open Keyframe Editor/ })
+
+      expect(button).toBeEnabled()
+      await user.click(button)
+
+      expect(onKeyframePanelToggle).toHaveBeenCalledTimes(1)
+    })
+  })
 })

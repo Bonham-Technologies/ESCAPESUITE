@@ -8,6 +8,7 @@ import { pushToHistory } from './storeHistory';
 import { createEmptyProject, calculateTimelineDuration } from './projectFactory';
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
+import { lockedSourceVideoIds } from './trackLock';
 
 export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo'>;
 
@@ -64,19 +65,27 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     return { sourceVideos, history: pushToHistory(state) }
   }),
 
-  removeSourceVideo: (id: string) => set((state) => ({
-    sourceVideos: state.sourceVideos.filter((v) => v.id !== id),
-    project: {
-      ...state.project,
-      modified: Date.now(),
-      timeline: {
-        ...state.project.timeline,
-        clips: state.project.timeline.clips.filter((c) => c.sourceVideoId !== id),
-        duration: calculateTimelineDuration(
-          state.project.timeline.clips.filter((c) => c.sourceVideoId !== id)
-        ),
+  removeSourceVideo: (id: string) => set((state) => {
+    // All-or-nothing, like every other group refusal: this takes every clip
+    // that uses the source with it, and a clip on a locked track cannot be
+    // removed — so the source stays too (ESCSUITE-84). The media library's
+    // Remove and Clear All buttons ask the same question, because clearing
+    // deletes the blobs before the store hears about it.
+    const { clips, tracks } = state.project.timeline;
+    if (lockedSourceVideoIds(clips, tracks).has(id)) return state; // ESCSUITE-84
+    const kept = clips.filter((c) => c.sourceVideoId !== id);
+    return {
+      sourceVideos: state.sourceVideos.filter((v) => v.id !== id),
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: kept,
+          duration: calculateTimelineDuration(kept),
+        },
       },
-    },
-    history: pushToHistory(state),
-  })),
+      history: pushToHistory(state),
+    };
+  }),
 });

@@ -221,8 +221,8 @@ export const TrackHeader = React.memo(function TrackHeader({
           <button
             className={`${styles.trackControlBtn} ${styles.trackDeleteBtn}`}
             onClick={() => onDeleteTrack(track.id)}
-            disabled={trackCount <= 1}
-            title="Delete track"
+            disabled={trackCount <= 1 || track.locked}
+            title={track.locked ? 'Unlock the track to delete it' : 'Delete track'}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6" />

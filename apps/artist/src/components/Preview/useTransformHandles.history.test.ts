@@ -48,13 +48,13 @@ const clipOf = (id: string): Clip => store().project.timeline.clips.find((c) => 
 const past = (): number => store().history.past.length
 
 const addShape = (data: Partial<ShapeOverlayData> = {}): Clip => {
-  const clip = store().addShapeOverlayClip(data, undefined, 0, 4)
+  const clip = store().addShapeOverlayClip(data, undefined, 0, 4)!
   store().setSelectedClipId(clip.id)
   return clip
 }
 
 const addText = (data: Partial<TextOverlayData> = {}): Clip => {
-  const clip = store().addTextOverlayClip(data, undefined, 0, 4)
+  const clip = store().addTextOverlayClip(data, undefined, 0, 4)!
   store().setSelectedClipId(clip.id)
   return clip
 }

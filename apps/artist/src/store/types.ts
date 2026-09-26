@@ -595,8 +595,10 @@ export interface EditorState {
   duplicateClip: (clipId: string) => void;
 
   // Actions - Overlay Clips
-  addTextOverlayClip: (textData?: Partial<TextOverlayData>, trackId?: string, position?: number, duration?: number) => Clip;
-  addShapeOverlayClip: (shapeData?: Partial<ShapeOverlayData>, trackId?: string, position?: number, duration?: number) => Clip;
+  // Returns null when an explicit trackId is locked (ESCSUITE-84); an omitted
+  // trackId can never land on one — findEmptyTrack already skips locked tracks.
+  addTextOverlayClip: (textData?: Partial<TextOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
+  addShapeOverlayClip: (shapeData?: Partial<ShapeOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => void;
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => void;
 

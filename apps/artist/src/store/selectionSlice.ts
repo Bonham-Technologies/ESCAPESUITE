@@ -9,6 +9,7 @@ import type { EditorState } from './types';
 import { cloneClip } from '../utils/deepClone';
 import { pushToHistory } from './storeHistory';
 import { calculateTimelineDuration } from './projectFactory';
+import { anyClipOnLockedTrack, lockedTrackIds } from './trackLock';
 
 export type SelectionSlice = Pick<EditorState, 'selectedClipId' | 'selectedClipIds' | 'selectedTrackId' | 'clipboard' | 'setSelectedClipId' | 'setSelectedTrackId' | 'toggleClipSelection' | 'selectClipsInRange' | 'clearMultiSelection' | 'moveSelectedClips' | 'deleteSelectedClips' | 'copySelectedClips' | 'pasteClips' | 'muteSelectedClips' | 'unmuteSelectedClips'>;
 
@@ -80,6 +81,23 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
       return updatedClip;
     });
 
+    // ESCSUITE-84: a locked track holds its clips where they are. Checked
+    // against the original clips (the origin) protects a locked-row clip that
+    // was ctrl+clicked into the selection; checked against newClips (the
+    // landing) protects a locked row from receiving clips moved onto it. Both
+    // arrays are in the same order (.map preserves it), so walking them by
+    // index compares each clip's before and after — but only for a selected
+    // clip: an unselected clip's origin and landing trackId are identical
+    // (moveSelectedClips leaves it untouched), so testing it too would refuse
+    // the whole move whenever ANY clip anywhere sits on a locked track,
+    // selected or not.
+    const locked = lockedTrackIds(tracks);
+    const original = state.project.timeline.clips;
+    for (let i = 0; i < original.length; i++) {
+      if (!state.selectedClipIds.has(original[i].id)) continue;
+      if (locked.has(original[i].trackId) || locked.has(newClips[i].trackId)) return state;
+    }
+
     return {
       project: {
         ...state.project,
@@ -96,6 +114,7 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
 
   deleteSelectedClips: () => set((state) => {
     if (state.selectedClipIds.size === 0) return state;
+    if (anyClipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, state.selectedClipIds)) return state; // ESCSUITE-84
 
     const newClips = state.project.timeline.clips.filter(
       clip => !state.selectedClipIds.has(clip.id)
@@ -138,6 +157,12 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
       id: uuidv4(),
       timelinePosition: clip.timelinePosition - minPosition + (state.currentTime || minPosition + 0.5),
     }));
+
+    // ESCSUITE-84: a clone keeps its clipboard trackId, so a paste lands
+    // exactly where it was copied from — the check is on the clones, and it
+    // is all-or-nothing.
+    const locked = lockedTrackIds(state.project.timeline.tracks);
+    if (newClips.some((clip) => locked.has(clip.trackId))) return state; // ESCSUITE-84
 
     const allClips = [...state.project.timeline.clips, ...newClips];
     const newSelectedIds = new Set(newClips.map(c => c.id));

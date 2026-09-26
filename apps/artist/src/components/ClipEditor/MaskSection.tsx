@@ -32,6 +32,8 @@ interface MaskSectionProps {
    * a pointer gesture is not what bounds that interaction.
    */
   sliderGesture: SliderGestureHandlers;
+  /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
+  disabled?: boolean;
 }
 
 /** `<input type="color">` accepts this and nothing else. */
@@ -79,6 +81,7 @@ export function MaskSection({
   onMaskChange,
   onStrokeChange,
   sliderGesture,
+  disabled,
 }: MaskSectionProps) {
   const kind = mask?.kind ?? 'none';
   const radius = mask?.radius ?? DEFAULT_CLIP_MASK_RADIUS;
@@ -86,7 +89,7 @@ export function MaskSection({
   const strokeColor = stroke?.color ?? DEFAULT_CLIP_STROKE_COLOR;
 
   return (
-    <CollapsibleSection title="Mask & Stroke" defaultOpen={false}>
+    <CollapsibleSection title="Mask & Stroke" defaultOpen={false} disabled={disabled}>
       <select
         className={styles.select}
         value={kind}

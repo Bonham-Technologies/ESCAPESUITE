@@ -123,6 +123,7 @@ describe('useClipEditorActions with nothing selected', () => {
     expect(result.current.selectedClip).toBeUndefined()
     expect(result.current.sourceVideo).toBeNull()
     expect(result.current.track).toBeNull()
+    expect(result.current.trackLocked).toBe(false)
     expect(result.current.clipPosition).toBe(0)
     // The scaleLocked selector falls back to true when it finds no clip.
     expect(result.current.scaleLocked).toBe(true)
@@ -186,10 +187,28 @@ describe('useClipEditorActions derived values', () => {
     expect(result.current.selectedClip?.id).toBe(clip.id)
     expect(result.current.sourceVideo?.id).toBe(video.id)
     expect(result.current.track?.id).toBe(clip.trackId)
+    expect(result.current.trackLocked).toBe(false)
     expect(result.current.clipPosition).toBe(3)
     expect(result.current.isVideo).toBe(true)
     expect(result.current.isOverlay).toBe(false)
     expect(result.current.clipTypeLabel).toBe('Video Clip')
+  })
+
+  it('reports trackLocked when the selected clip sits on a locked track (ESCSUITE-84)', () => {
+    const clip = mediaClip(3, 2)
+    store().updateTrack(clip.trackId, { locked: true })
+    const { result } = mount()
+
+    expect(result.current.trackLocked).toBe(true)
+  })
+
+  it('reports trackLocked as false when the clip names a track that does not exist', () => {
+    const clip = mediaClip(3, 2)
+    store().updateClip(clip.id, { trackId: 'no-such-track' })
+    const { result } = mount()
+
+    expect(result.current.track).toBeUndefined()
+    expect(result.current.trackLocked).toBe(false)
   })
 
   it('classifies a text overlay, which has no source video', () => {

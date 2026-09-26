@@ -17,6 +17,13 @@ interface ActionsSectionProps {
   onDuplicate: () => void;
   /** Split the clip at the playhead. */
   onSplit: () => void;
+  /**
+   * Freeze the two editing actions — the clip's track is locked
+   * (ESCSUITE-84). "Go to" only moves the playhead, so it stays live; that
+   * is why this section carries the flag on its own buttons instead of
+   * handing it to `CollapsibleSection`.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -28,7 +35,7 @@ interface ActionsSectionProps {
  * the clip's position and duration rather than a `timeInClip` its parent would
  * have had to recompute on every playback tick.
  */
-export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit }: ActionsSectionProps) {
+export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit, disabled }: ActionsSectionProps) {
   return (
     <CollapsibleSection title="Actions">
       <div className={styles.actions}>
@@ -47,6 +54,7 @@ export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, o
         <button
           className={styles.actionButton}
           onClick={onDuplicate}
+          disabled={disabled}
           title="Duplicate clip (Ctrl+D)"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -57,7 +65,12 @@ export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, o
         </button>
 
         {(isVideo || isAudio) && (
-          <SplitButton clipPosition={clipPosition} clipDuration={clipDuration} onSplit={onSplit} />
+          <SplitButton
+            clipPosition={clipPosition}
+            clipDuration={clipDuration}
+            onSplit={onSplit}
+            disabled={disabled}
+          />
         )}
       </div>
     </CollapsibleSection>

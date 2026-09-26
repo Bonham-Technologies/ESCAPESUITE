@@ -267,7 +267,7 @@ describe('projectStore remaining behaviours', () => {
     })
 
     it('auto-creates zero keyframes from a text overlay position and rotation', () => {
-      const overlay = store().addTextOverlayClip({ text: 'Hi', x: 0.2, y: 0.8, rotation: 30 })
+      const overlay = store().addTextOverlayClip({ text: 'Hi', x: 0.2, y: 0.8, rotation: 30 })!
 
       store().setClipKeyframe(overlay.id, 'x', { time: 2, value: 0.9, easing: 'linear' })
       store().setClipKeyframe(overlay.id, 'rotation', { time: 2, value: 90, easing: 'linear' })
@@ -278,7 +278,7 @@ describe('projectStore remaining behaviours', () => {
     })
 
     it('treats a text overlay with no rotation as zero', () => {
-      const overlay = store().addTextOverlayClip({ text: 'Hi' })
+      const overlay = store().addTextOverlayClip({ text: 'Hi' })!
       store().updateTextOverlayData(overlay.id, { rotation: undefined })
 
       store().setClipKeyframe(overlay.id, 'rotation', { time: 2, value: 45, easing: 'linear' })
@@ -288,7 +288,7 @@ describe('projectStore remaining behaviours', () => {
     })
 
     it('auto-creates a zero keyframe from a shape overlay position', () => {
-      const overlay = store().addShapeOverlayClip({ type: 'rectangle', x: 0.3, y: 0.4 })
+      const overlay = store().addShapeOverlayClip({ type: 'rectangle', x: 0.3, y: 0.4 })!
 
       store().setClipKeyframe(overlay.id, 'y', { time: 2, value: 0.9, easing: 'linear' })
 

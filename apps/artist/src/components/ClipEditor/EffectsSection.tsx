@@ -13,6 +13,8 @@ interface EffectsSectionProps {
    * calls and, with these attached, one undo entry.
    */
   sliderGesture: SliderGestureHandlers;
+  /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
+  disabled?: boolean;
 }
 
 /**
@@ -20,9 +22,9 @@ interface EffectsSectionProps {
  * default. The readout keeps one decimal place because the slider steps in
  * halves.
  */
-export function EffectsSection({ blur, onBlurChange, sliderGesture }: EffectsSectionProps) {
+export function EffectsSection({ blur, onBlurChange, sliderGesture, disabled }: EffectsSectionProps) {
   return (
-    <CollapsibleSection title="Effects" defaultOpen={false}>
+    <CollapsibleSection title="Effects" defaultOpen={false} disabled={disabled}>
       <div className={styles.transformControls}>
         <div className={styles.transformRow}>
           <label>Blur</label>

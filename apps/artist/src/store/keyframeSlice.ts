@@ -14,13 +14,20 @@ import type { StateCreator } from 'zustand';
 import type { EditorState, ClipTransform, AnimatableProperty, Keyframe } from './types';
 import { DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { pushToHistory } from './storeHistory';
+import { clipOnLockedTrack } from './trackLock';
 
 export type KeyframeSlice = Pick<EditorState, 'keyframePanelState' | 'setClipKeyframe' | 'removeClipKeyframe' | 'moveClipKeyframe' | 'clearClipKeyframes' | 'setKeyframePanelOpen' | 'setKeyframePanelPosition' | 'setKeyframePanelSize' | 'setKeyframePanelSelectedProperty' | 'setKeyframePanelZoom'>;
 
 export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlice> = (set) => ({
   keyframePanelState: DEFAULT_KEYFRAME_PANEL_STATE,
 
+  // ESCSUITE-84: a locked track's contents are frozen. Every one of the four
+  // clip-keyframe actions below asks `trackLock.ts`'s question first and
+  // returns `state` unchanged when the clip is on a locked track — the five
+  // panel-UI setters below them are untouched, since they hold no clip id. See
+  // the spec at .superpowers/sdd/2026-09-26-escsuite-84-track-lock/.
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION, keyframes: {} };
@@ -102,6 +109,7 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   }),
 
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation;
@@ -138,6 +146,7 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   }),
 
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation;
@@ -184,6 +193,7 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   }),
 
   clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation;

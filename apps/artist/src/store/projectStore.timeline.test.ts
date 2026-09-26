@@ -154,6 +154,31 @@ describe('projectStore integration', () => {
       expect(track.muted).toBe(true)
       expect(track.visible).toBe(false)
     })
+
+    it('does not remove a locked track, or its clips, and pushes no history entry (ESCSUITE-84)', () => {
+      useEditorStore.getState().addTrack()
+      const trackId = useEditorStore.getState().project.timeline.tracks[1].id
+      useEditorStore.getState().addClipToTimeline({
+        id: 'clip1',
+        name: 'Test Clip',
+        sourceVideoId: 'video1',
+        startTime: 0,
+        endTime: 5,
+        duration: 5,
+      }, trackId, 0)
+      useEditorStore.getState().updateTrack(trackId, { locked: true })
+      // updateTrack and addClipToTimeline each push their own history entry;
+      // clear those so the assertion below is about removeTrack's own effect.
+      useEditorStore.setState({ history: { past: [], future: [] } })
+
+      useEditorStore.getState().removeTrack(trackId)
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.tracks).toHaveLength(2)
+      expect(state.project.timeline.tracks.some(t => t.id === trackId)).toBe(true)
+      expect(state.project.timeline.clips).toHaveLength(1)
+      expect(state.history.past.length).toBe(0)
+    })
   })
 
   describe('clip operations', () => {
@@ -402,7 +427,7 @@ describe('projectStore remaining behaviours', () => {
 
     it('names an auto-created text track "Text"', () => {
       addClip('clip1', 0)
-      const overlay = store().addTextOverlayClip({ text: 'Hi' })
+      const overlay = store().addTextOverlayClip({ text: 'Hi' })!
 
       const track = store().project.timeline.tracks.find((t) => t.id === overlay.trackId)!
       expect(track.name).toBe('Text')
@@ -410,14 +435,14 @@ describe('projectStore remaining behaviours', () => {
 
     it('names an auto-created shape track after the shape', () => {
       addClip('clip1', 0)
-      const ellipse = store().addShapeOverlayClip({ type: 'ellipse' })
+      const ellipse = store().addShapeOverlayClip({ type: 'ellipse' })!
 
       expect(store().project.timeline.tracks.find((t) => t.id === ellipse.trackId)!.name).toBe('Ellipse')
     })
 
     it('names an auto-created blur track "Blur" and gives it blur defaults', () => {
       addClip('clip1', 0)
-      const blur = store().addShapeOverlayClip({ type: 'blur' })
+      const blur = store().addShapeOverlayClip({ type: 'blur' })!
 
       expect(store().project.timeline.tracks.find((t) => t.id === blur.trackId)!.name).toBe('Blur')
       expect(blur.name).toBe('Blur Region')
@@ -426,6 +451,19 @@ describe('projectStore remaining behaviours', () => {
         strokeWidth: 0,
         blurAmount: 10,
       })
+    })
+
+    it('never places a clip on an empty track that is locked (ESCSUITE-84)', () => {
+      // One track, empty and locked: the clip must go to a NEW track, not this one.
+      const lockedId = store().project.timeline.tracks[0].id
+      store().updateTrack(lockedId, { locked: true })
+
+      const clip = addClip('clip1', 0)
+
+      const { tracks, clips } = store().project.timeline
+      expect(tracks).toHaveLength(2)
+      expect(clips[0].trackId).not.toBe(lockedId)
+      expect(clip.trackId).not.toBe(lockedId)
     })
   })
 
@@ -647,6 +685,81 @@ describe('projectStore remaining behaviours', () => {
       store().recalculateTimelineDuration()
 
       expect(store().project.timeline.duration).toBe(4)
+    })
+  })
+
+  describe('a locked track (ESCSUITE-84)', () => {
+    let held: string
+    let free: string
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    beforeEach(() => {
+      held = useEditorStore.getState().project.timeline.tracks[0].id
+      free = store().addTrack('Free').id
+      addClip('h1', 0, 2, held)
+      addClip('h2', 4, 2, held)
+      addClip('f1', 0, 2, free)
+      store().updateTrack(held, { locked: true })
+    })
+
+    /** Assert the action wrote nothing: same clips array, no history entry. */
+    const refuses = (act: () => void) => {
+      const before = clipsRef(); const entries = past()
+      act()
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
+    it('refuses to add a clip to it by explicit track id', () => refuses(() =>
+      store().addClipToTimeline(
+        { id: 'new1', sourceVideoId: video.id, name: 'new1', startTime: 0, endTime: 2, duration: 2 },
+        held
+      )))
+    it('refuses to remove a clip on it', () => refuses(() => store().removeClipFromTimeline('h1')))
+    it('refuses to ripple-delete a clip on it', () => refuses(() => store().rippleDeleteClip('h1')))
+    it('refuses to update a clip on it', () => refuses(() => store().updateClip('h1', { endTime: 1 })))
+    it('refuses to split a clip on it', () => refuses(() => store().splitClip('h1', 1)))
+    it('refuses to move a clip on it in time', () => refuses(() => store().setClipTimelinePosition('h1', 8)))
+    it('refuses to move a clip on it to another track', () => refuses(() => store().moveClipToTrack('h1', free)))
+    it('refuses to move a clip onto it from another track', () => refuses(() => store().moveClipToTrack('f1', held)))
+    it('refuses to transform a clip on it', () => refuses(() => store().updateClipTransform('h1', { x: 0.2 })))
+    it('refuses to change the blend mode of a clip on it', () => refuses(() => store().updateClipBlendMode('h1', 'multiply')))
+    it('refuses to change the effects of a clip on it', () => refuses(() => store().updateClipEffects('h1', { blur: 3 })))
+    it('refuses to change the transition of a clip on it', () => refuses(() => store().updateClipTransition('h1', { duration: 1 })))
+    it('refuses to change the animation of a clip on it', () => refuses(() => store().updateClipAnimation('h1', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
+    it('refuses to duplicate a clip on it', () => refuses(() => store().duplicateClip('h1')))
+    it('refuses to shift the clips on it', () => refuses(() => store().shiftClipsAfter(held, 1, 2)))
+    it('still shifts the clips on an unlocked track', () => {
+      addClip('f2', 4, 2, free)
+      store().shiftClipsAfter(free, 1, 2)
+      expect(clipsRef().find((c) => c.id === 'f2')!.timelinePosition).toBe(6)
+    })
+    it('refuses to remove a source video a clip on it uses', () => {
+      const before = clipsRef(); const entries = past()
+
+      store().removeSourceVideo(video.id)
+
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toContain(video.id)
+    })
+    it('still removes a source video only unlocked clips use', () => {
+      store().addSourceVideo({ ...video, id: 'video2' })
+      store().addClipToTimeline(
+        { id: 'f2', sourceVideoId: 'video2', name: 'f2', startTime: 0, endTime: 2, duration: 2 },
+        free,
+        8
+      )
+
+      store().removeSourceVideo('video2')
+
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual([video.id])
+      expect(clipsRef().some((c) => c.id === 'f2')).toBe(false)
+    })
+    it('still edits a clip on an unlocked track while another track is locked', () => {
+      store().updateClipBlendMode('f1', 'multiply')
+      expect(clipsRef().find((c) => c.id === 'f1')!.blendMode).toBe('multiply')
     })
   })
 })

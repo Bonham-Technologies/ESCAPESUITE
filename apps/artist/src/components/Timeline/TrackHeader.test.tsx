@@ -318,4 +318,17 @@ describe('TrackHeader visibility, lock and delete', () => {
 
     expect(screen.getByTitle('Delete track')).toBeDisabled()
   })
+
+  it('cannot delete a locked track, and says so (ESCSUITE-84)', () => {
+    renderHeader({ track: makeTrack({ locked: true }), trackCount: 2 })
+
+    const button = screen.getByTitle('Unlock the track to delete it')
+    expect(button).toBeDisabled()
+  })
+
+  it('can delete an unlocked track with more than one on the timeline', () => {
+    renderHeader({ track: makeTrack({ locked: false }), trackCount: 2 })
+
+    expect(screen.getByTitle('Delete track')).toBeEnabled()
+  })
 })

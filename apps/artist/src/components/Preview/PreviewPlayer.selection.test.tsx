@@ -37,10 +37,10 @@ afterEach(() => {
 const clipOf = (id: string): Clip => store().project.timeline.clips.find((c) => c.id === id)!
 
 const addText = (data: Partial<TextOverlayData> = {}, duration = 4): Clip =>
-  store().addTextOverlayClip(data, undefined, 0, duration)
+  store().addTextOverlayClip(data, undefined, 0, duration)!
 
 const addShape = (data: Partial<ShapeOverlayData> = {}, duration = 4): Clip =>
-  store().addShapeOverlayClip(data, undefined, 0, duration)
+  store().addShapeOverlayClip(data, undefined, 0, duration)!
 
 /**
  * A default text overlay measures 100x57.6 canvas pixels around its centre —

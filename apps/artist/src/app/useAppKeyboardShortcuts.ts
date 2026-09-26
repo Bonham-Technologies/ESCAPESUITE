@@ -26,6 +26,7 @@
 import { useEffect } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { clipCountMessage, formatTimeForNotification } from './appFormat';
+import { anyClipOnLockedTrack, lockedTrackIds } from '../store/trackLock';
 import type { Clip, ToolType } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -148,6 +149,17 @@ export function useAppKeyboardShortcuts({
         return;
       }
 
+      // Read the lock on demand — the same reason `currentTime` is read through
+      // `getState()` rather than subscribed to (see the file banner): a `tracks`
+      // dependency here would re-run this whole effect, and re-render the app,
+      // on every lock toggle, for a question five branches ask only once each,
+      // right before they would otherwise act on a clip the store has already
+      // refused to touch.
+      const lockedIn = (ids: Iterable<string>) => {
+        const { clips: currentClips, tracks } = useEditorStore.getState().project.timeline;
+        return anyClipOnLockedTrack(currentClips, tracks, ids);
+      };
+
       // Ctrl/Cmd + Z = Undo
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -172,11 +184,19 @@ export function useAppKeyboardShortcuts({
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedClipIds.size > 0) {
           e.preventDefault();
+          if (lockedIn(selectedClipIds)) {
+            showNotification('Track is locked', 'info');
+            return;
+          }
           deleteSelectedClips();
           showNotification(clipCountMessage(selectedClipIds.size, 'deleted'), 'info');
           return;
         } else if (selectedClipId) {
           e.preventDefault();
+          if (lockedIn([selectedClipId])) {
+            showNotification('Track is locked', 'info');
+            return;
+          }
           if (activeTool === 'ripple') {
             rippleDeleteClip(selectedClipId);
             showNotification('Clip deleted (ripple)', 'info');
@@ -202,6 +222,14 @@ export function useAppKeyboardShortcuts({
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         if (clipboard && clipboard.length > 0) {
           e.preventDefault();
+          // The clones haven't landed on the timeline yet, so `lockedIn` (which
+          // looks a clip's *current* trackId up by id) is the wrong shape here —
+          // ask about the clipboard clones' own `trackId` instead.
+          const locked = lockedTrackIds(useEditorStore.getState().project.timeline.tracks);
+          if (clipboard.some((clip) => locked.has(clip.trackId))) {
+            showNotification('Track is locked', 'info');
+            return;
+          }
           pasteClips();
           showNotification(clipCountMessage(clipboard.length, 'pasted'), 'info');
           return;
@@ -211,6 +239,10 @@ export function useAppKeyboardShortcuts({
       // Ctrl/Cmd + D = Duplicate selected clip
       if ((e.ctrlKey || e.metaKey) && e.key === 'd' && selectedClipId) {
         e.preventDefault();
+        if (lockedIn([selectedClipId])) {
+          showNotification('Track is locked', 'info');
+          return;
+        }
         duplicateClip(selectedClipId);
         showNotification('Clip duplicated', 'info');
         return;
@@ -294,6 +326,10 @@ export function useAppKeyboardShortcuts({
       // Ctrl+B = Split clip at playhead
       if ((e.ctrlKey || e.metaKey) && e.key === 'b' && selectedClipId) {
         e.preventDefault();
+        if (lockedIn([selectedClipId])) {
+          showNotification('Track is locked', 'info');
+          return;
+        }
         const clip = clips.find(c => c.id === selectedClipId);
         if (clip) {
           const splitTime = useEditorStore.getState().currentTime - clip.timelinePosition;

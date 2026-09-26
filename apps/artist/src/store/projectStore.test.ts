@@ -405,7 +405,7 @@ describe('projectStore integration', () => {
     it('adds text overlay clip', () => {
       const clip = useEditorStore.getState().addTextOverlayClip({
         text: 'Hello World',
-      })
+      })!
 
       expect(clip.overlayType).toBe('text')
       expect(clip.textData?.text).toBe('Hello World')
@@ -415,7 +415,7 @@ describe('projectStore integration', () => {
     it('adds shape overlay clip', () => {
       const clip = useEditorStore.getState().addShapeOverlayClip({
         type: 'ellipse',
-      })
+      })!
 
       expect(clip.overlayType).toBe('shape')
       expect(clip.shapeData?.type).toBe('ellipse')
@@ -425,7 +425,7 @@ describe('projectStore integration', () => {
     it('updates text overlay data', () => {
       const clip = useEditorStore.getState().addTextOverlayClip({
         text: 'Original',
-      })
+      })!
 
       useEditorStore.getState().updateTextOverlayData(clip.id, {
         text: 'Updated',
@@ -440,7 +440,7 @@ describe('projectStore integration', () => {
     it('updates shape overlay data', () => {
       const clip = useEditorStore.getState().addShapeOverlayClip({
         type: 'rectangle',
-      })
+      })!
 
       useEditorStore.getState().updateShapeOverlayData(clip.id, {
         fillColor: '#ff0000ff',
@@ -450,6 +450,62 @@ describe('projectStore integration', () => {
       const updated = useEditorStore.getState().project.timeline.clips[0]
       expect(updated.shapeData?.fillColor).toBe('#ff0000ff')
       expect(updated.shapeData?.blurAmount).toBe(10)
+    })
+
+    describe('a locked track (ESCSUITE-84)', () => {
+      const past = () => useEditorStore.getState().history.past.length
+      const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+      /** Assert the action wrote nothing: same clips array, no history entry. */
+      const refuses = (act: () => void) => {
+        const before = clipsRef(); const entries = past()
+        act()
+        expect(clipsRef()).toBe(before)
+        expect(past()).toBe(entries)
+      }
+
+      it('adds no text overlay to an explicit locked track', () => {
+        const lockedId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().updateTrack(lockedId, { locked: true })
+
+        let clip: unknown
+        refuses(() => { clip = useEditorStore.getState().addTextOverlayClip(undefined, lockedId) })
+        expect(clip).toBeNull()
+      })
+
+      it('adds no shape overlay to an explicit locked track', () => {
+        const lockedId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().updateTrack(lockedId, { locked: true })
+
+        let clip: unknown
+        refuses(() => { clip = useEditorStore.getState().addShapeOverlayClip({ type: 'rectangle' }, lockedId) })
+        expect(clip).toBeNull()
+      })
+
+      it('refuses to update text overlay data once its track is locked', () => {
+        const clip = useEditorStore.getState().addTextOverlayClip({ text: 'Hi' })!
+        useEditorStore.getState().updateTrack(clip.trackId, { locked: true })
+
+        refuses(() => useEditorStore.getState().updateTextOverlayData(clip.id, { text: 'Bye' }))
+      })
+
+      it('refuses to update shape overlay data once its track is locked', () => {
+        const clip = useEditorStore.getState().addShapeOverlayClip({ type: 'rectangle' })!
+        useEditorStore.getState().updateTrack(clip.trackId, { locked: true })
+
+        refuses(() => useEditorStore.getState().updateShapeOverlayData(clip.id, { fillColor: '#ff0000ff' }))
+      })
+
+      it('lands a text overlay on a new track when the only empty track is locked', () => {
+        const lockedId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().updateTrack(lockedId, { locked: true })
+
+        const clip = useEditorStore.getState().addTextOverlayClip()
+
+        expect(clip).not.toBeNull()
+        expect(clip!.trackId).not.toBe(lockedId)
+        expect(useEditorStore.getState().project.timeline.tracks).toHaveLength(2)
+      })
     })
   })
 })

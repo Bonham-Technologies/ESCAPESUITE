@@ -36,7 +36,7 @@ const TEXT_TOP = 511.2
 const padding = (fontSize: number) => fontSize * 0.15
 
 const textClip = (data: Partial<TextOverlayData> = {}): Clip =>
-  store().addTextOverlayClip(data, undefined, 0, 4)
+  store().addTextOverlayClip(data, undefined, 0, 4)!
 
 /** Mount the anchor over a 1920x1080 canvas laid out in the given box. */
 function anchor(clip: Clip | undefined, rect: Box): HTMLTextAreaElement | null {
@@ -95,7 +95,7 @@ describe('InlineTextEditorAnchor', () => {
   })
 
   it('renders nothing for a clip that carries no text', () => {
-    const shape = store().addShapeOverlayClip({}, undefined, 0, 4)
+    const shape = store().addShapeOverlayClip({}, undefined, 0, 4)!
 
     expect(anchor(shape, { left: 0, top: 0, width: 960, height: 540 })).toBeNull()
   })

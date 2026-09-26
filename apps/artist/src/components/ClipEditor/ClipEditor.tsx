@@ -19,6 +19,7 @@ export function ClipEditor() {
     setScaleLocked,
     sourceVideo,
     track,
+    trackLocked,
     isTextOverlay,
     isShapeOverlay,
     isOverlay,
@@ -73,12 +74,17 @@ export function ClipEditor() {
         duration={selectedClip.duration}
         position={clipPosition}
         track={track}
+        locked={trackLocked}
         onDelete={handleDeleteClip}
       />
 
       {/* Text Overlay Content Section */}
       {isTextOverlay && selectedClip.textData && (
-        <TextContentSection textData={selectedClip.textData} onChange={handleTextDataChange} />
+        <TextContentSection
+          textData={selectedClip.textData}
+          onChange={handleTextDataChange}
+          disabled={trackLocked}
+        />
       )}
 
       {/* Shape Overlay Content Section */}
@@ -87,6 +93,7 @@ export function ClipEditor() {
           shapeData={selectedClip.shapeData}
           onChange={handleShapeDataChange}
           sliderGesture={sliderGesture}
+          disabled={trackLocked}
         />
       )}
 
@@ -108,12 +115,17 @@ export function ClipEditor() {
           onResetToDefaults={handleResetToDefaults}
           onReset={handleResetTransform}
           sliderGesture={sliderGesture}
+          disabled={trackLocked}
         />
       )}
 
       {/* Blend Mode section - for visual clips */}
       {!isAudio && !isOverlay && (
-        <BlendModeSection value={selectedClip.blendMode} onChange={handleBlendModeChange} />
+        <BlendModeSection
+          value={selectedClip.blendMode}
+          onChange={handleBlendModeChange}
+          disabled={trackLocked}
+        />
       )}
 
       {/* Mask & Stroke section - media clips only (ESCSUITE-65). Gated exactly
@@ -130,6 +142,7 @@ export function ClipEditor() {
           onMaskChange={handleMaskChange}
           onStrokeChange={handleStrokeChange}
           sliderGesture={sliderGesture}
+          disabled={trackLocked}
         />
       )}
 
@@ -139,6 +152,7 @@ export function ClipEditor() {
           blur={selectedClip.effects?.blur ?? 0}
           onBlurChange={handleBlurChange}
           sliderGesture={sliderGesture}
+          disabled={trackLocked}
         />
       )}
 
@@ -156,6 +170,7 @@ export function ClipEditor() {
           onOutDurationChange={handleAnimationOutDurationChange}
           onOutEasingChange={handleAnimationOutEasingChange}
           sliderGesture={sliderGesture}
+          disabled={trackLocked}
         />
       )}
 
@@ -167,6 +182,7 @@ export function ClipEditor() {
           onTypeChange={handleTransitionTypeChange}
           onDurationChange={handleTransitionDurationChange}
           sliderGesture={sliderGesture}
+          disabled={trackLocked}
         />
       )}
 
@@ -178,6 +194,7 @@ export function ClipEditor() {
         onGoToClip={handleGoToClip}
         onDuplicate={handleDuplicate}
         onSplit={handleSplitAtPlayhead}
+        disabled={trackLocked}
       />
     </div>
   );

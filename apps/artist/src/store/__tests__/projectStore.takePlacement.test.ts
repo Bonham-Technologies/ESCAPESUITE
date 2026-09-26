@@ -307,6 +307,22 @@ describe('placeTakeOnTimeline', () => {
     expect(tracks[1]).toBeLessThan(tracks[2])
   })
 
+  it('never lands a part on an empty track that is locked (ESCSUITE-84)', () => {
+    // The primary goes through `findEmptyTrack`, which skips a locked row: the
+    // one empty track here is locked, so the take builds its own tracks rather
+    // than filling a row the user froze.
+    const locked = store().project.timeline.tracks[0].id
+    store().updateTrack(locked, { locked: true })
+    store().clearHistory()
+
+    store().placeTakeOnTimeline([screenPart, webcamPart])
+
+    const [primary, webcam] = placedClips()
+    expect(primary.trackId).not.toBe(locked)
+    expect(webcam.trackId).not.toBe(locked)
+    expect(trackOf(primary).id).not.toBe(trackOf(webcam).id)
+  })
+
   it('appends to the end of a timeline that already holds work', () => {
     store().addClipToTimeline(
       { id: 'existing', sourceVideoId: video.id, name: 'existing', startTime: 0, endTime: 4, duration: 4 },

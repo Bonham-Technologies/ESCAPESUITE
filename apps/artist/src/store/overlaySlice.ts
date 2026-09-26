@@ -9,13 +9,22 @@ import type { EditorState, Clip, TextOverlayData, ShapeOverlayData } from './typ
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA } from './types';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
+import { clipOnLockedTrack, isTrackLocked } from './trackLock';
 
 export type OverlaySlice = Pick<EditorState, 'addTextOverlayClip' | 'addShapeOverlayClip' | 'updateTextOverlayData' | 'updateShapeOverlayData'>;
 
 export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice> = (set, get) => ({
   // Overlay clip actions (new clip-based overlays)
+  //
+  // ESCSUITE-84: a locked track's contents are frozen. Both adders refuse an
+  // explicit locked track and both `update*OverlayData` actions refuse a clip
+  // already on one — see the spec at
+  // .superpowers/sdd/2026-09-26-escsuite-84-track-lock/.
   addTextOverlayClip: (textData?, trackId?, position?, duration?) => {
     const state = get();
+    // An explicit locked track takes nothing (ESCSUITE-84); with no track named,
+    // `findEmptyTrack` already skips the locked ones.
+    if (isTrackLocked(state.project.timeline.tracks, trackId)) return null; // ESCSUITE-84
     const currentTime = state.currentTime;
     const clipDuration = duration ?? 5;
 
@@ -73,6 +82,9 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
 
   addShapeOverlayClip: (shapeData?, trackId?, position?, duration?) => {
     const state = get();
+    // An explicit locked track takes nothing (ESCSUITE-84); with no track named,
+    // `findEmptyTrack` already skips the locked ones.
+    if (isTrackLocked(state.project.timeline.tracks, trackId)) return null; // ESCSUITE-84
     const currentTime = state.currentTime;
     const clipDuration = duration ?? 5;
 
@@ -143,6 +155,7 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   },
 
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId || clip.overlayType !== 'text') return clip;
       return {
@@ -166,6 +179,7 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   }),
 
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => set((state) => {
+    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId || clip.overlayType !== 'shape') return clip;
       const updatedData = { ...clip.shapeData!, ...shapeData };

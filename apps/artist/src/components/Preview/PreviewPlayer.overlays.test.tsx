@@ -3,7 +3,7 @@
 // legacy arrays a project saved before overlays became clips still carries —
 // which `convertLegacyOverlays` folds into ordinary overlay clips on load.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cleanup, fireEvent } from '@testing-library/react'
+import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import {
   FRAME_MS,
@@ -47,13 +47,13 @@ afterEach(() => {
  * selected; the handles have their own file.
  */
 const addText = (data: Partial<TextOverlayData>, duration = 4): Clip => {
-  const clip = store().addTextOverlayClip(data, undefined, 0, duration)
+  const clip = store().addTextOverlayClip(data, undefined, 0, duration)!
   store().setSelectedClipId(null)
   return clip
 }
 
 const addShape = (data: Partial<ShapeOverlayData>, duration = 4): Clip => {
-  const clip = store().addShapeOverlayClip(data, undefined, 0, duration)
+  const clip = store().addShapeOverlayClip(data, undefined, 0, duration)!
   store().setSelectedClipId(null)
   return clip
 }
@@ -298,6 +298,20 @@ describe('PreviewPlayer overlay drawing', () => {
     await settle(FRAME_MS)
 
     expect(preview.frame().of('fillText')).toHaveLength(0)
+  })
+
+  // ESCSUITE-84: the editor would open and every keystroke would then be
+  // refused by the store, losing the edit silently.
+  it('does not open the inline editor for a text clip on a locked track', async () => {
+    const clip = addText({ text: 'Frozen' })
+    store().updateTrack(clip.trackId, { locked: true })
+
+    const preview = await renderPreview()
+    fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
+    await settle(FRAME_MS)
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(preview.frame().of('fillText')).toHaveLength(1)
   })
 })
 

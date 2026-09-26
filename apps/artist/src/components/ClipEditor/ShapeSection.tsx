@@ -20,6 +20,8 @@ interface ShapeSectionProps {
    * after the release, so a pointer gesture does not bound that interaction.
    */
   sliderGesture: SliderGestureHandlers;
+  /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
+  disabled?: boolean;
 }
 
 /**
@@ -31,9 +33,9 @@ interface ShapeSectionProps {
  * colour picker, the no-fill toggle and the fill-opacity row all read and
  * rewrite the same eight-digit hex string through `clipColorValues`.
  */
-export function ShapeSection({ shapeData, onChange, sliderGesture }: ShapeSectionProps) {
+export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: ShapeSectionProps) {
   return (
-    <CollapsibleSection title="Shape">
+    <CollapsibleSection title="Shape" disabled={disabled}>
       <select
         className={styles.select}
         value={shapeData.type}
