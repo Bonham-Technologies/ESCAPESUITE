@@ -375,9 +375,9 @@ the Help button.
   `isMP4ConversionSupported()` presence check the conversion guards itself with, and
   `resolveFixWebmDuration()`, the hand-written CJS interop the repair's import needs (see
   "WebM Handling"). The library
-  row's MP4 download reaches them through `hooks/useMp4Download.ts`. `remuxToWebM()` / `isWebMRemuxSupported()` (the
-  compatible-WebM VP9 + Opus re-encode) are the one part of this module nothing calls; see
-  "Download Formats"
+  row's MP4 download reaches them through `hooks/useMp4Download.ts`. The compatible-WebM
+  re-encode (`remuxToWebM`) that once lived here was deleted in ESCSUITE-85: nothing called
+  it, and the stored WebM is already seekable.
 
 ### VideoPlayer Component (`src/components/VideoPlayer/`)
 Reusable video player with full playback controls:
@@ -1049,10 +1049,9 @@ message and navigate to its own editor itself.
   check and the mux — a file written out of a dead encoder's packets is a truncated file
   handed over as a finished one. A **cancellation outranks a codec failure**: the user asked
   for no file, so a cancel that races an encoder death still rejects with
-  `ConversionAbortedError` and still raises no notice. `remuxToWebM` goes through the same
-  object, being the same law. The accounting is pinned exactly (built == released, none
-  closed twice) for the success, cancellation and encoder-failure outcomes of all three
-  conversions in `converter.perf.test.ts`, and the WebCodecs double's `close()` is strict
+  `ConversionAbortedError` and still raises no notice. The accounting is pinned exactly (built
+  == released, none closed twice) for the success, cancellation and encoder-failure outcomes
+  of both conversions in `converter.perf.test.ts`, and the WebCodecs double's `close()` is strict
   about a second close the way the real API is — which is the tripwire ESCSUITE-66 had to
   leave lenient, because the converter did not yet meet the law.
 - **A throw while reading frames fails the conversion instead of hanging it** (ESCSUITE-78):
@@ -1231,10 +1230,11 @@ part alone downloads its WebM from that part's own row.
   `videoDraws === 2 × framesEncoded`. First numbers in
   `docs/performance/2026-09-17-craft-baseline.md`.
 
-**Still unwired:** the compatible-WebM path (`remuxToWebM`, `isWebMRemuxSupported` — a
-VP9 + Opus re-encode into a freshly-muxed container). It is present and tested and nothing
-calls it; the WebM that is already in storage is seekable, so it has no user-visible job
-that the instant download does not already do.
+**Removed (ESCSUITE-85):** the compatible-WebM path (`remuxToWebM`, `isWebMRemuxSupported`, a
+VP9 + Opus re-encode into a fresh container) was present, tested and called by nothing from the
+MP4 restore (#389) onward; its job — a seekable copy of MediaRecorder output — is done at save
+time by the `webm-duration-fix` repair, and 'plays everywhere' is the MP4 download. Deleted
+2026-09-26 on the operator's decision rather than wired as a fourth download.
 
 ### A take can be several files
 
