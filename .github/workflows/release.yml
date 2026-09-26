@@ -163,77 +163,76 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const path = require('path');
 
-            // Get releases created by the release job
-            const { data: releases } = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 10
-            });
+            // changesets/action created the per-package releases in the job
+            // before this one, but the list endpoint does not always show a
+            // release that new (six per-package releases shipped with no
+            // asset on 2026-09-26, each looked up 20-40 s after it was
+            // published — ESCSUITE-83). Look each one up by its tag, retry
+            // while GitHub catches up, and fail the run if it never appears:
+            // a release with no asset must be red, not green.
+            const ATTEMPTS = 6;
+            const RETRY_MS = 10000;
 
-            // Upload craft build if released
+            async function findRelease(tagName) {
+              for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+                try {
+                  const { data } = await github.rest.repos.getReleaseByTag({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    tag: tagName
+                  });
+                  return data;
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                  console.log(`Release ${tagName} not visible yet (attempt ${attempt}/${ATTEMPTS})`);
+                  if (attempt < ATTEMPTS) {
+                    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+                  }
+                }
+              }
+              return null;
+            }
+
+            const missing = [];
+
+            async function attach(tagName, fileName, contentType) {
+              const release = await findRelease(tagName);
+              if (!release) {
+                missing.push(tagName);
+                return;
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+                name: fileName,
+                data: fs.readFileSync(`uploads/${fileName}`),
+                headers: { 'content-type': contentType }
+              });
+              console.log(`Attached ${fileName} to release ${tagName}`);
+            }
+
             if ('${{ steps.check-apps.outputs.craft_released }}' === 'true') {
               const version = '${{ steps.check-apps.outputs.craft_version }}';
-              const tagName = `@escapesuite/craft@${version}`;
-              const release = releases.find(r => r.tag_name === tagName);
-
-              if (release) {
-                const filePath = `uploads/ESCAPECRAFT-${version}.html`;
-                const content = fs.readFileSync(filePath);
-
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release.id,
-                  name: `ESCAPECRAFT-${version}.html`,
-                  data: content
-                });
-                console.log(`Attached ESCAPECRAFT-${version}.html to release`);
-              }
+              await attach(`@escapesuite/craft@${version}`, `ESCAPECRAFT-${version}.html`, 'text/html');
             }
 
-            // Upload artist build if released
             if ('${{ steps.check-apps.outputs.artist_released }}' === 'true') {
               const version = '${{ steps.check-apps.outputs.artist_version }}';
-              const tagName = `@escapesuite/artist@${version}`;
-              const release = releases.find(r => r.tag_name === tagName);
-
-              if (release) {
-                const filePath = `uploads/ESCAPEARTIST-${version}.html`;
-                const content = fs.readFileSync(filePath);
-
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release.id,
-                  name: `ESCAPEARTIST-${version}.html`,
-                  data: content
-                });
-                console.log(`Attached ESCAPEARTIST-${version}.html to release`);
-              }
+              await attach(`@escapesuite/artist@${version}`, `ESCAPEARTIST-${version}.html`, 'text/html');
             }
 
-            // Upload headless-artist kit if released
             if ('${{ steps.check-apps.outputs.headless_released }}' === 'true') {
               const version = '${{ steps.check-apps.outputs.headless_version }}';
-              const tagName = `@escapesuite/headless-artist@${version}`;
-              const release = releases.find(r => r.tag_name === tagName);
+              await attach(`@escapesuite/headless-artist@${version}`, `escapesuite-headless-artist-${version}.tgz`, 'application/gzip');
+            }
 
-              if (release) {
-                const filePath = `uploads/escapesuite-headless-artist-${version}.tgz`;
-                const content = fs.readFileSync(filePath);
-
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release.id,
-                  name: `escapesuite-headless-artist-${version}.tgz`,
-                  data: content,
-                  headers: {
-                    'content-type': 'application/gzip'
-                  }
-                });
-                console.log(`Attached escapesuite-headless-artist-${version}.tgz to release`);
-              }
+            if (missing.length > 0) {
+              core.setFailed(
+                `No GitHub Release found for ${missing.join(', ')} after ${ATTEMPTS} attempts — ` +
+                'the tag exists but changesets/action created no release for it (a missing ' +
+                'CHANGELOG.md?), so nothing was attached. Attach the build from this run by hand ' +
+                'once the release exists.'
+              );
             }
