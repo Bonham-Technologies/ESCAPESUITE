@@ -335,7 +335,79 @@ export interface Clip {
   overlayType?: OverlayType;      // 'text' | 'shape' - undefined for media clips
   textData?: TextOverlayData;     // Text overlay content and styling
   shapeData?: ShapeOverlayData;   // Shape overlay content and styling
+
+  // Mask and stroke (ESCSUITE-65). Static — never keyframed, never animated.
+  // Media clips only: text and shape overlays have no drawn box either could
+  // mean anything against. Absent means none for both.
+  mask?: ClipMask;
+  stroke?: ClipStroke;
 }
+
+/**
+ * Which shape a media clip's picture is masked to (ESCSUITE-65).
+ *
+ * `'none'` exists so the inspector's `<select>` has a value for "no mask"; it is
+ * never *stored* — `clip.mask === undefined` is how a clip says it has none, so
+ * a clip that was never masked and one whose mask was removed are the same
+ * object. `CLIP_MASK_KINDS` in `components/ClipEditor/clipEditorOptions.ts` is
+ * the table the dropdown is built from, in the order the user sees.
+ */
+export type ClipMaskKind = 'none' | 'circle' | 'rounded';
+
+/**
+ * A media clip's mask: **static, and deliberately not keyframeable** (decision 4).
+ *
+ * Not a member of `ClipTransform`, because every field there is a number fed
+ * through `getAnimatedValues` and every one of them is an `AnimatableProperty` —
+ * an enum in there would put a non-interpolable value inside the interpolator
+ * and force a `DEFAULT_TRANSFORM` change that every fixture and the migration in
+ * `projectMigration.ts` reads. `kind` cannot be interpolated at all, so a
+ * keyframed radius with a static kind would be a half-feature.
+ */
+export interface ClipMask {
+  kind: ClipMaskKind;
+  /**
+   * Corner radius as a **fraction of the clip's shorter drawn side**, 0 to 0.5,
+   * and read for `'rounded'` only (decision 2).
+   *
+   * A fraction rather than a pixel count for the same reason
+   * `OVERLAY_MARGIN_FRACTION` is one (`utils/overlayPlacement.ts`): ARTIST has a
+   * resolution-change dialog, and a pixel count would silently change the
+   * rounding the moment the project resolution moved. 0.5 is a stadium; anything
+   * above it is clamped to it by `core/clipMask.ts`.
+   */
+  radius?: number;
+}
+
+/**
+ * A media clip's outline: the mask's own edge, or the picture's rectangle when
+ * there is no mask (decision 6).
+ *
+ * The words are `ShapeOverlayData`'s (`strokeColor` / `strokeWidth`, defaulting
+ * to `'#ffffff'` / `0`) so the two vocabularies read alike, but this is its own
+ * object on the clip: a shape overlay's stroke belongs to its drawn shape, a
+ * media clip's belongs to its mask.
+ */
+export interface ClipStroke {
+  /** Any CSS colour string, stored as given — including the `rgba()` ESCAPECRAFT hands over. */
+  color: string;
+  /**
+   * Line width as a **fraction of the frame width**, resolved against the
+   * canvas at draw time. ESCAPECRAFT's border is 3 px *of a 1280-wide canvas*,
+   * and a pixel count would change meaning at another resolution. 0 is no
+   * stroke, but the inspector writes `undefined` rather than `{ width: 0 }`.
+   */
+  width: number;
+}
+
+/** The corner radius a mask starts at when the user first picks "Rounded Rectangle". */
+export const DEFAULT_CLIP_MASK_RADIUS = 0.05;
+
+/**
+ * The colour a stroke starts at, and what an `<input type="color">` shows for a
+ * stored colour it cannot represent — `ShapeOverlayData`'s own stroke default.
+ */
+export const DEFAULT_CLIP_STROKE_COLOR = '#ffffff';
 
 /**
  * One part of a handed-over take, ready to be placed on the timeline

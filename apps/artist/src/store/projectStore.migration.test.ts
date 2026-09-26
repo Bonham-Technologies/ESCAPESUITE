@@ -210,4 +210,94 @@ describe('projectStore remaining behaviours', () => {
       expect(store().project.timeline.clips.map((c) => c.timelinePosition)).toEqual([10, 0])
     })
   })
+
+  describe('a mask and a stroke through storage (ESCSUITE-65)', () => {
+    /** A project as every ARTIST before ESCSUITE-65 wrote it: clips with no mask field. */
+    const preMaskProject = (): Project => ({
+      id: 'p',
+      name: 'Pre-mask',
+      created: 1,
+      modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: {
+        tracks: [
+          { id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },
+        ],
+        clips: [
+          {
+            id: 'old-clip',
+            sourceVideoId: 'video1',
+            name: 'old-clip',
+            startTime: 0,
+            endTime: 2,
+            duration: 2,
+            trackId: 't1',
+            timelinePosition: 0,
+            blendMode: 'normal',
+            transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+            effects: { blur: 0 },
+            transition: { type: 'none', duration: 0.5 },
+          },
+        ],
+        textOverlays: [],
+        shapeOverlays: [],
+        duration: 2,
+      },
+    })
+
+    it('loads a pre-mask project with neither field, not with a default one', () => {
+      store().setProject(preMaskProject())
+
+      const clip = store().project.timeline.clips[0]
+      // Absent, not `{ kind: 'none' }`: `undefined === none` is the whole reason
+      // `ensureTimelineHasTracks` needs no new line for this feature, and it is
+      // what keeps a clip that has never been masked identical to one whose mask
+      // was removed. The unmasked *draw* is pinned in
+      // core/canvasRenderer.clips.test.ts, which asserts such a clip records
+      // exactly the three calls it has always recorded.
+      expect(clip.mask).toBeUndefined()
+      expect(clip.stroke).toBeUndefined()
+      expect('mask' in clip).toBe(false)
+      expect('stroke' in clip).toBe(false)
+    })
+
+    it('carries both fields through the existing updateClip action and its undo step', () => {
+      store().setProject(preMaskProject())
+      store().clearHistory()
+
+      store().updateClip('old-clip', {
+        mask: { kind: 'rounded', radius: 0.1 },
+        stroke: { color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 },
+      })
+
+      const clip = store().project.timeline.clips[0]
+      expect(clip.mask).toEqual({ kind: 'rounded', radius: 0.1 })
+      expect(clip.stroke).toEqual({ color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 })
+      // `updateClip` already pushes history (clipSlice.ts:281), which is why this
+      // feature needs no new store action and no new member in ClipSlice's Pick.
+      expect(store().history.past).toHaveLength(1)
+
+      store().undo()
+
+      expect(store().project.timeline.clips[0].mask).toBeUndefined()
+      expect(store().project.timeline.clips[0].stroke).toBeUndefined()
+    })
+
+    it('carries both fields onto a duplicated clip', () => {
+      store().setProject(preMaskProject())
+      store().updateClip('old-clip', {
+        mask: { kind: 'circle' },
+        stroke: { color: '#ff0000', width: 0.004 },
+      })
+
+      store().duplicateClip('old-clip')
+
+      // `cloneClip` is `structuredClone` (utils/deepClone.ts), so this holds by
+      // construction rather than by a field list somebody has to remember to
+      // extend — which is exactly why it is worth one test.
+      const copy = store().project.timeline.clips.find((c) => c.id !== 'old-clip')!
+      expect(copy.mask).toEqual({ kind: 'circle' })
+      expect(copy.stroke).toEqual({ color: '#ff0000', width: 0.004 })
+    })
+  })
 })

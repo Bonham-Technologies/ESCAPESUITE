@@ -34,4 +34,22 @@ describe('buildSessionSnapshot', () => {
     const snapshot = buildSessionSnapshot(state, 42);
     expect(snapshot.timestamp).toBe(42);
   });
+
+  it('carries a clip mask and stroke through, because it carries the project whole', () => {
+    const clip = addClip('clip1', 0);
+    store().updateClip(clip.id, {
+      mask: { kind: 'circle' },
+      stroke: { color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 },
+    });
+
+    const snapshot = buildSessionSnapshot(useEditorStore.getState(), 1);
+
+    // The snapshot is `state.project` by reference, so autosave and restore get
+    // ESCSUITE-65 for free and `DB_VERSION` stays 1. Asserted rather than
+    // assumed: a future snapshot that picked fields out of the project one by
+    // one would drop these two silently.
+    const restored = snapshot.project.timeline.clips[0];
+    expect(restored.mask).toEqual({ kind: 'circle' });
+    expect(restored.stroke).toEqual({ color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 });
+  });
 });
