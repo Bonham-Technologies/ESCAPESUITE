@@ -76,6 +76,18 @@ const CIRCLE_EDGE_X = 8
 const CIRCLE_EDGE_Y = 24
 /** A block wholly inside the circle and wholly inside the stroke's inner edge. */
 const CIRCLE_INSIDE = { x: 28, y: 20, width: 8, height: 8 }
+/**
+ * A point in the **outer** half of the stroke's band: outside the circle, inside
+ * the line.
+ *
+ * The band spans x 4 to 12 at y 24 and the circle's own edge is at x 8, so x 5-6
+ * is band and nothing else — a 2x2 sample centred on 6 covers exactly those two
+ * columns. This is the sample that can only be white if the stroke escaped the
+ * clip region; the one centred *on* the outline cannot say so on its own, because
+ * half of it is inside the circle either way.
+ */
+const CIRCLE_OUTER_X = 6
+const CIRCLE_OUTER_SAMPLE = 2
 
 const FFMPEG = hasFfmpeg()
 if (!FFMPEG) {
@@ -355,6 +367,27 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
     expect(edgeR).toBeGreaterThan(150)
     expect(edgeG).toBeGreaterThan(150)
     expect(edgeB).toBeGreaterThan(150)
+
+    // And the sample that proves the stroke is drawn **outside** the clip region
+    // — the inner `restore()` in `core/clipMask.ts`'s `drawWithMaskAndStroke`.
+    // The assertion above cannot prove it alone: centred on the outline, half of
+    // that sample is inside the circle whatever happens to the other half, so a
+    // stroke drawn *inside* the clip region (outer half eaten, inner half kept)
+    // still averages near white-over-red — nominally ~127 per channel against a
+    // 150 floor, and mutation B showed this encode can lift a nominally-127
+    // channel over that line. This 2x2 block is in the band's outer half only:
+    // white if the line escaped the mask, the export's black background if it
+    // did not. Nothing in between.
+    const [outerR, outerG, outerB] = await frameEdgeRGB(
+      outputPath,
+      MASKED_FRAME,
+      CIRCLE_OUTER_X,
+      CIRCLE_EDGE_Y,
+      CIRCLE_OUTER_SAMPLE,
+    )
+    expect(outerR).toBeGreaterThan(150)
+    expect(outerG).toBeGreaterThan(150)
+    expect(outerB).toBeGreaterThan(150)
   }, RENDER_TIMEOUT_MS)
 
   it('reads red from the red fixture and not from a blue control clip', async () => {

@@ -105,6 +105,12 @@ export async function frameMeanRGB(file: string, frameIndex: number): Promise<[n
  * silently measures a different rectangle; converting first makes every offset
  * exact. `scale=1:1` then does the averaging, as it does in `frameMeanRGB`.
  * Frames are zero-indexed, matching `select=eq(n,...)`.
+ *
+ * **One ffmpeg process per sample.** At the fixtures' 64x48 that is a few
+ * milliseconds and invisible beside the Chromium launch the render itself needs,
+ * so three samples of one frame are spelled as three calls. A case that wants
+ * dozens of points should not loop over this: one pass with several `crop`
+ * outputs (or a `tile` of them) reads them all from a single decode.
  */
 export async function frameRegionRGB(
   file: string,
@@ -166,6 +172,12 @@ export async function frameCornerRGB(
  * average in whatever lies either side of it. The caller picks a point at least
  * `size / 2` from the frame's edges: an outline that touches the edge has half
  * its line outside the frame, which is not a thing to measure.
+ *
+ * That last sentence is enforced rather than assumed. Clamping a sample back
+ * inside the frame would measure an off-centre rectangle and return it as the
+ * colour *at* the point asked for — precisely the silent mismeasurement this
+ * whole family of samplers exists to rule out — so a point too close to the top
+ * or left edge throws instead.
  */
 export async function frameEdgeRGB(
   file: string,
@@ -174,12 +186,13 @@ export async function frameEdgeRGB(
   y: number,
   size = 4,
 ): Promise<[number, number, number]> {
-  return frameRegionRGB(
-    file,
-    frameIndex,
-    Math.max(0, Math.round(x - size / 2)),
-    Math.max(0, Math.round(y - size / 2)),
-    size,
-    size,
-  )
+  const left = Math.round(x - size / 2)
+  const top = Math.round(y - size / 2)
+  if (left < 0 || top < 0) {
+    throw new Error(
+      `frameEdgeRGB: a ${size}x${size} sample centred on (${x}, ${y}) would start at ` +
+        `(${left}, ${top}), outside the frame — centre it at least ${size / 2} px from every edge`,
+    )
+  }
+  return frameRegionRGB(file, frameIndex, left, top, size, size)
 }

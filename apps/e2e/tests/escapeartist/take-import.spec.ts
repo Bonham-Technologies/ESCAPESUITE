@@ -262,9 +262,19 @@ async function transformValue(page: Page, label: string): Promise<string> {
   return (await row.locator('span').last().innerText()).trim()
 }
 
-/** Open one of the inspector's collapsed sections by its title. */
-async function openSection(page: Page, title: string) {
+/**
+ * Open one of the inspector's collapsed sections by its title, and return only
+ * once it really is open.
+ *
+ * `CollapsibleSection`'s header button *toggles*, so a click on its own is not
+ * "open": against a section that was already open it closes it, and every
+ * assertion after would then fail on an absent row rather than on a wrong value.
+ * `contentLabel` names a row only this section renders, so what the helper waits
+ * for is the content the caller came for being on screen.
+ */
+async function openSection(page: Page, title: string, contentLabel: string) {
   await page.getByRole('button', { name: title }).click()
+  await expect(page.getByText(contentLabel, { exact: true })).toBeVisible()
 }
 
 /**
@@ -376,7 +386,7 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     await page.locator('[data-clip-id]').filter({ hasText: '— webcam' }).click()
     // Collapsed by default (`MaskSection` passes `defaultOpen={false}`), exactly
     // as Blend Mode is.
-    await openSection(page, 'Mask & Stroke')
+    await openSection(page, 'Mask & Stroke', 'Stroke Width')
 
     // The take was recorded with `shape: 'circle'`, and `maskForPlacement` maps
     // that to `{ kind: 'circle' }` with no radius at all — `core/clipMask.ts`
@@ -400,7 +410,7 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible({ timeout: 15_000 })
 
     await page.locator('[data-clip-id]').filter({ hasText: '— webcam' }).click()
-    await openSection(page, 'Mask & Stroke')
+    await openSection(page, 'Mask & Stroke', 'Stroke Width')
 
     // The same circle — the shape does not depend on the capture's size...
     await expect(maskKindSelect(page)).toHaveValue('circle')
