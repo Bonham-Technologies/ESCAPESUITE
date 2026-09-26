@@ -170,6 +170,28 @@ describe('an inspector slider drag and the undo stack', () => {
     expect(clipNow().effects?.blur).toBe(10)
   })
 
+  it('records one entry for a shape overlay slider drag', async () => {
+    store().addShapeOverlayClip({ type: 'rectangle' })
+    render(<ClipEditor />)
+    const before = past()
+
+    drag(rowControl('Rotation'), [10, 20, 30, 40, 50])
+
+    expect(clipNow().shapeData?.rotation).toBe(50)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a bare change on a shape overlay slider', async () => {
+    store().addShapeOverlayClip({ type: 'rectangle' })
+    render(<ClipEditor />)
+    const before = past()
+
+    slide(rowControl('Rotation'), 90)
+
+    expect(clipNow().shapeData?.rotation).toBe(90)
+    expect(past() - before).toBe(1)
+  })
+
   it('still records one entry per write outside a gesture', async () => {
     const { user } = await selectedClipEditor()
     await openSection(user, 'Effects')
@@ -180,6 +202,23 @@ describe('an inspector slider drag and the undo stack', () => {
     // a click on the slider track, is a change on its own and keeps its own
     // undo entry.
     slide(blur, 1)
+    slide(blur, 2)
+
+    expect(past() - before).toBe(2)
+  })
+
+  it('ends a gesture when the pointer is cancelled', async () => {
+    const { user } = await selectedClipEditor()
+    await openSection(user, 'Effects')
+    const blur = rowControl('Blur')
+    const before = past()
+
+    // A touch or pen gesture can be cancelled — the browser takes the pointer
+    // away (a scroll takes over, the pen leaves range) and no `pointerup`
+    // arrives. Leaving the gesture open would swallow the next write's entry.
+    fireEvent.pointerDown(blur)
+    slide(blur, 1)
+    fireEvent.pointerCancel(blur)
     slide(blur, 2)
 
     expect(past() - before).toBe(2)

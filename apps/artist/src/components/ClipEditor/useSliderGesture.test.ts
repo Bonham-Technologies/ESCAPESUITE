@@ -95,6 +95,20 @@ describe('useSliderGesture', () => {
     expect(write()).toBe(false)
   })
 
+  it('ends the gesture when the pointer is cancelled', () => {
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    write()
+    // A cancelled touch or pen gesture gets no `pointerup` at all. Without
+    // this the gesture stayed open with its entry already pushed, and the next
+    // write — which reaches a handler with no press of its own — was told to
+    // skip, losing its undo entry.
+    on().onPointerCancel()
+
+    expect(write()).toBe(false)
+  })
+
   it('ends the gesture on blur, for a press whose release never arrives', () => {
     const { on, write } = gesture()
 

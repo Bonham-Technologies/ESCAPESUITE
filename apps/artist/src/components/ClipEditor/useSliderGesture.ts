@@ -14,7 +14,15 @@
 // extra happens on release, so a gesture that is abandoned mid-drag is already
 // undoable to where it started.
 //
-// This hook is the gesture, and nothing else: two refs and the five listeners
+// One difference from `useTransformHandles` is worth knowing: there, the writes
+// are throttled to an animation frame, so the flag has to be read inside the
+// updater the throttler runs rather than at the pointer move that schedules one.
+// A slider's writes are synchronous — the `input` event calls the handler, which
+// writes — so "decide at the call" and "decide at the write" are the same moment
+// here, and `skipHistoryForWrite()` can sit in the handler itself. A future
+// throttle on these writes would move it, not delete it.
+//
+// This hook is the gesture, and nothing else: two refs and the six listeners
 // that flip them. It holds no state, so a slider wired to it adds no store
 // subscription and no render — `ClipEditor.rerender.test.tsx`'s counts are
 // unchanged by design, not by luck.
@@ -31,6 +39,13 @@ import { useCallback, useMemo, useRef } from 'react';
 export interface SliderGestureHandlers {
   onPointerDown: () => void;
   onPointerUp: () => void;
+  /**
+   * A touch or pen gesture the browser took away — a scroll took over, the pen
+   * left range — which gets no `pointerup` of its own. Without it the gesture
+   * stayed open with its entry already pushed, and the next write swallowed its
+   * own undo entry.
+   */
+  onPointerCancel: () => void;
   onKeyDown: (event: { repeat: boolean }) => void;
   onKeyUp: () => void;
   onBlur: () => void;
@@ -56,7 +71,7 @@ export interface SliderGesture {
  * Turn a run of slider writes into one undo entry.
  *
  * A gesture opens on `pointerdown` or `keydown` and closes on `pointerup`,
- * `keyup` or `blur`. A **held** arrow key is one gesture, not one per
+ * `pointercancel`, `keyup` or `blur`. A **held** arrow key is one gesture, not one per
  * repetition: the browser fires `keydown` over and over while the key is down,
  * every repetition after the first carrying `repeat: true`, and a repeat leaves
  * the open gesture exactly as it is (the same rule the keyframe drags took in
@@ -88,6 +103,7 @@ export function useSliderGesture(): SliderGesture {
     return {
       onPointerDown: begin,
       onPointerUp: end,
+      onPointerCancel: end,
       onKeyDown: (event) => {
         // A repetition of a key that is already down continues the gesture it
         // started; it must not reopen it, or a held arrow would push an entry

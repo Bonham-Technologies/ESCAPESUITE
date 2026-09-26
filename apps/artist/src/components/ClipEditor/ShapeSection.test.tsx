@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ShapeSection } from './ShapeSection'
+import { inertSliderGesture } from '../../test/fixtures/clipFixtures'
 import { rowControl, rowColor } from '../../test/domQueries'
 import type { ShapeOverlayData } from '../../store/types'
 import styles from './ClipEditor.module.css'
@@ -22,7 +23,13 @@ const baseShape: ShapeOverlayData = {
 
 function renderSection(overrides: Partial<ShapeOverlayData> = {}) {
   const onChange = vi.fn()
-  render(<ShapeSection shapeData={{ ...baseShape, ...overrides }} onChange={onChange} />)
+  render(
+    <ShapeSection
+      shapeData={{ ...baseShape, ...overrides }}
+      onChange={onChange}
+      sliderGesture={inertSliderGesture}
+    />
+  )
   return { onChange }
 }
 

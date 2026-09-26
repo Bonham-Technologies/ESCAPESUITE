@@ -83,7 +83,11 @@ export function ClipEditor() {
 
       {/* Shape Overlay Content Section */}
       {isShapeOverlay && selectedClip.shapeData && (
-        <ShapeSection shapeData={selectedClip.shapeData} onChange={handleShapeDataChange} />
+        <ShapeSection
+          shapeData={selectedClip.shapeData}
+          onChange={handleShapeDataChange}
+          sliderGesture={sliderGesture}
+        />
       )}
 
 

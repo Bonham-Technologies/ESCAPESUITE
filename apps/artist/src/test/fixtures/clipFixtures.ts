@@ -30,6 +30,7 @@ import type { SliderGestureHandlers } from '../../components/ClipEditor/useSlide
 export const inertSliderGesture: SliderGestureHandlers = {
   onPointerDown: () => {},
   onPointerUp: () => {},
+  onPointerCancel: () => {},
   onKeyDown: () => {},
   onKeyUp: () => {},
   onBlur: () => {},
