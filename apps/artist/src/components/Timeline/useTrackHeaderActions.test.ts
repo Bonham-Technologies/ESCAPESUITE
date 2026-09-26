@@ -174,6 +174,20 @@ describe('useTrackHeaderActions deleting', () => {
     expect(storeOrder()).toEqual([bottom, middle, top])
   })
 
+  // ESCSUITE-84: the hook asks its question and calls through either way —
+  // the store is the authority, and it keeps the track and its clips.
+  it('leaves a locked track and its clips where they are', () => {
+    addClip('clip1', 0, 2, middle)
+    store().updateTrack(middle, { locked: true })
+    const { result } = mountActions()
+
+    act(() => result.current.handleDeleteTrack(middle))
+
+    expect(removeTrack).toHaveBeenCalledWith(middle)
+    expect(storeOrder()).toEqual([bottom, middle, top])
+    expect(useEditorStore.getState().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
+  })
+
   it('refuses to delete the last track', () => {
     const { result } = mountActions()
     act(() => result.current.handleDeleteTrack(middle))
