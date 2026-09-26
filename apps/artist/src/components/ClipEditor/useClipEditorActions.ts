@@ -376,6 +376,16 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClipAnimation]
   );
 
+  // One click, one undo entry (ESCSUITE-77). On an overlay this is two store
+  // writes — the transform, then the overlay's own coordinates — and both used
+  // to push, so a single Reset cost two Ctrl+Zs and the first of them left the
+  // clip in a state the user had never seen: the transform back at its default
+  // with the overlay data still where the drag had put it. The rule is the
+  // sliders': the first write pushes, so the entry snapshots the state as it was
+  // before the Reset, and the second passes `skipHistory`. The flag is a literal
+  // rather than `skipHistoryForWrite()` because this is a button, not a gesture
+  // — the two writes are one click, always, and asking a gesture that is not
+  // open would answer `false` twice.
   const handleResetTransform = useCallback(() => {
     if (!selectedClip) return;
 
@@ -393,7 +403,7 @@ export function useClipEditorActions(): ClipEditorActions {
       updateTextOverlayData(selectedClip.id, {
         x: 0.5,
         y: 0.5,
-      });
+      }, true);
     } else if (selectedClip.overlayType === 'shape' && selectedClip.shapeData) {
       updateShapeOverlayData(selectedClip.id, {
         x: 0.5,
@@ -401,7 +411,7 @@ export function useClipEditorActions(): ClipEditorActions {
         width: 0.2,
         height: 0.2,
         rotation: 0,
-      });
+      }, true);
     }
   }, [selectedClip, updateClipTransform, updateTextOverlayData, updateShapeOverlayData]);
 

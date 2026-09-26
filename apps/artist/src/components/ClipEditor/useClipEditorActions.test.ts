@@ -421,7 +421,9 @@ describe('useClipEditorActions transform', () => {
 
     act(() => result.current.handleResetTransform())
 
-    expect(spies.updateTextOverlayData).toHaveBeenCalledWith(clip.id, { x: 0.5, y: 0.5 })
+    // `true`: the second write of one click, so the transform write above it is
+    // the one that pushed the entry both halves undo to (ESCSUITE-77).
+    expect(spies.updateTextOverlayData).toHaveBeenCalledWith(clip.id, { x: 0.5, y: 0.5 }, true)
     expect(clipNow(clip.id).textData).toMatchObject({ x: 0.5, y: 0.5 })
   })
 
@@ -438,8 +440,41 @@ describe('useClipEditorActions transform', () => {
       width: 0.2,
       height: 0.2,
       rotation: 0,
-    })
+    }, true)
     expect(clipNow(clip.id).shapeData).toMatchObject({ width: 0.2, height: 0.2, rotation: 0 })
+  })
+
+  it('the section Reset on a text overlay is one undo entry, not two', () => {
+    const clip = textClip()
+    store().updateClipTransform(clip.id, { x: 0.1, opacity: 0.2 })
+    store().updateTextOverlayData(clip.id, { x: 0.1, y: 0.9 })
+    useEditorStore.setState({ history: { past: [], future: [] } })
+    const { result } = mount()
+
+    act(() => result.current.handleResetTransform())
+
+    // Two store writes, one undo step: the overlay write passes `skipHistory`,
+    // so a single Ctrl+Z puts both the transform and the overlay's own
+    // coordinates back.
+    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    act(() => store().undo())
+    expect(clipNow(clip.id).transform).toMatchObject({ x: 0.1, opacity: 0.2 })
+    expect(clipNow(clip.id).textData).toMatchObject({ x: 0.1, y: 0.9 })
+  })
+
+  it('the section Reset on a shape overlay is one undo entry, not two', () => {
+    const clip = shapeClip()
+    store().updateClipTransform(clip.id, { x: 0.1, opacity: 0.2 })
+    store().updateShapeOverlayData(clip.id, { x: 0.1, width: 0.7, rotation: 30 })
+    useEditorStore.setState({ history: { past: [], future: [] } })
+    const { result } = mount()
+
+    act(() => result.current.handleResetTransform())
+
+    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    act(() => store().undo())
+    expect(clipNow(clip.id).transform).toMatchObject({ x: 0.1, opacity: 0.2 })
+    expect(clipNow(clip.id).shapeData).toMatchObject({ x: 0.1, width: 0.7, rotation: 30 })
   })
 
   it('the scale row\'s Reset spreads the whole default transform, rotation included', () => {
