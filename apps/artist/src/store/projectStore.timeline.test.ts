@@ -711,6 +711,18 @@ describe('projectStore remaining behaviours', () => {
       expect(past()).toBe(entries)
     }
 
+    /**
+     * The same, for an action that *reports* its refusal (ESCSUITE-87): nothing
+     * written, and `false` back to the caller so a gesture threading
+     * `skipHistory` into a later write knows its first one never landed.
+     */
+    const reportsRefusal = (act: () => boolean) => {
+      const before = clipsRef(); const entries = past()
+      expect(act()).toBe(false)
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
     it('refuses to add a clip to it by explicit track id', () => refuses(() =>
       store().addClipToTimeline(
         { id: 'new1', sourceVideoId: video.id, name: 'new1', startTime: 0, endTime: 2, duration: 2 },
@@ -718,18 +730,18 @@ describe('projectStore remaining behaviours', () => {
       )))
     it('refuses to remove a clip on it', () => refuses(() => store().removeClipFromTimeline('h1')))
     it('refuses to ripple-delete a clip on it', () => refuses(() => store().rippleDeleteClip('h1')))
-    it('refuses to update a clip on it', () => refuses(() => store().updateClip('h1', { endTime: 1 })))
+    it('refuses to update a clip on it', () => reportsRefusal(() => store().updateClip('h1', { endTime: 1 })))
     it('refuses to split a clip on it', () => refuses(() => store().splitClip('h1', 1)))
-    it('refuses to move a clip on it in time', () => refuses(() => store().setClipTimelinePosition('h1', 8)))
-    it('refuses to move a clip on it to another track', () => refuses(() => store().moveClipToTrack('h1', free)))
-    it('refuses to move a clip onto it from another track', () => refuses(() => store().moveClipToTrack('f1', held)))
-    it('refuses to transform a clip on it', () => refuses(() => store().updateClipTransform('h1', { x: 0.2 })))
+    it('refuses to move a clip on it in time', () => reportsRefusal(() => store().setClipTimelinePosition('h1', 8)))
+    it('refuses to move a clip on it to another track', () => reportsRefusal(() => store().moveClipToTrack('h1', free)))
+    it('refuses to move a clip onto it from another track', () => reportsRefusal(() => store().moveClipToTrack('f1', held)))
+    it('refuses to transform a clip on it', () => reportsRefusal(() => store().updateClipTransform('h1', { x: 0.2 })))
     it('refuses to change the blend mode of a clip on it', () => refuses(() => store().updateClipBlendMode('h1', 'multiply')))
-    it('refuses to change the effects of a clip on it', () => refuses(() => store().updateClipEffects('h1', { blur: 3 })))
-    it('refuses to change the transition of a clip on it', () => refuses(() => store().updateClipTransition('h1', { duration: 1 })))
-    it('refuses to change the animation of a clip on it', () => refuses(() => store().updateClipAnimation('h1', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
+    it('refuses to change the effects of a clip on it', () => reportsRefusal(() => store().updateClipEffects('h1', { blur: 3 })))
+    it('refuses to change the transition of a clip on it', () => reportsRefusal(() => store().updateClipTransition('h1', { duration: 1 })))
+    it('refuses to change the animation of a clip on it', () => reportsRefusal(() => store().updateClipAnimation('h1', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
     it('refuses to duplicate a clip on it', () => refuses(() => store().duplicateClip('h1')))
-    it('refuses to shift the clips on it', () => refuses(() => store().shiftClipsAfter(held, 1, 2)))
+    it('refuses to shift the clips on it', () => reportsRefusal(() => store().shiftClipsAfter(held, 1, 2)))
     it('still shifts the clips on an unlocked track', () => {
       addClip('f2', 4, 2, free)
       store().shiftClipsAfter(free, 1, 2)
@@ -761,5 +773,35 @@ describe('projectStore remaining behaviours', () => {
       store().updateClipBlendMode('f1', 'multiply')
       expect(clipsRef().find((c) => c.id === 'f1')!.blendMode).toBe('multiply')
     })
+  })
+
+  // ESCSUITE-87. The refusals above are only half the contract: an action that
+  // *did* write says so too, or a caller could not tell "refused" from "wrote"
+  // and a gesture would hand `skipHistory` to a second write for an undo entry
+  // that was never pushed.
+  describe('reporting that it wrote (ESCSUITE-87)', () => {
+    let track: string
+
+    beforeEach(() => {
+      track = useEditorStore.getState().project.timeline.tracks[0].id
+      addClip('c1', 0, 2, track)
+      addClip('c2', 4, 2, track)
+    })
+
+    it('updateClip', () => expect(store().updateClip('c1', { endTime: 1 })).toBe(true))
+    it('setClipTimelinePosition', () => expect(store().setClipTimelinePosition('c1', 8)).toBe(true))
+    it('moveClipToTrack', () => expect(store().moveClipToTrack('c1', store().addTrack('Other').id)).toBe(true))
+    it('updateClipTransform', () => expect(store().updateClipTransform('c1', { x: 0.2 })).toBe(true))
+    it('updateClipEffects', () => expect(store().updateClipEffects('c1', { blur: 3 })).toBe(true))
+    it('updateClipTransition', () => expect(store().updateClipTransition('c1', { duration: 1 })).toBe(true))
+    it('updateClipAnimation', () => expect(store().updateClipAnimation('c1', {
+      in: { type: 'fade', duration: 1, easing: 'linear' },
+    })).toBe(true))
+    it('shiftClipsAfter', () => expect(store().shiftClipsAfter(track, 1, 2)).toBe(true))
+
+    // Nothing moved, so nothing was written — the same answer a lock gives, for
+    // the same reason: there is no undo entry for a later write to join.
+    it('shiftClipsAfter says false for a zero delta', () =>
+      expect(store().shiftClipsAfter(track, 1, 0)).toBe(false))
   })
 })
