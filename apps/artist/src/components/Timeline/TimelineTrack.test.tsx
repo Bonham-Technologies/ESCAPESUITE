@@ -327,8 +327,41 @@ describe('TimelineTrack waveforms', () => {
 
     const canvas = root.querySelector('canvas')
     expect(canvas).not.toBeNull()
-    // The waveform is inset by 2px top and bottom of the 60px row.
-    expect(canvas).toHaveStyle({ height: '56px' })
+    // The waveform fills the clip box, which is the 60px row less `.clip`'s 8px
+    // inset (`top: 4px; height: calc(100% - 8px)`).
+    expect(canvas).toHaveStyle({ height: '52px' })
+  })
+
+  it('sizes the backing store to the clip box, not to the track row', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [withAudio] })
+
+    const canvas = root.querySelector('canvas')!
+    // The canvas is `position: absolute; height: 100%` of `.clip`
+    // (`AudioWaveform.module.css`), and `.clip` is `top: 4px;
+    // height: calc(100% - 8px)` of the row — so the box the bitmap is painted
+    // into is 52px at a 60px track, and a 56px bitmap would be rescaled down
+    // into it, squashing every peak by ~7% and softening the whole waveform.
+    // The height attribute IS the backing store (times the DPR, 1 here), so
+    // this is the assertion that the two agree.
+    expect(canvas).toHaveAttribute('height', '52')
+    // The CSS box the store is stretched over, for the same number.
+    expect(canvas.style.height).toBe('52px')
+  })
+
+  it('never shrinks the backing store below the clip box’s own minimum height', () => {
+    const { root } = renderTrack({
+      track: makeTrack({ height: 30 }),
+      clips: [makeClip('clip1', 0)],
+      sourceVideos: [withAudio],
+    })
+
+    // `.clip` has `min-height: 40px`, so a track dragged shorter than that stops
+    // shrinking the box — and the bitmap has to stop shrinking with it, exactly
+    // as the thumbnail does (see the thumbnail clamp test below). 30 - 8 = 22
+    // would be a 22px store stretched over a 40px box.
+    const canvas = root.querySelector('canvas')!
+    expect(canvas).toHaveAttribute('height', '40')
+    expect(canvas.style.height).toBe('40px')
   })
 
   it('draws no waveform when the source has audio but no peaks', () => {

@@ -11,18 +11,36 @@ import styles from './Timeline.module.css';
  * How much shorter a clip's box is than its track row, in pixels.
  *
  * `.clip` is `top: 4px; height: calc(100% - 8px)` (`Timeline.module.css`), so
- * this mirrors one CSS declaration and exists because the thumbnail's height has
- * to be a number in JS — CSS cannot read `track.height`, and
- * `maskClipPathFor` needs the height in pixels to place a circle's radius.
+ * this mirrors one CSS declaration and exists because two boxes drawn inside
+ * `.clip` need that height as a number in JS — the thumbnail, whose
+ * `maskClipPathFor` needs pixels to place a circle's radius, and the waveform,
+ * whose canvas backing store has to match the box CSS stretches it over. CSS
+ * cannot read `track.height`, so neither can be written as a percentage.
  */
 const CLIP_BOX_VERTICAL_INSET = 8;
 
 /**
  * The shortest clip box there is, mirroring `.clip`'s own `min-height: 40px`: a
- * track dragged shorter than that stops shrinking the box, so the thumbnail has
- * to stop shrinking with it or it would float inside a box taller than itself.
+ * track dragged shorter than that stops shrinking the box, so both boxes drawn
+ * inside it have to stop shrinking too — a thumbnail would otherwise float
+ * inside a box taller than itself, and a waveform bitmap would be stretched.
  */
 const MIN_CLIP_BOX_HEIGHT = 40;
+
+/**
+ * The height, in pixels, of the box `.clip` actually draws in on a row this
+ * tall — the row less {@link CLIP_BOX_VERTICAL_INSET}, never below
+ * {@link MIN_CLIP_BOX_HEIGHT}.
+ *
+ * **One expression for both boxes**, deliberately (ESCSUITE-76). The waveform
+ * canvas used to be sized `track.height - 4` while the thumbnail used this
+ * inset, so at a 60 px track a 56 px bitmap was rescaled by CSS into the 52 px
+ * clip box: every peak squashed ~7% and the whole waveform softened. They
+ * cannot drift again while they read the same number.
+ */
+function clipBoxHeightFor(trackHeight: number): number {
+  return Math.max(trackHeight - CLIP_BOX_VERTICAL_INSET, MIN_CLIP_BOX_HEIGHT);
+}
 
 interface TimelineTrackProps {
   track: Track;
@@ -82,6 +100,9 @@ export const TimelineTrack = React.memo(function TimelineTrack({
   onClipMouseDown,
   onTrimMouseDown,
 }: TimelineTrackProps) {
+  /** The box every clip on this row draws in — see `clipBoxHeightFor`. */
+  const clipBoxHeight = clipBoxHeightFor(track.height);
+
   return (
     <div
       className={`${styles.track} ${!track.visible ? styles.trackHidden : ''} ${track.locked ? styles.trackLocked : ''}`}
@@ -133,11 +154,6 @@ export const TimelineTrack = React.memo(function TimelineTrack({
         // are unchanged by this feature.
         const thumbnailUrl =
           !isAudioClip && !isTextOverlay && !isShapeOverlay ? sourceMedia?.thumbnailUrl : undefined;
-        const thumbHeight = Math.max(
-          track.height - CLIP_BOX_VERTICAL_INSET,
-          MIN_CLIP_BOX_HEIGHT
-        );
-
         return (
           <div
             key={clip.id}
@@ -157,7 +173,7 @@ export const TimelineTrack = React.memo(function TimelineTrack({
                 startTime={clip.startTime}
                 endTime={clip.endTime}
                 width={clipWidth}
-                height={track.height - 4}
+                height={clipBoxHeight}
                 isAudioClip={isAudioClip}
                 isSelected={isSelected}
               />
@@ -183,9 +199,9 @@ export const TimelineTrack = React.memo(function TimelineTrack({
                   aria-hidden="true"
                   draggable={false}
                   decoding="async"
-                  width={Math.round(thumbHeight * CLIP_THUMB_ASPECT)}
-                  height={thumbHeight}
-                  style={{ clipPath: maskClipPathFor(clip.mask, thumbHeight) }}
+                  width={Math.round(clipBoxHeight * CLIP_THUMB_ASPECT)}
+                  height={clipBoxHeight}
+                  style={{ clipPath: maskClipPathFor(clip.mask, clipBoxHeight) }}
                 />
               )}
               {isAudioClip && (

@@ -29,7 +29,16 @@ interface AudioWaveformProps {
   endTime: number;
   /** Width of the clip in pixels */
   width: number;
-  /** Height of the clip in pixels */
+  /**
+   * Height of the clip **box** in pixels — not of the track row.
+   *
+   * The canvas is `height: 100%` of `.clip` (`AudioWaveform.module.css`), and
+   * `.clip` is inset 8px vertically inside its row, so this is what the caller's
+   * `clipBoxHeight` computes (`TimelineTrack.tsx`). It becomes both the backing
+   * store's height and the CSS height below, so the two agree and the browser
+   * rescales nothing: a store taller than the box would squash every peak
+   * (ESCSUITE-76).
+   */
   height: number;
   /** Waveform color */
   color?: string;

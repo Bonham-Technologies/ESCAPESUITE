@@ -11,6 +11,13 @@
  * sibling behind the label as the comment always claimed. Do not drop
  * `.clipContent`'s `position: relative` — the header comment on
  * `Timeline.module.css`'s `.clipThumb` says the same thing from the other side.
+ *
+ * `height: 100%` here is 100% of `.clip`, which is inset 8px inside its track
+ * row — so the box this canvas is stretched over is the clip box, and the
+ * backing store the component allocates has to be that tall too. `TimelineTrack`
+ * passes exactly that number (its `clipBoxHeight`, the same one the thumbnail's
+ * attribute box uses); until ESCSUITE-76 it passed `track.height - 4`, four
+ * pixels too many, and the browser rescaled the extra away.
  */
 
 .waveform {
