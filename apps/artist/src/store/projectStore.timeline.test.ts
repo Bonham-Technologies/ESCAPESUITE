@@ -281,6 +281,48 @@ describe('projectStore integration', () => {
       const clip = useEditorStore.getState().project.timeline.clips[0]
       expect(clip.timelinePosition).toBe(0)
     })
+
+    // ESCSUITE-79: the trailing `skipHistory` that lets a cross-track clip drag
+    // commit its two writes as one undo step. Same shape as
+    // `updateClipTransform`'s, so the flag is optional and last and every caller
+    // that omits it is one entry exactly as before.
+    describe('setClipTimelinePosition with skipHistory', () => {
+      let clipId: string
+
+      beforeEach(() => {
+        const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().addClipToTimeline({
+          id: 'clip1',
+          name: 'Test Clip',
+          sourceVideoId: 'video1',
+          startTime: 0,
+          endTime: 5,
+          duration: 5,
+          animation: undefined,
+        }, trackId, 0)
+        clipId = useEditorStore.getState().project.timeline.clips[0].id
+      })
+
+      it('moves the clip and pushes nothing when skipHistory is true', () => {
+        const before = useEditorStore.getState().history.past.length
+
+        useEditorStore.getState().setClipTimelinePosition(clipId, 10, true)
+
+        expect(useEditorStore.getState().project.timeline.clips[0].timelinePosition).toBe(10)
+        expect(useEditorStore.getState().history.past.length).toBe(before)
+      })
+
+      it.each([
+        ['false', false],
+        ['omitted', undefined],
+      ])('pushes an entry when skipHistory is %s', (_name, skipHistory) => {
+        const before = useEditorStore.getState().history.past.length
+
+        useEditorStore.getState().setClipTimelinePosition(clipId, 10, skipHistory)
+
+        expect(useEditorStore.getState().history.past.length).toBe(before + 1)
+      })
+    })
   })
 
   describe('track operations', () => {

@@ -754,7 +754,7 @@ component.
 | `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture. Invalidation is **event-based**, so a layout change that fires neither — an autosave or an undo changing a row's height mid-drag — would leave it stale where the old per-frame measurement absorbed it; unreachable through the UI today (a clip drag writes nothing until release, and no control resizes a track while a pointer is down), and if row heights ever become dynamic the hook to reach for is the `ResizeObserver` `useScrollSync` already installs on this container, not a third listener |
 | `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
 | `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point it writes |
-| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written once, on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame |
+| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame. A drop that changed both the row and the time writes twice there, and the second write carries `skipHistory` so the whole drag is one undo step (ESCSUITE-79, below) |
 | `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it. The per-move write makes `clips` a fresh array every frame, which is exactly why the listeners hang off `trimState` and not off the clips |
 | `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking. The rows are still walked on the release only — once per gesture, never per frame |
 | `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips |
@@ -963,10 +963,11 @@ code. It holds refs and no state, so no slider adds a subscription and no render
 
 The flag reaches the store through the trailing optional `skipHistory` parameter on
 `updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData`,
-`updateShapeOverlayData`, `updateClipAnimation`, `updateClipTransition` and
-`shiftClipsAfter` — the first, fourth
+`updateShapeOverlayData`, `updateClipAnimation`, `updateClipTransition`,
+`shiftClipsAfter` and `setClipTimelinePosition` — the first, fourth
 and fifth already had it; ESCSUITE-75 added it to
-`updateClip` and `updateClipEffects` and ESCSUITE-77 to the last three, all five in the same shape
+`updateClip` and `updateClipEffects`, ESCSUITE-77 the next three and ESCSUITE-79
+`setClipTimelinePosition`, all six in the same shape
 (`history: skipHistory ? state.history :
 pushToHistory(state)`). It is optional and last, so every existing caller is one undo step
 exactly as before.
@@ -990,6 +991,24 @@ landing on the pre-trim in and out points, and the refused opening move). The sa
 Transform section header's Reset one entry rather than two on an overlay clip: its second write,
 the overlay's own coordinates, passes `skipHistory: true` as a **literal** — that is a button, not
 a gesture, so there is nothing to ask.
+
+**Dragging a clip to another track is one undo step too** (ESCSUITE-79 — the last gesture that
+was not). `Timeline/useClipDrag.ts` writes nothing while the drag runs, so both of its writes
+happen in the one `handleMouseUp`: a drop that changed the clip's row *and* its time called
+`moveClipToTrack` and then `setClipTimelinePosition`, and each pushed an entry. The first Ctrl+Z
+then put the time back and left the clip on its **new** row — a half-state the drag had never
+produced — and a second was needed to get home. `moveClipToTrack` now pushes the gesture's entry,
+which therefore snapshots the clip on the track and at the position the gesture found it, and
+`setClipTimelinePosition` takes the same trailing `skipHistory` the others do and passes `true`
+whenever the row changed. There is no `historyPushedRef` here, unlike `useTrimDrag`: with both
+writes in one handler, "has the entry been pushed?" *is* "did the row change?", which the commit
+already computes. A drop that only moved the clip in time, and one that only changed its row, are
+each a single write and a single entry exactly as before. The bulk move a multi-selection drag
+commits was never affected — `selectionSlice.moveSelectedClips` moves every selected clip inside
+one `set` with one `pushToHistory`, so a five-clip drag was always one entry —
+and `useClipDrag.test.ts` now holds all four shapes (one entry each, the cross-track drop's undo
+landing on both the original row and the original position, and the flag `false` on the first
+write and `true` on the second).
 
 The one documented exception is the colour swatches
 in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the

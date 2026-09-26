@@ -383,7 +383,15 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  setClipTimelinePosition: (clipId: string, position: number) => set((state) => {
+  // `skipHistory` as on `updateClip`, `shiftClipsAfter` and the rest
+  // (ESCSUITE-79). Its one production caller is the clip drag's commit, which
+  // writes twice when a drop changed both the clip's row and its time:
+  // `moveClipToTrack` pushes the entry — snapshotting the clip where the gesture
+  // found it — and this one joins it. Pushing a second made one drag two undo
+  // steps, the first Ctrl+Z putting the time back and leaving the clip on its new
+  // row, a state the user had never seen. Optional and last, so a call that omits
+  // it is one undo step exactly as before.
+  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip =>
       clip.id === clipId ? { ...clip, timelinePosition: Math.max(0, position) } : clip
     );
@@ -398,7 +406,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           duration: calculateTimelineDuration(newClips),
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 

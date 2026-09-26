@@ -15,6 +15,13 @@
 // on mouseup: a bulk move when the dragged clip is part of a multi-selection,
 // otherwise a single move that an overlap on the target track can veto outright.
 //
+// **One drag is one undo entry** (ESCSUITE-79), whichever of those it is. A bulk
+// move always was — `moveSelectedClips` moves every selected clip inside one
+// `set` — but a single move that changed the clip's row *and* its time is two
+// store writes, and they used to push an entry each. The first now pushes and
+// the second passes `skipHistory`, the shape `updateClip` and `shiftClipsAfter`
+// already carry.
+//
 // **One listener pair, one measurement, one snap array — per gesture, not per
 // pointer frame.** The listeners go through `useDocumentListener`, whose
 // `enabled` flag is `dragState !== null`: a boolean that flips twice a gesture,
@@ -57,7 +64,13 @@ export interface ClipDragDeps {
   setSelectedClipId: (id: string | null) => void;
   toggleClipSelection: (clipId: string) => void;
   moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
-  setClipTimelinePosition: (clipId: string, position: number) => void;
+  /**
+   * The store's `setClipTimelinePosition`. The trailing `skipHistory` is
+   * ESCSUITE-79's: a drop that changed the clip's row as well as its time has
+   * already pushed the gesture's undo entry through `moveClipToTrack`, so this
+   * write joins that entry instead of opening one of its own.
+   */
+  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => void;
   moveClipToTrack: (clipId: string, trackId: string) => void;
   splitClip: (clipId: string, splitTime: number) => void;
 }
@@ -177,12 +190,24 @@ export function useClipDrag({
           );
 
           if (!overlap) {
-            // Commit the move
-            if (drag.currentTrackId !== drag.originalTrackId) {
+            // Commit the move. A drop that changed the row *and* the time is two
+            // store writes and **one** undo entry (ESCSUITE-79): the first one
+            // pushes it — so the entry holds the clip on the track and at the
+            // position the gesture found it — and the second passes
+            // `skipHistory`. Both writes pushing made one drag two undo steps,
+            // and the first Ctrl+Z then left the clip on its new row at its old
+            // time, a half-state the drag had never produced.
+            //
+            // No `historyPushedRef` here, unlike `useTrimDrag`: a clip drag
+            // writes nothing until release, so both writes happen in this one
+            // handler and "has the entry been pushed?" is just "did the row
+            // change?".
+            const movedTrack = drag.currentTrackId !== drag.originalTrackId;
+            if (movedTrack) {
               moveClipToTrack(drag.clipId, drag.currentTrackId);
             }
             if (deltaTime !== 0) {
-              setClipTimelinePosition(drag.clipId, drag.currentPosition);
+              setClipTimelinePosition(drag.clipId, drag.currentPosition, movedTrack);
             }
           }
         }
