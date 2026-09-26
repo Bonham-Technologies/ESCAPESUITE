@@ -91,6 +91,14 @@ export interface AudioContextDoubleControl {
   destinationTrackCount: number
   /** Byte value every analyser bin reports. */
   analyserLevel: number
+  /**
+   * Held open to park `resume()` mid-flight, so a test can land a `dispose()`
+   * inside the await the code under test is sitting on and then resolve it.
+   * Null (the default) resumes immediately. Pair it with
+   * `initialState: 'suspended'`, which is the only state the recorder resumes
+   * from — and the state Chrome hands out without a user gesture.
+   */
+  resumeGate: Promise<void> | null
 }
 
 const control: AudioContextDoubleControl = {
@@ -100,6 +108,7 @@ const control: AudioContextDoubleControl = {
   initialState: 'running',
   destinationTrackCount: 1,
   analyserLevel: 0,
+  resumeGate: null,
 }
 
 function makeAudioTrack(index: number): MediaStreamTrack {
@@ -126,6 +135,12 @@ export class AudioContextDoubleInstance {
   /** The source nodes themselves, in creation order. */
   readonly mediaStreamSourceNodes: MediaStreamSourceDouble[] = []
   readonly resume = vi.fn(async () => {
+    if (control.resumeGate) await control.resumeGate
+    // A context closed while this was parked stays closed — resume() cannot
+    // reopen one. (A real browser is stricter still and rejects; this is
+    // deliberately lenient, so a test can assert what the *caller* does after a
+    // resume that landed too late rather than what the platform said.)
+    if (this.state === 'closed') return
     this.state = 'running'
   })
   readonly close = vi.fn(async () => {
@@ -227,6 +242,7 @@ export function resetAudioContextDouble(): void {
   control.initialState = 'running'
   control.destinationTrackCount = 1
   control.analyserLevel = 0
+  control.resumeGate = null
 }
 
 /** The single AudioContext the code under test created (fails loudly if none). */

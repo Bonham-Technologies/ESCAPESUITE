@@ -574,4 +574,112 @@ describe('WebCodecsRecorder work ceilings', () => {
       }
     })
   })
+  describe('one take disposed while it was still setting up', () => {
+    // The take nobody ever saw: the recorder screen unmounts — or a start fails
+    // — while `initialize()` is still parked on one of its half-dozen awaits,
+    // and `disposeRecorder()` runs synchronously underneath it (ESCSUITE-73).
+    // `cleanup()` has already swept the three registries by the time the
+    // parked step resolves, so everything setup went on to build afterwards was
+    // built into a recorder nothing would ever tear down again. Every number
+    // here is an exact conservation law, not a ceiling: what was acquired was
+    // released, once, and nothing was acquired after the sweep.
+    //
+    // Measured 2026-09-26 — a separate-tracks take with both audio sources,
+    // disposed inside the webcam encoder's configure(): three codecs, two
+    // outputs, three source nodes, one ScriptProcessor, two readers, and zero
+    // level samples.
+
+    /** Park the Nth VideoEncoder's `configure()` on a promise the test holds. */
+    function parkVideoEncoderConfigure(nth: number, gate: Promise<void>): () => void {
+      const g = globalThis as unknown as Record<string, unknown>
+      const Installed = g.VideoEncoder as typeof VideoEncoderDouble
+      class ParkingVideoEncoder extends Installed {
+        private readonly parked = VideoEncoderDouble.instances.length === nth
+        configure(config: unknown): void | Promise<void> {
+          super.configure(config)
+          return this.parked ? gate : undefined
+        }
+      }
+      g.VideoEncoder = ParkingVideoEncoder
+      return () => {
+        g.VideoEncoder = Installed
+      }
+    }
+
+    it('releases everything it had built and starts no monitor loop', async () => {
+      const trackProcessor = installTrackProcessorDouble()
+      const webcamStream = createStreamDouble([
+        createTrackDouble('video', { id: 'webcam-video', settings: { width: 640, height: 480 } }),
+      ])
+      let resolveConfigure!: () => void
+      const parked = new Promise<void>(resolve => {
+        resolveConfigure = resolve
+      })
+      // The webcam's encoder: by then the primary output, the primary's two
+      // codecs, the whole mix and the camera's own output all exist.
+      const restore = parkVideoEncoderConfigure(2, parked)
+      try {
+        const init = recorder.initialize(screenStream, webcamStream, micStream, {
+          ...baseConfig,
+          webcamEnabled: true,
+          separateTracks: true,
+          microphoneEnabled: true,
+          systemAudioEnabled: true,
+        })
+        await flush()
+
+        recorder.dispose()
+        resolveConfigure()
+        await init
+
+        // Three codecs constructed — the screen's and the webcam's
+        // VideoEncoders and the mix's AudioEncoder — and three closed, once
+        // each. The two audio companions were never reached, so the five a
+        // finished separate-tracks take builds are three here.
+        const codecs = [...VideoEncoderDouble.instances, ...AudioEncoderDouble.instances]
+        expect(codecs).toHaveLength(3)
+        expect(codecs.map(c => c.closeCalls)).toEqual([1, 1, 1])
+        expect(codecs.every(c => c.state === 'closed')).toBe(true)
+        // Two outputs started, two cancelled, none finalized — the camera's
+        // included, whose `start()` resolved before the sweep and whose encoder
+        // was still configuring after it.
+        const outputs = getMediabunnyState().outputs
+        expect(outputs).toHaveLength(2)
+        expect(outputs.map(o => o.startCalls)).toEqual([1, 1])
+        expect(outputs.map(o => o.cancelCalls)).toEqual([1, 1])
+        expect(outputs.map(o => o.finalizeCalls)).toEqual([0, 0])
+        // The mix's three source nodes — the system tap, the microphone tap and
+        // the mixed destination — and its one ScriptProcessor, released once
+        // each. A companion's own tap is built after the configure this parked
+        // on, so there are three rather than five.
+        const sourceNodes = lastAudioContext().mediaStreamSourceNodes
+        expect(sourceNodes).toHaveLength(3)
+        expect(sourceNodes.map(n => n.disconnect.mock.calls.length)).toEqual([1, 1, 1])
+        const processors = lastAudioContext().scriptProcessors
+        expect(processors).toHaveLength(1)
+        expect(processors.map(n => n.disconnect.mock.calls.length)).toEqual([1])
+        // Two frame readers, cancelled once each: the screen's, dropped by the
+        // teardown, and the camera's, released by the half that was abandoned.
+        expect(trackProcessor.cancelCalls()).toBe(2)
+        // One AudioContext, closed. A second one — built by the resuming setup,
+        // with its own analysers and its own graph — is exactly what nothing
+        // would ever have closed.
+        expect(audio.contexts).toHaveLength(1)
+        expect(audio.contexts.every(c => c.state === 'closed')).toBe(true)
+        // Exact: not one level sample pushed at the store for a take nobody
+        // saw. That is the load-bearing assertion of the pair — `cleanup()`
+        // nulls both meters, so a monitor started after it wrote once rather
+        // than looping, and one whole-app re-render on behalf of a take that no
+        // longer exists is the thing that was wrong. The two rAF counts are a
+        // guard: monitoring is now unreachable after a dispose, and `pending()`
+        // alone could not tell "never started" from "started and cancelled".
+        expect(onAudioLevels).not.toHaveBeenCalled()
+        expect(raf.scheduled()).toBe(0)
+        expect(raf.pending()).toBe(0)
+      } finally {
+        restore()
+        uninstallTrackProcessorDouble()
+      }
+    })
+  })
 })

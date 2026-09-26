@@ -50,6 +50,13 @@ export interface RecorderDouble {
   duration: number
   /** When set, the next initialize() rejects with it. */
   initializeError: Error | null
+  /**
+   * When set, initialize() awaits it before resolving — so a test can hold a
+   * take's setup open, do something to the component (unmount it, say) and
+   * then let the setup finish, the way a real recorder's several awaits let a
+   * dispose() land in the middle of one.
+   */
+  initializeGate: Promise<void> | null
   /** Fire onError as the real recorder does when encoding fails. */
   failWith(error: Error): void
   /** Fire onAudioLevels as the level monitor does. */
@@ -75,6 +82,7 @@ function createRecorderDouble(
     companionParts: null,
     duration: 0,
     initializeError: null,
+    initializeGate: null,
 
     initialize: vi.fn(
       async (
@@ -84,6 +92,7 @@ function createRecorderDouble(
         config: RecordingConfig
       ) => {
         double.initializeCalls.push({ screen, webcam, mic, config })
+        if (double.initializeGate) await double.initializeGate
         if (double.initializeError) throw double.initializeError
       }
     ),
@@ -157,6 +166,8 @@ export interface RecorderFactoryDouble {
   canRecordSeparateTracks: boolean
   /** When set, the next recorder handed out rejects its first initialize(). */
   nextInitializeError: Error | null
+  /** When set, the next recorder handed out parks its first initialize() on it. */
+  nextInitializeGate: Promise<void> | null
   readonly createRecorder: ReturnType<typeof vi.fn>
   readonly getRecorderType: ReturnType<typeof vi.fn>
   readonly canUseWebCodecsRecorder: ReturnType<typeof vi.fn>
@@ -175,6 +186,7 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
     recorderType: 'mediarecorder',
     canRecordSeparateTracks: false,
     nextInitializeError: null,
+    nextInitializeGate: null,
 
     last() {
       const recorder = recorders[recorders.length - 1]
@@ -191,6 +203,8 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
       const recorder = createRecorderDouble(callbacks, isPiP, hasVideoSource, separateTracks)
       recorder.initializeError = factory.nextInitializeError
       factory.nextInitializeError = null
+      recorder.initializeGate = factory.nextInitializeGate
+      factory.nextInitializeGate = null
       recorders.push(recorder)
       return recorder
     }),
@@ -226,6 +240,7 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
       factory.recorderType = 'mediarecorder'
       factory.canRecordSeparateTracks = false
       factory.nextInitializeError = null
+      factory.nextInitializeGate = null
       factory.createRecorder.mockClear()
       factory.getRecorderType.mockClear()
       factory.canUseWebCodecsRecorder.mockClear()

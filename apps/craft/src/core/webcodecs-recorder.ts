@@ -182,6 +182,19 @@ interface AudioCompanionPipeline extends CompanionPipelineBase {
 
 type CompanionPipeline = VideoCompanionPipeline | AudioCompanionPipeline;
 
+/**
+ * Thrown by `abortIfDisposed()` and swallowed by `initialize()`, and by nothing
+ * else: it is how a take that was thrown away mid-setup unwinds the half-dozen
+ * awaits it might be parked inside (ESCSUITE-73). It is not a failure to
+ * report — there is no recording, and no user waiting to hear about one.
+ */
+class TakeDisposedDuringSetup extends Error {
+  constructor() {
+    super('The recorder was disposed while it was still initializing');
+    this.name = 'TakeDisposedDuringSetup';
+  }
+}
+
 /** Bitrate for a video pipeline of this size. */
 function videoBitrateFor(width: number, height: number): number {
   const pixels = width * height;
@@ -278,6 +291,16 @@ export class WebCodecsRecorder {
    */
   private sourceNodes: MediaStreamAudioSourceNode[] = [];
 
+  /**
+   * Set by `cleanup()` and never cleared, because a WebCodecsRecorder records
+   * one take: the recorder is finished with, whether it stopped, was cancelled
+   * or failed.
+   *
+   * Read only by `abortIfDisposed()`, which every await in the setup path is
+   * followed by. See that method for why setup has to ask (ESCSUITE-73).
+   */
+  private disposed = false;
+
   // Audio capture
   private audioWorklet: ScriptProcessorNode | null = null;
   private mixedAudioStream: MediaStream | null = null;
@@ -297,8 +320,42 @@ export class WebCodecsRecorder {
 
   /**
    * Initialize the recorder with the given streams.
+   *
+   * Setting up a take awaits half a dozen times, and `dispose()` can land
+   * inside any one of those awaits — see `abortIfDisposed()`, which every one of
+   * them is followed by. When it does, setup stops where it stands and this
+   * **resolves**: there is no take any more, and a rejection would have
+   * `useRecordingController`'s start path raise `START_FAILED` at a user who
+   * never saw a recording. Every other failure still rejects, as it always did.
    */
   async initialize(
+    screenStream: MediaStream | null,
+    webcamStream: MediaStream | null,
+    micStream: MediaStream | null,
+    config: RecordingConfig
+  ): Promise<void> {
+    try {
+      await this.setUpTake(screenStream, webcamStream, micStream, config);
+    } catch (e) {
+      if (e instanceof TakeDisposedDuringSetup) return;
+      throw e;
+    }
+
+    // Start audio level monitoring. Out here, past the guard, and structural
+    // rather than a repair of anything the loop did: monitoring simply cannot
+    // be reached after a dispose now, so neither the rAF loop nor the single
+    // `{ microphone: 0, system: 0 }` its no-meter branch sends can belong to a
+    // take that is already gone.
+    this.startAudioLevelMonitoring();
+  }
+
+  /**
+   * Everything a take holds before `start()`: the video track, the frame
+   * source, the audio graph, the muxer, the codecs and every companion
+   * pipeline. Split out of `initialize()` only so that the one error a
+   * disposal raises has somewhere to unwind to.
+   */
+  private async setUpTake(
     screenStream: MediaStream | null,
     webcamStream: MediaStream | null,
     micStream: MediaStream | null,
@@ -349,6 +406,12 @@ export class WebCodecsRecorder {
       this.videoElement.style.cssText = `position:fixed;top:0;left:0;width:${this.width}px;height:${this.height}px;visibility:hidden;pointer-events:none;z-index:-9999;`;
       document.body.appendChild(this.videoElement);
       await this.videoElement.play();
+      // The earliest await, and the one a dispose costs the most: everything
+      // below — the AudioContext, its analysers, the muxer, the codecs — would
+      // be built into a recorder whose cleanup has already run, and setup would
+      // then read `addEventListener` off the `videoTrack` that cleanup nulled
+      // and reject.
+      this.abortIfDisposed();
 
       // Set up canvas for frame capture
       this.canvas = document.createElement('canvas');
@@ -361,6 +424,10 @@ export class WebCodecsRecorder {
     this.audioContext = new AudioContext({ sampleRate: this.sampleRate });
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
+      // `cleanup()` closes and nulls the context, so without this the very next
+      // line reads `createMediaStreamDestination` off null and the whole
+      // initialize rejects — a notice about a take the user never saw.
+      this.abortIfDisposed();
     }
     const destination = this.audioContext.createMediaStreamDestination();
 
@@ -427,6 +494,10 @@ export class WebCodecsRecorder {
 
     // Start the output
     await this.output.start();
+    // The output is the loose end here: it reaches `'started'` after
+    // `cleanup()`'s sweep has run and cleared the registry, so nothing else
+    // would ever tell Mediabunny the file is over.
+    this.abortIfDisposed(primary.output);
 
     // Set up video encoder
     this.videoEncoder = await this.createVideoEncoder(
@@ -440,6 +511,11 @@ export class WebCodecsRecorder {
         this.callbacks.onError?.(new Error(`Video encoder error: ${e.message}`));
       }
     );
+    // The encoder itself is already closed — `registerCodec()` put it on the
+    // list before its `configure()` was awaited (ESCSUITE-66) — but the audio
+    // pipeline below would construct a *second* codec onto a registry that has
+    // just been cleared.
+    this.abortIfDisposed();
 
     // Set up audio encoder if we have audio
     if (this.audioSource) {
@@ -462,6 +538,7 @@ export class WebCodecsRecorder {
         numberOfChannels: 2,
         bitrate: 128000,
       });
+      this.abortIfDisposed();
 
       // Set up audio capture using ScriptProcessorNode
       // (AudioWorklet would be better but requires more setup)
@@ -493,9 +570,6 @@ export class WebCodecsRecorder {
       // parts `stop()` delivers — is in role order.
       await this.initializeAudioCompanions(this.audioContext, screenStream, micStream, config);
     }
-
-    // Start audio level monitoring
-    this.startAudioLevelMonitoring();
   }
 
   /**
@@ -540,6 +614,9 @@ export class WebCodecsRecorder {
       // No audio track: the mix stays on the primary output, and the audio
       // companions are their own outputs.
       await output.start();
+      // No argument: the catch below releases both loose ends for the disposed
+      // case exactly as it does for a setup that failed.
+      this.abortIfDisposed();
 
       companion = {
         kind: 'video',
@@ -569,18 +646,25 @@ export class WebCodecsRecorder {
           this.failCompanion(companion);
         }
       );
+      this.abortIfDisposed();
     } catch (e) {
-      console.warn(`${COMPANION_PARTS.webcam.trackLabel} track could not be set up:`, e);
       // Nothing downstream can reach this half any more — it was never pushed
       // onto `companions`, so `stop()` and `cleanup()` both skip it — so
       // release it here: the camera, and the output, which Mediabunny is
-      // otherwise left holding open for the whole take.
+      // otherwise left holding open for the whole take. A disposal needs
+      // exactly the same two releases, which is why it is thrown *into* this
+      // catch rather than guarded around it.
       await this.cancelOutput(output);
       try {
         await reader.cancel();
       } catch {
         // Ignore cancel errors: the pipeline is being abandoned either way.
       }
+      // ...and then keeps unwinding: a take that no longer exists is not a
+      // take recorded without its camera, so there is nothing to warn about
+      // and nothing below this to set up.
+      if (e instanceof TakeDisposedDuringSetup) throw e;
+      console.warn(`${COMPANION_PARTS.webcam.trackLabel} track could not be set up:`, e);
       return;
     }
 
@@ -674,6 +758,7 @@ export class WebCodecsRecorder {
 
     try {
       await output.start();
+      this.abortIfDisposed();
 
       companion = {
         kind: 'audio',
@@ -712,9 +797,14 @@ export class WebCodecsRecorder {
         bitrate: 128000,
       });
       companion.encoder = encoder;
+      // Before the source node and the ScriptProcessor below, which are built
+      // outside this try and would be built onto a closed AudioContext — and
+      // onto a `sourceNodes` registry that has already been swept.
+      this.abortIfDisposed();
     } catch (e) {
-      console.warn(`${trackLabel} track could not be set up:`, e);
       await this.cancelOutput(output);
+      if (e instanceof TakeDisposedDuringSetup) throw e;
+      console.warn(`${trackLabel} track could not be set up:`, e);
       return;
     }
 
@@ -1493,6 +1583,50 @@ export class WebCodecsRecorder {
   }
 
   /**
+   * Stop setting up a take that no longer exists.
+   *
+   * `initialize()` awaits half a dozen times — the capture `<video>` starting,
+   * the AudioContext resuming, `Output.start()`, each codec's `configure()`,
+   * each companion — and `dispose()` lands inside one of those awaits for real:
+   * `useRecordingController`'s unmount teardown calls `disposeRecorder()`
+   * synchronously while `handleStartRecording` is still parked on the
+   * `initialize()` it started (ESCSUITE-73). `cleanup()` has then already swept
+   * the three registries and cleared them, so everything the *resolving* step
+   * goes on to build is built into a recorder nothing will ever tear down
+   * again: a second AudioContext with its own analysers and graph, up to four
+   * Mediabunny `Output`s holding their encoders and their targets open, up to
+   * five codecs each holding an encoder session, and an `ended` listener
+   * `trackEndedHandlers` can no longer remove. Setup would then walk into one
+   * of the fields `cleanup()` *nulled* — `videoTrack`, `audioContext` — and
+   * throw a `TypeError` out of `initialize()`, which the controller's start
+   * path reported as `START_FAILED` about a take the user never saw. The level
+   * monitor's share of it was smaller and stranger than it looks: `cleanup()`
+   * nulls both meters, so a monitor started after it took its no-meter branch
+   * and pushed one `{ microphone: 0, system: 0 }` at the store — a re-render of
+   * the whole app on behalf of a take that no longer existed.
+   *
+   * So every await in the setup path is followed by a call to this. It throws
+   * rather than returning a flag, which is what keeps the guard to one
+   * decision: the two companion builders already have a catch that releases
+   * exactly what their half was holding, so the error is thrown *into* those
+   * catches and re-raised by them, and `initialize()` swallows it.
+   *
+   * Most steps have nothing to release. A codec still configuring was
+   * registered at construction, so `closeCodecs()` has already closed it
+   * (ESCSUITE-66); the `<video>`, the AudioContext and the primary's reader are
+   * all fields `cleanup()` reached. `startedOutput` is the one exception: an
+   * `Output` whose `start()` resolves *after* the sweep sits at `'started'` and
+   * is no longer on `this.outputs`, so nothing else would ever tell Mediabunny
+   * the file is over. Cancelled without awaiting, exactly as `cleanup()`
+   * cancels the others — there is no longer anything to wait for.
+   */
+  private abortIfDisposed(startedOutput?: Output): void {
+    if (!this.disposed) return;
+    if (startedOutput) void this.cancelOutput(startedOutput);
+    throw new TakeDisposedDuringSetup();
+  }
+
+  /**
    * Close every codec this take constructed that is not closed already.
    *
    * `stop()` flushes and closes them itself on the way to a finished file, so
@@ -1611,6 +1745,11 @@ export class WebCodecsRecorder {
    * Clean up resources.
    */
   private cleanup(): void {
+    // First, and before any await could let setup resume: from here on
+    // `abortIfDisposed()` stops an `initialize()` that is still parked on one
+    // of its awaits from building the rest of a take nobody will ever tear
+    // down (ESCSUITE-73).
+    this.disposed = true;
     this.frameReaderActive = false;
 
     if (this.frameInterval) {
