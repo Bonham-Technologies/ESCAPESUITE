@@ -239,7 +239,9 @@ see "How to read these" below.
 > Two more things turned up in the raw runs, both harness bugs rather than findings about
 > ESCAPECRAFT: (1) with the rAF painter, `rafPerSecond` read 120/180/240 across a round's three
 > takes rather than holding near 60 — every `getDisplayMedia` call had been leaving its
-> previous painter loop running (fixed: the painter now stops when its track does), and the
+> previous painter loop running (fixed: the painter now stops when its track does — a rAF run
+> after the fix reads `rafPerSecond` 119.87 as the median of its three takes, i.e. the page's
+> 60 plus the one live painter's 60, at 29.97 fps), and the
 > leak was invisible under the interval painter only because nothing here counts its rate; (2)
 > the first rAF take of most rounds read 25–26 fps, with the later two at 29.9–30.2, a
 > warm-up effect the interval painter does not show.
