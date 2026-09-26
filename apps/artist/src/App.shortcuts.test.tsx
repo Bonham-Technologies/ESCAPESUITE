@@ -197,11 +197,20 @@ describe('App keyboard shortcuts', () => {
       press('Delete')
 
       expect(store().project.timeline.clips).toHaveLength(1)
-      // The toast is the hook's, not the store's — it still says deleted (stated limit,
-      // ESCSUITE-84). Found by text rather than through the shared `notification()`
-      // helper: the locked clip's inspector panel now shows its own `role="status"`
-      // notice too, so `getByRole('status')` would find two.
-      expect(screen.getByText('Clip deleted')).toBeInTheDocument()
+      expect(notification()).toBe('Track is locked')
+    })
+
+    it('leaves a multi-selection alone when one member is on a locked track (ESCSUITE-84)', async () => {
+      const clip1 = addClip('clip1', 0, 2)
+      addClip('clip2', 4, 2)
+      store().updateTrack(clip1.trackId, { locked: true })
+      store().selectClipsInRange(['clip1', 'clip2'])
+      await renderApp()
+
+      press('Delete')
+
+      expect(store().project.timeline.clips).toHaveLength(2)
+      expect(notification()).toBe('Track is locked')
     })
   })
 
@@ -248,6 +257,19 @@ describe('App keyboard shortcuts', () => {
       expect(store().project.timeline.clips).toHaveLength(1)
     })
 
+    it('pastes nothing when the copied clip landed on a locked track (ESCSUITE-84)', async () => {
+      const clip1 = store().project.timeline.clips[0]
+      store().selectClipsInRange(['clip1'])
+      await renderApp()
+      press('c', { ctrlKey: true })
+      store().updateTrack(clip1.trackId, { locked: true })
+
+      press('v', { ctrlKey: true })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      expect(notification()).toBe('Track is locked')
+    })
+
     it('duplicates the selected clip', async () => {
       store().setSelectedClipId('clip1')
       await renderApp()
@@ -256,6 +278,18 @@ describe('App keyboard shortcuts', () => {
 
       expect(store().project.timeline.clips).toHaveLength(2)
       expect(notification()).toBe('Clip duplicated')
+    })
+
+    it('duplicates nothing on a locked track (ESCSUITE-84)', async () => {
+      const clip1 = store().project.timeline.clips[0]
+      store().updateTrack(clip1.trackId, { locked: true })
+      store().setSelectedClipId('clip1')
+      await renderApp()
+
+      press('d', { ctrlKey: true })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      expect(notification()).toBe('Track is locked')
     })
 
     it('duplicates nothing with no clip selected', async () => {
@@ -457,6 +491,29 @@ describe('App keyboard shortcuts', () => {
       press('b', { ctrlKey: true })
 
       expect(store().project.timeline.clips).toHaveLength(1)
+    })
+
+    it('does not split a clip on a locked track (ESCSUITE-84)', async () => {
+      const clip1 = store().project.timeline.clips[0]
+      store().updateTrack(clip1.trackId, { locked: true })
+      await renderApp()
+
+      press('b', { ctrlKey: true })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      expect(notification()).toBe('Track is locked')
+    })
+
+    it('reports the lock even at the clip edge, before the split-time check (ESCSUITE-84)', async () => {
+      const clip1 = store().project.timeline.clips[0]
+      store().updateTrack(clip1.trackId, { locked: true })
+      store().setCurrentTime(9)
+      await renderApp()
+
+      press('b', { ctrlKey: true })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      expect(notification()).toBe('Track is locked')
     })
   })
 
