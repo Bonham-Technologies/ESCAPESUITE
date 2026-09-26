@@ -137,6 +137,18 @@ describe('MaskSection', () => {
     expect(screen.getByText('0px')).toBeInTheDocument()
   })
 
+  it('steps the stroke width in whole pixels at a typical resolution', async () => {
+    await renderOpen({ stroke: HANDOVER_STROKE })
+
+    const width = rowControl('Stroke Width')
+    expect(width).toHaveAttribute('min', '0')
+    expect(width).toHaveAttribute('max', '0.02')
+    // 0.001 of a 1280-wide frame is ~1.3px per arrow press. A tenth of that —
+    // which this slider had — moves the border by an eighth of a pixel and reads
+    // as a dead control.
+    expect(width).toHaveAttribute('step', '0.001')
+  })
+
   it('reports a new stroke width, keeping the colour it had', async () => {
     const { onStrokeChange } = await renderOpen({ stroke: { color: '#ff0000', width: 0.004 } })
 
@@ -170,6 +182,16 @@ describe('MaskSection', () => {
     // `<input type="color">` accepts #rrggbb only, and the ESCAPECRAFT handoff
     // stores `rgba(255, 255, 255, 0.8)`. It shows as white — which it is — and
     // the stored string is replaced only when the user actually picks.
+    expect(rowColor('Stroke Color')).toHaveValue(DEFAULT_CLIP_STROKE_COLOR)
+  })
+
+  it('shows white in the swatch for a three-digit hex too', async () => {
+    await renderOpen({ stroke: { color: '#f00', width: 0.004 } })
+
+    // `#f00` is valid CSS and the renderer draws it red, but the swatch's regex
+    // is six-digit-only on purpose: an `<input type="color">` normalises what it
+    // accepts, so a colour it cannot represent exactly falls back to white and
+    // the stored string survives until the user actually picks.
     expect(rowColor('Stroke Color')).toHaveValue(DEFAULT_CLIP_STROKE_COLOR)
   })
 

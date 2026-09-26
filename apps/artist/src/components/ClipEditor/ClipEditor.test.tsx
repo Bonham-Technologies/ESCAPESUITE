@@ -173,6 +173,16 @@ describe('ClipEditor', () => {
 
       expect(screen.getByRole('button', { name: 'Mask & Stroke' })).toBeInTheDocument()
     })
+
+    it('offers the mask and stroke to an image clip as well', () => {
+      // The gate is `!isAudio && !isOverlay`, so a still is masked and stroked
+      // exactly as a video is — there is nothing about either field that needs
+      // moving pictures.
+      mediaClip({ mediaType: 'image' })
+      render(<ClipEditor />)
+
+      expect(screen.getByRole('button', { name: 'Mask & Stroke' })).toBeInTheDocument()
+    })
   })
 
   describe('transform', () => {

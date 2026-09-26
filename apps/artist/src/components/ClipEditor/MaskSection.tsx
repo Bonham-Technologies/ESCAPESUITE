@@ -112,7 +112,7 @@ export function MaskSection({
             type="range"
             min={0}
             max={0.02}
-            step={0.0001}
+            step={0.001}
             value={strokeWidth}
             onChange={(e) =>
               onStrokeChange({ color: strokeColor, width: parseFloat(e.target.value) })
