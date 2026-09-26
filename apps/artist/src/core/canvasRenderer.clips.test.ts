@@ -17,7 +17,7 @@ import {
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { VideoFrameDouble, resetFrameRegistry } from '../test/doubles/webcodecs'
 import { makeClip } from '../test/fixtures/clipFixtures'
-import type { Clip } from '../store/types'
+import type { Clip, ClipMask, ClipStroke } from '../store/types'
 import type { DrawableMediaSource, MediaDrawOptions, TransitionModifiers } from './exportTypes'
 
 const W = 1920
@@ -175,6 +175,17 @@ describe('drawClipToCanvas', () => {
 
     expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([540, 410, 640, 360])
   })
+
+  it('records exactly what it always has for a clip with neither mask nor stroke', () => {
+    draw(frame(640, 360))
+
+    // ESCSUITE-65's load-bearing pin. Not "a rect and a clip that happen to be
+    // no-ops" — literally the three calls this function made before the mask
+    // existed, which is what the per-frame ceilings in
+    // `components/Preview/drawFrame.perf.test.ts` and `core/exportMP4.perf.test.ts`
+    // rest on, and what a project saved before ESCSUITE-65 draws as.
+    expect(ctx.calls.map((c) => c.method)).toEqual(['save', 'drawImage', 'restore'])
+  })
 })
 
 describe('drawImageToCanvasWithModifiers', () => {
@@ -229,6 +240,12 @@ describe('drawImageToCanvasWithModifiers', () => {
     draw(loadedImage(800, 600), makeClip(), { offsetX: 40, offsetY: -40 })
 
     expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([600, 200, 800, 600])
+  })
+
+  it('records exactly what it always has for a clip with neither mask nor stroke', () => {
+    draw(loadedImage(800, 600))
+
+    expect(ctx.calls.map((c) => c.method)).toEqual(['save', 'drawImage', 'restore'])
   })
 })
 
@@ -367,4 +384,266 @@ describe('drawMediaWithFrame', () => {
 
     expect(ctx.stateFor('drawImage')[0].globalAlpha).toBe(0.25)
   })
+})
+
+// ESCSUITE-65: the mask and the stroke are drawn in these two functions and
+// nowhere else, so every claim below is made twice — once per function. The
+// shared helper in `core/clipMask.ts` guards against the two disagreeing about
+// the *geometry*; these guard against one of them simply not having been
+// edited, which is the spec's own named risk.
+const CIRCLE: ClipMask = { kind: 'circle' }
+const ROUNDED: ClipMask = { kind: 'rounded', radius: 0.25 }
+const STROKE: ClipStroke = { color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1920 }
+
+describe('drawClipToCanvas with a mask and a stroke', () => {
+  const draw = (
+    clip: Clip,
+    modifiers?: TransitionModifiers
+  ) => drawClipToCanvas(asCtx(), frame(640, 360), clip, 0, W, H, modifiers)
+
+  it('clips to the mask after the rotation and before the image', () => {
+    draw(
+      makeClip({
+        mask: CIRCLE,
+        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 90, opacity: 1 },
+      })
+    )
+
+    // After the rotation so the mask turns with the clip; before drawImage so
+    // it is a clip region and not a shape painted over the picture.
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'translate',
+      'rotate',
+      'translate',
+      'beginPath',
+      'ellipse',
+      'clip',
+      'drawImage',
+      'restore',
+    ])
+  })
+
+  it('inscribes the circle in the drawn box', () => {
+    draw(makeClip({ mask: CIRCLE }))
+
+    // 640x360 at scale 1, centred on a 1920x1080 canvas: the box is
+    // (640, 360)-(1280, 720), so the centre is (960, 540) and the inscribed
+    // radius is 360/2 = 180.
+    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([640, 360, 640, 360])
+    expect(ctx.argsFor('ellipse')[0]).toEqual([960, 540, 180, 180, 0, 0, Math.PI * 2])
+  })
+
+  it('reads the rounded radius as a fraction of the drawn box shorter side', () => {
+    draw(makeClip({ mask: ROUNDED }))
+
+    // 0.25 x min(640, 360) = 90 canvas pixels, at this scale. Doubling the clip
+    // would double the rounding, which is the point of a fraction.
+    expect(ctx.argsFor('roundRect')[0]).toEqual([640, 360, 640, 360, 90])
+  })
+
+  it('strokes the outline after the image, outside the clip region', () => {
+    draw(makeClip({ mask: CIRCLE, stroke: STROKE }))
+
+    // The inner save/restore pair is the whole cost of a stroke: it exists so
+    // the clip region is gone while the rotation is kept, which is how
+    // ESCAPECRAFT draws the same border (overlayGeometry.ts:182-187). Without it
+    // the mask would eat the inner half of every line.
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'save',
+      'beginPath',
+      'ellipse',
+      'clip',
+      'drawImage',
+      'restore',
+      'beginPath',
+      'ellipse',
+      'stroke',
+      'restore',
+    ])
+    const [state] = ctx.stateFor('stroke')
+    expect(state.strokeStyle).toBe('rgba(255, 255, 255, 0.8)')
+    // 3/1920 of a 1920-wide frame is 3 canvas pixels.
+    expect(state.lineWidth).toBeCloseTo(3, 10)
+  })
+
+  it('strokes the picture rectangle when the clip has no mask', () => {
+    draw(makeClip({ stroke: STROKE }))
+
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'save',
+      'drawImage',
+      'restore',
+      'beginPath',
+      'rect',
+      'stroke',
+      'restore',
+    ])
+    expect(ctx.argsFor('rect')[0]).toEqual([640, 360, 640, 360])
+  })
+
+  it('records two clips for a masked clip inside a wipe', () => {
+    draw(makeClip({ mask: CIRCLE }), { clipRegion: { x: 10, y: 20, width: 300, height: 400 } })
+
+    // The wipe's region and the mask intersect, which is the correct
+    // composition: a half-revealed circular clip is a circle with a straight
+    // edge, not a whole circle and not a whole rectangle.
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'beginPath',
+      'rect',
+      'clip',
+      'beginPath',
+      'ellipse',
+      'clip',
+      'drawImage',
+      'restore',
+    ])
+    expect(ctx.argsFor('rect')[0]).toEqual([10, 20, 300, 400])
+  })
+
+  it.each([
+    ['neither', undefined, undefined, 0, 0],
+    ['a mask only', CIRCLE, undefined, 3, 0],
+    ['a stroke only', undefined, STROKE, 5, 1],
+    ['both', CIRCLE, STROKE, 8, 1],
+  ])(
+    'balances save and restore and adds a fixed cost for %s',
+    (_label, mask, stroke, extraCalls, extraSaves) => {
+      ctx = createRecordingContext()
+      const plain = (() => {
+        drawClipToCanvas(asCtx(), frame(640, 360), makeClip(), 0, W, H)
+        return { calls: ctx.calls.length, saves: ctx.argsFor('save').length }
+      })()
+
+      ctx = createRecordingContext()
+      drawClipToCanvas(asCtx(), frame(640, 360), makeClip({ mask, stroke }), 0, W, H)
+
+      // Exact, not a ceiling: this is the arithmetic the per-frame ceilings in
+      // Task 4 are derived from. A mask is beginPath + shape + clip, so 3; a
+      // stroke is save + restore + beginPath + shape + stroke, so 5 — the
+      // save/restore pair is counted here as well as in extraSaves, because
+      // ctx.calls records them like any other call. lineWidth and strokeStyle
+      // are property assignments, which the recording double does not count as
+      // calls — see its `record()` helper and the note on `FrameMeasurement` in
+      // `components/Preview/drawFrame.perf.test.ts`. The totals are exactly the
+      // lengths of the call sequences enumerated above: 3, 6, 8 and 11.
+      expect(ctx.calls.length).toBe(plain.calls + extraCalls)
+      expect(ctx.argsFor('save').length).toBe(plain.saves + extraSaves)
+      expect(ctx.argsFor('save').length).toBe(ctx.argsFor('restore').length)
+    }
+  )
+})
+
+describe('drawImageToCanvasWithModifiers with a mask and a stroke', () => {
+  const draw = (clip: Clip, modifiers?: TransitionModifiers) =>
+    drawImageToCanvasWithModifiers(asCtx(), loadedImage(800, 600), clip, 0, W, H, modifiers)
+
+  it('clips to the mask after the rotation and before the image', () => {
+    draw(
+      makeClip({
+        mask: CIRCLE,
+        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 180, opacity: 1 },
+      })
+    )
+
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'translate',
+      'rotate',
+      'translate',
+      'beginPath',
+      'ellipse',
+      'clip',
+      'drawImage',
+      'restore',
+    ])
+  })
+
+  it('inscribes the circle in the drawn box', () => {
+    draw(makeClip({ mask: CIRCLE }))
+
+    // 800x600 centred on 1920x1080: the box is (560, 240)-(1360, 840), centre
+    // (960, 540), inscribed radius 600/2 = 300.
+    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([560, 240, 800, 600])
+    expect(ctx.argsFor('ellipse')[0]).toEqual([960, 540, 300, 300, 0, 0, Math.PI * 2])
+  })
+
+  it('reads the rounded radius as a fraction of the drawn box shorter side', () => {
+    draw(makeClip({ mask: ROUNDED }))
+
+    // 0.25 x min(800, 600) = 150.
+    expect(ctx.argsFor('roundRect')[0]).toEqual([560, 240, 800, 600, 150])
+  })
+
+  it('strokes the outline after the image, outside the clip region', () => {
+    draw(makeClip({ mask: ROUNDED, stroke: STROKE }))
+
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'save',
+      'beginPath',
+      'roundRect',
+      'clip',
+      'drawImage',
+      'restore',
+      'beginPath',
+      'roundRect',
+      'stroke',
+      'restore',
+    ])
+    expect(ctx.stateFor('stroke')[0].lineWidth).toBeCloseTo(3, 10)
+  })
+
+  it('strokes the picture rectangle when the clip has no mask', () => {
+    draw(makeClip({ stroke: STROKE }))
+
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'save',
+      'drawImage',
+      'restore',
+      'beginPath',
+      'rect',
+      'stroke',
+      'restore',
+    ])
+  })
+
+  it('records two clips for a masked clip inside a wipe', () => {
+    draw(makeClip({ mask: CIRCLE }), { clipRegion: { x: 0, y: 0, width: 960, height: H } })
+
+    expect(ctx.argsFor('clip')).toHaveLength(2)
+    expect(ctx.argsFor('rect')[0]).toEqual([0, 0, 960, H])
+  })
+
+  it.each([
+    ['neither', undefined, undefined, 0, 0],
+    ['a mask only', CIRCLE, undefined, 3, 0],
+    ['a stroke only', undefined, STROKE, 5, 1],
+    ['both', CIRCLE, STROKE, 8, 1],
+  ])(
+    'balances save and restore and adds a fixed cost for %s',
+    (_label, mask, stroke, extraCalls, extraSaves) => {
+      ctx = createRecordingContext()
+      drawImageToCanvasWithModifiers(asCtx(), loadedImage(800, 600), makeClip(), 0, W, H)
+      const plain = { calls: ctx.calls.length, saves: ctx.argsFor('save').length }
+
+      ctx = createRecordingContext()
+      drawImageToCanvasWithModifiers(
+        asCtx(),
+        loadedImage(800, 600),
+        makeClip({ mask, stroke }),
+        0,
+        W,
+        H
+      )
+
+      expect(ctx.calls.length).toBe(plain.calls + extraCalls)
+      expect(ctx.argsFor('save').length).toBe(plain.saves + extraSaves)
+      expect(ctx.argsFor('save').length).toBe(ctx.argsFor('restore').length)
+    }
+  )
 })

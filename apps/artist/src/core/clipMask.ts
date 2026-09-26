@@ -224,3 +224,59 @@ export function applyClipStroke(
   ctx.strokeStyle = visible.color;
   ctx.stroke();
 }
+
+/**
+ * Mask, draw, un-clip, stroke — the whole sequence a media clip is drawn with,
+ * in one place.
+ *
+ * `drawClipToCanvas` and `drawImageToCanvasWithModifiers` are near-duplicates
+ * and each calls this exactly once, handing it the `ctx.drawImage(...)` it
+ * already made as `drawImage`. Written here rather than twice there because the
+ * *order* is the part that can silently diverge: the spec's own risk list names
+ * the two functions drifting apart as the way this feature breaks, and a mask
+ * applied after the image, or a stroke applied inside the clip region, is wrong
+ * in a way no geometry test would catch.
+ *
+ * The three shapes it takes, by what the clip carries:
+ * - **neither** — `drawImage()` and nothing else. Not one extra context call:
+ *   that is what the per-frame ceilings in
+ *   `components/Preview/drawFrame.perf.test.ts` and `core/exportMP4.perf.test.ts`
+ *   rest on, and what a project saved before ESCSUITE-65 has to keep drawing as.
+ * - **a mask alone** — three calls before the picture, and no save of its own:
+ *   the caller's existing `save()`/`restore()` pair covers it, and the caller
+ *   has already applied its rotation, so the mask turns with the clip.
+ * - **a stroke** — an inner `save()`/`restore()` pair around the mask and the
+ *   picture, then the outline. The restore is the whole point: the clip region
+ *   has to be gone while the caller's rotation stays, or the mask eats the inner
+ *   half of every line. ESCAPECRAFT draws its own border the same way
+ *   (`apps/craft/src/core/overlayGeometry.ts:182-187`).
+ *
+ * `frameWidth` is the canvas width, which the line width is a fraction of.
+ */
+export function drawWithMaskAndStroke(
+  ctx: CanvasRenderingContext2D,
+  mask: ClipMask | undefined,
+  stroke: ClipStroke | undefined,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  frameWidth: number,
+  drawImage: () => void
+): void {
+  // Resolved before the picture, because whether there is an inner save at all
+  // is the question — and one definition of "visible" serves both this and
+  // `applyClipStroke`.
+  const visible = visibleClipStroke(stroke);
+
+  if (visible) ctx.save();
+
+  applyClipMask(ctx, mask, x, y, width, height);
+
+  drawImage();
+
+  if (visible) {
+    ctx.restore();
+    applyClipStroke(ctx, visible, mask, x, y, width, height, frameWidth);
+  }
+}
