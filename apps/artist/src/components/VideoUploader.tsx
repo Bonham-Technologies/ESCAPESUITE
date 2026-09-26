@@ -426,6 +426,10 @@ export function VideoLibrary() {
 
   const handleRemoveVideo = useCallback(
     async (id: string) => {
+      // ESCSUITE-84: the blob goes before the store is asked, so a source a
+      // locked-track clip uses is refused here, ahead of `deleteVideo` — the
+      // disabled button is the visible half of the same rule.
+      if (lockedMedia.has(id)) return;
       if (confirm('Remove this video? This will also remove any clips using it.')) {
         try {
           await deleteVideo(id);
@@ -435,7 +439,7 @@ export function VideoLibrary() {
         removeSourceVideo(id);
       }
     },
-    [removeSourceVideo]
+    [lockedMedia, removeSourceVideo]
   );
 
   if (sourceVideos.length === 0) {

@@ -1063,8 +1063,8 @@ pins it beside the new refusals in `useClipDrag.test.ts` and `timelineSnapping.t
 **A locked track is locked for every component** (ESCSUITE-84). ESCSUITE-82 closed the pointer
 gestures; Delete, paste, split, duplicate, the inspector, the keyframe panel and a new clip
 landing on an empty locked track did not know the row was locked. The fix is one enforcement
-point: `store/trackLock.ts`'s four pure questions (`lockedTrackIds`, `isTrackLocked`,
-`clipOnLockedTrack`, `anyClipOnLockedTrack` — no store, no React) are asked as the first statement
+point: `store/trackLock.ts`'s five pure questions (`lockedTrackIds`, `isTrackLocked`,
+`clipOnLockedTrack`, `anyClipOnLockedTrack`, `lockedSourceVideoIds` — no store, no React) are asked as the first statement
 of a mutating action's `set` updater, and a refused action `return`s the unchanged state: no
 `modified` write, no history entry. Every clip- and keyframe-slice action over a clip already on
 the timeline refuses when its track is locked (`moveClipToTrack` checks both origin and target);

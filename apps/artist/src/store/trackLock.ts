@@ -2,7 +2,7 @@
 //
 // `Track.locked` means "prevent edits" (ESCSUITE-84): every store action that
 // would add a clip to a locked track, or change, move, remove, split, duplicate,
-// keyframe or restyle a clip already on one, asks one of these four questions
+// keyframe or restyle a clip already on one, asks one of these five questions
 // first and returns its state untouched when the answer is yes. Pure functions
 // over the clips and tracks they are handed — no store, no React — so a slice
 // can import them without an edge to any other slice, the way it imports
