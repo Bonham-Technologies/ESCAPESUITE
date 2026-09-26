@@ -37,7 +37,7 @@ pnpm lint                # Run ESLint
 - Timeline is a flat array of `Clip` objects; each clip references a `sourceVideoId` and defines `startTime`/`endTime` within that source
 - **Track properties**: `id`, `name`, `index`, `visible`, `locked`, `muted`, `volume` (0-1), `height`
 - **Auto-track creation**: When adding clips/overlays without specifying a track, a new track is created automatically
-- **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work. Two more live here and are **not** re-exported, because only the clip drag asks them: `trackIndexDelta` (how many rows a drop moved the clip the pointer held, in `moveSelectedClips`' ascending-`index` space, or `null` when either row has left the timeline) and `canMoveSelectedClips` (whether *every* clip of a multi-selection can take a given time and row delta) — ESCSUITE-80, below
+- **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work. Two more live here and are **not** re-exported, because only the clip drag asks them: `trackIndexDelta` (how many rows a drop moved the clip the pointer held, in `moveSelectedClips`' ascending-`index` space, or `null` when either row has left the timeline) and `canMoveSelectedClips` (whether *every* clip of a multi-selection can take a given time and row delta) — ESCSUITE-80, below. A third, `trackRefusesDrop` (a locked row, or one not on the timeline, takes no clip), is what the single-clip drop asks about the row under the pointer; the group veto applies the same locked rule inline — ESCSUITE-82, below
 
 **Pure helpers** — no zustand, no React, no store access:
 
@@ -1024,7 +1024,7 @@ clip inside one `set` with one `pushToHistory`, so the whole group is still **on
 which is why the row half is not a second write here the way it is for a single clip.
 
 **The group's veto is all-or-nothing**, and `canMoveSelectedClips` is what answers it, before
-anything is written. Three ways a member refuses: its current row is not on the timeline, the
+anything is written. Three ways a member refuses (four since ESCSUITE-82, below): its current row is not on the timeline, the
 row it would land on is off the top or the bottom of the stack, or its landing spot is taken by
 a clip that is not moving with it. Any one of them and the drop commits nothing — the
 alternative is a group arriving with some of its clips piled against the edge of the stack,
@@ -1042,7 +1042,22 @@ omission: ARTIST's `Track` has no kind. A clip is audio because its *source* med
 (`TimelineTrack` reads `sourceMedia?.mediaType`), and any clip may sit on any track, which is
 exactly what a single-clip drop allows. `useClipDrag.test.ts` holds the drag half (a same-time
 group drop moving every clip, a diagonal one moving rows and times together, one Ctrl+Z
-restoring all of it, and the four refusals) and `store/timelineSnapping.test.ts` the arithmetic.
+restoring all of it, and the refusals — four then, six with ESCSUITE-82's) and `store/timelineSnapping.test.ts` the arithmetic.
+
+**A locked row takes no drop** (ESCSUITE-82). The mousedown has always refused to *start* a
+drag on a locked row, but neither commit path asked about the row the clip was **dropped** on:
+a clip could be dragged onto a locked track, and a selection holding a clip on a locked row
+(ctrl+click adds one; the mousedown guard only sees the row of the clip the pointer holds)
+could be dragged off it by a free member. `trackRefusesDrop(tracks, trackId)` in
+`store/timelineSnapping.ts` — true for a locked row and for one that is not on the timeline —
+is the rule the single-clip commit now asks of the row under the pointer, beside the overlap
+check it already made; `canMoveSelectedClips` applies the same locked rule inline, over a Set of
+the locked rows, to every member's origin row and landing row (it already refused a row that is
+not on the timeline by index), so the group's veto has a fourth way to refuse. Silent, like the
+other three. A rule added to `trackRefusesDrop` has to be added to that loop too. The ticket also named the ripple trim, and that half was wrong: `shiftClipsAfter`
+is asked for the trimmed clip's *own* row (so is `rippleDeleteClip`'s shift), and a trim cannot
+start on a locked one, so a ripple never reaches a locked row's clips — `useTrimDrag.test.ts`
+pins it beside the new refusals in `useClipDrag.test.ts` and `timelineSnapping.test.ts`.
 
 The one documented exception is the colour swatches
 in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the

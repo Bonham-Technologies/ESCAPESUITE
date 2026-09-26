@@ -459,6 +459,32 @@ describe('useClipDrag committing', () => {
     expect(theClip('clip1').timelinePosition).toBe(2)
   })
 
+  it('refuses a drop onto a locked row, the clip springing back (ESCSUITE-82)', () => {
+    store().setSnapEnabled(false)
+    store().updateTrack(trackB, { locked: true })
+    const { result } = mountDrag()
+    grabClip1(result)
+    move(pointerFor(4), 80)
+
+    release()
+
+    expect(actions.moveClipToTrack).not.toHaveBeenCalled()
+    expect(actions.setClipTimelinePosition).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+  })
+
+  it('still moves a clip in time along its own unlocked row while another row is locked', () => {
+    store().setSnapEnabled(false)
+    store().updateTrack(trackB, { locked: true })
+    const { result } = mountDrag()
+    grabClip1(result)
+    move(pointerFor(4))
+
+    release()
+
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 4 })
+  })
+
   it('moves the whole selection when the dragged clip is part of one', () => {
     store().setSnapEnabled(false)
     store().selectClipsInRange(['clip1', 'clip2'])
@@ -742,6 +768,42 @@ describe('useClipDrag committing a multi-selection across rows', () => {
     expect(actions.moveClipToTrack).not.toHaveBeenCalled()
     expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
     expect(theClip('clip2')).toMatchObject({ trackId: trackA, timelinePosition: 6 })
+    expect(past() - before).toBe(0)
+  })
+
+  it('refuses the whole drop when a member would land on a locked row (ESCSUITE-82)', () => {
+    store().updateTrack(trackB, { locked: true })
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+    const before = past()
+
+    move(pointerFor(4), 80)
+    release()
+
+    expect(actions.moveSelectedClips).not.toHaveBeenCalled()
+    expect(actions.moveClipToTrack).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(theClip('clip2')).toMatchObject({ trackId: trackA, timelinePosition: 6 })
+    expect(past() - before).toBe(0)
+  })
+
+  it('refuses the whole drop when a member of the selection sits on a locked row (ESCSUITE-82)', () => {
+    // clip3 is on the locked row; the pointer holds clip1, which is free to
+    // drag. The mousedown guard only sees clip1's row.
+    addClip('clip3', 2, 2, trackB)
+    store().updateTrack(trackB, { locked: true })
+    store().selectClipsInRange(['clip1', 'clip3'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+    const before = past()
+
+    move(pointerFor(4))
+    release()
+
+    expect(actions.moveSelectedClips).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(theClip('clip3')).toMatchObject({ trackId: trackB, timelinePosition: 2 })
     expect(past() - before).toBe(0)
   })
 

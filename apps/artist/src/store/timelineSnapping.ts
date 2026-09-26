@@ -14,7 +14,9 @@
 // can take that move. They are here rather than in the drag hook because they are
 // arithmetic over clips and tracks with no DOM and no store in them, and because
 // they are answers about `selectionSlice.moveSelectedClips` — the action they
-// guard — whose index space they share.
+// guard — whose index space they share. `trackRefusesDrop` (ESCSUITE-82) is the
+// one rule about a *row* the two drop paths share: a locked row, or one that is
+// not on the timeline, takes no clip.
 import type { Clip, Track } from './types';
 
 // Get snap points from all clip edges
@@ -102,6 +104,22 @@ export function trackIndexDelta(
   return to - from;
 }
 
+/**
+ * Whether a row refuses to take a clip: it is locked, or it is not on the
+ * timeline at all. The single-clip drop asks this of the row under the
+ * pointer; `canMoveSelectedClips` applies the same locked rule inline, over a
+ * Set, because it is in a loop — and it has its own "not on the timeline"
+ * check already, on the row index (ESCSUITE-82). The mousedown already refuses
+ * to *start* on a locked row; this is the other end of the gesture, which used
+ * to check nothing — a clip could be dropped onto a locked row, and a
+ * selection holding a clip on one (ctrl+click adds it) could be dragged off it
+ * by a free member. A rule added here must be added to that loop too.
+ */
+export function trackRefusesDrop(tracks: Track[], trackId: string): boolean {
+  const track = tracks.find((t) => t.id === trackId);
+  return track === undefined || track.locked;
+}
+
 /** A move `moveSelectedClips` would make, asked about before it is made. */
 export interface BulkMove {
   /** Every clip on the timeline — the movers and the ones they could land on. */
@@ -120,12 +138,12 @@ export interface BulkMove {
  * Whether **every** selected clip can take the move — so the caller can commit
  * all of it or none of it.
  *
- * Three ways a member refuses, matching the single-clip drop's own veto one
+ * Four ways a member refuses, matching the single-clip drop's own veto one
  * rung down in `useClipDrag`: its current row is not on the timeline, the row
- * it would land on is off the top or the bottom of the stack, or its landing
- * spot is taken. A member's *old* placement is never in the way — the group
- * vacates it in the same write — so a selection sliding along its own run
- * never vetoes itself.
+ * it would land on is off the top or the bottom of the stack, either of those
+ * rows is locked (ESCSUITE-82), or its landing spot is taken. A member's *old*
+ * placement is never in the way — the group vacates it in the same write — so
+ * a selection sliding along its own run never vetoes itself.
  *
  * There is no audio-versus-video row check here, and that is not an omission:
  * ARTIST's `Track` has no kind. A clip is audio because its *source* media is
@@ -144,6 +162,7 @@ export function canMoveSelectedClips({
 }: BulkMove): boolean {
   const order = orderedTrackIds(tracks);
   const trackIndex = new Map(order.map((id, index) => [id, index]));
+  const locked = new Set(tracks.filter((track) => track.locked).map((track) => track.id));
 
   /** The clips nothing is moving, and then each member as it is placed. */
   const settled: Clip[] = [];
@@ -159,6 +178,10 @@ export function canMoveSelectedClips({
     if (from === undefined) return false;
     const to = from + deltaTrack;
     if (to < 0 || to >= order.length) return false;
+    // A locked row holds what it has and takes nothing new. The row the member
+    // sits on can be locked even though the drag started elsewhere: the
+    // mousedown guard only sees the row of the clip the pointer holds.
+    if (locked.has(clip.trackId) || locked.has(order[to])) return false;
 
     moved.push({
       ...clip,

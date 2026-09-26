@@ -556,6 +556,12 @@ conversions each kept in their own `finally` were ten *covered* branches, and th
 release that replaced them is two, so the denominator fell 1,325 → 1,315 and took the same ten
 off the numerator: the same arithmetic the recorder's own percentage went through a day earlier,
 for the same reason. **No floor crossed**, so craft's floors stay 100 / 99 / 97 / 100.
+`@escapesuite/artist` was re-measured 2026-09-26 at the end of ESCSUITE-82 (a locked row
+takes no drop): 99.40 / 98.75 / **93.77** / 98.98 — `trackRefusesDrop` and the two guards it
+feeds are fully covered by the five new refusals and the ripple pin — and **no floor crossed**,
+so artist's floors stay 99 / 98 / 93 / 98. The row had drifted a hundredth or two on every
+figure across the ESCSUITE-73–80 follow-ups, which measured and did not write it down; it is
+corrected here.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -563,7 +569,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.47 | 97.56 | 100.00 |
-| `@escapesuite/artist` | 99.39 | 98.73 | 93.70 | 98.97 |
+| `@escapesuite/artist` | 99.40 | 98.75 | 93.77 | 98.98 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

@@ -288,6 +288,28 @@ describe('useTrimDrag ripple', () => {
     expect(theClip('clip2').timelinePosition).toBe(7)
   })
 
+  it('shifts only the trimmed clip’s own row, so a locked neighbouring row is never reached (ESCSUITE-82 pin)', () => {
+    // Not a fix — a pin, and of the row scope rather than of the lock: the
+    // assertion would pass with track B unlocked too, because `shiftClipsAfter`
+    // is asked for the trimmed clip's own row and nothing else. Together with
+    // the mousedown guard (a trim cannot start on a locked row) that is why a
+    // ripple never reaches a locked row's clips. ESCSUITE-82 was filed believing
+    // it could; this is the evidence that corrected it.
+    const trackB = store().addTrack('Track 2').id
+    addClip('clip3', 6, 2, trackB)
+    store().updateTrack(trackB, { locked: true })
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+    moveTo(5)
+
+    release()
+
+    expect(actions.shiftClipsAfter).toHaveBeenCalledWith(trackA, 4, 1, true)
+    expect(theClip('clip2').timelinePosition).toBe(7)
+    expect(theClip('clip3')).toMatchObject({ trackId: trackB, timelinePosition: 6 })
+  })
+
   it('shifts nothing when the trim left the clip’s length unchanged', () => {
     store().setActiveTool('ripple')
     const { result } = mountTrim()
