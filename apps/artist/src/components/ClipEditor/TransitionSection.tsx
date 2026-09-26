@@ -2,6 +2,7 @@ import type { Transition, TransitionType } from '../../store/types';
 import { maxPresetDuration } from './clipEditorModel';
 import { TRANSITION_TYPES } from './clipEditorOptions';
 import { CollapsibleSection } from './CollapsibleSection';
+import type { SliderGestureHandlers } from './useSliderGesture';
 import styles from './ClipEditor.module.css';
 
 interface TransitionSectionProps {
@@ -13,6 +14,12 @@ interface TransitionSectionProps {
   onTypeChange: (type: TransitionType) => void;
   /** Set how long the transition runs, in seconds. */
   onDurationChange: (duration: number) => void;
+  /**
+   * Undo-coalescing listeners for the duration slider (ESCSUITE-77, finishing
+   * ESCSUITE-75): a drag is dozens of `onDurationChange` calls and one undo
+   * entry. The type select takes none — it is a single change.
+   */
+  sliderGesture: SliderGestureHandlers;
 }
 
 /**
@@ -20,7 +27,7 @@ interface TransitionSectionProps {
  * which transition runs at the end of this clip and, for anything other than
  * `none`, how long it takes.
  */
-export function TransitionSection({ transition, clipDuration, onTypeChange, onDurationChange }: TransitionSectionProps) {
+export function TransitionSection({ transition, clipDuration, onTypeChange, onDurationChange, sliderGesture }: TransitionSectionProps) {
   return (
     <CollapsibleSection title="Transition Out" defaultOpen={false}>
       <div className={styles.transitionControls}>
@@ -52,6 +59,7 @@ export function TransitionSection({ transition, clipDuration, onTypeChange, onDu
               max={maxPresetDuration(clipDuration)}
               step={0.1}
               value={transition.duration}
+              {...sliderGesture}
               onChange={(e) => onDurationChange(parseFloat(e.target.value))}
             />
             <span>{transition.duration.toFixed(1)}s</span>

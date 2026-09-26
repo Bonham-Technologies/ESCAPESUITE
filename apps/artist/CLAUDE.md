@@ -931,11 +931,16 @@ are throttled to an animation frame and so must read the flag inside the updater
 runs, a slider's writes are synchronous — the `input` event calls the handler, which writes — so
 here "decide at the call" and "decide at the write" are the same moment.
 `useClipEditorActions` calls it once and returns its
-listeners as `sliderGesture`, which `ClipEditor` spreads onto every slider in
-`TransformSection`, `ShapeSection`, `EffectsSection` and `MaskSection`; the handlers those sliders reach —
-`handleTransformChange`, `handleBlurChange`, `handleMaskChange`, `handleStrokeChange` and, for
+listeners as `sliderGesture`, which `ClipEditor` spreads onto **every slider on the panel** —
+`TransformSection`, `ShapeSection`, `EffectsSection`, `MaskSection`, `AnimationSection` and
+`TransitionSection`; the handlers those sliders reach —
+`handleTransformChange`, `handleBlurChange`, `handleMaskChange`, `handleStrokeChange`,
+`handleAnimationInDurationChange`, `handleAnimationOutDurationChange`,
+`handleTransitionDurationChange` and, for
 an overlay's Pos X/Y, `handleTextDataChange` / `handleShapeDataChange` — ask
-`skipHistoryForWrite()` at the moment they write. One instance for the whole panel is
+`skipHistoryForWrite()` at the moment they write. The selects beside those sliders (preset,
+easing, transition type) deliberately do not ask: a select is a single change and keeps its own
+entry. One instance for the whole panel is
 deliberate: a user drags one slider at a time, and a press on the next closes whatever the last
 one left open. **A write that belongs to no gesture pushes its own entry**, exactly as before —
 every other control on the panel, a section rendered on its own in a test, and a value set from
@@ -945,13 +950,36 @@ code. It holds refs and no state, so no slider adds a subscription and no render
 `useSliderGesture.test.ts` (the contract, without a DOM).
 
 The flag reaches the store through the trailing optional `skipHistory` parameter on
-`updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData` and
-`updateShapeOverlayData` — the first, fourth and fifth already had it; ESCSUITE-75 added it to
-`updateClip` and `updateClipEffects` in the same shape (`history: skipHistory ? state.history :
+`updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData`,
+`updateShapeOverlayData`, `updateClipAnimation`, `updateClipTransition` and
+`shiftClipsAfter` — the first, fourth
+and fifth already had it; ESCSUITE-75 added it to
+`updateClip` and `updateClipEffects` and ESCSUITE-77 to the last three, all five in the same shape
+(`history: skipHistory ? state.history :
 pushToHistory(state)`). It is optional and last, so every existing caller is one undo step
-exactly as before. **The sliders in `AnimationSection` and `TransitionSection` are not wired to
-the gesture yet** — they need the same flag on `updateClipAnimation` and `updateClipTransition`
-first, which is ESCSUITE-77, and so does `Timeline/useTrimDrag.ts`. Nor are the colour swatches
+exactly as before.
+
+**Every slider in the inspector and the trim drag on the timeline now follow the one-entry-per-gesture
+rule** (ESCSUITE-77 finished what ESCSUITE-75 started). `Timeline/useTrimDrag.ts` is the one that
+is not a slider: it writes the store on every mousemove, so it carries
+`useTransformHandles`' shape instead of the hook's — a per-gesture `historyPushedRef` reset on
+mousedown, the first write unskipped and the rest passing `true`. It throttles nothing, but the
+flag is still asked for *inside* the `if (update)` rather than at the move, because
+`computeTrimUpdate` refuses a move that would leave the clip too short and such a move writes
+nothing at all: a gesture whose opening move was rejected must still push on the write that does
+land. The one thing a trim does on release — the ripple tool's `shiftClipsAfter`, which closes
+the gap the trim left — takes the flag too, and `shiftClipsAfter` grew it for that:
+the shift belongs to the trim that produced it, and pushing an entry of its own made
+one ripple trim two undo steps, the first Ctrl+Z sliding the downstream clips back and
+leaving the clip trimmed.
+`useTrimDrag.test.ts` holds it (one entry for five moves, two for two trims, one for a
+whole ripple trim with both halves coming back together, the undo
+landing on the pre-trim in and out points, and the refused opening move). The same ticket made the
+Transform section header's Reset one entry rather than two on an overlay clip: its second write,
+the overlay's own coordinates, passes `skipHistory: true` as a **literal** — that is a button, not
+a gesture, so there is nothing to ask.
+
+The one documented exception is the colour swatches
 in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the
 press and reports after the release, so a pointer gesture does not bound that interaction and
 these listeners would not help it.

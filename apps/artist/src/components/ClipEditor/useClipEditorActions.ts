@@ -32,12 +32,16 @@
 // `selectSelectedClip` already selects, one line below it. Merging the two
 // subscriptions would change how often the panel re-renders; they stay apart.
 //
-// **The slider handlers coalesce their undo entries** (ESCSUITE-75). A range
-// input writes on every `input` event, so the five handlers a slider can reach
+// **The slider handlers coalesce their undo entries** (ESCSUITE-75, completed by
+// ESCSUITE-77). A range
+// input writes on every `input` event, so the eight handlers a slider can reach
 // — `handleTransformChange`, `handleBlurChange`, `handleMaskChange`,
-// `handleStrokeChange` and, for an overlay's Pos X/Y, `handleTextDataChange` /
+// `handleStrokeChange`, `handleAnimationInDurationChange`,
+// `handleAnimationOutDurationChange`, `handleTransitionDurationChange` and, for
+// an overlay's Pos X/Y, `handleTextDataChange` /
 // `handleShapeDataChange` — ask `useSliderGesture` for the `skipHistory` flag at
-// the moment they write. The gesture itself is the `sliderGesture` listeners
+// the moment they write. The selects beside them (preset, easing, transition
+// type) do not: a select is a single change and keeps its own entry. The gesture itself is the `sliderGesture` listeners
 // returned below, which `ClipEditor` spreads onto each slider. One hook
 // instance serves the whole panel: a user drags one slider at a time, and a
 // press on the next one closes whatever the last one left open. It holds refs
@@ -314,12 +318,14 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClipTransition]
   );
 
+  // The Transition Out section's one slider (ESCSUITE-77). The type select
+  // above it keeps its own entry per change, so it does not ask.
   const handleTransitionDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipTransition(selectedClip.id, { duration });
+      updateClipTransition(selectedClip.id, { duration }, skipHistoryForWrite());
     },
-    [selectedClip, updateClipTransition]
+    [selectedClip, updateClipTransition, skipHistoryForWrite]
   );
 
   // Animation handlers
@@ -331,12 +337,15 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClipAnimation]
   );
 
+  // The Animation section's two sliders (ESCSUITE-77), Animate In and Animate
+  // Out. The four preset and easing selects around them are single changes and
+  // keep an entry each, so only these two ask.
   const handleAnimationInDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { in: { type: selectedClip.animation?.in.type ?? 'none', duration, easing: selectedClip.animation?.in.easing ?? 'ease-out' } });
+      updateClipAnimation(selectedClip.id, { in: { type: selectedClip.animation?.in.type ?? 'none', duration, easing: selectedClip.animation?.in.easing ?? 'ease-out' } }, skipHistoryForWrite());
     },
-    [selectedClip, updateClipAnimation]
+    [selectedClip, updateClipAnimation, skipHistoryForWrite]
   );
 
   const handleAnimationInEasingChange = useCallback(
@@ -358,9 +367,9 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleAnimationOutDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { out: { type: selectedClip.animation?.out.type ?? 'none', duration, easing: selectedClip.animation?.out.easing ?? 'ease-in' } });
+      updateClipAnimation(selectedClip.id, { out: { type: selectedClip.animation?.out.type ?? 'none', duration, easing: selectedClip.animation?.out.easing ?? 'ease-in' } }, skipHistoryForWrite());
     },
-    [selectedClip, updateClipAnimation]
+    [selectedClip, updateClipAnimation, skipHistoryForWrite]
   );
 
   const handleAnimationOutEasingChange = useCallback(
@@ -371,6 +380,16 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClipAnimation]
   );
 
+  // One click, one undo entry (ESCSUITE-77). On an overlay this is two store
+  // writes — the transform, then the overlay's own coordinates — and both used
+  // to push, so a single Reset cost two Ctrl+Zs and the first of them left the
+  // clip in a state the user had never seen: the transform back at its default
+  // with the overlay data still where the drag had put it. The rule is the
+  // sliders': the first write pushes, so the entry snapshots the state as it was
+  // before the Reset, and the second passes `skipHistory`. The flag is a literal
+  // rather than `skipHistoryForWrite()` because this is a button, not a gesture
+  // — the two writes are one click, always, and asking a gesture that is not
+  // open would answer `false` twice.
   const handleResetTransform = useCallback(() => {
     if (!selectedClip) return;
 
@@ -388,7 +407,7 @@ export function useClipEditorActions(): ClipEditorActions {
       updateTextOverlayData(selectedClip.id, {
         x: 0.5,
         y: 0.5,
-      });
+      }, true);
     } else if (selectedClip.overlayType === 'shape' && selectedClip.shapeData) {
       updateShapeOverlayData(selectedClip.id, {
         x: 0.5,
@@ -396,7 +415,7 @@ export function useClipEditorActions(): ClipEditorActions {
         width: 0.2,
         height: 0.2,
         rotation: 0,
-      });
+      }, true);
     }
   }, [selectedClip, updateClipTransform, updateTextOverlayData, updateShapeOverlayData]);
 

@@ -421,7 +421,9 @@ describe('useClipEditorActions transform', () => {
 
     act(() => result.current.handleResetTransform())
 
-    expect(spies.updateTextOverlayData).toHaveBeenCalledWith(clip.id, { x: 0.5, y: 0.5 })
+    // `true`: the second write of one click, so the transform write above it is
+    // the one that pushed the entry both halves undo to (ESCSUITE-77).
+    expect(spies.updateTextOverlayData).toHaveBeenCalledWith(clip.id, { x: 0.5, y: 0.5 }, true)
     expect(clipNow(clip.id).textData).toMatchObject({ x: 0.5, y: 0.5 })
   })
 
@@ -438,8 +440,41 @@ describe('useClipEditorActions transform', () => {
       width: 0.2,
       height: 0.2,
       rotation: 0,
-    })
+    }, true)
     expect(clipNow(clip.id).shapeData).toMatchObject({ width: 0.2, height: 0.2, rotation: 0 })
+  })
+
+  it('the section Reset on a text overlay is one undo entry, not two', () => {
+    const clip = textClip()
+    store().updateClipTransform(clip.id, { x: 0.1, opacity: 0.2 })
+    store().updateTextOverlayData(clip.id, { x: 0.1, y: 0.9 })
+    useEditorStore.setState({ history: { past: [], future: [] } })
+    const { result } = mount()
+
+    act(() => result.current.handleResetTransform())
+
+    // Two store writes, one undo step: the overlay write passes `skipHistory`,
+    // so a single Ctrl+Z puts both the transform and the overlay's own
+    // coordinates back.
+    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    act(() => store().undo())
+    expect(clipNow(clip.id).transform).toMatchObject({ x: 0.1, opacity: 0.2 })
+    expect(clipNow(clip.id).textData).toMatchObject({ x: 0.1, y: 0.9 })
+  })
+
+  it('the section Reset on a shape overlay is one undo entry, not two', () => {
+    const clip = shapeClip()
+    store().updateClipTransform(clip.id, { x: 0.1, opacity: 0.2 })
+    store().updateShapeOverlayData(clip.id, { x: 0.1, width: 0.7, rotation: 30 })
+    useEditorStore.setState({ history: { past: [], future: [] } })
+    const { result } = mount()
+
+    act(() => result.current.handleResetTransform())
+
+    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    act(() => store().undo())
+    expect(clipNow(clip.id).transform).toMatchObject({ x: 0.1, opacity: 0.2 })
+    expect(clipNow(clip.id).shapeData).toMatchObject({ x: 0.1, width: 0.7, rotation: 30 })
   })
 
   it('the scale row\'s Reset spreads the whole default transform, rotation included', () => {
@@ -523,7 +558,7 @@ describe('useClipEditorActions appearance', () => {
     act(() => result.current.handleTransitionDurationChange(0.75))
 
     expect(spies.updateClipTransition).toHaveBeenNthCalledWith(1, clip.id, { type: 'dissolve' })
-    expect(spies.updateClipTransition).toHaveBeenNthCalledWith(2, clip.id, { duration: 0.75 })
+    expect(spies.updateClipTransition).toHaveBeenNthCalledWith(2, clip.id, { duration: 0.75 }, false)
     expect(clipNow(clip.id).transition).toMatchObject({ type: 'dissolve', duration: 0.75 })
   })
 
@@ -591,7 +626,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       in: { type: 'none', duration: 1.1, easing: 'ease-out' },
-    })
+    }, false)
   })
 
   it('fills the out duration change from the handler\'s own fallbacks on a fresh clip', () => {
@@ -602,7 +637,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       out: { type: 'none', duration: 1.1, easing: 'ease-in' },
-    })
+    }, false)
   })
 
   it('carries the clip\'s existing in duration and easing through a type change', () => {
@@ -636,7 +671,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       in: { type: 'fade', duration: 1.25, easing: 'linear' },
-    })
+    }, false)
     expect(clipNow(clip.id).animation?.in).toMatchObject({ type: 'fade', duration: 1.25 })
   })
 
@@ -666,7 +701,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       out: { type: 'fade', duration: 0.9, easing: 'linear' },
-    })
+    }, false)
     expect(clipNow(clip.id).animation?.out).toMatchObject({ duration: 0.9 })
   })
 

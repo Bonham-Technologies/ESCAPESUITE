@@ -3,6 +3,7 @@ import { hasAnimation } from '../../utils/animation';
 import { maxPresetDuration, keyframeCount } from './clipEditorModel';
 import { ANIMATION_PRESETS, EASING_TYPES } from './clipEditorOptions';
 import { CollapsibleSection } from './CollapsibleSection';
+import type { SliderGestureHandlers } from './useSliderGesture';
 import styles from './ClipEditor.module.css';
 
 interface AnimationSectionProps {
@@ -26,6 +27,14 @@ interface AnimationSectionProps {
   onOutDurationChange: (duration: number) => void;
   /** Choose the Animate Out easing curve. */
   onOutEasingChange: (easing: EasingType) => void;
+  /**
+   * Undo-coalescing listeners for the two duration sliders (ESCSUITE-77,
+   * finishing ESCSUITE-75). Each steps in tenths up to the clip's length, so a
+   * full drag is dozens of `onInDurationChange` / `onOutDurationChange` calls
+   * and, with these attached, one undo entry. The four selects around them are
+   * single changes and take no listeners.
+   */
+  sliderGesture: SliderGestureHandlers;
 }
 
 /**
@@ -49,6 +58,7 @@ export function AnimationSection({
   onOutTypeChange,
   onOutDurationChange,
   onOutEasingChange,
+  sliderGesture,
 }: AnimationSectionProps) {
   return (
     <CollapsibleSection
@@ -83,6 +93,7 @@ export function AnimationSection({
                 max={maxPresetDuration(clipDuration)}
                 step={0.1}
                 value={animation.in.duration}
+                {...sliderGesture}
                 onChange={(e) => onInDurationChange(parseFloat(e.target.value))}
               />
               <span>{animation.in.duration.toFixed(1)}s</span>
@@ -131,6 +142,7 @@ export function AnimationSection({
                 max={maxPresetDuration(clipDuration)}
                 step={0.1}
                 value={animation.out.duration}
+                {...sliderGesture}
                 onChange={(e) => onOutDurationChange(parseFloat(e.target.value))}
               />
               <span>{animation.out.duration.toFixed(1)}s</span>

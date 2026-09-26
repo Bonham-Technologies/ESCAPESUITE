@@ -155,6 +155,7 @@ export function ClipEditor() {
           onOutTypeChange={handleAnimationOutTypeChange}
           onOutDurationChange={handleAnimationOutDurationChange}
           onOutEasingChange={handleAnimationOutEasingChange}
+          sliderGesture={sliderGesture}
         />
       )}
 
@@ -165,6 +166,7 @@ export function ClipEditor() {
           clipDuration={selectedClip.duration}
           onTypeChange={handleTransitionTypeChange}
           onDurationChange={handleTransitionDurationChange}
+          sliderGesture={sliderGesture}
         />
       )}
 

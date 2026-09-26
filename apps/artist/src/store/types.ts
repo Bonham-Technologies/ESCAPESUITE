@@ -578,7 +578,7 @@ export interface EditorState {
   placeTakeOnTimeline: (parts: TakeClipPart[]) => void;
   removeClipFromTimeline: (clipId: string) => void;
   rippleDeleteClip: (clipId: string) => void;
-  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => void;
+  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => void;
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => void;
   splitClip: (clipId: string, splitTime: number) => void;
   moveClipToTrack: (clipId: string, trackId: string) => void;
@@ -586,8 +586,8 @@ export interface EditorState {
   updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => void;
   updateClipBlendMode: (clipId: string, blendMode: BlendMode) => void;
   updateClipEffects: (clipId: string, effects: Partial<ClipEffects>, skipHistory?: boolean) => void;
-  updateClipTransition: (clipId: string, transition: Partial<Transition>) => void;
-  updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>) => void;
+  updateClipTransition: (clipId: string, transition: Partial<Transition>, skipHistory?: boolean) => void;
+  updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>, skipHistory?: boolean) => void;
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => void;
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => void;
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => void;

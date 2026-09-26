@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AnimationSection } from './AnimationSection'
-import { makeAnimation } from '../../test/fixtures/clipFixtures'
+import { makeAnimation, inertSliderGesture } from '../../test/fixtures/clipFixtures'
 import { ANIMATION_PRESETS, EASING_TYPES } from './clipEditorOptions'
 import type { ClipAnimation } from '../../store/types'
 import styles from './ClipEditor.module.css'
@@ -26,6 +26,7 @@ function renderSection(overrides: Partial<Props> = {}) {
       animation={undefined}
       clipDuration={10}
       keyframePanelOpen={false}
+      sliderGesture={inertSliderGesture}
       {...handlers}
       {...overrides}
     />

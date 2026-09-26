@@ -5,6 +5,11 @@
 // preview, and they watch that the origin recorded on mousedown is what the
 // arithmetic measures against, not the clip's live values.
 //
+// The trailing `skipHistory` those argument assertions carry is ESCSUITE-77's:
+// the gesture's first write pushes the undo entry (`false`) and every write
+// after it skips (`true`), so a whole trim is one undo step. The last describe
+// block below is the rule itself.
+//
 // The scene is the real store: clip1 on track A, at 2s on the timeline, playing
 // the first two seconds of a 30s source. The track container's left edge is at
 // client X 100 and the scale is 50px per second, so client X 225 is 2.5s.
@@ -13,7 +18,7 @@ import { act, renderHook } from '@testing-library/react'
 import type React from 'react'
 import { useTrimDrag, type TrimDragDeps } from './useTrimDrag'
 import { useEditorStore } from '../../store/projectStore'
-import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
+import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { setRect } from '../../test/doubles/layout'
 
 /** The timeline's default scale: one second is 50px at zoom 1. */
@@ -191,7 +196,7 @@ describe('useTrimDrag following the pointer', () => {
     expect(actions.updateClip).toHaveBeenCalledWith('clip1', {
       startTime: 0.5,
       timelinePosition: 2.5,
-    })
+    }, false)
     expect(theClip('clip1').duration).toBe(1.5)
   })
 
@@ -204,7 +209,7 @@ describe('useTrimDrag following the pointer', () => {
     expect(actions.updateClip).toHaveBeenCalledWith('clip1', {
       startTime: 0,
       timelinePosition: 2,
-    })
+    }, false)
   })
 
   it('takes the end edge out into the rest of the source', () => {
@@ -213,7 +218,7 @@ describe('useTrimDrag following the pointer', () => {
 
     moveTo(5)
 
-    expect(actions.updateClip).toHaveBeenCalledWith('clip1', { endTime: 3 })
+    expect(actions.updateClip).toHaveBeenCalledWith('clip1', { endTime: 3 }, false)
     expect(theClip('clip1').duration).toBe(3)
   })
 
@@ -224,10 +229,12 @@ describe('useTrimDrag following the pointer', () => {
     moveTo(2.5)
     moveTo(2.25)
 
+    // The second write of the gesture, so it skips history — the first one
+    // pushed the entry the whole trim undoes to.
     expect(actions.updateClip).toHaveBeenLastCalledWith('clip1', {
       startTime: 0.25,
       timelinePosition: 2.25,
-    })
+    }, true)
   })
 
   it('writes nothing when the clip has no source to trim against', () => {
@@ -275,7 +282,9 @@ describe('useTrimDrag ripple', () => {
     release()
 
     // The clip's end moved from 4s to 5s, so everything after 4s follows it.
-    expect(actions.shiftClipsAfter).toHaveBeenCalledWith(trackA, 4, 1)
+    // `true`: the shift is part of the trim that produced it, whose first
+    // mousemove already pushed the entry both halves undo to (ESCSUITE-77).
+    expect(actions.shiftClipsAfter).toHaveBeenCalledWith(trackA, 4, 1, true)
     expect(theClip('clip2').timelinePosition).toBe(7)
   })
 
@@ -313,5 +322,113 @@ describe('useTrimDrag ripple', () => {
 
     expect(actions.shiftClipsAfter).not.toHaveBeenCalled()
     expect(theClip('clip2').timelinePosition).toBe(6)
+  })
+})
+
+describe('useTrimDrag and the undo stack', () => {
+  /** How many undo entries the stack holds right now. */
+  const past = () => useEditorStore.getState().history.past.length
+
+  it('records one entry for a whole trim, not one per mousemove', () => {
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+    const before = past()
+
+    for (const seconds of [4.2, 4.4, 4.6, 4.8, 5]) moveTo(seconds)
+    release()
+
+    // The trim really ran, all five moves of it — otherwise "one entry" would
+    // pass by writing nothing at all.
+    expect(actions.updateClip).toHaveBeenCalledTimes(5)
+    expect(theClip('clip1').endTime).toBe(3)
+    expect(past() - before).toBe(1)
+  })
+
+  it('pushes on the first write of the gesture and skips every one after it', () => {
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+
+    moveTo(4.5)
+    moveTo(5)
+
+    expect(actions.updateClip).toHaveBeenNthCalledWith(1, 'clip1', { endTime: 2.5 }, false)
+    expect(actions.updateClip).toHaveBeenNthCalledWith(2, 'clip1', { endTime: 3 }, true)
+  })
+
+  it('undoes the whole trim, back to the in and out points it started at', () => {
+    const { result } = mountTrim()
+    grabEdge(result, 'start')
+
+    moveTo(2.5)
+    moveTo(3)
+    release()
+    expect(theClip('clip1')).toMatchObject({ startTime: 1, timelinePosition: 3 })
+
+    store().undo()
+
+    // The entry was captured before the first write, so one undo lands on the
+    // clip as it was grabbed and not on the last frame the drag passed through.
+    expect(theClip('clip1')).toMatchObject({ startTime: 0, endTime: 2, timelinePosition: 2 })
+  })
+
+  it('records two entries for two separate trims', () => {
+    const { result } = mountTrim()
+    const before = past()
+
+    grabEdge(result, 'end')
+    for (const seconds of [4.2, 4.4, 4.5]) moveTo(seconds)
+    release()
+    grabEdge(result, 'end')
+    for (const seconds of [4.7, 4.9, 5]) moveTo(seconds)
+    release()
+
+    expect(theClip('clip1').endTime).toBe(3)
+    expect(past() - before).toBe(2)
+  })
+
+  it('records one entry for a ripple trim, the downstream shift included', () => {
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+    const before = past()
+
+    for (const seconds of [4.2, 4.4, 4.6, 4.8, 5]) moveTo(seconds)
+    release()
+
+    // Both halves of the gesture really happened: the clip grew and the clip
+    // behind it moved out of the way.
+    expect(theClip('clip1').endTime).toBe(3)
+    expect(theClip('clip2').timelinePosition).toBe(7)
+    expect(past() - before).toBe(1)
+
+    store().undo()
+
+    // One Ctrl+Z, and neither half is left behind. The release's
+    // `shiftClipsAfter` used to push an entry of its own, so the first undo slid
+    // the downstream clips back and left the clip trimmed — a state the user had
+    // never seen.
+    expect(theClip('clip1')).toMatchObject({ endTime: 2, timelinePosition: 2 })
+    expect(theClip('clip2').timelinePosition).toBe(6)
+  })
+
+  it('hands the first-write slot on when the opening move is refused', () => {
+    // An image clip's end trim is refused below MIN_CLIP_DURATION, so the first
+    // move of this gesture writes nothing at all. The flag is decided where the
+    // write happens rather than at the move that asks for one, so the write that
+    // does land is still the gesture's first and still pushes — a trim whose
+    // opening move was rejected must stay undoable.
+    store().addSourceVideo({ ...video, id: 'still', mediaType: 'image' })
+    store().updateClip('clip1', { sourceVideoId: 'still' })
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+    const before = past()
+
+    moveTo(2.05)
+    moveTo(5)
+    release()
+
+    expect(actions.updateClip).toHaveBeenCalledTimes(1)
+    expect(actions.updateClip).toHaveBeenCalledWith('clip1', { duration: 3, endTime: 3 }, false)
+    expect(past() - before).toBe(1)
   })
 })

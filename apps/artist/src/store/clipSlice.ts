@@ -249,8 +249,16 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  // Shift all clips on a track that are after a certain time by a delta amount
-  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => set((state) => {
+  // Shift all clips on a track that are after a certain time by a delta amount.
+  //
+  // `skipHistory` as on `updateClipTransform` and the rest (ESCSUITE-77). Its one
+  // production caller is a ripple trim, which calls it once on release after a
+  // drag that has already pushed its entry — and pushing a second one made one
+  // gesture two undo steps: the first Ctrl+Z slid the downstream clips back and
+  // left the clip trimmed, a state the user had never seen. Optional and last, so
+  // a call that omits it is one undo step exactly as before; `rippleDeleteClip`
+  // does its own shifting inside one `set` and does not come through here.
+  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => set((state) => {
     if (delta === 0) return state;
 
     const newClips = state.project.timeline.clips.map((clip) => {
@@ -274,7 +282,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           duration: calculateTimelineDuration(newClips),
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 
@@ -459,7 +467,11 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>) => set((state) => {
+  // `skipHistory` as on `updateClipTransform`, `updateClip` and
+  // `updateClipEffects` (ESCSUITE-77 finishing ESCSUITE-75): the Transition Out
+  // section's duration slider writes on every `input` event, so the gesture's
+  // first write pushes the undo entry and the rest of the drag passes `true`.
+  updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       // Seed from DEFAULT_TRANSITION the way updateClipAnimation seeds from DEFAULT_ANIMATION:
@@ -480,11 +492,15 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           clips: newClips,
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 
-  updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>) => set((state) => {
+  // `skipHistory` again (ESCSUITE-77): the Animation section's two duration
+  // sliders, Animate In and Animate Out, write on every `input` event. The
+  // preset and easing selects reach this action too and never pass the flag, so
+  // they keep their own entry each.
+  updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION };
@@ -510,7 +526,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           clips: newClips,
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 
