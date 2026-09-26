@@ -94,9 +94,14 @@ interface KeyframeGraphKeyboardOptions {
    * `skipHistory` is the keydown's own `repeat` flag: false for the first press
    * of a key, true for every auto-repeat while it is held. The host passes it
    * straight to the store, which makes one held key one undo step.
+   *
+   * Both **return whether the edit landed** (ESCSUITE-87). The store refuses an
+   * edit to a clip on a locked track, and a nudge that wrote nothing must not
+   * announce a change that did not happen or move the selection to a time no
+   * keyframe occupies.
    */
-  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory: boolean) => void;
-  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory: boolean) => void;
+  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory: boolean) => boolean;
+  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory: boolean) => boolean;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
   onDeleteKeyframe?: (property: AnimatableProperty, time: number) => void;
 }
@@ -196,7 +201,11 @@ export function useKeyframeGraphKeyboard({
     // nothing to say. The key stays swallowed: the caller has already claimed
     // it.
     if (newValue === selectedKeyframe.value) return;
-    onKeyframeValueChanged(property, selectedKeyframe.time, newValue, repeat);
+    // A refused write is not an edit either (ESCSUITE-87): the clip is on a
+    // locked track, nothing changed, and the live region must not say otherwise.
+    // Silent, like every other refusal the lock produces; the key stays
+    // swallowed, because the graph still owns it.
+    if (!onKeyframeValueChanged(property, selectedKeyframe.time, newValue, repeat)) return;
     announce(nudgeAnnouncement(property, newValue, selectedKeyframe.time));
   }, [selectedKeyframe, property, range, onKeyframeValueChanged, announce]);
 
@@ -227,7 +236,10 @@ export function useKeyframeGraphKeyboard({
       );
       return;
     }
-    onKeyframeMoved(property, selectedKeyframe.time, newTime, repeat);
+    // Refused by the store (a locked track): nothing moved, so the active
+    // option and the selection stay on the keyframe where it still is, and
+    // nothing is announced (ESCSUITE-87).
+    if (!onKeyframeMoved(property, selectedKeyframe.time, newTime, repeat)) return;
     // The keyframe lives at newTime now, so the active option and the selection
     // follow it — exactly what the drag's mouseup does.
     setActiveTime(newTime);

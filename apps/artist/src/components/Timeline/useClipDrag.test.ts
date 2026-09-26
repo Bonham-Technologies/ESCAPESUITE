@@ -607,6 +607,31 @@ describe('useClipDrag and the undo stack', () => {
     expect(past() - before).toBe(1)
   })
 
+  // ESCSUITE-87. The commit's two writes were "move the row, then move the
+  // time", the second carrying `skipHistory` because the first had pushed the
+  // entry. If the first is refused — the row is locked, or has left the timeline
+  // — there is no entry, and moving the clip in time on its OLD row would be a
+  // half-drop nobody asked for, carrying `skipHistory` for an entry that was
+  // never pushed. So the commit does nothing at all.
+  it('commits nothing when the row refuses the clip', () => {
+    store().setSnapEnabled(false)
+    // The store's own veto is unreachable here — `trackRefusesDrop` catches a
+    // locked row first — so the refusal is injected at the dependency, which is
+    // exactly what the hook is given in production.
+    actions.moveClipToTrack = vi.fn(() => false)
+    const { result } = mountDrag()
+    grabClip1(result)
+    const before = past()
+
+    move(pointerFor(4), 80)
+    release()
+
+    expect(actions.moveClipToTrack).toHaveBeenCalledWith('clip1', trackB)
+    expect(actions.setClipTimelinePosition).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(past() - before).toBe(0)
+  })
+
   it('records one entry for a bulk move of a multi-selection', () => {
     store().setSnapEnabled(false)
     store().selectClipsInRange(['clip1', 'clip2'])

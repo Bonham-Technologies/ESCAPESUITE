@@ -453,4 +453,31 @@ describe('useTrimDrag and the undo stack', () => {
     expect(actions.updateClip).toHaveBeenCalledWith('clip1', { duration: 3, endTime: 3 }, false)
     expect(past() - before).toBe(1)
   })
+
+  it('hands the first-write slot on when the STORE refused the opening write (ESCSUITE-87)', () => {
+    // The move was fine and the write reached the store, which refused it: the
+    // clip's row is locked (ESCSUITE-84), so nothing was written and no entry
+    // pushed. The gesture therefore still owes one, and the write that lands
+    // after the row is unlocked is the one that pays it. A gesture that had
+    // marked itself pushed on the refusal would leave the whole trim off the
+    // undo stack.
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+    act(() => store().updateTrack(trackA, { locked: true }))
+
+    moveTo(4.5)
+
+    expect(theClip('clip1').endTime).toBe(2)
+
+    act(() => store().updateTrack(trackA, { locked: false }))
+    const before = past()
+
+    moveTo(5)
+    release()
+
+    expect(actions.updateClip).toHaveBeenNthCalledWith(1, 'clip1', { endTime: 2.5 }, false)
+    expect(actions.updateClip).toHaveBeenNthCalledWith(2, 'clip1', { endTime: 3 }, false)
+    expect(theClip('clip1').endTime).toBe(3)
+    expect(past() - before).toBe(1)
+  })
 })

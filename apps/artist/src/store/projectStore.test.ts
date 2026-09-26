@@ -482,18 +482,33 @@ describe('projectStore integration', () => {
         expect(clip).toBeNull()
       })
 
-      it('refuses to update text overlay data once its track is locked', () => {
+      it('refuses to update text overlay data once its track is locked, and says so', () => {
         const clip = useEditorStore.getState().addTextOverlayClip({ text: 'Hi' })!
         useEditorStore.getState().updateTrack(clip.trackId, { locked: true })
 
-        refuses(() => useEditorStore.getState().updateTextOverlayData(clip.id, { text: 'Bye' }))
+        // ESCSUITE-87: `false` back to the caller, not just an untouched state.
+        refuses(() => expect(
+          useEditorStore.getState().updateTextOverlayData(clip.id, { text: 'Bye' })
+        ).toBe(false))
       })
 
-      it('refuses to update shape overlay data once its track is locked', () => {
+      it('refuses to update shape overlay data once its track is locked, and says so', () => {
         const clip = useEditorStore.getState().addShapeOverlayClip({ type: 'rectangle' })!
         useEditorStore.getState().updateTrack(clip.trackId, { locked: true })
 
-        refuses(() => useEditorStore.getState().updateShapeOverlayData(clip.id, { fillColor: '#ff0000ff' }))
+        refuses(() => expect(
+          useEditorStore.getState().updateShapeOverlayData(clip.id, { fillColor: '#ff0000ff' })
+        ).toBe(false))
+      })
+
+      // ESCSUITE-87's other half: a write that landed reports `true`, so a
+      // gesture can tell the two apart.
+      it('reports true when the overlay data really was written', () => {
+        const text = useEditorStore.getState().addTextOverlayClip({ text: 'Hi' })!
+        const shape = useEditorStore.getState().addShapeOverlayClip({ type: 'rectangle' })!
+
+        expect(useEditorStore.getState().updateTextOverlayData(text.id, { text: 'Bye' })).toBe(true)
+        expect(useEditorStore.getState().updateShapeOverlayData(shape.id, { fillColor: '#ff0000ff' })).toBe(true)
       })
 
       it('lands a text overlay on a new track when the only empty track is locked', () => {

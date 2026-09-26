@@ -20,13 +20,19 @@ import {
 
 export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
 
-export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (set) => ({
+export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (set, get) => ({
   // Clip actions
   // ESCSUITE-84: a locked track's contents are frozen. Every mutating action
   // below asks `trackLock.ts`'s questions before touching state, and returns
   // `state` unchanged (no new clips array, no history entry) when the answer
   // is yes — see the spec at
   // .superpowers/sdd/2026-09-26-escsuite-84-track-lock/.
+  //
+  // ESCSUITE-87: the actions a gesture threads `skipHistory` through *report*
+  // that refusal. Their lock guard therefore sits before the `set` and reads
+  // through `get()` — the store's own state, the same way `addTrack` reads it —
+  // so the action can answer `false` without writing, and `true` once the `set`
+  // has run. See the shared doc comment on `EditorState` in `types.ts`.
   addClipToTimeline: (clipData, trackId?, position?) => set((state) => {
     // Only an explicit id can be locked — findEmptyTrack already skips locked
     // tracks (Task 1), so an omitted trackId can never land on one.
@@ -269,71 +275,85 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // left the clip trimmed, a state the user had never seen. Optional and last, so
   // a call that omits it is one undo step exactly as before; `rippleDeleteClip`
   // does its own shifting inside one `set` and does not come through here.
-  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => set((state) => {
-    if (delta === 0) return state;
+  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => {
+    // Nothing shifted is nothing written, so `false` — the same answer a lock
+    // gives, for the same reason (ESCSUITE-87): there is no undo entry here for
+    // a later write of the gesture to join.
+    if (delta === 0) return false;
 
     // A locked track holds its clips where they are (ESCSUITE-84). One row is
     // the whole question here: the shift below only moves clips whose
     // `trackId` matches, so an undefined `trackId` moves nothing and has
     // nothing to refuse.
-    if (isTrackLocked(state.project.timeline.tracks, trackId)) return state; // ESCSUITE-84
+    const { tracks } = get().project.timeline;
+    if (isTrackLocked(tracks, trackId)) return false; // ESCSUITE-84
 
-    const newClips = state.project.timeline.clips.map((clip) => {
-      // Shift clips on the same track that start at or after the given time
-      if (clip.trackId === trackId && clip.timelinePosition >= afterTime) {
-        return {
-          ...clip,
-          timelinePosition: Math.max(0, clip.timelinePosition + delta),
-        };
-      }
-      return clip;
+    set((state) => {
+      const newClips = state.project.timeline.clips.map((clip) => {
+        // Shift clips on the same track that start at or after the given time
+        if (clip.trackId === trackId && clip.timelinePosition >= afterTime) {
+          return {
+            ...clip,
+            timelinePosition: Math.max(0, clip.timelinePosition + delta),
+          };
+        }
+        return clip;
+      });
+
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+            duration: calculateTimelineDuration(newClips),
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
+      };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-          duration: calculateTimelineDuration(newClips),
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   // `skipHistory` is `updateClipTransform`'s flag, in the same shape and for the
   // same reason (ESCSUITE-75): the inspector's mask and stroke sliders write on
   // every `input` event, so the gesture's first write pushes the undo entry and
   // the rest of the drag passes `true`. Optional and last, so every existing
   // caller is a single undo step exactly as before.
-  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map((clip) => {
-      if (clip.id !== clipId) return clip;
+  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
 
-      const updated = { ...clip, ...updates };
-      // Recalculate duration if start/end times changed
-      if (updates.startTime !== undefined || updates.endTime !== undefined) {
-        updated.duration = updated.endTime - updated.startTime;
-      }
-      return updated;
+    set((state) => {
+      const newClips = state.project.timeline.clips.map((clip) => {
+        if (clip.id !== clipId) return clip;
+
+        const updated = { ...clip, ...updates };
+        // Recalculate duration if start/end times changed
+        if (updates.startTime !== undefined || updates.endTime !== undefined) {
+          updated.duration = updated.endTime - updated.startTime;
+        }
+        return updated;
+      });
+
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+            duration: calculateTimelineDuration(newClips),
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
+      };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-          duration: calculateTimelineDuration(newClips),
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   splitClip: (clipId: string, splitTime: number) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
@@ -384,25 +404,31 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  moveClipToTrack: (clipId: string, trackId: string) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    if (isTrackLocked(state.project.timeline.tracks, trackId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip =>
-      clip.id === clipId ? { ...clip, trackId } : clip
-    );
+  moveClipToTrack: (clipId: string, trackId: string) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (isTrackLocked(tracks, trackId)) return false; // ESCSUITE-84
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip =>
+        clip.id === clipId ? { ...clip, trackId } : clip
+      );
+
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
         },
-      },
-      history: pushToHistory(state),
-    };
-  }),
+        history: pushToHistory(state),
+      };
+    });
+
+    return true;
+  },
 
   // `skipHistory` as on `updateClip`, `shiftClipsAfter` and the rest
   // (ESCSUITE-79). Its one production caller is the clip drag's commit, which
@@ -412,48 +438,60 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // steps, the first Ctrl+Z putting the time back and leaving the clip on its new
   // row, a state the user had never seen. Optional and last, so a call that omits
   // it is one undo step exactly as before.
-  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip =>
-      clip.id === clipId ? { ...clip, timelinePosition: Math.max(0, position) } : clip
-    );
+  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-          duration: calculateTimelineDuration(newClips),
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip =>
+        clip.id === clipId ? { ...clip, timelinePosition: Math.max(0, position) } : clip
+      );
 
-  updateClipTransform: (clipId: string, transformUpdates: Partial<ClipTransform>, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
       return {
-        ...clip,
-        transform: { ...clip.transform, ...transformUpdates },
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+            duration: calculateTimelineDuration(newClips),
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
+    return true;
+  },
+
+  updateClipTransform: (clipId: string, transformUpdates: Partial<ClipTransform>, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        return {
+          ...clip,
+          transform: { ...clip.transform, ...transformUpdates },
+        };
+      });
+
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
         },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+        history: skipHistory ? state.history : pushToHistory(state),
+      };
+    });
+
+    return true;
+  },
 
   updateClipBlendMode: (clipId: string, blendMode: BlendMode) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
@@ -477,93 +515,111 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // `skipHistory` as on `updateClipTransform` and `updateClip` (ESCSUITE-75):
   // the Effects section's blur slider steps in halves from 0 to 50, so a full
   // drag is around a hundred writes and exactly one undo entry.
-  updateClipEffects: (clipId: string, effectsUpdates: Partial<ClipEffects>, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
+  updateClipEffects: (clipId: string, effectsUpdates: Partial<ClipEffects>, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        return {
+          ...clip,
+          effects: { ...clip.effects, ...effectsUpdates },
+        };
+      });
+
       return {
-        ...clip,
-        effects: { ...clip.effects, ...effectsUpdates },
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   // `skipHistory` as on `updateClipTransform`, `updateClip` and
   // `updateClipEffects` (ESCSUITE-77 finishing ESCSUITE-75): the Transition Out
   // section's duration slider writes on every `input` event, so the gesture's
   // first write pushes the undo entry and the rest of the drag passes `true`.
-  updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
-      // Seed from DEFAULT_TRANSITION the way updateClipAnimation seeds from DEFAULT_ANIMATION:
-      // a clip loaded from a foreign project file can be missing `transition` entirely, and a
-      // half-written `{ type }` with no duration crashes TransitionSection's `duration.toFixed(1)`.
+  updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        // Seed from DEFAULT_TRANSITION the way updateClipAnimation seeds from DEFAULT_ANIMATION:
+        // a clip loaded from a foreign project file can be missing `transition` entirely, and a
+        // half-written `{ type }` with no duration crashes TransitionSection's `duration.toFixed(1)`.
+        return {
+          ...clip,
+          transition: { ...DEFAULT_TRANSITION, ...clip.transition, ...transitionUpdates },
+        };
+      });
+
       return {
-        ...clip,
-        transition: { ...DEFAULT_TRANSITION, ...clip.transition, ...transitionUpdates },
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   // `skipHistory` again (ESCSUITE-77): the Animation section's two duration
   // sliders, Animate In and Animate Out, write on every `input` event. The
   // preset and easing selects reach this action too and never pass the flag, so
   // they keep their own entry each.
-  updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
-      const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION };
+  updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION };
+        return {
+          ...clip,
+          animation: {
+            ...currentAnimation,
+            ...animationUpdates,
+            // Deep merge in/out if provided
+            in: animationUpdates.in ? { ...currentAnimation.in, ...animationUpdates.in } : currentAnimation.in,
+            out: animationUpdates.out ? { ...currentAnimation.out, ...animationUpdates.out } : currentAnimation.out,
+            keyframes: animationUpdates.keyframes !== undefined ? animationUpdates.keyframes : currentAnimation.keyframes,
+          },
+        };
+      });
+
       return {
-        ...clip,
-        animation: {
-          ...currentAnimation,
-          ...animationUpdates,
-          // Deep merge in/out if provided
-          in: animationUpdates.in ? { ...currentAnimation.in, ...animationUpdates.in } : currentAnimation.in,
-          out: animationUpdates.out ? { ...currentAnimation.out, ...animationUpdates.out } : currentAnimation.out,
-          keyframes: animationUpdates.keyframes !== undefined ? animationUpdates.keyframes : currentAnimation.keyframes,
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
         },
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   duplicateClip: (clipId: string) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84

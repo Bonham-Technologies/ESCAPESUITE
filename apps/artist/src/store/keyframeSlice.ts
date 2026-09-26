@@ -9,6 +9,12 @@
 // undo entry is pushed. The keyframe graph's keyboard passes the keydown's own
 // `repeat` flag there, which makes a held arrow key one undo step rather than
 // one per auto-repeat.
+//
+// Those two therefore also **report whether they wrote** (ESCSUITE-87): their
+// lock guard sits before the `set` and reads through `get()`, they answer `false`
+// when it refuses and `true` otherwise, so a caller threading `skipHistory` into
+// a later write can tell that its first one never landed. See the shared doc
+// comment on `EditorState` in `types.ts`.
 
 import type { StateCreator } from 'zustand';
 import type { EditorState, ClipTransform, AnimatableProperty, Keyframe } from './types';
@@ -18,7 +24,7 @@ import { clipOnLockedTrack } from './trackLock';
 
 export type KeyframeSlice = Pick<EditorState, 'keyframePanelState' | 'setClipKeyframe' | 'removeClipKeyframe' | 'moveClipKeyframe' | 'clearClipKeyframes' | 'setKeyframePanelOpen' | 'setKeyframePanelPosition' | 'setKeyframePanelSize' | 'setKeyframePanelSelectedProperty' | 'setKeyframePanelZoom'>;
 
-export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlice> = (set) => ({
+export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlice> = (set, get) => ({
   keyframePanelState: DEFAULT_KEYFRAME_PANEL_STATE,
 
   // ESCSUITE-84: a locked track's contents are frozen. Every one of the four
@@ -26,87 +32,93 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   // returns `state` unchanged when the clip is on a locked track — the five
   // panel-UI setters below them are untouched, since they hold no clip id. See
   // the spec at .superpowers/sdd/2026-09-26-escsuite-84-track-lock/.
-  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
-      const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION, keyframes: {} };
-      const currentKeyframes = currentAnimation.keyframes[property] || [];
+  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
 
-      // Check if keyframe exists at this time (within tolerance)
-      const existingIndex = currentKeyframes.findIndex(kf => Math.abs(kf.time - keyframe.time) < 0.001);
-      let newKeyframes: Keyframe[];
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION, keyframes: {} };
+        const currentKeyframes = currentAnimation.keyframes[property] || [];
 
-      if (existingIndex >= 0) {
-        // Replace existing keyframe
-        newKeyframes = [...currentKeyframes];
-        newKeyframes[existingIndex] = keyframe;
-      } else {
-        // Add new keyframe and sort by time
-        newKeyframes = [...currentKeyframes, keyframe].sort((a, b) => a.time - b.time);
-      }
+        // Check if keyframe exists at this time (within tolerance)
+        const existingIndex = currentKeyframes.findIndex(kf => Math.abs(kf.time - keyframe.time) < 0.001);
+        let newKeyframes: Keyframe[];
 
-      // AUTO-CREATE START KEYFRAME: If this is the first keyframe for this property
-      // and it's not at time 0, create a keyframe at time 0 with the base value.
-      // This ensures there's always a "from" value to animate from.
-      const hasKeyframeAtZero = newKeyframes.some(kf => Math.abs(kf.time) < 0.001);
-      if (!hasKeyframeAtZero && newKeyframes.length > 0) {
-        // Get the base value for this property from the clip's transform/effects/overlayData
-        let baseValue: number;
-        if (property === 'blur') {
-          baseValue = clip.effects?.blur ?? 0;
-        } else if (property === 'volume') {
-          // Volume default is 1 (100%)
-          baseValue = 1;
-        } else if (clip.textData && (property === 'x' || property === 'y' || property === 'rotation')) {
-          // Text overlay - get from textData
-          if (property === 'rotation') {
-            baseValue = clip.textData.rotation ?? 0;
-          } else {
-            baseValue = clip.textData[property];
-          }
-        } else if (clip.shapeData && (property === 'x' || property === 'y' || property === 'rotation')) {
-          // Shape overlay - get from shapeData
-          baseValue = clip.shapeData[property];
+        if (existingIndex >= 0) {
+          // Replace existing keyframe
+          newKeyframes = [...currentKeyframes];
+          newKeyframes[existingIndex] = keyframe;
         } else {
-          // Video/image clip - get from transform
-          baseValue = clip.transform[property as keyof ClipTransform] as number;
+          // Add new keyframe and sort by time
+          newKeyframes = [...currentKeyframes, keyframe].sort((a, b) => a.time - b.time);
         }
 
-        // Insert keyframe at time 0 with base value
-        newKeyframes.unshift({
-          time: 0,
-          value: baseValue,
-          easing: 'ease-out',
-        });
-      }
+        // AUTO-CREATE START KEYFRAME: If this is the first keyframe for this property
+        // and it's not at time 0, create a keyframe at time 0 with the base value.
+        // This ensures there's always a "from" value to animate from.
+        const hasKeyframeAtZero = newKeyframes.some(kf => Math.abs(kf.time) < 0.001);
+        if (!hasKeyframeAtZero && newKeyframes.length > 0) {
+          // Get the base value for this property from the clip's transform/effects/overlayData
+          let baseValue: number;
+          if (property === 'blur') {
+            baseValue = clip.effects?.blur ?? 0;
+          } else if (property === 'volume') {
+            // Volume default is 1 (100%)
+            baseValue = 1;
+          } else if (clip.textData && (property === 'x' || property === 'y' || property === 'rotation')) {
+            // Text overlay - get from textData
+            if (property === 'rotation') {
+              baseValue = clip.textData.rotation ?? 0;
+            } else {
+              baseValue = clip.textData[property];
+            }
+          } else if (clip.shapeData && (property === 'x' || property === 'y' || property === 'rotation')) {
+            // Shape overlay - get from shapeData
+            baseValue = clip.shapeData[property];
+          } else {
+            // Video/image clip - get from transform
+            baseValue = clip.transform[property as keyof ClipTransform] as number;
+          }
+
+          // Insert keyframe at time 0 with base value
+          newKeyframes.unshift({
+            time: 0,
+            value: baseValue,
+            easing: 'ease-out',
+          });
+        }
+
+        return {
+          ...clip,
+          animation: {
+            ...currentAnimation,
+            keyframes: {
+              ...currentAnimation.keyframes,
+              [property]: newKeyframes,
+            },
+          },
+        };
+      });
 
       return {
-        ...clip,
-        animation: {
-          ...currentAnimation,
-          keyframes: {
-            ...currentAnimation.keyframes,
-            [property]: newKeyframes,
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
           },
         },
+        // Same flag, and the same shape, as updateClipTransform's: a run of edits
+        // the caller wants collapsed pushes on its first call and skips the rest.
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      // Same flag, and the same shape, as updateClipTransform's: a run of edits
-      // the caller wants collapsed pushes on its first call and skips the rest.
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
@@ -145,52 +157,58 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
     };
   }),
 
-  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
-      const currentAnimation = clip.animation;
-      if (!currentAnimation) return clip;
+  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
 
-      const currentKeyframes = currentAnimation.keyframes[property];
-      if (!currentKeyframes) return clip;
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        const currentAnimation = clip.animation;
+        if (!currentAnimation) return clip;
 
-      // Find the keyframe to move
-      const keyframeToMove = currentKeyframes.find(kf => Math.abs(kf.time - originalTime) < 0.001);
-      if (!keyframeToMove) return clip;
+        const currentKeyframes = currentAnimation.keyframes[property];
+        if (!currentKeyframes) return clip;
 
-      // Remove any existing keyframe at the new time, then update the moved keyframe's time
-      const newKeyframes = currentKeyframes
-        .filter(kf => Math.abs(kf.time - originalTime) >= 0.001 && Math.abs(kf.time - newTime) >= 0.001)
-        .concat({ ...keyframeToMove, time: newTime })
-        .sort((a, b) => a.time - b.time);
+        // Find the keyframe to move
+        const keyframeToMove = currentKeyframes.find(kf => Math.abs(kf.time - originalTime) < 0.001);
+        if (!keyframeToMove) return clip;
+
+        // Remove any existing keyframe at the new time, then update the moved keyframe's time
+        const newKeyframes = currentKeyframes
+          .filter(kf => Math.abs(kf.time - originalTime) >= 0.001 && Math.abs(kf.time - newTime) >= 0.001)
+          .concat({ ...keyframeToMove, time: newTime })
+          .sort((a, b) => a.time - b.time);
+
+        return {
+          ...clip,
+          animation: {
+            ...currentAnimation,
+            keyframes: {
+              ...currentAnimation.keyframes,
+              [property]: newKeyframes,
+            },
+          },
+        };
+      });
 
       return {
-        ...clip,
-        animation: {
-          ...currentAnimation,
-          keyframes: {
-            ...currentAnimation.keyframes,
-            [property]: newKeyframes,
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
           },
         },
+        // Same skipHistory contract as setClipKeyframe above: an Alt+Arrow run
+        // held down is one undo step, not one per auto-repeat.
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      // Same skipHistory contract as setClipKeyframe above: an Alt+Arrow run
-      // held down is one undo step, not one per auto-repeat.
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84

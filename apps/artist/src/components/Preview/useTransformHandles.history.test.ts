@@ -226,6 +226,51 @@ describe('preview drags and the undo stack', () => {
     expect(past()).toBe(before)
   })
 
+  // ESCSUITE-87. "The first write pushes" has to mean the first write that
+  // LANDED. A clip on a locked row refuses the write and pushes nothing
+  // (ESCSUITE-84), and the preview lets the drag start anyway — nothing moves,
+  // which is the refusal being visible. A gesture that marked itself pushed on
+  // that refused write would then hand `skipHistory` to the write that did land
+  // and leave the whole drag off the undo stack.
+  it('pushes the entry on the first write that lands, when a locked row refused the first', async () => {
+    const shape = addShape()
+    const trackId = clipOf(shape.id).trackId
+    store().updateTrack(trackId, { locked: true })
+
+    const preview = await renderPreview()
+    const before = past()
+
+    fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
+    await settle()
+    fireEvent.mouseMove(window, preview.at(960 + STEP, 540))
+    await settle(FRAME_MS)
+
+    // Refused: the shape has not moved, and there is no entry for the rest of
+    // the drag to join.
+    expect(clipOf(shape.id).shapeData!.x).toBeCloseTo(0.5, 5)
+    expect(past()).toBe(before)
+
+    // The row is unlocked while the button is still down.
+    store().updateTrack(trackId, { locked: false })
+    const unlocked = past()
+
+    fireEvent.mouseMove(window, preview.at(960 + 2 * STEP, 540))
+    await settle(FRAME_MS)
+    fireEvent.mouseMove(window, preview.at(960 + 3 * STEP, 540))
+    await settle(FRAME_MS)
+    fireEvent.mouseUp(window)
+    await settle(FRAME_MS)
+
+    // Three steps right of where the press measured it, and one entry — pushed
+    // by the write that landed, so it holds the shape where the drag found it.
+    expect(clipOf(shape.id).shapeData!.x).toBeCloseTo(0.53, 5)
+    expect(past()).toBe(unlocked + 1)
+
+    store().undo()
+
+    expect(clipOf(shape.id).shapeData!.x).toBeCloseTo(0.5, 5)
+  })
+
   it('gives two consecutive drags an entry each', async () => {
     addShape()
 

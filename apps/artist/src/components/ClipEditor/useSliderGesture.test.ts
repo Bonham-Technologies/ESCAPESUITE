@@ -1,9 +1,14 @@
-// The slider gesture's contract, read directly (ESCSUITE-75).
+// The slider gesture's contract, read directly (ESCSUITE-75, ESCSUITE-87).
 //
 // `ClipEditor.sliderHistory.test.tsx` proves the rule end to end, through the
 // real panel and the real store. This file states it as the hook's own contract,
 // so the answer for a given event sequence can be read without a DOM: which
 // writes are told to skip history, and which are not.
+//
+// The shared mechanism's own contract — what a *refused* write does to the flag
+// — is `hooks/useGestureHistory.test.ts`. What this file adds is the mapping
+// from DOM events to `begin`/`resume`/`end`, and one refusal case to prove the
+// hook really delegates rather than keeping a flag of its own.
 import { describe, it, expect } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useSliderGesture } from './useSliderGesture'
@@ -14,8 +19,26 @@ function gesture() {
   return {
     /** The listeners a slider would carry. */
     on: () => result.current.handlers,
-    /** One write: the `skipHistory` flag it is handed. */
-    write: () => result.current.skipHistoryForWrite(),
+    /** One write that lands: the `skipHistory` flag it is handed. */
+    write: () => {
+      let seen = false
+      result.current.commit((skipHistory) => {
+        seen = skipHistory
+        return true
+      })
+      return seen
+    },
+    /** One write the store refused: the flag it was handed. */
+    refusedWrite: () => {
+      let seen = false
+      result.current.commit((skipHistory) => {
+        seen = skipHistory
+        return false
+      })
+      return seen
+    },
+    /** `commit`'s own return value, for a write that answers `answer`. */
+    commit: (answer: boolean) => result.current.commit(() => answer),
   }
 }
 
@@ -35,6 +58,28 @@ describe('useSliderGesture', () => {
     expect(write()).toBe(false)
     expect(write()).toBe(true)
     expect(write()).toBe(true)
+  })
+
+  it('gives the next write the push when the first one was refused', () => {
+    const { on, write, refusedWrite } = gesture()
+
+    on().onPointerDown()
+
+    // The clip's track was locked when this write reached the store, so it
+    // wrote nothing and pushed nothing — the gesture still owes an entry
+    // (ESCSUITE-87).
+    expect(refusedWrite()).toBe(false)
+    expect(write()).toBe(false)
+    expect(write()).toBe(true)
+  })
+
+  it('hands the answer of the write back to the caller', () => {
+    const { on, commit } = gesture()
+
+    on().onPointerDown()
+
+    expect(commit(true)).toBe(true)
+    expect(commit(false)).toBe(false)
   })
 
   it('starts a new entry for the next drag, after the release', () => {
@@ -128,6 +173,6 @@ describe('useSliderGesture', () => {
     // The sections spread these onto their inputs; a fresh object per render
     // would make every slider's props change on every render of the panel.
     expect(result.current.handlers).toBe(first.handlers)
-    expect(result.current.skipHistoryForWrite).toBe(first.skipHistoryForWrite)
+    expect(result.current.commit).toBe(first.commit)
   })
 })

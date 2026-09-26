@@ -20,6 +20,11 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   // explicit locked track and both `update*OverlayData` actions refuse a clip
   // already on one — see the spec at
   // .superpowers/sdd/2026-09-26-escsuite-84-track-lock/.
+  //
+  // ESCSUITE-87: the two `update*OverlayData` actions, which a preview drag and
+  // the inspector's sliders thread `skipHistory` through, guard before their
+  // `set` and report `false` when that guard refuses. See the shared doc comment
+  // on `EditorState` in `types.ts`.
   addTextOverlayClip: (textData?, trackId?, position?, duration?) => {
     const state = get();
     // An explicit locked track takes nothing (ESCSUITE-84); with no track named,
@@ -154,52 +159,64 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
     return newClip;
   },
 
-  updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId || clip.overlayType !== 'text') return clip;
+  updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId || clip.overlayType !== 'text') return clip;
+        return {
+          ...clip,
+          textData: { ...clip.textData!, ...textData },
+          name: textData.text ?? clip.name, // Update name if text changes
+        };
+      });
+
       return {
-        ...clip,
-        textData: { ...clip.textData!, ...textData },
-        name: textData.text ?? clip.name, // Update name if text changes
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
-  updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId || clip.overlayType !== 'shape') return clip;
-      const updatedData = { ...clip.shapeData!, ...shapeData };
+  updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId || clip.overlayType !== 'shape') return clip;
+        const updatedData = { ...clip.shapeData!, ...shapeData };
+        return {
+          ...clip,
+          shapeData: updatedData,
+          name: shapeData.type ? shapeData.type.charAt(0).toUpperCase() + shapeData.type.slice(1) : clip.name,
+        };
+      });
+
       return {
-        ...clip,
-        shapeData: updatedData,
-        name: shapeData.type ? shapeData.type.charAt(0).toUpperCase() + shapeData.type.slice(1) : clip.name,
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      history: skipHistory ? state.history : pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 });

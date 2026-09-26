@@ -126,10 +126,12 @@ export function KeyframePanel() {
     originalTime: number,
     newTime: number,
     skipHistory?: boolean
-  ) => {
-    if (selectedClipId) {
-      moveClipKeyframe(selectedClipId, property, originalTime, newTime, skipHistory);
-    }
+  ): boolean => {
+    // Whether the store wrote (ESCSUITE-87), straight through: the graph's
+    // keyboard will not announce a nudge the lock refused. No selection is no
+    // write either.
+    if (!selectedClipId) return false;
+    return moveClipKeyframe(selectedClipId, property, originalTime, newTime, skipHistory);
   }, [selectedClipId, moveClipKeyframe]);
 
   // Handle add keyframe (with optional value)
@@ -166,8 +168,9 @@ export function KeyframePanel() {
     time: number,
     newValue: number,
     skipHistory?: boolean
-  ) => {
-    if (!selectedClipId) return;
+  ): boolean => {
+    // As `handleKeyframeMoved`: the store's own answer (ESCSUITE-87).
+    if (!selectedClipId) return false;
 
     // Get fresh state from store to avoid stale memoized values
     const state = useEditorStore.getState();
@@ -176,7 +179,7 @@ export function KeyframePanel() {
     const existingKf = existingKeyframes.find(kf => Math.abs(kf.time - time) < 0.001);
 
     // Update existing keyframe or create new one at this time
-    setClipKeyframe(selectedClipId, property, {
+    return setClipKeyframe(selectedClipId, property, {
       time: time,
       value: newValue,
       easing: existingKf?.easing || 'ease-in-out',

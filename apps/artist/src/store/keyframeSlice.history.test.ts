@@ -98,10 +98,15 @@ describe('keyframe actions and the undo stack', () => {
       expect(past()).toBe(entries)
     }
 
-    it('refuses to set a keyframe on a clip on it', () => {
+    it('refuses to set a keyframe on a clip on it, and says so', () => {
       lock()
 
-      refuses(() => store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' }))
+      // ESCSUITE-87: `false` back to the caller. The keyframe graph's keyboard
+      // threads `skipHistory` into its later writes, so it has to be able to
+      // tell a refusal from a write.
+      refuses(() => expect(
+        store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      ).toBe(false))
     })
 
     it('refuses to remove a keyframe on a clip on it', () => {
@@ -112,12 +117,19 @@ describe('keyframe actions and the undo stack', () => {
       expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
     })
 
-    it('refuses to move a keyframe on a clip on it', () => {
+    it('refuses to move a keyframe on a clip on it, and says so', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
       lock()
 
-      refuses(() => store().moveClipKeyframe('clip1', 'opacity', 1, 2))
+      refuses(() => expect(store().moveClipKeyframe('clip1', 'opacity', 1, 2)).toBe(false))
       expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
+    })
+
+    it('reports true for the two that wrote (ESCSUITE-87)', () => {
+      expect(
+        store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      ).toBe(true)
+      expect(store().moveClipKeyframe('clip1', 'opacity', 1, 2)).toBe(true)
     })
 
     it('refuses to clear the keyframes of a clip on it', () => {

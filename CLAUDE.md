@@ -594,6 +594,26 @@ denominators, and the deleted path carried a few uncovered branches, so both fig
 with **no floor crossed**, so craft's floors stay 100 / 99 / 97 / 100. The row was two hundredths
 stale on statements and branches (the ESCSUITE-78–81 follow-ups measured 99.51 / 97.64 and did
 not write it down); it is corrected here to the figure measured on this branch.
+`@escapesuite/artist` was re-measured 2026-09-26 at the end of ESCSUITE-87 (a refused store
+write says so, and a gesture's undo entry follows the write that landed): all four figures up —
+lines 99.40 → 99.41, statements 98.75 → 98.77, branches 93.93 → 93.96 and functions
+98.99 → **99.01**, which crosses a whole percent, so artist's **functions floor goes 98 → 99**
+in `apps/artist/vite.config.ts` and `scripts/coverage-report.mjs`, leaving its floors
+99 / 98 / 93 / **99**. The new module is the reason: `hooks/useGestureHistory.ts` is four tiny
+functions and one branch-per-line `commit`, and every one of them is reached by
+`hooks/useGestureHistory.test.ts`'s twelve cases plus the three gestures that now share it. The
+twelve store actions cost nothing either way — their guard moved out of the `set` updater and in
+front of it, which is the same decision on a different line, and the refusal tests that already
+covered both sides now also read the return value. Only `useSliderGesture`'s deleted flag getter
+left, and its replacement is one delegation. Re-measured once more after the branch review's
+four follow-ups (the keyframe graph's two nudges reading the boolean, `commit` surviving a write
+that throws, and two wording fixes): **99.41 / 98.76 / 93.97 / 99.01** — branches up a hundredth
+(every branch the review added is covered from both sides) and statements *down* a hundredth,
+which is one statement exactly: `KeyframePanel`'s `handleKeyframeMoved` now guards with
+`if (!selectedClipId) return false;` where it used to wrap its call in `if (selectedClipId)`, and
+that `return false` is unreachable while the panel renders (its sibling in
+`handleKeyframeValueChanged` has been uncovered for the same reason since it was written). Lines
+and functions unmoved, and **no floor crossed** either way.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -601,7 +621,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.40 | 98.75 | 93.93 | 98.99 |
+| `@escapesuite/artist` | 99.41 | 98.76 | 93.97 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

@@ -578,19 +578,40 @@ export interface EditorState {
   placeTakeOnTimeline: (parts: TakeClipPart[]) => void;
   removeClipFromTimeline: (clipId: string) => void;
   rippleDeleteClip: (clipId: string) => void;
-  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => void;
-  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => void;
+  /**
+   * **A refused write says so** (ESCSUITE-87).
+   *
+   * Every action declared `=> boolean` below — the eleven that take a trailing
+   * `skipHistory`, plus `moveClipToTrack`, which is the first write of the clip
+   * drag's two-write commit — answers `true` when it wrote and `false` when it
+   * wrote nothing: the ESCSUITE-84 lock guard refused the clip's track, or
+   * (`shiftClipsAfter` alone) the delta was zero. `false` means **no state
+   * changed and no undo entry was pushed**; `true` means **the action was not
+   * refused — it ran and pushed its undo entry, or skipped it because it was
+   * asked to** — and NOT that any value is now different: writing a clip the
+   * position it already holds runs, records an entry and answers `true`.
+   *
+   * A caller that passes `skipHistory: true` to a *later* write of the same
+   * gesture MUST look at it. `skipHistory` says "an earlier write of this
+   * gesture already pushed the undo entry", and a refused write pushed nothing
+   * — so a gesture that assumed its first write landed would hand `skipHistory`
+   * to the write that did land and leave the whole gesture off the undo stack.
+   * `hooks/useGestureHistory.ts` is the one mechanism that gets this right; the
+   * gesture hooks go through its `commit`.
+   */
+  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => boolean;
+  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => boolean;
   splitClip: (clipId: string, splitTime: number) => void;
-  moveClipToTrack: (clipId: string, trackId: string) => void;
-  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => void;
-  updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => void;
+  moveClipToTrack: (clipId: string, trackId: string) => boolean;
+  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => boolean;
+  updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => boolean;
   updateClipBlendMode: (clipId: string, blendMode: BlendMode) => void;
-  updateClipEffects: (clipId: string, effects: Partial<ClipEffects>, skipHistory?: boolean) => void;
-  updateClipTransition: (clipId: string, transition: Partial<Transition>, skipHistory?: boolean) => void;
-  updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>, skipHistory?: boolean) => void;
-  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => void;
+  updateClipEffects: (clipId: string, effects: Partial<ClipEffects>, skipHistory?: boolean) => boolean;
+  updateClipTransition: (clipId: string, transition: Partial<Transition>, skipHistory?: boolean) => boolean;
+  updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>, skipHistory?: boolean) => boolean;
+  setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => boolean;
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => void;
-  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => void;
+  moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => boolean;
   clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => void;
   duplicateClip: (clipId: string) => void;
 
@@ -599,8 +620,9 @@ export interface EditorState {
   // trackId can never land on one — findEmptyTrack already skips locked tracks.
   addTextOverlayClip: (textData?: Partial<TextOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
   addShapeOverlayClip: (shapeData?: Partial<ShapeOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
-  updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => void;
-  updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => void;
+  /** `boolean` for the same reason as the clip actions above (ESCSUITE-87). */
+  updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => boolean;
+  updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => boolean;
 
   // Actions - Playback
   setCurrentTime: (time: number) => void;

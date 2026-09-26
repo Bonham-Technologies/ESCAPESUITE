@@ -34,6 +34,14 @@
 // silent: the clip springs back to where it was picked up and no notice is
 // raised.
 //
+// **A refused row takes the time half with it** (ESCSUITE-87). The single-clip
+// commit's two writes are "move the row, then move the time", and the second
+// carries `skipHistory` because the first pushed the gesture's entry. Since
+// `moveClipToTrack` reports whether it wrote, the commit no longer assumes it
+// did: a refused row means no entry, so committing the time half alone would
+// both leave the clip somewhere the drag never rested and leave the drag off the
+// undo stack. It commits nothing instead, as silently as the vetoes below.
+//
 // **A locked row takes no drop** (ESCSUITE-82). The mousedown has always
 // refused to start a drag on a locked row, but neither commit path asked about
 // the row the clip was *dropped* on, so a clip could be dragged onto a locked
@@ -104,7 +112,12 @@ export interface ClipDragDeps {
    * write joins that entry instead of opening one of its own.
    */
   setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => void;
-  moveClipToTrack: (clipId: string, trackId: string) => void;
+  /**
+   * The store's `moveClipToTrack`. It answers whether it wrote (ESCSUITE-87),
+   * and the commit reads that: a row that refuses the clip leaves no undo entry
+   * for the position write to join, so the drop commits nothing at all.
+   */
+  moveClipToTrack: (clipId: string, trackId: string) => boolean;
   splitClip: (clipId: string, splitTime: number) => void;
 }
 
@@ -257,15 +270,22 @@ export function useClipDrag({
             // and the first Ctrl+Z then left the clip on its new row at its old
             // time, a half-state the drag had never produced.
             //
-            // No `historyPushedRef` here, unlike `useTrimDrag`: a clip drag
+            // No `useGestureHistory` here, unlike `useTrimDrag`: a clip drag
             // writes nothing until release, so both writes happen in this one
             // handler and "has the entry been pushed?" is just "did the row
-            // change?".
+            // change, and did that write land?".
+            //
+            // Which is the second half, and ESCSUITE-87's: the row write can be
+            // refused (locked, or the row gone mid-drag), and then there is no
+            // entry for the time write to join.
             const movedTrack = drag.currentTrackId !== drag.originalTrackId;
-            if (movedTrack) {
-              moveClipToTrack(drag.clipId, drag.currentTrackId);
-            }
-            if (deltaTime !== 0) {
+            if (movedTrack && !moveClipToTrack(drag.clipId, drag.currentTrackId)) {
+              // The row refused: the user aimed at a row the clip cannot take,
+              // so moving it in time on its OLD row would be a half-drop nobody
+              // asked for — and one carrying `skipHistory` for an entry that was
+              // never pushed. Commit nothing; the clip springs back, as silently
+              // as it does for the vetoes above.
+            } else if (deltaTime !== 0) {
               setClipTimelinePosition(drag.clipId, drag.currentPosition, movedTrack);
             }
           }

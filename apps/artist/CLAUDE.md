@@ -689,10 +689,12 @@ writes — one per animation frame through the throttled updaters, or two to fou
 when the keyframe panel is open — and all of them belong to one edit. `useTransformHandles`
 gives the gesture a single history entry by passing the store actions' `skipHistory` flag
 (`updateClipTransform`, `updateTextOverlayData`, `updateShapeOverlayData`, `setClipKeyframe`)
-on every write **except the first**: `skipHistoryForWrite()` returns `false` once per gesture
-and `true` thereafter, and it is called inside the updater the throttler runs — not at the
+on every write **except the first**: every write runs through `commit` from the shared
+`hooks/useGestureHistory.ts` (ESCSUITE-87, below), which hands out `false` once per gesture and
+`true` thereafter, and it is called inside the updater the throttler runs — not at the
 mousemove that scheduled one — because a frame's moves coalesce into a single write and
-"first" has to mean the first write that actually reaches the store. `handleMouseUp` only
+"first" has to mean the first write that actually reaches the store. Since ESCSUITE-87 it means
+the first write that **landed**: a write the store refuses hands the push back. `handleMouseUp` only
 flushes the pending update and clears the drag state; it must not write anything of its own.
 It used to, un-flagged, as the gesture's one push — but `pushToHistory` snapshots the state it
 is *handed*, so a push at release recorded the already-moved clip and undo after a drag landed
@@ -888,8 +890,8 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | Module | Owns |
 |--------|------|
 | `ClipEditor.tsx` | The composition: the hook call, the empty-state early return, and the per-section guards in their fixed order. Owns `div.container` itself in both the empty and selected states, so that element's identity is stable across the empty↔selected transition |
-| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays (plus the stable `skipHistoryForWrite`, which changes no identity). **No `currentTime` selector** — see the note below |
-| `useSliderGesture.ts` | Where one slider gesture starts and stops, and the `skipHistory` flag each write inside it gets — two refs and five listeners, no state. One instance serves the whole panel; see "One drag of a slider is one undo step" below |
+| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays (plus the stable `commit`, which changes no identity). **No `currentTime` selector** — see the note below |
+| `useSliderGesture.ts` | Where one slider gesture starts and stops, and `commit`, which runs one write inside it with the `skipHistory` flag it is owed — a `useGestureHistory` and six listeners, no state. One instance serves the whole panel; see "One drag of a slider is one undo step" below |
 | `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
 | `clipEditorOptions.ts` | The **five** `{ value, label }` option lists the dropdowns render — transitions, blend modes, clip mask kinds, animation presets, easings (the last re-exported from `utils/easingOptions.ts`) |
@@ -950,8 +952,8 @@ listeners as `sliderGesture`, which `ClipEditor` spreads onto **every slider on 
 `handleTransformChange`, `handleBlurChange`, `handleMaskChange`, `handleStrokeChange`,
 `handleAnimationInDurationChange`, `handleAnimationOutDurationChange`,
 `handleTransitionDurationChange` and, for
-an overlay's Pos X/Y, `handleTextDataChange` / `handleShapeDataChange` — ask
-`skipHistoryForWrite()` at the moment they write. The selects beside those sliders (preset,
+an overlay's Pos X/Y, `handleTextDataChange` / `handleShapeDataChange` — run their write
+through `commit` at the moment they write. The selects beside those sliders (preset,
 easing, transition type) deliberately do not ask: a select is a single change and keeps its own
 entry. One instance for the whole panel is
 deliberate: a user drags one slider at a time, and a press on the next closes whatever the last
@@ -976,9 +978,9 @@ exactly as before.
 **Every slider in the inspector and the trim drag on the timeline now follow the one-entry-per-gesture
 rule** (ESCSUITE-77 finished what ESCSUITE-75 started). `Timeline/useTrimDrag.ts` is the one that
 is not a slider: it writes the store on every mousemove, so it carries
-`useTransformHandles`' shape instead of the hook's — a per-gesture `historyPushedRef` reset on
+`useTransformHandles`' shape instead of the hook's — a per-gesture `useGestureHistory` begun on
 mousedown, the first write unskipped and the rest passing `true`. It throttles nothing, but the
-flag is still asked for *inside* the `if (update)` rather than at the move, because
+write is still `commit`ted *inside* the `if (update)` rather than at the move, because
 `computeTrimUpdate` refuses a move that would leave the clip too short and such a move writes
 nothing at all: a gesture whose opening move was rejected must still push on the write that does
 land. The one thing a trim does on release — the ripple tool's `shiftClipsAfter`, which closes
@@ -1001,9 +1003,9 @@ then put the time back and left the clip on its **new** row — a half-state the
 produced — and a second was needed to get home. `moveClipToTrack` now pushes the gesture's entry,
 which therefore snapshots the clip on the track and at the position the gesture found it, and
 `setClipTimelinePosition` takes the same trailing `skipHistory` the others do and passes `true`
-whenever the row changed. There is no `historyPushedRef` here, unlike `useTrimDrag`: with both
-writes in one handler, "has the entry been pushed?" *is* "did the row change?", which the commit
-already computes. A drop that only moved the clip in time, and one that only changed its row, are
+whenever the row changed. There is no `useGestureHistory` here, unlike `useTrimDrag`: with both
+writes in one handler, "has the entry been pushed?" *is* "did the row change, and did that write
+land?" — which the commit already computes, the second half of it since ESCSUITE-87 below. A drop that only moved the clip in time, and one that only changed its row, are
 each a single write and a single entry exactly as before. The bulk move a multi-selection drag
 commits was never affected — `selectionSlice.moveSelectedClips` moves every selected clip inside
 one `set` with one `pushToHistory`, so a five-clip drag was always one entry —
@@ -1083,6 +1085,57 @@ every clip stay (`lockedSourceVideoIds` is the question). `shiftClipsAfter` is t
 that is *not* the all-or-nothing question, deliberately: the shift below it only moves clips
 whose `trackId` matches, so an undefined `trackId` moves nothing and the guard asks
 `isTrackLocked` about the one row.
+
+**A refused write says so** (ESCSUITE-87). ESCSUITE-84's guards were invisible to the caller:
+an action that refused and an action that wrote were both `void`, and three gestures were
+already threading a `skipHistory` flag through a *second* store write on the strength of the
+first having pushed the undo entry. A refused first write pushes nothing, so those gestures
+would hand `skipHistory` to the write that did land and leave the whole gesture off the undo
+stack — one Ctrl+Z after it would then eat the edit *before* it instead. The eleven actions that
+take a trailing `skipHistory` (`shiftClipsAfter`, `updateClip`, `setClipTimelinePosition`,
+`updateClipTransform`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`,
+`setClipKeyframe`, `moveClipKeyframe`, `updateTextOverlayData`, `updateShapeOverlayData`) plus
+`moveClipToTrack` — which takes no flag but is the *first* write of the clip drag's two-write
+commit — therefore return `boolean`: `true` when they wrote, `false` when the lock guard refused
+(or, `shiftClipsAfter` alone, when the delta was zero and nothing moved). Their guard moves out
+of the `set` updater and in front of it, reading through `get()` the way `addTrack` already
+does, so the action can answer without writing; every updater body is otherwise unchanged, and
+the other locked-track guards — the ones nothing threads a flag through — stay inside their
+updaters as `return state`. The shared doc comment on `EditorState` in `store/types.ts` is the
+contract: **`false` means no state changed and no undo entry was pushed, and a caller passing
+`skipHistory` to a later write must look at it.**
+
+`hooks/useGestureHistory.ts` is the one mechanism that does. `createGestureHistory()` (and the
+`useGestureHistory()` that holds one per component) is `begin` / `resume` / `end` / `commit`,
+two booleans in a closure and no state or subscription of any kind: `commit(write)` runs one
+store write, hands it the flag the gesture owes it, and — if the write reports it did not land —
+takes the "already pushed" mark back, so the gesture's entry follows the first write that **does**
+land. All three gestures that used to keep that bit themselves now share it:
+`ClipEditor/useSliderGesture.ts` exposes `commit` in place of its old flag getter and keeps only
+the six DOM listeners (a key `repeat` maps to `resume`, which continues a gesture without
+forgetting that it pushed), `Preview/useTransformHandles.ts` commits inside the throttled
+updaters exactly where it read the flag before, and `Timeline/useTrimDrag.ts` inside its
+`if (update)`. The contract is `hooks/useGestureHistory.test.ts`; each hook's own suite adds the
+end-to-end case of a row locked under an open gesture and unlocked mid-way, and the entry riding
+the write that landed.
+
+The keyframe graph's keyboard is the other caller that had to read the answer.
+`KeyframePanel/hooks/useKeyframeGraphKeyboard.ts`'s two nudges called the host and then
+unconditionally announced the new value into the live region and moved the active option and the
+selection to the new time. On a locked track the store refused and the announcement was a lie —
+"Opacity 49% at 1.00 seconds" for an edit that never happened — while the selection walked off
+to a time no keyframe occupied, leaving the next key acting on nothing. `onKeyframeMoved` and
+`onKeyframeValueChanged` are therefore `=> boolean` all the way up through `KeyframeGraph`'s
+props to `KeyframePanel`'s two handlers, which hand back what `moveClipKeyframe` /
+`setClipKeyframe` answered (and `false` when there is no selected clip to write to), and each
+nudge returns early on a refusal. Silent, like every other refusal the lock produces, and the
+key stays swallowed because the graph still owns it.
+
+The clip drag is the exception that proves it, because its two writes are not a `commit` loop
+but one `if`/`else`: `if (movedTrack && !moveClipToTrack(...)) { }` — the row refused, so
+`Timeline/useClipDrag.ts` commits **nothing**. Moving the clip in time on its *old* row would be
+a half-drop nobody aimed at, and one carrying `skipHistory` for an entry that was never pushed.
+The clip springs back, silently, like every other refused drop.
 
 Refusal is **silent** in the store, like every pointer veto. Four components read the lock to
 say something anyway.
