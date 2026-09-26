@@ -90,3 +90,96 @@ export async function frameMeanRGB(file: string, frameIndex: number): Promise<[n
   }
   return [stdout[0], stdout[1], stdout[2]]
 }
+
+/**
+ * The mean colour of a rectangle of one frame, as `[r, g, b]` in 0-255.
+ *
+ * {@link frameMeanRGB} averages the *whole* frame, which is the right probe for
+ * "is this clip still red after the round trip" and the wrong one for anything
+ * local: a circle-masked red clip on black averages to a muddy dark red whose
+ * value says nothing about whether the mask was applied. This crops first, so
+ * the caller chooses what is averaged.
+ *
+ * `format=rgb24` comes **before** the crop deliberately. On a subsampled
+ * yuv420p stream ffmpeg snaps an odd crop offset onto the chroma grid and
+ * silently measures a different rectangle; converting first makes every offset
+ * exact. `scale=1:1` then does the averaging, as it does in `frameMeanRGB`.
+ * Frames are zero-indexed, matching `select=eq(n,...)`.
+ */
+export async function frameRegionRGB(
+  file: string,
+  frameIndex: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<[number, number, number]> {
+  const { stdout } = await execFileAsync(
+    'ffmpeg',
+    [
+      '-v', 'error',
+      '-i', file,
+      // The comma inside eq() is escaped so the filter parser reads it as an
+      // argument separator rather than the end of the `select` filter.
+      '-vf', `select=eq(n\\,${frameIndex}),format=rgb24,crop=${width}:${height}:${x}:${y},scale=1:1`,
+      '-frames:v', '1',
+      '-f', 'rawvideo',
+      '-pix_fmt', 'rgb24',
+      '-',
+    ],
+    { encoding: 'buffer' },
+  )
+
+  if (stdout.length < 3) {
+    throw new Error(
+      `frame ${frameIndex} of "${file}" at ${width}x${height}+${x}+${y} produced ${stdout.length} bytes, expected 3`,
+    )
+  }
+  return [stdout[0], stdout[1], stdout[2]]
+}
+
+/**
+ * The mean colour of the frame's top-left `size` x `size` block — the corner a
+ * mask cuts away.
+ *
+ * Filter: `select=eq(n\,N),format=rgb24,crop=8:8:0:0,scale=1:1`. 8 px because it
+ * is big enough to be unaffected by an encoder's ringing at a distant edge and
+ * small enough to stay well clear of a circle inscribed in the frame — on a
+ * 64x48 frame the nearest point of this block to that circle's centre is 30 px
+ * away against a radius of 24, so a masked frame has nothing drawn here at all.
+ */
+export async function frameCornerRGB(
+  file: string,
+  frameIndex: number,
+  size = 8,
+): Promise<[number, number, number]> {
+  return frameRegionRGB(file, frameIndex, 0, 0, size, size)
+}
+
+/**
+ * The mean colour of a `size` x `size` block **centred on** `(x, y)` — a point
+ * on a mask's outline, which is where a stroke either is or is not.
+ *
+ * Filter, for the default size centred on (8, 24):
+ * `select=eq(n\,N),format=rgb24,crop=4:4:6:22,scale=1:1`. Small, because a
+ * stroke is a band a few pixels wide and a sample wider than the band would
+ * average in whatever lies either side of it. The caller picks a point at least
+ * `size / 2` from the frame's edges: an outline that touches the edge has half
+ * its line outside the frame, which is not a thing to measure.
+ */
+export async function frameEdgeRGB(
+  file: string,
+  frameIndex: number,
+  x: number,
+  y: number,
+  size = 4,
+): Promise<[number, number, number]> {
+  return frameRegionRGB(
+    file,
+    frameIndex,
+    Math.max(0, Math.round(x - size / 2)),
+    Math.max(0, Math.round(y - size / 2)),
+    size,
+    size,
+  )
+}
