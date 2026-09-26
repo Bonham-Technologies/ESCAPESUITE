@@ -11,7 +11,11 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATI
 import { cloneClip } from '../utils/deepClone';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
-import { overlayPlacementToTransform } from '../utils/overlayPlacement';
+import {
+  maskForPlacement,
+  overlayPlacementToTransform,
+  strokeForPlacement,
+} from '../utils/overlayPlacement';
 
 export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
 
@@ -128,6 +132,13 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         trackId = created.id;
       }
 
+      // The placement the camera was drawn with, or nothing — asked once, so
+      // the transform, the mask and the stroke cannot disagree about whether
+      // this part is the take's camera. An audio part never takes any of the
+      // three: it is never drawn, so a picture property on it would be a number
+      // nobody reads that looks like a decision (ESCSUITE-71).
+      const placement = part.mediaType !== 'audio' ? part.overlayPlacement : undefined;
+
       clips.push({
         id: uuidv4(),
         sourceVideoId: part.sourceVideoId,
@@ -148,11 +159,22 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         // never read; it carries the whole default rather than nothing because
         // `Clip.transform` is a required field. Stated rather than left to the
         // 0x0 dimensions such a part arrives with, which reached the same place
-        // by accident.
-        transform:
-          part.mediaType !== 'audio' && part.overlayPlacement
-            ? overlayPlacementToTransform(part.overlayPlacement, resolution, part, overlayFrame)
-            : { ...DEFAULT_TRANSFORM },
+        // by accident. The same question decides the mask and the stroke
+        // (ESCSUITE-65).
+        transform: placement
+          ? overlayPlacementToTransform(placement, resolution, part, overlayFrame)
+          : { ...DEFAULT_TRANSFORM },
+        // ESCSUITE-65: the shape and the border the camera was recorded with,
+        // mapped beside the corner and the size rather than bolted on after.
+        // Spread conditionally so a part that is not the camera produces the
+        // same clip object it produced before this ticket — byte for byte, not
+        // just `toEqual`-equal.
+        ...(placement
+          ? {
+              mask: maskForPlacement(placement, overlayFrame ?? resolution, part),
+              stroke: strokeForPlacement(overlayFrame ?? resolution, resolution),
+            }
+          : {}),
         effects: { ...DEFAULT_EFFECTS },
         transition: { ...DEFAULT_TRANSITION },
       });

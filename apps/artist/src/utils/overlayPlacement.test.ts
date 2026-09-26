@@ -20,10 +20,16 @@
 // `drawOverlay` and this is the test that will be pointed at it.
 import { describe, it, expect } from 'vitest'
 import {
+  maskForPlacement,
   overlayMarginFor,
   overlayPlacementToTransform,
+  strokeForPlacement,
+  OVERLAY_CORNER_RADIUS_FRACTION,
   OVERLAY_MARGIN_FRACTION,
+  OVERLAY_STROKE_COLOR,
+  OVERLAY_STROKE_WIDTH_FRACTION,
 } from './overlayPlacement'
+import { maskPathFor } from '../core/clipMask'
 import { DEFAULT_TRANSFORM } from '../store/types'
 import type { OverlayPlacement } from '@escapesuite/shared/types'
 
@@ -198,10 +204,163 @@ describe('overlayPlacementToTransform', () => {
       SIXTEEN_BY_NINE_CAMERA
     )
 
-    // The shape is ignored (ESCSUITE-65): a circle placement produces an
-    // ordinary rectangular clip, so nothing here says anything about masking.
+    // The shape is ignored by the transform; the mask reads it (ESCSUITE-65).
+    // A circle placement still produces an ordinary rectangular *transform*, so
+    // nothing here says anything about masking — `maskForPlacement` below is
+    // where the shape is answered.
     expect(transform.rotation).toBe(DEFAULT_TRANSFORM.rotation)
     expect(transform.opacity).toBe(DEFAULT_TRANSFORM.opacity)
     expect(transform.scaleLocked).toBe(DEFAULT_TRANSFORM.scaleLocked)
+  })
+})
+
+// What shape the handed-over webcam clip arrives in (ESCSUITE-65, decisions 1,
+// 2 and 6).
+//
+// The numbers are ESCAPECRAFT's, from `drawOverlay`
+// (apps/craft/src/core/overlayGeometry.ts): an inscribed circle at
+// min(webcamWidth, webcamHeight) / 2, a rounded rectangle at a flat 8 px, and a
+// border of `rgba(255, 255, 255, 0.8)` at 3 px — all of them pixels of a canvas
+// capped at 1280 wide. ARTIST stores fractions, so every case below converts
+// back through `maskPathFor` and compares with those literals.
+describe('maskForPlacement', () => {
+  it('maps a circle placement to a circle mask', () => {
+    // Decision 1: `maskPathFor` inscribes the circle in the drawn box, which is
+    // exactly what ESCAPECRAFT drew, so the mask needs no radius of its own.
+    expect(maskForPlacement(placement('bottom-right'), COMPOSITOR_FRAME, SIXTEEN_BY_NINE_CAMERA))
+      .toEqual({ kind: 'circle' })
+  })
+
+  it('reproduces craft 8px corner at the compositor cap', () => {
+    const placement: OverlayPlacement = { position: 'bottom-right', size: 0.2, shape: 'rectangle' }
+
+    const mask = maskForPlacement(placement, COMPOSITOR_FRAME, SIXTEEN_BY_NINE_CAMERA)
+
+    expect(mask.kind).toBe('rounded')
+    // The drawn box at 1280 x 0.2 is 256 x 144, and the stored fraction has to
+    // put 8 canvas pixels on its corners — `ctx.roundRect(x, y, w, h, 8)`,
+    // overlayGeometry.ts:193.
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 256, 144)).toMatchObject({ radius: 8 })
+    expect(OVERLAY_CORNER_RADIUS_FRACTION).toBe(8 / 1280)
+  })
+
+  it('scales the corner with the frame rather than freezing it at 8 pixels', () => {
+    const placement: OverlayPlacement = { position: 'bottom-right', size: 0.2, shape: 'rectangle' }
+    const project = { width: 1920, height: 1080 }
+
+    const mask = maskForPlacement(placement, project, SIXTEEN_BY_NINE_CAMERA)
+
+    // 1920 x 8/1280 = 12 px on a 384 x 216 box. The fraction is the same one as
+    // at 1280 — both the radius and the box scale with the frame — which is the
+    // whole reason it is stored as a fraction: ARTIST has a resolution-change
+    // dialog, and a pixel count would silently change the rounding under a clip.
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 384, 216)).toMatchObject({ radius: 12 })
+    expect(mask.radius).toBeCloseTo(
+      maskForPlacement(placement, COMPOSITOR_FRAME, SIXTEEN_BY_NINE_CAMERA).radius!,
+      12
+    )
+  })
+
+  it('measures the corner against the clip shorter side, camera aspect and all', () => {
+    const placement: OverlayPlacement = { position: 'bottom-right', size: 0.25, shape: 'rectangle' }
+    const project = { width: 1920, height: 1080 }
+
+    const mask = maskForPlacement(placement, project, { width: 640, height: 480 })
+
+    // A 4:3 camera at size 0.25 of a 1920 frame is drawn 480 x 360, not the
+    // compositor's 480 x 270: ARTIST draws the part un-stretched. The shorter
+    // side is 360, and the radius still has to come out at 1920 x 8/1280 = 12.
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 480, 360)).toMatchObject({ radius: 12 })
+  })
+
+  it('falls back to the compositor 16:9 box for a part with no dimensions', () => {
+    const placement: OverlayPlacement = { position: 'top-left', size: 0.2, shape: 'rectangle' }
+
+    const mask = maskForPlacement(placement, COMPOSITOR_FRAME, { width: 0, height: 0 })
+
+    // Nothing ESCAPECRAFT writes, but IndexedDB is not type-checked. The box
+    // falls back to 16:9 — 256 x 144 — the same fallback the transform makes,
+    // rather than dividing by zero into a NaN radius.
+    expect(Number.isFinite(mask.radius)).toBe(true)
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 256, 144)).toMatchObject({ radius: 8 })
+  })
+})
+
+// The border's weight travels the same road the *inset* does, not the road the
+// corner radius does.
+//
+// The radius comes out frame-independent because its numerator and the box it
+// divides by both scale with the frame, so the `frameWidth` cancels. Nothing
+// cancels for the border: ESCAPECRAFT's 3 px is 3 px of its *capture* canvas,
+// which it caps only **above** `COMPOSITOR_MAX_WIDTH` — exactly the two arms
+// `overlayPaddingFor` has for the padding (`3 x frameWidth / min(frameWidth,
+// 1280)`) — while `clip.stroke.width` is read as a fraction of the **project**
+// width. The two widths are the same number only by coincidence, so both have
+// to be asked for.
+describe('strokeForPlacement', () => {
+  it('is craft white 3px border at the compositor cap', () => {
+    // A 1280-wide capture in a 1280-wide project: CRAFT drew a flat 3 px, and
+    // ARTIST draws that picture at native size, so the border is 3 px of a
+    // 1280-wide canvas. The one case where the stored fraction and the named
+    // constant are the same number.
+    expect(strokeForPlacement(COMPOSITOR_FRAME, COMPOSITOR_FRAME)).toEqual({
+      color: 'rgba(255, 255, 255, 0.8)',
+      width: 3 / 1280,
+    })
+    expect(OVERLAY_STROKE_COLOR).toBe('rgba(255, 255, 255, 0.8)')
+    expect(OVERLAY_STROKE_WIDTH_FRACTION).toBe(3 / 1280)
+  })
+
+  it('measures the border in craft pixels and stores it against the project', () => {
+    // The same 1280-wide capture, now in a 1080p project. CRAFT still drew a
+    // flat 3 px and ARTIST still draws the capture at native size, so the border
+    // is still 3 px — but 3 px of a 1920-wide canvas is 3/1920, not 3/1280.
+    // Storing the flat 3/1280 here would have drawn a 4.5 px border on a
+    // recording whose border was 3 px.
+    expect(strokeForPlacement(COMPOSITOR_FRAME, { width: 1920, height: 1080 }).width).toBe(
+      3 / 1920
+    )
+  })
+
+  it('scales the border above the cap, exactly as craft scales its padding', () => {
+    // A 2560-wide capture is previewed at the 1280 cap, so CRAFT's 3 px is
+    // 3/1280 of what the user saw — 6 px once the capture is drawn at its own
+    // 2560 pixels. In a 1080p project that is 6/1920.
+    expect(
+      strokeForPlacement({ width: 2560, height: 1440 }, { width: 1920, height: 1080 }).width
+    ).toBe(6 / 1920)
+    // And the case the handoff actually hits most often — a 1920-wide capture in
+    // a 1920-wide project — is 4.5 px, which *is* 3/1280 of the frame. That the
+    // two coincide here is why the flat fraction looked right for so long.
+    expect(
+      strokeForPlacement({ width: 1920, height: 1080 }, { width: 1920, height: 1080 }).width
+    ).toBe(3 / 1280)
+    expect(3 / 1280).toBeCloseTo(4.5 / 1920, 15)
+  })
+
+  it('keeps the flat 3px below the cap, which is what craft drew there', () => {
+    // The compositor never scales a narrower share *up*, so a 640-wide capture
+    // was previewed at 640 with a flat 3 px border — the same arm of
+    // `overlayPaddingFor` that keeps the inset at a flat 20 px. 3 px of the
+    // 1280-wide project it is drawn into is 3/1280.
+    expect(strokeForPlacement({ width: 640, height: 360 }, COMPOSITOR_FRAME).width).toBe(3 / 1280)
+  })
+
+  it('depends on the two widths and nothing else', () => {
+    // It takes no placement, deliberately: `drawOverlay` sets the same
+    // strokeStyle and the same lineWidth in both of its branches
+    // (overlayGeometry.ts:185-186 and 204-205), whatever corner the camera is in
+    // and whatever shape it is. So this exists to name the two literals exactly
+    // once on this side of the handoff and to read as a mapping beside the other
+    // two in `clipSlice.ts` — and its two arguments are the two things the
+    // border genuinely does depend on, neither of which is the placement.
+    expect(strokeForPlacement(COMPOSITOR_FRAME, COMPOSITOR_FRAME)).toEqual(
+      strokeForPlacement(COMPOSITOR_FRAME, COMPOSITOR_FRAME)
+    )
+    expect(strokeForPlacement.length).toBe(2)
+    // Neither height is read: the border is a width against a width.
+    expect(strokeForPlacement({ width: 1280, height: 720 }, { width: 1920, height: 1080 })).toEqual(
+      strokeForPlacement({ width: 1280, height: 9999 }, { width: 1920, height: 1 })
+    )
   })
 })

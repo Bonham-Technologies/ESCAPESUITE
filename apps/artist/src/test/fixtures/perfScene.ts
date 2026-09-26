@@ -14,7 +14,7 @@
 // Lives under src/test/ so neither the vitest `include` glob (which would treat
 // it as a suite containing no tests) nor the coverage `include` glob (which
 // would score test scaffolding as production code) picks it up.
-import type { Clip, Project, SourceVideo, Track } from '../../store/types'
+import type { Clip, ClipMask, ClipStroke, Project, SourceVideo, Track } from '../../store/types'
 
 /** Project canvas the scene renders at — 720p, as in the browser benchmark. */
 export const SCENE_RESOLUTION = { width: 1280, height: 720 } as const
@@ -224,5 +224,56 @@ export function buildSceneProject(): Project {
       shapeOverlays: [],
       duration: SCENE_DURATION_SECONDS,
     },
+  }
+}
+
+/**
+ * The mask and stroke the masked variant of the scene puts on every media clip
+ * (ESCSUITE-65) — the handoff's own pair, so the variant measures the shape a
+ * real user most often has: a circular webcam clip with ESCAPECRAFT's white
+ * border.
+ */
+export const MASKED_SCENE_MASK: ClipMask = { kind: 'circle' }
+export const MASKED_SCENE_STROKE: ClipStroke = {
+  color: 'rgba(255, 255, 255, 0.8)',
+  width: 3 / 1280,
+}
+
+/**
+ * Media clips live at `EFFECTS_FRAME_TIME`, and over the export range the MP4
+ * ceilings measure: the full-frame V1 clip (6-8 s) and the `screen`-blended
+ * picture-in-picture V2 clip (7-9 s). The two overlays are live too but take
+ * neither field — media clips only (decision 3) — so the per-frame delta the
+ * ceilings expect is this many times the per-clip cost.
+ */
+export const MASKED_MEDIA_CLIPS_AT_EFFECTS_FRAME = 2
+
+/**
+ * The scene's clips with every **media** clip masked and stroked.
+ *
+ * A variant, deliberately, and never an edit to `buildSceneClips`: adding a mask
+ * to an existing perf-scene clip would move the plain ceilings and break the
+ * "same scene as the browser benchmark" contract this file opens with —
+ * `apps/e2e/utils/perf.ts` builds the same twelve clips in a real browser and
+ * the millisecond figures it reports are about that scene.
+ *
+ * The overlays are left alone because they cannot take either field.
+ */
+export function buildMaskedSceneClips(): Clip[] {
+  return buildSceneClips().map((clip) =>
+    clip.overlayType === undefined
+      ? { ...clip, mask: { ...MASKED_SCENE_MASK }, stroke: { ...MASKED_SCENE_STROKE } }
+      : clip
+  )
+}
+
+/** The masked variant as a project, ready for `setProject`. */
+export function buildMaskedSceneProject(): Project {
+  const project = buildSceneProject()
+  return {
+    ...project,
+    id: 'perf-scene-masked',
+    name: 'Perf Scene (masked)',
+    timeline: { ...project.timeline, clips: buildMaskedSceneClips() },
   }
 }

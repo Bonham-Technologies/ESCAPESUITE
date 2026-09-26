@@ -5,7 +5,11 @@
 // whatever the timeline already holds.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { store, resetStoreForTest, video } from '../../test/fixtures/projectStore'
-import { overlayPlacementToTransform } from '../../utils/overlayPlacement'
+import {
+  maskForPlacement,
+  overlayPlacementToTransform,
+  strokeForPlacement,
+} from '../../utils/overlayPlacement'
 import { DEFAULT_TRANSFORM } from '../types'
 import type { Clip, TakeClipPart } from '../types'
 
@@ -109,6 +113,84 @@ describe('placeTakeOnTimeline', () => {
     // clip does.
     expect(placedClips()[0].transform.x).toBe(0.5)
     expect(placedClips()[0].transform.scaleX).toBe(1)
+  })
+
+  it('gives the webcam clip the mask and stroke it was recorded with', () => {
+    store().placeTakeOnTimeline([screenPart, webcamPart])
+
+    const webcam = placedClips()[1]
+    // ESCSUITE-65: the handoff now carries the shape *and* the border, not just
+    // the corner and the size. The screen recording is 1920x1080 and the project
+    // is 1920x1080, so the frame the camera sat in a corner of is the canvas.
+    expect(webcam.mask).toEqual(
+      maskForPlacement(webcamPart.overlayPlacement!, store().project.resolution, {
+        width: webcamPart.width,
+        height: webcamPart.height,
+      })
+    )
+    expect(webcam.stroke).toEqual(
+      strokeForPlacement(store().project.resolution, store().project.resolution)
+    )
+    expect(webcam.mask).toEqual({ kind: 'circle' })
+    // 3/1280 of a 1920-wide canvas is 4.5 px, which is craft's 3 px scaled the
+    // way craft itself scales it: a 1920-wide capture is previewed at the 1280
+    // cap, so the border the user saw was 3/1280 of the picture.
+    expect(webcam.stroke).toEqual({ color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 })
+  })
+
+  it('weighs the border against the screen recording, not the canvas', () => {
+    // The same question the transform's frame settles, asked of the border.
+    // A 1280-wide capture was previewed *uncapped*, so craft drew a flat 3 px on
+    // it; ARTIST draws that picture at native size in a 1920-wide canvas, so the
+    // stored fraction has to be 3/1920. Handing `strokeForPlacement` the project
+    // resolution instead of the frame would store 3/1280 here and draw a 4.5 px
+    // border on a recording whose border was 3 px.
+    const smallScreen: TakeClipPart = { ...screenPart, width: 1280, height: 720 }
+
+    store().placeTakeOnTimeline([smallScreen, webcamPart])
+
+    expect(placedClips()[1].stroke).toEqual({
+      color: 'rgba(255, 255, 255, 0.8)',
+      width: 3 / 1920,
+    })
+    expect(placedClips()[1].stroke).toEqual(
+      strokeForPlacement({ width: 1280, height: 720 }, store().project.resolution)
+    )
+  })
+
+  it('gives every other part neither', () => {
+    store().placeTakeOnTimeline([screenPart, webcamPart, micPart])
+
+    // The mask travels with the placement, which `app/takeImport.ts` puts on the
+    // camera part alone — so the screen recording is an ordinary rectangular
+    // clip and the microphone, which is never drawn, carries nothing derived
+    // from a picture at all (ESCSUITE-71's rule, restated for two more fields).
+    expect(placedClips()[0].mask).toBeUndefined()
+    expect(placedClips()[0].stroke).toBeUndefined()
+    expect(placedClips()[2].mask).toBeUndefined()
+    expect(placedClips()[2].stroke).toBeUndefined()
+    // And the keys are *absent*, not present holding `undefined` — which is the
+    // half `toBeUndefined` cannot tell apart and `toEqual` ignores outright. It
+    // is the conditional spread in `clipSlice.ts` that makes it true, and the
+    // reason it has to be true is the first case in this file: 'places a
+    // single-part take exactly as dropping it from the library would' compares
+    // the whole clip object against `addClipToTimeline`'s with `toEqual`, so two
+    // undefined keys would leak past it unnoticed.
+    expect('mask' in placedClips()[0]).toBe(false)
+    expect('stroke' in placedClips()[0]).toBe(false)
+    expect('mask' in placedClips()[2]).toBe(false)
+    expect('stroke' in placedClips()[2]).toBe(false)
+  })
+
+  it('never masks an audio part, even one carrying a placement', () => {
+    const misfiled: TakeClipPart = { ...micPart, overlayPlacement: webcamPart.overlayPlacement }
+
+    store().placeTakeOnTimeline([screenPart, misfiled])
+
+    // Same question as the transform's, and the same answer: having no picture
+    // wins over carrying a placement. IndexedDB is not type-checked.
+    expect(placedClips()[1].mask).toBeUndefined()
+    expect(placedClips()[1].stroke).toBeUndefined()
   })
 
   it('measures the webcam corner from the primary drawn rectangle, not the canvas', () => {

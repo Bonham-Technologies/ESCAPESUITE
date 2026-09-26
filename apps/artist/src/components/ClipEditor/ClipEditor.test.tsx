@@ -160,10 +160,28 @@ describe('ClipEditor', () => {
       expect(screen.getByText('Audio')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Transform' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Blend Mode' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Mask & Stroke' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Animation/ })).not.toBeInTheDocument()
       // A transition and a split still make sense for audio
       expect(screen.getByRole('button', { name: 'Transition Out' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Split' })).toBeInTheDocument()
+    })
+
+    it('offers the mask and stroke to a video clip', () => {
+      mediaClip({})
+      render(<ClipEditor />)
+
+      expect(screen.getByRole('button', { name: 'Mask & Stroke' })).toBeInTheDocument()
+    })
+
+    it('offers the mask and stroke to an image clip as well', () => {
+      // The gate is `!isAudio && !isOverlay`, so a still is masked and stroked
+      // exactly as a video is — there is nothing about either field that needs
+      // moving pictures.
+      mediaClip({ mediaType: 'image' })
+      render(<ClipEditor />)
+
+      expect(screen.getByRole('button', { name: 'Mask & Stroke' })).toBeInTheDocument()
     })
   })
 

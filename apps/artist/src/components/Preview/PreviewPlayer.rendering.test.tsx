@@ -14,6 +14,8 @@ import {
 } from '../../test/renderPreview'
 import { getFrameCache, resetFrameCache } from '../../core/frameCache'
 import { getVideoBlob } from '../../core/storage'
+import { drawClipToCanvas } from '../../core/canvasRenderer'
+import { createRecordingContext } from '../../test/doubles/canvas'
 import type { Clip, TextOverlayData } from '../../store/types'
 import { PreviewPlayer } from './PreviewPlayer'
 
@@ -173,6 +175,81 @@ describe('PreviewPlayer drawing', () => {
     await settle(FRAME_MS)
 
     expect(preview.frame().methods).toEqual(['setTransform', 'fillRect'])
+  })
+
+  it('draws a masked and stroked clip exactly as an export does (ESCSUITE-65)', async () => {
+    const clip = addClip('clip1', 0, 2)
+    store().updateClip(clip.id, {
+      mask: { kind: 'circle' },
+      stroke: { color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1920 },
+    })
+    store().setSelectedClipId(null)
+
+    const preview = await renderPreview()
+    const frame = preview.frame()
+
+    // The export's own draw, called directly with the same clip and the same
+    // project size. `core/exportMP4.ts` reaches this function through
+    // `drawMediaWithFrame` and `core/exportWebM.ts` calls it outright, so this
+    // *is* what an export records for this clip.
+    const exportCtx = createRecordingContext()
+    drawClipToCanvas(
+      exportCtx as unknown as CanvasRenderingContext2D,
+      doubles.media.videos[0],
+      store().project.timeline.clips[0],
+      0,
+      1920,
+      1080
+    )
+
+    // Every frame opens with the raster transform and the black clear, which is
+    // the preview's own business; from the clip's first `save` on, the two must
+    // agree method for method.
+    expect(frame.methods.slice(2)).toEqual(exportCtx.calls.map((c) => c.method))
+    expect(frame.argsFor('ellipse')).toEqual(exportCtx.argsFor('ellipse'))
+    expect(frame.argsFor('drawImage').map((args) => args.slice(1))).toEqual(
+      exportCtx.argsFor('drawImage').map((args) => args.slice(1))
+    )
+    // The line width is in project pixels at both ends: the export canvas *is*
+    // the project resolution, and the preview's raster transform scales the
+    // stroke for free — unlike `ctx.filter`, whose lengths the CTM does not
+    // reach (see MediaDrawOptions.filterScale).
+    expect(frame.of('stroke')[0].state.lineWidth).toBe(
+      exportCtx.stateFor('stroke')[0].lineWidth
+    )
+    expect(frame.of('stroke')[0].state.strokeStyle).toBe(
+      exportCtx.stateFor('stroke')[0].strokeStyle
+    )
+  })
+
+  it('masks a clip drawn after a blur shape overlay', async () => {
+    const clip = addClip('clip1', 0, 4)
+    store().updateClip(clip.id, { mask: { kind: 'circle' } })
+    // The blur shape goes on a track *below* the clip, so the clip is drawn
+    // after it. That path re-captures the canvas at the identity transform and
+    // hands it back (canvasRenderer.ts:244-247), which is exactly where a stray
+    // transform or a leaked clip region would show up.
+    const lower = store().project.timeline.tracks[0].id
+    const upper = store().addTrack('Upper').id
+    store().moveClipToTrack(clip.id, upper)
+    store().addShapeOverlayClip({ type: 'blur', blurAmount: 10 }, lower, 0, 4)
+    store().setSelectedClipId(null)
+
+    const preview = await renderPreview()
+    const frame = preview.frame()
+
+    // The blur shape below draws its own clip-region ellipse first (the same
+    // default 192x108 half-dims a plain ellipse overlay draws — see
+    // PreviewPlayer.overlays.test.tsx's "draws an ellipse shape as a path" —
+    // unrelated to this clip's mask); the masked clip's own full-canvas circle
+    // is the second, drawn with no transform or clip region leaked from the
+    // shape before it. The frame's save/restore stack still balances across
+    // both draws.
+    expect(frame.argsFor('ellipse')).toHaveLength(2)
+    expect(frame.argsFor('ellipse')[0]).toEqual([960, 540, 192, 108, 0, 0, Math.PI * 2])
+    expect(frame.argsFor('ellipse')[1]).toEqual([960, 540, 540, 540, 0, 0, Math.PI * 2])
+    expect(frame.of('clip').length).toBeGreaterThanOrEqual(1)
+    expect(frame.of('save')).toHaveLength(frame.of('restore').length)
   })
 })
 

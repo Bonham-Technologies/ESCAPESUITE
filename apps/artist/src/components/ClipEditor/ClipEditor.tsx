@@ -5,6 +5,7 @@ import { TextContentSection } from './TextContentSection';
 import { ShapeSection } from './ShapeSection';
 import { TransformSection } from './TransformSection';
 import { BlendModeSection } from './BlendModeSection';
+import { MaskSection } from './MaskSection';
 import { EffectsSection } from './EffectsSection';
 import { AnimationSection } from './AnimationSection';
 import { TransitionSection } from './TransitionSection';
@@ -25,6 +26,7 @@ export function ClipEditor() {
     isVideo,
     clipTypeLabel,
     clipPosition,
+    frameWidth,
     keyframePanelOpen,
     handleSplitAtPlayhead,
     handleDeleteClip,
@@ -32,6 +34,8 @@ export function ClipEditor() {
     handleTransformChange,
     handleDuplicate,
     handleBlendModeChange,
+    handleMaskChange,
+    handleStrokeChange,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
@@ -104,6 +108,22 @@ export function ClipEditor() {
       {/* Blend Mode section - for visual clips */}
       {!isAudio && !isOverlay && (
         <BlendModeSection value={selectedClip.blendMode} onChange={handleBlendModeChange} />
+      )}
+
+      {/* Mask & Stroke section - media clips only (ESCSUITE-65). Gated exactly
+          as Blend Mode is: a text or shape overlay has no drawn box a mask
+          could mean anything against. Added *after* Blend Mode and before
+          Effects rather than anywhere else, because CollapsibleSection seeds its
+          open/closed state positionally (see its doc comment) — moving an
+          existing section would hand its state to a different one. */}
+      {!isAudio && !isOverlay && (
+        <MaskSection
+          mask={selectedClip.mask}
+          stroke={selectedClip.stroke}
+          frameWidth={frameWidth}
+          onMaskChange={handleMaskChange}
+          onStrokeChange={handleStrokeChange}
+        />
       )}
 
       {/* Effects section - for visual clips */}

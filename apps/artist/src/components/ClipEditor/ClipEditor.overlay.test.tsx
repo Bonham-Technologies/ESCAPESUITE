@@ -278,6 +278,7 @@ describe('ClipEditor shape overlay', () => {
     // Overlays have no source media, so splitting and blending are not offered
     expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Blend Mode' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mask & Stroke' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Transition Out' })).not.toBeInTheDocument()
   })
 })

@@ -208,8 +208,13 @@ and the scale is the drawn width over the part's native width, because that is h
 `core/canvasRenderer.ts` reads them: **scale 1 means native pixels**. A part whose stored
 dimensions are unusable (nothing ESCAPECRAFT writes) still lands in its corner: the box falls
 back to 16:9 and the clip to `DEFAULT_TRANSFORM.scaleX`, which beats a clip zero pixels wide.
-The placement's `shape` is carried across from ESCAPECRAFT and **ignored** until ESCSUITE-65
-gives every clip a mask.
+The placement's `shape` is **no longer ignored** (ESCSUITE-65): `maskForPlacement` and
+`strokeForPlacement` map it and ESCAPECRAFT's white border onto the clip's own `mask` and
+`stroke`, beside the transform and from the same one question about whether this part is the
+take's camera. The mask's radius is a fraction of the clip's **shorter drawn side** — so it
+survives a resolution change — and the stroke's width is a fraction of the **project's** width
+carrying craft's 3 px scaled the way `overlayPaddingFor` scales its padding: flat at or below
+`COMPOSITOR_MAX_WIDTH`, proportional above it.
 
 **The corner is the screen recording's, not the canvas's.** `overlayPlacementToTransform`
 takes an optional fourth argument — the **frame**, a rectangle in canvas pixels — and both the

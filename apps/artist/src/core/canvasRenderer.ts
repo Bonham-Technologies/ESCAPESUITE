@@ -12,6 +12,7 @@ import type {
   AnimatedOverlayValues,
 } from './exportTypes';
 import { blendModeToCanvas, getSourceDimensions } from './exportTypes';
+import { drawWithMaskAndStroke } from './clipMask';
 
 /**
  * The animated transform/effect values of a clip at one instant.
@@ -385,8 +386,36 @@ export function drawClipToCanvas(
   const x = centerX - (scaledWidth / 2);
   const y = centerY - (scaledHeight / 2);
 
-  // Draw the media frame (VideoFrame, HTMLVideoElement, or HTMLImageElement)
-  ctx.drawImage(source, x, y, scaledWidth, scaledHeight);
+  // The mask and the stroke (ESCSUITE-65). This function and
+  // `drawImageToCanvasWithModifiers` are the only two places either is drawn,
+  // and every pipeline funnels through them — the preview, both exports, both
+  // transition paths and the headless renderer — so a mask written here is a
+  // mask drawn everywhere.
+  //
+  // Here rather than anywhere else because this is after the rotation block
+  // above (so the mask turns with the clip) and after the drawn box is known.
+  // A wipe transition's own clip() is already in effect and the two regions
+  // intersect, which is the right composition. The mask needs no save of its
+  // own: the outer save/restore this function already makes covers it. The
+  // stroke is the one thing that needs a second save, and pays for it alone.
+  //
+  // The order lives in `drawWithMaskAndStroke` rather than being written out
+  // here and again in the image draw: the two are near-duplicates, and the
+  // spec's named risk is exactly that they drift apart.
+  //
+  // It draws the media frame (VideoFrame, HTMLVideoElement or HTMLImageElement)
+  // itself, on the same five arguments the bare ctx.drawImage() here used to.
+  drawWithMaskAndStroke(
+    ctx,
+    source,
+    clip.mask,
+    clip.stroke,
+    x,
+    y,
+    scaledWidth,
+    scaledHeight,
+    canvasWidth
+  );
 
   // Restore context state
   ctx.restore();
@@ -510,8 +539,25 @@ export function drawImageToCanvasWithModifiers(
   const x = centerX - (scaledWidth / 2);
   const y = centerY - (scaledHeight / 2);
 
-  // Draw the image
-  ctx.drawImage(image, x, y, scaledWidth, scaledHeight);
+  // The mask and the stroke (ESCSUITE-65) — the same call as `drawClipToCanvas`,
+  // in the same place, for the reasons argued in full there. These two
+  // near-duplicate functions are the *only* two places either is drawn, and a
+  // mask added to one and not the other would give videos a mask and images
+  // none.
+  //
+  // It draws the image itself, on the same five arguments the bare
+  // ctx.drawImage() here used to.
+  drawWithMaskAndStroke(
+    ctx,
+    image,
+    clip.mask,
+    clip.stroke,
+    x,
+    y,
+    scaledWidth,
+    scaledHeight,
+    canvasWidth
+  );
 
   ctx.restore();
 }

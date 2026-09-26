@@ -4,7 +4,13 @@
 // these selects by index, so these assertions pin the order as well as the
 // contents — a reordered table would otherwise pass silently.
 import { describe, it, expect } from 'vitest'
-import { TRANSITION_TYPES, BLEND_MODES, ANIMATION_PRESETS, EASING_TYPES } from './clipEditorOptions'
+import {
+  TRANSITION_TYPES,
+  BLEND_MODES,
+  CLIP_MASK_KINDS,
+  ANIMATION_PRESETS,
+  EASING_TYPES,
+} from './clipEditorOptions'
 
 describe('clipEditorOptions', () => {
   it('lists the transitions, None first', () => {
@@ -33,6 +39,14 @@ describe('clipEditorOptions', () => {
       { value: 'lighten', label: 'Lighten' },
       { value: 'difference', label: 'Difference' },
       { value: 'add', label: 'Add' },
+    ])
+  })
+
+  it('lists the mask kinds, None first', () => {
+    expect(CLIP_MASK_KINDS).toEqual([
+      { value: 'none', label: 'None' },
+      { value: 'circle', label: 'Circle' },
+      { value: 'rounded', label: 'Rounded Rectangle' },
     ])
   })
 

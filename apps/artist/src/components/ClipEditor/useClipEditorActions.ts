@@ -39,10 +39,12 @@
 // be a new memo rather than a move.
 import { useCallback, useMemo } from 'react';
 import { useEditorStore, selectSelectedClip } from '../../store/projectStore';
-import { DEFAULT_TRANSFORM } from '../../store/types';
+import { DEFAULT_TRANSFORM, DEFAULT_CLIP_MASK_RADIUS } from '../../store/types';
 import type {
   BlendMode,
   Clip,
+  ClipMask,
+  ClipStroke,
   TransitionType,
   ShapeType,
   SourceVideo,
@@ -73,6 +75,13 @@ export interface ClipEditorActions {
   clipTypeLabel: string;
   /** Where the clip starts on the timeline, in seconds. */
   clipPosition: number;
+  /**
+   * The project's frame width in pixels — what `clip.stroke.width` is a
+   * fraction of, so the inspector can show it as the pixels the user sees.
+   * Derived from the `resolution` selector this hook already had; it is not a
+   * new subscription.
+   */
+  frameWidth: number;
   /** Whether the keyframe panel is open — the Animation section's toggle state. */
   keyframePanelOpen: boolean;
   handleSplitAtPlayhead: () => void;
@@ -81,6 +90,8 @@ export interface ClipEditorActions {
   handleTransformChange: (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => void;
   handleDuplicate: () => void;
   handleBlendModeChange: (mode: BlendMode) => void;
+  handleMaskChange: (mask: ClipMask) => void;
+  handleStrokeChange: (stroke: ClipStroke) => void;
   handleBlurChange: (blur: number) => void;
   handleTransitionTypeChange: (type: TransitionType) => void;
   handleTransitionDurationChange: (duration: number) => void;
@@ -133,6 +144,13 @@ export function useClipEditorActions(): ClipEditorActions {
   const updateClipEffects = useEditorStore((state) => state.updateClipEffects);
   const updateClipTransition = useEditorStore((state) => state.updateClipTransition);
   const updateClipAnimation = useEditorStore((state) => state.updateClipAnimation);
+  // ESCSUITE-65's mask and stroke go through the `updateClip` that already
+  // exists — it takes a Partial<Clip> and pushes history — so this feature adds
+  // no store action and no member to ClipSlice's Pick. An *action* selector, in
+  // the same shape as the thirteen above: an action's identity never changes, so
+  // this cannot cost a re-render, and `ClipEditor.rerender.test.tsx` is what
+  // holds that line.
+  const updateClip = useEditorStore((state) => state.updateClip);
   const duplicateClip = useEditorStore((state) => state.duplicateClip);
   const updateTextOverlayData = useEditorStore((state) => state.updateTextOverlayData);
   const updateShapeOverlayData = useEditorStore((state) => state.updateShapeOverlayData);
@@ -208,6 +226,36 @@ export function useClipEditorActions(): ClipEditorActions {
       updateClipBlendMode(selectedClip.id, mode);
     },
     [selectedClip, updateClipBlendMode]
+  );
+
+  // ESCSUITE-65. `MaskSection` reports what the user did; these decide what gets
+  // stored, so the store only ever holds canonical shapes: no `{ kind: 'none' }`,
+  // no `{ width: 0 }`, and no radius on a circle. A clip that was never masked
+  // and one whose mask was removed are then the same object, which is what makes
+  // `undefined === none` the only rule the renderer and the migration need.
+  const handleMaskChange = useCallback(
+    (mask: ClipMask) => {
+      if (!selectedClip) return;
+      if (mask.kind === 'none') {
+        updateClip(selectedClip.id, { mask: undefined });
+        return;
+      }
+      updateClip(selectedClip.id, {
+        mask:
+          mask.kind === 'circle'
+            ? { kind: 'circle' }
+            : { kind: 'rounded', radius: mask.radius ?? DEFAULT_CLIP_MASK_RADIUS },
+      });
+    },
+    [selectedClip, updateClip]
+  );
+
+  const handleStrokeChange = useCallback(
+    (stroke: ClipStroke) => {
+      if (!selectedClip) return;
+      updateClip(selectedClip.id, { stroke: stroke.width > 0 ? stroke : undefined });
+    },
+    [selectedClip, updateClip]
   );
 
   const handleBlurChange = useCallback(
@@ -363,6 +411,7 @@ export function useClipEditorActions(): ClipEditorActions {
     isVideo,
     clipTypeLabel,
     clipPosition,
+    frameWidth: resolution.width,
     keyframePanelOpen,
     handleSplitAtPlayhead,
     handleDeleteClip,
@@ -370,6 +419,8 @@ export function useClipEditorActions(): ClipEditorActions {
     handleTransformChange,
     handleDuplicate,
     handleBlendModeChange,
+    handleMaskChange,
+    handleStrokeChange,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
