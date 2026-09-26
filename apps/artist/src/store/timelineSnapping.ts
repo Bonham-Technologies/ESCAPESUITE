@@ -106,12 +106,14 @@ export function trackIndexDelta(
 
 /**
  * Whether a row refuses to take a clip: it is locked, or it is not on the
- * timeline at all. Asked by the single-clip drop about the row under the
- * pointer, and by `canMoveSelectedClips` about every row a member sits on or
- * would land on (ESCSUITE-82). The mousedown already refuses to *start* on a
- * locked row; this is the other end of the gesture, which used to check
- * nothing — a clip could be dropped onto a locked row, and a selection holding
- * a clip on one (ctrl+click adds it) could be dragged off it by a free member.
+ * timeline at all. The single-clip drop asks this of the row under the
+ * pointer; `canMoveSelectedClips` applies the same locked rule inline, over a
+ * Set, because it is in a loop — and it has its own "not on the timeline"
+ * check already, on the row index (ESCSUITE-82). The mousedown already refuses
+ * to *start* on a locked row; this is the other end of the gesture, which used
+ * to check nothing — a clip could be dropped onto a locked row, and a
+ * selection holding a clip on one (ctrl+click adds it) could be dragged off it
+ * by a free member. A rule added here must be added to that loop too.
  */
 export function trackRefusesDrop(tracks: Track[], trackId: string): boolean {
   const track = tracks.find((t) => t.id === trackId);

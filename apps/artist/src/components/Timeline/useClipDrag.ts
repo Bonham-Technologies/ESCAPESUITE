@@ -38,10 +38,10 @@
 // refused to start a drag on a locked row, but neither commit path asked about
 // the row the clip was *dropped* on, so a clip could be dragged onto a locked
 // track — and a selection holding a clip on a locked row (ctrl+click adds it)
-// could be dragged off it by a free member. Both paths now ask
-// `trackRefusesDrop` of every row involved: the single-clip commit of the row
-// under the pointer, `canMoveSelectedClips` of every member's origin and
-// landing row. A refused drop is silent, like the other vetoes.
+// could be dragged off it by a free member. The single-clip commit now asks
+// `trackRefusesDrop` of the row under the pointer, and `canMoveSelectedClips`
+// applies the same locked rule inline to every member's origin and landing
+// row. A refused drop is silent, like the other vetoes.
 //
 // **One listener pair, one measurement, one snap array — per gesture, not per
 // pointer frame.** The listeners go through `useDocumentListener`, whose
