@@ -13,6 +13,7 @@ import { act, renderHook } from '@testing-library/react'
 import { useClipEditorActions } from './useClipEditorActions'
 import { useEditorStore } from '../../store/projectStore'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
+import { DEFAULT_CLIP_MASK_RADIUS } from '../../store/types'
 import type { Clip, SourceVideo } from '../../store/types'
 
 /** The store actions the hook reaches for, wrapped so their arguments are visible. */
@@ -25,6 +26,7 @@ const ACTIONS = [
   'updateClipEffects',
   'updateClipTransition',
   'updateClipAnimation',
+  'updateClip',
   'duplicateClip',
   'updateTextOverlayData',
   'updateShapeOverlayData',
@@ -143,6 +145,8 @@ describe('useClipEditorActions with nothing selected', () => {
       result.current.handleFitToCanvas()
       result.current.handleTextDataChange({ text: 'x' })
       result.current.handleShapeDataChange({ strokeWidth: 2 })
+      result.current.handleMaskChange({ kind: 'circle' })
+      result.current.handleStrokeChange({ color: '#ffffff', width: 0.004 })
     })
 
     for (const name of ACTIONS) expect(spies[name]).not.toHaveBeenCalled()
@@ -684,5 +688,83 @@ describe('useClipEditorActions handler identity', () => {
     // These two are plain closures, as they were when they lived in the JSX.
     expect(result.current.handleResetToDefaults).not.toBe(first.handleResetToDefaults)
     expect(result.current.handleKeyframePanelToggle).not.toBe(first.handleKeyframePanelToggle)
+  })
+})
+
+describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
+  it('stores a circle with no radius, whatever radius the section reported', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.handleMaskChange({ kind: 'circle', radius: 0.2 }))
+
+    // The section reports what the user did; the handler decides what is stored.
+    // A radius on a circle is noise the renderer never reads, so it is dropped
+    // here rather than carried in every project file from now on.
+    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { mask: { kind: 'circle' } })
+    expect(clipNow(clip.id).mask).toEqual({ kind: 'circle' })
+  })
+
+  it('stores a rounded mask with its radius, defaulting one that is missing', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.handleMaskChange({ kind: 'rounded', radius: 0.3 }))
+    expect(clipNow(clip.id).mask).toEqual({ kind: 'rounded', radius: 0.3 })
+
+    act(() => result.current.handleMaskChange({ kind: 'rounded' }))
+    expect(clipNow(clip.id).mask).toEqual({ kind: 'rounded', radius: DEFAULT_CLIP_MASK_RADIUS })
+  })
+
+  it('removes the mask rather than storing kind none', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+    act(() => result.current.handleMaskChange({ kind: 'circle' }))
+
+    act(() => result.current.handleMaskChange({ kind: 'none', radius: 0.2 }))
+
+    // So a clip that was never masked and one whose mask was removed are the
+    // same object, and `undefined === none` stays the only rule the renderer and
+    // the migration need to know.
+    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { mask: undefined })
+    expect(clipNow(clip.id).mask).toBeUndefined()
+  })
+
+  it('removes the stroke rather than storing a width of zero', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+    act(() => result.current.handleStrokeChange({ color: '#ffffff', width: 0.004 }))
+    expect(clipNow(clip.id).stroke).toEqual({ color: '#ffffff', width: 0.004 })
+
+    act(() => result.current.handleStrokeChange({ color: '#ffffff', width: 0 }))
+
+    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { stroke: undefined })
+    expect(clipNow(clip.id).stroke).toBeUndefined()
+  })
+
+  it('pushes one history entry per change, through the action that already existed', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+    useEditorStore.setState({ history: { past: [], future: [] } })
+
+    act(() => result.current.handleMaskChange({ kind: 'circle' }))
+    act(() => result.current.handleStrokeChange({ color: '#ffffff', width: 0.004 }))
+
+    // `updateClip` pushes history itself (clipSlice.ts:281), which is why this
+    // feature adds no store action and no member to ClipSlice's Pick — and why
+    // one Ctrl+Z takes the stroke off and leaves the mask on.
+    expect(useEditorStore.getState().history.past).toHaveLength(2)
+    act(() => store().undo())
+    expect(clipNow(clip.id).stroke).toBeUndefined()
+    expect(clipNow(clip.id).mask).toEqual({ kind: 'circle' })
+  })
+
+  it('reports the project frame width the stroke is a fraction of', () => {
+    mediaClip()
+    const { result } = mount()
+
+    // Derived from the `resolution` selector this hook has always had — no new
+    // subscription, which is the rule `ClipEditor.rerender.test.tsx` holds.
+    expect(result.current.frameWidth).toBe(store().project.resolution.width)
   })
 })

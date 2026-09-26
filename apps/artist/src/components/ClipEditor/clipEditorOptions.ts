@@ -3,7 +3,12 @@
 // Each array's order is the order its <option>s appear in, so it is what the
 // user sees and what tests addressing a select by index resolve to — reordering
 // one of these tables is a visible change, not a tidy-up.
-import type { BlendMode, TransitionType, AnimationPresetType } from '../../store/types';
+import type {
+  BlendMode,
+  ClipMaskKind,
+  TransitionType,
+  AnimationPresetType,
+} from '../../store/types';
 
 /** Transition Out → Type. */
 export const TRANSITION_TYPES: { value: TransitionType; label: string }[] = [
@@ -30,6 +35,20 @@ export const BLEND_MODES: { value: BlendMode; label: string }[] = [
   { value: 'lighten', label: 'Lighten' },
   { value: 'difference', label: 'Difference' },
   { value: 'add', label: 'Add' },
+];
+
+/**
+ * Mask & Stroke → the mask's shape (ESCSUITE-65).
+ *
+ * `'none'` is first because it is the default and because a list of shapes with
+ * no way back to "no shape" is a trap. The labels say what the shape is rather
+ * than what it is for — "Rounded Rectangle", not "Webcam" — because the mask is
+ * a clip property now, not a handoff artefact.
+ */
+export const CLIP_MASK_KINDS: { value: ClipMaskKind; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'rounded', label: 'Rounded Rectangle' },
 ];
 
 /** Animate In / Animate Out → preset. */
