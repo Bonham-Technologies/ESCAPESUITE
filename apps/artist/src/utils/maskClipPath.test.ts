@@ -14,25 +14,41 @@ import type { ClipMask } from '../store/types'
 const H = 52
 
 describe('maskClipPathFor', () => {
-  it('inscribes a circle of half the thumb’s height, centred', () => {
+  it('inscribes a circle of half the thumb’s height, against its left edge', () => {
     // The thumb is 16:9, so its shorter side is its height and the inscribed
     // circle is h/2 — the same rule `core/clipMask.ts` applies to a drawn box.
-    expect(maskClipPathFor({ kind: 'circle' }, H)).toBe('circle(26px at 50% 50%)')
+    // Its centre sits h/2 from the left, not at 50%: see the narrow-clip case
+    // below for why.
+    expect(maskClipPathFor({ kind: 'circle' }, H)).toBe('circle(26px at 26px 50%)')
+  })
+
+  it('keeps a circle visible on a clip narrower than the thumb', () => {
+    // A clip is as wide as its duration: 0.2s at the default 50px/s is 10px, and
+    // `.clip` is `overflow: hidden`, so only the thumb's left 10px are ever seen.
+    // Centred in the 92px box the circle would span x 20-72 and that clip would
+    // show an empty rectangle where an unmasked clip shows its picture. Hugging
+    // the left edge, the circle's own leftmost pixel is x 0, so every clip wide
+    // enough to be clicked shows some of the shape.
+    const path = maskClipPathFor({ kind: 'circle' }, H)!
+    const centreX = Number(/at ([\d.]+)px/.exec(path)![1])
+    const radius = Number(/circle\(([\d.]+)px/.exec(path)![1])
+    expect(centreX - radius).toBe(0)
   })
 
   it('is the same circle core/clipMask.ts draws for the same box', () => {
     const path = maskPathFor('circle', undefined, 0, 0, H * CLIP_THUMB_ASPECT, H)
     // Not a restatement of the assertion above: this one fails if the two ever
-    // stop sharing an implementation, which is the only way they can drift.
+    // stop sharing an implementation, which is the only way they can drift. Only
+    // the radius is shared — the centre is this module's own choice, and it is
+    // the radius again because a left-hugged circle's centre *is* its radius.
     expect(path.shape).toBe('circle')
-    expect(maskClipPathFor({ kind: 'circle' }, H)).toBe(
-      `circle(${path.shape === 'circle' ? path.radius : NaN}px at 50% 50%)`
-    )
+    const r = path.shape === 'circle' ? path.radius : NaN
+    expect(maskClipPathFor({ kind: 'circle' }, H)).toBe(`circle(${r}px at ${r}px 50%)`)
   })
 
   it('carries a half-pixel radius rather than rounding a shape away', () => {
     // An odd row height is reachable: track heights are stored numbers.
-    expect(maskClipPathFor({ kind: 'circle' }, 45)).toBe('circle(22.5px at 50% 50%)')
+    expect(maskClipPathFor({ kind: 'circle' }, 45)).toBe('circle(22.5px at 22.5px 50%)')
   })
 
   it.each([

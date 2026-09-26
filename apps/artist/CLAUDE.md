@@ -791,8 +791,15 @@ counts are what a release build keeps.
 
 **A media clip carries its own masked thumbnail (ESCSUITE-65, decision 5).** `TimelineTrack`
 draws one `<img>` of the clip's *source* thumbnail at the head of the clip and shapes it with an
-inline CSS `clip-path` from `utils/maskClipPath.ts`: `circle(<h/2>px at 50% 50%)` for a circle
-mask, `inset(0 round <fraction x h>px)` for a rounded one, and nothing at all for neither. The
+inline CSS `clip-path` from `utils/maskClipPath.ts`: `circle(<h/2>px at <h/2>px 50%)` for a
+circle mask, `inset(0 round <fraction x h>px)` for a rounded one, and nothing at all for
+neither. The circle is **hugged to the thumbnail's left edge** rather than centred in the 92px
+box, and that is a deliberate fix rather than an oversight: a clip is as wide as its duration
+and `.clip` is `overflow: hidden`, so a 0.2s clip is 10px wide and shows only the thumbnail's
+first 10 pixels — a centred circle spans x 20-72 and that clip would show an empty rectangle
+where an unmasked clip shows its picture. Only the *centre* moves; the radius is still
+`maskPathFor`'s, so it is a placement choice and not a second piece of geometry, and
+`inset(0 round r)` already starts at the left edge and needs no equivalent. The
 geometry is not a second copy — `maskClipPathFor` asks `core/clipMask.ts`'s `maskPathFor` for
 the shape of a 16:9 box of the thumb's height and only says the answer in CSS, so the inscribed
 circle, the clamp to half the shorter side and "a rounded rectangle with square corners is a
@@ -816,6 +823,9 @@ in the component because CSS cannot read a track's height and a `clip-path` circ
 radius — leaving the inline `style` to carry the `clip-path` alone, which is what lets one
 assertion on the whole style attribute prove the thumbnail is masked *and* not stroked. And it
 is **`aria-hidden` with `alt=""`**: the clip's name is already its label, and this is decoration.
+It also carries `decoding="async"`, because the virtualiser unmounts and remounts clips as the
+timeline scrolls and so creates these `<img>`s in bursts; nothing on the page waits for the
+picture, so a burst has no business on the main thread.
 It costs the row no store read — `sourceMedia` is the lookup the waveform already needs — and
 `timelineGestures.perf.test.ts` and `App.rerender.test.tsx` are byte-unchanged and green, which
 is the proof it costs no listener, no rect read, no render and no subscription. The

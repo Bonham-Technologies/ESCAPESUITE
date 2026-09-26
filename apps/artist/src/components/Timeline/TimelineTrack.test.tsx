@@ -432,6 +432,10 @@ describe('TimelineTrack clip thumbnails', () => {
     expect(thumb).toHaveAttribute('aria-hidden', 'true')
     // A native image drag would race the timeline's own clip drag.
     expect(thumb).toHaveAttribute('draggable', 'false')
+    // The virtualiser unmounts and remounts clips as the timeline scrolls, so
+    // these <img>s are created in bursts. Decoding off the main thread keeps a
+    // burst off the gesture path — nothing here is waiting on the picture.
+    expect(thumb).toHaveAttribute('decoding', 'async')
   })
 
   it('sits inside .clipContent, where the hit geometry cannot see it', () => {
@@ -458,7 +462,7 @@ describe('TimelineTrack clip thumbnails', () => {
     // The whole inline style, not just the clip-path: this is also the pin that
     // the *stroke* is not drawn on the thumbnail in v1 (no border, no outline,
     // no box-shadow). A stroked clip is the next case.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 50% 50%);')
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
   })
 
   it('leaves a stroked clip’s thumbnail unstroked (v1)', () => {
@@ -473,7 +477,7 @@ describe('TimelineTrack clip thumbnails', () => {
     })
 
     // The border stays in the frame. The thumbnail shows the shape.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 50% 50%);')
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
   })
 
   it('rounds the corners by the same fraction the frame uses', () => {

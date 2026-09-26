@@ -182,6 +182,7 @@ export const TimelineTrack = React.memo(function TimelineTrack({
                   alt=""
                   aria-hidden="true"
                   draggable={false}
+                  decoding="async"
                   width={Math.round(thumbHeight * CLIP_THUMB_ASPECT)}
                   height={thumbHeight}
                   style={{ clipPath: maskClipPathFor(clip.mask, thumbHeight) }}

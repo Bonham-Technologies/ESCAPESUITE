@@ -51,6 +51,17 @@ function px(value: number): string {
  * side, decision 2) resolves here against exactly what it resolves against in
  * the frame.
  *
+ * The circle is **hugged to the thumbnail's left edge** — `at <h/2>px 50%`, and
+ * not centred in the box. A clip is as wide as its duration, and `.clip` is
+ * `overflow: hidden`, so a short clip shows only the thumbnail's first few
+ * pixels: 0.2s at the default 50px/s is a 10px clip. Centred in the 92px box the
+ * circle would span x 20-72 and that clip would show an empty rectangle where an
+ * unmasked clip shows its picture. Against the left edge the circle's own
+ * leftmost pixel is x 0, so the shape is visible from the first pixel of any
+ * clip. It is the *centre* that moves, never the radius, so this is a placement
+ * choice and not a second piece of geometry — `inset(0 round r)` already starts
+ * at the left edge and needs no equivalent.
+ *
  * `undefined` rather than `'none'` for the no-mask case: React omits an
  * undefined style property, so an unmasked clip's thumbnail carries no
  * `clip-path` at all and is byte-identical in the DOM to one from before this
@@ -73,7 +84,12 @@ export function maskClipPathFor(
     thumbHeightPx
   );
 
-  if (path.shape === 'circle') return `circle(${px(path.radius)} at 50% 50%)`;
+  if (path.shape === 'circle') {
+    // Centre and radius are the same length: a circle whose leftmost pixel is
+    // x 0 is centred exactly its own radius from the left edge.
+    const r = px(path.radius);
+    return `circle(${r} at ${r} 50%)`;
+  }
   if (path.shape === 'rounded') return `inset(0 round ${px(path.radius)})`;
   // `'rect'` is `maskPathFor`'s way of saying there is nothing to mask — a
   // rectangle the size of the box is the box. It covers `kind: 'none'`, a

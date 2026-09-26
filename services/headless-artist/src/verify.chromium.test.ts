@@ -356,8 +356,10 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
     // The stroke: white, on the mask's own outline, drawn after the picture and
     // after the clip region was dropped (`core/clipMask.ts`'s inner restore) —
     // which is the whole reason that inner save/restore pair exists. Inside the
-    // clip region, half of every line would have been eaten. This sample is the
-    // middle of the band, so it is the line and nothing else.
+    // clip region, half of every line would have been eaten. This sample reads
+    // the middle of the band — `frameEdgeRGB` centres its crop on the point and
+    // the probe reads that centre, it does not average the crop — so it is the
+    // line and nothing else.
     const [edgeR, edgeG, edgeB] = await frameEdgeRGB(
       outputPath,
       MASKED_FRAME,
@@ -370,14 +372,17 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
 
     // And the sample that proves the stroke is drawn **outside** the clip region
     // — the inner `restore()` in `core/clipMask.ts`'s `drawWithMaskAndStroke`.
-    // The assertion above cannot prove it alone: centred on the outline, half of
-    // that sample is inside the circle whatever happens to the other half, so a
-    // stroke drawn *inside* the clip region (outer half eaten, inner half kept)
-    // still averages near white-over-red — nominally ~127 per channel against a
-    // 150 floor, and mutation B showed this encode can lift a nominally-127
-    // channel over that line. This 2x2 block is in the band's outer half only:
-    // white if the line escaped the mask, the export's black background if it
-    // did not. Nothing in between.
+    // The assertion above cannot prove it alone: it reads the point *on* the
+    // outline, and that pixel is white whether the line escaped the mask or was
+    // half-eaten by it, because the half that survives is the half the outline
+    // itself runs through. (These probes sample near the centre of their crop
+    // rather than averaging it — see `test/ffprobe.ts` — so the old reading of
+    // this, that a half-eaten line "averages near white-over-red, nominally
+    // ~127", was never the mechanism; the point read is on the line either way,
+    // which is the sharper reason this second sample is needed.) The 2x2 block
+    // below is offset into the band's **outer half**, so the pixel it reads is
+    // outside the circle: white if the line escaped the mask, the export's black
+    // background if it did not. Nothing in between.
     const [outerR, outerG, outerB] = await frameEdgeRGB(
       outputPath,
       MASKED_FRAME,

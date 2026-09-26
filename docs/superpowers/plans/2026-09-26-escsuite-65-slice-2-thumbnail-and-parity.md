@@ -98,6 +98,15 @@ Record `clipDragLayoutsPerFrame`, `marqueeLayoutsPerFrame` and `playheadScrubLay
 - Modify: `apps/artist/src/components/Timeline/Timeline.module.css` (`.clipContent` at 449-459 gains one declaration; a new `.clipThumb` block after line 459)
 - Modify: `apps/artist/src/components/Timeline/TimelineTrack.test.tsx` (one describe block appended after `describe('TimelineTrack keyframes')`, which closes at line 366)
 
+> **Amended after the whole-branch review (final fix wave).** The `circle(...)` strings
+> throughout this task originally centred the circle horizontally in the 92 px thumbnail box. Review found that invisible on a narrow clip (`.clip` is
+> `overflow: hidden`, so a 0.2 s clip is 10 px wide and a centred circle spans x 20-72), and
+> ruled that the circle hugs the thumbnail's **left** edge instead: `circle(<h/2>px at <h/2>px
+> 50%)`. Only the centre moved — the radius is still `maskPathFor`'s — and `inset(0 round r)`
+> already started at the left edge and is unchanged. Every string below has been corrected to
+> what shipped, so this plan can still be read as a description of the code; the ruling is
+> recorded here so it is not read as something the plan foresaw.
+
 **Interfaces:**
 
 - Consumes: `maskPathFor` from `../core/clipMask` (slice 1) and `ClipMask` from `../store/types`; in the component, the `track`, `clips` and `sourceVideos` props it already takes and the `sourceMedia` lookup it already makes at line 94.
@@ -108,7 +117,7 @@ Record `clipDragLayoutsPerFrame`, `marqueeLayoutsPerFrame` and `playheadScrubLay
 export const CLIP_THUMB_ASPECT = 16 / 9;
 
 /**
- * `circle(<h/2>px at 50% 50%)` for a circle mask,
+ * `circle(<h/2>px at <h/2>px 50%)` for a circle mask,
  * `inset(0 round <fraction x h>px)` for a rounded one,
  * `undefined` for no mask at all.
  */
@@ -152,7 +161,7 @@ describe('maskClipPathFor', () => {
   it('inscribes a circle of half the thumb’s height, centred', () => {
     // The thumb is 16:9, so its shorter side is its height and the inscribed
     // circle is h/2 — the same rule `core/clipMask.ts` applies to a drawn box.
-    expect(maskClipPathFor({ kind: 'circle' }, H)).toBe('circle(26px at 50% 50%)')
+    expect(maskClipPathFor({ kind: 'circle' }, H)).toBe('circle(26px at 26px 50%)')
   })
 
   it('is the same circle core/clipMask.ts draws for the same box', () => {
@@ -161,13 +170,13 @@ describe('maskClipPathFor', () => {
     // stop sharing an implementation, which is the only way they can drift.
     expect(path.shape).toBe('circle')
     expect(maskClipPathFor({ kind: 'circle' }, H)).toBe(
-      `circle(${path.shape === 'circle' ? path.radius : NaN}px at 50% 50%)`
+      `circle(${r}px at ${r}px 50%)`
     )
   })
 
   it('carries a half-pixel radius rather than rounding a shape away', () => {
     // An odd row height is reachable: track heights are stored numbers.
-    expect(maskClipPathFor({ kind: 'circle' }, 45)).toBe('circle(22.5px at 50% 50%)')
+    expect(maskClipPathFor({ kind: 'circle' }, 45)).toBe('circle(22.5px at 22.5px 50%)')
   })
 
   it.each([
@@ -297,7 +306,7 @@ export function maskClipPathFor(
     thumbHeightPx
   );
 
-  if (path.shape === 'circle') return `circle(${px(path.radius)} at 50% 50%)`;
+  if (path.shape === 'circle') return `circle(${r} at ${r} 50%)`;
   if (path.shape === 'rounded') return `inset(0 round ${px(path.radius)})`;
   // `'rect'` is `maskPathFor`'s way of saying there is nothing to mask — a
   // rectangle the size of the box is the box. It covers `kind: 'none'`, a
@@ -403,7 +412,7 @@ describe('TimelineTrack clip thumbnails', () => {
     // The whole inline style, not just the clip-path: this is also the pin that
     // the *stroke* is not drawn on the thumbnail in v1 (no border, no outline,
     // no box-shadow). A stroked clip is the next case.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 50% 50%);')
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
   })
 
   it('leaves a stroked clip’s thumbnail unstroked (v1)', () => {
@@ -418,7 +427,7 @@ describe('TimelineTrack clip thumbnails', () => {
     })
 
     // The border stays in the frame. The thumbnail shows the shape.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 50% 50%);')
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
   })
 
   it('rounds the corners by the same fraction the frame uses', () => {
@@ -1232,7 +1241,7 @@ Then insert this note after the round-2 paragraph that ends at line **788** and 
 ```md
 **A media clip carries its own masked thumbnail (ESCSUITE-65, decision 5).** `TimelineTrack`
 draws one `<img>` of the clip's *source* thumbnail at the head of the clip and shapes it with an
-inline CSS `clip-path` from `utils/maskClipPath.ts`: `circle(<h/2>px at 50% 50%)` for a circle
+inline CSS `clip-path` from `utils/maskClipPath.ts`: `circle(<h/2>px at <h/2>px 50%)` for a circle
 mask, `inset(0 round <fraction x h>px)` for a rounded one, and nothing at all for neither. The
 geometry is not a second copy — `maskClipPathFor` asks `core/clipMask.ts`'s `maskPathFor` for
 the shape of a 16:9 box of the thumb's height and only says the answer in CSS, so the inscribed
@@ -1495,7 +1504,7 @@ EOF
 | (f8) Fixed height = the clip row's inner height, 16:9 | Task 8, Step 7: `thumbHeight = max(track.height - 8, 40)` mirroring `.clip`'s three CSS declarations, width `round(h x CLIP_THUMB_ASPECT)`; asserted as `height="52" width="92"` on a 60px track and `40`/`71` at the clamp |
 | (f8) `aria-hidden`, `alt=""`, `draggable={false}`, `pointer-events: none` | Global Constraint 6; Task 8's 'is decoration, not content' case (three attributes) and the `.clipThumb` CSS (`pointer-events`) |
 | (f8) `style={{ clipPath }}` from a pure `utils/maskClipPath.ts` | Task 8, Step 3 and Step 7 |
-| (f8) `maskClipPathFor(mask, thumbHeightPx)` → `circle(<h/2>px at 50% 50%)` / `inset(0 round <fraction x h>px)` / `undefined` | Task 8's Interfaces block, Step 1's tests (`circle(26px at 50% 50%)`, `inset(0 round 13px)`, `undefined`) and Step 3's implementation |
+| (f8) `maskClipPathFor(mask, thumbHeightPx)` → `circle(<h/2>px at <h/2>px 50%)` / `inset(0 round <fraction x h>px)` / `undefined` | Task 8's Interfaces block, Step 1's tests (`circle(26px at 26px 50%)`, `inset(0 round 13px)`, `undefined`) and Step 3's implementation |
 | (f8) "the thumb's shorter side is its height, so the fraction resolves against it exactly as the canvas path does" | Task 8, decision 1 and Step 3's docstring; asserted twice — the string, and the parity case against `maskPathFor` |
 | (f8) The stroke is **not** drawn on the thumbnail (v1; say so) | Global Constraint 7; Task 8 decision 6; the 'leaves a stroked clip's thumbnail unstroked' case asserting the **whole** style attribute; the changeset; `apps/artist/CLAUDE.md` (Task 10, Step 1) |
 | (f8) Red-first: a video clip renders the img with its source's URL | Task 8, Steps 5-6-8 |
@@ -1529,7 +1538,7 @@ EOF
 | (h) `inset(… round …)` needs no prefix in the three engines the e2e suite runs | No prefix is written; and jsdom round-trips both strings verbatim, which the plan verified before writing the assertions |
 | (h) Fixture blast radius | Global Constraint 9; Task 9 Steps 2 and 6 |
 
-**2. Placeholder scan.** No "TBD", no "add appropriate tests", no "similar to Task N", no "and so on". Every string, number and command is written out: the two `clip-path` forms and every value they take (`circle(26px at 50% 50%)`, `circle(22.5px at 50% 50%)`, `inset(0 round 2.6px)`, `inset(0 round 13px)`, `inset(0 round 18.2px)`, `inset(0 round 26px)`); the whole style attribute both assertions read (`'clip-path: circle(26px at 50% 50%);'` and `''`); the box attributes (`height="52" width="92"`, and `40`/`71` at the clamp); the two component constants (`CLIP_BOX_VERTICAL_INSET = 8`, `MIN_CLIP_BOX_HEIGHT = 40`) and the exported `CLIP_THUMB_ASPECT = 16 / 9`; the CSS class name `.clipThumb` and every declaration in it including `opacity: 0.45`; the three ffmpeg filter strings; the verify case's five constants (`0.125`, frame `15`, `(8, 24)`, the inside block `28,20,8,8`) and all nine of its thresholds; the e2e's four assertion strings (`'circle'`, `'Circle'`, `'4.5px'`, `'3px'`) with the arithmetic that produces each; every doc sentence in full, with the line it replaces; and every run command with its expected result.
+**2. Placeholder scan.** No "TBD", no "add appropriate tests", no "similar to Task N", no "and so on". Every string, number and command is written out: the two `clip-path` forms and every value they take (`circle(26px at 26px 50%)`, `circle(22.5px at 22.5px 50%)`, `inset(0 round 2.6px)`, `inset(0 round 13px)`, `inset(0 round 18.2px)`, `inset(0 round 26px)`); the whole style attribute both assertions read (`'clip-path: circle(26px at 26px 50%);'` and `''`); the box attributes (`height="52" width="92"`, and `40`/`71` at the clamp); the two component constants (`CLIP_BOX_VERTICAL_INSET = 8`, `MIN_CLIP_BOX_HEIGHT = 40`) and the exported `CLIP_THUMB_ASPECT = 16 / 9`; the CSS class name `.clipThumb` and every declaration in it including `opacity: 0.45`; the three ffmpeg filter strings; the verify case's five constants (`0.125`, frame `15`, `(8, 24)`, the inside block `28,20,8,8`) and all nine of its thresholds; the e2e's four assertion strings (`'circle'`, `'Circle'`, `'4.5px'`, `'3px'`) with the arithmetic that produces each; every doc sentence in full, with the line it replaces; and every run command with its expected result.
 
 Three deliberate exceptions, each with a rule instead of a value. **Task 8 Step 8's and Step 9's test totals** — the plan says "report the real count" rather than guessing, because slice 1's ledger recorded four brief-vs-reality count mismatches and a wrong count in a plan costs a review cycle for nothing. **Task 9 Step 3's and Step 5's red failure numbers** — the corner's red value and the edge's dark value depend on the encoder, so the step names the assertion that must fail and asks for the printed number to be quoted. **Task 10 Step 8's four coverage figures** — that step's entire subject is the measurement; it names the command, the two baselines to compare against (the table's stale row and slice 1's real figures), the whole-percent rule, the three files a risen floor touches, and the "add the test, never lower the floor" instruction.
 
