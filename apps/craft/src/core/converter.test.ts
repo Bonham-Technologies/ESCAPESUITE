@@ -2,10 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   convertToMP4,
   convertToM4A,
-  remuxToWebM,
   fixWebMMetadata,
   isMP4ConversionSupported,
-  isWebMRemuxSupported,
   probeMP4Support,
   ConversionAbortedError,
   M4A_NO_AUDIO_MESSAGE,
@@ -221,7 +219,6 @@ describe('converter', () => {
   describe('capability probes', () => {
     it('report support when every WebCodecs global is present', () => {
       expect(isMP4ConversionSupported()).toBe(true)
-      expect(isWebMRemuxSupported()).toBe(true)
     })
 
     it.each(['VideoEncoder', 'VideoFrame', 'AudioEncoder', 'AudioContext'])(
@@ -229,7 +226,6 @@ describe('converter', () => {
       name => {
         withoutGlobal(name, () => {
           expect(isMP4ConversionSupported()).toBe(false)
-          expect(isWebMRemuxSupported()).toBe(false)
         })
       }
     )
@@ -241,9 +237,6 @@ describe('converter', () => {
       try {
         await expect(convertToMP4(SOURCE, vi.fn())).rejects.toThrow(
           'MP4 conversion requires WebCodecs API (Chrome/Edge)'
-        )
-        await expect(remuxToWebM(SOURCE, 1, vi.fn())).rejects.toThrow(
-          'WebM remuxing requires WebCodecs API (Chrome/Edge)'
         )
       } finally {
         g.VideoEncoder = saved
@@ -1661,7 +1654,6 @@ describe('converter', () => {
     })
   })
 
-  // --- remuxToWebM ---------------------------------------------------------
 
   // --- convertToM4A --------------------------------------------------------
 
@@ -1847,158 +1839,6 @@ describe('converter', () => {
     })
   })
 
-  describe('remuxToWebM', () => {
-    it('produces a WebM blob muxed from VP9 + Opus', async () => {
-      audio.decodeResult = createAudioBufferDouble({ length: 4 })
-      const { promise, video, progress } = start(p => remuxToWebM(SOURCE, 0.1, p))
-      await playThroughRvfc(video, 3)
-
-      const blob = await promise
-      expect(blob.type).toBe('video/webm')
-      expect(blob.size).toBe(128)
-
-      const state = getMediabunnyState()
-      expect(state.formats.map(f => f.name)).toEqual(['webm'])
-      expect(state.videoSources[0].codec).toBe('vp9')
-      expect(state.audioSources[0].codec).toBe('opus')
-      expect(lastVideoEncoder().configureCalls[0]).toMatchObject({ codec: 'vp09.00.10.08' })
-      expect(lastAudioEncoder().configureCalls[0]).toMatchObject({ codec: 'opus' })
-      // Opus needs no isConfigSupported probe — unlike the MP4 path's AAC.
-      expect(progress[progress.length - 1]).toEqual({
-        phase: 'finalizing',
-        progress: 100,
-        message: 'WebM ready!',
-      })
-    })
-
-    it('uses a keyframe every two seconds for seekability', async () => {
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 2.2, p), { duration: 2.2 })
-      await settle()
-      for (let i = 0; i < 66; i++) video.presentFrame(i / 30)
-      video.fireEnded()
-      await settle()
-      await promise
-
-      const encodes = lastVideoEncoder().encodes
-      expect(encodes).toHaveLength(66)
-      const keyIndexes = encodes.map((e, i) => (e.options?.keyFrame ? i : -1)).filter(i => i >= 0)
-      expect(keyIndexes).toEqual([0, 60])
-    })
-
-    it('falls back to the supplied duration when the container reports Infinity', async () => {
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.2, p), { duration: Infinity })
-      await settle()
-      for (let i = 0; i < 6; i++) video.presentFrame(i / 30)
-      video.fireEnded()
-      await settle()
-      await promise
-
-      // ceil(0.2 * 30) = 6 frames, taken from the caller's duration.
-      expect(lastVideoEncoder().encodes).toHaveLength(6)
-    })
-
-    it('remuxes video-only when there is no decodable audio', async () => {
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p))
-      await playThroughRvfc(video, 3)
-      await promise
-
-      expect(getMediabunnyState().audioSources).toHaveLength(0)
-      expect(AudioEncoderDouble.instances).toHaveLength(0)
-    })
-
-    it.each([
-      [1920, 1080, 8_000_000],
-      [1280, 720, 5_000_000],
-      [640, 360, 2_500_000],
-    ])('picks the bitrate for %ix%i', async (width, height, bitrate) => {
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p), { width, height })
-      await playThroughRvfc(video, 3)
-      await promise
-
-      expect(lastVideoEncoder().configureCalls[0]).toMatchObject({ bitrate })
-    })
-
-    it('rejects when the muxer wrote no bytes', async () => {
-      getMediabunnyState().producesBuffer = false
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p))
-      await playThroughRvfc(video, 3)
-
-      await expect(promise).rejects.toThrow('Remuxing failed: no data was written to buffer')
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
-    })
-
-    it('aborts mid-capture and releases the open video encoder', async () => {
-      const controller = new AbortController()
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p, controller.signal))
-      await settle()
-      video.presentFrame(0)
-
-      controller.abort()
-
-      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
-      expect(lastVideoEncoder().closeCalls).toBe(1)
-      expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
-      expect(allFramesClosed()).toBe(true)
-    })
-
-    it('aborts before the audio pass', async () => {
-      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
-      const controller = new AbortController()
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p, controller.signal))
-      await settle()
-      for (let i = 0; i < 3; i++) video.presentFrame(i / 30)
-      video.fireEnded()
-      controller.abort()
-
-      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
-      expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
-      expect(lastVideoEncoder().closeCalls).toBe(1)
-      expect(lastAudioEncoder().closeCalls).toBe(1)
-    })
-
-    it('waits for audio encoder backpressure to clear', async () => {
-      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p))
-      await settle()
-      lastAudioEncoder().setQueueScript([30, 21, 0])
-      for (let i = 0; i < 3; i++) video.presentFrame(i / 30)
-      video.fireEnded()
-      await settle(8)
-      await promise
-
-      const encoder = lastAudioEncoder()
-      expect(encoder.encodes).toHaveLength(3)
-      expect(getMediabunnyState().audioSources[0].packets).toHaveLength(3)
-      expect(encoder.queueReads).toEqual([30, 21, 0, 0, 0])
-    })
-
-    it('rejects when the source video will not load', async () => {
-      const promise = remuxToWebM(SOURCE, 1, vi.fn())
-      getLastVideoDouble()!.fireError()
-
-      await expect(promise).rejects.toThrow('Failed to load video')
-    })
-
-    it('reports the first encoder failure, logging both, and leaves neither open', async () => {
-      // The same law as the MP4 path's, applied to the remux because it is the
-      // same helper: an asynchronous encoder failure ends the conversion and is
-      // reported in the codec's own words, and the *first* one is the one that
-      // stopped the work (ESCSUITE-74).
-      audio.decodeResult = createAudioBufferDouble({ length: 4 })
-      const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p))
-      await settle()
-      lastVideoEncoder().emitError('vp9 died')
-      lastAudioEncoder().emitError('opus died')
-
-      await expect(promise).rejects.toThrow('vp9 died')
-      expect(consoleError).toHaveBeenCalledWith('Video encoder error:', expect.any(Error))
-      expect(consoleError).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
-      expect(video.pause).toHaveBeenCalled()
-      expect(lastVideoEncoder().state).toBe('closed')
-      expect(lastAudioEncoder().state).toBe('closed')
-    })
-  })
-
   // --- fixWebMMetadata -----------------------------------------------------
 
   describe('fixWebMMetadata', () => {
@@ -2019,12 +1859,12 @@ describe('converter', () => {
     })
   })
 
-  it('does not leak encoder instances between conversions', async () => {
+  it('does not leak encoder instances between successive conversions', async () => {
     const first = start(p => convertToMP4(SOURCE, p))
     await playThroughRvfc(first.video, 3)
     await first.promise
 
-    const second = start(p => remuxToWebM(SOURCE, 0.1, p))
+    const second = start(p => convertToMP4(SOURCE, p))
     await playThroughRvfc(second.video, 3)
     await second.promise
 
