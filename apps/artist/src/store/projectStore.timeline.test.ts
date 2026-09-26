@@ -662,4 +662,58 @@ describe('projectStore remaining behaviours', () => {
       expect(store().project.timeline.duration).toBe(4)
     })
   })
+
+  describe('a locked track (ESCSUITE-84)', () => {
+    let held: string
+    let free: string
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    beforeEach(() => {
+      held = useEditorStore.getState().project.timeline.tracks[0].id
+      free = store().addTrack('Free').id
+      addClip('h1', 0, 2, held)
+      addClip('h2', 4, 2, held)
+      addClip('f1', 0, 2, free)
+      store().updateTrack(held, { locked: true })
+    })
+
+    /** Assert the action wrote nothing: same clips array, no history entry. */
+    const refuses = (act: () => void) => {
+      const before = clipsRef(); const entries = past()
+      act()
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
+    it('refuses to add a clip to it by explicit track id', () => refuses(() =>
+      store().addClipToTimeline(
+        { id: 'new1', sourceVideoId: video.id, name: 'new1', startTime: 0, endTime: 2, duration: 2 },
+        held
+      )))
+    it('refuses to remove a clip on it', () => refuses(() => store().removeClipFromTimeline('h1')))
+    it('refuses to ripple-delete a clip on it', () => refuses(() => store().rippleDeleteClip('h1')))
+    it('refuses to update a clip on it', () => refuses(() => store().updateClip('h1', { endTime: 1 })))
+    it('refuses to split a clip on it', () => refuses(() => store().splitClip('h1', 1)))
+    it('refuses to move a clip on it in time', () => refuses(() => store().setClipTimelinePosition('h1', 8)))
+    it('refuses to move a clip on it to another track', () => refuses(() => store().moveClipToTrack('h1', free)))
+    it('refuses to move a clip onto it from another track', () => refuses(() => store().moveClipToTrack('f1', held)))
+    it('refuses to transform a clip on it', () => refuses(() => store().updateClipTransform('h1', { x: 0.2 })))
+    it('refuses to change the blend mode of a clip on it', () => refuses(() => store().updateClipBlendMode('h1', 'multiply')))
+    it('refuses to change the effects of a clip on it', () => refuses(() => store().updateClipEffects('h1', { blur: 3 })))
+    it('refuses to change the transition of a clip on it', () => refuses(() => store().updateClipTransition('h1', { duration: 1 })))
+    it('refuses to change the animation of a clip on it', () => refuses(() => store().updateClipAnimation('h1', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
+    it('refuses to duplicate a clip on it', () => refuses(() => store().duplicateClip('h1')))
+    it('refuses to shift the clips on it', () => refuses(() => store().shiftClipsAfter(held, 1, 2)))
+    it('refuses a shift over every track when any shifted clip is on it', () => refuses(() => store().shiftClipsAfter(undefined, 1, 2)))
+    it('still shifts the clips on an unlocked track', () => {
+      addClip('f2', 4, 2, free)
+      store().shiftClipsAfter(free, 1, 2)
+      expect(clipsRef().find((c) => c.id === 'f2')!.timelinePosition).toBe(6)
+    })
+    it('still edits a clip on an unlocked track while another track is locked', () => {
+      store().updateClipBlendMode('f1', 'multiply')
+      expect(clipsRef().find((c) => c.id === 'f1')!.blendMode).toBe('multiply')
+    })
+  })
 })
