@@ -36,16 +36,18 @@ import {
   type WebCodecsDoubles,
 } from '../test/doubles/webcodecs'
 import {
+  MASKED_MEDIA_CLIPS_AT_EFFECTS_FRAME,
   SCENE_RESOLUTION,
   SCENE_SOURCE_HEIGHT,
   SCENE_SOURCE_ID,
   SCENE_SOURCE_WIDTH,
   SCENE_TRACKS,
+  buildMaskedSceneClips,
   buildSceneClips,
   sceneSource,
 } from '../test/fixtures/perfScene'
 import { makeExportOptions } from '../test/fixtures/clipFixtures'
-import type { ExportProgress } from '../store/types'
+import type { Clip, ExportProgress } from '../store/types'
 
 vi.mock('mediabunny', async () => {
   const { createMediabunnyDouble } = await import('../test/doubles/mediabunny')
@@ -61,6 +63,12 @@ const RANGE = { start: 7, end: 8 }
 const FRAMES = 30
 /** Clips live over that second: two media clips and the two overlays. */
 const ACTIVE_CLIPS = 4
+/**
+ * save() calls the *plain* scene makes per frame — what the masked variant's
+ * tripwire counts up from. Measured 2026-09-12 and re-measured unchanged
+ * 2026-09-25; the first case below pins the rest of that frame.
+ */
+const PLAIN_SAVES_PER_FRAME = 4
 
 let media: MediaDoubles
 let webcodecs: WebCodecsDoubles
@@ -141,8 +149,7 @@ interface ExportMeasurement {
   videoFlushes: number
 }
 
-async function measureExport(): Promise<ExportMeasurement> {
-  const clips = buildSceneClips()
+async function measureExport(clips: Clip[] = buildSceneClips()): Promise<ExportMeasurement> {
   const progress: ExportProgress[] = []
   const getAnimatedValues = vi.spyOn(animation, 'getAnimatedValues')
   const contextsBefore = getContextCallCount()
@@ -197,6 +204,52 @@ describe('export per-frame work', () => {
     expect(measured.savesPerFrame).toBe(measured.restoresPerFrame)
     // Exact: one canvas for the whole export, not one per frame.
     expect(measured.getContexts).toBe(1)
+  })
+
+  it('encodes the masked and stroked scene within its per-frame ceilings', async () => {
+    // The same 30 frames, with every media clip masked and stroked. The plain
+    // ceilings above are untouched and must stay that way: this is a variant of
+    // the benchmark scene, not an edit to it.
+    const measured = await measureExport(buildMaskedSceneClips())
+
+    expect(measured.framesEncoded).toBe(FRAMES)
+
+    // Measured 2026-09-25: 40 calls per frame, 2 drawImage, 6 save/restore
+    // pairs, 4 animation lookups per frame.
+    //
+    // Derived the same way as the preview ceiling: 3 calls for a mask, 5 for a
+    // stroke, two media clips live over this second, so the plain 24 calls per
+    // frame become 24 + 2 x 8 = 40, which is what was measured.
+    expect(measured.callsPerFrame).toBeLessThanOrEqual(80)
+    // Exact, and unchanged: a mask draws no second image.
+    expect(measured.drawImagesPerFrame).toBeLessThanOrEqual(4)
+    // Exact, and unchanged: neither field is animated, so the lookup count is
+    // still frames x active clips and nothing else (decision 4).
+    expect(measured.animationLookupsPerFrame).toBe(ACTIVE_CLIPS)
+    expect(measured.animationLookups).toBe(FRAMES * ACTIVE_CLIPS)
+    // Exact: an export that leaked a save() would drift the whole file, and the
+    // stroke's inner save is the only one this feature adds.
+    expect(measured.savesPerFrame).toBe(measured.restoresPerFrame)
+    // Exact, and the tripwire the ceilings above cannot be: that inner save is
+    // one per stroked media clip, so this count is how many masked clips
+    // actually reached the renderer — every `<=` in this case would pass just as
+    // happily on the plain scene. Measured 2026-09-25: 6, the plain frame's 4
+    // plus one per masked clip.
+    expect(measured.savesPerFrame).toBe(
+      PLAIN_SAVES_PER_FRAME + MASKED_MEDIA_CLIPS_AT_EFFECTS_FRAME
+    )
+    expect(measured.getContexts).toBe(1)
+  })
+
+  it('creates and closes exactly one VideoFrame per encoded frame with masks on', async () => {
+    const measured = await measureExport(buildMaskedSceneClips())
+
+    // The classic out-of-memory bug, asked again with the mask on: a clip region
+    // is context state, and a feature that leaked one could plausibly leak a
+    // frame too.
+    expect(measured.videoFramesCreated).toBe(FRAMES)
+    expect(measured.videoFramesClosed).toBe(measured.videoFramesCreated)
+    expect(allFramesClosed()).toBe(true)
   })
 
   it('creates and closes exactly one VideoFrame per encoded frame', async () => {
