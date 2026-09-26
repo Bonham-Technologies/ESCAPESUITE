@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { getSnapPoints, findNearestSnapPoint, wouldOverlap } from './timelineSnapping'
-import type { Clip } from './types'
+import {
+  getSnapPoints,
+  findNearestSnapPoint,
+  wouldOverlap,
+  trackIndexDelta,
+  canMoveSelectedClips,
+} from './timelineSnapping'
+import type { Clip, Track } from './types'
 
 describe('timelineSnapping helper functions', () => {
   const createMockClip = (id: string, trackId: string, position: number, duration: number): Clip => ({
@@ -89,6 +95,128 @@ describe('timelineSnapping helper functions', () => {
 
       // Same position as c1 but excluding c1 from check
       expect(wouldOverlap(clips, 't1', 5, 5, 'c1')).toBe(false)
+    })
+  })
+
+  // ESCSUITE-80: the two questions a multi-selection's drop asks before it
+  // commits. Both work in `selectionSlice.moveSelectedClips`' own index space —
+  // tracks sorted by ascending `index`, which is bottom-to-top on screen.
+  const createMockTrack = (id: string, index: number): Track => ({
+    id,
+    name: `Track ${index}`,
+    index,
+    visible: true,
+    locked: false,
+    muted: false,
+    volume: 1,
+    height: 60,
+  })
+
+  /** Three rows, deliberately handed over out of order. */
+  const tracks = [
+    createMockTrack('t2', 1),
+    createMockTrack('t3', 2),
+    createMockTrack('t1', 0),
+  ]
+
+  describe('trackIndexDelta', () => {
+    it('is zero for a drop back onto the row the drag started on', () => {
+      expect(trackIndexDelta(tracks, 't2', 't2')).toBe(0)
+    })
+
+    it('counts rows in ascending index order, whatever order the tracks arrive in', () => {
+      expect(trackIndexDelta(tracks, 't1', 't3')).toBe(2)
+      expect(trackIndexDelta(tracks, 't3', 't2')).toBe(-1)
+    })
+
+    it('answers null when the row the drag started on is gone', () => {
+      expect(trackIndexDelta(tracks, 'gone', 't1')).toBeNull()
+    })
+
+    it('answers null when the row it was dropped on is gone', () => {
+      expect(trackIndexDelta(tracks, 't1', 'gone')).toBeNull()
+    })
+  })
+
+  describe('canMoveSelectedClips', () => {
+    const move = (
+      clips: Clip[],
+      selected: string[],
+      deltaTime: number,
+      deltaTrack: number
+    ): boolean =>
+      canMoveSelectedClips({
+        clips,
+        tracks,
+        selectedClipIds: new Set(selected),
+        deltaTime,
+        deltaTrack,
+      })
+
+    it('allows a move in time alone onto free ground', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5)]
+
+      expect(move(clips, ['c1'], 10, 0)).toBe(true)
+    })
+
+    it('allows a move onto a row with nothing on it', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5)]
+
+      expect(move(clips, ['c1'], 0, 1)).toBe(true)
+    })
+
+    it('lets the selection slide over ground its own members are vacating', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 5),
+        createMockClip('c2', 't1', 5, 5),
+      ]
+
+      // c1 lands where c2 stands, and c2 is moving out of it in the same write.
+      expect(move(clips, ['c1', 'c2'], 5, 0)).toBe(true)
+    })
+
+    it('refuses the move when a member would land past the top of the stack', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 5),
+        createMockClip('c2', 't3', 0, 5),
+      ]
+
+      expect(move(clips, ['c1', 'c2'], 0, 1)).toBe(false)
+    })
+
+    it('refuses the move when a member would land below the bottom of the stack', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 5),
+        createMockClip('c2', 't3', 0, 5),
+      ]
+
+      expect(move(clips, ['c1', 'c2'], 0, -1)).toBe(false)
+    })
+
+    it('refuses the move when a member is on a row that is not on the timeline', () => {
+      const clips = [createMockClip('c1', 'gone', 0, 5)]
+
+      expect(move(clips, ['c1'], 1, 0)).toBe(false)
+    })
+
+    it('refuses the move when a member would land on a clip that is not moving', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 5),
+        createMockClip('c2', 't2', 2, 5),
+      ]
+
+      expect(move(clips, ['c1'], 0, 1)).toBe(false)
+    })
+
+    it('refuses the move when clamping at zero would stack two members', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 5),
+        createMockClip('c2', 't1', 5, 5),
+      ]
+
+      // Both members are pulled back past the start of the timeline, where the
+      // store's own `Math.max(0, …)` would pile them on top of each other.
+      expect(move(clips, ['c1', 'c2'], -10, 0)).toBe(false)
     })
   })
 })

@@ -37,7 +37,7 @@ pnpm lint                # Run ESLint
 - Timeline is a flat array of `Clip` objects; each clip references a `sourceVideoId` and defines `startTime`/`endTime` within that source
 - **Track properties**: `id`, `name`, `index`, `visible`, `locked`, `muted`, `volume` (0-1), `height`
 - **Auto-track creation**: When adding clips/overlays without specifying a track, a new track is created automatically
-- **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work
+- **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work. Two more live here and are **not** re-exported, because only the clip drag asks them: `trackIndexDelta` (how many rows a drop moved the clip the pointer held, in `moveSelectedClips`' ascending-`index` space, or `null` when either row has left the timeline) and `canMoveSelectedClips` (whether *every* clip of a multi-selection can take a given time and row delta) — ESCSUITE-80, below
 
 **Pure helpers** — no zustand, no React, no store access:
 
@@ -754,7 +754,7 @@ component.
 | `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture. Invalidation is **event-based**, so a layout change that fires neither — an autosave or an undo changing a row's height mid-drag — would leave it stale where the old per-frame measurement absorbed it; unreachable through the UI today (a clip drag writes nothing until release, and no control resizes a track while a pointer is down), and if row heights ever become dynamic the hook to reach for is the `ResizeObserver` `useScrollSync` already installs on this container, not a third listener |
 | `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
 | `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point it writes |
-| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame. A drop that changed both the row and the time writes twice there, and the second write carries `skipHistory` so the whole drag is one undo step (ESCSUITE-79, below) |
+| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame. A drop that changed both the row and the time writes twice there, and the second write carries `skipHistory` so the whole drag is one undo step (ESCSUITE-79, below). A drop by a **multi-selection** is the other branch of that same commit: one `moveSelectedClips` carrying both deltas, all-or-nothing (ESCSUITE-80, below) |
 | `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it. The per-move write makes `clips` a fresh array every frame, which is exactly why the listeners hang off `trimState` and not off the clips |
 | `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking. The rows are still walked on the release only — once per gesture, never per frame |
 | `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips |
@@ -1009,6 +1009,40 @@ one `set` with one `pushToHistory`, so a five-clip drag was always one entry —
 and `useClipDrag.test.ts` now holds all four shapes (one entry each, the cross-track drop's undo
 landing on both the original row and the original position, and the flag `false` on the first
 write and `true` on the second).
+
+**A multi-selection drags in rows as well as in time, all of it or none of it** (ESCSUITE-80).
+The bulk branch of that same commit in `Timeline/useClipDrag.ts` was gated on `deltaTime !== 0`
+and passed a hard-coded row delta of `0`, so it got both cross-track cases wrong. A group
+dropped on another row at the *same time* did not match the gate at all and fell through to the
+single-clip commit below it, which fired `moveClipToTrack` for the clip the pointer was holding
+and nothing else — the selection split, silently. A **diagonal** drag did take the bulk path,
+and moved every clip in time and none of them in row. The commit is now gated on either delta
+and carries the real one: `trackIndexDelta` reads the drop's row change in
+`selectionSlice.moveSelectedClips`' own index space (tracks sorted by ascending `index`, which
+is bottom-to-top on screen), and `moveSelectedClips(deltaTime, deltaTrack)` moves every selected
+clip inside one `set` with one `pushToHistory`, so the whole group is still **one undo entry** —
+which is why the row half is not a second write here the way it is for a single clip.
+
+**The group's veto is all-or-nothing**, and `canMoveSelectedClips` is what answers it, before
+anything is written. Three ways a member refuses: its current row is not on the timeline, the
+row it would land on is off the top or the bottom of the stack, or its landing spot is taken by
+a clip that is not moving with it. Any one of them and the drop commits nothing — the
+alternative is a group arriving with some of its clips piled against the edge of the stack,
+which is what the store's own per-clip clamp (`Math.max(0, Math.min(len - 1, idx + delta))`,
+left as it is: it is that action's contract and its tests pin it) would otherwise produce. A
+member's **old** placement is never in the way, since the group vacates it in the same write, so
+a selection sliding along its own run does not veto itself. The positions checked are the ones
+that would be written, `Math.max(0, …)` clamp included, which is also what catches a group
+dragged back past the start of the timeline: the clamp would stack its members, and that reads
+as the overlap it is. A refused drop is **silent** — the clips spring back and no notice is
+raised — which is parity with the single-clip veto one branch down, the only other drop that
+can be refused; neither has ever notified, and making one of them talk is a product decision
+about both. There is no audio-versus-video row check in any of this, and that is not an
+omission: ARTIST's `Track` has no kind. A clip is audio because its *source* media is
+(`TimelineTrack` reads `sourceMedia?.mediaType`), and any clip may sit on any track, which is
+exactly what a single-clip drop allows. `useClipDrag.test.ts` holds the drag half (a same-time
+group drop moving every clip, a diagonal one moving rows and times together, one Ctrl+Z
+restoring all of it, and the four refusals) and `store/timelineSnapping.test.ts` the arithmetic.
 
 The one documented exception is the colour swatches
 in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the
