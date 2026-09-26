@@ -1350,7 +1350,7 @@ describe('useRecordingController teardown', () => {
   // while a take is still being set up: disposeRecorder() runs synchronously
   // underneath a handleStartRecording that is parked (ESCSUITE-73). The take
   // that resumes afterwards belongs to nobody.
-  describe('when the screen goes away mid-start', () => {
+  describe('when a take is thrown away mid-start', () => {
     /** A recorder whose initialize() is held open until the test lets go. */
     function parkedInitialize(): () => void {
       let release!: () => void
@@ -1387,6 +1387,44 @@ describe('useRecordingController teardown', () => {
       expect(useRecorderStore.getState().countdownValue).toBe(0)
       // ...and nothing said about a recording the user never saw.
       expect(useRecorderStore.getState().notice).toBeNull()
+    })
+
+    it('starts no countdown when the capture ends mid-initialize', async () => {
+      // The other way a take is disposed underneath a parked initialize(), and
+      // the one `cancelledRef` cannot see: the video track's 'ended' listener
+      // is installed before `Output.start()`, so a user who stops sharing while
+      // setup is still running reaches the recorder's own `onError`, which
+      // clears the countdown ticker, disposes the recorder and returns to idle
+      // — and raises no cancelled flag, because nobody cancelled anything. The
+      // guard has to ask the recorder ref, which every disposal nulls.
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const release = parkedInitialize()
+      const { result } = mountController({ countdownSeconds: 3 })
+      let start!: Promise<void>
+      await act(async () => {
+        start = result.current.handleStartRecording()
+      })
+      const recorder = recorderFactory.last()
+
+      await act(async () => {
+        recorder.callbacks.onError?.(new Error('Capture ended before recording started'))
+      })
+      release()
+      await act(async () => {
+        await start
+      })
+
+      expect(recorder.dispose).toHaveBeenCalledTimes(1)
+      expect(recorder.start).not.toHaveBeenCalled()
+      // No 3-2-1 over a recorder that is gone: idle, nothing ticking, no
+      // countdown left in the store for the next mount to come up inside.
+      expect(state()).toBe('idle')
+      expect(useRecorderStore.getState().countdownValue).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+      // ESCAPECRAFT says nothing for a capture that ended before it started —
+      // the console carries it, and that is the behaviour to keep.
+      expect(useRecorderStore.getState().notice).toBeNull()
+      expect(consoleError).toHaveBeenCalledWith('Recording error:', expect.any(Error))
     })
 
     it('says nothing when such a take fails as it is abandoned', async () => {

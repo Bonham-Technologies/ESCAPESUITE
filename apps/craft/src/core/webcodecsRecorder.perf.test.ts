@@ -586,7 +586,8 @@ describe('WebCodecsRecorder work ceilings', () => {
     //
     // Measured 2026-09-26 — a separate-tracks take with both audio sources,
     // disposed inside the webcam encoder's configure(): three codecs, two
-    // outputs, three source nodes, one ScriptProcessor, two readers.
+    // outputs, three source nodes, one ScriptProcessor, two readers, and zero
+    // level samples.
 
     /** Park the Nth VideoEncoder's `configure()` on a promise the test holds. */
     function parkVideoEncoderConfigure(nth: number, gate: Promise<void>): () => void {
@@ -665,14 +666,16 @@ describe('WebCodecsRecorder work ceilings', () => {
         // would ever have closed.
         expect(audio.contexts).toHaveLength(1)
         expect(audio.contexts.every(c => c.state === 'closed')).toBe(true)
-        // Exact, and the reason the flag exists: not one animation frame was
-        // ever scheduled, so there is no monitor loop to leave running, and not
-        // one level sample was pushed at the store for a take nobody saw.
-        // `pending()` alone cannot tell "never started" from "started and
-        // cancelled", and for a disposed recorder those are different bugs.
+        // Exact: not one level sample pushed at the store for a take nobody
+        // saw. That is the load-bearing assertion of the pair — `cleanup()`
+        // nulls both meters, so a monitor started after it wrote once rather
+        // than looping, and one whole-app re-render on behalf of a take that no
+        // longer exists is the thing that was wrong. The two rAF counts are a
+        // guard: monitoring is now unreachable after a dispose, and `pending()`
+        // alone could not tell "never started" from "started and cancelled".
+        expect(onAudioLevels).not.toHaveBeenCalled()
         expect(raf.scheduled()).toBe(0)
         expect(raf.pending()).toBe(0)
-        expect(onAudioLevels).not.toHaveBeenCalled()
       } finally {
         restore()
         uninstallTrackProcessorDouble()

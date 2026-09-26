@@ -2316,17 +2316,23 @@ describe('WebCodecsRecorder', () => {
   // started. `cleanup()` has then already swept the three registries
   // (ESCSUITE-66) and cleared them, so everything the *resolving* setup goes on
   // to build is built into a recorder nothing will ever tear down again: a
-  // second AudioContext, up to four Mediabunny outputs, up to five codecs, and
-  // the rAF level monitor, which reschedules itself unconditionally and pushes
-  // into the module-singleton store for the life of the page.
+  // second AudioContext with its own analysers and graph, up to four Mediabunny
+  // outputs holding their encoders and their targets open, up to five codecs,
+  // and an `ended` listener `trackEndedHandlers` can no longer remove. Setup
+  // then walked into one of the fields `cleanup()` *nulled* and threw, and the
+  // controller reported that as `START_FAILED` — a notice, in the
+  // module-singleton store, about a take nobody ever saw. The level monitor's
+  // share was one stray `{ microphone: 0, system: 0 }`: `cleanup()` nulls both
+  // meters, so a monitor started after it takes its no-meter branch and writes
+  // once rather than looping.
   //
   // Each test parks one of those awaits on a hand-resolved promise, disposes
   // while it is held, then lets it resolve — and asserts the same conservation
   // laws a cancelled take keeps, plus the two the caller cares about: nothing
-  // scheduled on rAF and nothing pushed at the store after the take was thrown
-  // away, and an `initialize()` that *resolves*, because the controller's catch
-  // turns a rejection into a `START_FAILED` notice about a take the user never
-  // saw.
+  // pushed at the store after the take was thrown away, and an `initialize()`
+  // that *resolves*, because a rejection is what produced that notice. The
+  // companion rAF assertions are a guard rather than a red: the monitor cannot
+  // be reached at all now, and on main it was the store write that was wrong.
   describe('dispose while initialize is still setting up', () => {
     /** A promise this test resolves by hand, to hold one await open. */
     function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -2410,8 +2416,10 @@ describe('WebCodecsRecorder', () => {
       expect(allCodecs()).toHaveLength(0)
       // ...and the video track keeps no listener from a take that never was.
       expect(videoTrack.listenerCount('ended')).toBe(0)
-      // Exact: no animation frame scheduled after the take was thrown away,
-      // and no level pushed at the store.
+      // The load-bearing one is the emission: not a single level sample for a
+      // take that no longer exists. The rAF count beside it is a guard — the
+      // monitor is now unreachable after a dispose — kept so that moving the
+      // call back inside setup cannot pass quietly.
       expect(rafSchedules()).toBe(schedulesAtDispose)
       expect(rafCallbacks.size).toBe(0)
       expect(callbacks.onAudioLevels).not.toHaveBeenCalled()
@@ -2477,12 +2485,16 @@ describe('WebCodecsRecorder', () => {
       expect(callbacks.onAudioLevels).not.toHaveBeenCalled()
     })
 
-    it('constructs no second codec when the first is still configuring', async () => {
-      // The ESCSUITE-66 half of this: the parked encoder is registered at
-      // construction, so `cleanup()` closes it. What it cannot reach is the
-      // *mixed AudioEncoder* the resuming setup went on to construct — onto a
-      // registry that had just been cleared — nor the one `{0, 0}` level sample
-      // `startAudioLevelMonitoring()` pushed at the store on its way past.
+    it('pushes no level sample when the first codec is still configuring', async () => {
+      // ESCSUITE-66 already covers the codec: the parked encoder is registered
+      // at construction, so `cleanup()` closes it — and the mixed AudioEncoder
+      // below it was never constructed either, because `cleanup()` nulls
+      // `audioSource` and the `if` that guards the audio pipeline was therefore
+      // false. What was left was the one `{ microphone: 0, system: 0 }` that
+      // `startAudioLevelMonitoring()` pushed at the store on its way past: a
+      // whole-app re-render for a take that had already been thrown away. The
+      // conservation assertions below are kept as the guard that the rest of
+      // the take stays unbuilt.
       const parked = deferred()
       const restore = parkVideoEncoderConfigure(1, parked.promise)
       try {

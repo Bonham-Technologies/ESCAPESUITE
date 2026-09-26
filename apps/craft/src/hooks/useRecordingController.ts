@@ -474,14 +474,20 @@ export function useRecordingController({
         separateTracks,
       });
 
-      // The screen can go away while that await is parked — the unmount
-      // teardown raises the cancelled flag and disposes the recorder
-      // synchronously underneath it — and there is then no take to count down
-      // to (ESCSUITE-73). Without this, startCountdown() writes 'countdown'
-      // back into the module-singleton store the teardown had just reset and
-      // leaves an interval ticking against a recorder that is already gone, so
-      // the next mount comes up mid-countdown over nothing.
-      if (cancelledRef.current) return;
+      // A take can be thrown away while that await is parked, and in two ways
+      // that look nothing alike (ESCSUITE-73). The unmount teardown raises the
+      // cancelled flag and disposes the recorder synchronously underneath this;
+      // the recorder's own `onError` — the capture ended, and the video track's
+      // 'ended' listener is installed before `Output.start()`, so it fires
+      // during setup for real — disposes it and returns to idle while
+      // *cancelling nothing*, so the flag alone cannot see it. The recorder ref
+      // can: `disposeRecorder()` nulls it on every path that disposes.
+      //
+      // Without this, startCountdown() writes 'countdown' back into the
+      // module-singleton store that was just reset to idle and leaves an
+      // interval ticking against `recorderRef.current === null` — a 3-2-1 over
+      // nothing, and a next mount that comes up inside it.
+      if (cancelledRef.current || !recorderRef.current) return;
 
       // Start countdown or record immediately
       if (config.countdownSeconds > 0) {

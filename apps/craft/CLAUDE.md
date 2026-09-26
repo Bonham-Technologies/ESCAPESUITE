@@ -630,13 +630,21 @@ built** (ESCSUITE-73). `initialize()` awaits half a dozen times — the fallback
 `<video>` starting, the AudioContext resuming, `Output.start()`, each codec's `configure()`,
 each companion — and `dispose()` lands inside one of those awaits for real: the screen's
 unmount teardown calls `disposeRecorder()` synchronously while `handleStartRecording` is still
-parked on the `initialize()` it started. `cleanup()` has then already swept the three
-registries above *and cleared them*, so whatever the resolving step goes on to build is built
-into a recorder nothing will ever tear down again — a second AudioContext with its own
-analysers and graph, up to four Mediabunny outputs, up to five codecs, a track `ended`
-listener `trackEndedHandlers` can no longer remove, and `startAudioLevelMonitoring()`, whose
-`monitor()` reschedules itself unconditionally and is stopped only by the
-`cancelAnimationFrame` that has already run.
+parked on the `initialize()` it started, and the recorder's own `onError` does the same when
+the capture ends mid-setup (the video track's `ended` listener is installed before
+`Output.start()`). `cleanup()` has then already swept the three registries above *and cleared
+them*, so whatever the resolving step goes on to build is built into a recorder nothing will
+ever tear down again — a second AudioContext with its own analysers and graph, up to four
+Mediabunny outputs holding their encoders and their targets open, up to five codecs, and a
+track `ended` listener `trackEndedHandlers` can no longer remove. Setup then walked into one
+of the fields `cleanup()` *nulled* — `videoTrack`, `audioContext` — and threw a `TypeError`
+out of `initialize()`, which `handleStartRecording` reported as `START_FAILED`: a notice, in
+the module-singleton store, about a take the user never saw. The level monitor's share was
+one stray sample rather than a runaway loop, and worth stating precisely because it is easy to
+assume otherwise: `cleanup()` nulls both meters, so a `startAudioLevelMonitoring()` reached
+after it takes its **no-meter branch** and pushes a single
+`{ microphone: 0, system: 0 }` — one whole-app re-render on behalf of a take that no longer
+exists — rather than scheduling anything.
 
 So `cleanup()` raises a **`disposed` flag first**, and every await in the setup path is
 followed by `abortIfDisposed()`. Three decisions carry it:
@@ -656,16 +664,26 @@ followed by `abortIfDisposed()`. Three decisions carry it:
   and is already closed (ESCSUITE-66); the `<video>`, the AudioContext and the primary's
   reader are all fields `cleanup()` reached
 
-`startAudioLevelMonitoring()` moved out to `initialize()` itself, after the guard, so it
-cannot run for a take that is gone. The controller closes the same loop from its own side:
-`handleStartRecording` returns without starting a countdown when `cancelledRef` is raised
-while it was parked, and withholds the start notice for the same reason — so a browser that
-*does* reject out of a half-torn-down setup (an AudioContext closed under a pending
-`resume()`) still says nothing to a user who has left. `webcodecsRecorder.perf.test.ts` pins
-the whole of it as exact conservation over one such take ("one take disposed while it was
-still setting up"): three codecs closed, two outputs cancelled, three source nodes and one
-processor disconnected, two readers cancelled, one AudioContext closed, **zero**
-`requestAnimationFrame` calls and zero level samples pushed.
+`startAudioLevelMonitoring()` moved out of the setup body to `initialize()` itself, past the
+guard. That move is **structural**, not a repair of anything the loop did: monitoring is now
+unreachable after a dispose, so neither the rAF loop nor that one stray sample can belong to a
+take that is gone.
+
+The controller closes the same window from its own side, and has to ask **two** questions,
+because the two ways a take is thrown away mid-setup look nothing alike:
+`handleStartRecording` returns without starting a countdown when `cancelledRef` is raised (the
+unmount teardown) **or** when `recorderRef.current` is null (any `disposeRecorder()`, including
+the `onError` path, which cancels nothing and so raises no flag). Without the second, a capture
+stopped during setup left `'countdown'` in the store and an interval ticking against a null
+recorder — a 3-2-1 over nothing, with a next mount coming up inside it. The start notice is
+withheld under the same pair, so a browser that *does* reject out of a half-torn-down setup (an
+AudioContext closed under a pending `resume()`) still says nothing to a user who has left.
+
+`webcodecsRecorder.perf.test.ts` pins the whole of it as exact conservation over one such take
+("one take disposed while it was still setting up"): three codecs closed, two outputs
+cancelled, three source nodes and one processor disconnected, two readers cancelled, one
+AudioContext closed, **zero level samples pushed**, and zero `requestAnimationFrame` calls
+beside it as the guard that the monitor call stays where it is.
 
 **Audio companions are a second tap, never a diversion.** The primary output keeps the mixed
 `AudioEncoder` and the mixed Opus track exactly as before — a screen-only download still has

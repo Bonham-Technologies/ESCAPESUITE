@@ -341,10 +341,11 @@ export class WebCodecsRecorder {
       throw e;
     }
 
-    // Start audio level monitoring. Deliberately out here, after the guard:
-    // `monitor()` reschedules itself on every animation frame and only
-    // `cleanup()` — which has already run — can stop it, so a take that has
-    // been thrown away must never start one.
+    // Start audio level monitoring. Out here, past the guard, and structural
+    // rather than a repair of anything the loop did: monitoring simply cannot
+    // be reached after a dispose now, so neither the rAF loop nor the single
+    // `{ microphone: 0, system: 0 }` its no-meter branch sends can belong to a
+    // take that is already gone.
     this.startAudioLevelMonitoring();
   }
 
@@ -406,9 +407,10 @@ export class WebCodecsRecorder {
       document.body.appendChild(this.videoElement);
       await this.videoElement.play();
       // The earliest await, and the one a dispose costs the most: everything
-      // below — the AudioContext, its analysers, the muxer, the codecs, the
-      // level monitor — would be built into a recorder whose cleanup has
-      // already run.
+      // below — the AudioContext, its analysers, the muxer, the codecs — would
+      // be built into a recorder whose cleanup has already run, and setup would
+      // then read `addEventListener` off the `videoTrack` that cleanup nulled
+      // and reject.
       this.abortIfDisposed();
 
       // Set up canvas for frame capture
@@ -1591,10 +1593,17 @@ export class WebCodecsRecorder {
    * `initialize()` it started (ESCSUITE-73). `cleanup()` has then already swept
    * the three registries and cleared them, so everything the *resolving* step
    * goes on to build is built into a recorder nothing will ever tear down
-   * again: a second AudioContext, up to four Mediabunny outputs, up to five
-   * codecs, a track listener that can no longer be removed, and the rAF level
-   * monitor, which reschedules itself unconditionally and pushes at the
-   * module-singleton store for the life of the page.
+   * again: a second AudioContext with its own analysers and graph, up to four
+   * Mediabunny `Output`s holding their encoders and their targets open, up to
+   * five codecs each holding an encoder session, and an `ended` listener
+   * `trackEndedHandlers` can no longer remove. Setup would then walk into one
+   * of the fields `cleanup()` *nulled* — `videoTrack`, `audioContext` — and
+   * throw a `TypeError` out of `initialize()`, which the controller's start
+   * path reported as `START_FAILED` about a take the user never saw. The level
+   * monitor's share of it was smaller and stranger than it looks: `cleanup()`
+   * nulls both meters, so a monitor started after it took its no-meter branch
+   * and pushed one `{ microphone: 0, system: 0 }` at the store — a re-render of
+   * the whole app on behalf of a take that no longer existed.
    *
    * So every await in the setup path is followed by a call to this. It throws
    * rather than returning a flag, which is what keeps the guard to one
