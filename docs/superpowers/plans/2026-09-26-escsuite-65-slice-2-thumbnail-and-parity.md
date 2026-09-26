@@ -169,6 +169,7 @@ describe('maskClipPathFor', () => {
     // Not a restatement of the assertion above: this one fails if the two ever
     // stop sharing an implementation, which is the only way they can drift.
     expect(path.shape).toBe('circle')
+    const r = path.shape === 'circle' ? path.radius : NaN
     expect(maskClipPathFor({ kind: 'circle' }, H)).toBe(
       `circle(${r}px at ${r}px 50%)`
     )
