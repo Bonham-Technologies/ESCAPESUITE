@@ -577,13 +577,20 @@ early-return conditionals; functions moved a hundredth; lines held at 99.40, and
 came back to the 98.75 they were at before the ticket — the review round's per-section
 disabling and the two new refusals enlarge the denominator about as fast as their tests cover
 it. **No floor crossed**, so artist's floors stay 99 / 98 / 93 / 98.
+`@escapesuite/craft` was re-measured 2026-09-26 at the end of ESCSUITE-85 (the unwired
+compatible-WebM re-encode deleted): lines still exactly 100.00, functions still exactly 100.00,
+statements 99.47 → 99.49 and branches 97.56 → **97.59** — deleting covered code moves the
+denominators, and the deleted path carried a few uncovered branches, so both figures went *up* —
+with **no floor crossed**, so craft's floors stay 100 / 99 / 97 / 100. The row was two hundredths
+stale on statements and branches (the ESCSUITE-78–81 follow-ups measured 99.51 / 97.64 and did
+not write it down); it is corrected here to the figure measured on this branch.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.47 | 97.56 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
 | `@escapesuite/artist` | 99.40 | 98.75 | 93.93 | 98.99 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
