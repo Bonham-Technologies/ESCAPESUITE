@@ -365,6 +365,188 @@ describe('TimelineTrack keyframes', () => {
   })
 })
 
+describe('TimelineTrack clip thumbnails', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  /** A source with a thumbnail, which is what `processVideoFile` writes. */
+  const withThumb: SourceVideo = { ...video, thumbnailUrl: 'blob:thumb-video' }
+  /**
+   * An audio source that somehow has one. `extractAudioMetadata` writes no
+   * thumbnail, so the gate below is asserted against data that *would* draw if
+   * the gate were only "has a thumbnail" — the absence of the field is not what
+   * is under test.
+   */
+  const audioWithThumb: SourceVideo = {
+    ...withThumb,
+    id: 'audio1',
+    mediaType: 'audio',
+    thumbnailUrl: 'blob:thumb-audio',
+  }
+
+  function thumbOf(root: HTMLElement): HTMLImageElement | null {
+    return root.querySelector<HTMLImageElement>(`img.${styles.clipThumb}`)
+  }
+
+  it('draws the source thumbnail at the head of a video clip', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [withThumb] })
+
+    const thumb = thumbOf(root)
+    expect(thumb).not.toBeNull()
+    expect(thumb).toHaveAttribute('src', 'blob:thumb-video')
+    // 60px track → a 52px clip box (`.clip` is `top: 4px; height: calc(100% -
+    // 8px)`), and 16:9 of 52 is 92. On the attributes rather than in the style,
+    // so the element has its box and its ratio before the blob URL decodes.
+    expect(thumb).toHaveAttribute('height', '52')
+    expect(thumb).toHaveAttribute('width', '92')
+  })
+
+  it('draws it for an image clip too', () => {
+    // Its own URL, and it is the *second* source in the list: a row that drew
+    // "the first source that has a thumbnail" rather than this clip's own source
+    // would pass with `blob:thumb-video` and fail here.
+    const image: SourceVideo = {
+      ...withThumb,
+      id: 'image1',
+      mediaType: 'image',
+      thumbnailUrl: 'blob:thumb-image',
+    }
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { sourceVideoId: image.id })],
+      sourceVideos: [withThumb, image],
+    })
+
+    expect(thumbOf(root)).toHaveAttribute('src', 'blob:thumb-image')
+  })
+
+  it('is decoration, not content, and cannot be dragged', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [withThumb] })
+
+    const thumb = thumbOf(root)!
+    // The clip's name is already its label; announcing the picture too would say
+    // the same thing twice. `alt=""` is also what keeps the e2e suite's
+    // `checkImageAltText` counting this as decorative rather than as an image
+    // missing alt text (apps/e2e/utils/accessibility.ts).
+    expect(thumb).toHaveAttribute('alt', '')
+    expect(thumb).toHaveAttribute('aria-hidden', 'true')
+    // A native image drag would race the timeline's own clip drag.
+    expect(thumb).toHaveAttribute('draggable', 'false')
+    // The virtualiser unmounts and remounts clips as the timeline scrolls, so
+    // these <img>s are created in bursts. Decoding off the main thread keeps a
+    // burst off the gesture path — nothing here is waiting on the picture.
+    expect(thumb).toHaveAttribute('decoding', 'async')
+  })
+
+  it('sits inside .clipContent, where the hit geometry cannot see it', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [withThumb] })
+
+    const thumb = thumbOf(root)!
+    expect(thumb.parentElement).toHaveClass(styles.clipContent)
+    // The timeline finds the clip under the pointer with
+    // `target.closest('[data-clip-id]')` (useTimelineSeek.ts:108,
+    // useTimelineMarquee.ts:190) and measures only `[data-track-id]` rows and
+    // the container (useTrackAreaCache.ts:73), so an element *inside* a clip
+    // changes neither. This is that claim, asserted.
+    expect(thumb.closest('[data-clip-id]')).toBe(clipEls(root)[0])
+    // And the trim handles are still the row's outermost interactive children.
+    expect(clipEls(root)[0].querySelectorAll(`.${styles.trimHandle}`)).toHaveLength(2)
+  })
+
+  it('clips the thumbnail to the clip’s own circle, and writes nothing else', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { mask: { kind: 'circle' } })],
+      sourceVideos: [withThumb],
+    })
+
+    // The whole inline style, not just the clip-path: this is also the pin that
+    // the *stroke* is not drawn on the thumbnail in v1 (no border, no outline,
+    // no box-shadow). A stroked clip is the next case.
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
+  })
+
+  it('leaves a stroked clip’s thumbnail unstroked (v1)', () => {
+    const { root } = renderTrack({
+      clips: [
+        makeClip('clip1', 0, 2, {
+          mask: { kind: 'circle' },
+          stroke: { color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 },
+        }),
+      ],
+      sourceVideos: [withThumb],
+    })
+
+    // The border stays in the frame. The thumbnail shows the shape.
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
+  })
+
+  it('rounds the corners by the same fraction the frame uses', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { mask: { kind: 'rounded', radius: 0.25 } })],
+      sourceVideos: [withThumb],
+    })
+
+    // 0.25 of the thumb's 52px shorter side is 13px — the same fraction, of the
+    // same shorter side, that `core/clipMask.ts` resolves against the drawn box.
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: inset(0 round 13px);')
+  })
+
+  it('leaves an unmasked clip’s thumbnail unclipped', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [withThumb] })
+
+    // No `clip-path: none` — no style attribute at all, so the element is
+    // byte-identical to an element that never had one.
+    expect(thumbOf(root)!.getAttribute('style')).toBeNull()
+  })
+
+  it('never shrinks below the clip box’s own minimum height', () => {
+    const { root } = renderTrack({
+      track: makeTrack({ height: 30 }),
+      clips: [makeClip('clip1', 0)],
+      sourceVideos: [withThumb],
+    })
+
+    // `.clip` has `min-height: 40px`, so a shorter track stops shrinking the
+    // box and the thumb has to stop shrinking with it — otherwise the picture
+    // would float in a box taller than itself.
+    expect(thumbOf(root)).toHaveAttribute('height', '40')
+    expect(thumbOf(root)).toHaveAttribute('width', '71')
+  })
+
+  it('draws no thumbnail for an audio clip, even one whose source has one', () => {
+    const { root } = renderTrack({
+      clips: [makeClip('clip1', 0, 2, { sourceVideoId: audioWithThumb.id })],
+      sourceVideos: [video, audioWithThumb],
+    })
+
+    // Media clips only (decision 3). An audio part carries no picture.
+    expect(thumbOf(root)).toBeNull()
+  })
+
+  it.each<['text' | 'shape']>([['text'], ['shape']])(
+    'draws no thumbnail for a %s overlay',
+    (overlayType) => {
+      const { root } = renderTrack({
+        clips: [makeClip('clip1', 0, 2, { overlayType })],
+        sourceVideos: [withThumb],
+      })
+
+      // An overlay has no drawn box a mask could mean anything against, which is
+      // the same reason `ClipEditor` hides the Mask & Stroke section for one.
+      expect(thumbOf(root)).toBeNull()
+    }
+  )
+
+  it.each<[string, SourceVideo[]]>([
+    ['the source has no thumbnail', [video]],
+    ['the clip has no source at all', []],
+  ])('draws no thumbnail when %s', (_label, sourceVideos) => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos })
+
+    expect(thumbOf(root)).toBeNull()
+  })
+})
+
 describe('TimelineTrack drag', () => {
   beforeEach(() => {
     resetStoreForTest()

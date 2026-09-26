@@ -330,11 +330,19 @@ the Help button.
   The overlay it draws is `core/overlayGeometry.ts`'s `drawOverlay()`, not its own method
 - `overlayGeometry.ts`: `drawOverlay()` — where the webcam sits in a frame and how it is
   drawn there (the 16:9 derivation, the four corners, the circular centre-crop, both clip
-  paths, the border) — plus `overlayGeometryFor()` / `overlayPaddingFor()` and the two
-  constants `COMPOSITOR_MAX_WIDTH` / `DEFAULT_OVERLAY_PADDING`. Pure: no element lookup, no
-  canvas creation, no state, no `this`. It exists because **two** things draw this overlay —
-  `Compositor` live, and `convertToMP4` offline from a second *file* — and a rounding difference
-  between two copies would only ever be visible in a downloaded MP4. `CompositorConfig` is an
+  paths, the border) — plus `overlayGeometryFor()` / `overlayPaddingFor()` and **five** constants:
+  `COMPOSITOR_MAX_WIDTH`, `DEFAULT_OVERLAY_PADDING`, and the camera's own
+  `OVERLAY_BORDER_COLOR` / `OVERLAY_BORDER_WIDTH` / `OVERLAY_CORNER_RADIUS` — the last three
+  named (ESCSUITE-65) because ESCAPEARTIST now reproduces that border on a handed-over webcam
+  clip and names the same numbers on its side (`OVERLAY_STROKE_COLOR`,
+  `OVERLAY_STROKE_WIDTH_FRACTION`, `OVERLAY_CORNER_RADIUS_FRACTION` in
+  `apps/artist/src/utils/overlayPlacement.ts`), so a change to the border here cannot silently
+  stop matching what the editor draws. Naming them changed no pixel: the compositor's preview, a
+  composited PiP recording and a re-composited MP4 all paint what they painted before. Pure: no
+  element lookup, no canvas creation, no state, no `this`. It exists because **two** things draw
+  this overlay — `Compositor` live, and `convertToMP4` offline from a second *file* — and a
+  rounding difference between two copies would only ever be visible in a downloaded MP4.
+  `CompositorConfig` is an
   alias of its `OverlayGeometry`, so the live loop passes `this.config` straight through and
   allocates nothing per frame. Nothing mocks it, which is what keeps `compositor.test.ts`
   exercising the real geometry

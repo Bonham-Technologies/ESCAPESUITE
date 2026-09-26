@@ -66,10 +66,13 @@ creation tools that run entirely in the browser. The suite consists of:
 - 50-level undo/redo
 - Keyframe animation system (position, scale, rotation, opacity, blur)
 - Text & shape overlays
+- Clip masks (circle or rounded rectangle) and clip borders, drawn identically in the preview, in
+  every export and by the headless renderer
 - 11 transition types
 - WebM (VP9+Opus) and MP4 (H.264+AAC) export with codec fallbacks
 - Project save/load
 - Audio waveform visualization with extreme zoom support
+- Per-clip thumbnails on the timeline, clipped to that clip's own mask
 
 **Test Coverage:** unit tests covering exporter, waveform, animation, and more — run `pnpm test --filter=@escapesuite/artist` for the current count
 

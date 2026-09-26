@@ -214,7 +214,9 @@ The placement's `shape` is **no longer ignored** (ESCSUITE-65): `maskForPlacemen
 take's camera. The mask's radius is a fraction of the clip's **shorter drawn side** — so it
 survives a resolution change — and the stroke's width is a fraction of the **project's** width
 carrying craft's 3 px scaled the way `overlayPaddingFor` scales its padding: flat at or below
-`COMPOSITOR_MAX_WIDTH`, proportional above it.
+`COMPOSITOR_MAX_WIDTH`, proportional above it. The handed-over mask is visible on the timeline
+as well as in the frame: the webcam clip's thumbnail is clipped to the same circle (see the
+Timeline section). Its border is not — the thumbnail shows the shape only.
 
 **The corner is the screen recording's, not the canvas's.** `overlayPlacementToTransform`
 takes an optional fourth argument — the **frame**, a rectangle in canvas pixels — and both the
@@ -744,7 +746,7 @@ component.
 | `TimelineRuler.tsx` | The ruler: ticks and labels, the marker flags, the in/out handles and the region they bracket. `React.memo`'d — nothing on it can change during a gesture. Also exports `TimelineMarkerLines`, the marker verticals drawn down over the tracks (not memo'd: it re-renders with `Timeline` and is two divs) |
 | `TimelinePlayhead.tsx` | The playhead line — `React.memo`'d and subscribing to `currentTime` itself, so a playback tick moves this element instead of re-rendering the timeline |
 | `TimelineTimeReadout.tsx` | The `current / total` readout in the info bar, split out for the same reason |
-| `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
+| `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, **masked thumbnail**, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
 | `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — its props are stable through a clip drag, a marquee and playback, so the whole column sits those out. **Not through a trim**: `useTrackHeaderActions`' `handleDeleteTrack` depends on `clips`, and a trim writes the store every move, so `onDeleteTrack` changes identity per frame and the column re-renders anyway |
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
 | `AudioWaveform.tsx` | The canvas waveform inside a clip, capped at 4000 CSS px of backing store and CSS-scaled beyond it, because browsers refuse a canvas much wider |
@@ -787,6 +789,77 @@ means a prop has become unstable again. The whole round is written up in
 including the caveat that the millisecond figures are dev-build numbers while the render
 counts are what a release build keeps.
 
+**A media clip carries its own masked thumbnail (ESCSUITE-65, decision 5).** `TimelineTrack`
+draws one `<img>` of the clip's *source* thumbnail at the head of the clip and shapes it with an
+inline CSS `clip-path` from `utils/maskClipPath.ts`: `circle(<h/2>px at <h/2>px 50%)` for a
+circle mask, `inset(0 round <fraction x h>px)` for a rounded one, and nothing at all for
+neither. The circle is **hugged to the thumbnail's left edge** rather than centred in the 92px
+box, and that is a deliberate fix rather than an oversight: a clip is as wide as its duration
+and `.clip` is `overflow: hidden`, so a 0.2s clip is 10px wide and shows only the thumbnail's
+first 10 pixels — a centred circle spans x 20-72 and that clip would show an empty rectangle
+where an unmasked clip shows its picture. Only the *centre* moves; the radius is still
+`maskPathFor`'s, so it is a placement choice and not a second piece of geometry, and
+`inset(0 round r)` already starts at the left edge and needs no equivalent. The
+geometry is not a second copy — `maskClipPathFor` asks `core/clipMask.ts`'s `maskPathFor` for
+the shape of a 16:9 box of the thumb's height and only says the answer in CSS, so the inscribed
+circle, the clamp to half the shorter side and "a rounded rectangle with square corners is a
+rectangle" have one implementation each, and one test asserts the thumbnail's radius *is*
+`maskPathFor`'s. The thumb's shorter side is its height, which is why one number is enough and
+why the stored radius (a fraction of the clip's shorter side) resolves here against exactly what
+it resolves against in the frame. DOM and CSS, never a canvas: the timeline drew no picture at
+all before this, and a canvas per clip would put a second rasteriser on the gesture path.
+
+Four properties of that `<img>` are load-bearing and each is asserted in
+`TimelineTrack.test.tsx`. It is **`position: absolute` inside `.clipContent`**, so it is out of
+flow — in flow it would be the tallest item in a `flex-wrap: wrap` row whose duration is
+`width: 100%`, and it would push that duration past `overflow: hidden` and out of sight; out of
+flow the name/duration layout is byte-identical, the trim handles keep their `z-index: 5` above
+it, and no pointer frame has anything new to lay out. It is **`pointer-events: none`** and
+**`draggable={false}`**, so it can never be an event target nor start a native drag racing the
+clip drag — the hit geometry is `target.closest('[data-clip-id]')` plus a measurement of
+`[data-track-id]` rows (`useTrackAreaCache.ts`), and an element inside a clip changes neither.
+Its box is **one number each, on the `width`/`height` attributes**, computed from `track.height`
+in the component because CSS cannot read a track's height and a `clip-path` circle needs a pixel
+radius — leaving the inline `style` to carry the `clip-path` alone, which is what lets one
+assertion on the whole style attribute prove the thumbnail is masked *and* not stroked. And it
+is **`aria-hidden` with `alt=""`**: the clip's name is already its label, and this is decoration.
+It also carries `decoding="async"`, because the virtualiser unmounts and remounts clips as the
+timeline scrolls and so creates these `<img>`s in bursts; nothing on the page waits for the
+picture, so a burst has no business on the main thread.
+It costs the row no store read — `sourceMedia` is the lookup the waveform already needs — and
+`timelineGestures.perf.test.ts` and `App.rerender.test.tsx` are byte-unchanged and green, which
+is the proof it costs no listener, no rect read, no render and no subscription. The
+`timeline-interaction` benchmark was re-run before and after and its three per-frame
+forced-layout figures did not move — but that run **witnesses nothing about a drawn
+thumbnail**: the benchmark scene's source carries no `thumbnailUrl`, so no `<img>` was
+rendered in either arm. The argument for the drawn case is therefore a-priori, not measured —
+out of flow, a fixed attribute box that neither reads nor contributes to in-flow layout, and
+`pointer-events: none` so it is on no hit path. A thumbnail-bearing benchmark arm is
+**ESCSUITE-76**.
+
+**Paint order is three offsetless `position: relative` rules, and they are load-bearing too.**
+`.clipThumb` is positioned with `z-index: auto`, which paints in CSS 2.1 Appendix E **step 8** —
+after *all* in-flow, non-positioned content of its stacking context — regardless of tree order,
+so being `.clipContent`'s first child bought it nothing and the thumbnail painted *over* the
+clip's own name at 45% opacity. `.clipName`, `.clipDuration` and `.clipIcon` are therefore
+`position: relative` with **no offsets**, which moves them into step 8 as well, where tree order
+decides and they win as later siblings; no geometry moves, which is why no existing test changed.
+One visible side effect, worth saying rather than leaving to be discovered: giving `.clipContent`
+a containing block made it *positioned*, so a clip's label now paints **over** its waveform
+instead of under it — the reverse of what `AudioWaveform.module.css`'s comment claimed before
+this slice, when the canvas at `z-index: 0` was in step 8 and the in-flow label was not. Arguably
+the right order, and small, but it is a real visible change on an audio clip. jsdom computes no
+paint order at all (it has neither layout nor paint), so this is pinned in those two files'
+comments and nowhere else.
+
+Three deliberate limits, so none of them reads as a bug. **The stroke is not drawn on the
+thumbnail** — v1 shows the shape; the border stays in the frame. **The preview's
+selection box and hit test stay rectangular** (`components/Preview/hitTest.ts`,
+`selectionOverlay.ts`): a circle-masked clip is still selected, dragged, resized and rotated by
+its drawn rectangle. And **the media library's card stays unmasked** (`VideoUploader.tsx`),
+because that thumbnail belongs to the *source* file and one source can back several clips with
+different masks — which is also why the mask could not simply be put there instead.
+
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
 early return, and the JSX that hands each section the handful of props it needs. It holds no
@@ -805,7 +878,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays. **No `currentTime` selector** — see the note below |
 | `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
-| `clipEditorOptions.ts` | The four `{ value, label }` option lists the dropdowns render — transitions, blend modes, animation presets, easings |
+| `clipEditorOptions.ts` | The **five** `{ value, label }` option lists the dropdowns render — transitions, blend modes, clip mask kinds, animation presets, easings (the last re-exported from `utils/easingOptions.ts`) |
 | `CollapsibleSection.tsx` | One titled, collapsible block: its own open/closed flag, seeded from `defaultOpen` at mount and never re-read |
 | `ClipEditorEmptyState.tsx` | The panel's contents when nothing is selected: the prompt plus the five buttons that create an overlay from nothing. `ClipEditor.tsx` supplies the surrounding `div.container` |
 | `ClipEditorHeader.tsx` | The title block — clip type, name, delete button, and the duration/position/track rows underneath |
@@ -813,6 +886,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `ShapeSection.tsx` | "Shape": the shape type, then either the blur region's amount slider or the fill/stroke controls, plus size, rotation and blur. "No fill" is an alpha of `00` on the fill colour, not a separate flag |
 | `TransformSection.tsx` | "Transform": position, then — media clips only — scale with its aspect-ratio lock, Fit to Canvas and Reset, and opacity last |
 | `BlendModeSection.tsx` | "Blend Mode": one dropdown over `BLEND_MODES`, collapsed by default |
+| `MaskSection.tsx` | "Mask & Stroke": the mask kind over `CLIP_MASK_KINDS`, a corner-radius slider shown for `rounded` only, and the stroke's width and colour — the width labelled in **pixels at the project's resolution**, because what is stored is a fraction of the frame width and a fraction is not a number anyone can act on. Collapsed by default. Media clips only, gated exactly as Blend Mode is. It normalises nothing: "`none` with a radius" and "a width of 0 with a colour" are things a user can express, and turning them into absent fields is `useClipEditorActions`' job |
 | `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
@@ -1266,6 +1340,20 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   bytes — it fails instead of rendering black), seeds sources into IndexedDB via
   `seedSources.ts`, then calls the **same** `exportToMP4`/`exportToWebM` the editor
   uses. No engine fork.
+  That is a claim `services/headless-artist/src/verify.chromium.test.ts` now **tests** rather
+  than asserts: a clip masked to a circle and given an outline is rendered through this bundle
+  in real Chromium and probed with ffmpeg — the frame's corner comes back black, its centre red
+  and a point on the circle's own edge white (ESCSUITE-65). There are **two** edge samples, not
+  one. The one centred on the outline straddles the circle, so half of it is the clip's own red
+  whatever the stroke does: deleting the stroke leaves that sample's **red** above its floor and
+  fails on **green and blue** at 0, which is why the predicate is all three channels and not the
+  red one. The second sample sits wholly in the band's *outer* half, outside the circle
+  altogether, and it is the one that proves the stroke is drawn **outside** the clip region — the
+  inner `restore()` in `core/clipMask.ts`. Moving the stroke inside that region is caught by the
+  on-outline sample by 22 counts (128 against a floor of 150) and by the outer one by 150 (0
+  against 150), which is the whole reason for the second point. The case patches the loaded
+  fixture rather than the file on disk, which is what keeps the two golden single-clip cases as
+  its control: they assert the whole frame is red, which a masked frame cannot be.
 - `render()` runs the store's `convertLegacyOverlays` on the incoming timeline before anything
   reads it, so a `project.json` carrying the legacy `textOverlays`/`shapeOverlays` arrays
   renders and exports identically with or without the store. A project with neither array is

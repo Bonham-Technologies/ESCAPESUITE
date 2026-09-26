@@ -456,9 +456,65 @@
   padding: var(--spacing-xs) var(--spacing-sm);
   overflow: hidden;
   gap: 2px;
+  /* The containing block for `.clipThumb` (ESCSUITE-65). The thumbnail is the
+     only absolutely positioned thing in here, and it is positioned against this
+     element's padding box — which is the clip's whole box, since `.clip` has no
+     padding of its own. */
+  position: relative;
+}
+
+/* The per-clip thumbnail (ESCSUITE-65, decision 5): the clip's mask, shown where
+   the user looks for the clip.
+
+   Out of flow on purpose. In flow it would be the tallest item in a
+   `flex-wrap: wrap` row whose duration is `width: 100%`, so it would push that
+   duration past `overflow: hidden` and out of sight; absolutely positioned, the
+   name/duration layout is exactly what it was before this existed. Its box is
+   also fixed — the `width`/`height` attributes, computed from the track's height
+   in `TimelineTrack.tsx` (CSS cannot read a track height, and the `clip-path`
+   needs the height in pixels) — so it neither reads nor contributes to the
+   in-flow layout of anything, and `pointer-events: none` keeps it off every hit
+   path. That is the a-priori case for it costing a pointer frame nothing; the
+   `timeline-interaction` benchmark does NOT witness it, because that scene's
+   source carries no `thumbnailUrl` and so renders no thumbnail at all. Its
+   unchanged numbers say this feature did not regress the gesture path, not that
+   a drawn thumbnail is free.
+
+   Its shape is an inline `clip-path` from `utils/maskClipPath.ts`. Nothing here
+   draws a border: the clip's stroke stays in the frame in v1.
+
+   PAINT ORDER, which is not DOM order. This is positioned with `z-index: auto`,
+   so it paints in CSS 2.1 Appendix E step 8 — after **all** in-flow,
+   non-positioned content of its stacking context (steps 4-7), whatever the tree
+   order. Against the waveform the tree order does hold (that canvas is
+   positioned at `z-index: 0`, also step 8, and is an earlier sibling of
+   `.clipContent`), so the thumb covers its first ~92px at 45%. Against the
+   clip's own label it does not: `.clipName`, `.clipDuration` and `.clipIcon`
+   would be painted over by this element, which is why each of them carries a
+   `position: relative` of its own — see the comment on each. jsdom computes no
+   paint order, so this is pinned here and nowhere else.
+
+   Held under half opacity because the clip's name is drawn over its right-hand
+   side; at 0.45 the masked silhouette still reads against the flat clip
+   background and the white label stays legible. */
+.clipThumb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  object-fit: cover;
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .clipName {
+  /* Painted over `.clipThumb`, not under it (ESCSUITE-65). A positioned element
+     with `z-index: auto` paints in CSS 2.1 Appendix E step 8, after every
+     in-flow non-positioned box (steps 4-7) regardless of tree order — so while
+     this label is a static flex item it loses to the thumbnail even though the
+     thumbnail is an earlier sibling. `position: relative` puts it in step 8 too,
+     where tree order decides and it wins. It changes no geometry: no offsets are
+     set. */
+  position: relative;
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
@@ -468,6 +524,11 @@
 }
 
 .clipDuration {
+  /* Painted over `.clipThumb` for the same reason as `.clipName` above: an
+     in-flow box would paint in Appendix E step 7 and lose to the positioned
+     thumbnail's step 8, so this joins step 8 and tree order decides. Sets no
+     offsets, so the wrapping layout is untouched. */
+  position: relative;
   font-size: 9px;
   color: rgba(255, 255, 255, 0.7);
   width: 100%;
@@ -527,6 +588,10 @@
 
 /* Clip icon */
 .clipIcon {
+  /* Painted over `.clipThumb`, same rule as `.clipName` and `.clipDuration`:
+     in-flow content paints before a positioned sibling, so the media-type glyph
+     needs its own step-8 seat. Offsetless, so nothing moves. */
+  position: relative;
   flex-shrink: 0;
   margin-right: 4px;
   opacity: 0.8;

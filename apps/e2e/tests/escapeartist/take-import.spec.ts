@@ -262,6 +262,32 @@ async function transformValue(page: Page, label: string): Promise<string> {
   return (await row.locator('span').last().innerText()).trim()
 }
 
+/**
+ * Open one of the inspector's collapsed sections by its title, and return only
+ * once it really is open.
+ *
+ * `CollapsibleSection`'s header button *toggles*, so a click on its own is not
+ * "open": against a section that was already open it closes it, and every
+ * assertion after would then fail on an absent row rather than on a wrong value.
+ * `contentLabel` names a row only this section renders, so what the helper waits
+ * for is the content the caller came for being on screen.
+ */
+async function openSection(page: Page, title: string, contentLabel: string) {
+  await page.getByRole('button', { name: title }).click()
+  await expect(page.getByText(contentLabel, { exact: true })).toBeVisible()
+}
+
+/**
+ * The Mask & Stroke section's kind dropdown.
+ *
+ * Found by the options it holds rather than by position: the inspector renders
+ * several `<select>`s for a media clip (transition, blend mode, the two animation
+ * groups) and only this one offers a rounded rectangle.
+ */
+function maskKindSelect(page: Page) {
+  return page.locator('select').filter({ has: page.locator('option[value="rounded"]') })
+}
+
 test.describe('ESCAPEARTIST imports a multi-part take', () => {
   // The fixture is a take *in the database*, and WebKit under Playwright cannot
   // put a Blob into IndexedDB at all — every `put` here fails with
@@ -349,6 +375,55 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     expect(await transformValue(page, 'Pos X')).toBe('76%')
     expect(await transformValue(page, 'Pos Y')).toBe('75%')
     expect(await transformValue(page, 'Scale')).toBe('40%')
+  })
+
+  test('the webcam clip arrives with the circle it was recorded in (ESCSUITE-65)', async ({
+    page,
+  }) => {
+    await page.goto(`${ARTIST_URL}?loadVideo=${TAKE_ID}&suppressRestore=1`)
+    await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible({ timeout: 15_000 })
+
+    await page.locator('[data-clip-id]').filter({ hasText: '— webcam' }).click()
+    // Collapsed by default (`MaskSection` passes `defaultOpen={false}`), exactly
+    // as Blend Mode is.
+    await openSection(page, 'Mask & Stroke', 'Stroke Width')
+
+    // The take was recorded with `shape: 'circle'`, and `maskForPlacement` maps
+    // that to `{ kind: 'circle' }` with no radius at all — `core/clipMask.ts`
+    // inscribes the circle at min(w, h) / 2, which is precisely the circle
+    // ESCAPECRAFT drew. jsdom cannot see any of this: the inspector is the only
+    // place the handed-over mask is visible as a user sees it.
+    await expect(maskKindSelect(page)).toHaveValue('circle')
+    expect(await maskKindSelect(page).locator('option:checked').innerText()).toBe('Circle')
+
+    // And the border, in the pixels the user reads rather than the fraction that
+    // is stored. This take's screen half is 1920x1080 and the project is
+    // ARTIST's own 1920x1080 default, so the camera sat in a 1920-wide frame:
+    // craft draws 3 px of a canvas it caps at 1280, which is 1920/1280 x 3 =
+    // 4.5 px of that frame, stored as 4.5/1920 and printed back against the
+    // project's width by `MaskSection`'s strokePixels.
+    expect(await transformValue(page, 'Stroke Width')).toBe('4.5px')
+  })
+
+  test('the border is the recording’s 3 px, not the project’s (ESCSUITE-65)', async ({ page }) => {
+    await page.goto(`${ARTIST_URL}?loadVideo=${SMALL_TAKE_ID}&suppressRestore=1`)
+    await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible({ timeout: 15_000 })
+
+    await page.locator('[data-clip-id]').filter({ hasText: '— webcam' }).click()
+    await openSection(page, 'Mask & Stroke', 'Stroke Width')
+
+    // The same circle — the shape does not depend on the capture's size...
+    await expect(maskKindSelect(page)).toHaveValue('circle')
+
+    // ...but the border's weight does. This take's screen half is 1280x720, at
+    // the compositor's cap, where craft's border is a flat 3 px. Stored as
+    // 3/1920 — the *project's* width is what the renderer multiplies back — and
+    // printed as 3px. A stroke stored as the flat 3/1280 fraction reads 4.5px
+    // here, which is the regression this pins: the two widths coincide on the
+    // commonest take (1920 in 1920) and differ the moment they do not, and this
+    // is where a user would have seen a border half again as heavy as the
+    // recording's.
+    expect(await transformValue(page, 'Stroke Width')).toBe('3px')
   })
 
   test('appends the take after a restored session, and one undo takes it off again', async ({
