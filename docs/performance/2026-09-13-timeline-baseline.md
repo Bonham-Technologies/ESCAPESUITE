@@ -9,6 +9,10 @@ Round 1 measured what the editor costs while it *plays* and while it *exports*
 costs while someone is *editing*, which is where a user spends nearly all of their
 time. This file is that half.
 
+**Later addendum:** [2026-09-26](#2026-09-26-the-benchmark-arm-was-never-blind-escsuite-76)
+corrects a claim ESCSUITE-65 slice 2 left in two places — that this benchmark's scene draws no
+clip thumbnails — and records the arm that was missing from the jsdom half.
+
 Reproduce with:
 
 ```bash
@@ -244,6 +248,89 @@ within the probe's 30 s. It is in the shared scene loader, predates this round's
 benchmark, and affects `preview-playback` and `export` equally; `perf.mjs` is written so
 that a benchmark which dies this way leaves the surviving numbers readable. Worth
 watching; not this round's to fix.
+
+## 2026-09-26: the benchmark arm was never blind (ESCSUITE-76)
+
+ESCSUITE-65 slice 2 put an `<img>` at the head of every media clip on the timeline, re-ran
+this benchmark before and after, and recorded that the three per-move forced-layout figures
+did not move. Both `apps/artist/CLAUDE.md` and `Timeline.module.css` then said that run
+**witnessed nothing**, on the grounds that the benchmark scene's source carries no
+`thumbnailUrl` — and ESCSUITE-76 was filed to add the thumbnail-bearing arm it was missing.
+
+**That claim was wrong, and the arm already existed.** The confusion is between the two
+halves of the perf split, which build the scene in completely different ways:
+
+| | How its source is made | Thumbnails drawn |
+|---|---|---|
+| Browser (`apps/e2e/tests/perf/timeline-interaction.spec.ts`) | `loadPerfScene` puts a real MP4 through the media library's own file input, so `processVideoFile` writes a `thumbnailUrl` | **12** — one per media clip, ever since slice 2 landed |
+| jsdom (`apps/artist/src/components/Timeline/timelineGestures.perf.test.ts`) | `perfScene.ts`'s `sceneSource` literal, which has no `thumbnailUrl` | **0** |
+
+Only the **jsdom** half was blind, and it is the half that counts listeners, rect reads and
+renders rather than the one that measures milliseconds. The slice-2 statement generalised the
+jsdom fixture to the browser and got the conclusion backwards.
+
+Verified rather than argued. The spec now counts the thumbnails the loaded scene is drawing
+(`[data-clip-id] img[aria-hidden="true"]`, addressed by its attributes because the class is a
+CSS-module hash), asserts the count is exactly `MEDIA_CLIPS` **before a single gesture runs**,
+and reports it as `thumbnailsDrawn` in `perf-report.json` and in the Markdown table. A scene
+that silently stopped drawing them now fails the benchmark instead of quietly reporting
+figures for a lighter timeline than the app really draws.
+
+### The confirming run — 2026-09-26
+
+`playwright test --config=playwright.perf.config.ts tests/perf/timeline-interaction.spec.ts`,
+medians of the same three runs. **`thumbnailsDrawn`: 12.**
+
+| Metric | `clipDrag` | `marquee` | `playheadScrub` |
+| --- | --- | --- | --- |
+| Pointer moves | 60 | 60 | 60 |
+| **Layouts per move** | **0.82** | **1.00** | **1.00** |
+| Style recalcs per move | 1.38 | 2.10 | 3.92 |
+| Renderer task per move | 9.08 ms | 5.64 ms | 9.43 ms |
+| Layouts | 49 | 60 | 60 |
+| Style recalcs | 83 | 126 | 235 |
+| Long tasks | 0 | 0 | 0 |
+
+The forced layouts per move are **0.82 / 1.00 / 1.00**, which is the slice-2 "after" reading
+and within the 2026-09-13 spread above (0.83 / 0.98 / 1.00) — so slice 2's unchanged
+forced-layout figures were, all along, a statement about a scene drawing twelve thumbnails.
+That is the measured half of the argument that an out-of-flow `<img>` with a fixed attribute
+box and `pointer-events: none` costs a pointer frame nothing.
+
+**The milliseconds in that table are not comparable to the 2026-09-13 ones and are recorded
+only for completeness.** This machine carried a 1-minute load average of 6.7–7.5 from
+unrelated work throughout the run — the baseline above was taken on an idle machine — and the
+wall times came out roughly half the 2026-09-13 figures rather than worse, which on its own
+says the two invocations are not measuring under comparable conditions. **The layout and
+recalc counts are the comparable part**: they come from the renderer's own counters and do
+not depend on how much CPU was available. No published figure in this file is revised on the
+strength of this run.
+
+### The jsdom half now has the arm
+
+`perfScene.ts` gained `sceneSourceWithThumbnail` — a variant, never an edit to `sceneSource`,
+for the same reason `buildMaskedSceneClips` is a variant: the browser benchmark builds the
+same scene, and the plain ceilings describe the scene as it is. `timelineGestures.perf.test.ts`
+gained one test that drags the really-rendered timeline twice, once with each source, and
+asserts **equality** rather than a ceiling:
+
+| | plain arm | thumbnail arm |
+|---|---|---|
+| Thumbnails drawn | 0 | 12 |
+| Gesture listener adds / removes | 2 / 2 | 2 / 2 |
+| Container rect reads (whole gesture) | 1 | 1 |
+| Track-row rect reads (whole gesture) | 4 | 4 |
+| `TimelineTrack` renders per drag frame | 4 | 4 |
+| `TrackHeader` / `TimelineRuler` / tick rebuilds per frame | 0 / 0 / 0 | 0 / 0 / 0 |
+| Rect reads on the `<img>`s themselves | — | **0** |
+
+Two details of that test are load-bearing. The rect reads are counted over the **whole
+gesture**, mousedown included, not over the moves alone: `useTrackAreaCache` measures the
+container and the rows once on the press and the moves read the cache, so a window that
+started after the press reports zero rect reads on both sides and the equality proves
+nothing — the first draft of this test did exactly that and had to be reworked. And the
+counters are wrapped on the real rendered rows rather than on `buildTrackArea`'s stand-ins,
+because only the rendered tree has an `<img>` in it at all.
 
 ## How to read these
 

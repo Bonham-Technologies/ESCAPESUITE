@@ -86,6 +86,7 @@ const METRICS = {
   windowSeconds: { label: 'Measured window', unit: 's' },
   takeSeconds: { label: 'Source take length', unit: 's' },
   moves: { label: 'Pointer moves per gesture' },
+  thumbnailsDrawn: { label: 'Clip thumbnails drawn' },
   renderedFps: { label: 'Rendered fps' },
   compositedFps: { label: 'Composited fps' },
   videoDraws: { label: 'Video draws' },

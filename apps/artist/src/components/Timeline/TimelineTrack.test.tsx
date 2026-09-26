@@ -327,8 +327,42 @@ describe('TimelineTrack waveforms', () => {
 
     const canvas = root.querySelector('canvas')
     expect(canvas).not.toBeNull()
-    // The waveform is inset by 2px top and bottom of the 60px row.
-    expect(canvas).toHaveStyle({ height: '56px' })
+    // The waveform is exactly as tall as the clip box: the 60px row, less
+    // `.track`'s 1px bottom border, less `.clip`'s 8px inset.
+    expect(canvas).toHaveStyle({ height: '51px' })
+  })
+
+  it('draws the waveform no taller than the clip box it sits in', () => {
+    const { root } = renderTrack({ clips: [makeClip('clip1', 0)], sourceVideos: [withAudio] })
+
+    const canvas = root.querySelector('canvas')!
+    // `AudioWaveform` writes the same number to the backing store and to the CSS
+    // height, so the two never disagree and nothing is ever rescaled. What
+    // matters is whether that number fits: `.clip` is `overflow: hidden`, so a
+    // canvas taller than the box has its bottom cut off and its centreline —
+    // which is the middle of the canvas — sits below the middle of the box.
+    //
+    // 60px row − 1px `.track` border-bottom − 8px `.clip` inset = 51. The old
+    // `track.height - 4` gave 56: five pixels too tall, so the lower peaks were
+    // clipped and the whole waveform sat ~2.5px low.
+    expect(canvas).toHaveAttribute('height', '51')
+    expect(canvas.style.height).toBe('51px')
+  })
+
+  it('never shrinks the waveform below the clip box’s own minimum height', () => {
+    const { root } = renderTrack({
+      track: makeTrack({ height: 30 }),
+      clips: [makeClip('clip1', 0)],
+      sourceVideos: [withAudio],
+    })
+
+    // `.clip` has `min-height: 40px`, so a track dragged shorter than that stops
+    // shrinking the box — and the canvas has to stop shrinking with it, exactly
+    // as the thumbnail does (see the thumbnail clamp test below). 30 − 1 − 8 = 21
+    // would be a 21px waveform in a 40px box, floating against its top edge.
+    const canvas = root.querySelector('canvas')!
+    expect(canvas).toHaveAttribute('height', '40')
+    expect(canvas.style.height).toBe('40px')
   })
 
   it('draws no waveform when the source has audio but no peaks', () => {
@@ -395,11 +429,13 @@ describe('TimelineTrack clip thumbnails', () => {
     const thumb = thumbOf(root)
     expect(thumb).not.toBeNull()
     expect(thumb).toHaveAttribute('src', 'blob:thumb-video')
-    // 60px track → a 52px clip box (`.clip` is `top: 4px; height: calc(100% -
-    // 8px)`), and 16:9 of 52 is 92. On the attributes rather than in the style,
-    // so the element has its box and its ratio before the blob URL decodes.
-    expect(thumb).toHaveAttribute('height', '52')
-    expect(thumb).toHaveAttribute('width', '92')
+    // 60px track → a 51px clip box: `.track` is `border-box` with a 1px
+    // `border-bottom`, and `.clip` is `top: 4px; height: calc(100% - 8px)` of
+    // that element's *padding* box. 16:9 of 51 rounds to 91. On the attributes
+    // rather than in the style, so the element has its box and its ratio before
+    // the blob URL decodes.
+    expect(thumb).toHaveAttribute('height', '51')
+    expect(thumb).toHaveAttribute('width', '91')
   })
 
   it('draws it for an image clip too', () => {
@@ -462,7 +498,7 @@ describe('TimelineTrack clip thumbnails', () => {
     // The whole inline style, not just the clip-path: this is also the pin that
     // the *stroke* is not drawn on the thumbnail in v1 (no border, no outline,
     // no box-shadow). A stroked clip is the next case.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(25.5px at 25.5px 50%);')
   })
 
   it('leaves a stroked clip’s thumbnail unstroked (v1)', () => {
@@ -477,7 +513,7 @@ describe('TimelineTrack clip thumbnails', () => {
     })
 
     // The border stays in the frame. The thumbnail shows the shape.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(26px at 26px 50%);')
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: circle(25.5px at 25.5px 50%);')
   })
 
   it('rounds the corners by the same fraction the frame uses', () => {
@@ -486,9 +522,10 @@ describe('TimelineTrack clip thumbnails', () => {
       sourceVideos: [withThumb],
     })
 
-    // 0.25 of the thumb's 52px shorter side is 13px — the same fraction, of the
-    // same shorter side, that `core/clipMask.ts` resolves against the drawn box.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: inset(0 round 13px);')
+    // 0.25 of the thumb's 51px shorter side is 12.75px — the same fraction, of
+    // the same shorter side, that `core/clipMask.ts` resolves against the drawn
+    // box.
+    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: inset(0 round 12.75px);')
   })
 
   it('leaves an unmasked clip’s thumbnail unclipped', () => {

@@ -54,11 +54,11 @@ function px(value: number): string {
  * The circle is **hugged to the thumbnail's left edge** — `at <h/2>px 50%`, and
  * not centred in the box. A clip is as wide as its duration, and `.clip` is
  * `overflow: hidden`, so a short clip shows only the thumbnail's first few
- * pixels: 0.2s at the default 50px/s is a 10px clip. Centred in the 92px box the
- * circle would span x 20-72 and that clip would show an empty rectangle where an
- * unmasked clip shows its picture. Against the left edge the circle's own
- * leftmost pixel is x 0, so the shape is visible from the first pixel of any
- * clip. It is the *centre* that moves, never the radius, so this is a placement
+ * pixels: 0.2s at the default 50px/s is a 10px clip. Centred in the 91px box a
+ * standard row gives, the circle would span x 20-71 and that clip would show an
+ * empty rectangle where an unmasked clip shows its picture. Against the left
+ * edge the circle's own leftmost pixel is x 0, so the shape is visible from the
+ * first pixel of any clip. It is the *centre* that moves, never the radius, so this is a placement
  * choice and not a second piece of geometry — `inset(0 round r)` already starts
  * at the left edge and needs no equivalent.
  *

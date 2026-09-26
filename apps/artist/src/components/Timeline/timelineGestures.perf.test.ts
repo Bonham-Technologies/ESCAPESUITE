@@ -30,6 +30,14 @@
 // are exact properties rather than budgets — every listener added is given back,
 // one pass over the track rows per gesture — are asserted exactly.
 //
+// **One variant arm, at the end.** `perfScene.ts`'s `sceneSource` carries no
+// `thumbnailUrl`, so every ceiling above is measured over a timeline drawing no
+// clip thumbnails — while the browser benchmark, which imports a real MP4, has
+// drawn twelve of them since ESCSUITE-65 slice 2. The last describe block closes
+// that gap (ESCSUITE-76): it drags the rendered timeline twice, once with each
+// source, and asserts the two are **equal** in listeners, rect reads and renders
+// per frame rather than re-asserting a ceiling.
+//
 // **2026-09-13, after the one-pair-per-gesture change.** The three FINDING pins
 // this file carried on its first day are gone: `useClipDrag`, `useTrimDrag` and
 // `useTimelineMarquee` each bound and gave back 2 * (MOVES + 1) document
@@ -50,6 +58,7 @@ import { usePlayheadDrag, type PlayheadDragDeps } from './usePlayheadDrag'
 import { useTimelineMarquee, type TimelineMarqueeDeps } from './useTimelineMarquee'
 import { useTrimDrag, type TrimDragDeps } from './useTrimDrag'
 import { useEditorStore } from '../../store/projectStore'
+import type { SourceVideo } from '../../store/types'
 // Spied for the `getSnapPoints` counter. Deliberately the module `useClipDrag`
 // itself imports from: a pass-through spy only counts calls that go through the
 // binding the caller actually holds, so if the helper is ever moved to its own
@@ -60,12 +69,21 @@ import * as timelineRulerModule from './TimelineRuler'
 import * as timelineTrackModule from './TimelineTrack'
 import * as trackHeaderModule from './TrackHeader'
 import { resetStoreForTest, store } from '../../test/fixtures/projectStore'
-import { SCENE_TRACKS, buildSceneProject, sceneSource } from '../../test/fixtures/perfScene'
+import {
+  MEDIA_CLIPS,
+  SCENE_TRACKS,
+  buildSceneProject,
+  sceneSource,
+  sceneSourceWithThumbnail,
+} from '../../test/fixtures/perfScene'
 import { setRect } from '../../test/doubles/layout'
 import {
   installResizeObserverDouble,
   type ResizeObserverDouble,
 } from '../../test/doubles/resizeObserver'
+// Only to name the thumbnail's class — the variant arm below counts the `<img>`s
+// it draws, and the class is a CSS-module hash.
+import styles from './Timeline.module.css'
 
 /** The timeline's default scale: one second is 50px at zoom 1. */
 const PPS = 50
@@ -857,5 +875,177 @@ describe('the rendered timeline during a marquee', () => {
     expect(measured.headers).toBe(0)
     expect(measured.rulers).toBe(0)
     expect(measured.ticks).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The variant arm: the same drag with a thumbnail drawn on every media clip
+// ---------------------------------------------------------------------------
+
+/**
+ * One measured drag over the really-rendered timeline, with the given source.
+ *
+ * The two arms below have to be measured the same way to be compared, so the
+ * whole run — store, render, layout boxes, counters, press, 20 moves, release —
+ * lives here and is called twice. It rebuilds the scene itself rather than
+ * leaning on `beforeEach`, because the first arm's drag moves a clip and the
+ * second arm has to start from the same timeline.
+ *
+ * Listeners and rect reads are counted on the *real* rendered tree here, not on
+ * `buildTrackArea`'s stand-ins: the question this arm answers is whether an
+ * `<img>` inside a clip changes what a pointer frame measures, and only the
+ * rendered tree has the `<img>`.
+ *
+ * They are also counted over the **whole gesture**, mousedown and mouseup
+ * included, rather than over the moves alone. `useTrackAreaCache` measures the
+ * container and the rows once on the mousedown and the moves then read the
+ * cache, so a window that began after the press would report zero rect reads —
+ * and an equality between two zeroes proves nothing. The renders are still
+ * per-frame, because that is the number the plain ceiling above pins.
+ */
+function measureRenderedDrag(source: SourceVideo): {
+  thumbnails: number
+  listenerAdds: number
+  listenerRemoves: number
+  containerRects: number
+  rowRects: number
+  /** Rect reads on the thumbnail `<img>`s themselves. */
+  thumbRects: number
+  rendersPerFrame: ReturnType<typeof perFrame>
+  movedTo: number
+} {
+  resetStoreForTest()
+  store().setProject(buildSceneProject())
+  store().addSourceVideo(source)
+
+  const counters = countTimelineRenders()
+  const { container: root } = render(createElement(Timeline))
+
+  const trackArea = root.querySelector('[data-track-id]')!.parentElement!
+    .parentElement as HTMLElement
+  setRect(trackArea, { left: LEFT, top: 0, width: 1000, height: ROW_HEIGHT * 4 })
+  const trackRows = [...root.querySelectorAll('[data-track-id]')] as HTMLElement[]
+  trackRows.forEach((row, i) =>
+    setRect(row, { left: LEFT, top: i * ROW_HEIGHT, width: 5000, height: ROW_HEIGHT })
+  )
+  const clip = root.querySelector('[data-clip-id="perf-clip-0"]') as HTMLElement
+  setRect(clip, { left: LEFT, top: 0, width: 2 * PPS, height: ROW_HEIGHT })
+
+  // After every `setRect`, always — see `countRects`.
+  const rects = { container: 0, rows: 0, thumbs: 0 }
+  countRects(trackArea, () => {
+    rects.container += 1
+  })
+  trackRows.forEach((row) =>
+    countRects(row, () => {
+      rects.rows += 1
+    })
+  )
+  const thumbs = [...root.querySelectorAll(`img.${styles.clipThumb}`)]
+  thumbs.forEach((thumb) =>
+    countRects(thumb, () => {
+      rects.thumbs += 1
+    })
+  )
+
+  const v1Y =
+    trackRows.findIndex((row) => row.getAttribute('data-track-id') === V1) * ROW_HEIGHT +
+    ROW_HEIGHT / 2
+
+  addListener.mockClear()
+  removeListener.mockClear()
+
+  act(() => {
+    clip.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, clientX: LEFT + 50, clientY: v1Y })
+    )
+  })
+  const afterPress = counters.read()
+
+  // The same 20 moves along `V1` to 14 s that the plain drag test above makes.
+  for (let i = 1; i <= MOVES; i++) {
+    move(LEFT + 50 + (i * 700) / MOVES, v1Y)
+  }
+
+  const rendersPerFrame = perFrame(afterPress, counters.read())
+  release()
+  counters.restore()
+  const movedTo = useEditorStore
+    .getState()
+    .project.timeline.clips.find((c) => c.id === 'perf-clip-0')!.timelinePosition
+  cleanup()
+
+  return {
+    thumbnails: thumbs.length,
+    listenerAdds: addListener.mock.calls.filter(isGestureEvent).length,
+    listenerRemoves: removeListener.mock.calls.filter(isGestureEvent).length,
+    containerRects: rects.container,
+    rowRects: rects.rows,
+    thumbRects: rects.thumbs,
+    rendersPerFrame,
+    movedTo,
+  }
+}
+
+describe('a drawn thumbnail on every media clip', () => {
+  it('costs the drag no listener, no rect read and no render per frame', () => {
+    const plain = measureRenderedDrag(sceneSource)
+    const drawn = measureRenderedDrag(sceneSourceWithThumbnail)
+
+    // The two arms really are different renders. Without these the equalities
+    // below would hold for the dullest possible reason — both arms drawing no
+    // thumbnail at all — which is exactly the hole this test exists to close
+    // (ESCSUITE-76): the browser benchmark has drawn twelve of these since
+    // ESCSUITE-65 slice 2, because it imports a real MP4 and `processVideoFile`
+    // writes a `thumbnailUrl`; nothing in jsdom did.
+    expect(plain.thumbnails).toBe(0)
+    // One per media clip. The two overlays take no thumbnail (media clips only),
+    // and every media clip is on screen at this scale, so the virtualiser
+    // subtracts nothing.
+    expect(drawn.thumbnails).toBe(MEDIA_CLIPS)
+
+    // Both arms really dragged the clip, so the counts describe a gesture.
+    expect(plain.movedTo).toBeGreaterThan(0)
+    expect(drawn.movedTo).toBe(plain.movedTo)
+    expect(plain.rendersPerFrame.tracks).toBeGreaterThan(0)
+
+    // And the counters that the equalities below rest on really counted
+    // something in the plain arm — a rect read of zero on both sides would make
+    // "the same number of rect reads" true of a gesture that measured nothing.
+    expect(plain.listenerAdds).toBeGreaterThan(0)
+    expect(plain.listenerRemoves).toBeGreaterThan(0)
+    expect(plain.containerRects).toBeGreaterThan(0)
+    expect(plain.rowRects).toBeGreaterThan(0)
+
+    // Equality, not a ceiling: this is the ESCSUITE-65 argument asserted rather
+    // than reasoned. The `<img>` is `position: absolute` inside `.clipContent`
+    // with a fixed attribute box, so it contributes to no in-flow layout; it is
+    // `pointer-events: none` and `draggable={false}`, so it is on no hit path
+    // and the hit geometry (`target.closest('[data-clip-id]')` plus a
+    // measurement of the container and the `[data-track-id]` rows) cannot see
+    // it; and it is derived from `sourceMedia`, the lookup the waveform and the
+    // type styling already do, so it adds no store read and no prop.
+    expect(drawn.listenerAdds).toBe(plain.listenerAdds)
+    expect(drawn.listenerRemoves).toBe(plain.listenerRemoves)
+    expect(drawn.containerRects).toBe(plain.containerRects)
+    expect(drawn.rowRects).toBe(plain.rowRects)
+    expect(drawn.rendersPerFrame).toEqual(plain.rendersPerFrame)
+    // And nothing measured a thumbnail. Exact, and the one count with no plain
+    // counterpart: there is no `<img>` in the plain arm to read a rect from.
+    expect(drawn.thumbRects).toBe(0)
+
+    // And the plain arm's own numbers are still the ones the ceilings above
+    // pin, so "equal to the plain arm" is equal to something known rather than
+    // to whatever this run happened to produce.
+    //
+    // Measured 2026-09-26, both arms identical: 2 listener adds and 2 removes,
+    // 1 container rect and 4 row rects for the whole gesture (one per row, on
+    // the mousedown — `useTrackAreaCache`), 4 `TimelineTrack` renders per drag
+    // frame and 0 headers / 0 rulers / 0 tick rebuilds. 12 thumbnails drawn in
+    // the variant arm, 0 in the plain one, and 0 rect reads on any of the 12.
+    expect(plain.rendersPerFrame.tracks).toBeLessThanOrEqual(8)
+    expect(plain.rendersPerFrame.headers).toBe(0)
+    expect(plain.rendersPerFrame.rulers).toBe(0)
+    expect(plain.rendersPerFrame.ticks).toBe(0)
   })
 })

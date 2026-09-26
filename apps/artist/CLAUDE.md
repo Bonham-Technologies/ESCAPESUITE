@@ -793,7 +793,7 @@ counts are what a release build keeps.
 draws one `<img>` of the clip's *source* thumbnail at the head of the clip and shapes it with an
 inline CSS `clip-path` from `utils/maskClipPath.ts`: `circle(<h/2>px at <h/2>px 50%)` for a
 circle mask, `inset(0 round <fraction x h>px)` for a rounded one, and nothing at all for
-neither. The circle is **hugged to the thumbnail's left edge** rather than centred in the 92px
+neither. The circle is **hugged to the thumbnail's left edge** rather than centred in the 91px
 box, and that is a deliberate fix rather than an oversight: a clip is as wide as its duration
 and `.clip` is `overflow: hidden`, so a 0.2s clip is 10px wide and shows only the thumbnail's
 first 10 pixels — a centred circle spans x 20-72 and that clip would show an empty rectangle
@@ -827,15 +827,27 @@ It also carries `decoding="async"`, because the virtualiser unmounts and remount
 timeline scrolls and so creates these `<img>`s in bursts; nothing on the page waits for the
 picture, so a burst has no business on the main thread.
 It costs the row no store read — `sourceMedia` is the lookup the waveform already needs — and
-`timelineGestures.perf.test.ts` and `App.rerender.test.tsx` are byte-unchanged and green, which
-is the proof it costs no listener, no rect read, no render and no subscription. The
-`timeline-interaction` benchmark was re-run before and after and its three per-frame
-forced-layout figures did not move — but that run **witnesses nothing about a drawn
-thumbnail**: the benchmark scene's source carries no `thumbnailUrl`, so no `<img>` was
-rendered in either arm. The argument for the drawn case is therefore a-priori, not measured —
-out of flow, a fixed attribute box that neither reads nor contributes to in-flow layout, and
-`pointer-events: none` so it is on no hit path. A thumbnail-bearing benchmark arm is
-**ESCSUITE-76**.
+`timelineGestures.perf.test.ts` and `App.rerender.test.tsx` were byte-unchanged and green when
+it landed, which is the proof it costs no listener, no rect read, no render and no subscription.
+The `timeline-interaction` benchmark was re-run before and after and its three per-frame
+forced-layout figures did not move.
+
+**That run did witness a drawn thumbnail** — corrected here by ESCSUITE-76, which set out to add
+the arm it thought was missing and found it already there. `loadPerfScene` imports a real MP4
+through the media library's own file input, so `processVideoFile` gives the browser scene's
+source a `thumbnailUrl` and all twelve media clips draw one; the spec now counts them
+(`thumbnailsDrawn`, asserted `=== 12` before a gesture runs, and reported in
+`perf-report.json`), so the arm can never go blind unnoticed. Measured 2026-09-26: 12
+thumbnails drawn, and the per-move forced layouts still 0.82 / 1.00 / 1.00 —
+[docs/performance/2026-09-13-timeline-baseline.md](../../docs/performance/2026-09-13-timeline-baseline.md#2026-09-26-the-benchmark-arm-was-never-blind-escsuite-76).
+The half that really was blind is the **jsdom** one: `perfScene.ts`'s `sceneSource` carries no
+`thumbnailUrl`, so the per-frame *counts* had never seen an `<img>`. ESCSUITE-76 closed that too,
+with `sceneSourceWithThumbnail` and a variant arm in `timelineGestures.perf.test.ts` that
+drags the scene twice — 0 thumbnails then 12 — and asserts the listener adds and removes, the
+container and row rect reads and the renders per frame are **equal**, plus zero rect reads on any
+of the twelve `<img>`s. The a-priori argument (out of flow, a fixed attribute box that neither
+reads nor contributes to in-flow layout, `pointer-events: none` so it is on no hit path) is
+therefore now asserted in the counting half and measured in the timing half.
 
 **Paint order is three offsetless `position: relative` rules, and they are load-bearing too.**
 `.clipThumb` is positioned with `z-index: auto`, which paints in CSS 2.1 Appendix E **step 8** —
@@ -1350,6 +1362,15 @@ Waveform visualization adapts to clip selection state:
 - **Selected state**: White (`rgba(255, 255, 255, 0.85)`) for high contrast against blue selection background
 - **Custom color**: `color` prop overrides default/selected colors when provided
 - **Extreme zoom handling**: Canvas width clamped to `MAX_CANVAS_WIDTH` (4000px) to prevent exceeding browser limits (~32,767px). CSS scales the canvas up for wider clips while maintaining visual quality.
+- **Height is the exception to that, and must fit exactly** (ESCSUITE-76): the component writes
+  one number to both the backing store and `style.height`, so nothing is rescaled vertically —
+  what matters is that the number is the **clip box**, because `.clip` is `overflow: hidden` and
+  a taller canvas is simply cut off at the bottom with its centreline left sitting low. The
+  caller passes `TimelineTrack`'s `clipBoxHeight`: `track.height` less `.track`'s 1px
+  `border-bottom` (which `.clip`'s `height: calc(100% - 8px)` resolves against, `.track` being
+  `border-box`) less that 8px inset, clamped to `.clip`'s own `min-height: 40px` — 51px at a
+  standard 60px row. It was `track.height - 4`, i.e. 56px, until ESCSUITE-76. The thumbnail's
+  attribute box is the same expression, so the two cannot drift.
 
 ### Testing
 
