@@ -582,7 +582,7 @@ export interface EditorState {
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => void;
   splitClip: (clipId: string, splitTime: number) => void;
   moveClipToTrack: (clipId: string, trackId: string) => void;
-  setClipTimelinePosition: (clipId: string, position: number) => void;
+  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => void;
   updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => void;
   updateClipBlendMode: (clipId: string, blendMode: BlendMode) => void;
   updateClipEffects: (clipId: string, effects: Partial<ClipEffects>, skipHistory?: boolean) => void;
