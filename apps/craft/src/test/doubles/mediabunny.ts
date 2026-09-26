@@ -40,6 +40,12 @@ export interface MediabunnyState {
   producesBuffer: boolean
   /** Set to make Output.start() reject. */
   startError: Error | null
+  /**
+   * Held open to park `Output.start()` mid-flight, so a test can land a
+   * `dispose()` inside the await the code under test is sitting on and then
+   * resolve it. Null (the default) starts the output immediately.
+   */
+  startGate: Promise<void> | null
   /** Set to make Output.finalize() reject. */
   finalizeError: Error | null
 }
@@ -54,6 +60,7 @@ const state: MediabunnyState = {
   finalizedByteLength: 128,
   producesBuffer: true,
   startError: null,
+  startGate: null,
   finalizeError: null,
 }
 
@@ -125,6 +132,7 @@ export class OutputDouble {
   start = vi.fn(async () => {
     state.callLog.push('Output.start')
     this.startCalls++
+    if (state.startGate) await state.startGate
     if (state.startError) throw state.startError
     this.state = 'started'
   })
@@ -227,5 +235,6 @@ export function resetMediabunnyDouble(): void {
   state.finalizedByteLength = 128
   state.producesBuffer = true
   state.startError = null
+  state.startGate = null
   state.finalizeError = null
 }

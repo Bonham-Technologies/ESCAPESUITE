@@ -24,6 +24,13 @@ export interface RafDouble {
   tick(): number
   /** Callbacks scheduled and not yet run. */
   pending(): number
+  /**
+   * How many times requestAnimationFrame has been called since install —
+   * pending, run and cancelled alike. `pending()` cannot tell "the loop was
+   * never started" from "it was started and cancelled", and for a recorder
+   * that has been disposed those are different bugs.
+   */
+  scheduled(): number
   uninstall(): void
 }
 
@@ -34,12 +41,14 @@ export interface RafDouble {
 export function installRafDouble(): RafDouble {
   const callbacks = new Map<number, FrameRequestCallback>()
   let nextHandle = 1
+  let scheduled = 0
 
   const originalRaf = globalThis.requestAnimationFrame
   const originalCancel = globalThis.cancelAnimationFrame
 
   globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
     const handle = nextHandle++
+    scheduled++
     callbacks.set(handle, cb)
     return handle
   }) as typeof globalThis.requestAnimationFrame
@@ -58,6 +67,7 @@ export function installRafDouble(): RafDouble {
       return pending.length
     },
     pending: () => callbacks.size,
+    scheduled: () => scheduled,
     uninstall() {
       globalThis.requestAnimationFrame = originalRaf
       globalThis.cancelAnimationFrame = originalCancel

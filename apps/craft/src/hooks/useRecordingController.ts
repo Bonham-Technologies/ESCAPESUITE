@@ -474,6 +474,15 @@ export function useRecordingController({
         separateTracks,
       });
 
+      // The screen can go away while that await is parked — the unmount
+      // teardown raises the cancelled flag and disposes the recorder
+      // synchronously underneath it — and there is then no take to count down
+      // to (ESCSUITE-73). Without this, startCountdown() writes 'countdown'
+      // back into the module-singleton store the teardown had just reset and
+      // leaves an interval ticking against a recorder that is already gone, so
+      // the next mount comes up mid-countdown over nothing.
+      if (cancelledRef.current) return;
+
       // Start countdown or record immediately
       if (config.countdownSeconds > 0) {
         startCountdown();
@@ -483,8 +492,12 @@ export function useRecordingController({
     } catch (error) {
       console.error('Failed to start recording:', error);
       // A start that died here used to leave the app back at idle with
-      // nothing said — the same silence this work exists to delete.
-      setNotice(startFailureNotice(error));
+      // nothing said — the same silence this work exists to delete. Unless the
+      // user is already gone: the notice lives in the module-singleton store,
+      // so one written for a take that was thrown away mid-start would be read
+      // out on the next mount, about a recording nobody ever saw
+      // (ESCSUITE-73). The console still carries it.
+      if (!cancelledRef.current) setNotice(startFailureNotice(error));
       // initialize() can throw after the recorder has already built its audio
       // graph — an all-sources-off take reaches MediaRecorder, which creates
       // the AudioContext before discovering it has no tracks — so a failed

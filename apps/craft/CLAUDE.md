@@ -625,6 +625,48 @@ handed to each audio `encode()` is closed in a `finally` for the same reason: `c
 next statement leaked the decoded buffer every time `encode()` threw, which for a codec closed
 under the callback is ~11.7 times a second for the rest of the take.
 
+**A take can be thrown away while it is still being set up, and then nothing more may be
+built** (ESCSUITE-73). `initialize()` awaits half a dozen times — the fallback capture
+`<video>` starting, the AudioContext resuming, `Output.start()`, each codec's `configure()`,
+each companion — and `dispose()` lands inside one of those awaits for real: the screen's
+unmount teardown calls `disposeRecorder()` synchronously while `handleStartRecording` is still
+parked on the `initialize()` it started. `cleanup()` has then already swept the three
+registries above *and cleared them*, so whatever the resolving step goes on to build is built
+into a recorder nothing will ever tear down again — a second AudioContext with its own
+analysers and graph, up to four Mediabunny outputs, up to five codecs, a track `ended`
+listener `trackEndedHandlers` can no longer remove, and `startAudioLevelMonitoring()`, whose
+`monitor()` reschedules itself unconditionally and is stopped only by the
+`cancelAnimationFrame` that has already run.
+
+So `cleanup()` raises a **`disposed` flag first**, and every await in the setup path is
+followed by `abortIfDisposed()`. Three decisions carry it:
+
+- **It throws.** `TakeDisposedDuringSetup` is caught by `initialize()` and by nothing else,
+  which keeps the guard to one decision rather than an `if` at each of nine call sites — and
+  the two companion builders' existing `catch` blocks already release exactly what their half
+  was holding (the output, and the camera's reader), so the error is thrown *into* those
+  catches and re-raised by them rather than guarded around them. A disposal is warned about
+  nowhere: a take that no longer exists is not a take recorded without its camera
+- **`initialize()` resolves.** A rejection would reach `handleStartRecording`'s catch and
+  raise `START_FAILED` — a notice, in the module-singleton store, read out on the next mount,
+  about a recording the user never saw. Every other failure still rejects exactly as before
+- **Only one step has anything to release**: an `Output` whose `start()` resolves *after* the
+  sweep sits at `'started'` and is no longer on `this.outputs`, so `abortIfDisposed()` takes
+  it as an argument and cancels it. A codec still configuring was registered at construction
+  and is already closed (ESCSUITE-66); the `<video>`, the AudioContext and the primary's
+  reader are all fields `cleanup()` reached
+
+`startAudioLevelMonitoring()` moved out to `initialize()` itself, after the guard, so it
+cannot run for a take that is gone. The controller closes the same loop from its own side:
+`handleStartRecording` returns without starting a countdown when `cancelledRef` is raised
+while it was parked, and withholds the start notice for the same reason — so a browser that
+*does* reject out of a half-torn-down setup (an AudioContext closed under a pending
+`resume()`) still says nothing to a user who has left. `webcodecsRecorder.perf.test.ts` pins
+the whole of it as exact conservation over one such take ("one take disposed while it was
+still setting up"): three codecs closed, two outputs cancelled, three source nodes and one
+processor disconnected, two readers cancelled, one AudioContext closed, **zero**
+`requestAnimationFrame` calls and zero level samples pushed.
+
 **Audio companions are a second tap, never a diversion.** The primary output keeps the mixed
 `AudioEncoder` and the mixed Opus track exactly as before — a screen-only download still has
 sound, and the composite MP4 has the mix to draw on without decoding a single part. Each companion adds its own

@@ -77,6 +77,18 @@ export interface VideoElementDouble {
   hasPendingFrameCallback(): boolean
 }
 
+/**
+ * Held open to park every `play()` mid-flight, so a test can land a teardown
+ * inside the await the code under test is sitting on and then resolve it. Null
+ * (the default) resolves immediately, as it always did.
+ */
+let playGate: Promise<void> | null = null
+
+/** Park (or, with null, release) `play()` on every element from now on. */
+export function setVideoPlayGate(gate: Promise<void> | null): void {
+  playGate = gate
+}
+
 function defineOn(video: HTMLVideoElement, prop: string, value: unknown): void {
   Object.defineProperty(video, prop, { value, configurable: true, writable: true })
 }
@@ -84,7 +96,9 @@ function defineOn(video: HTMLVideoElement, prop: string, value: unknown): void {
 function wrap(video: HTMLVideoElement): VideoElementDouble {
   // Silence jsdom's "not implemented" console noise for media methods the
   // code under test may call; behave as inert no-ops instead.
-  const play = vi.fn().mockResolvedValue(undefined)
+  const play = vi.fn(async () => {
+    if (playGate) await playGate
+  })
   const pause = vi.fn()
   video.play = play as unknown as typeof video.play
   video.pause = pause as unknown as typeof video.pause
@@ -191,6 +205,7 @@ export function uninstallVideoElementDouble(): void {
     originalCreateElement = null
   }
   capturedVideos = []
+  playGate = null
 }
 
 /** The most recently created <video> element double. */
@@ -205,6 +220,7 @@ export function getVideoDoubles(): VideoElementDouble[] {
 
 export function resetVideoElementDouble(): void {
   capturedVideos = []
+  playGate = null
 }
 
 // --- MediaError -------------------------------------------------------------

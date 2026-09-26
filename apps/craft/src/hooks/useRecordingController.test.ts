@@ -1345,4 +1345,73 @@ describe('useRecordingController teardown', () => {
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
     expect(state()).toBe('idle')
   })
+  // The recorder is created and initialize()d before the countdown starts, and
+  // initialize() awaits several times over — so the teardown genuinely lands
+  // while a take is still being set up: disposeRecorder() runs synchronously
+  // underneath a handleStartRecording that is parked (ESCSUITE-73). The take
+  // that resumes afterwards belongs to nobody.
+  describe('when the screen goes away mid-start', () => {
+    /** A recorder whose initialize() is held open until the test lets go. */
+    function parkedInitialize(): () => void {
+      let release!: () => void
+      recorderFactory.nextInitializeGate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      return release
+    }
+
+    it('starts no countdown for a take that was thrown away mid-initialize', async () => {
+      const release = parkedInitialize()
+      const { result, unmount } = mountController({ countdownSeconds: 3 })
+      let start!: Promise<void>
+      await act(async () => {
+        start = result.current.handleStartRecording()
+      })
+      // Parked inside initialize(), with the recorder already built.
+      expect(recorderFactory.recorders).toHaveLength(1)
+      expect(recorderFactory.last().initializeCalls).toHaveLength(1)
+
+      unmount()
+      release()
+      await act(async () => {
+        await start
+      })
+
+      // The teardown disposed it; the resuming start must not raise it again.
+      expect(recorderFactory.last().dispose).toHaveBeenCalledTimes(1)
+      expect(recorderFactory.last().start).not.toHaveBeenCalled()
+      // Nothing ticking, and the store left exactly as the teardown left it —
+      // not 'countdown' with a countdown running over a disposed recorder.
+      expect(vi.getTimerCount()).toBe(0)
+      expect(state()).toBe('idle')
+      expect(useRecorderStore.getState().countdownValue).toBe(0)
+      // ...and nothing said about a recording the user never saw.
+      expect(useRecorderStore.getState().notice).toBeNull()
+    })
+
+    it('says nothing when such a take fails as it is abandoned', async () => {
+      // The recorder resolves a disposal quietly, but a browser can still
+      // reject out of a half-torn-down setup — an AudioContext closed under a
+      // pending resume(), say. The notice lives in the module-singleton store,
+      // so it would be read out on the next mount.
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const release = parkedInitialize()
+      recorderFactory.nextInitializeError = new Error('InvalidStateError')
+      const { result, unmount } = mountController({ countdownSeconds: 0 })
+      let start!: Promise<void>
+      await act(async () => {
+        start = result.current.handleStartRecording()
+      })
+
+      unmount()
+      release()
+      await act(async () => {
+        await start
+      })
+
+      expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error))
+      expect(useRecorderStore.getState().notice).toBeNull()
+      expect(state()).toBe('idle')
+    })
+  })
 })
