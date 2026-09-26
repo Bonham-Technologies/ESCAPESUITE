@@ -208,6 +208,46 @@ describe('timelineSnapping helper functions', () => {
       expect(move(clips, ['c1'], 0, 1)).toBe(false)
     })
 
+    // ESCSUITE-82: a locked row takes part in no move — neither as somewhere a
+    // member sits nor as somewhere one would land. `handleClipMouseDown` refuses
+    // to *start* on a locked row, but a selection can hold a clip on one (ctrl+
+    // click adds it) while the pointer holds a clip that is free to drag.
+    const withLocked = (lockedId: string): Track[] =>
+      tracks.map((track) => (track.id === lockedId ? { ...track, locked: true } : track))
+
+    it('refuses the move when a member would land on a locked row', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5)]
+
+      expect(
+        canMoveSelectedClips({
+          clips,
+          tracks: withLocked('t2'),
+          selectedClipIds: new Set(['c1']),
+          deltaTime: 0,
+          deltaTrack: 1,
+        })
+      ).toBe(false)
+    })
+
+    it('refuses the move when a member is sitting on a locked row', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 5),
+        createMockClip('c2', 't2', 0, 5),
+      ]
+
+      // c1 is free to move and nothing is in either clip's way; c2 is on the
+      // locked row, and the move would carry it off.
+      expect(
+        canMoveSelectedClips({
+          clips,
+          tracks: withLocked('t2'),
+          selectedClipIds: new Set(['c1', 'c2']),
+          deltaTime: 10,
+          deltaTrack: 0,
+        })
+      ).toBe(false)
+    })
+
     it('refuses the move when clamping at zero would stack two members', () => {
       const clips = [
         createMockClip('c1', 't1', 0, 5),
