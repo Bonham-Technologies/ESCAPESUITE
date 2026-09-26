@@ -187,6 +187,22 @@ describe('App keyboard shortcuts', () => {
 
       expect(store().project.timeline.clips).toHaveLength(1)
     })
+
+    it('leaves a clip on a locked track alone (ESCSUITE-84)', async () => {
+      const clip = addClip('clip1', 0, 2)
+      store().updateTrack(clip.trackId, { locked: true })
+      store().setSelectedClipId('clip1')
+      await renderApp()
+
+      press('Delete')
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      // The toast is the hook's, not the store's — it still says deleted (stated limit,
+      // ESCSUITE-84). Found by text rather than through the shared `notification()`
+      // helper: the locked clip's inspector panel now shows its own `role="status"`
+      // notice too, so `getByRole('status')` would find two.
+      expect(screen.getByText('Clip deleted')).toBeInTheDocument()
+    })
   })
 
   describe('copy, paste and duplicate', () => {

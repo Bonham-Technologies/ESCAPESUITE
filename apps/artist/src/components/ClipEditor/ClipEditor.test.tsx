@@ -135,6 +135,52 @@ describe('ClipEditor', () => {
     })
   })
 
+  describe('locked track (ESCSUITE-84)', () => {
+    beforeEach(() => {
+      addClip('clip1', 3, 4)
+      store().setSelectedClipId('clip1')
+    })
+
+    it('leaves the panel enabled while the track is unlocked', () => {
+      const { container } = render(<ClipEditor />)
+
+      const fieldset = container.querySelector('fieldset')
+      expect(fieldset).not.toBeNull()
+      expect((fieldset as HTMLFieldSetElement).disabled).toBe(false)
+      expect(
+        screen.queryByText('Track locked — unlock it in the timeline to edit this clip')
+      ).not.toBeInTheDocument()
+    })
+
+    it('disables the panel and shows the notice once the track is locked', () => {
+      const trackId = store().project.timeline.clips[0].trackId
+      store().updateTrack(trackId, { locked: true })
+      const { container } = render(<ClipEditor />)
+
+      const fieldset = container.querySelector('fieldset')
+      expect(fieldset).not.toBeNull()
+      expect((fieldset as HTMLFieldSetElement).disabled).toBe(true)
+      expect(
+        screen.getByText('Track locked — unlock it in the timeline to edit this clip')
+      ).toBeInTheDocument()
+      expect(screen.getByTitle('Delete clip')).toBeDisabled()
+    })
+
+    it('re-enables the panel and drops the notice once the track is unlocked again', () => {
+      const trackId = store().project.timeline.clips[0].trackId
+      store().updateTrack(trackId, { locked: true })
+      const { container, rerender } = render(<ClipEditor />)
+      store().updateTrack(trackId, { locked: false })
+      rerender(<ClipEditor />)
+
+      const fieldset = container.querySelector('fieldset')
+      expect((fieldset as HTMLFieldSetElement).disabled).toBe(false)
+      expect(
+        screen.queryByText('Track locked — unlock it in the timeline to edit this clip')
+      ).not.toBeInTheDocument()
+    })
+  })
+
   describe('clip type labels', () => {
     const mediaClip = (media: Partial<SourceVideo>) => {
       store().addSourceVideo({ ...video, id: 'media2', ...media } as SourceVideo)

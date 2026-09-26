@@ -26,6 +26,7 @@ function renderHeader(overrides: Partial<ComponentProps<typeof ClipEditorHeader>
       duration={5.5}
       position={12.25}
       track={track}
+      locked={false}
       onDelete={onDelete}
       {...overrides}
     />
@@ -75,5 +76,20 @@ describe('ClipEditorHeader', () => {
     await user.click(screen.getByTitle('Delete clip'))
 
     expect(onDelete).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows no lock notice while the track is unlocked', () => {
+    renderHeader({ locked: false })
+
+    expect(
+      screen.queryByText('Track locked — unlock it in the timeline to edit this clip')
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the lock notice as a status region when the track is locked (ESCSUITE-84)', () => {
+    renderHeader({ locked: true })
+
+    const notice = screen.getByRole('status')
+    expect(notice).toHaveTextContent('Track locked — unlock it in the timeline to edit this clip')
   })
 })

@@ -13,6 +13,8 @@ interface ClipEditorHeaderProps {
   position: number;
   /** The track the clip sits on, or null/undefined when it can't be found. */
   track: Track | null | undefined;
+  /** Whether the clip's track is locked — shows the notice line (ESCSUITE-84). */
+  locked: boolean;
   /** Delete the clip. The confirmation prompt lives with the caller. */
   onDelete: () => void;
 }
@@ -25,7 +27,7 @@ interface ClipEditorHeaderProps {
  * Everything here is display: the timecodes are formatted from the numbers it
  * is handed, and deleting is the caller's business.
  */
-export function ClipEditorHeader({ clipTypeLabel, name, duration, position, track, onDelete }: ClipEditorHeaderProps) {
+export function ClipEditorHeader({ clipTypeLabel, name, duration, position, track, locked, onDelete }: ClipEditorHeaderProps) {
   return (
     <>
       <div className={styles.header}>
@@ -61,6 +63,12 @@ export function ClipEditorHeader({ clipTypeLabel, name, duration, position, trac
           </div>
         )}
       </div>
+
+      {locked && (
+        <p className={styles.lockedNotice} role="status">
+          Track locked — unlock it in the timeline to edit this clip
+        </p>
+      )}
     </>
   );
 }

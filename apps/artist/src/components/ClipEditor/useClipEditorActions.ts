@@ -88,6 +88,8 @@ export interface ClipEditorActions {
   sourceVideo: SourceVideo | null | undefined;
   /** The track the clip sits on, for the header's third row. */
   track: Track | null | undefined;
+  /** Whether the clip's track is locked — the inspector disables itself on it (ESCSUITE-84). */
+  trackLocked: boolean;
   isTextOverlay: boolean;
   isShapeOverlay: boolean;
   isOverlay: boolean;
@@ -199,6 +201,8 @@ export function useClipEditorActions(): ClipEditorActions {
     if (!selectedClip) return null;
     return tracks.find((t) => t.id === selectedClip.trackId);
   }, [selectedClip, tracks]);
+
+  const trackLocked = track?.locked === true;
 
   // Determine clip type
   const { isTextOverlay, isShapeOverlay, isOverlay, isAudio, isVideo, clipTypeLabel } =
@@ -466,6 +470,7 @@ export function useClipEditorActions(): ClipEditorActions {
     setScaleLocked,
     sourceVideo,
     track,
+    trackLocked,
     isTextOverlay,
     isShapeOverlay,
     isOverlay,

@@ -13,6 +13,21 @@
   overflow-x: hidden;
 }
 
+/* A fieldset's UA defaults otherwise add a border and padding of their own —
+   this one exists to be an inert grouping/disabling boundary, not a box. */
+.body {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.lockedNotice {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .empty {
   display: flex;
   flex-direction: column;
