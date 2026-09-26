@@ -128,9 +128,34 @@ describe('placeTakeOnTimeline', () => {
         height: webcamPart.height,
       })
     )
-    expect(webcam.stroke).toEqual(strokeForPlacement())
+    expect(webcam.stroke).toEqual(
+      strokeForPlacement(store().project.resolution, store().project.resolution)
+    )
     expect(webcam.mask).toEqual({ kind: 'circle' })
+    // 3/1280 of a 1920-wide canvas is 4.5 px, which is craft's 3 px scaled the
+    // way craft itself scales it: a 1920-wide capture is previewed at the 1280
+    // cap, so the border the user saw was 3/1280 of the picture.
     expect(webcam.stroke).toEqual({ color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 })
+  })
+
+  it('weighs the border against the screen recording, not the canvas', () => {
+    // The same question the transform's frame settles, asked of the border.
+    // A 1280-wide capture was previewed *uncapped*, so craft drew a flat 3 px on
+    // it; ARTIST draws that picture at native size in a 1920-wide canvas, so the
+    // stored fraction has to be 3/1920. Handing `strokeForPlacement` the project
+    // resolution instead of the frame would store 3/1280 here and draw a 4.5 px
+    // border on a recording whose border was 3 px.
+    const smallScreen: TakeClipPart = { ...screenPart, width: 1280, height: 720 }
+
+    store().placeTakeOnTimeline([smallScreen, webcamPart])
+
+    expect(placedClips()[1].stroke).toEqual({
+      color: 'rgba(255, 255, 255, 0.8)',
+      width: 3 / 1920,
+    })
+    expect(placedClips()[1].stroke).toEqual(
+      strokeForPlacement({ width: 1280, height: 720 }, store().project.resolution)
+    )
   })
 
   it('gives every other part neither', () => {

@@ -20,7 +20,7 @@ resolution keeps a masked clip looking the way you left it instead of quietly re
 And neither can be animated: a mask that changed shape halfway through a clip is not a thing
 this release does.
 
-The mask and the border are drawn on the clip's picture only. The selection box and the
-click target in the preview stay rectangular, and the thumbnail on the timeline and the
-thumbnail in your media library — which belongs to the source file rather than to one clip of
-it — are unmasked.
+The mask and the border are drawn on the clip's picture only. The selection box and the click
+target in the preview stay rectangular; the timeline shows no picture of a clip yet, masked or
+otherwise; and the thumbnail in your media library — which belongs to the source file rather
+than to any one clip of it — is unmasked.

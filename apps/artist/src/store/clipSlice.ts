@@ -172,7 +172,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         ...(placement
           ? {
               mask: maskForPlacement(placement, overlayFrame ?? resolution, part),
-              stroke: strokeForPlacement(),
+              stroke: strokeForPlacement(overlayFrame ?? resolution, resolution),
             }
           : {}),
         effects: { ...DEFAULT_EFFECTS },

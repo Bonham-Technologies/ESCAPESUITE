@@ -55,11 +55,16 @@ export const OVERLAY_MARGIN_FRACTION = DEFAULT_OVERLAY_PADDING / COMPOSITOR_MAX_
 export const OVERLAY_CORNER_RADIUS_FRACTION = 8 / COMPOSITOR_MAX_WIDTH;
 
 /**
- * ESCAPECRAFT's border weight, as a fraction of the frame's width.
+ * ESCAPECRAFT's border weight at the compositor's cap, as a fraction of a
+ * frame that wide.
  *
- * `OVERLAY_BORDER_WIDTH` (3 px) on the same capped canvas. A fraction for the
- * same reason again — and because `clip.stroke.width` is defined as a fraction
- * of the frame, so this is the unit the field is already in.
+ * `OVERLAY_BORDER_WIDTH` (3 px) on a canvas capped at `COMPOSITOR_MAX_WIDTH`.
+ * Unlike the corner radius, this is **not** the number that gets stored: see
+ * `strokeForPlacement`, which turns it into craft's border in *frame* pixels and
+ * then into a fraction of the *project's* width, because those are two different
+ * widths and `clip.stroke.width` is read against the second one. It is named
+ * here because it is the one number both apps have to agree on
+ * (`OVERLAY_BORDER_WIDTH` / `COMPOSITOR_MAX_WIDTH` on craft's side).
  */
 export const OVERLAY_STROKE_WIDTH_FRACTION = 3 / COMPOSITOR_MAX_WIDTH;
 
@@ -183,10 +188,11 @@ function overlayBoxFor(
  *
  * `placement.shape` is no longer ignored: `maskForPlacement` below turns it into
  * the clip's mask (ESCSUITE-65), named against `OVERLAY_CORNER_RADIUS_FRACTION`,
- * and `strokeForPlacement` carries the border across as
- * `OVERLAY_STROKE_COLOR` at `OVERLAY_STROKE_WIDTH_FRACTION`. This function
- * still answers geometry alone — the two are separate properties on the clip,
- * and `store/clipSlice.ts` maps all three side by side.
+ * and `strokeForPlacement` carries the border across as `OVERLAY_STROKE_COLOR`
+ * at the weight `OVERLAY_STROKE_WIDTH_FRACTION` describes — scaled the way this
+ * function scales the inset, not stored flat. This function still answers
+ * geometry alone — the two are separate properties on the clip, and
+ * `store/clipSlice.ts` maps all three side by side.
  */
 export function overlayPlacementToTransform(
   placement: OverlayPlacement,
@@ -264,14 +270,41 @@ export function maskForPlacement(
 /**
  * The border a handed-over webcam clip arrives with (ESCSUITE-65, decision 6).
  *
- * Takes nothing, deliberately: `drawOverlay` sets the same `strokeStyle` and the
- * same `lineWidth` in both of its branches, whatever corner the camera is in and
- * whatever shape it is. This exists so the mapping in `store/clipSlice.ts` reads
- * as three properties side by side rather than two calls and an inline object,
- * and so the two literals are named exactly once on this side of the handoff —
- * they are named on the other side too (`OVERLAY_BORDER_COLOR` and
- * `OVERLAY_BORDER_WIDTH`), so the two cannot drift silently.
+ * It takes no placement, deliberately: `drawOverlay` sets the same `strokeStyle`
+ * and the same `lineWidth` in both of its branches, whatever corner the camera is
+ * in and whatever shape it is. This exists so the mapping in
+ * `store/clipSlice.ts` reads as three properties side by side rather than two
+ * calls and an inline object, and so the two literals are named exactly once on
+ * this side of the handoff — they are named on the other side too
+ * (`OVERLAY_BORDER_COLOR` and `OVERLAY_BORDER_WIDTH`), so the two cannot drift
+ * silently.
+ *
+ * It does take the two **widths**, because unlike the mask's radius the border's
+ * weight does not cancel. The radius is a fraction of the clip's drawn box and
+ * both its numerator and that box scale with the frame, so the frame's width
+ * drops out. Nothing drops out here: craft's 3 px is 3 px of its *capture*
+ * canvas, which it caps only **above** `COMPOSITOR_MAX_WIDTH`, while
+ * `clip.stroke.width` is multiplied by the **project's** width when it is drawn
+ * (`core/clipMask.ts`). So the conversion is in two steps, and the widths it
+ * reads are different ones:
+ *
+ * 1. the border in **frame** pixels is craft's own `overlayPaddingFor` shape
+ *    applied to 3 rather than 20 — `3 x frame.width / min(frame.width,
+ *    COMPOSITOR_MAX_WIDTH)`, i.e. a flat 3 px at or below the cap and
+ *    `OVERLAY_STROKE_WIDTH_FRACTION` of the frame above it. Written below as
+ *    `OVERLAY_STROKE_WIDTH_FRACTION x max(frame.width, COMPOSITOR_MAX_WIDTH)`,
+ *    which is the same two arms in one expression — the identity
+ *    `overlayMarginFor` above could equally be written with;
+ * 2. the stored fraction is that divided by `resolution.width`, since that is
+ *    what the renderer will multiply it back by.
+ *
+ * The two widths coincide on the commonest take — a 1920-wide capture in a
+ * 1920-wide project is 4.5 px, which is 3/1280 either way — which is exactly why
+ * storing the flat fraction looked right. It is wrong the moment they differ: a
+ * 1280-wide capture in a 1080p project drew 4.5 px where the recording had 3.
  */
-export function strokeForPlacement(): ClipStroke {
-  return { color: OVERLAY_STROKE_COLOR, width: OVERLAY_STROKE_WIDTH_FRACTION };
+export function strokeForPlacement(frame: PixelSize, resolution: PixelSize): ClipStroke {
+  const widthInFramePixels =
+    OVERLAY_STROKE_WIDTH_FRACTION * Math.max(frame.width, COMPOSITOR_MAX_WIDTH);
+  return { color: OVERLAY_STROKE_COLOR, width: widthInFramePixels / resolution.width };
 }

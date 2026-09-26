@@ -286,9 +286,24 @@ describe('maskForPlacement', () => {
   })
 })
 
+// The border's weight travels the same road the *inset* does, not the road the
+// corner radius does.
+//
+// The radius comes out frame-independent because its numerator and the box it
+// divides by both scale with the frame, so the `frameWidth` cancels. Nothing
+// cancels for the border: ESCAPECRAFT's 3 px is 3 px of its *capture* canvas,
+// which it caps only **above** `COMPOSITOR_MAX_WIDTH` — exactly the two arms
+// `overlayPaddingFor` has for the padding (`3 x frameWidth / min(frameWidth,
+// 1280)`) — while `clip.stroke.width` is read as a fraction of the **project**
+// width. The two widths are the same number only by coincidence, so both have
+// to be asked for.
 describe('strokeForPlacement', () => {
-  it('is craft white 3px border, as a fraction of the frame', () => {
-    expect(strokeForPlacement()).toEqual({
+  it('is craft white 3px border at the compositor cap', () => {
+    // A 1280-wide capture in a 1280-wide project: CRAFT drew a flat 3 px, and
+    // ARTIST draws that picture at native size, so the border is 3 px of a
+    // 1280-wide canvas. The one case where the stored fraction and the named
+    // constant are the same number.
+    expect(strokeForPlacement(COMPOSITOR_FRAME, COMPOSITOR_FRAME)).toEqual({
       color: 'rgba(255, 255, 255, 0.8)',
       width: 3 / 1280,
     })
@@ -296,13 +311,56 @@ describe('strokeForPlacement', () => {
     expect(OVERLAY_STROKE_WIDTH_FRACTION).toBe(3 / 1280)
   })
 
-  it('takes no arguments, because craft border does not depend on any', () => {
-    // `drawOverlay` sets the same strokeStyle and the same lineWidth in both of
-    // its branches (overlayGeometry.ts:185-186 and 204-205), whatever corner the
-    // camera is in and whatever shape it is. This exists so the call site in
-    // `clipSlice.ts` reads as a mapping beside the other two, and so the two
-    // literals are named exactly once on this side of the handoff.
-    expect(strokeForPlacement()).toEqual(strokeForPlacement())
-    expect(strokeForPlacement.length).toBe(0)
+  it('measures the border in craft pixels and stores it against the project', () => {
+    // The same 1280-wide capture, now in a 1080p project. CRAFT still drew a
+    // flat 3 px and ARTIST still draws the capture at native size, so the border
+    // is still 3 px — but 3 px of a 1920-wide canvas is 3/1920, not 3/1280.
+    // Storing the flat 3/1280 here would have drawn a 4.5 px border on a
+    // recording whose border was 3 px.
+    expect(strokeForPlacement(COMPOSITOR_FRAME, { width: 1920, height: 1080 }).width).toBe(
+      3 / 1920
+    )
+  })
+
+  it('scales the border above the cap, exactly as craft scales its padding', () => {
+    // A 2560-wide capture is previewed at the 1280 cap, so CRAFT's 3 px is
+    // 3/1280 of what the user saw — 6 px once the capture is drawn at its own
+    // 2560 pixels. In a 1080p project that is 6/1920.
+    expect(
+      strokeForPlacement({ width: 2560, height: 1440 }, { width: 1920, height: 1080 }).width
+    ).toBe(6 / 1920)
+    // And the case the handoff actually hits most often — a 1920-wide capture in
+    // a 1920-wide project — is 4.5 px, which *is* 3/1280 of the frame. That the
+    // two coincide here is why the flat fraction looked right for so long.
+    expect(
+      strokeForPlacement({ width: 1920, height: 1080 }, { width: 1920, height: 1080 }).width
+    ).toBe(3 / 1280)
+    expect(3 / 1280).toBeCloseTo(4.5 / 1920, 15)
+  })
+
+  it('keeps the flat 3px below the cap, which is what craft drew there', () => {
+    // The compositor never scales a narrower share *up*, so a 640-wide capture
+    // was previewed at 640 with a flat 3 px border — the same arm of
+    // `overlayPaddingFor` that keeps the inset at a flat 20 px. 3 px of the
+    // 1280-wide project it is drawn into is 3/1280.
+    expect(strokeForPlacement({ width: 640, height: 360 }, COMPOSITOR_FRAME).width).toBe(3 / 1280)
+  })
+
+  it('depends on the two widths and nothing else', () => {
+    // It takes no placement, deliberately: `drawOverlay` sets the same
+    // strokeStyle and the same lineWidth in both of its branches
+    // (overlayGeometry.ts:185-186 and 204-205), whatever corner the camera is in
+    // and whatever shape it is. So this exists to name the two literals exactly
+    // once on this side of the handoff and to read as a mapping beside the other
+    // two in `clipSlice.ts` — and its two arguments are the two things the
+    // border genuinely does depend on, neither of which is the placement.
+    expect(strokeForPlacement(COMPOSITOR_FRAME, COMPOSITOR_FRAME)).toEqual(
+      strokeForPlacement(COMPOSITOR_FRAME, COMPOSITOR_FRAME)
+    )
+    expect(strokeForPlacement.length).toBe(2)
+    // Neither height is read: the border is a width against a width.
+    expect(strokeForPlacement({ width: 1280, height: 720 }, { width: 1920, height: 1080 })).toEqual(
+      strokeForPlacement({ width: 1280, height: 9999 }, { width: 1920, height: 1 })
+    )
   })
 })

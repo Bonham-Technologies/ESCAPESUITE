@@ -227,10 +227,16 @@ describe('preview per-frame work', () => {
     // reaching the renderer, and 47 would mean the double has started recording
     // property sets and every other ceiling in this file is now understated.
     expect(frame.totalCalls).toBeLessThanOrEqual(82)
-    // Unchanged from the plain frame, and exact where the plain frame is exact:
-    // a mask draws no second image, and neither field is animated (decision 4),
-    // so a movement in either of these is a bug and not a cost.
-    expect(frame.drawImages).toBeLessThanOrEqual(4)
+    // **Exact, not a ceiling** (measured 2026-09-25: 2). A mask draws no second
+    // image, so this is one `drawImage` per live media clip and no cost of this
+    // feature's can hide in it — a 2x ceiling here would have absorbed a mask
+    // that re-drew the picture to composite itself, which is the most likely way
+    // to implement one wrongly.
+    expect(frame.drawImages).toBe(MASKED_MEDIA_CLIPS_AT_EFFECTS_FRAME)
+    // Still a 2x ceiling (measured 2026-09-25: 4), like the plain frame's:
+    // neither field is animated (decision 4), so the lookups are frames x active
+    // clips — but that is the *scene's* cost, not this feature's, and the exact
+    // form of it is asserted in `exportMP4.perf.test.ts`.
     expect(frame.animatedValues).toBeLessThanOrEqual(8)
     // The scene's shape overlay strokes once; the two masked clips add one each.
     expect(frame.strokes).toBeLessThanOrEqual(6)

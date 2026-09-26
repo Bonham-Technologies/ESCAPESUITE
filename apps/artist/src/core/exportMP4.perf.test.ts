@@ -221,8 +221,10 @@ describe('export per-frame work', () => {
     // stroke, two media clips live over this second, so the plain 24 calls per
     // frame become 24 + 2 x 8 = 40, which is what was measured.
     expect(measured.callsPerFrame).toBeLessThanOrEqual(80)
-    // Exact, and unchanged: a mask draws no second image.
-    expect(measured.drawImagesPerFrame).toBeLessThanOrEqual(4)
+    // **Exact, not a ceiling** (measured 2026-09-25: 2): a mask draws no second
+    // image, so this is one `drawImage` per live media clip. A 2x ceiling would
+    // have absorbed a mask that re-drew the picture to composite itself.
+    expect(measured.drawImagesPerFrame).toBe(MASKED_MEDIA_CLIPS_AT_EFFECTS_FRAME)
     // Exact, and unchanged: neither field is animated, so the lookup count is
     // still frames x active clips and nothing else (decision 4).
     expect(measured.animationLookupsPerFrame).toBe(ACTIVE_CLIPS)
