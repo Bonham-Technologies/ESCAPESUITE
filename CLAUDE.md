@@ -202,8 +202,12 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `?loadVideo=<id>` for the CRAFT handoff — the id addresses a take's **primary** part, and
   ARTIST resolves its siblings by `takeId`, adds every part to the media library and places
   them on the timeline in one undo step: the primary on a video track, the webcam on a track
-  above it at its `startOffset` with its transform seeded from the primary's
-  `overlayPlacement`, and the audio parts on tracks of their own. Placement happens for
+  above it at its `startOffset` with its transform, its **mask** and its **border** all
+  seeded from the primary's `overlayPlacement` (ESCSUITE-65: a `'circle'` placement arrives as
+  `clip.mask = { kind: 'circle' }` and ESCAPECRAFT's white border as `clip.stroke`, carried at
+  the weight the *capture* had rather than the project's — visible in the preview, in an export,
+  and as the shape of that clip's thumbnail on the timeline), and the audio parts on tracks of
+  their own. Placement happens for
   **every** handoff, a single-file take included (ESCSUITE-14 decision 7); a handoff into a
   session that already holds clips appends at the end of the timeline —
   `?suppressRestore=1` to skip the
@@ -525,7 +529,18 @@ statements and branches each moved up a hundredth (99.45 → 99.46, 97.54 → 97
 at exactly 100.00, no floor crossed. The recorder file's own branch *percentage* fell a
 hundredth (94.55 → 94.48) while covering strictly more: the fix deleted three unreachable
 guards, so the same fourteen pre-existing uncovered branches now sit on a denominator of 254
-rather than 257.
+rather than 257. `@escapesuite/artist` was re-measured 2026-09-26 at the end of
+ESCSUITE-65 slice 2 (the masked timeline thumbnail, the headless and e2e parity cases, and
+this documentation sweep): 99.39 / 98.73 / **93.70** / 98.97, with `utils/maskClipPath.ts` a
+dozen lines of pure translation carrying a test per arm and the thumbnail's four load-bearing
+properties one each — and **no floor crossed**, so artist's floors stay 99 / 98 / 93 / 98. The
+row was stale on all four figures: it still read the 99.38 / 98.71 / 93.51 / 98.95 of the end
+of ESCSUITE-14 slice 2, while ESCSUITE-65 slice 1 finished at 99.39 / 98.73 / 93.68 / 98.97
+(its own Task 7's measurement) without writing them down, and it is corrected here.
+`@escapesuite/craft` was re-measured the same day and came back unchanged at
+100.00 / 99.46 / 97.55 / 100.00 — slice 2 touched no craft **source** at all, which is why it
+carries no changeset of its own: `git diff --name-only main -- apps/craft` lists that app's own
+CLAUDE.md and nothing else, and this measurement confirms it.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -533,7 +548,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.46 | 97.55 | 100.00 |
-| `@escapesuite/artist` | 99.38 | 98.71 | 93.51 | 98.95 |
+| `@escapesuite/artist` | 99.39 | 98.73 | 93.70 | 98.97 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
