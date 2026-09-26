@@ -578,7 +578,7 @@ export interface EditorState {
   placeTakeOnTimeline: (parts: TakeClipPart[]) => void;
   removeClipFromTimeline: (clipId: string) => void;
   rippleDeleteClip: (clipId: string) => void;
-  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => void;
+  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => void;
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => void;
   splitClip: (clipId: string, splitTime: number) => void;
   moveClipToTrack: (clipId: string, trackId: string) => void;

@@ -951,9 +951,10 @@ code. It holds refs and no state, so no slider adds a subscription and no render
 
 The flag reaches the store through the trailing optional `skipHistory` parameter on
 `updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData`,
-`updateShapeOverlayData`, `updateClipAnimation` and `updateClipTransition` — the first, fourth
+`updateShapeOverlayData`, `updateClipAnimation`, `updateClipTransition` and
+`shiftClipsAfter` — the first, fourth
 and fifth already had it; ESCSUITE-75 added it to
-`updateClip` and `updateClipEffects` and ESCSUITE-77 to the last two, all four in the same shape
+`updateClip` and `updateClipEffects` and ESCSUITE-77 to the last three, all five in the same shape
 (`history: skipHistory ? state.history :
 pushToHistory(state)`). It is optional and last, so every existing caller is one undo step
 exactly as before.
@@ -966,7 +967,13 @@ mousedown, the first write unskipped and the rest passing `true`. It throttles n
 flag is still asked for *inside* the `if (update)` rather than at the move, because
 `computeTrimUpdate` refuses a move that would leave the clip too short and such a move writes
 nothing at all: a gesture whose opening move was rejected must still push on the write that does
-land. `useTrimDrag.test.ts` holds it (one entry for five moves, two for two trims, the undo
+land. The one thing a trim does on release — the ripple tool's `shiftClipsAfter`, which closes
+the gap the trim left — takes the flag too, and `shiftClipsAfter` grew it for that:
+the shift belongs to the trim that produced it, and pushing an entry of its own made
+one ripple trim two undo steps, the first Ctrl+Z sliding the downstream clips back and
+leaving the clip trimmed.
+`useTrimDrag.test.ts` holds it (one entry for five moves, two for two trims, one for a
+whole ripple trim with both halves coming back together, the undo
 landing on the pre-trim in and out points, and the refused opening move). The same ticket made the
 Transform section header's Reset one entry rather than two on an overlay clip: its second write,
 the overlay's own coordinates, passes `skipHistory: true` as a **literal** — that is a button, not

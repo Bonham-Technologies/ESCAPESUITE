@@ -249,8 +249,16 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  // Shift all clips on a track that are after a certain time by a delta amount
-  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => set((state) => {
+  // Shift all clips on a track that are after a certain time by a delta amount.
+  //
+  // `skipHistory` as on `updateClipTransform` and the rest (ESCSUITE-77). Its one
+  // production caller is a ripple trim, which calls it once on release after a
+  // drag that has already pushed its entry — and pushing a second one made one
+  // gesture two undo steps: the first Ctrl+Z slid the downstream clips back and
+  // left the clip trimmed, a state the user had never seen. Optional and last, so
+  // a call that omits it is one undo step exactly as before; `rippleDeleteClip`
+  // does its own shifting inside one `set` and does not come through here.
+  shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => set((state) => {
     if (delta === 0) return state;
 
     const newClips = state.project.timeline.clips.map((clip) => {
@@ -274,7 +282,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           duration: calculateTimelineDuration(newClips),
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 

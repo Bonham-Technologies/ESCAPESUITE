@@ -282,7 +282,9 @@ describe('useTrimDrag ripple', () => {
     release()
 
     // The clip's end moved from 4s to 5s, so everything after 4s follows it.
-    expect(actions.shiftClipsAfter).toHaveBeenCalledWith(trackA, 4, 1)
+    // `true`: the shift is part of the trim that produced it, whose first
+    // mousemove already pushed the entry both halves undo to (ESCSUITE-77).
+    expect(actions.shiftClipsAfter).toHaveBeenCalledWith(trackA, 4, 1, true)
     expect(theClip('clip2').timelinePosition).toBe(7)
   })
 
@@ -382,6 +384,31 @@ describe('useTrimDrag and the undo stack', () => {
 
     expect(theClip('clip1').endTime).toBe(3)
     expect(past() - before).toBe(2)
+  })
+
+  it('records one entry for a ripple trim, the downstream shift included', () => {
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+    const before = past()
+
+    for (const seconds of [4.2, 4.4, 4.6, 4.8, 5]) moveTo(seconds)
+    release()
+
+    // Both halves of the gesture really happened: the clip grew and the clip
+    // behind it moved out of the way.
+    expect(theClip('clip1').endTime).toBe(3)
+    expect(theClip('clip2').timelinePosition).toBe(7)
+    expect(past() - before).toBe(1)
+
+    store().undo()
+
+    // One Ctrl+Z, and neither half is left behind. The release's
+    // `shiftClipsAfter` used to push an entry of its own, so the first undo slid
+    // the downstream clips back and left the clip trimmed — a state the user had
+    // never seen.
+    expect(theClip('clip1')).toMatchObject({ endTime: 2, timelinePosition: 2 })
+    expect(theClip('clip2').timelinePosition).toBe(6)
   })
 
   it('hands the first-write slot on when the opening move is refused', () => {
