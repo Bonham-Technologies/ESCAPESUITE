@@ -248,7 +248,7 @@ see "How to read these" below.
 > `rafPerSecond` figure in this file, and in the round 1/round 2 baselines it links to, was
 > taken under the interval painter; switching the default would make all of them
 > non-comparable with anything measured after the switch, for a 0.25 ms/frame difference that
-> is the painter's cost, not something a ESCAPECRAFT change could move either way.
+> is the painter's cost, not something an ESCAPECRAFT change could move either way.
 > `PERF_PAINTER=raf` and `scripts/perf-paired.mjs` stay in the harness as the way to make a
 > claim about the recorded frame rate specifically, the next time one is needed.
 
