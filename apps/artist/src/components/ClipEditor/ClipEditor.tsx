@@ -68,121 +68,134 @@ export function ClipEditor() {
 
   return (
     <div className={styles.container}>
-      <fieldset className={styles.body} disabled={trackLocked}>
-        <ClipEditorHeader
-          clipTypeLabel={clipTypeLabel}
-          name={selectedClip.name}
-          duration={selectedClip.duration}
-          position={clipPosition}
-          track={track}
-          locked={trackLocked}
-          onDelete={handleDeleteClip}
+      <ClipEditorHeader
+        clipTypeLabel={clipTypeLabel}
+        name={selectedClip.name}
+        duration={selectedClip.duration}
+        position={clipPosition}
+        track={track}
+        locked={trackLocked}
+        onDelete={handleDeleteClip}
+      />
+
+      {/* Text Overlay Content Section */}
+      {isTextOverlay && selectedClip.textData && (
+        <TextContentSection
+          textData={selectedClip.textData}
+          onChange={handleTextDataChange}
+          disabled={trackLocked}
         />
+      )}
 
-        {/* Text Overlay Content Section */}
-        {isTextOverlay && selectedClip.textData && (
-          <TextContentSection textData={selectedClip.textData} onChange={handleTextDataChange} />
-        )}
-
-        {/* Shape Overlay Content Section */}
-        {isShapeOverlay && selectedClip.shapeData && (
-          <ShapeSection
-            shapeData={selectedClip.shapeData}
-            onChange={handleShapeDataChange}
-            sliderGesture={sliderGesture}
-          />
-        )}
+      {/* Shape Overlay Content Section */}
+      {isShapeOverlay && selectedClip.shapeData && (
+        <ShapeSection
+          shapeData={selectedClip.shapeData}
+          onChange={handleShapeDataChange}
+          sliderGesture={sliderGesture}
+          disabled={trackLocked}
+        />
+      )}
 
 
-        {/* Transform section - for all visual clips */}
-        {!isAudio && (
-          <TransformSection
-            clip={selectedClip}
-            isOverlay={isOverlay}
-            isTextOverlay={isTextOverlay}
-            isShapeOverlay={isShapeOverlay}
-            scaleLocked={scaleLocked}
-            onScaleLockedChange={setScaleLocked}
-            hasSourceVideo={!!sourceVideo}
-            onTransformChange={handleTransformChange}
-            onTextDataChange={handleTextDataChange}
-            onShapeDataChange={handleShapeDataChange}
-            onFitToCanvas={handleFitToCanvas}
-            onResetToDefaults={handleResetToDefaults}
-            onReset={handleResetTransform}
-            sliderGesture={sliderGesture}
-          />
-        )}
+      {/* Transform section - for all visual clips */}
+      {!isAudio && (
+        <TransformSection
+          clip={selectedClip}
+          isOverlay={isOverlay}
+          isTextOverlay={isTextOverlay}
+          isShapeOverlay={isShapeOverlay}
+          scaleLocked={scaleLocked}
+          onScaleLockedChange={setScaleLocked}
+          hasSourceVideo={!!sourceVideo}
+          onTransformChange={handleTransformChange}
+          onTextDataChange={handleTextDataChange}
+          onShapeDataChange={handleShapeDataChange}
+          onFitToCanvas={handleFitToCanvas}
+          onResetToDefaults={handleResetToDefaults}
+          onReset={handleResetTransform}
+          sliderGesture={sliderGesture}
+          disabled={trackLocked}
+        />
+      )}
 
-        {/* Blend Mode section - for visual clips */}
-        {!isAudio && !isOverlay && (
-          <BlendModeSection value={selectedClip.blendMode} onChange={handleBlendModeChange} />
-        )}
+      {/* Blend Mode section - for visual clips */}
+      {!isAudio && !isOverlay && (
+        <BlendModeSection
+          value={selectedClip.blendMode}
+          onChange={handleBlendModeChange}
+          disabled={trackLocked}
+        />
+      )}
 
-        {/* Mask & Stroke section - media clips only (ESCSUITE-65). Gated exactly
-            as Blend Mode is: a text or shape overlay has no drawn box a mask
-            could mean anything against. Added *after* Blend Mode and before
-            Effects rather than anywhere else, because CollapsibleSection seeds its
-            open/closed state positionally (see its doc comment) — moving an
-            existing section would hand its state to a different one. */}
-        {!isAudio && !isOverlay && (
-          <MaskSection
-            mask={selectedClip.mask}
-            stroke={selectedClip.stroke}
-            frameWidth={frameWidth}
-            onMaskChange={handleMaskChange}
-            onStrokeChange={handleStrokeChange}
-            sliderGesture={sliderGesture}
-          />
-        )}
+      {/* Mask & Stroke section - media clips only (ESCSUITE-65). Gated exactly
+          as Blend Mode is: a text or shape overlay has no drawn box a mask
+          could mean anything against. Added *after* Blend Mode and before
+          Effects rather than anywhere else, because CollapsibleSection seeds its
+          open/closed state positionally (see its doc comment) — moving an
+          existing section would hand its state to a different one. */}
+      {!isAudio && !isOverlay && (
+        <MaskSection
+          mask={selectedClip.mask}
+          stroke={selectedClip.stroke}
+          frameWidth={frameWidth}
+          onMaskChange={handleMaskChange}
+          onStrokeChange={handleStrokeChange}
+          sliderGesture={sliderGesture}
+          disabled={trackLocked}
+        />
+      )}
 
-        {/* Effects section - for visual clips */}
-        {!isAudio && !isOverlay && (
-          <EffectsSection
-            blur={selectedClip.effects?.blur ?? 0}
-            onBlurChange={handleBlurChange}
-            sliderGesture={sliderGesture}
-          />
-        )}
+      {/* Effects section - for visual clips */}
+      {!isAudio && !isOverlay && (
+        <EffectsSection
+          blur={selectedClip.effects?.blur ?? 0}
+          onBlurChange={handleBlurChange}
+          sliderGesture={sliderGesture}
+          disabled={trackLocked}
+        />
+      )}
 
-        {/* Animation section - for visual clips */}
-        {!isAudio && (
-          <AnimationSection
-            animation={selectedClip.animation}
-            clipDuration={selectedClip.duration}
-            keyframePanelOpen={keyframePanelOpen}
-            onKeyframePanelToggle={handleKeyframePanelToggle}
-            onInTypeChange={handleAnimationInTypeChange}
-            onInDurationChange={handleAnimationInDurationChange}
-            onInEasingChange={handleAnimationInEasingChange}
-            onOutTypeChange={handleAnimationOutTypeChange}
-            onOutDurationChange={handleAnimationOutDurationChange}
-            onOutEasingChange={handleAnimationOutEasingChange}
-            sliderGesture={sliderGesture}
-          />
-        )}
-
-        {/* Transition section - for all clips */}
-        {!isOverlay && (
-          <TransitionSection
-            transition={selectedClip.transition}
-            clipDuration={selectedClip.duration}
-            onTypeChange={handleTransitionTypeChange}
-            onDurationChange={handleTransitionDurationChange}
-            sliderGesture={sliderGesture}
-          />
-        )}
-
-        <ActionsSection
-          isVideo={isVideo}
-          isAudio={isAudio}
-          clipPosition={clipPosition}
+      {/* Animation section - for visual clips */}
+      {!isAudio && (
+        <AnimationSection
+          animation={selectedClip.animation}
           clipDuration={selectedClip.duration}
-          onGoToClip={handleGoToClip}
-          onDuplicate={handleDuplicate}
-          onSplit={handleSplitAtPlayhead}
+          keyframePanelOpen={keyframePanelOpen}
+          onKeyframePanelToggle={handleKeyframePanelToggle}
+          onInTypeChange={handleAnimationInTypeChange}
+          onInDurationChange={handleAnimationInDurationChange}
+          onInEasingChange={handleAnimationInEasingChange}
+          onOutTypeChange={handleAnimationOutTypeChange}
+          onOutDurationChange={handleAnimationOutDurationChange}
+          onOutEasingChange={handleAnimationOutEasingChange}
+          sliderGesture={sliderGesture}
+          disabled={trackLocked}
         />
-      </fieldset>
+      )}
+
+      {/* Transition section - for all clips */}
+      {!isOverlay && (
+        <TransitionSection
+          transition={selectedClip.transition}
+          clipDuration={selectedClip.duration}
+          onTypeChange={handleTransitionTypeChange}
+          onDurationChange={handleTransitionDurationChange}
+          sliderGesture={sliderGesture}
+          disabled={trackLocked}
+        />
+      )}
+
+      <ActionsSection
+        isVideo={isVideo}
+        isAudio={isAudio}
+        clipPosition={clipPosition}
+        clipDuration={selectedClip.duration}
+        onGoToClip={handleGoToClip}
+        onDuplicate={handleDuplicate}
+        onSplit={handleSplitAtPlayhead}
+        disabled={trackLocked}
+      />
     </div>
   );
 }

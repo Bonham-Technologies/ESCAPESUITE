@@ -8,15 +8,17 @@ interface BlendModeSectionProps {
   value: BlendMode;
   /** Choose a different one. */
   onChange: (mode: BlendMode) => void;
+  /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
+  disabled?: boolean;
 }
 
 /**
  * The "Blend Mode" section of the clip inspector: one dropdown over
  * `BLEND_MODES`, collapsed by default.
  */
-export function BlendModeSection({ value, onChange }: BlendModeSectionProps) {
+export function BlendModeSection({ value, onChange, disabled }: BlendModeSectionProps) {
   return (
-    <CollapsibleSection title="Blend Mode" defaultOpen={false}>
+    <CollapsibleSection title="Blend Mode" defaultOpen={false} disabled={disabled}>
       <select
         className={styles.select}
         value={value}

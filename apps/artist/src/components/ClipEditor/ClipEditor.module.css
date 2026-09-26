@@ -14,12 +14,18 @@
 }
 
 /* A fieldset's UA defaults otherwise add a border and padding of their own —
-   this one exists to be an inert grouping/disabling boundary, not a box. */
-.body {
+   this one exists to be an inert grouping/disabling boundary, not a box. It
+   wraps one section's contents, never the panel: `.container` is the flex
+   column that supplies the gap between the sections, so a fieldset around all
+   of them would collapse that gap into a single flex child (ESCSUITE-84). */
+.sectionBody {
   border: 0;
   margin: 0;
   padding: 0;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
 }
 
 .lockedNotice {

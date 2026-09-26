@@ -103,4 +103,66 @@ describe('CollapsibleSection', () => {
 
     expect(screen.getByRole('button')).toHaveAttribute('type', 'button')
   })
+
+  // ESCSUITE-84: a locked track freezes its clips' controls, and the inspector
+  // disables each section's *contents* rather than the whole panel — reading a
+  // locked clip has to keep working, so the header toggle is deliberately
+  // outside the fieldset and a footer is outside it too.
+  describe('disabled', () => {
+    it('adds no fieldset at all while it is not disabled', () => {
+      const { container } = render(
+        <CollapsibleSection title="Transform">
+          <input aria-label="Pos X" />
+        </CollapsibleSection>
+      )
+
+      expect(container.querySelector('fieldset')).toBeNull()
+      expect(screen.getByLabelText('Pos X')).toBeEnabled()
+    })
+
+    it('disables its children and still opens and closes', async () => {
+      const user = userEvent.setup()
+      const { container } = render(
+        <CollapsibleSection title="Transform" disabled>
+          <input aria-label="Pos X" />
+        </CollapsibleSection>
+      )
+
+      expect(container.querySelector('fieldset')).toBeInTheDocument()
+      expect(screen.getByLabelText('Pos X')).toBeDisabled()
+
+      const toggle = screen.getByRole('button', { name: 'Transform' })
+      expect(toggle).toBeEnabled()
+
+      await user.click(toggle)
+      expect(screen.queryByLabelText('Pos X')).not.toBeInTheDocument()
+
+      await user.click(toggle)
+      expect(screen.getByLabelText('Pos X')).toBeDisabled()
+    })
+
+    it('leaves a footer out of the fieldset, enabled either way', () => {
+      const { rerender } = render(
+        <CollapsibleSection
+          title="Animation"
+          disabled
+          footer={<button>Open Keyframe Editor</button>}
+        >
+          <input aria-label="Animate In" />
+        </CollapsibleSection>
+      )
+
+      expect(screen.getByLabelText('Animate In')).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Open Keyframe Editor' })).toBeEnabled()
+
+      rerender(
+        <CollapsibleSection title="Animation" footer={<button>Open Keyframe Editor</button>}>
+          <input aria-label="Animate In" />
+        </CollapsibleSection>
+      )
+
+      expect(screen.getByLabelText('Animate In')).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Open Keyframe Editor' })).toBeEnabled()
+    })
+  })
 })

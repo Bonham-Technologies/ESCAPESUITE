@@ -13,7 +13,11 @@ interface ClipEditorHeaderProps {
   position: number;
   /** The track the clip sits on, or null/undefined when it can't be found. */
   track: Track | null | undefined;
-  /** Whether the clip's track is locked — shows the notice line (ESCSUITE-84). */
+  /**
+   * Whether the clip's track is locked — shows the notice line and disables
+   * the delete button (ESCSUITE-84). The button carries the flag itself: the
+   * inspector disables each section's contents rather than the whole panel.
+   */
   locked: boolean;
   /** Delete the clip. The confirmation prompt lives with the caller. */
   onDelete: () => void;
@@ -38,6 +42,7 @@ export function ClipEditorHeader({ clipTypeLabel, name, duration, position, trac
         <button
           className={styles.deleteButton}
           onClick={onDelete}
+          disabled={locked}
           title="Delete clip"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

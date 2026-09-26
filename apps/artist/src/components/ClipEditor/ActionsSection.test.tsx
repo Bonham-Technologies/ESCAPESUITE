@@ -100,5 +100,29 @@ describe('ActionsSection', () => {
 
       expect(split()).toBeEnabled()
     })
+
+    it('is disabled on a locked track wherever the playhead is', () => {
+      renderSection({ disabled: true }, 4)
+
+      expect(split()).toBeDisabled()
+    })
+  })
+
+  // ESCSUITE-84: the two editing actions go, "Go to" stays — it moves the
+  // playhead and touches no clip, so this section disables its own buttons
+  // rather than handing the flag to CollapsibleSection.
+  describe('on a locked track', () => {
+    it('disables Duplicate and leaves "Go to" working', async () => {
+      const user = userEvent.setup()
+      const { onGoToClip } = renderSection({ disabled: true })
+
+      expect(screen.getByRole('button', { name: 'Duplicate' })).toBeDisabled()
+
+      const goTo = screen.getByRole('button', { name: 'Go to' })
+      expect(goTo).toBeEnabled()
+      await user.click(goTo)
+
+      expect(onGoToClip).toHaveBeenCalledTimes(1)
+    })
   })
 })

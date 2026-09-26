@@ -8,6 +8,8 @@ interface TextContentSectionProps {
   textData: TextOverlayData;
   /** Apply a partial change to that data. */
   onChange: (updates: Partial<TextOverlayData>) => void;
+  /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
+  disabled?: boolean;
 }
 
 /**
@@ -18,9 +20,9 @@ interface TextContentSectionProps {
  * `style.height` on the element directly — there is no measured height in
  * React state, so a re-render never fights the resize.
  */
-export function TextContentSection({ textData, onChange }: TextContentSectionProps) {
+export function TextContentSection({ textData, onChange, disabled }: TextContentSectionProps) {
   return (
-    <CollapsibleSection title="Text Content">
+    <CollapsibleSection title="Text Content" disabled={disabled}>
       <textarea
         className={styles.textarea}
         value={textData.text}

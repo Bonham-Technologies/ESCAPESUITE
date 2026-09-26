@@ -20,6 +20,8 @@ interface TransitionSectionProps {
    * entry. The type select takes none — it is a single change.
    */
   sliderGesture: SliderGestureHandlers;
+  /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
+  disabled?: boolean;
 }
 
 /**
@@ -27,9 +29,9 @@ interface TransitionSectionProps {
  * which transition runs at the end of this clip and, for anything other than
  * `none`, how long it takes.
  */
-export function TransitionSection({ transition, clipDuration, onTypeChange, onDurationChange, sliderGesture }: TransitionSectionProps) {
+export function TransitionSection({ transition, clipDuration, onTypeChange, onDurationChange, sliderGesture, disabled }: TransitionSectionProps) {
   return (
-    <CollapsibleSection title="Transition Out" defaultOpen={false}>
+    <CollapsibleSection title="Transition Out" defaultOpen={false} disabled={disabled}>
       <div className={styles.transitionControls}>
         <div className={styles.transitionRow}>
           <label>Type</label>

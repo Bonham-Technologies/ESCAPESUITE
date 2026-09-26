@@ -141,40 +141,95 @@ describe('ClipEditor', () => {
       store().setSelectedClipId('clip1')
     })
 
-    it('leaves the panel enabled while the track is unlocked', () => {
+    /** Lock the track the selected clip sits on. */
+    const lockTrack = () => {
+      store().updateTrack(clipNow().trackId, { locked: true })
+    }
+
+    /** The whole collapsible block whose header carries `title`. */
+    const section = (title: string) =>
+      screen.getByRole('button', { name: title }).closest(`.${styles.collapsible}`) as HTMLElement
+
+    /** The container div ClipEditor draws the panel into. */
+    const panelOf = (container: HTMLElement) =>
+      container.querySelector(`.${styles.container}`) as HTMLElement
+
+    it('wraps the panel in no fieldset at all while the track is unlocked', () => {
       const { container } = render(<ClipEditor />)
 
-      const fieldset = container.querySelector('fieldset')
-      expect(fieldset).not.toBeNull()
-      expect((fieldset as HTMLFieldSetElement).disabled).toBe(false)
+      // `.container` is the flex column that supplies the gap between the
+      // header and the sections, so they have to be its own children.
+      expect(container.querySelector('fieldset')).toBeNull()
+      const panel = panelOf(container)
+      expect(panel.firstElementChild).toHaveClass(styles.header)
+      expect(
+        [...panel.children].filter((el) => el.classList.contains(styles.collapsible)).length
+      ).toBeGreaterThan(0)
+      expect(screen.getByTitle('Delete clip')).toBeEnabled()
       expect(
         screen.queryByText('Track locked — unlock it in the timeline to edit this clip')
       ).not.toBeInTheDocument()
     })
 
-    it('disables the panel and shows the notice once the track is locked', () => {
-      const trackId = store().project.timeline.clips[0].trackId
-      store().updateTrack(trackId, { locked: true })
-      const { container } = render(<ClipEditor />)
+    it('disables every section\'s controls once the track is locked', async () => {
+      const user = userEvent.setup()
+      lockTrack()
+      render(<ClipEditor />)
 
-      const fieldset = container.querySelector('fieldset')
-      expect(fieldset).not.toBeNull()
-      expect((fieldset as HTMLFieldSetElement).disabled).toBe(true)
+      // The four sections that default closed can still be opened and read.
+      for (const title of ['Blend Mode', 'Mask & Stroke', 'Effects', 'Transition Out']) {
+        const header = screen.getByRole('button', { name: title })
+        expect(header).toBeEnabled()
+        await user.click(header)
+      }
+
+      expect(within(section('Transform')).getAllByRole('slider')[0]).toBeDisabled()
+      expect(within(section('Blend Mode')).getByRole('combobox')).toBeDisabled()
+      expect(within(section('Mask & Stroke')).getByRole('combobox')).toBeDisabled()
+      expect(within(section('Effects')).getByRole('slider')).toBeDisabled()
+      expect(within(section('Animation')).getAllByRole('combobox')[0]).toBeDisabled()
+      expect(within(section('Transition Out')).getByRole('combobox')).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Duplicate' })).toBeDisabled()
+      // Both Resets, including Transform's header one — it writes the
+      // transform but sits outside the section's fieldset.
+      for (const reset of screen.getAllByRole('button', { name: 'Reset' })) {
+        expect(reset).toBeDisabled()
+      }
+      expect(screen.getByTitle('Delete clip')).toBeDisabled()
       expect(
         screen.getByText('Track locked — unlock it in the timeline to edit this clip')
       ).toBeInTheDocument()
-      expect(screen.getByTitle('Delete clip')).toBeDisabled()
     })
 
-    it('re-enables the panel and drops the notice once the track is unlocked again', () => {
-      const trackId = store().project.timeline.clips[0].trackId
-      store().updateTrack(trackId, { locked: true })
+    it('keeps Split disabled on a locked clip even with the playhead inside it', () => {
+      store().setCurrentTime(4)
+      lockTrack()
+      render(<ClipEditor />)
+
+      expect(screen.getByRole('button', { name: 'Split' })).toBeDisabled()
+    })
+
+    it('leaves Go to and Open Keyframe Editor working on a locked clip', async () => {
+      const user = userEvent.setup()
+      lockTrack()
+      render(<ClipEditor />)
+
+      await user.click(screen.getByRole('button', { name: 'Go to' }))
+      expect(store().currentTime).toBe(3)
+
+      await user.click(screen.getByRole('button', { name: /Open Keyframe Editor/ }))
+      expect(store().keyframePanelState.isOpen).toBe(true)
+    })
+
+    it('re-enables everything and drops the notice once the track is unlocked again', () => {
+      lockTrack()
       const { container, rerender } = render(<ClipEditor />)
-      store().updateTrack(trackId, { locked: false })
+      store().updateTrack(clipNow().trackId, { locked: false })
       rerender(<ClipEditor />)
 
-      const fieldset = container.querySelector('fieldset')
-      expect((fieldset as HTMLFieldSetElement).disabled).toBe(false)
+      expect(container.querySelector('fieldset')).toBeNull()
+      expect(screen.getByTitle('Delete clip')).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Duplicate' })).toBeEnabled()
       expect(
         screen.queryByText('Track locked — unlock it in the timeline to edit this clip')
       ).not.toBeInTheDocument()

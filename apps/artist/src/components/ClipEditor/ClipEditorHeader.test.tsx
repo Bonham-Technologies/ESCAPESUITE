@@ -93,4 +93,16 @@ describe('ClipEditorHeader', () => {
       screen.getByText('Track locked — unlock it in the timeline to edit this clip')
     ).toBeInTheDocument()
   })
+
+  it('disables the delete button itself while the track is locked', () => {
+    renderHeader({ locked: true })
+
+    expect(screen.getByTitle('Delete clip')).toBeDisabled()
+  })
+
+  it('leaves the delete button enabled while the track is unlocked', () => {
+    renderHeader({ locked: false })
+
+    expect(screen.getByTitle('Delete clip')).toBeEnabled()
+  })
 })

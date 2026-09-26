@@ -9,6 +9,11 @@ interface SplitButtonProps {
   clipDuration: number;
   /** Split the clip at the playhead. */
   onSplit: () => void;
+  /**
+   * Refuse the split outright — the clip's track is locked (ESCSUITE-84).
+   * Or'd with the playhead-derived reason this button already has.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -31,10 +36,11 @@ interface SplitButtonProps {
  *
  * Split stays visible but disabled when the playhead is outside the clip or
  * exactly on its first frame, since splitting there would produce an empty
- * first half.
+ * first half — and when the caller says the clip's track is locked, which the
+ * store would refuse anyway.
  */
-export function SplitButton({ clipPosition, clipDuration, onSplit }: SplitButtonProps) {
-  const disabled = useEditorStore((state) => {
+export function SplitButton({ clipPosition, clipDuration, onSplit, disabled }: SplitButtonProps) {
+  const outsideClip = useEditorStore((state) => {
     const timeInClip = relativeTimeInClip(state.currentTime, clipPosition, clipDuration);
     return timeInClip === null || timeInClip <= 0;
   });
@@ -43,7 +49,7 @@ export function SplitButton({ clipPosition, clipDuration, onSplit }: SplitButton
     <button
       className={styles.actionButton}
       onClick={onSplit}
-      disabled={disabled}
+      disabled={disabled || outsideClip}
       title="Split clip at playhead position"
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
