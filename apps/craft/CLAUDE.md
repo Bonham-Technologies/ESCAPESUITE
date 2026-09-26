@@ -1029,6 +1029,32 @@ message and navigate to its own editor itself.
   than the old presence check and is not a complete answer; the real fix is a
   profile-fallback chain like ARTIST's (`apps/artist/src/core/exportMP4.ts` tries High, then
   Main, then Baseline), which CRAFT does not have yet.
+- **Every encoder a conversion builds is released in one place, and a codec that dies says
+  so** (ESCSUITE-74). `conversionEncoders()` in `core/converter.ts` is both halves of that,
+  because they are one problem seen twice. A `VideoEncoder`/`AudioEncoder` is a hardware
+  encode session and `close()` is the only way to give one back, so each conversion
+  registers every encoder it constructs and its **one `finally`** closes the ones still
+  open — guarded on `state !== 'closed'`, because a codec that reported an asynchronous
+  failure closed itself and the real API throws `InvalidStateError` on a second `close()`.
+  The `close()` calls used to sit on the success path after the flush, which a cancellation
+  or a failure part-way never reaches. And an asynchronous failure arrives through the
+  encoder's `error:` callback, which is on **no await path at all**: that callback used to
+  only `console.error`, so the conversion kept handing frames to a dead encoder — whose
+  `encode()` throws from inside a `requestVideoFrameCallback`, where nothing catches it, so
+  the capture promise never settled, the conversion hung holding every other encoder open
+  and the row never returned to idle. The callback now records the codec's error and aborts
+  the work in flight; the conversion rejects with **the codec's own error** (so the notice
+  reads `Conversion failed: <what the encoder said>`), and `throwIfFailed()` before
+  `output.finalize()` covers the gap between the audio pass's every-hundredth-chunk abort
+  check and the mux — a file written out of a dead encoder's packets is a truncated file
+  handed over as a finished one. A **cancellation outranks a codec failure**: the user asked
+  for no file, so a cancel that races an encoder death still rejects with
+  `ConversionAbortedError` and still raises no notice. `remuxToWebM` goes through the same
+  object, being the same law. The accounting is pinned exactly (built == released, none
+  closed twice) for the success, cancellation and encoder-failure outcomes of all three
+  conversions in `converter.perf.test.ts`, and the WebCodecs double's `close()` is strict
+  about a second close the way the real API is — which is the tripwire ESCSUITE-66 had to
+  leave lenient, because the converter did not yet meet the law.
 - **Cancelling is not failing.** Cancel aborts through an `AbortSignal`; the converter
   rejects with `ConversionAbortedError`, the row returns to idle, no file is written and
   **no notice is raised**. Any other rejection becomes `mp4ConversionFailed(message)` in
