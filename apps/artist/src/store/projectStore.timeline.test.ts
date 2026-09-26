@@ -427,6 +427,19 @@ describe('projectStore remaining behaviours', () => {
         blurAmount: 10,
       })
     })
+
+    it('never places a clip on an empty track that is locked (ESCSUITE-84)', () => {
+      // One track, empty and locked: the clip must go to a NEW track, not this one.
+      const lockedId = store().project.timeline.tracks[0].id
+      store().updateTrack(lockedId, { locked: true })
+
+      const clip = addClip('clip1', 0)
+
+      const { tracks, clips } = store().project.timeline
+      expect(tracks).toHaveLength(2)
+      expect(clips[0].trackId).not.toBe(lockedId)
+      expect(clip.trackId).not.toBe(lockedId)
+    })
   })
 
   describe('removeSourceVideo', () => {

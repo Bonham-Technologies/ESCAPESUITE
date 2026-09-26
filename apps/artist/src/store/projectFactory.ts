@@ -33,10 +33,12 @@ function createTrackAtTop(tracks: Track[], name?: string): Track {
   };
 }
 
-// Find an empty track (no clips assigned) - returns lowest index empty track
+// Find an empty track (no clips assigned) - returns lowest index empty track.
+// A locked track is never chosen (ESCSUITE-84): its contents are frozen, and an
+// empty locked track is still locked.
 function findEmptyTrack(tracks: Track[], clips: Clip[]): Track | null {
   const usedTrackIds = new Set(clips.map(c => c.trackId));
-  const emptyTracks = tracks.filter(t => !usedTrackIds.has(t.id));
+  const emptyTracks = tracks.filter(t => !usedTrackIds.has(t.id) && !t.locked);
   if (emptyTracks.length === 0) return null;
   // Return the one with lowest index
   return emptyTracks.reduce((a, b) => a.index < b.index ? a : b);
