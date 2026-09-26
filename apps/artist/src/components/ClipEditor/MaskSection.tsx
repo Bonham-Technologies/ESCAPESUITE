@@ -2,6 +2,7 @@ import type { ClipMask, ClipMaskKind, ClipStroke } from '../../store/types';
 import { DEFAULT_CLIP_MASK_RADIUS, DEFAULT_CLIP_STROKE_COLOR } from '../../store/types';
 import { CLIP_MASK_KINDS } from './clipEditorOptions';
 import { CollapsibleSection } from './CollapsibleSection';
+import type { SliderGestureHandlers } from './useSliderGesture';
 import styles from './ClipEditor.module.css';
 
 interface MaskSectionProps {
@@ -22,6 +23,15 @@ interface MaskSectionProps {
   onMaskChange: (mask: ClipMask) => void;
   /** The stroke colour or width the user chose. Normalising it is the caller's job. */
   onStrokeChange: (stroke: ClipStroke) => void;
+  /**
+   * Undo-coalescing listeners for the two sliders (ESCSUITE-75): a radius or
+   * width drag is one undo entry rather than one per `input` event.
+   *
+   * Not on the colour swatch, deliberately — the OS colour picker also reports
+   * continuously, but it opens on the press and reports after the release, so
+   * a pointer gesture is not what bounds that interaction.
+   */
+  sliderGesture: SliderGestureHandlers;
 }
 
 /** `<input type="color">` accepts this and nothing else. */
@@ -68,6 +78,7 @@ export function MaskSection({
   frameWidth,
   onMaskChange,
   onStrokeChange,
+  sliderGesture,
 }: MaskSectionProps) {
   const kind = mask?.kind ?? 'none';
   const radius = mask?.radius ?? DEFAULT_CLIP_MASK_RADIUS;
@@ -98,6 +109,7 @@ export function MaskSection({
               max={0.5}
               step={0.01}
               value={radius}
+              {...sliderGesture}
               onChange={(e) => onMaskChange({ kind: 'rounded', radius: parseFloat(e.target.value) })}
             />
             {/* A fraction of the clip's shorter side, so a percentage of it is
@@ -114,6 +126,7 @@ export function MaskSection({
             max={0.02}
             step={0.001}
             value={strokeWidth}
+            {...sliderGesture}
             onChange={(e) =>
               onStrokeChange({ color: strokeColor, width: parseFloat(e.target.value) })
             }

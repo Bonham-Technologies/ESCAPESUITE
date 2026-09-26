@@ -3,19 +3,24 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { EffectsSection } from './EffectsSection'
+import { inertSliderGesture } from '../../test/fixtures/clipFixtures'
 import { rowControl } from '../../test/domQueries'
 
 async function renderOpen(blur = 0) {
   const user = userEvent.setup()
   const onBlurChange = vi.fn()
-  render(<EffectsSection blur={blur} onBlurChange={onBlurChange} />)
+  render(
+    <EffectsSection blur={blur} onBlurChange={onBlurChange} sliderGesture={inertSliderGesture} />
+  )
   await user.click(screen.getByRole('button', { name: 'Effects' }))
   return { onBlurChange }
 }
 
 describe('EffectsSection', () => {
   it('starts collapsed', () => {
-    render(<EffectsSection blur={0} onBlurChange={vi.fn()} />)
+    render(
+      <EffectsSection blur={0} onBlurChange={vi.fn()} sliderGesture={inertSliderGesture} />
+    )
 
     expect(screen.getByText('Effects')).toBeInTheDocument()
     expect(screen.queryByText('Blur')).not.toBeInTheDocument()

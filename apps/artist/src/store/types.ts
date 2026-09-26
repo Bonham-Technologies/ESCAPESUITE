@@ -579,13 +579,13 @@ export interface EditorState {
   removeClipFromTimeline: (clipId: string) => void;
   rippleDeleteClip: (clipId: string) => void;
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => void;
-  updateClip: (clipId: string, updates: Partial<Clip>) => void;
+  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => void;
   splitClip: (clipId: string, splitTime: number) => void;
   moveClipToTrack: (clipId: string, trackId: string) => void;
   setClipTimelinePosition: (clipId: string, position: number) => void;
   updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => void;
   updateClipBlendMode: (clipId: string, blendMode: BlendMode) => void;
-  updateClipEffects: (clipId: string, effects: Partial<ClipEffects>) => void;
+  updateClipEffects: (clipId: string, effects: Partial<ClipEffects>, skipHistory?: boolean) => void;
   updateClipTransition: (clipId: string, transition: Partial<Transition>) => void;
   updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>) => void;
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => void;

@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event'
 import { MaskSection } from './MaskSection'
 import { CLIP_MASK_KINDS } from './clipEditorOptions'
 import { rowControl, rowColor } from '../../test/domQueries'
+import { inertSliderGesture } from '../../test/fixtures/clipFixtures'
 import { DEFAULT_CLIP_MASK_RADIUS, DEFAULT_CLIP_STROKE_COLOR } from '../../store/types'
 import type { ClipMask, ClipStroke } from '../../store/types'
 
@@ -33,6 +34,7 @@ async function renderOpen({
       frameWidth={frameWidth}
       onMaskChange={onMaskChange}
       onStrokeChange={onStrokeChange}
+      sliderGesture={inertSliderGesture}
     />
   )
   await user.click(screen.getByRole('button', { name: 'Mask & Stroke' }))
@@ -48,6 +50,7 @@ describe('MaskSection', () => {
         frameWidth={1280}
         onMaskChange={vi.fn()}
         onStrokeChange={vi.fn()}
+        sliderGesture={inertSliderGesture}
       />
     )
 

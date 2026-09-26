@@ -8,6 +8,13 @@
 // be the same values), while the state assertions confirm the write really
 // landed. Nothing is mocked out: remove the `toHaveBeenCalledWith` lines and
 // the suite would still be driving a working editor.
+//
+// The trailing `false` several of those assertions carry is the `skipHistory`
+// flag of ESCSUITE-75: a handler called straight from here is a write inside no
+// slider gesture, so it pushes its own undo entry — the behaviour every one of
+// these tests described before the flag existed. The gesture itself is pinned
+// below ("one undo step per slider gesture") and end to end in
+// `ClipEditor.sliderHistory.test.tsx`.
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useClipEditorActions } from './useClipEditorActions'
@@ -358,7 +365,7 @@ describe('useClipEditorActions transform', () => {
 
     act(() => result.current.handleTransformChange('scaleX', 2))
 
-    expect(spies.updateClipTransform).toHaveBeenCalledWith(clip.id, { scaleX: 2, scaleY: 2 })
+    expect(spies.updateClipTransform).toHaveBeenCalledWith(clip.id, { scaleX: 2, scaleY: 2 }, false)
     expect(clipNow(clip.id).transform).toMatchObject({ scaleX: 2, scaleY: 2 })
   })
 
@@ -370,7 +377,7 @@ describe('useClipEditorActions transform', () => {
     spies.updateClipTransform.mockClear()
     act(() => result.current.handleTransformChange('scaleY', 3))
 
-    expect(spies.updateClipTransform).toHaveBeenCalledWith(clip.id, { scaleY: 3 })
+    expect(spies.updateClipTransform).toHaveBeenCalledWith(clip.id, { scaleY: 3 }, false)
     expect(clipNow(clip.id).transform).toMatchObject({ scaleX: 1, scaleY: 3 })
   })
 
@@ -381,8 +388,8 @@ describe('useClipEditorActions transform', () => {
     act(() => result.current.handleTransformChange('x', 0.25))
     act(() => result.current.handleTransformChange('opacity', 0.4))
 
-    expect(spies.updateClipTransform).toHaveBeenNthCalledWith(1, clip.id, { x: 0.25 })
-    expect(spies.updateClipTransform).toHaveBeenNthCalledWith(2, clip.id, { opacity: 0.4 })
+    expect(spies.updateClipTransform).toHaveBeenNthCalledWith(1, clip.id, { x: 0.25 }, false)
+    expect(spies.updateClipTransform).toHaveBeenNthCalledWith(2, clip.id, { opacity: 0.4 }, false)
   })
 
   it('the section Reset restores position, scale and opacity but not rotation', () => {
@@ -504,7 +511,7 @@ describe('useClipEditorActions appearance', () => {
 
     act(() => result.current.handleBlurChange(12))
 
-    expect(spies.updateClipEffects).toHaveBeenCalledWith(clip.id, { blur: 12 })
+    expect(spies.updateClipEffects).toHaveBeenCalledWith(clip.id, { blur: 12 }, false)
     expect(clipNow(clip.id).effects?.blur).toBe(12)
   })
 
@@ -526,7 +533,7 @@ describe('useClipEditorActions appearance', () => {
 
     act(() => result.current.handleTextDataChange({ text: 'Hello', fontSize: 64 }))
 
-    expect(spies.updateTextOverlayData).toHaveBeenCalledWith(clip.id, { text: 'Hello', fontSize: 64 })
+    expect(spies.updateTextOverlayData).toHaveBeenCalledWith(clip.id, { text: 'Hello', fontSize: 64 }, false)
     expect(clipNow(clip.id).textData).toMatchObject({ text: 'Hello', fontSize: 64 })
   })
 
@@ -536,10 +543,11 @@ describe('useClipEditorActions appearance', () => {
 
     act(() => result.current.handleShapeDataChange({ fillColor: '#ff0000ff', strokeWidth: 4 }))
 
-    expect(spies.updateShapeOverlayData).toHaveBeenCalledWith(clip.id, {
-      fillColor: '#ff0000ff',
-      strokeWidth: 4,
-    })
+    expect(spies.updateShapeOverlayData).toHaveBeenCalledWith(
+      clip.id,
+      { fillColor: '#ff0000ff', strokeWidth: 4 },
+      false
+    )
     expect(clipNow(clip.id).shapeData).toMatchObject({ fillColor: '#ff0000ff', strokeWidth: 4 })
   })
 })
@@ -701,7 +709,7 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
     // The section reports what the user did; the handler decides what is stored.
     // A radius on a circle is noise the renderer never reads, so it is dropped
     // here rather than carried in every project file from now on.
-    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { mask: { kind: 'circle' } })
+    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { mask: { kind: 'circle' } }, false)
     expect(clipNow(clip.id).mask).toEqual({ kind: 'circle' })
   })
 
@@ -726,7 +734,7 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
     // So a clip that was never masked and one whose mask was removed are the
     // same object, and `undefined === none` stays the only rule the renderer and
     // the migration need to know.
-    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { mask: undefined })
+    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { mask: undefined }, false)
     expect(clipNow(clip.id).mask).toBeUndefined()
   })
 
@@ -738,7 +746,7 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
 
     act(() => result.current.handleStrokeChange({ color: '#ffffff', width: 0 }))
 
-    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { stroke: undefined })
+    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { stroke: undefined }, false)
     expect(clipNow(clip.id).stroke).toBeUndefined()
   })
 
@@ -757,6 +765,24 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
     act(() => store().undo())
     expect(clipNow(clip.id).stroke).toBeUndefined()
     expect(clipNow(clip.id).mask).toEqual({ kind: 'circle' })
+  })
+
+  it('asks the slider gesture what each write should do about history', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    // The listeners the sections spread onto their sliders. A press opens the
+    // gesture; the first write then pushes and the rest of the drag skips, so
+    // the whole drag is one entry captured before it started.
+    act(() => result.current.sliderGesture.onPointerDown())
+    act(() => result.current.handleBlurChange(1))
+    act(() => result.current.handleBlurChange(2))
+    act(() => result.current.handleBlurChange(3))
+    act(() => result.current.sliderGesture.onPointerUp())
+
+    expect(spies.updateClipEffects).toHaveBeenNthCalledWith(1, clip.id, { blur: 1 }, false)
+    expect(spies.updateClipEffects).toHaveBeenNthCalledWith(2, clip.id, { blur: 2 }, true)
+    expect(spies.updateClipEffects).toHaveBeenNthCalledWith(3, clip.id, { blur: 3 }, true)
   })
 
   it('reports the project frame width the stroke is a fraction of', () => {
