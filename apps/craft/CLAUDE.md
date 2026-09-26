@@ -1055,6 +1055,13 @@ message and navigate to its own editor itself.
   conversions in `converter.perf.test.ts`, and the WebCodecs double's `close()` is strict
   about a second close the way the real API is — which is the tripwire ESCSUITE-66 had to
   leave lenient, because the converter did not yet meet the law.
+- **A throw while reading frames fails the conversion instead of hanging it** (ESCSUITE-78):
+  every capture callback in `captureFramesViaPlayback` — the `requestVideoFrameCallback`, the
+  `requestAnimationFrame` fallback and both `ended` handlers — runs inside `guarded()`, which
+  hands a synchronous throw (a `drawImage`/`drawOverlay` from a dead element, a `VideoFrame`
+  built on a zero-sized canvas) to the same `fail()` the abort path takes, so the conversion
+  rejects with that error and releases every encoder rather than sitting on "Converting…" for
+  the life of the tab, which is what the browser swallowing the throw used to leave behind.
 - **Cancelling is not failing.** Cancel aborts through an `AbortSignal`; the converter
   rejects with `ConversionAbortedError`, the row returns to idle, no file is written and
   **no notice is raised**. Any other rejection becomes `mp4ConversionFailed(message)` in

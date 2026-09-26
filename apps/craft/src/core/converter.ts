@@ -423,10 +423,76 @@ async function captureFramesViaPlayback(
       }
     };
 
-    const onAbort = () => {
-      cleanup();
-      reject(new ConversionAbortedError());
+    /**
+     * Leave the capture with an error, by the one door: stop the loop and both
+     * elements, stop listening for a cancellation that can no longer matter,
+     * and reject with what stopped it.
+     *
+     * The abort path's own exit, which is why it is the exit a throw takes too
+     * (see `guarded` below). It removes the abort listener where `onAbort`
+     * used to leave it attached — a signal fires `abort` once, so that is the
+     * same thing happening in one place instead of two.
+     *
+     * The rejection is in a `finally` because `cleanup()` calls back into the
+     * *caller* — `overlay.onSkipped`, the report that a camera part decoded
+     * nothing — and a caller's callback can throw. Unguarded, that throw would
+     * step over the `reject` below and re-create this whole bug one level
+     * down. What the caller hears is the error that **stopped the conversion**,
+     * not the one its own report raised: the draw or the codec that failed is
+     * the useful half, and the report's own throw goes on to the page's error
+     * handler the way it would from any callback.
+     */
+    const fail = (error: unknown) => {
+      try {
+        cleanup();
+      } finally {
+        signal?.removeEventListener('abort', onAbort);
+        reject(error);
+      }
     };
+
+    /**
+     * …and the same door for a capture that got every frame it was owed.
+     *
+     * No `finally` here, and it is not an oversight: every call to this is
+     * inside a `guarded` body, so a throw out of its `cleanup()` is caught and
+     * becomes `fail(thatError)` — the conversion rejects rather than hanging,
+     * which is the same guarantee by a different route.
+     */
+    const finish = () => {
+      cleanup();
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    };
+
+    const onAbort = () => fail(new ConversionAbortedError());
+
+    /**
+     * Run one callback body, and turn a synchronous throw into that same
+     * failure exit (ESCSUITE-78).
+     *
+     * Everything below runs from a browser callback — a video-frame callback,
+     * an animation frame, an `ended` listener — and the browser *swallows* a
+     * throw out of one of those: it is reported to the page and nothing else
+     * happens. The next frame is never requested, neither `resolve` nor
+     * `reject` is ever reached, so this promise stays pending for the life of
+     * the tab, the conversion's one `finally` never runs, every encoder it
+     * built stays open and the recording row never leaves "Converting…".
+     * `new VideoFrame()` on a zero-sized canvas, a `drawImage` or
+     * `drawOverlay` from an element that has errored or detached, a frame that
+     * is already closed: all raise exactly that. ESCSUITE-74 fixed the one
+     * case that was reachable in practice — a dead encoder's `encode()` — by
+     * removing its cause; this is the shape, whatever the cause.
+     */
+    const guarded =
+      <A extends unknown[]>(body: (...args: A) => void) =>
+      (...args: A): void => {
+        try {
+          body(...args);
+        } catch (error) {
+          fail(error);
+        }
+      };
 
     signal?.addEventListener('abort', onAbort);
 
@@ -459,8 +525,18 @@ async function captureFramesViaPlayback(
       });
 
       const keyFrame = frameIndex % keyFrameInterval === 0;
-      videoEncoder.encode(frame, { keyFrame });
-      frame.close();
+      // `finally`, because `encode()` is the one call here that can throw
+      // while this function is holding a frame: a codec that has died throws
+      // `InvalidStateError` out of it (ESCSUITE-74's shape), and a `VideoFrame`
+      // that is not closed again is 1280x720 of pixels the browser cannot
+      // reclaim until the tab goes away. The throw still leaves through
+      // `guarded` and becomes the conversion's rejection — this only makes
+      // sure it does not take the frame with it.
+      try {
+        videoEncoder.encode(frame, { keyFrame });
+      } finally {
+        frame.close();
+      }
 
       frameIndex++;
       onProgress?.(frameIndex, totalFrames);
@@ -474,7 +550,7 @@ async function captureFramesViaPlayback(
 
     if (hasRVFC) {
       // Use requestVideoFrameCallback for precise frame capture
-      const rvfcCallback = (_now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => {
+      const rvfcCallback = guarded((_now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => {
         if (signal?.aborted || isFinished) return;
 
         const currentTime = metadata.mediaTime;
@@ -489,24 +565,20 @@ async function captureFramesViaPlayback(
         if (!video.ended && !video.paused && frameIndex < totalFrames) {
           rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
         }
-      };
+      });
 
-      video.addEventListener('ended', () => {
+      video.addEventListener('ended', guarded(() => {
         if (isFinished) return;
         // Capture any remaining frames using the last displayed frame
         while (frameIndex < totalFrames) {
           captureCurrentFrame();
           lastCaptureTime += frameDuration;
         }
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      });
+        finish();
+      }));
 
       video.addEventListener('error', () => {
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        reject(new Error('Video playback error'));
+        fail(new Error('Video playback error'));
       });
 
       rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
@@ -514,7 +586,7 @@ async function captureFramesViaPlayback(
       video.play().catch(reject);
     } else {
       // Fallback: use requestAnimationFrame with time-based capture
-      const rafCallback = () => {
+      const rafCallback = guarded(() => {
         if (signal?.aborted || isFinished) return;
 
         const currentTime = video.currentTime;
@@ -534,28 +606,22 @@ async function captureFramesViaPlayback(
             captureCurrentFrame();
             lastCaptureTime += frameDuration;
           }
-          cleanup();
-          signal?.removeEventListener('abort', onAbort);
-          resolve();
+          finish();
         }
-      };
+      });
 
-      video.addEventListener('ended', () => {
+      video.addEventListener('ended', guarded(() => {
         if (isFinished) return;
         // Capture any remaining frames
         while (frameIndex < totalFrames) {
           captureCurrentFrame();
           lastCaptureTime += frameDuration;
         }
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      });
+        finish();
+      }));
 
       video.addEventListener('error', () => {
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        reject(new Error('Video playback error'));
+        fail(new Error('Video playback error'));
       });
 
       video.currentTime = 0;
