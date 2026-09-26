@@ -86,10 +86,15 @@ refused action `return state`.
 ### Components
 
 - **Inspector** (`ClipEditor/`): `useClipEditorActions` exposes `trackLocked: boolean`
-  (`track?.locked === true`). `ClipEditor.tsx` wraps the header and every section in one
-  `<fieldset disabled={trackLocked} className={styles.body}>` — a disabled fieldset disables
-  every descendant input, select, textarea and button natively, so no section changes.
-  `ClipEditorHeader` takes `locked` and renders one line under the info rows:
+  (`track?.locked === true`). `ClipEditor.tsx` passes it to every section, and
+  `CollapsibleSection` wraps **that section's contents** in `<fieldset disabled>`, leaving its
+  header toggle and its `footer` slot outside. (Amended after review: one fieldset around the
+  whole panel made `.container` a single flex child and cost every clip's inspector the gap
+  between its sections, disabled the collapsible headers so a locked clip's closed sections
+  could not be read, and killed Actions' "Go to" and Animation's "Open Keyframe Editor", which
+  read rather than edit and stay live.)
+  `ClipEditorHeader` takes `locked`, disables the delete button and renders one line under the
+  info rows:
   `Track locked — unlock it in the timeline to edit this clip` (the fieldset's disabled state is
   the machine-readable half; this line is the human-readable one).
 - **Track header** (`Timeline/TrackHeader.tsx`): the delete button is `disabled` while the track

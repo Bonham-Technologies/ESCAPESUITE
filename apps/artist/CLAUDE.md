@@ -48,7 +48,7 @@ pnpm lint                # Run ESLint
 | `sourceVideoEquality.ts` | `sameSourceVideo` (and the `sameWaveform` it needs) — the field-by-field comparison that lets `addSourceVideo` treat a re-add of identical metadata as no change at all, rather than as an undo step that restores an identical library |
 | `projectMigration.ts` | `ensureTimelineHasTracks` — normalising a loaded project onto the current timeline shape: missing resolution, missing tracks, missing overlay arrays, clips without a `trackId`, and the `convertLegacyOverlays` call on **both** return paths. Runs on every `setProject` |
 | `clipQueries.ts` | `getClipsAtTime`, `getClipAtTime`, `getClipPosition` — reads over a clips array they are handed, never over the store. Re-exported by `projectStore.ts` |
-| `trackLock.ts` | Four questions over the clips and tracks a caller hands it — `lockedTrackIds`, `isTrackLocked`, `clipOnLockedTrack`, `anyClipOnLockedTrack` — that every slice's locked-track guard is built from (ESCSUITE-84, see Timeline) |
+| `trackLock.ts` | Five questions over the clips and tracks a caller hands it — `lockedTrackIds`, `isTrackLocked`, `clipOnLockedTrack`, `anyClipOnLockedTrack` and `lockedSourceVideoIds` (the media a locked row's clips use, which `removeSourceVideo` and the media library's two buttons both ask about) — that every locked-track guard is built from (ESCSUITE-84, see Timeline) |
 
 **Slices** — each one `export const createXSlice: StateCreator<EditorState, [], [], XSlice>`, composed in this order:
 
@@ -1077,17 +1077,52 @@ without knowing "locked" exists. Selection-slice group actions are **all-or-noth
 `trackId`, since they haven't landed) and `moveSelectedClips` as one yes/no over the whole set.
 `muteSelectedClips`/`unmuteSelectedClips`, `updateTrack` and `reorderTracks` stay untouched —
 track properties, not clip contents — and `removeTrack` refuses, since deleting a locked track
-deletes its clips. Refusal is **silent** in the store, like every pointer veto. Two places read
-the lock to say something anyway: `useClipEditorActions` exposes `trackLocked: boolean` on
-demand (a plain `track?.locked` read, no new subscription), `ClipEditor.tsx` wraps its body in
-`<fieldset disabled={trackLocked}>`, and `ClipEditorHeader` renders a plain `<p>` — not a second
-status region — "Track locked — unlock it in the timeline to edit this clip"; `TrackHeader.tsx`'s
-delete button is `disabled`, `title="Unlock the track to delete it"`. `useAppKeyboardShortcuts.ts`
-does the same on-demand read before its five editing branches — Delete/Backspace (both selection
-forms), Ctrl+V, Ctrl+D, Ctrl+B — and toasts "Track is locked" instead of calling the action and
-letting the store swallow it silently. The stated limit: the keyframe panel and the toolbar's
-delete button raise no notice and rely on the store's refusal alone, showing nothing for a no-op
-edit — a visible keyframe-panel state is a follow-up, not this ticket.
+deletes its clips. So does the project slice's `removeSourceVideo`, all-or-nothing: it removes
+every clip that references the source, so if one of them is on a locked track the source and
+every clip stay (`lockedSourceVideoIds` is the question). `shiftClipsAfter` is the one guard
+that is *not* the all-or-nothing question, deliberately: the shift below it only moves clips
+whose `trackId` matches, so an undefined `trackId` moves nothing and the guard asks
+`isTrackLocked` about the one row.
+
+Refusal is **silent** in the store, like every pointer veto. Four components read the lock to
+say something anyway.
+
+The **inspector** disables each section's *contents*, never the panel. `useClipEditorActions`
+exposes `trackLocked: boolean` on demand (a plain `track?.locked` read, no new subscription) and
+`ClipEditor.tsx` hands it to every section; `CollapsibleSection` takes `disabled` and wraps that
+section's children in one `<fieldset className={styles.sectionBody} disabled>`, with its header
+toggle and its `footer` slot outside. One fieldset around the whole panel was the first shape
+and was wrong three ways: `.container` is the flex column that supplies the gap between the
+sections, so a single fieldset child collapsed that gap on **every** clip's inspector, locked or
+not; the section headers are `<button>`s, so on a locked clip the four sections that default
+closed could not be opened and read at all; and it killed the two controls that are reading
+rather than editing. Those two stay live — Actions' "Go to" moves the playhead (that section
+therefore puts the flag on its own Duplicate and Split buttons and hands `CollapsibleSection`
+nothing) and Animation's "Open Keyframe Editor" opens a panel (it renders through `footer`).
+Transform's header "Reset" writes the transform and sits outside the fieldset in `headerRight`,
+so it carries the flag itself, as does `ClipEditorHeader`'s delete button; the header also
+renders a plain `<p>` — not a second status region — "Track locked — unlock it in the timeline
+to edit this clip".
+
+The **media library** (`VideoUploader.tsx`) asks `lockedSourceVideoIds` and disables the
+per-item Remove button (`title="Used by a clip on a locked track"`) and Clear All
+(`title="Media is used by a clip on a locked track"`). Clear All refuses in its handler as well
+as being disabled, and it is the one refusal enforced at the UI rather than in the store:
+`clearAllVideos()` deletes the blobs from IndexedDB *before* the per-source `removeSourceVideo`
+calls, so a store refusal afterwards would leave a locked clip pointing at bytes that are gone.
+
+The **preview**: `useTransformHandles`' `handleDoubleClick` asks `clipOnLockedTrack` before
+opening the inline text editor — it already subscribes to both `clips` and `tracks`, so the
+question costs nothing — because the editor would otherwise open and then lose every keystroke
+to `updateTextOverlayData`'s refusal, silently.
+
+The **track header** (`TrackHeader.tsx`): the delete button is `disabled`,
+`title="Unlock the track to delete it"`. `useAppKeyboardShortcuts.ts` does the same on-demand
+read before its five editing branches — Delete/Backspace on a multi-selection, Delete/Backspace
+on a single clip, Ctrl+V, Ctrl+D and Ctrl+B — and toasts "Track is locked" instead of calling
+the action and letting the store swallow it silently. The stated limit: the keyframe panel and
+the toolbar's delete button raise no notice and rely on the store's refusal alone, showing
+nothing for a no-op edit — a visible keyframe-panel state is a follow-up, not this ticket.
 
 The one documented exception is the colour swatches
 in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the
@@ -1182,7 +1217,7 @@ and queries `styles.menuBackdrop`.
 | `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect |
 | `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
-| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. Above all of it sits `modalOpen`, which stops the cascade dead while a dialog is up (see "Dialogs"). The editor's **fourth** effect. Its deps array is the inline one character for character plus `modalOpen`, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **38 deps, measured and left verbatim** — see below. Its five editing branches — Delete/Backspace, Ctrl+V, Ctrl+D, Ctrl+B — ask `store/trackLock.ts` about the lock on demand before calling the store and toast "Track is locked" instead when it would refuse (ESCSUITE-84) |
+| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. Above all of it sits `modalOpen`, which stops the cascade dead while a dialog is up (see "Dialogs"). The editor's **fourth** effect. Its deps array is the inline one character for character plus `modalOpen`, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **38 deps, measured and left verbatim** — see below. Its five editing branches — Delete/Backspace on a multi-selection, Delete/Backspace on a single clip, Ctrl+V, Ctrl+D and Ctrl+B — ask `store/trackLock.ts` about the lock on demand before calling the store and toast "Track is locked" instead when it would refuse (ESCSUITE-84) |
 | `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **fifth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life |
 | `takeImport.ts` | The storage half of the `?loadVideo=` handoff: resolve the take's parts, read each one's blob and thumbnail, add it to the library with a resolved duration, and return the parts to place (`ImportedTake`: `clipParts`, `thumbnailUrls`, `missingParts`). Lives beside the hook rather than inside it because the hook's effect is already the app's longest and these are the arms worth testing on their own |
