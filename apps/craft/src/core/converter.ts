@@ -220,7 +220,7 @@ function conversionEncoders(callerSignal?: AbortSignal): ConversionEncoders {
         if (encoder.state !== 'closed') encoder.close();
       }
     },
-  }
+  };
 }
 
 /**

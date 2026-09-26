@@ -24,6 +24,7 @@ import {
   lastAudioEncoder,
   getCreatedFrames,
   allFramesClosed,
+  webcodecsCallLog,
   AudioEncoderDouble,
   VideoEncoderDouble,
 } from '../test/doubles/webcodecs'
@@ -126,6 +127,27 @@ async function playThroughRvfc(video: VideoElementDouble, count: number): Promis
   for (let i = 0; i < count; i++) video.presentFrame(i / 30)
   video.fireEnded()
   await settle()
+}
+
+/**
+ * Every encoder flush happened before the muxer was finalized.
+ *
+ * The invariant that decides whether a converted file is complete: packets
+ * still sitting inside an encoder when `finalize()` runs are packets the muxer
+ * never writes, so a conversion that flushed late would hand over a file
+ * missing its tail — and no count of calls can see that. Both doubles push into
+ * one ordered log (`webcodecsCallLog`, whose own comment names this as what it
+ * is for), which is the only way to ask about order across the two of them.
+ */
+function expectEveryFlushBeforeFinalize(): void {
+  const finalize = webcodecsCallLog.indexOf('Output.finalize')
+  expect(finalize).toBeGreaterThan(-1)
+  const flushes = webcodecsCallLog.flatMap((call, index) =>
+    call.endsWith('.flush') ? [index] : []
+  )
+  // Never vacuous: a conversion that flushed nothing would otherwise pass.
+  expect(flushes.length).toBeGreaterThan(0)
+  expect(Math.max(...flushes)).toBeLessThan(finalize)
 }
 
 function withoutGlobal(name: string, fn: () => void): void {
@@ -472,7 +494,12 @@ describe('converter', () => {
       )
     })
 
-    it('closes the video encoder before finalizing', async () => {
+    it('flushes and closes the video encoder exactly once', async () => {
+      // Both encoders are released in the conversion's one `finally`
+      // (ESCSUITE-74), which runs after `finalize()` — so what has to be pinned
+      // is not where the close sits but that the **flush** came first, which is
+      // the half the file depends on.
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
       const { promise, video } = start(p => convertToMP4(SOURCE, p))
       await playThroughRvfc(video, 3)
       await promise
@@ -480,6 +507,9 @@ describe('converter', () => {
       expect(lastVideoEncoder().flushCalls).toBe(1)
       expect(lastVideoEncoder().closeCalls).toBe(1)
       expect(lastVideoEncoder().state).toBe('closed')
+      expect(lastAudioEncoder().flushCalls).toBe(1)
+      expect(lastAudioEncoder().closeCalls).toBe(1)
+      expectEveryFlushBeforeFinalize()
     })
   })
 
@@ -862,6 +892,16 @@ describe('converter', () => {
       // paused with the screen, in the one cleanup both go through.
       expect(screen.pause).toHaveBeenCalled()
       expect(webcam.pause).toHaveBeenCalled()
+    })
+
+    it('flushes the encoder before the muxer is finalized', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const composite = startComposite()
+      readyWebcam(composite.webcam)
+      await playThroughRvfc(composite.screen, 3)
+      await composite.promise
+
+      expectEveryFlushBeforeFinalize()
     })
 
     it('stops both elements, and says what the encoder said, when the encoder fails', async () => {
@@ -1352,6 +1392,16 @@ describe('converter', () => {
       expect(getCreatedFrames('AudioData').every(f => f.closed)).toBe(true)
       expect(getMediabunnyState().audioSources[0].packets).toHaveLength(3)
       expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    })
+
+    it('flushes the encoder before the muxer is finalized', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      const { promise } = convertAudio()
+      await promise
+
+      // The whole file is the audio here, so a late flush would lose the last
+      // chunks of the only track there is.
+      expectEveryFlushBeforeFinalize()
     })
 
     it('reports progress that only moves forward, through every phase, to 100', async () => {

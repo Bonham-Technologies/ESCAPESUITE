@@ -156,10 +156,12 @@ export class EncoderDouble {
   // as the real API does — which is why the guard in `release()` asks about
   // `state` and not about whether the conversion closed it before.
   close(): void {
-    webcodecsCallLog.push(`${this.label}.close`)
+    // Logged *after* the guard, so the shared log records the closes that
+    // happened and not the one that was refused.
     if (this.state === 'closed') {
       throw new DOMException(`${this.label} is already closed`, 'InvalidStateError')
     }
+    webcodecsCallLog.push(`${this.label}.close`)
     this.closeCalls++
     this.state = 'closed'
   }
@@ -408,6 +410,9 @@ export function resetWebCodecsDoubles(): void {
   VideoEncoderDouble.supportPlan = true
   AudioEncoderDouble.supportPlan = true
   VideoDecoderDouble.supportPlan = true
+  // The base's own property as well as the two subclasses': a test that armed
+  // it on `EncoderDouble` would otherwise arm every encoder of the next test.
+  EncoderDouble.failNextAt = null
   VideoEncoderDouble.failNextAt = null
   AudioEncoderDouble.failNextAt = null
   encoderRegistry.length = 0
