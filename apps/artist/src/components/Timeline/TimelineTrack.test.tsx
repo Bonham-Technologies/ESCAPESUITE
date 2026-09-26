@@ -403,13 +403,21 @@ describe('TimelineTrack clip thumbnails', () => {
   })
 
   it('draws it for an image clip too', () => {
-    const image: SourceVideo = { ...withThumb, id: 'image1', mediaType: 'image' }
+    // Its own URL, and it is the *second* source in the list: a row that drew
+    // "the first source that has a thumbnail" rather than this clip's own source
+    // would pass with `blob:thumb-video` and fail here.
+    const image: SourceVideo = {
+      ...withThumb,
+      id: 'image1',
+      mediaType: 'image',
+      thumbnailUrl: 'blob:thumb-image',
+    }
     const { root } = renderTrack({
       clips: [makeClip('clip1', 0, 2, { sourceVideoId: image.id })],
-      sourceVideos: [video, image],
+      sourceVideos: [withThumb, image],
     })
 
-    expect(thumbOf(root)).toHaveAttribute('src', 'blob:thumb-video')
+    expect(thumbOf(root)).toHaveAttribute('src', 'blob:thumb-image')
   })
 
   it('is decoration, not content, and cannot be dragged', () => {

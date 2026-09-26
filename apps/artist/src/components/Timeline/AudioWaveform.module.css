@@ -1,6 +1,16 @@
 /**
  * AudioWaveform component styles
- * Waveform is rendered behind clip content
+ *
+ * The waveform is painted behind the clip's content — but only because
+ * `.clipContent` is itself positioned (`position: relative`, added by
+ * ESCSUITE-65 to be the thumbnail's containing block). This canvas is positioned
+ * at `z-index: 0`, so it paints in CSS 2.1 Appendix E step 8; an in-flow,
+ * non-positioned `.clipContent` painted in steps 4-7, i.e. BEFORE it, and the
+ * waveform covered the clip's own name and duration at `opacity: 0.8`. Now both
+ * are step-8 positioned boxes and tree order decides, which puts this earlier
+ * sibling behind the label as the comment always claimed. Do not drop
+ * `.clipContent`'s `position: relative` — the header comment on
+ * `Timeline.module.css`'s `.clipThumb` says the same thing from the other side.
  */
 
 .waveform {
