@@ -117,6 +117,112 @@ function checkAborted(signal?: AbortSignal): void {
   }
 }
 
+/** What a conversion needs to be able to do to any encoder it built. */
+interface ReleasableEncoder {
+  readonly state: CodecState;
+  close(): void;
+}
+
+/**
+ * The encoders one conversion built, and the first failure any of them
+ * reported asynchronously.
+ *
+ * Two jobs in one object, because they are the same problem seen twice
+ * (ESCSUITE-74).
+ *
+ * **Releasing.** A `VideoEncoder`/`AudioEncoder` holds a hardware encode
+ * session and `close()` is the only way to give one back. Every encoder a
+ * conversion constructs is registered here, and `release()` — called from that
+ * conversion's one `finally`, which runs however it left — closes the ones
+ * still open. Registration rather than a local per encoder, so a path that
+ * grows a second encoder cannot grow a way to forget it.
+ *
+ * **Surfacing.** A codec that fails *asynchronously* fails through its
+ * `error:` callback, which sits on no await path at all. Before this, that
+ * callback only wrote a console line: the conversion carried on handing frames
+ * to a dead encoder — whose `encode()` then throws `InvalidStateError` from
+ * inside a `requestVideoFrameCallback`, where nothing catches it, so the
+ * capture promise never settles and the conversion hangs holding every other
+ * encoder open. `errorCallback()` is what that callback now is: it remembers
+ * the codec's own error and aborts the work in flight, so the conversion stops
+ * at the next check. `translate()` then puts the codec's message on the
+ * rejection in place of the abort the failure itself raised, and
+ * `throwIfFailed()` covers the gap between the last abort check and the muxer —
+ * a file written from a dead encoder's packets is truncated, and handing one
+ * over silently was the other half of the bug.
+ */
+interface ConversionEncoders {
+  /**
+   * The signal the conversion's own work runs under: the caller's cancellation
+   * *and* an encoder failure, so one check serves both.
+   */
+  readonly signal: AbortSignal;
+  /** Register an encoder for release, and hand it straight back. */
+  register<T extends ReleasableEncoder>(encoder: T): T;
+  /** The `error:` callback for one encoder. `kind` names it in the console. */
+  errorCallback(kind: 'Video' | 'Audio'): (error: DOMException) => void;
+  /** Throw the first codec failure, if there was one. */
+  throwIfFailed(): void;
+  /** What the conversion should reject with, given what its work threw. */
+  translate(error: unknown): unknown;
+  /** Close every registered encoder that is not closed already. */
+  release(): void;
+}
+
+function conversionEncoders(callerSignal?: AbortSignal): ConversionEncoders {
+  const encoders: ReleasableEncoder[] = [];
+  const controller = new AbortController();
+  let failure: DOMException | null = null;
+
+  const onCallerAbort = () => controller.abort();
+  // An already-aborted signal never fires `abort`, so the combined signal has
+  // to start aborted — the conversion would otherwise run to completion for a
+  // caller that had already cancelled it.
+  if (callerSignal?.aborted) controller.abort();
+  else callerSignal?.addEventListener('abort', onCallerAbort);
+
+  return {
+    signal: controller.signal,
+    register(encoder) {
+      encoders.push(encoder);
+      return encoder;
+    },
+    errorCallback: (kind) => (error) => {
+      // Still logged: the console line is where the browser's own stack
+      // survives, and it is the only record left when the rejection below is
+      // swallowed (a cancellation outranks it — see `translate`).
+      console.error(`${kind} encoder error:`, error);
+      // The first failure is the one that stopped the conversion; a second
+      // encoder dying afterwards is usually a consequence of the first.
+      failure ??= error;
+      controller.abort();
+    },
+    throwIfFailed() {
+      if (failure) throw failure;
+    },
+    translate(error) {
+      // The user's own cancellation outranks an encoder failure: they asked for
+      // no file, and `useMp4Download` deliberately says nothing about a
+      // conversion that was cancelled. Anything else that came back while an
+      // encoder had failed *is* that failure, wearing whatever the work
+      // happened to raise — the abort this object issued, or the flush that
+      // rejected because the codec had closed itself.
+      if (callerSignal?.aborted) return error;
+      return failure ?? error;
+    },
+    release() {
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+      for (const encoder of encoders) {
+        // Guarded because an encoder that reported an asynchronous failure
+        // closed itself, and the real API throws `InvalidStateError` on a
+        // second `close()` — which is how this was found (ESCSUITE-66), and
+        // what the test double is now strict about.
+        if (encoder.state !== 'closed') encoder.close();
+      }
+    },
+  }
+}
+
 /**
  * Yield to main thread without being throttled in background tabs.
  * Uses MessageChannel which is not subject to the same throttling as setTimeout.
@@ -830,8 +936,10 @@ async function encodeAudioChunks(
     }
   }
 
+  // Flushed, not closed: every encoder a conversion builds is released in that
+  // conversion's one `finally` (see `conversionEncoders`), which is the only
+  // place that also runs for the conversions that never reach here.
   await audioEncoder.flush();
-  audioEncoder.close();
 }
 
 /**
@@ -895,10 +1003,10 @@ export async function convertToMP4(
     };
   }
 
-  // Declared out here so the finally below can release them however this
-  // function leaves — including a cancellation between the two encode passes.
-  let videoEncoder: VideoEncoder | null = null;
-  let audioEncoder: AudioEncoder | null = null;
+  // Every encoder this conversion builds, and the signal its work runs under:
+  // the caller's cancellation and any encoder's own failure, together. The
+  // `finally` below releases whatever was built, however this function leaves.
+  const encoders = conversionEncoders(signal);
 
   try {
     // Load video metadata
@@ -992,28 +1100,25 @@ export async function convertToMP4(
     await output.start();
 
     // Create video encoder
-    videoEncoder = new VideoEncoder({
+    const videoEncoder = encoders.register(new VideoEncoder({
       output: async (chunk, meta) => {
         await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
       },
-      error: (e) => {
-        console.error('Video encoder error:', e);
-      },
-    });
+      error: encoders.errorCallback('Video'),
+    }));
 
     // The same configuration `probeMP4Support()` asked about, by construction.
     await videoEncoder.configure(mp4VideoEncoderConfig(width, height));
 
     // Create audio encoder if we have audio
+    let audioEncoder: AudioEncoder | null = null;
     if (audioData && audioSource) {
-      audioEncoder = new AudioEncoder({
+      audioEncoder = encoders.register(new AudioEncoder({
         output: async (chunk, meta) => {
           await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
         },
-        error: (e) => {
-          console.error('Audio encoder error:', e);
-        },
-      });
+        error: encoders.errorCallback('Audio'),
+      }));
 
       await audioEncoder.configure(MP4_AUDIO_ENCODER_CONFIG);
     }
@@ -1035,7 +1140,7 @@ export async function convertToMP4(
       frameRate,
       totalFrames,
       30, // keyframe every 30 frames (1 second)
-      signal,
+      encoders.signal,
       (frameIndex, total) => {
         const progress = 18 + (frameIndex / total) * 70;
         onProgress({
@@ -1047,16 +1152,23 @@ export async function convertToMP4(
       overlay
     );
 
-    // Flush video encoder
+    // Flush video encoder. It is not closed here: every encoder is released in
+    // the one `finally` below, which is also the only place a conversion that
+    // never got this far releases anything.
     await videoEncoder.flush();
-    videoEncoder.close();
 
     onProgress({ phase: 'encoding', progress: 90, message: 'Encoding audio...' });
 
     // Encode audio if we have it
     if (audioEncoder && audioData) {
-      await encodeAudioChunks(audioData, audioEncoder, signal);
+      await encodeAudioChunks(audioData, audioEncoder, encoders.signal);
     }
+
+    // The last moment at which no file has been written. An encoder can fail
+    // between the audio pass's every-hundredth-chunk abort check and here, and
+    // a file muxed out of a dead encoder's packets is a truncated file handed
+    // over as a finished one.
+    encoders.throwIfFailed();
 
     onProgress({ phase: 'finalizing', progress: 95, message: 'Finalizing MP4...' });
 
@@ -1073,19 +1185,18 @@ export async function convertToMP4(
     onProgress({ phase: 'finalizing', progress: 100, message: 'Conversion complete!' });
 
     return mp4Blob;
+  } catch (error) {
+    // An encoder that failed asynchronously stopped the work above by aborting
+    // it, so what arrives here is that abort (or the flush that rejected
+    // because the codec had closed itself) rather than the failure. The codec's
+    // own words are what the notice should carry.
+    throw encoders.translate(error);
   } finally {
     URL.revokeObjectURL(videoUrl);
     if (companion) {
       URL.revokeObjectURL(companion.url);
     }
-    // Both encoders are already closed on the success path; this releases them
-    // when the conversion left early (cancellation, or a failure part-way).
-    if (videoEncoder && videoEncoder.state !== 'closed') {
-      videoEncoder.close();
-    }
-    if (audioEncoder && audioEncoder.state !== 'closed') {
-      audioEncoder.close();
-    }
+    encoders.release();
   }
 }
 
@@ -1122,9 +1233,9 @@ export async function convertToM4A(
 ): Promise<Blob> {
   onProgress({ phase: 'preparing', progress: 0, message: 'Extracting audio…' });
 
-  // Declared out here so the finally below can release it however this
-  // function leaves — including a cancellation part-way through the encode.
-  let audioEncoder: AudioEncoder | null = null;
+  // The one encoder this conversion builds, and the signal its work runs
+  // under — the caller's cancellation and the encoder's own failure, together.
+  const encoders = conversionEncoders(signal);
 
   try {
     // Asked first, because it is the cheap half: the same question
@@ -1168,26 +1279,29 @@ export async function convertToM4A(
 
     await output.start();
 
-    audioEncoder = new AudioEncoder({
+    const audioEncoder = encoders.register(new AudioEncoder({
       output: async (chunk, meta) => {
         await audioSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
       },
-      error: (e) => {
-        console.error('Audio encoder error:', e);
-      },
-    });
+      error: encoders.errorCallback('Audio'),
+    }));
 
     await audioEncoder.configure(MP4_AUDIO_ENCODER_CONFIG);
 
     // The encode is the whole conversion here, so it owns the whole bar
     // between the extraction and the mux.
-    await encodeAudioChunks(audioData, audioEncoder, signal, (fraction) => {
+    await encodeAudioChunks(audioData, audioEncoder, encoders.signal, (fraction) => {
       onProgress({
         phase: 'encoding',
         progress: 15 + fraction * 80,
         message: 'Encoding audio…',
       });
     });
+
+    // See `convertToMP4`: the encoder can die between the loop's last abort
+    // check and the mux, and there is no such thing as a truncated M4A worth
+    // handing over.
+    encoders.throwIfFailed();
 
     onProgress({ phase: 'finalizing', progress: 95, message: 'Finalizing M4A…' });
 
@@ -1202,12 +1316,10 @@ export async function convertToM4A(
     onProgress({ phase: 'finalizing', progress: 100, message: 'Conversion complete!' });
 
     return m4aBlob;
+  } catch (error) {
+    throw encoders.translate(error);
   } finally {
-    // `encodeAudioChunks` closes it on the success path; this releases it when
-    // the conversion left early (cancellation, or a failure part-way).
-    if (audioEncoder && audioEncoder.state !== 'closed') {
-      audioEncoder.close();
-    }
+    encoders.release();
   }
 }
 
@@ -1252,10 +1364,10 @@ export async function remuxToWebM(
 
   const videoUrl = URL.createObjectURL(webmBlob);
 
-  // Declared out here so the finally below can release them however this
-  // function leaves — including a cancellation between the two encode passes.
-  let videoEncoder: VideoEncoder | null = null;
-  let audioEncoder: AudioEncoder | null = null;
+  // The same encoder hygiene the MP4 conversion has, through the same object:
+  // one release point, and an asynchronous codec failure that reaches the
+  // caller in the codec's own words.
+  const encoders = conversionEncoders(signal);
 
   try {
     // Load video metadata
@@ -1312,14 +1424,12 @@ export async function remuxToWebM(
     const videoBitrate = videoBitrateForFrameSize(width, height);
 
     // Create video encoder (VP9)
-    videoEncoder = new VideoEncoder({
+    const videoEncoder = encoders.register(new VideoEncoder({
       output: async (chunk, meta) => {
         await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
       },
-      error: (e) => {
-        console.error('Video encoder error:', e);
-      },
-    });
+      error: encoders.errorCallback('Video'),
+    }));
 
     await videoEncoder.configure({
       codec: 'vp09.00.10.08', // VP9 Profile 0
@@ -1330,15 +1440,14 @@ export async function remuxToWebM(
     });
 
     // Create audio encoder if we have audio (Opus)
+    let audioEncoder: AudioEncoder | null = null;
     if (audioData && audioSource) {
-      audioEncoder = new AudioEncoder({
+      audioEncoder = encoders.register(new AudioEncoder({
         output: async (chunk, meta) => {
           await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
         },
-        error: (e) => {
-          console.error('Audio encoder error:', e);
-        },
-      });
+        error: encoders.errorCallback('Audio'),
+      }));
 
       await audioEncoder.configure({
         codec: 'opus',
@@ -1365,7 +1474,7 @@ export async function remuxToWebM(
       frameRate,
       totalFrames,
       frameRate * 2, // keyframe every 2 seconds for better seeking
-      signal,
+      encoders.signal,
       (frameIndex, total) => {
         const progress = 18 + (frameIndex / total) * 70;
         onProgress({
@@ -1376,16 +1485,16 @@ export async function remuxToWebM(
       }
     );
 
-    // Flush video encoder
+    // Flush video encoder. Released, like every encoder here, in the one
+    // `finally` below.
     await videoEncoder.flush();
-    videoEncoder.close();
 
     onProgress({ phase: 'encoding', progress: 90, message: 'Encoding audio...' });
 
     // Encode audio if we have it
     if (audioEncoder && audioData) {
       // Check for cancellation before audio encoding
-      checkAborted(signal);
+      checkAborted(encoders.signal);
       const samplesPerChunk = 1024;
       const totalAudioSamples = audioData.length / 2; // Stereo, so divide by 2
       let audioTimestamp = 0;
@@ -1394,7 +1503,7 @@ export async function remuxToWebM(
       for (let offset = 0; offset < totalAudioSamples; offset += samplesPerChunk) {
         // Check for cancellation periodically during audio encoding
         if (chunkCount % 100 === 0) {
-          checkAborted(signal);
+          checkAborted(encoders.signal);
         }
         chunkCount++;
 
@@ -1432,8 +1541,10 @@ export async function remuxToWebM(
       }
 
       await audioEncoder.flush();
-      audioEncoder.close();
     }
+
+    // See `convertToMP4`: no file is written out of an encoder that has died.
+    encoders.throwIfFailed();
 
     onProgress({ phase: 'finalizing', progress: 95, message: 'Finalizing WebM...' });
 
@@ -1450,15 +1561,10 @@ export async function remuxToWebM(
     onProgress({ phase: 'finalizing', progress: 100, message: 'WebM ready!' });
 
     return remuxedBlob;
+  } catch (error) {
+    throw encoders.translate(error);
   } finally {
     URL.revokeObjectURL(videoUrl);
-    // Both encoders are already closed on the success path; this releases them
-    // when the conversion left early (cancellation, or a failure part-way).
-    if (videoEncoder && videoEncoder.state !== 'closed') {
-      videoEncoder.close();
-    }
-    if (audioEncoder && audioEncoder.state !== 'closed') {
-      audioEncoder.close();
-    }
+    encoders.release();
   }
 }

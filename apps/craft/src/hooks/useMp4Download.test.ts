@@ -404,6 +404,30 @@ describe('useMp4Download failures', () => {
     expect(result.current.converting).toBeNull()
   })
 
+  it('puts the codec\'s own words in the notice when an encoder fails', async () => {
+    // What an asynchronous encoder failure rejects with since ESCSUITE-74 is the
+    // codec's own `DOMException`, rather than whatever the flush afterwards
+    // happened to raise (and before that, nothing at all — the conversion hung).
+    // Only the codec's sentence is pinned, not the whole string: jsdom's
+    // DOMException is not an `Error` instance where a browser's is, so this hook
+    // reads it through `String(error)` here and through `error.message` in the
+    // shipped app — and the encoder's own words reach the live region either way.
+    await seed('take-1', 'Take One')
+    converterModule.convertToMP4.mockRejectedValue(
+      new DOMException('Encoding error', 'EncodingError')
+    )
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    const notice = setNotice.mock.calls.at(-1)?.[0]
+    expect(notice).toContain('Conversion failed: ')
+    expect(notice).toContain('Encoding error')
+    expect(clicks).toEqual([])
+  })
+
   it('says something even when what was thrown is not an Error', async () => {
     await seed('take-1', 'Take One')
     converterModule.convertToMP4.mockRejectedValue('encoder exploded')

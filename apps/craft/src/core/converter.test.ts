@@ -863,6 +863,24 @@ describe('converter', () => {
       expect(screen.pause).toHaveBeenCalled()
       expect(webcam.pause).toHaveBeenCalled()
     })
+
+    it('stops both elements, and says what the encoder said, when the encoder fails', async () => {
+      // The composite is the path with two <video> elements decoding at once,
+      // so an encoder failure that is not noticed is two decodes left running
+      // for the rest of the take as well as an encode session held open
+      // (ESCSUITE-74).
+      VideoEncoderDouble.failNextAt = 'encode'
+      const composite = startComposite({ duration: 1 })
+      readyWebcam(composite.webcam)
+      await settle()
+      composite.screen.presentFrame(0)
+
+      await expect(composite.promise).rejects.toThrow('VideoEncoder encoding error')
+      expect(composite.screen.pause).toHaveBeenCalled()
+      expect(composite.webcam.pause).toHaveBeenCalled()
+      expect(lastVideoEncoder().state).toBe('closed')
+      expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+    })
   })
 
   // --- audio handling ------------------------------------------------------
@@ -1031,26 +1049,78 @@ describe('converter', () => {
       await expect(promise).rejects.toThrow('NotAllowedError')
     })
 
-    it('logs an asynchronous video encoder error', async () => {
+    // ESCSUITE-74. An encoder that fails does so through its `error:`
+    // callback, which is on no await path at all: until this, the callback
+    // only wrote a console line, the conversion carried on feeding a dead
+    // codec, and what the user was told was whatever the flush afterwards
+    // happened to do — in a real browser, an InvalidStateError about a
+    // closed encoder, and here, a finished MP4 muxed from the packets that
+    // had made it. The codec's own words are the useful half, and they are
+    // what `mp4ConversionFailed()` now carries.
+    it('rejects with the video encoder\'s own message when it fails asynchronously', async () => {
       const { promise, video } = start(p => convertToMP4(SOURCE, p))
       await settle()
       lastVideoEncoder().emitError('encoder died')
-      video.fireEnded()
-      await settle()
-      await promise
 
+      await expect(promise).rejects.toThrow('encoder died')
+      // Still logged: the console line is where the browser's own stack
+      // survives, and it is the only record when the rejection is swallowed.
       expect(consoleError).toHaveBeenCalledWith('Video encoder error:', expect.any(Error))
+      // …and the capture stopped rather than spending the rest of the
+      // recording drawing frames for a file that cannot be written.
+      expect(video.pause).toHaveBeenCalled()
+      expect(lastVideoEncoder().state).toBe('closed')
     })
 
-    it('logs an asynchronous audio encoder error', async () => {
+    it('rejects with the audio encoder\'s own message, stopping the frame capture too', async () => {
       audio.decodeResult = createAudioBufferDouble({ length: 4 })
       const { promise, video } = start(p => convertToMP4(SOURCE, p))
       await settle()
       lastAudioEncoder().emitError('audio encoder died')
-      await playThroughRvfc(video, 3)
-      await promise
 
+      await expect(promise).rejects.toThrow('audio encoder died')
       expect(consoleError).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
+      // The failure was the *audio* encoder's, and the video half is what was
+      // in flight: one failed encoder ends the conversion, because the file it
+      // would write is not the one that was asked for.
+      expect(video.pause).toHaveBeenCalled()
+      // Neither encoder is left holding an encode session. The one that failed
+      // closed itself, as the real API does; the other is released by the
+      // conversion's one `finally`.
+      expect(lastVideoEncoder().state).toBe('closed')
+      expect(lastAudioEncoder().state).toBe('closed')
+    })
+
+    it('refuses to mux a file when an encoder failed after the last frame', async () => {
+      // The failure that arrives between the last abort check and the muxer:
+      // the AAC encoder reports it from inside the encode it could not do, and
+      // there are too few chunks left for the every-hundredth check to see it.
+      // A file muxed from a dead encoder's packets is truncated, and handing
+      // one over silently is the whole bug.
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      AudioEncoderDouble.failNextAt = 'encode'
+      const { promise, video } = start(p => convertToMP4(SOURCE, p))
+      await playThroughRvfc(video, 3)
+
+      await expect(promise).rejects.toThrow('AudioEncoder encoding error')
+      expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+      expect(lastVideoEncoder().state).toBe('closed')
+      expect(lastAudioEncoder().state).toBe('closed')
+    })
+
+    it('stays a cancellation when the user cancels and an encoder then fails', async () => {
+      // Precedence, and it matters: `useMp4Download` says nothing about a
+      // conversion the user cancelled, and raises a notice for anything else.
+      // An encoder that dies as the conversion is torn down must not turn a
+      // cancel into "Conversion failed: …".
+      const controller = new AbortController()
+      const { promise, video } = start(p => convertToMP4(SOURCE, p, controller.signal))
+      await settle()
+      video.presentFrame(0)
+      controller.abort()
+      lastVideoEncoder().emitError('encoder died')
+
+      await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
     })
 
     it('rejects when the muxer wrote no bytes', async () => {
@@ -1376,6 +1446,22 @@ describe('converter', () => {
 
       expect(consoleError).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
     })
+
+    it('rejects with the encoder\'s own message when the AAC encoder fails mid-conversion', async () => {
+      // Armed on the class because this conversion builds its encoder for
+      // itself, part-way through an await chain no test can interleave with —
+      // the encoder is only reachable once it is over (ESCSUITE-74).
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      AudioEncoderDouble.failNextAt = 'encode'
+      const { promise } = convertAudio()
+
+      await expect(promise).rejects.toThrow('AudioEncoder encoding error')
+      expect(consoleError).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
+      // No file, and no encode session left open: the encoder that failed
+      // closed itself, which is why the release below it is guarded.
+      expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+      expect(lastAudioEncoder().state).toBe('closed')
+    })
   })
 
   describe('remuxToWebM', () => {
@@ -1510,18 +1596,23 @@ describe('converter', () => {
       await expect(promise).rejects.toThrow('Failed to load video')
     })
 
-    it('logs asynchronous encoder errors from both encoders', async () => {
+    it('reports the first encoder failure, logging both, and leaves neither open', async () => {
+      // The same law as the MP4 path's, applied to the remux because it is the
+      // same helper: an asynchronous encoder failure ends the conversion and is
+      // reported in the codec's own words, and the *first* one is the one that
+      // stopped the work (ESCSUITE-74).
       audio.decodeResult = createAudioBufferDouble({ length: 4 })
       const { promise, video } = start(p => remuxToWebM(SOURCE, 0.1, p))
       await settle()
       lastVideoEncoder().emitError('vp9 died')
       lastAudioEncoder().emitError('opus died')
-      video.fireEnded()
-      await settle()
-      await promise
 
+      await expect(promise).rejects.toThrow('vp9 died')
       expect(consoleError).toHaveBeenCalledWith('Video encoder error:', expect.any(Error))
       expect(consoleError).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
+      expect(video.pause).toHaveBeenCalled()
+      expect(lastVideoEncoder().state).toBe('closed')
+      expect(lastAudioEncoder().state).toBe('closed')
     })
   })
 

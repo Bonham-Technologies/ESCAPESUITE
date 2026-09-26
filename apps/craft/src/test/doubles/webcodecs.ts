@@ -38,6 +38,9 @@ export interface EncoderInitLike {
  *  both encoders flush before the muxer is finalized). */
 export const webcodecsCallLog: string[] = []
 
+/** Every encoder double constructed since the last reset, oldest first. */
+const encoderRegistry: EncoderDouble[] = []
+
 function makeChunk(type: 'key' | 'delta', timestamp: number, duration: number | null, size: number): SyntheticEncodedChunk {
   return {
     type,
@@ -52,7 +55,7 @@ function makeChunk(type: 'key' | 'delta', timestamp: number, duration: number | 
 }
 
 /** Base for the two encoder doubles — they differ only in name and chunk shape. */
-class EncoderDouble {
+export class EncoderDouble {
   static readonly label: string = 'Encoder'
   state: 'unconfigured' | 'configured' | 'closed' = 'unconfigured'
   encodeQueueSize = 0
@@ -64,6 +67,14 @@ class EncoderDouble {
 
   /** Set to make the next call at that step fail. */
   failAt: EncoderFailStep | null = null
+  /**
+   * The same thing armed on the class, for an encoder no test can reach in
+   * time: a conversion builds its own encoders part-way through an `await`
+   * chain that runs to completion in microtasks, so by the time
+   * `lastAudioEncoder()` can be called the encode it should have failed at is
+   * over. Set this before starting the work instead.
+   */
+  static failNextAt: EncoderFailStep | null = null
   /** Every value encodeQueueSize handed back, in order — lets a test prove the
    *  caller actually consulted it (i.e. really drained the queue). */
   readonly queueReads: number[] = []
@@ -75,6 +86,8 @@ class EncoderDouble {
 
   constructor(init: EncoderInitLike) {
     this.init = init
+    this.failAt = (this.constructor as typeof EncoderDouble).failNextAt
+    encoderRegistry.push(this)
   }
 
   private get label(): string {
@@ -133,14 +146,20 @@ class EncoderDouble {
     }
   }
 
-  // Deliberately lenient about being closed twice, unlike the real API (which
-  // throws InvalidStateError): `converter.ts` closes unguarded on its
-  // asynchronous-error path and three of its tests would fail here rather than
-  // where the bug is. What holds the *recorder's* guards in place instead is
-  // the exact `closeCalls` conservation in webcodecsRecorder.perf.test.ts —
-  // one close per constructed codec per take, which a missing guard breaks.
+  // Strict about being closed twice, exactly as the real API is: `close()` on a
+  // codec whose state is already "closed" throws InvalidStateError. This was
+  // lenient until ESCSUITE-74 because `converter.ts` closed unguarded on its
+  // asynchronous-error path, so three of its tests failed here rather than
+  // where the bug was; both conversions now release every encoder they built
+  // through one guarded path, so the tripwire can be armed. A codec that
+  // reported its own failure counts as closed — `emitError()` below closes it,
+  // as the real API does — which is why the guard in `release()` asks about
+  // `state` and not about whether the conversion closed it before.
   close(): void {
     webcodecsCallLog.push(`${this.label}.close`)
+    if (this.state === 'closed') {
+      throw new DOMException(`${this.label} is already closed`, 'InvalidStateError')
+    }
     this.closeCalls++
     this.state = 'closed'
   }
@@ -165,6 +184,9 @@ export class VideoEncoderDouble extends EncoderDouble {
   static readonly instances: VideoEncoderDouble[] = []
   /** Programmable answer for the static isConfigSupported(). */
   static supportPlan: ConfigSupportPlan = true
+  /** Own property from the start, so a reset clears this class's arming and
+   *  never the other class's — see `EncoderDouble.failNextAt`. */
+  static failNextAt: EncoderFailStep | null = null
 
   constructor(init: EncoderInitLike) {
     super(init)
@@ -180,6 +202,7 @@ export class AudioEncoderDouble extends EncoderDouble {
   static readonly label = 'AudioEncoder'
   static readonly instances: AudioEncoderDouble[] = []
   static supportPlan: ConfigSupportPlan = true
+  static failNextAt: EncoderFailStep | null = null
 
   constructor(init: EncoderInitLike) {
     super(init)
@@ -318,6 +341,34 @@ export function allFramesClosed(): boolean {
   return frameRegistry.every(f => f.closed)
 }
 
+/**
+ * Every VideoEncoder/AudioEncoder the code under test constructed, oldest
+ * first. Throws when none was constructed, so an accounting assertion over
+ * them can never pass vacuously — the same discipline `allFramesClosed()` has.
+ */
+export function getCreatedEncoders(): EncoderDouble[] {
+  if (encoderRegistry.length === 0) {
+    throw new Error(
+      'getCreatedEncoders(): no VideoEncoder/AudioEncoder was constructed, so this assertion would be vacuous'
+    )
+  }
+  return [...encoderRegistry]
+}
+
+/**
+ * True when no encoder the code under test built is still open.
+ *
+ * It asks about `state`, not about `close()` having been called, because an
+ * encoder that reported an asynchronous failure closed *itself* — that is what
+ * the real API does, and what makes a second `close()` on it an
+ * InvalidStateError. `closeCalls` is the separate question of how many times
+ * the code under test asked, which is what the `close()` below is strict
+ * about.
+ */
+export function allEncodersClosed(): boolean {
+  return getCreatedEncoders().every(e => e.state === 'closed')
+}
+
 let originalGlobals: Record<string, unknown> | null = null
 
 const GLOBAL_NAMES = ['VideoEncoder', 'AudioEncoder', 'VideoDecoder', 'VideoFrame', 'AudioData'] as const
@@ -357,6 +408,9 @@ export function resetWebCodecsDoubles(): void {
   VideoEncoderDouble.supportPlan = true
   AudioEncoderDouble.supportPlan = true
   VideoDecoderDouble.supportPlan = true
+  VideoEncoderDouble.failNextAt = null
+  AudioEncoderDouble.failNextAt = null
+  encoderRegistry.length = 0
   frameRegistry.length = 0
   webcodecsCallLog.length = 0
 }
