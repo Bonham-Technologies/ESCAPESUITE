@@ -513,10 +513,8 @@ describe('drawClipToCanvas with a mask and a stroke', () => {
     'balances save and restore and adds a fixed cost for %s',
     (_label, mask, stroke, extraCalls, extraSaves) => {
       ctx = createRecordingContext()
-      const plain = (() => {
-        drawClipToCanvas(asCtx(), frame(640, 360), makeClip(), 0, W, H)
-        return { calls: ctx.calls.length, saves: ctx.argsFor('save').length }
-      })()
+      drawClipToCanvas(asCtx(), frame(640, 360), makeClip(), 0, W, H)
+      const plain = { calls: ctx.calls.length, saves: ctx.argsFor('save').length }
 
       ctx = createRecordingContext()
       drawClipToCanvas(asCtx(), frame(640, 360), makeClip({ mask, stroke }), 0, W, H)

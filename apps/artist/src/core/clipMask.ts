@@ -1,5 +1,5 @@
-// A media clip's mask and its stroke: the geometry, and the only two functions
-// that issue either to a canvas context (ESCSUITE-65).
+// A media clip's mask and its stroke: the geometry, and the only functions that
+// issue either to a canvas context (ESCSUITE-65).
 //
 // It lives on its own because two near-duplicate functions draw every media
 // clip in this editor — `drawClipToCanvas` and `drawImageToCanvasWithModifiers`
@@ -11,7 +11,9 @@
 //
 // Pure: it reads its arguments and calls the context. No clip, no store, no
 // element lookup, and no allocation in the hot path beyond the small path object
-// — numbers are passed to the context rather than built into a `Path2D`.
+// — numbers are passed to the context rather than built into a `Path2D`, and
+// `drawWithMaskAndStroke` takes the media source itself rather than a callback,
+// so it allocates no closure per clip per frame either.
 import type { ClipMask, ClipMaskKind, ClipStroke } from '../store/types';
 
 /**
@@ -230,15 +232,21 @@ export function applyClipStroke(
  * in one place.
  *
  * `drawClipToCanvas` and `drawImageToCanvasWithModifiers` are near-duplicates
- * and each calls this exactly once, handing it the `ctx.drawImage(...)` it
- * already made as `drawImage`. Written here rather than twice there because the
- * *order* is the part that can silently diverge: the spec's own risk list names
- * the two functions drifting apart as the way this feature breaks, and a mask
- * applied after the image, or a stroke applied inside the clip region, is wrong
- * in a way no geometry test would catch.
+ * and each calls this exactly once, handing it the media source it was about to
+ * draw. Written here rather than twice there because the *order* is the part
+ * that can silently diverge: the spec's own risk list names the two functions
+ * drifting apart as the way this feature breaks, and a mask applied after the
+ * image, or a stroke applied inside the clip region, is wrong in a way no
+ * geometry test would catch.
+ *
+ * It issues the `drawImage` itself, on the same five arguments both callers
+ * passed (`source` and the box) — the source rather than a `() => void` because
+ * a callback would allocate one closure per media clip per frame, in the one
+ * place this module promises not to allocate. Neither caller uses the nine-
+ * argument crop form, so there is nothing the five arguments cannot say.
  *
  * The three shapes it takes, by what the clip carries:
- * - **neither** — `drawImage()` and nothing else. Not one extra context call:
+ * - **neither** — the `drawImage` and nothing else. Not one extra context call:
  *   that is what the per-frame ceilings in
  *   `components/Preview/drawFrame.perf.test.ts` and `core/exportMP4.perf.test.ts`
  *   rest on, and what a project saved before ESCSUITE-65 has to keep drawing as.
@@ -255,14 +263,14 @@ export function applyClipStroke(
  */
 export function drawWithMaskAndStroke(
   ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
   mask: ClipMask | undefined,
   stroke: ClipStroke | undefined,
   x: number,
   y: number,
   width: number,
   height: number,
-  frameWidth: number,
-  drawImage: () => void
+  frameWidth: number
 ): void {
   // Resolved before the picture, because whether there is an inner save at all
   // is the question — and one definition of "visible" serves both this and
@@ -273,7 +281,7 @@ export function drawWithMaskAndStroke(
 
   applyClipMask(ctx, mask, x, y, width, height);
 
-  drawImage();
+  ctx.drawImage(source, x, y, width, height);
 
   if (visible) {
     ctx.restore();

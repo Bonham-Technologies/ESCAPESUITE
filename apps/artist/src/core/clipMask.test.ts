@@ -294,26 +294,19 @@ describe('drawWithMaskAndStroke', () => {
    * sequence itself, read directly.
    */
   const SOURCE = {} as unknown as CanvasImageSource
-  const drawTheBox = () => asCtx().drawImage(SOURCE, BOX.x, BOX.y, BOX.width, BOX.height)
 
-  const run = (mask: ClipMask | undefined, stroke: ClipStroke | undefined) => {
-    let drew = 0
+  const run = (mask: ClipMask | undefined, stroke: ClipStroke | undefined) =>
     drawWithMaskAndStroke(
       asCtx(),
+      SOURCE,
       mask,
       stroke,
       BOX.x,
       BOX.y,
       BOX.width,
       BOX.height,
-      1280,
-      () => {
-        drew += 1
-        drawTheBox()
-      }
+      1280
     )
-    return drew
-  }
 
   const CIRCLE: ClipMask = { kind: 'circle' }
   const STROKE: ClipStroke = { color: '#ffffff', width: 3 / 1280 }
@@ -322,19 +315,27 @@ describe('drawWithMaskAndStroke', () => {
     // The load-bearing case: no mask and no stroke must cost not one extra
     // context call, because that is what every per-frame ceiling in the repo
     // measures and what a project saved before ESCSUITE-65 draws as.
-    expect(run(undefined, undefined)).toBe(1)
+    run(undefined, undefined)
+
     expect(ctx.calls.map((c) => c.method)).toEqual(['drawImage'])
+    // The helper issues the draw itself, so this is also the pin on the
+    // pass-through: the source and the box it was handed, unchanged, in the
+    // five-argument form both callers used before it existed.
+    expect(ctx.argsFor('drawImage')[0]).toEqual([SOURCE, 50, 30, 200, 100])
   })
 
   it('clips before the picture and takes no save for a mask alone', () => {
     // The caller's own save()/restore() pair already covers the mask, so a
     // masked-but-unstroked clip adds three calls and no state operations.
-    expect(run(CIRCLE, undefined)).toBe(1)
+    run(CIRCLE, undefined)
+
     expect(ctx.calls.map((c) => c.method)).toEqual(['beginPath', 'ellipse', 'clip', 'drawImage'])
+    expect(ctx.argsFor('drawImage')).toHaveLength(1)
   })
 
   it('wraps the picture in a save/restore and strokes the box after it', () => {
-    expect(run(undefined, STROKE)).toBe(1)
+    run(undefined, STROKE)
+
     expect(ctx.calls.map((c) => c.method)).toEqual([
       'save',
       'drawImage',
@@ -343,13 +344,15 @@ describe('drawWithMaskAndStroke', () => {
       'rect',
       'stroke',
     ])
+    expect(ctx.argsFor('drawImage')).toHaveLength(1)
   })
 
   it('strokes the mask outline outside the clip region when it has both', () => {
     // The restore() between drawImage and the stroke is the whole point: the
     // clip region has to be gone while the caller's rotation stays, or the mask
     // eats the inner half of every line.
-    expect(run(CIRCLE, STROKE)).toBe(1)
+    run(CIRCLE, STROKE)
+
     expect(ctx.calls.map((c) => c.method)).toEqual([
       'save',
       'beginPath',
@@ -361,15 +364,19 @@ describe('drawWithMaskAndStroke', () => {
       'ellipse',
       'stroke',
     ])
-    // One save, one restore — and no trailing restore, because the outer pair
-    // belongs to the caller, not to this helper.
-    expect(ctx.argsFor('save')).toHaveLength(ctx.argsFor('restore').length)
+    expect(ctx.argsFor('drawImage')).toHaveLength(1)
+    // One save and one restore — and no *trailing* restore, because the outer
+    // pair belongs to the caller, not to this helper.
+    expect(ctx.argsFor('save')).toHaveLength(1)
+    expect(ctx.argsFor('restore')).toHaveLength(1)
   })
 
   it('pays no save for a stroke that would not be visible', () => {
     // One definition of "visible", read here rather than duplicated: a stored
     // stroke of zero width is not a stroke, so it buys no save and no restore.
-    expect(run(undefined, { color: '#ffffff', width: 0 })).toBe(1)
+    run(undefined, { color: '#ffffff', width: 0 })
+
     expect(ctx.calls.map((c) => c.method)).toEqual(['drawImage'])
+    expect(ctx.argsFor('drawImage')).toHaveLength(1)
   })
 })

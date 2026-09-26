@@ -402,17 +402,19 @@ export function drawClipToCanvas(
   // The order lives in `drawWithMaskAndStroke` rather than being written out
   // here and again in the image draw: the two are near-duplicates, and the
   // spec's named risk is exactly that they drift apart.
+  //
+  // It draws the media frame (VideoFrame, HTMLVideoElement or HTMLImageElement)
+  // itself, on the same five arguments the bare ctx.drawImage() here used to.
   drawWithMaskAndStroke(
     ctx,
+    source,
     clip.mask,
     clip.stroke,
     x,
     y,
     scaledWidth,
     scaledHeight,
-    canvasWidth,
-    // Draw the media frame (VideoFrame, HTMLVideoElement, or HTMLImageElement)
-    () => ctx.drawImage(source, x, y, scaledWidth, scaledHeight)
+    canvasWidth
   );
 
   // Restore context state
@@ -542,17 +544,19 @@ export function drawImageToCanvasWithModifiers(
   // near-duplicate functions are the *only* two places either is drawn, and a
   // mask added to one and not the other would give videos a mask and images
   // none.
+  //
+  // It draws the image itself, on the same five arguments the bare
+  // ctx.drawImage() here used to.
   drawWithMaskAndStroke(
     ctx,
+    image,
     clip.mask,
     clip.stroke,
     x,
     y,
     scaledWidth,
     scaledHeight,
-    canvasWidth,
-    // Draw the image
-    () => ctx.drawImage(image, x, y, scaledWidth, scaledHeight)
+    canvasWidth
   );
 
   ctx.restore();
