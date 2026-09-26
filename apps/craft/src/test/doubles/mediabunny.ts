@@ -14,6 +14,7 @@
 //   })
 // and reach the recorded state from the test with getMediabunnyState().
 import { vi } from 'vitest'
+import { webcodecsCallLog } from './webcodecs'
 
 export interface AddedTrack {
   kind: 'video' | 'audio'
@@ -139,6 +140,13 @@ export class OutputDouble {
 
   finalize = vi.fn(async () => {
     state.callLog.push('Output.finalize')
+    // …and into the encoders' shared log, which exists for exactly this
+    // question: its own comment names "both encoders flush before the muxer is
+    // finalized" as the thing it is for, and one ordered list is the only way
+    // to ask it. Packets still sitting inside an encoder are packets the muxer
+    // will not write, so flush-before-finalize is what decides whether a
+    // conversion's file is complete — and counting the calls cannot see it.
+    webcodecsCallLog.push('Output.finalize')
     this.finalizeCalls++
     this.state = 'finalizing'
     if (state.finalizeError) {

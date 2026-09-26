@@ -12,7 +12,12 @@
 // date beside them; the conservation laws (created == closed == encoded) are
 // exact.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { convertToMP4, convertToM4A, type ConversionProgress } from './converter'
+import {
+  convertToMP4,
+  convertToM4A,
+  ConversionAbortedError,
+  type ConversionProgress,
+} from './converter'
 import {
   installWebCodecsDoubles,
   uninstallWebCodecsDoubles,
@@ -20,7 +25,10 @@ import {
   lastVideoEncoder,
   lastAudioEncoder,
   getCreatedFrames,
+  getCreatedEncoders,
   allFramesClosed,
+  allEncodersClosed,
+  AudioEncoderDouble,
   VideoEncoderDouble,
 } from '../test/doubles/webcodecs'
 import { resetMediabunnyDouble } from '../test/doubles/mediabunny'
@@ -287,5 +295,149 @@ describe('composite (screen + webcam) per-frame work', () => {
     expect(raf.pending()).toBe(0)
     expect(audio.contexts).toHaveLength(1)
     expect(audio.contexts.every((c) => c.state === 'closed')).toBe(true)
+  })
+})
+
+// The encoder accounting (ESCSUITE-74).
+//
+// A `VideoEncoder`/`AudioEncoder` is a hardware encode session, and `close()` is
+// the only way to give one back. The success path was never the interesting one:
+// the `close()` calls sat on it, after the flush, so a conversion that was
+// cancelled or whose codec died left a session open for as long as the tab did —
+// and a user who cancels an MP4 is usually a user who is about to start another
+// one.
+//
+// So this counts encoders built against encoders released, on all three outcomes
+// of all three conversions. It is **exact rather than a ceiling**, because there
+// is no "about right" number of open encode sessions. An encoder that reported
+// its own asynchronous failure closed *itself*, exactly as the real API does, so
+// the law is in two halves: none of them is left open (`allEncodersClosed`), and
+// the conversion asked at most once (`closeCalls`, which is 0 for the encoder
+// that closed itself — the guard the one release point is written with). The
+// other half of "at most once" is enforced by the double, whose `close()` throws
+// on an already-closed encoder the way the real API does.
+describe('encoder release', () => {
+  const COMPANION = new Blob(['webcam-bytes'], { type: 'video/webm' })
+  const PLACEMENT = { position: 'bottom-right', size: 0.2, shape: 'circle' } as const
+
+  interface Running {
+    promise: Promise<Blob>
+    video: VideoElementDouble
+  }
+
+  /** Start a conversion of a take *with* audio, so two encoders are in play. */
+  function startPlain(signal?: AbortSignal): Running {
+    audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+    const promise = convertToMP4(SOURCE, () => {}, signal)
+    promise.catch(() => {})
+    const video = getLastVideoDouble() as VideoElementDouble
+    video.enableRequestVideoFrameCallback()
+    video.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 1 })
+    video.fireLoadedMetadata()
+    return { promise, video }
+  }
+
+  /** The same, as a composite of a separate-tracks take. */
+  function startComposite(signal?: AbortSignal): Running {
+    audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+    const promise = convertToMP4(SOURCE, () => {}, signal, {
+      companion: { blob: COMPANION, placement: PLACEMENT, startOffset: 0 },
+    })
+    promise.catch(() => {})
+    const [screen, webcam] = getVideoDoubles()
+    screen.enableRequestVideoFrameCallback()
+    screen.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 1 })
+    screen.fireLoadedMetadata()
+    webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 2, duration: 1 })
+    webcam.fireLoadedMetadata()
+    return { promise, video: screen }
+  }
+
+  /** Play a conversion to its end and let it finish. */
+  async function finish({ promise, video }: Running): Promise<void> {
+    await settle()
+    for (let i = 0; i < FRAMES; i++) video.presentFrame(i / 30)
+    video.fireEnded()
+    await settle()
+    await promise
+  }
+
+  /** Cancel a conversion one frame in. */
+  async function cancel(running: Running, controller: AbortController): Promise<void> {
+    await settle()
+    running.video.presentFrame(0)
+    controller.abort()
+    await expect(running.promise).rejects.toBeInstanceOf(ConversionAbortedError)
+  }
+
+  /** The encoders' close() counts, in the order they were constructed. */
+  const closeCalls = (): number[] => getCreatedEncoders().map((e) => e.closeCalls)
+
+  describe.each([
+    ['plain MP4', startPlain],
+    ['composite MP4', startComposite],
+  ])('%s', (_name, begin) => {
+    it('closes both encoders exactly once when it succeeds', async () => {
+      await finish(begin())
+
+      expect(allEncodersClosed()).toBe(true)
+      expect(closeCalls()).toEqual([1, 1])
+    })
+
+    it('closes both encoders exactly once when it is cancelled', async () => {
+      const controller = new AbortController()
+      await cancel(begin(controller.signal), controller)
+
+      // The point of the ticket: the two `close()` calls used to sit after the
+      // flush, which a cancellation never reaches.
+      expect(allEncodersClosed()).toBe(true)
+      expect(closeCalls()).toEqual([1, 1])
+    })
+
+    it('leaves nothing open when an encoder fails asynchronously', async () => {
+      VideoEncoderDouble.failNextAt = 'encode'
+      const running = begin()
+      await settle()
+      running.video.presentFrame(0)
+
+      await expect(running.promise).rejects.toThrow('VideoEncoder encoding error')
+      // The video encoder closed itself when it failed, so the conversion must
+      // not close it again — an InvalidStateError from the release would be
+      // thrown out of the `finally` and replace the codec's own message.
+      expect(allEncodersClosed()).toBe(true)
+      expect(closeCalls()).toEqual([0, 1])
+    })
+  })
+
+  describe('M4A', () => {
+    it('closes its one encoder exactly once when it succeeds', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      await convertToM4A(SOURCE, () => {})
+
+      expect(getCreatedEncoders()).toHaveLength(1)
+      expect(allEncodersClosed()).toBe(true)
+      expect(closeCalls()).toEqual([1])
+    })
+
+    it('closes its one encoder exactly once when it is cancelled', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      const controller = new AbortController()
+      controller.abort()
+
+      await expect(convertToM4A(SOURCE, () => {}, controller.signal)).rejects.toBeInstanceOf(
+        ConversionAbortedError
+      )
+      expect(allEncodersClosed()).toBe(true)
+      expect(closeCalls()).toEqual([1])
+    })
+
+    it('leaves nothing open when its encoder fails asynchronously', async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 2400 })
+      AudioEncoderDouble.failNextAt = 'encode'
+
+      await expect(convertToM4A(SOURCE, () => {})).rejects.toThrow('AudioEncoder encoding error')
+      expect(allEncodersClosed()).toBe(true)
+      expect(closeCalls()).toEqual([0])
+    })
   })
 })

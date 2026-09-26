@@ -546,14 +546,23 @@ while `initialize()` was still parked on one of its awaits): lines still exactly
 functions still exactly 100.00, statements 99.46 → 99.47 and branches 97.55 → **97.58** — the
 one guard the fix adds is a single decision reached from both sides by the new tests, and the
 two companion builders' re-raises are covered by the failure tests that were already there —
-with **no floor crossed**, so craft's floors stay 100 / 99 / 97 / 100.
+with **no floor crossed**, so craft's floors stay 100 / 99 / 97 / 100. It was re-measured once
+more 2026-09-26 for ESCSUITE-74 (the converter releasing every encoder it builds from one place,
+and an asynchronous codec failure reaching the caller in the codec's own words): lines still
+exactly 100.00, functions still exactly 100.00, statements unchanged at 99.47 and branches
+97.58 → **97.56**, with **nothing less covered than before** — the uncovered branch count is the
+same 32 it was. The five `if (encoder && encoder.state !== 'closed')` guards the three
+conversions each kept in their own `finally` were ten *covered* branches, and the one guarded
+release that replaced them is two, so the denominator fell 1,325 → 1,315 and took the same ten
+off the numerator: the same arithmetic the recorder's own percentage went through a day earlier,
+for the same reason. **No floor crossed**, so craft's floors stay 100 / 99 / 97 / 100.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.47 | 97.58 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.47 | 97.56 | 100.00 |
 | `@escapesuite/artist` | 99.39 | 98.73 | 93.70 | 98.97 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
