@@ -839,6 +839,45 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
     expect(spies.updateClipEffects).toHaveBeenNthCalledWith(3, clip.id, { blur: 3 }, true)
   })
 
+  // ESCSUITE-87. The gesture's undo entry follows the first write that LANDED,
+  // not the first that was attempted. Driven through the hook because the panel
+  // makes it unreachable: a locked row disables the whole fieldset, so there is
+  // no slider to press. The store's own refusal is what this exercises, and a row
+  // can be unlocked while a press is still held.
+  it('gives the undo entry to the first write that lands, when a locked row refused the first', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+    act(() => store().updateTrack(clip.trackId, { locked: true }))
+    useEditorStore.setState({ history: { past: [], future: [] } })
+
+    act(() => result.current.sliderGesture.onPointerDown())
+    act(() => result.current.handleBlurChange(1))
+
+    // Refused: no blur, and no entry for a later write to join.
+    expect(clipNow(clip.id).effects.blur).toBe(0)
+    expect(useEditorStore.getState().history.past).toHaveLength(0)
+
+    act(() => store().updateTrack(clip.trackId, { locked: false }))
+    useEditorStore.setState({ history: { past: [], future: [] } })
+
+    act(() => result.current.handleBlurChange(2))
+    act(() => result.current.handleBlurChange(3))
+    act(() => result.current.sliderGesture.onPointerUp())
+
+    // The write that landed is the one that pushed. Before this, the refused
+    // first write had claimed the push and both of these would have skipped,
+    // leaving the drag off the undo stack entirely.
+    expect(spies.updateClipEffects).toHaveBeenNthCalledWith(1, clip.id, { blur: 1 }, false)
+    expect(spies.updateClipEffects).toHaveBeenNthCalledWith(2, clip.id, { blur: 2 }, false)
+    expect(spies.updateClipEffects).toHaveBeenNthCalledWith(3, clip.id, { blur: 3 }, true)
+    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    expect(clipNow(clip.id).effects.blur).toBe(3)
+
+    // And it is one entry, holding the clip as the gesture found it.
+    act(() => store().undo())
+    expect(clipNow(clip.id).effects.blur).toBe(0)
+  })
+
   it('reports the project frame width the stroke is a fraction of', () => {
     mediaClip()
     const { result } = mount()

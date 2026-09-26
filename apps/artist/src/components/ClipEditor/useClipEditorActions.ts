@@ -39,14 +39,17 @@
 // `handleStrokeChange`, `handleAnimationInDurationChange`,
 // `handleAnimationOutDurationChange`, `handleTransitionDurationChange` and, for
 // an overlay's Pos X/Y, `handleTextDataChange` /
-// `handleShapeDataChange` — ask `useSliderGesture` for the `skipHistory` flag at
-// the moment they write. The selects beside them (preset, easing, transition
+// `handleShapeDataChange` — run their write through
+// `useSliderGesture`'s `commit`, which hands it the `skipHistory` flag the
+// gesture owes it and, if the store reports the write was refused, keeps the
+// entry owed for the next one (ESCSUITE-87). The selects beside them (preset,
+// easing, transition
 // type) do not: a select is a single change and keeps its own entry. The gesture itself is the `sliderGesture` listeners
 // returned below, which `ClipEditor` spreads onto each slider. One hook
 // instance serves the whole panel: a user drags one slider at a time, and a
 // press on the next one closes whatever the last one left open. It holds refs
 // and no state, so it adds no subscription and no render — the handler
-// identities are unchanged too, `skipHistoryForWrite` being stable across
+// identities are unchanged too, `commit` being stable across
 // renders. A write that belongs to no gesture (every other control on the
 // panel, and a section rendered on its own in a test) pushes its own entry
 // exactly as before.
@@ -145,10 +148,10 @@ export interface ClipEditorActions {
 }
 
 export function useClipEditorActions(): ClipEditorActions {
-  // One gesture for the whole panel: its listeners go on every slider, and its
-  // `skipHistory` answer is asked for at each write. Refs only — see the note
+  // One gesture for the whole panel: its listeners go on every slider, and every
+  // write a slider can reach runs through its `commit`. Refs only — see the note
   // above, and `useSliderGesture.ts` for the rule.
-  const { handlers: sliderGesture, skipHistoryForWrite } = useSliderGesture();
+  const { handlers: sliderGesture, commit } = useSliderGesture();
 
   // Read scaleLocked from the selected clip's transform (default true for backwards compat)
   const scaleLocked = useEditorStore((state) => {
@@ -240,18 +243,17 @@ export function useClipEditorActions(): ClipEditorActions {
     (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => {
       if (!selectedClip) return;
 
-      // Asked once, before the branch: both arms are one write, and asking is
-      // what marks the gesture as having pushed.
-      const skipHistory = skipHistoryForWrite();
-
-      // If scale is locked and changing one scale dimension, update both
-      if (scaleLocked && (key === 'scaleX' || key === 'scaleY')) {
-        updateClipTransform(selectedClip.id, { scaleX: value, scaleY: value }, skipHistory);
-      } else {
-        updateClipTransform(selectedClip.id, { [key]: value }, skipHistory);
-      }
+      // One `commit` around the branch: both arms are one write, and the commit
+      // is what marks the gesture as having pushed — or, if the store refuses,
+      // does not.
+      commit((skipHistory) =>
+        // If scale is locked and changing one scale dimension, update both
+        scaleLocked && (key === 'scaleX' || key === 'scaleY')
+          ? updateClipTransform(selectedClip.id, { scaleX: value, scaleY: value }, skipHistory)
+          : updateClipTransform(selectedClip.id, { [key]: value }, skipHistory)
+      );
     },
-    [selectedClip, updateClipTransform, scaleLocked, skipHistoryForWrite]
+    [selectedClip, updateClipTransform, scaleLocked, commit]
   );
 
   const handleDuplicate = useCallback(() => {
@@ -275,43 +277,45 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleMaskChange = useCallback(
     (mask: ClipMask) => {
       if (!selectedClip) return;
-      const skipHistory = skipHistoryForWrite();
-      if (mask.kind === 'none') {
-        updateClip(selectedClip.id, { mask: undefined }, skipHistory);
-        return;
-      }
-      updateClip(
-        selectedClip.id,
-        {
-          mask:
-            mask.kind === 'circle'
-              ? { kind: 'circle' }
-              : { kind: 'rounded', radius: mask.radius ?? DEFAULT_CLIP_MASK_RADIUS },
-        },
-        skipHistory
-      );
+      commit((skipHistory) => {
+        if (mask.kind === 'none') {
+          return updateClip(selectedClip.id, { mask: undefined }, skipHistory);
+        }
+        return updateClip(
+          selectedClip.id,
+          {
+            mask:
+              mask.kind === 'circle'
+                ? { kind: 'circle' }
+                : { kind: 'rounded', radius: mask.radius ?? DEFAULT_CLIP_MASK_RADIUS },
+          },
+          skipHistory
+        );
+      });
     },
-    [selectedClip, updateClip, skipHistoryForWrite]
+    [selectedClip, updateClip, commit]
   );
 
   const handleStrokeChange = useCallback(
     (stroke: ClipStroke) => {
       if (!selectedClip) return;
-      updateClip(
-        selectedClip.id,
-        { stroke: stroke.width > 0 ? stroke : undefined },
-        skipHistoryForWrite()
+      commit((skipHistory) =>
+        updateClip(
+          selectedClip.id,
+          { stroke: stroke.width > 0 ? stroke : undefined },
+          skipHistory
+        )
       );
     },
-    [selectedClip, updateClip, skipHistoryForWrite]
+    [selectedClip, updateClip, commit]
   );
 
   const handleBlurChange = useCallback(
     (blur: number) => {
       if (!selectedClip) return;
-      updateClipEffects(selectedClip.id, { blur }, skipHistoryForWrite());
+      commit((skipHistory) => updateClipEffects(selectedClip.id, { blur }, skipHistory));
     },
-    [selectedClip, updateClipEffects, skipHistoryForWrite]
+    [selectedClip, updateClipEffects, commit]
   );
 
   const handleTransitionTypeChange = useCallback(
@@ -327,9 +331,9 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleTransitionDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipTransition(selectedClip.id, { duration }, skipHistoryForWrite());
+      commit((skipHistory) => updateClipTransition(selectedClip.id, { duration }, skipHistory));
     },
-    [selectedClip, updateClipTransition, skipHistoryForWrite]
+    [selectedClip, updateClipTransition, commit]
   );
 
   // Animation handlers
@@ -347,9 +351,9 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleAnimationInDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { in: { type: selectedClip.animation?.in.type ?? 'none', duration, easing: selectedClip.animation?.in.easing ?? 'ease-out' } }, skipHistoryForWrite());
+      commit((skipHistory) => updateClipAnimation(selectedClip.id, { in: { type: selectedClip.animation?.in.type ?? 'none', duration, easing: selectedClip.animation?.in.easing ?? 'ease-out' } }, skipHistory));
     },
-    [selectedClip, updateClipAnimation, skipHistoryForWrite]
+    [selectedClip, updateClipAnimation, commit]
   );
 
   const handleAnimationInEasingChange = useCallback(
@@ -371,9 +375,9 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleAnimationOutDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { out: { type: selectedClip.animation?.out.type ?? 'none', duration, easing: selectedClip.animation?.out.easing ?? 'ease-in' } }, skipHistoryForWrite());
+      commit((skipHistory) => updateClipAnimation(selectedClip.id, { out: { type: selectedClip.animation?.out.type ?? 'none', duration, easing: selectedClip.animation?.out.easing ?? 'ease-in' } }, skipHistory));
     },
-    [selectedClip, updateClipAnimation, skipHistoryForWrite]
+    [selectedClip, updateClipAnimation, commit]
   );
 
   const handleAnimationOutEasingChange = useCallback(
@@ -391,9 +395,9 @@ export function useClipEditorActions(): ClipEditorActions {
   // with the overlay data still where the drag had put it. The rule is the
   // sliders': the first write pushes, so the entry snapshots the state as it was
   // before the Reset, and the second passes `skipHistory`. The flag is a literal
-  // rather than `skipHistoryForWrite()` because this is a button, not a gesture
-  // — the two writes are one click, always, and asking a gesture that is not
-  // open would answer `false` twice.
+  // rather than a `commit` because this is a button, not a gesture — the two
+  // writes are one click, always, and a gesture that is not open would answer
+  // `false` twice.
   const handleResetTransform = useCallback(() => {
     if (!selectedClip) return;
 
@@ -436,18 +440,18 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleTextDataChange = useCallback(
     (updates: Partial<TextOverlayData>) => {
       if (!selectedClip) return;
-      updateTextOverlayData(selectedClip.id, updates, skipHistoryForWrite());
+      commit((skipHistory) => updateTextOverlayData(selectedClip.id, updates, skipHistory));
     },
-    [selectedClip, updateTextOverlayData, skipHistoryForWrite]
+    [selectedClip, updateTextOverlayData, commit]
   );
 
   // Shape overlay handlers — the Pos X/Y sliders' other destination, same rule.
   const handleShapeDataChange = useCallback(
     (updates: Partial<ShapeOverlayData>) => {
       if (!selectedClip) return;
-      updateShapeOverlayData(selectedClip.id, updates, skipHistoryForWrite());
+      commit((skipHistory) => updateShapeOverlayData(selectedClip.id, updates, skipHistory));
     },
-    [selectedClip, updateShapeOverlayData, skipHistoryForWrite]
+    [selectedClip, updateShapeOverlayData, commit]
   );
 
   // Add overlay handlers

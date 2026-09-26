@@ -14,19 +14,29 @@
 // extra happens on release, so a gesture that is abandoned mid-drag is already
 // undoable to where it started.
 //
+// **The bit that remembers all that is not here.** It is
+// `hooks/useGestureHistory.ts`, shared with the preview's transform drag and the
+// timeline's trim (ESCSUITE-87), and the reason it moved out is that "the first
+// write pushes" has to mean the first write that *landed*: a clip on a locked
+// track refuses the write and pushes nothing, so a gesture that marked itself
+// pushed anyway would hand `skipHistory` to the write that did land and leave
+// the whole drag off the undo stack. `commit` runs the write, hands it the flag
+// and takes the mark back if the store says it was refused.
+//
 // One difference from `useTransformHandles` is worth knowing: there, the writes
-// are throttled to an animation frame, so the flag has to be read inside the
+// are throttled to an animation frame, so `commit` has to be called inside the
 // updater the throttler runs rather than at the pointer move that schedules one.
 // A slider's writes are synchronous — the `input` event calls the handler, which
 // writes — so "decide at the call" and "decide at the write" are the same moment
-// here, and `skipHistoryForWrite()` can sit in the handler itself. A future
-// throttle on these writes would move it, not delete it.
+// here, and `commit` can wrap the write in the handler itself. A future throttle
+// on these writes would move it, not delete it.
 //
-// This hook is the gesture, and nothing else: two refs and the six listeners
-// that flip them. It holds no state, so a slider wired to it adds no store
-// subscription and no render — `ClipEditor.rerender.test.tsx`'s counts are
+// This hook is the gesture, and nothing else: one gesture history and the six
+// listeners that drive it. It holds no state, so a slider wired to it adds no
+// store subscription and no render — `ClipEditor.rerender.test.tsx`'s counts are
 // unchanged by design, not by luck.
-import { useCallback, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
+import { useGestureHistory } from '../../hooks';
 
 /**
  * The listeners to spread onto an `<input type="range">`, so the hook can see
@@ -55,16 +65,19 @@ export interface SliderGesture {
   /** Spread onto every slider whose writes should coalesce into one undo step. */
   handlers: SliderGestureHandlers;
   /**
-   * The `skipHistory` flag for the write that is about to happen: `false` for
-   * the first write of a gesture, `true` for every write after it, and `false`
-   * for a write that belongs to no gesture at all (a click on the slider's
-   * track, or a value set from code) — those keep their own undo entry, exactly
-   * as before this hook existed.
+   * Run one store write inside the gesture. Hands it the `skipHistory` flag the
+   * gesture owes it — `false` for the first write of a gesture, `true` for every
+   * write after it, and `false` for a write that belongs to no gesture at all (a
+   * click on the slider's track, or a value set from code), which keeps its own
+   * undo entry exactly as before this hook existed — and, if the write reports
+   * it did not land, takes back the "already pushed" mark so the gesture's undo
+   * entry follows the first write that DOES land. Returns what the write
+   * returned.
    *
-   * Call it once per write, at the point the write happens: it is what marks
-   * the gesture as having pushed.
+   * Call it once per write, at the point the write happens: it is what marks the
+   * gesture as having pushed.
    */
-  skipHistoryForWrite: () => boolean;
+  commit: (write: (skipHistory: boolean) => boolean) => boolean;
 }
 
 /**
@@ -78,46 +91,28 @@ export interface SliderGesture {
  * #373).
  */
 export function useSliderGesture(): SliderGesture {
-  // Refs, not state: these are read and written by DOM listeners and at write
-  // time, never rendered, and a re-render of the whole inspector per pointer
-  // move is the cost this hook exists to avoid.
-  const activeRef = useRef(false);
-  const pushedRef = useRef(false);
+  // Not state: this is read and written by DOM listeners and at write time,
+  // never rendered, and a re-render of the whole inspector per pointer move is
+  // the cost this hook exists to avoid.
+  const history = useGestureHistory();
 
-  const skipHistoryForWrite = useCallback((): boolean => {
-    if (!activeRef.current) return false;
-    if (pushedRef.current) return true;
-    pushedRef.current = true;
-    return false;
-  }, []);
+  const handlers = useMemo<SliderGestureHandlers>(() => ({
+    onPointerDown: history.begin,
+    onPointerUp: history.end,
+    onPointerCancel: history.end,
+    onKeyDown: (event) => {
+      // A repetition of a key that is already down continues the gesture it
+      // started; it must not reopen it, or a held arrow would push an entry
+      // per repeat.
+      if (event.repeat) {
+        history.resume();
+        return;
+      }
+      history.begin();
+    },
+    onKeyUp: history.end,
+    onBlur: history.end,
+  }), [history]);
 
-  const handlers = useMemo<SliderGestureHandlers>(() => {
-    const begin = () => {
-      activeRef.current = true;
-      pushedRef.current = false;
-    };
-    const end = () => {
-      activeRef.current = false;
-      pushedRef.current = false;
-    };
-    return {
-      onPointerDown: begin,
-      onPointerUp: end,
-      onPointerCancel: end,
-      onKeyDown: (event) => {
-        // A repetition of a key that is already down continues the gesture it
-        // started; it must not reopen it, or a held arrow would push an entry
-        // per repeat.
-        if (event.repeat) {
-          activeRef.current = true;
-          return;
-        }
-        begin();
-      },
-      onKeyUp: end,
-      onBlur: end,
-    };
-  }, []);
-
-  return { handlers, skipHistoryForWrite };
+  return { handlers, commit: history.commit };
 }
