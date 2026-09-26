@@ -428,7 +428,7 @@ describe('useClipDrag committing', () => {
 
     release()
 
-    expect(actions.setClipTimelinePosition).toHaveBeenCalledWith('clip1', 4)
+    expect(actions.setClipTimelinePosition).toHaveBeenCalledWith('clip1', 4, false)
     expect(theClip('clip1').timelinePosition).toBe(4)
     expect(actions.moveClipToTrack).not.toHaveBeenCalled()
   })
@@ -497,5 +497,104 @@ describe('useClipDrag committing', () => {
     expect(actions.setClipTimelinePosition).not.toHaveBeenCalled()
     expect(result.current.dragState).toBeNull()
     expect(bound()).toBe(0)
+  })
+})
+
+// ESCSUITE-79. A drop that changed the clip's row *and* its time was two store
+// writes, and both pushed: the first Ctrl+Z put the time back and left the clip
+// on its new row, a half-state the drag never produced. The rule is the one
+// ESCSUITE-52/75/77 set everywhere else — the commit's first write pushes the
+// entry, so it snapshots the clip where the gesture found it, and the second
+// passes `skipHistory`.
+describe('useClipDrag and the undo stack', () => {
+  /** How many undo entries the stack holds right now. */
+  const past = () => useEditorStore.getState().history.past.length
+
+  it('records one entry for a drop that changed both the row and the time', () => {
+    store().setSnapEnabled(false)
+    const { result } = mountDrag()
+    grabClip1(result)
+    const before = past()
+
+    move(pointerFor(4), 80)
+    release()
+
+    // Both halves of the drop really happened, so "one entry" cannot pass here
+    // by committing nothing at all.
+    expect(theClip('clip1').trackId).toBe(trackB)
+    expect(theClip('clip1').timelinePosition).toBe(4)
+    expect(past() - before).toBe(1)
+  })
+
+  it('undoes both halves of such a drop together', () => {
+    store().setSnapEnabled(false)
+    const { result } = mountDrag()
+    grabClip1(result)
+
+    move(pointerFor(4), 80)
+    release()
+
+    store().undo()
+
+    // One Ctrl+Z, and neither half is left behind. The entry was captured
+    // before the first write, so it holds the clip as it was grabbed.
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+  })
+
+  it('pushes on the first write of the commit and skips the second', () => {
+    store().setSnapEnabled(false)
+    const { result } = mountDrag()
+    grabClip1(result)
+
+    move(pointerFor(4), 80)
+    release()
+
+    expect(actions.moveClipToTrack).toHaveBeenCalledWith('clip1', trackB)
+    expect(actions.setClipTimelinePosition).toHaveBeenCalledWith('clip1', 4, true)
+  })
+
+  it('records one entry for a drop that only moved the clip in time', () => {
+    store().setSnapEnabled(false)
+    const { result } = mountDrag()
+    grabClip1(result)
+    const before = past()
+
+    move(pointerFor(4))
+    release()
+
+    // Nothing moved the clip's row, so the position write is the commit's first
+    // and keeps the entry it always had.
+    expect(actions.setClipTimelinePosition).toHaveBeenCalledWith('clip1', 4, false)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a drop that only changed the row', () => {
+    const { result } = mountDrag()
+    grabClip1(result)
+    const before = past()
+
+    move(pointerFor(2), 80)
+    release()
+
+    expect(theClip('clip1').trackId).toBe(trackB)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a bulk move of a multi-selection', () => {
+    store().setSnapEnabled(false)
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grabClip1(result)
+    const before = past()
+
+    move(pointerFor(4))
+    release()
+
+    // `moveSelectedClips` moves every selected clip inside one `set`, so a bulk
+    // drag was already one entry however many clips it carried — this holds it
+    // that way.
+    expect(theClip('clip1').timelinePosition).toBe(4)
+    expect(theClip('clip2').timelinePosition).toBe(8)
+    expect(past() - before).toBe(1)
   })
 })
