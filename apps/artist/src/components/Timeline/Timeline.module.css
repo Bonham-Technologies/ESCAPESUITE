@@ -474,11 +474,14 @@
    in `TimelineTrack.tsx` (CSS cannot read a track height, and the `clip-path`
    needs the height in pixels) — so it neither reads nor contributes to the
    in-flow layout of anything, and `pointer-events: none` keeps it off every hit
-   path. That is the a-priori case for it costing a pointer frame nothing; the
-   `timeline-interaction` benchmark does NOT witness it, because that scene's
-   source carries no `thumbnailUrl` and so renders no thumbnail at all. Its
-   unchanged numbers say this feature did not regress the gesture path, not that
-   a drawn thumbnail is free.
+   path. That is the a-priori case for it costing a pointer frame nothing, and
+   since ESCSUITE-76 both halves of the perf split witness the drawn case: the
+   `timeline-interaction` benchmark's scene imports a real MP4 and so has always
+   drawn twelve of these (it now counts them, `thumbnailsDrawn === 12`, before it
+   measures anything), and `timelineGestures.perf.test.ts`' variant arm drags the
+   same scene with and without a `thumbnailUrl` and asserts the listeners, rect
+   reads and renders per frame are equal — with zero rect reads on the `<img>`s
+   themselves.
 
    Its shape is an inline `clip-path` from `utils/maskClipPath.ts`. Nothing here
    draws a border: the clip's stroke stays in the frame in v1.

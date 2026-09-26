@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import {
   GESTURE_MOVES,
+  MEDIA_CLIPS,
   PERF_PROFILE,
   PERF_RUNS,
   SCENE_CLIP_COUNT,
@@ -94,6 +95,27 @@ interface Box {
   width: number
   height: number
 }
+
+/**
+ * How many clip thumbnails the loaded scene is drawing.
+ *
+ * ESCSUITE-65 slice 2 put an `<img>` at the head of every media clip on the
+ * timeline, and the argument that it costs a pointer frame nothing was a-priori:
+ * out of flow, a fixed attribute box, `pointer-events: none`. This benchmark is
+ * the half that measures rather than counts, so it should say out loud that the
+ * scene it measures actually draws them — `loadPerfScene` imports a real MP4
+ * through the media library's own file input, so `processVideoFile` gives the
+ * source a `thumbnailUrl` and all 12 media clips draw one. Reported beside the
+ * gesture numbers and asserted below (ESCSUITE-76): a scene that silently
+ * stopped drawing them would keep reporting respectable figures for a timeline
+ * with less on it than the app really puts there.
+ *
+ * Addressed by the attributes rather than by class — the class is a CSS-module
+ * hash — and scoped to `[data-clip-id]`, so the media library's own thumbnails
+ * are not counted.
+ */
+const countClipThumbnails = () =>
+  document.querySelectorAll('[data-clip-id] img[aria-hidden="true"]').length
 
 interface TimelineGeometry {
   /** The scrolling track area, and how far it is scrolled. */
@@ -194,6 +216,17 @@ test.describe('perf: timeline interaction', () => {
 
     const geometry = await readTimelineGeometry(page)
     const { container, ruler, clip0, v1, v2 } = geometry
+
+    // The scene is thumbnail-bearing — see `countClipThumbnails`. One per media
+    // clip; the two overlays take none (media clips only, ESCSUITE-65
+    // decision 3). Asserted before a single gesture runs, so a scene that lost
+    // them fails here rather than reporting numbers for a lighter timeline.
+    const thumbnailsDrawn = await page.evaluate(countClipThumbnails)
+    expect(
+      thumbnailsDrawn,
+      'the scene drew no clip thumbnails — the gesture numbers below would be ' +
+        'measuring a timeline with less on it than the app really draws'
+    ).toBe(MEDIA_CLIPS)
 
     /** Viewport X of a timeline time, in the track container's coordinates. */
     const timeX = (seconds: number) =>
@@ -339,6 +372,7 @@ test.describe('perf: timeline interaction', () => {
       runs: PERF_RUNS,
       scene: `${SCENE_CLIP_COUNT} clips / ${SCENE_TRACK_COUNT} tracks @ ${SCENE_RESOLUTION_LABEL}`,
       moves: GESTURE_MOVES,
+      thumbnailsDrawn,
       ...summary,
     })
 

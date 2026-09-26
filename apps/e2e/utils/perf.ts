@@ -474,8 +474,14 @@ function parseSceneResolution(spec: string | undefined): { width: number; height
 /** The scene's resolution as the report labels it, e.g. `1280x720`. */
 export const SCENE_RESOLUTION_LABEL = `${SCENE_RESOLUTION.width}x${SCENE_RESOLUTION.height}`
 
-/** Media clips in the generated scene, split evenly across the two media tracks. */
-const MEDIA_CLIPS = 12
+/**
+ * Media clips in the generated scene, split evenly across the two media tracks.
+ *
+ * Exported since ESCSUITE-76, so `timeline-interaction.spec.ts` can assert that
+ * the scene draws one clip thumbnail per media clip rather than hard-coding 12
+ * beside this 12.
+ */
+export const MEDIA_CLIPS = 12
 const CLIPS_PER_TRACK = MEDIA_CLIPS / 2
 /**
  * Seconds each clip occupies on the timeline.

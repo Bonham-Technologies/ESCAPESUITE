@@ -228,6 +228,30 @@ export function buildSceneProject(): Project {
 }
 
 /**
+ * The scene's source with a thumbnail on it — the variant arm of the gesture
+ * ceilings (ESCSUITE-76).
+ *
+ * A variant and never an edit to {@link sceneSource}, for the same reason
+ * `buildMaskedSceneClips` is a variant: `apps/e2e/utils/perf.ts` builds the same
+ * scene in a real browser, and the plain ceilings in this repo describe the
+ * scene as it is, not as one test would like it.
+ *
+ * Why it is needed at all: the browser benchmark imports a real MP4 through the
+ * media library's own file input, so `processVideoFile` gives *its* source a
+ * `thumbnailUrl` and the browser arm has drawn twelve thumbnails ever since
+ * ESCSUITE-65 slice 2. The jsdom arm had no thumbnail anywhere, so the
+ * per-pointer-frame **counts** — listeners, rect reads, renders — were the one
+ * half of the split that was blind to the feature. This closes that.
+ *
+ * The URL is a plausible `blob:` string rather than a real object URL: nothing
+ * in jsdom decodes it, and `TimelineTrack` only asks whether the field is there.
+ */
+export const sceneSourceWithThumbnail: SourceVideo = {
+  ...sceneSource,
+  thumbnailUrl: 'blob:perf-scene-thumb',
+}
+
+/**
  * The mask and stroke the masked variant of the scene puts on every media clip
  * (ESCSUITE-65) — the handoff's own pair, so the variant measures the shape a
  * real user most often has: a circular webcam clip with ESCAPECRAFT's white
