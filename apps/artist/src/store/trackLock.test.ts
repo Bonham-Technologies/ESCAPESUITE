@@ -40,6 +40,9 @@ describe('anyClipOnLockedTrack', () => {
   })
   it('is false when none is', () => { expect(anyClipOnLockedTrack(clips, tracks, ['a'])).toBe(false) })
   it('is false for no clips', () => { expect(anyClipOnLockedTrack(clips, tracks, [])).toBe(false) })
+  it('is false when no track is locked at all', () => {
+    expect(anyClipOnLockedTrack(clips, [track('free', false), track('held', false)], ['a', 'b'])).toBe(false)
+  })
   it('takes a Set as well as an array', () => {
     expect(anyClipOnLockedTrack(clips, tracks, new Set(['b']))).toBe(true)
   })
