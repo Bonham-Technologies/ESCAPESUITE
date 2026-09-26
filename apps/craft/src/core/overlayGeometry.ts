@@ -29,7 +29,7 @@ export const COMPOSITOR_MAX_WIDTH = 1280;
 export const DEFAULT_OVERLAY_PADDING = 20;
 
 /**
- * The camera's border, drawn on the mask's own outline after the frame.
+ * The camera's border, drawn on the mask's own outline after the webcam image.
  *
  * Named because ESCAPEARTIST now reproduces it: a handed-over webcam clip
  * arrives with `clip.stroke` set to this colour at
@@ -38,9 +38,10 @@ export const DEFAULT_OVERLAY_PADDING = 20;
  * the same two numbers so a change to the border here cannot silently stop
  * matching what the editor draws.
  *
- * Both are pixels of *this* frame, unlike the padding, which
- * `overlayPaddingFor` scales — the border and the corner are the weight and the
- * radius the compositor has always drawn, and this commit changes neither.
+ * The width, and `OVERLAY_CORNER_RADIUS` below, are pixels of *this* frame,
+ * unlike the padding, which `overlayPaddingFor` scales — the border and the
+ * corner are the weight and the radius the compositor has always drawn, and this
+ * commit changes neither.
  */
 export const OVERLAY_BORDER_COLOR = 'rgba(255, 255, 255, 0.8)';
 export const OVERLAY_BORDER_WIDTH = 3;

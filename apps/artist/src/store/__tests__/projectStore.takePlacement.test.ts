@@ -144,6 +144,17 @@ describe('placeTakeOnTimeline', () => {
     expect(placedClips()[0].stroke).toBeUndefined()
     expect(placedClips()[2].mask).toBeUndefined()
     expect(placedClips()[2].stroke).toBeUndefined()
+    // And the keys are *absent*, not present holding `undefined` — which is the
+    // half `toBeUndefined` cannot tell apart and `toEqual` ignores outright. It
+    // is the conditional spread in `clipSlice.ts` that makes it true, and the
+    // reason it has to be true is the first case in this file: 'places a
+    // single-part take exactly as dropping it from the library would' compares
+    // the whole clip object against `addClipToTimeline`'s with `toEqual`, so two
+    // undefined keys would leak past it unnoticed.
+    expect('mask' in placedClips()[0]).toBe(false)
+    expect('stroke' in placedClips()[0]).toBe(false)
+    expect('mask' in placedClips()[2]).toBe(false)
+    expect('stroke' in placedClips()[2]).toBe(false)
   })
 
   it('never masks an audio part, even one carrying a placement', () => {

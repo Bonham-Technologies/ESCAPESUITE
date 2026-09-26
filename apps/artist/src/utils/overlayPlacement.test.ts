@@ -204,8 +204,10 @@ describe('overlayPlacementToTransform', () => {
       SIXTEEN_BY_NINE_CAMERA
     )
 
-    // The shape is ignored (ESCSUITE-65): a circle placement produces an
-    // ordinary rectangular clip, so nothing here says anything about masking.
+    // The shape is ignored by the transform; the mask reads it (ESCSUITE-65).
+    // A circle placement still produces an ordinary rectangular *transform*, so
+    // nothing here says anything about masking — `maskForPlacement` below is
+    // where the shape is answered.
     expect(transform.rotation).toBe(DEFAULT_TRANSFORM.rotation)
     expect(transform.opacity).toBe(DEFAULT_TRANSFORM.opacity)
     expect(transform.scaleLocked).toBe(DEFAULT_TRANSFORM.scaleLocked)

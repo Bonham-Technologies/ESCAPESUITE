@@ -21,5 +21,6 @@ And neither can be animated: a mask that changed shape halfway through a clip is
 this release does.
 
 The mask and the border are drawn on the clip's picture only. The selection box and the
-click target in the preview stay rectangular, and the thumbnail in your media library — which
-belongs to the source file rather than to one clip of it — is unmasked.
+click target in the preview stay rectangular, and the thumbnail on the timeline and the
+thumbnail in your media library — which belongs to the source file rather than to one clip of
+it — are unmasked.

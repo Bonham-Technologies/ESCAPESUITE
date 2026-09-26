@@ -246,6 +246,7 @@ describe('PreviewPlayer drawing', () => {
     // shape before it. The frame's save/restore stack still balances across
     // both draws.
     expect(frame.argsFor('ellipse')).toHaveLength(2)
+    expect(frame.argsFor('ellipse')[0]).toEqual([960, 540, 192, 108, 0, 0, Math.PI * 2])
     expect(frame.argsFor('ellipse')[1]).toEqual([960, 540, 540, 540, 0, 0, Math.PI * 2])
     expect(frame.of('clip').length).toBeGreaterThanOrEqual(1)
     expect(frame.of('save')).toHaveLength(frame.of('restore').length)
