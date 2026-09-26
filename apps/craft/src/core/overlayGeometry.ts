@@ -29,6 +29,32 @@ export const COMPOSITOR_MAX_WIDTH = 1280;
 export const DEFAULT_OVERLAY_PADDING = 20;
 
 /**
+ * The camera's border, drawn on the mask's own outline after the frame.
+ *
+ * Named because ESCAPEARTIST now reproduces it: a handed-over webcam clip
+ * arrives with `clip.stroke` set to this colour at
+ * `OVERLAY_STROKE_WIDTH_FRACTION` of the frame width
+ * (`apps/artist/src/utils/overlayPlacement.ts`, ESCSUITE-65). Both sides name
+ * the same two numbers so a change to the border here cannot silently stop
+ * matching what the editor draws.
+ *
+ * Both are pixels of *this* frame, unlike the padding, which
+ * `overlayPaddingFor` scales — the border and the corner are the weight and the
+ * radius the compositor has always drawn, and this commit changes neither.
+ */
+export const OVERLAY_BORDER_COLOR = 'rgba(255, 255, 255, 0.8)';
+export const OVERLAY_BORDER_WIDTH = 3;
+
+/**
+ * The rounded overlay's corner radius, in pixels of this frame.
+ *
+ * Was a function-local in `drawOverlay`; lifted out unchanged for the same
+ * reason as the border — ARTIST stores it as `OVERLAY_CORNER_RADIUS_FRACTION`
+ * (8/1280) and the two should be readable side by side.
+ */
+export const OVERLAY_CORNER_RADIUS = 8;
+
+/**
  * Where the camera goes in a frame, and what shape it is.
  *
  * Field names are the recording config's (`webcamPosition`, `webcamSize`,
@@ -182,13 +208,13 @@ export function drawOverlay(
     ctx.restore();
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = OVERLAY_BORDER_COLOR;
+    ctx.lineWidth = OVERLAY_BORDER_WIDTH;
     ctx.stroke();
   } else {
     // Draw rectangular webcam overlay
     // Create rounded rectangle clip path
-    const borderRadius = 8;
+    const borderRadius = OVERLAY_CORNER_RADIUS;
     ctx.beginPath();
     ctx.roundRect(x, y, webcamWidth, webcamHeight, borderRadius);
     ctx.closePath();
@@ -201,8 +227,8 @@ export function drawOverlay(
     ctx.restore();
     ctx.beginPath();
     ctx.roundRect(x, y, webcamWidth, webcamHeight, borderRadius);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = OVERLAY_BORDER_COLOR;
+    ctx.lineWidth = OVERLAY_BORDER_WIDTH;
     ctx.stroke();
   }
 }

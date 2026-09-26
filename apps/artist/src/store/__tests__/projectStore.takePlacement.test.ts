@@ -5,7 +5,11 @@
 // whatever the timeline already holds.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { store, resetStoreForTest, video } from '../../test/fixtures/projectStore'
-import { overlayPlacementToTransform } from '../../utils/overlayPlacement'
+import {
+  maskForPlacement,
+  overlayPlacementToTransform,
+  strokeForPlacement,
+} from '../../utils/overlayPlacement'
 import { DEFAULT_TRANSFORM } from '../types'
 import type { Clip, TakeClipPart } from '../types'
 
@@ -109,6 +113,48 @@ describe('placeTakeOnTimeline', () => {
     // clip does.
     expect(placedClips()[0].transform.x).toBe(0.5)
     expect(placedClips()[0].transform.scaleX).toBe(1)
+  })
+
+  it('gives the webcam clip the mask and stroke it was recorded with', () => {
+    store().placeTakeOnTimeline([screenPart, webcamPart])
+
+    const webcam = placedClips()[1]
+    // ESCSUITE-65: the handoff now carries the shape *and* the border, not just
+    // the corner and the size. The screen recording is 1920x1080 and the project
+    // is 1920x1080, so the frame the camera sat in a corner of is the canvas.
+    expect(webcam.mask).toEqual(
+      maskForPlacement(webcamPart.overlayPlacement!, store().project.resolution, {
+        width: webcamPart.width,
+        height: webcamPart.height,
+      })
+    )
+    expect(webcam.stroke).toEqual(strokeForPlacement())
+    expect(webcam.mask).toEqual({ kind: 'circle' })
+    expect(webcam.stroke).toEqual({ color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 })
+  })
+
+  it('gives every other part neither', () => {
+    store().placeTakeOnTimeline([screenPart, webcamPart, micPart])
+
+    // The mask travels with the placement, which `app/takeImport.ts` puts on the
+    // camera part alone — so the screen recording is an ordinary rectangular
+    // clip and the microphone, which is never drawn, carries nothing derived
+    // from a picture at all (ESCSUITE-71's rule, restated for two more fields).
+    expect(placedClips()[0].mask).toBeUndefined()
+    expect(placedClips()[0].stroke).toBeUndefined()
+    expect(placedClips()[2].mask).toBeUndefined()
+    expect(placedClips()[2].stroke).toBeUndefined()
+  })
+
+  it('never masks an audio part, even one carrying a placement', () => {
+    const misfiled: TakeClipPart = { ...micPart, overlayPlacement: webcamPart.overlayPlacement }
+
+    store().placeTakeOnTimeline([screenPart, misfiled])
+
+    // Same question as the transform's, and the same answer: having no picture
+    // wins over carrying a placement. IndexedDB is not type-checked.
+    expect(placedClips()[1].mask).toBeUndefined()
+    expect(placedClips()[1].stroke).toBeUndefined()
   })
 
   it('measures the webcam corner from the primary drawn rectangle, not the canvas', () => {

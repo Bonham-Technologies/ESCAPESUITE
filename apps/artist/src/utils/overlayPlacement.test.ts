@@ -20,10 +20,16 @@
 // `drawOverlay` and this is the test that will be pointed at it.
 import { describe, it, expect } from 'vitest'
 import {
+  maskForPlacement,
   overlayMarginFor,
   overlayPlacementToTransform,
+  strokeForPlacement,
+  OVERLAY_CORNER_RADIUS_FRACTION,
   OVERLAY_MARGIN_FRACTION,
+  OVERLAY_STROKE_COLOR,
+  OVERLAY_STROKE_WIDTH_FRACTION,
 } from './overlayPlacement'
+import { maskPathFor } from '../core/clipMask'
 import { DEFAULT_TRANSFORM } from '../store/types'
 import type { OverlayPlacement } from '@escapesuite/shared/types'
 
@@ -203,5 +209,98 @@ describe('overlayPlacementToTransform', () => {
     expect(transform.rotation).toBe(DEFAULT_TRANSFORM.rotation)
     expect(transform.opacity).toBe(DEFAULT_TRANSFORM.opacity)
     expect(transform.scaleLocked).toBe(DEFAULT_TRANSFORM.scaleLocked)
+  })
+})
+
+// What shape the handed-over webcam clip arrives in (ESCSUITE-65, decisions 1,
+// 2 and 6).
+//
+// The numbers are ESCAPECRAFT's, from `drawOverlay`
+// (apps/craft/src/core/overlayGeometry.ts): an inscribed circle at
+// min(webcamWidth, webcamHeight) / 2, a rounded rectangle at a flat 8 px, and a
+// border of `rgba(255, 255, 255, 0.8)` at 3 px — all of them pixels of a canvas
+// capped at 1280 wide. ARTIST stores fractions, so every case below converts
+// back through `maskPathFor` and compares with those literals.
+describe('maskForPlacement', () => {
+  it('maps a circle placement to a circle mask', () => {
+    // Decision 1: `maskPathFor` inscribes the circle in the drawn box, which is
+    // exactly what ESCAPECRAFT drew, so the mask needs no radius of its own.
+    expect(maskForPlacement(placement('bottom-right'), COMPOSITOR_FRAME, SIXTEEN_BY_NINE_CAMERA))
+      .toEqual({ kind: 'circle' })
+  })
+
+  it('reproduces craft 8px corner at the compositor cap', () => {
+    const placement: OverlayPlacement = { position: 'bottom-right', size: 0.2, shape: 'rectangle' }
+
+    const mask = maskForPlacement(placement, COMPOSITOR_FRAME, SIXTEEN_BY_NINE_CAMERA)
+
+    expect(mask.kind).toBe('rounded')
+    // The drawn box at 1280 x 0.2 is 256 x 144, and the stored fraction has to
+    // put 8 canvas pixels on its corners — `ctx.roundRect(x, y, w, h, 8)`,
+    // overlayGeometry.ts:193.
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 256, 144)).toMatchObject({ radius: 8 })
+    expect(OVERLAY_CORNER_RADIUS_FRACTION).toBe(8 / 1280)
+  })
+
+  it('scales the corner with the frame rather than freezing it at 8 pixels', () => {
+    const placement: OverlayPlacement = { position: 'bottom-right', size: 0.2, shape: 'rectangle' }
+    const project = { width: 1920, height: 1080 }
+
+    const mask = maskForPlacement(placement, project, SIXTEEN_BY_NINE_CAMERA)
+
+    // 1920 x 8/1280 = 12 px on a 384 x 216 box. The fraction is the same one as
+    // at 1280 — both the radius and the box scale with the frame — which is the
+    // whole reason it is stored as a fraction: ARTIST has a resolution-change
+    // dialog, and a pixel count would silently change the rounding under a clip.
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 384, 216)).toMatchObject({ radius: 12 })
+    expect(mask.radius).toBeCloseTo(
+      maskForPlacement(placement, COMPOSITOR_FRAME, SIXTEEN_BY_NINE_CAMERA).radius!,
+      12
+    )
+  })
+
+  it('measures the corner against the clip shorter side, camera aspect and all', () => {
+    const placement: OverlayPlacement = { position: 'bottom-right', size: 0.25, shape: 'rectangle' }
+    const project = { width: 1920, height: 1080 }
+
+    const mask = maskForPlacement(placement, project, { width: 640, height: 480 })
+
+    // A 4:3 camera at size 0.25 of a 1920 frame is drawn 480 x 360, not the
+    // compositor's 480 x 270: ARTIST draws the part un-stretched. The shorter
+    // side is 360, and the radius still has to come out at 1920 x 8/1280 = 12.
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 480, 360)).toMatchObject({ radius: 12 })
+  })
+
+  it('falls back to the compositor 16:9 box for a part with no dimensions', () => {
+    const placement: OverlayPlacement = { position: 'top-left', size: 0.2, shape: 'rectangle' }
+
+    const mask = maskForPlacement(placement, COMPOSITOR_FRAME, { width: 0, height: 0 })
+
+    // Nothing ESCAPECRAFT writes, but IndexedDB is not type-checked. The box
+    // falls back to 16:9 — 256 x 144 — the same fallback the transform makes,
+    // rather than dividing by zero into a NaN radius.
+    expect(Number.isFinite(mask.radius)).toBe(true)
+    expect(maskPathFor('rounded', mask.radius, 0, 0, 256, 144)).toMatchObject({ radius: 8 })
+  })
+})
+
+describe('strokeForPlacement', () => {
+  it('is craft white 3px border, as a fraction of the frame', () => {
+    expect(strokeForPlacement()).toEqual({
+      color: 'rgba(255, 255, 255, 0.8)',
+      width: 3 / 1280,
+    })
+    expect(OVERLAY_STROKE_COLOR).toBe('rgba(255, 255, 255, 0.8)')
+    expect(OVERLAY_STROKE_WIDTH_FRACTION).toBe(3 / 1280)
+  })
+
+  it('takes no arguments, because craft border does not depend on any', () => {
+    // `drawOverlay` sets the same strokeStyle and the same lineWidth in both of
+    // its branches (overlayGeometry.ts:185-186 and 204-205), whatever corner the
+    // camera is in and whatever shape it is. This exists so the call site in
+    // `clipSlice.ts` reads as a mapping beside the other two, and so the two
+    // literals are named exactly once on this side of the handoff.
+    expect(strokeForPlacement()).toEqual(strokeForPlacement())
+    expect(strokeForPlacement.length).toBe(0)
   })
 })
