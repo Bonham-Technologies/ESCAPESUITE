@@ -1051,7 +1051,7 @@ message and navigate to its own editor itself.
   for no file, so a cancel that races an encoder death still rejects with
   `ConversionAbortedError` and still raises no notice. The accounting is pinned exactly (built
   == released, none closed twice) for the success, cancellation and encoder-failure outcomes
-  of both conversions in `converter.perf.test.ts`, and the WebCodecs double's `close()` is strict
+  of all three conversions — plain MP4, composite MP4 and M4A — in `converter.perf.test.ts`, and the WebCodecs double's `close()` is strict
   about a second close the way the real API is — which is the tripwire ESCSUITE-66 had to
   leave lenient, because the converter did not yet meet the law.
 - **A throw while reading frames fails the conversion instead of hanging it** (ESCSUITE-78):

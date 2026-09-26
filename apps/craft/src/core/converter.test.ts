@@ -1859,7 +1859,7 @@ describe('converter', () => {
     })
   })
 
-  it('does not leak encoder instances between conversions', async () => {
+  it('does not leak encoder instances between successive conversions', async () => {
     const first = start(p => convertToMP4(SOURCE, p))
     await playThroughRvfc(first.video, 3)
     await first.promise
