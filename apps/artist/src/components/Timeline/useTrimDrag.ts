@@ -12,6 +12,23 @@
 // what makes it possible: the clips after this one shift by however much the
 // end moved over the whole gesture.
 //
+// **One trim is one undo entry** (ESCSUITE-77, the rule ESCSUITE-52 set for a
+// preview transform drag and ESCSUITE-75 for the inspector's sliders). Writing
+// on every mousemove meant pushing an undo entry on every mousemove: a single
+// trim was dozens of entries, so it evicted everything before it from the
+// 50-entry stack, paid a full-project `structuredClone` each frame, and left
+// Ctrl+Z stepping back a few milliseconds of media at a time. The **first**
+// write of a gesture goes through unskipped — so the entry snapshots the clip's
+// in and out points as they were before the drag — and every write after it
+// passes `skipHistory`. Nothing extra happens on release, so a trim abandoned
+// mid-drag is already undoable to where it started. Unlike
+// `Preview/useTransformHandles.ts`, whose writes are throttled to an animation
+// frame, a trim writes synchronously from the mousemove — so "decide at the
+// move" and "decide at the write" would be the same moment were it not for the
+// moves `computeTrimUpdate` refuses, which write nothing. The flag is therefore
+// asked for inside the `if (update)`: a gesture whose opening move was rejected
+// must still push on the write that does land.
+//
 // **One listener pair per gesture, and one measurement.** The per-move store
 // write used to be what re-bound the listeners: `clips` is a fresh array after
 // every `updateClip`, and it was in the effect's deps. The listeners now go
@@ -43,7 +60,12 @@ export interface TrimDragDeps {
   /** The active tool: `ripple` closes the gap the trim leaves behind. */
   activeTool: ToolType;
   setSelectedClipId: (id: string | null) => void;
-  updateClip: (clipId: string, updates: Partial<Clip>) => void;
+  /**
+   * The store's `updateClip`. The trailing `skipHistory` is ESCSUITE-77's: the
+   * gesture's first write leaves it `false` and the rest of the drag passes
+   * `true`, so the whole trim is one undo entry.
+   */
+  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => void;
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number) => void;
 }
 
@@ -70,6 +92,28 @@ export function useTrimDrag({
   /** The same gesture, for handlers that must not wait on a render. */
   const trimRef = useRef<TrimState | null>(null);
   const trackArea = useTrackAreaCache();
+  /**
+   * Whether the trim under way has already pushed its undo entry. A ref, not
+   * state: it is read and written by a document listener on every mousemove,
+   * and a re-render per frame is the opposite of what this hook wants.
+   */
+  const historyPushedRef = useRef(false);
+
+  /**
+   * The `skipHistory` flag for the store write that is about to happen: `false`
+   * for the first write of a gesture — which therefore snapshots the clip as it
+   * was before the drag — and `true` for every write after it.
+   *
+   * Call it where the write happens, never at the mousemove that asks for one:
+   * `computeTrimUpdate` refuses a move that would leave the clip too short, and
+   * such a move writes nothing at all. Marking the gesture as pushed there would
+   * lose the entry the trim owes the undo stack.
+   */
+  const skipHistoryForWrite = useCallback((): boolean => {
+    if (historyPushedRef.current) return true;
+    historyPushedRef.current = true;
+    return false;
+  }, []);
 
   const handleMouseMove = (e: MouseEvent) => {
     if (!trackContainerRef.current) return;
@@ -95,7 +139,7 @@ export function useTrimDrag({
     });
 
     if (update) {
-      updateClip(trim.clipId, update);
+      updateClip(trim.clipId, update, skipHistoryForWrite());
     }
   };
 
@@ -118,6 +162,11 @@ export function useTrimDrag({
     }
     trimRef.current = null;
     trackArea.end();
+    // Belt and braces with the reset in `handleTrimMouseDown`: every write is
+    // gated on a `trimRef` only that handler fills, so the flag cannot be read
+    // stale today. Clearing it at both ends keeps the invariant local to the
+    // gesture.
+    historyPushedRef.current = false;
     setTrimState(null);
   };
 
@@ -134,6 +183,10 @@ export function useTrimDrag({
       if (!track || track.locked) return;
 
       setSelectedClipId(clip.id);
+      // A fresh gesture owes the undo stack one entry, which its first store
+      // write will push. A press released without a move writes nothing and so
+      // pushes nothing.
+      historyPushedRef.current = false;
       // Where the track area is, taken once: a trim reads only `scrollLeft`
       // per move after this.
       trackArea.begin(trackContainerRef.current, false);
