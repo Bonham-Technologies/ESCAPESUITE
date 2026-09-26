@@ -1392,6 +1392,11 @@ describe('converter', () => {
       video.play.mockRejectedValueOnce(new Error('NotAllowedError'))
 
       await expect(promise).rejects.toThrow('NotAllowedError')
+      // Nothing is pending — and, the stronger half, nothing was ever asked
+      // for: `pendingFrameCount()` alone reads 0 both for a loop that was
+      // never started and for one that was started and cancelled, which is
+      // the distinction `scheduled()` exists to make.
+      expect(raf.scheduled()).toBe(0)
       expect(pendingFrameCount()).toBe(0)
       expect(video.pause).toHaveBeenCalledTimes(1)
       expect(listeners.added()).toBe(1)
