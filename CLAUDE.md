@@ -562,6 +562,18 @@ feeds are fully covered by the five new refusals and the ripple pin — and **no
 so artist's floors stay 99 / 98 / 93 / 98. The row had drifted a hundredth or two on every
 figure across the ESCSUITE-73–80 follow-ups, which measured and did not write it down; it is
 corrected here.
+`@escapesuite/artist` was re-measured 2026-09-26 at the end of ESCSUITE-84 (a locked track is
+locked for every component): L / S / B / F — 99.40 / 98.76 / **93.93** / 98.99. `store/trackLock.ts`'s
+four pure questions are fully covered, one test per question; the locked-track guard each clip-,
+keyframe-, overlay- and selection-slice action gained is reached from both sides by the new
+store tests (a refused mutation and an allowed one), the two overlay adds' `null` return included;
+`findEmptyTrack` skipping a locked track is pinned through `addClipToTimeline`; and the two
+components that surface the lock — `ClipEditor`'s `<fieldset disabled>` plus its notice, and
+`TrackHeader`'s disabled delete button — are covered by their own tests, as is
+`useAppKeyboardShortcuts.ts`'s new "Track is locked" toast on each of its five editing branches.
+Branches moved the most (93.77 → 93.93) because the guards are almost all early-return
+conditionals; statements and functions each moved a hundredth; lines held at 99.40. **No floor
+crossed**, so artist's floors stay 99 / 98 / 93 / 98.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -569,7 +581,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.47 | 97.56 | 100.00 |
-| `@escapesuite/artist` | 99.40 | 98.75 | 93.77 | 98.98 |
+| `@escapesuite/artist` | 99.40 | 98.76 | 93.93 | 98.99 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
