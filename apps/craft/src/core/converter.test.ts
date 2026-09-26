@@ -1504,6 +1504,71 @@ describe('converter', () => {
       expect(allFramesClosed()).toBe(true)
       expect(allEncodersClosed()).toBe(true)
     })
+
+    it('closes the frame the encoder threw on, and rejects with what it said', { timeout: 1000 }, async () => {
+      // The throw `guarded` was written for, raised from the one line of the
+      // capture that is holding a `VideoFrame` when it happens: a codec that
+      // has died throws out of `encode()` (ESCSUITE-74's shape), and the frame
+      // two lines above it is 1280x720 of pixels nothing else will release.
+      // Settling the conversion is only half the job if the frame leaks.
+      VideoEncoderDouble.failNextAt = 'encodeThrow'
+      const { promise, video } = start(p => convertToMP4(SOURCE, p))
+      await settle()
+      presentFrameAsBrowser(video, 0)
+
+      await expect(promise).rejects.toThrow('VideoEncoder encode failed')
+      expect(getCreatedFrames('VideoFrame')).toHaveLength(1)
+      expect(allFramesClosed()).toBe(true)
+      expect(allEncodersClosed()).toBe(true)
+    })
+
+    it('rejects with the error that stopped it when the overlay report throws', { timeout: 1000 }, async () => {
+      // `cleanup()` calls back into the caller — `onCompanionSkipped`, for a
+      // camera part that parsed and never decoded a frame — and that callback
+      // is the caller's code, so it can throw. It runs *inside* the failure
+      // exit, so a throw there used to re-create the whole bug one level down:
+      // `reject` was never reached and the conversion hung again.
+      //
+      // What the caller hears is the error that **stopped the conversion**,
+      // not the one its own report raised: the draw that failed is the useful
+      // half, and the report's throw is the caller's own bug, which goes on to
+      // the page's error handler the way it would from any callback.
+      const reportFailed = new Error('onCompanionSkipped threw')
+      const onCompanionSkipped = vi.fn(() => {
+        throw reportFailed
+      })
+      const promise = convertToMP4(SOURCE, () => {}, undefined, {
+        companion: {
+          blob: new Blob(['webcam'], { type: 'video/webm' }),
+          placement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+          startOffset: 0,
+        },
+        onCompanionSkipped,
+      })
+      promise.catch(() => {})
+      const [screen, webcam] = getVideoDoubles()
+      screen.enableRequestVideoFrameCallback()
+      screen.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 0.1 })
+      screen.fireLoadedMetadata()
+      // The camera part's header parses — so an overlay *is* built, and the
+      // load-failure report never fires — but no frame of it ever decodes, so
+      // the only report left is the frame count `cleanup()` takes.
+      webcam.setMetadata({ videoWidth: 640, videoHeight: 480, duration: 0.1 })
+      webcam.fireLoadedMetadata()
+      await settle()
+      screen.presentFrame(0)
+      expect(onCompanionSkipped).not.toHaveBeenCalled()
+
+      breakNextDraw()
+      presentFrameAsBrowser(screen, 1 / 30)
+
+      await expect(promise).rejects.toThrow(DRAW_FAILED)
+      expect(onCompanionSkipped).toHaveBeenCalledTimes(1)
+      expect(screen.pause).toHaveBeenCalled()
+      expect(webcam.pause).toHaveBeenCalled()
+      expect(allFramesClosed()).toBe(true)
+      expect(allEncodersClosed()).toBe(true)
+    })
   })
 
   // --- remuxToWebM ---------------------------------------------------------

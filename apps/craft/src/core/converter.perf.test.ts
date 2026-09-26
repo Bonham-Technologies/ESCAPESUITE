@@ -144,6 +144,35 @@ describe('converter per-frame work', () => {
     expect(ctx.calls.length / FRAMES).toBeLessThanOrEqual(2)
   })
 
+  it('closes the frame an encoder throws on', async () => {
+    // The one frame no `finally` was holding before ESCSUITE-78. `encode()`
+    // throwing — a codec that has died, which is what ESCSUITE-74 found — left
+    // the `VideoFrame` two lines above it open, and 1280x720 of pixels the
+    // browser cannot reclaim until the tab goes away is exactly the leak the
+    // law above exists to catch. Exact, like the law: created == closed, on
+    // the failing frame as much as on the thirty that worked.
+    VideoEncoderDouble.failNextAt = 'encodeThrow'
+    const promise = convertToMP4(SOURCE, () => {})
+    promise.catch(() => {})
+    const video = getLastVideoDouble() as VideoElementDouble
+    video.enableRequestVideoFrameCallback()
+    video.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 1 })
+    video.fireLoadedMetadata()
+    await settle()
+    try {
+      video.presentFrame(0)
+    } catch {
+      // The browser's callback dispatcher swallows it; so does this, so the
+      // question asked is whether the conversion cleaned up after itself.
+    }
+
+    await expect(promise).rejects.toThrow('VideoEncoder encode failed')
+    const frames = getCreatedFrames('VideoFrame')
+    expect(frames).toHaveLength(1)
+    expect(frames.filter((f) => f.closed)).toHaveLength(1)
+    expect(allFramesClosed()).toBe(true)
+  })
+
   it('leaves nothing scheduled when the conversion finishes', async () => {
     await convert(FRAMES)
 

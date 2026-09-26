@@ -432,14 +432,33 @@ async function captureFramesViaPlayback(
      * (see `guarded` below). It removes the abort listener where `onAbort`
      * used to leave it attached — a signal fires `abort` once, so that is the
      * same thing happening in one place instead of two.
+     *
+     * The rejection is in a `finally` because `cleanup()` calls back into the
+     * *caller* — `overlay.onSkipped`, the report that a camera part decoded
+     * nothing — and a caller's callback can throw. Unguarded, that throw would
+     * step over the `reject` below and re-create this whole bug one level
+     * down. What the caller hears is the error that **stopped the conversion**,
+     * not the one its own report raised: the draw or the codec that failed is
+     * the useful half, and the report's own throw goes on to the page's error
+     * handler the way it would from any callback.
      */
     const fail = (error: unknown) => {
-      cleanup();
-      signal?.removeEventListener('abort', onAbort);
-      reject(error);
+      try {
+        cleanup();
+      } finally {
+        signal?.removeEventListener('abort', onAbort);
+        reject(error);
+      }
     };
 
-    /** …and the same door for a capture that got every frame it was owed. */
+    /**
+     * …and the same door for a capture that got every frame it was owed.
+     *
+     * No `finally` here, and it is not an oversight: every call to this is
+     * inside a `guarded` body, so a throw out of its `cleanup()` is caught and
+     * becomes `fail(thatError)` — the conversion rejects rather than hanging,
+     * which is the same guarantee by a different route.
+     */
     const finish = () => {
       cleanup();
       signal?.removeEventListener('abort', onAbort);
@@ -506,8 +525,18 @@ async function captureFramesViaPlayback(
       });
 
       const keyFrame = frameIndex % keyFrameInterval === 0;
-      videoEncoder.encode(frame, { keyFrame });
-      frame.close();
+      // `finally`, because `encode()` is the one call here that can throw
+      // while this function is holding a frame: a codec that has died throws
+      // `InvalidStateError` out of it (ESCSUITE-74's shape), and a `VideoFrame`
+      // that is not closed again is 1280x720 of pixels the browser cannot
+      // reclaim until the tab goes away. The throw still leaves through
+      // `guarded` and becomes the conversion's rejection — this only makes
+      // sure it does not take the frame with it.
+      try {
+        videoEncoder.encode(frame, { keyFrame });
+      } finally {
+        frame.close();
+      }
 
       frameIndex++;
       onProgress?.(frameIndex, totalFrames);
