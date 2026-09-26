@@ -491,7 +491,7 @@
    non-positioned content of its stacking context (steps 4-7), whatever the tree
    order. Against the waveform the tree order does hold (that canvas is
    positioned at `z-index: 0`, also step 8, and is an earlier sibling of
-   `.clipContent`), so the thumb covers its first ~92px at 45%. Against the
+   `.clipContent`), so the thumb covers its first ~91px at 45%. Against the
    clip's own label it does not: `.clipName`, `.clipDuration` and `.clipIcon`
    would be painted over by this element, which is why each of them carries a
    `position: relative` of its own — see the comment on each. jsdom computes no

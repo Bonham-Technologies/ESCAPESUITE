@@ -2,12 +2,12 @@
 '@escapesuite/artist': patch
 ---
 
-**The timeline waveform is drawn at the clip box's own height, no longer squashed by 4 px.** An
-audio waveform on a timeline clip was being drawn into a canvas four pixels taller than the box
-it appears in, and the browser then scaled that picture down to fit — so on a standard 60 px
-track a 56 px waveform was squeezed into 52 px. Every peak was about 7% shorter than it should
-have been and the whole shape came out slightly soft. The waveform is now drawn at exactly the
-height it is shown at, so the peaks are the height of the sound and the picture is crisp.
+**An audio waveform on a timeline clip is no longer cut off at the bottom.** The waveform was
+being drawn a few pixels taller than the clip it sits in, and a clip hides anything that
+overflows it — so the bottom of the waveform was cropped away and what was left sat slightly
+low in the clip, its quiet middle line a touch below centre. On a standard track it was five
+pixels too tall. The waveform is now drawn at exactly the height of the clip, so the whole
+shape is visible and it is centred where it should be.
 
-Nothing about the waveform's colours, position or data changed, and a track dragged shorter than
-a clip's minimum height keeps a readable waveform instead of a stretched one.
+Nothing about the waveform's colours, position or data changed, and a track dragged shorter
+than a clip's minimum height keeps a waveform that still fills the clip.

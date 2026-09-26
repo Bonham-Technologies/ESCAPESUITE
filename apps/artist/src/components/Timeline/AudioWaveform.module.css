@@ -12,12 +12,15 @@
  * `.clipContent`'s `position: relative` — the header comment on
  * `Timeline.module.css`'s `.clipThumb` says the same thing from the other side.
  *
- * `height: 100%` here is 100% of `.clip`, which is inset 8px inside its track
- * row — so the box this canvas is stretched over is the clip box, and the
- * backing store the component allocates has to be that tall too. `TimelineTrack`
- * passes exactly that number (its `clipBoxHeight`, the same one the thumbnail's
- * attribute box uses); until ESCSUITE-76 it passed `track.height - 4`, four
- * pixels too many, and the browser rescaled the extra away.
+ * `height: 100%` here is only the height until the component's effect runs: it
+ * then writes an explicit `style.height` in pixels, from the same number it gives
+ * the backing store, so the two can never disagree and nothing is rescaled
+ * vertically. That number is the **clip box**, which `TimelineTrack` computes
+ * (`clipBoxHeight`, the same one the thumbnail's attribute box uses) — and the
+ * thing that matters about it is that it fits, because `.clip` is
+ * `overflow: hidden`. Until ESCSUITE-76 the caller passed `track.height - 4`:
+ * 56px inside a 51px box at a standard row, so the waveform's lower peaks were
+ * **cut off** and its centreline sat ~2.5px below the middle of the box.
  */
 
 .waveform {

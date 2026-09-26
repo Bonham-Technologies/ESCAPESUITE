@@ -27,17 +27,31 @@ interface AudioWaveformProps {
   startTime: number;
   /** End time within source (for trimmed clips) */
   endTime: number;
-  /** Width of the clip in pixels */
+  /**
+   * Width of the clip in pixels.
+   *
+   * The **deliberate exception** to "one number, drawn at that size": the effect
+   * below clamps the backing store to {@link MAX_CANVAS_WIDTH} and floors the CSS
+   * width to the full `width`, so a clip wider than the clamp really is a bitmap
+   * stretched horizontally. That is a browser limit rather than a choice — a
+   * canvas is capped at roughly 32,767px per dimension — and stretching a
+   * waveform along its time axis costs only horizontal resolution. Height has no
+   * such excuse and no such clamp.
+   */
   width: number;
   /**
    * Height of the clip **box** in pixels — not of the track row.
    *
-   * The canvas is `height: 100%` of `.clip` (`AudioWaveform.module.css`), and
-   * `.clip` is inset 8px vertically inside its row, so this is what the caller's
-   * `clipBoxHeight` computes (`TimelineTrack.tsx`). It becomes both the backing
-   * store's height and the CSS height below, so the two agree and the browser
-   * rescales nothing: a store taller than the box would squash every peak
-   * (ESCSUITE-76).
+   * The canvas is `height: 100%` of `.clip` (`AudioWaveform.module.css`) and
+   * `.clip` is inset inside its row, so this is what the caller's
+   * `clipBoxHeight` computes (`TimelineTrack.tsx`). It is written to **both** the
+   * backing store and the CSS height below, so those two can never disagree and
+   * nothing here is ever rescaled vertically. What this number has to get right
+   * is whether it **fits**: `.clip` is `overflow: hidden`, so a canvas taller
+   * than the box has its bottom cut off, and the centreline the peaks are drawn
+   * around — the middle of the canvas — then sits below the middle of the box.
+   * Until ESCSUITE-76 the caller passed `track.height - 4`, five pixels too many
+   * at a 60px row, and the lower peaks were clipped away.
    */
   height: number;
   /** Waveform color */

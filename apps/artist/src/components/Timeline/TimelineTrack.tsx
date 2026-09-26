@@ -8,38 +8,59 @@ import type { DragState, TrimState } from './types';
 import styles from './Timeline.module.css';
 
 /**
- * How much shorter a clip's box is than its track row, in pixels.
+ * How much shorter a clip's box is than its track row's content, in pixels.
  *
  * `.clip` is `top: 4px; height: calc(100% - 8px)` (`Timeline.module.css`), so
  * this mirrors one CSS declaration and exists because two boxes drawn inside
  * `.clip` need that height as a number in JS — the thumbnail, whose
  * `maskClipPathFor` needs pixels to place a circle's radius, and the waveform,
- * whose canvas backing store has to match the box CSS stretches it over. CSS
- * cannot read `track.height`, so neither can be written as a percentage.
+ * whose canvas is sized in device pixels. CSS cannot read `track.height`, so
+ * neither can be written as a percentage.
  */
 const CLIP_BOX_VERTICAL_INSET = 8;
 
 /**
+ * `.track`'s `border-bottom`, in pixels.
+ *
+ * Load-bearing and easy to miss: `.track` is `box-sizing: border-box` with
+ * `border-bottom: 1px solid var(--border-color)`, and `.clip` is absolutely
+ * positioned, so its `height: calc(100% - 8px)` resolves the `100%` against
+ * `.track`'s **padding** box — which is `track.height` minus this border, not
+ * `track.height`. A 60px row therefore holds a 51px clip box, not a 52px one.
+ *
+ * (`.track:last-child` drops the border, so the bottom row's box really is one
+ * pixel taller than this says. Being a pixel short there is the harmless
+ * direction — the drawn box sits inside `.clip` rather than overflowing it —
+ * and the alternative would be to give the last row of the stack its own
+ * arithmetic for one pixel.)
+ */
+const TRACK_BORDER_BOTTOM = 1;
+
+/**
  * The shortest clip box there is, mirroring `.clip`'s own `min-height: 40px`: a
  * track dragged shorter than that stops shrinking the box, so both boxes drawn
- * inside it have to stop shrinking too — a thumbnail would otherwise float
- * inside a box taller than itself, and a waveform bitmap would be stretched.
+ * inside it have to stop shrinking too — otherwise they would float against the
+ * top edge of a box taller than themselves.
  */
 const MIN_CLIP_BOX_HEIGHT = 40;
 
 /**
  * The height, in pixels, of the box `.clip` actually draws in on a row this
- * tall — the row less {@link CLIP_BOX_VERTICAL_INSET}, never below
- * {@link MIN_CLIP_BOX_HEIGHT}.
+ * tall — the row less {@link TRACK_BORDER_BOTTOM} and
+ * {@link CLIP_BOX_VERTICAL_INSET}, never below {@link MIN_CLIP_BOX_HEIGHT}.
  *
  * **One expression for both boxes**, deliberately (ESCSUITE-76). The waveform
- * canvas used to be sized `track.height - 4` while the thumbnail used this
- * inset, so at a 60 px track a 56 px bitmap was rescaled by CSS into the 52 px
- * clip box: every peak squashed ~7% and the whole waveform softened. They
- * cannot drift again while they read the same number.
+ * canvas used to be sized `track.height - 4`, which at a 60px row is 56px inside
+ * a 51px box — and `.clip` is `overflow: hidden`, so the extra five pixels were
+ * not scaled away, they were **cut off**: the waveform lost its lower peaks and
+ * its centreline sat ~2.5px below the middle of the box. The two boxes cannot
+ * drift again while they read the same number.
  */
 function clipBoxHeightFor(trackHeight: number): number {
-  return Math.max(trackHeight - CLIP_BOX_VERTICAL_INSET, MIN_CLIP_BOX_HEIGHT);
+  return Math.max(
+    trackHeight - TRACK_BORDER_BOTTOM - CLIP_BOX_VERTICAL_INSET,
+    MIN_CLIP_BOX_HEIGHT
+  );
 }
 
 interface TimelineTrackProps {
