@@ -380,6 +380,29 @@ Add one comment block above the first guarded action, once, saying what the guar
 
 ---
 
+### Task 5b: The keyboard shortcuts stop announcing an edit the store refused
+
+**Why (found writing Task 5's shortcut test):** `app/useAppKeyboardShortcuts.ts` calls a store
+action and then `showNotification('Clip deleted', …)` regardless — the action returns nothing,
+so after the lock the toast says *deleted*, *pasted*, *duplicated* or *split* while the store
+refused and nothing happened. That is the one place ESCSUITE-84 would put a wrong sentence in
+front of the user, so the hook asks the lock question itself, on demand, before it acts.
+
+**Files:**
+- Modify: `apps/artist/src/app/useAppKeyboardShortcuts.ts`
+- Test: `apps/artist/src/App.shortcuts.test.tsx` (real store), `apps/artist/src/app/useAppKeyboardShortcuts.test.ts` (the branch contract with mocks)
+
+**Rule:** before each of the five branches that edit a clip — Delete/Backspace (multi and single, ripple included), Ctrl+V paste, Ctrl+D duplicate, Ctrl+B split — read `useEditorStore.getState().project.timeline` **on demand** (the same shape the hook already uses for `currentTime`; **no new selector, no new dependency**, so `App.rerender.test.tsx` and the 38-entry deps array stay as they are) and ask `anyClipOnLockedTrack(clips, tracks, ids)` / `lockedTrackIds` from `store/trackLock.ts`:
+- Delete (multi): the selection; Delete (single, either tool): the one clip; Ctrl+D: the one clip; Ctrl+B: the one clip; Ctrl+V: whether any clipboard clone's `trackId` is locked (`clipboard` is already a dep; check `clipboard.some((clip) => locked.has(clip.trackId))`).
+- If locked: `e.preventDefault()`, **do not call the action**, `showNotification('Track is locked', 'info')`, `return`. Otherwise the branch is unchanged.
+
+- [ ] **Step 1: Failing tests.** In `App.shortcuts.test.tsx`: Delete on a locked-row clip → clip still there and the toast reads `Track is locked` (replace the stated-limit assertion Task 5 left, and its comment); Ctrl+D on a locked-row clip → one clip, `Track is locked`; Ctrl+V after copying a clip and locking its track → clip count unchanged, `Track is locked`; Ctrl+B with the playhead inside a locked-row clip → one clip, `Track is locked`; Delete on a multi-selection with one locked member → both clips remain, `Track is locked`. Controls already exist for the unlocked cases. In `useAppKeyboardShortcuts.test.ts` nothing changes unless a branch's mock contract moved; if it did, say so.
+- [ ] **Step 2: Run, expect the five to fail** (the old toasts appear).
+- [ ] **Step 3: Implement** as above; one helper inside the hook file, `const lockedIn = (ids: Iterable<string>) => { const { clips, tracks } = useEditorStore.getState().project.timeline; return anyClipOnLockedTrack(clips, tracks, ids); }`, with a comment saying why it reads on demand.
+- [ ] **Step 4:** `npx vitest run src/app src/App.shortcuts.test.tsx src/App.rerender.test.tsx src/app/useAppKeyboardShortcuts.rebinds.test.tsx` green; the rebinds test's measured count must not move (its assertion is the pin). **Commit:** `feat(artist): the shortcuts say "Track is locked" instead of announcing an edit the store refused (ESCSUITE-84)`.
+
+---
+
 ### Task 6: Docs, changeset, coverage
 
 **Files:**
