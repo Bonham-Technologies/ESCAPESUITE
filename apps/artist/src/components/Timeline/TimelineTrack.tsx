@@ -3,8 +3,26 @@ import type { Clip, SourceVideo, Track } from '../../store/types';
 import { formatTime, timeToPixels } from '../../utils/timeUtils';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
+import { CLIP_THUMB_ASPECT, maskClipPathFor } from '../../utils/maskClipPath';
 import type { DragState, TrimState } from './types';
 import styles from './Timeline.module.css';
+
+/**
+ * How much shorter a clip's box is than its track row, in pixels.
+ *
+ * `.clip` is `top: 4px; height: calc(100% - 8px)` (`Timeline.module.css`), so
+ * this mirrors one CSS declaration and exists because the thumbnail's height has
+ * to be a number in JS — CSS cannot read `track.height`, and
+ * `maskClipPathFor` needs the height in pixels to place a circle's radius.
+ */
+const CLIP_BOX_VERTICAL_INSET = 8;
+
+/**
+ * The shortest clip box there is, mirroring `.clip`'s own `min-height: 40px`: a
+ * track dragged shorter than that stops shrinking the box, so the thumbnail has
+ * to stop shrinking with it or it would float inside a box taller than itself.
+ */
+const MIN_CLIP_BOX_HEIGHT = 40;
 
 interface TimelineTrackProps {
   track: Track;
@@ -100,6 +118,26 @@ export const TimelineTrack = React.memo(function TimelineTrack({
         // Check if this clip has waveform data
         const hasWaveform = sourceMedia?.hasAudio && sourceMedia?.waveformData && sourceMedia.waveformData.length > 0;
 
+        // The masked thumbnail (ESCSUITE-65, decision 5): the clip's own mask,
+        // shown where the user looks for the clip.
+        //
+        // Media clips only — an audio part carries no picture and an overlay has
+        // no drawn box a mask could mean anything against — and only when the
+        // source actually has a thumbnail, which `processVideoFile` and
+        // `processImageFile` write and `extractAudioMetadata` does not.
+        //
+        // It costs this row **no new store read**: `sourceMedia` above is the
+        // lookup the waveform and the type styling already need, and `clip.mask`
+        // is on the clip being rendered. That is why `App.rerender.test.tsx`'s
+        // Timeline counts and `timelineGestures.perf.test.ts`' per-move counts
+        // are unchanged by this feature.
+        const thumbnailUrl =
+          !isAudioClip && !isTextOverlay && !isShapeOverlay ? sourceMedia?.thumbnailUrl : undefined;
+        const thumbHeight = Math.max(
+          track.height - CLIP_BOX_VERTICAL_INSET,
+          MIN_CLIP_BOX_HEIGHT
+        );
+
         return (
           <div
             key={clip.id}
@@ -137,6 +175,18 @@ export const TimelineTrack = React.memo(function TimelineTrack({
               onMouseDown={(e) => onTrimMouseDown(e, clip, 'end')}
             />
             <div className={styles.clipContent}>
+              {thumbnailUrl && (
+                <img
+                  className={styles.clipThumb}
+                  src={thumbnailUrl}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  width={Math.round(thumbHeight * CLIP_THUMB_ASPECT)}
+                  height={thumbHeight}
+                  style={{ clipPath: maskClipPathFor(clip.mask, thumbHeight) }}
+                />
+              )}
               {isAudioClip && (
                 <svg className={styles.clipIcon} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 18V5l12-2v13" />

@@ -456,6 +456,42 @@
   padding: var(--spacing-xs) var(--spacing-sm);
   overflow: hidden;
   gap: 2px;
+  /* The containing block for `.clipThumb` (ESCSUITE-65). The thumbnail is the
+     only absolutely positioned thing in here, and it is positioned against this
+     element's padding box — which is the clip's whole box, since `.clip` has no
+     padding of its own. */
+  position: relative;
+}
+
+/* The per-clip thumbnail (ESCSUITE-65, decision 5): the clip's mask, shown where
+   the user looks for the clip.
+
+   Out of flow on purpose. In flow it would be the tallest item in a
+   `flex-wrap: wrap` row whose duration is `width: 100%`, so it would push that
+   duration past `overflow: hidden` and out of sight; absolutely positioned, the
+   name/duration layout is exactly what it was before this existed — which is
+   also why no pointer frame has anything new to lay out and the
+   `timeline-interaction` benchmark's per-move layout count does not move.
+
+   Its box is the `width`/`height` attributes, computed from the track's height in
+   `TimelineTrack.tsx` (CSS cannot read a track height, and the `clip-path` needs
+   the height in pixels). Its shape is an inline `clip-path` from
+   `utils/maskClipPath.ts`. Nothing here draws a border: the clip's stroke stays
+   in the frame in v1.
+
+   `pointer-events: none` so it can never be an event target — the timeline finds
+   the clip under the pointer with `closest('[data-clip-id]')` and the trim
+   handles sit above it at `z-index: 5`. Held under half opacity because the
+   clip's name is drawn over its right-hand side; at 0.45 the masked silhouette
+   still reads against the flat clip background and the white label stays
+   legible. */
+.clipThumb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  object-fit: cover;
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .clipName {
