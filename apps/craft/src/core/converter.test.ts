@@ -131,6 +131,31 @@ async function playThroughRvfc(video: VideoElementDouble, count: number): Promis
 }
 
 /**
+ * The 'abort' listeners added and removed from the moment this is installed.
+ *
+ * `captureFramesViaPlayback` listens for its cancellation on the signal
+ * `convertToMP4` builds for it (`conversionEncoders().signal`), which no test
+ * can reach: it is not the caller's own signal, and the conversion's `finally`
+ * detaches the caller's listener whether or not the capture detached its own.
+ * So the question "did the capture stop listening when it left?" is asked at
+ * the one place every signal goes through, `AbortSignal.prototype` — and not
+ * at `EventTarget.prototype`, because under jsdom the `AbortSignal` the code
+ * gets is Node's, whose `EventTarget` is a different class from the global
+ * one this environment defines. Spied rather than replaced — the original
+ * still runs — so nothing about the conversion changes by being counted.
+ *
+ * With no caller signal in play the conversion adds exactly one 'abort'
+ * listener, so `added === removed` is the whole assertion.
+ */
+function trackAbortListeners(): { added: () => number; removed: () => number } {
+  const added = vi.spyOn(AbortSignal.prototype, 'addEventListener')
+  const removed = vi.spyOn(AbortSignal.prototype, 'removeEventListener')
+  const count = (spy: typeof added): number =>
+    spy.mock.calls.filter(([type]) => type === 'abort').length
+  return { added: () => count(added), removed: () => count(removed) }
+}
+
+/**
  * Every encoder flush happened before the muxer was finalized.
  *
  * The invariant that decides whether a converted file is complete: packets
@@ -905,6 +930,28 @@ describe('converter', () => {
       expectEveryFlushBeforeFinalize()
     })
 
+    // ESCSUITE-81. The camera element is started before the branch that plays
+    // the screen (`startOverlayIfDue(0)`), so a screen that will not play is
+    // the one failure that could leave a second <video> decoding behind a row
+    // that has gone back to idle — and, with no frame drawn, the take's camera
+    // is missing from a file the user never gets told about.
+    it('stops the camera element too, and says so, when the screen will not play', async () => {
+      const composite = startComposite()
+      readyWebcam(composite.webcam)
+      composite.screen.play.mockRejectedValueOnce(new Error('NotAllowedError'))
+
+      await expect(composite.promise).rejects.toThrow('NotAllowedError')
+      // The camera was started — that is the point — and stopped with the
+      // screen, in the one cleanup both go through.
+      expect(composite.webcam.play).toHaveBeenCalledTimes(1)
+      expect(composite.screen.pause).toHaveBeenCalledTimes(1)
+      expect(composite.webcam.pause).toHaveBeenCalledTimes(1)
+      // …and the report a camera part that drew nothing owes the caller is
+      // made exactly once, as it is on every other way out.
+      expect(composite.onCompanionSkipped).toHaveBeenCalledTimes(1)
+      expect(allEncodersClosed()).toBe(true)
+    })
+
     it('stops both elements, and says what the encoder said, when the encoder fails', async () => {
       // The composite is the path with two <video> elements decoding at once,
       // so an encoder failure that is not noticed is two decodes left running
@@ -1078,16 +1125,36 @@ describe('converter', () => {
       expect(allFramesClosed()).toBe(true)
     })
 
-    it('rejects when play() is refused', async () => {
-      const progress: ConversionProgress[] = []
-      const promise = convertToMP4(SOURCE, p => progress.push(p))
-      const video = getLastVideoDouble()!
-      video.enableRequestVideoFrameCallback()
-      video.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 0.1 })
+    // ESCSUITE-81. A refused `play()` used to reject the capture promise
+    // directly, without the `fail()` exit ESCSUITE-78 gave every other
+    // failure. Nothing hung — the promise settled, so the conversion's one
+    // `finally` still released the encoders and revoked the URLs — but the
+    // capture left by no door at all: on the rVFC path the frame callback
+    // registered immediately before `play()` stayed live, in both paths the
+    // abort listener stayed attached and the element was left unpaused, and a
+    // composite left the camera element playing with nothing said about it.
+    // The whole teardown is asserted here because the rejection on its own
+    // never saw any of it.
+    it('rejects when play() is refused, tearing the capture down like any other failure', async () => {
+      const listeners = trackAbortListeners()
+      const { promise, video } = start(p => convertToMP4(SOURCE, p))
       video.play.mockRejectedValueOnce(new Error('NotAllowedError'))
-      video.fireLoadedMetadata()
 
+      // The play error itself, not the abort the teardown runs through.
       await expect(promise).rejects.toThrow('NotAllowedError')
+      // The frame callback is requested on the line above `play()`, so a
+      // refusal is the one failure that can strand one: handle 1 is the only
+      // one this capture ever asked for, and it was given back.
+      expect(video.cancelledFrameCallbacks).toEqual([1])
+      expect(video.hasPendingFrameCallback()).toBe(false)
+      expect(video.pause).toHaveBeenCalledTimes(1)
+      // …and nothing is still listening for a cancellation that can no longer
+      // matter.
+      expect(listeners.added()).toBe(1)
+      expect(listeners.removed()).toBe(1)
+      // The law the rest of the failure paths keep: every encoder built was
+      // released, and none of them twice.
+      expect(allEncodersClosed()).toBe(true)
     })
 
     // ESCSUITE-74. An encoder that fails does so through its `error:`
@@ -1312,6 +1379,29 @@ describe('converter', () => {
 
       await expect(promise).rejects.toThrow('Video playback error')
       expect(pendingFrameCount()).toBe(0)
+    })
+
+    // ESCSUITE-81, the other branch. There is no frame callback to strand
+    // here — `rafHandle` is only assigned inside the `then()` a refused
+    // `play()` never reaches — so what this asks is that the rest of the exit
+    // still happens: nothing scheduled, the element paused, the abort listener
+    // dropped.
+    it('tears down when play() is refused, with no animation frame to cancel', async () => {
+      const listeners = trackAbortListeners()
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { rvfc: false })
+      video.play.mockRejectedValueOnce(new Error('NotAllowedError'))
+
+      await expect(promise).rejects.toThrow('NotAllowedError')
+      // Nothing is pending — and, the stronger half, nothing was ever asked
+      // for: `pendingFrameCount()` alone reads 0 both for a loop that was
+      // never started and for one that was started and cancelled, which is
+      // the distinction `scheduled()` exists to make.
+      expect(raf.scheduled()).toBe(0)
+      expect(pendingFrameCount()).toBe(0)
+      expect(video.pause).toHaveBeenCalledTimes(1)
+      expect(listeners.added()).toBe(1)
+      expect(listeners.removed()).toBe(1)
+      expect(allEncodersClosed()).toBe(true)
     })
 
     it('aborts mid-capture', async () => {

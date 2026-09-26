@@ -423,6 +423,19 @@ describe('encoder release', () => {
       expect(closeCalls()).toEqual([1, 1])
     })
 
+    // ESCSUITE-81: the outcome that used to leave the capture by no door at
+    // all. It always released the encoders — the rejection reached the
+    // conversion's one `finally` — and the law is counted here anyway,
+    // because it is the file that owns "built == released" for every outcome.
+    it('closes both encoders exactly once when play() is refused', async () => {
+      const running = begin()
+      running.video.play.mockRejectedValueOnce(new Error('NotAllowedError'))
+
+      await expect(running.promise).rejects.toThrow('NotAllowedError')
+      expect(allEncodersClosed()).toBe(true)
+      expect(closeCalls()).toEqual([1, 1])
+    })
+
     it('leaves nothing open when an encoder fails asynchronously', async () => {
       VideoEncoderDouble.failNextAt = 'encode'
       const running = begin()

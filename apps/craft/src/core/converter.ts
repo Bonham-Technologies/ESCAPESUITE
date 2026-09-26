@@ -583,7 +583,15 @@ async function captureFramesViaPlayback(
 
       rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
       video.currentTime = 0;
-      video.play().catch(reject);
+      // Out by the same door as every other failure (ESCSUITE-81). A bare
+      // `reject` settled the promise — so nothing hung — but left the capture
+      // standing: the frame callback requested on the line above is still
+      // registered, this element is still unplayed-but-unpaused, the abort
+      // listener is still attached, and for a composite the camera element
+      // `startOverlayIfDue(0)` started a few lines up is still playing with
+      // nothing said about the picture it never contributed. `fail()` is all
+      // of that, and it rejects with the play error itself.
+      video.play().catch(fail);
     } else {
       // Fallback: use requestAnimationFrame with time-based capture
       const rafCallback = guarded(() => {
@@ -625,9 +633,13 @@ async function captureFramesViaPlayback(
       });
 
       video.currentTime = 0;
+      // The same exit as the rVFC branch above. There is no frame callback to
+      // cancel on this one — `rafHandle` is assigned inside the `then()` a
+      // refused play never reaches — and the rest of the teardown is owed
+      // just the same.
       video.play().then(() => {
         rafHandle = requestAnimationFrame(rafCallback);
-      }).catch(reject);
+      }).catch(fail);
     }
   });
 }
