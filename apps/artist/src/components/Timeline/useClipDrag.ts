@@ -34,6 +34,15 @@
 // silent: the clip springs back to where it was picked up and no notice is
 // raised.
 //
+// **A locked row takes no drop** (ESCSUITE-82). The mousedown has always
+// refused to start a drag on a locked row, but neither commit path asked about
+// the row the clip was *dropped* on, so a clip could be dragged onto a locked
+// track — and a selection holding a clip on a locked row (ctrl+click adds it)
+// could be dragged off it by a free member. Both paths now ask
+// `trackRefusesDrop` of every row involved: the single-clip commit of the row
+// under the pointer, `canMoveSelectedClips` of every member's origin and
+// landing row. A refused drop is silent, like the other vetoes.
+//
 // **One listener pair, one measurement, one snap array — per gesture, not per
 // pointer frame.** The listeners go through `useDocumentListener`, whose
 // `enabled` flag is `dragState !== null`: a boolean that flips twice a gesture,
@@ -52,6 +61,7 @@ import {
   canMoveSelectedClips,
   getSnapPoints,
   trackIndexDelta,
+  trackRefusesDrop,
   wouldOverlap,
 } from '../../store/timelineSnapping';
 import type { Clip, ToolType, Track } from '../../store/types';
@@ -68,7 +78,7 @@ export interface ClipDragDeps {
   pixelsPerSecond: number;
   /** Every clip on the timeline: snap points, the dragged clip, overlap checks. */
   clips: Clip[];
-  /** Every track, to refuse a gesture that starts on a locked one. */
+  /** Every track, to refuse a gesture that starts on — or ends on — a locked one. */
   tracks: Track[];
   /** Whether dragging snaps to neighbouring clip edges. */
   snapEnabled: boolean;
@@ -225,16 +235,20 @@ export function useClipDrag({
           }
         } else {
           // Single clip move
-          // Check for overlaps before committing
-          const overlap = wouldOverlap(
-            clips,
-            drag.currentTrackId,
-            drag.currentPosition,
-            clip.duration,
-            drag.clipId
-          );
+          // Check the row and the ground before committing: a locked row (or
+          // one that has left the timeline) takes nothing, and neither does a
+          // spot another clip is standing on.
+          const refused =
+            trackRefusesDrop(tracks, drag.currentTrackId) ||
+            wouldOverlap(
+              clips,
+              drag.currentTrackId,
+              drag.currentPosition,
+              clip.duration,
+              drag.clipId
+            );
 
-          if (!overlap) {
+          if (!refused) {
             // Commit the move. A drop that changed the row *and* the time is two
             // store writes and **one** undo entry (ESCSUITE-79): the first one
             // pushes it — so the entry holds the clip on the track and at the
