@@ -194,23 +194,31 @@ jobs:
               return null;
             }
 
+            // Every package is attempted before the step fails, so one
+            // package's problem never hides the state of the others.
             const missing = [];
+            const failed = [];
 
             async function attach(tagName, fileName, contentType) {
-              const release = await findRelease(tagName);
-              if (!release) {
-                missing.push(tagName);
-                return;
+              try {
+                const release = await findRelease(tagName);
+                if (!release) {
+                  missing.push(tagName);
+                  return;
+                }
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  name: fileName,
+                  data: fs.readFileSync(`uploads/${fileName}`),
+                  headers: { 'content-type': contentType }
+                });
+                console.log(`Attached ${fileName} to release ${tagName}`);
+              } catch (error) {
+                console.log(`Attaching ${fileName} to ${tagName} failed: ${error.message}`);
+                failed.push(`${tagName} (${error.message})`);
               }
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: release.id,
-                name: fileName,
-                data: fs.readFileSync(`uploads/${fileName}`),
-                headers: { 'content-type': contentType }
-              });
-              console.log(`Attached ${fileName} to release ${tagName}`);
             }
 
             if ('${{ steps.check-apps.outputs.craft_released }}' === 'true') {
@@ -228,11 +236,18 @@ jobs:
               await attach(`@escapesuite/headless-artist@${version}`, `escapesuite-headless-artist-${version}.tgz`, 'application/gzip');
             }
 
+            const problems = [];
             if (missing.length > 0) {
-              core.setFailed(
+              problems.push(
                 `No GitHub Release found for ${missing.join(', ')} after ${ATTEMPTS} attempts — ` +
                 'the tag exists but changesets/action created no release for it (a missing ' +
                 'CHANGELOG.md?), so nothing was attached. Attach the build from this run by hand ' +
                 'once the release exists.'
               );
+            }
+            if (failed.length > 0) {
+              problems.push(`Upload failed for ${failed.join('; ')} — re-run this job, or attach by hand.`);
+            }
+            if (problems.length > 0) {
+              core.setFailed(problems.join('\n'));
             }
