@@ -1119,6 +1119,18 @@ updaters exactly where it read the flag before, and `Timeline/useTrimDrag.ts` in
 end-to-end case of a row locked under an open gesture and unlocked mid-way, and the entry riding
 the write that landed.
 
+The keyframe graph's keyboard is the other caller that had to read the answer.
+`KeyframePanel/hooks/useKeyframeGraphKeyboard.ts`'s two nudges called the host and then
+unconditionally announced the new value into the live region and moved the active option and the
+selection to the new time. On a locked track the store refused and the announcement was a lie —
+"Opacity 49% at 1.00 seconds" for an edit that never happened — while the selection walked off
+to a time no keyframe occupied, leaving the next key acting on nothing. `onKeyframeMoved` and
+`onKeyframeValueChanged` are therefore `=> boolean` all the way up through `KeyframeGraph`'s
+props to `KeyframePanel`'s two handlers, which hand back what `moveClipKeyframe` /
+`setClipKeyframe` answered (and `false` when there is no selected clip to write to), and each
+nudge returns early on a refusal. Silent, like every other refusal the lock produces, and the
+key stays swallowed because the graph still owns it.
+
 The clip drag is the exception that proves it, because its two writes are not a `commit` loop
 but one `if`/`else`: `if (movedTrack && !moveClipToTrack(...)) { }` — the row refused, so
 `Timeline/useClipDrag.ts` commits **nothing**. Moving the clip in time on its *old* row would be

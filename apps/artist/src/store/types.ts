@@ -586,7 +586,10 @@ export interface EditorState {
    * drag's two-write commit — answers `true` when it wrote and `false` when it
    * wrote nothing: the ESCSUITE-84 lock guard refused the clip's track, or
    * (`shiftClipsAfter` alone) the delta was zero. `false` means **no state
-   * changed and no undo entry was pushed**.
+   * changed and no undo entry was pushed**; `true` means **the action was not
+   * refused — it ran and pushed its undo entry, or skipped it because it was
+   * asked to** — and NOT that any value is now different: writing a clip the
+   * position it already holds runs, records an entry and answers `true`.
    *
    * A caller that passes `skipHistory: true` to a *later* write of the same
    * gesture MUST look at it. `skipHistory` says "an earlier write of this

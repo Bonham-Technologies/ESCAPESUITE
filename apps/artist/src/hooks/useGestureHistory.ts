@@ -25,7 +25,9 @@
 //
 // No React state and no store subscription: the whole thing is two booleans in a
 // closure, read and written from DOM listeners and from inside throttled
-// updaters, and never rendered.
+// updaters, and never rendered. A write that *throws* is treated as one that did
+// not land, for the same reason: the exception is on its way out of the gesture
+// rather than ending it, so the entry is still owed.
 import { useRef } from 'react';
 
 /** The "have I pushed this gesture's undo entry yet?" bit, and its writes. */
@@ -76,7 +78,16 @@ export function createGestureHistory(): GestureHistory {
       const skipHistory = active ? pushed : false;
       if (active && !pushed) pushed = true;
 
-      const wrote = write(skipHistory);
+      let wrote: boolean;
+      try {
+        wrote = write(skipHistory);
+      } catch (error) {
+        // A write that threw pushed nothing either, and the throw is on its way
+        // out of the gesture rather than ending it — leaving the mark set would
+        // cost the gesture its entry exactly as a refusal would.
+        if (!skipHistory && active) pushed = false;
+        throw error;
+      }
 
       // Refused, and it was this write that was to push the gesture's entry:
       // hand the debt back, so the next write pushes instead. A *later* write

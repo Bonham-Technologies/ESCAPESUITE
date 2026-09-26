@@ -605,7 +605,15 @@ functions and one branch-per-line `commit`, and every one of them is reached by
 twelve store actions cost nothing either way — their guard moved out of the `set` updater and in
 front of it, which is the same decision on a different line, and the refusal tests that already
 covered both sides now also read the return value. Only `useSliderGesture`'s deleted flag getter
-left, and its replacement is one delegation.
+left, and its replacement is one delegation. Re-measured once more after the branch review's
+four follow-ups (the keyframe graph's two nudges reading the boolean, `commit` surviving a write
+that throws, and two wording fixes): **99.41 / 98.76 / 93.97 / 99.01** — branches up a hundredth
+(every branch the review added is covered from both sides) and statements *down* a hundredth,
+which is one statement exactly: `KeyframePanel`'s `handleKeyframeMoved` now guards with
+`if (!selectedClipId) return false;` where it used to wrap its call in `if (selectedClipId)`, and
+that `return false` is unreachable while the panel renders (its sibling in
+`handleKeyframeValueChanged` has been uncovered for the same reason since it was written). Lines
+and functions unmoved, and **no floor crossed** either way.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -613,7 +621,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.77 | 93.96 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.76 | 93.97 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

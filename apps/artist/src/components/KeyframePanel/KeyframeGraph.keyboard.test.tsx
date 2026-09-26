@@ -40,8 +40,16 @@ function renderGraph(
     withEasing?: boolean
   } = {}
 ) {
-  const onKeyframeMoved = vi.fn()
-  const onKeyframeValueChanged = vi.fn()
+  // The two that report whether the store wrote (ESCSUITE-87). `true` is the
+  // ordinary answer — an unlocked track — and a test that wants the refusal
+  // says so with `mockReturnValue(false)`. Written out longhand rather than as
+  // `vi.fn(() => true)` so the recorded arguments stay typed.
+  const onKeyframeMoved = vi.fn(
+    (_property: AnimatableProperty, _originalTime: number, _newTime: number, _skipHistory?: boolean) => true
+  )
+  const onKeyframeValueChanged = vi.fn(
+    (_property: AnimatableProperty, _time: number, _newValue: number, _skipHistory?: boolean) => true
+  )
   const onAddKeyframe = vi.fn()
   const onDeleteKeyframe = vi.fn()
   const onKeyframeEasingChanged = vi.fn()
@@ -955,6 +963,45 @@ describe('KeyframeGraph keyboard access', () => {
       fireEvent.keyDown(svg, { key: 'Enter' })
 
       expect(screen.getByRole('status')).toHaveTextContent('Opacity 50% at 2.00 seconds')
+    })
+
+    // ESCSUITE-87. The store refuses an edit to a clip on a locked track, and
+    // the host's handler now reports that back. A nudge that was refused wrote
+    // nothing: announcing a move that did not happen tells a screen-reader user
+    // the opposite of the truth, and moving the selection to a time no keyframe
+    // occupies leaves the next key acting on nothing.
+    it('says nothing when the host refuses the value nudge', () => {
+      opacityKeyframes()
+      const { container, onKeyframeValueChanged } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      const status = screen.getByRole('status')
+      onKeyframeValueChanged.mockReturnValue(false)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      fireEvent.keyDown(svg, { key: 'ArrowDown' })
+
+      // The attempt was real — it reached the host, which refused it.
+      expect(onKeyframeValueChanged).toHaveBeenCalledTimes(1)
+      expect(status).toHaveTextContent('')
+    })
+
+    it('says nothing and moves nothing when the host refuses the time nudge', () => {
+      opacityKeyframes()
+      const { container, onKeyframeMoved } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      const status = screen.getByRole('status')
+      onKeyframeMoved.mockReturnValue(false)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      const activeBefore = svg.getAttribute('aria-activedescendant')
+
+      fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true, shiftKey: true })
+
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      expect(status).toHaveTextContent('')
+      // The keyframe is still where it was, so the active option and the
+      // selection must still point at it.
+      expect(svg.getAttribute('aria-activedescendant')).toBe(activeBefore)
     })
 
     it('says an identical message differently the second time', () => {

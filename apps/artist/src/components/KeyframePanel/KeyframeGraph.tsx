@@ -19,9 +19,13 @@ interface KeyframeGraphProps {
   transform: ClipTransform;
   effects: ClipEffects;
   playheadTime: number;
-  /** `skipHistory` folds an auto-repeated key's edit into the previous undo step. */
-  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => void;
-  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory?: boolean) => void;
+  /**
+   * `skipHistory` folds an auto-repeated key's edit into the previous undo step.
+   * Both return whether the store wrote (ESCSUITE-87) — the keyboard reads it,
+   * so a nudge the lock refused announces nothing and moves no selection.
+   */
+  onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => boolean;
+  onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory?: boolean) => boolean;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
   onDeleteKeyframe?: (property: AnimatableProperty, time: number) => void;
   /** Omit to hide the per-keyframe easing control entirely. */

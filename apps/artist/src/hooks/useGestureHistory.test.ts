@@ -160,6 +160,38 @@ describe('createGestureHistory', () => {
     expect(seen).toEqual([false, true])
   })
 
+  it('keeps the entry owed when the first write throws', () => {
+    const history = createGestureHistory()
+    const seen: boolean[] = []
+    const boom = () => {
+      throw new Error('boom')
+    }
+
+    history.begin()
+    // A write that threw wrote nothing and pushed nothing, and the throw is on
+    // its way out of the gesture rather than ending it — the entry is still
+    // owed, exactly as after a refusal.
+    expect(() => history.commit(boom)).toThrow('boom')
+    history.commit(wrote(seen))
+
+    expect(seen).toEqual([false])
+  })
+
+  it('leaves an already-pushed entry alone when a later write throws', () => {
+    const history = createGestureHistory()
+    const seen: boolean[] = []
+    const boom = () => {
+      throw new Error('boom')
+    }
+
+    history.begin()
+    history.commit(wrote(seen))
+    expect(() => history.commit(boom)).toThrow('boom')
+    history.commit(wrote(seen))
+
+    expect(seen).toEqual([false, true])
+  })
+
   it('runs the write exactly once per commit', () => {
     const history = createGestureHistory()
     const write = vi.fn(() => true)
