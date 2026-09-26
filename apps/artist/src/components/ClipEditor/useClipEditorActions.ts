@@ -32,6 +32,21 @@
 // `selectSelectedClip` already selects, one line below it. Merging the two
 // subscriptions would change how often the panel re-renders; they stay apart.
 //
+// **The slider handlers coalesce their undo entries** (ESCSUITE-75). A range
+// input writes on every `input` event, so the five handlers a slider can reach
+// — `handleTransformChange`, `handleBlurChange`, `handleMaskChange`,
+// `handleStrokeChange` and, for an overlay's Pos X/Y, `handleTextDataChange` /
+// `handleShapeDataChange` — ask `useSliderGesture` for the `skipHistory` flag at
+// the moment they write. The gesture itself is the `sliderGesture` listeners
+// returned below, which `ClipEditor` spreads onto each slider. One hook
+// instance serves the whole panel: a user drags one slider at a time, and a
+// press on the next one closes whatever the last one left open. It holds refs
+// and no state, so it adds no subscription and no render — the handler
+// identities are unchanged too, `skipHistoryForWrite` being stable across
+// renders. A write that belongs to no gesture (every other control on the
+// panel, and a section rendered on its own in a test) pushes its own entry
+// exactly as before.
+//
 // The last two entries returned, `handleResetToDefaults` and
 // `handleKeyframePanelToggle`, are deliberately *not* memoised: they were
 // inline arrows in the JSX before this file existed, so a fresh function per
@@ -55,6 +70,8 @@ import type {
   EasingType,
 } from '../../store/types';
 import { describeClip, relativeTimeInClip, fitToCanvasScale } from './clipEditorModel';
+import { useSliderGesture } from './useSliderGesture';
+import type { SliderGestureHandlers } from './useSliderGesture';
 
 /** The store reads, derived values and handlers `ClipEditor` composes its sections from. */
 export interface ClipEditorActions {
@@ -84,6 +101,11 @@ export interface ClipEditorActions {
   frameWidth: number;
   /** Whether the keyframe panel is open — the Animation section's toggle state. */
   keyframePanelOpen: boolean;
+  /**
+   * The gesture listeners every inspector slider spreads onto its
+   * `<input type="range">`, so one drag is one undo step (ESCSUITE-75).
+   */
+  sliderGesture: SliderGestureHandlers;
   handleSplitAtPlayhead: () => void;
   handleDeleteClip: () => void;
   handleGoToClip: () => void;
@@ -117,6 +139,11 @@ export interface ClipEditorActions {
 }
 
 export function useClipEditorActions(): ClipEditorActions {
+  // One gesture for the whole panel: its listeners go on every slider, and its
+  // `skipHistory` answer is asked for at each write. Refs only — see the note
+  // above, and `useSliderGesture.ts` for the rule.
+  const { handlers: sliderGesture, skipHistoryForWrite } = useSliderGesture();
+
   // Read scaleLocked from the selected clip's transform (default true for backwards compat)
   const scaleLocked = useEditorStore((state) => {
     const clip = state.project.timeline.clips.find(c => c.id === state.selectedClipId);
@@ -205,14 +232,18 @@ export function useClipEditorActions(): ClipEditorActions {
     (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => {
       if (!selectedClip) return;
 
+      // Asked once, before the branch: both arms are one write, and asking is
+      // what marks the gesture as having pushed.
+      const skipHistory = skipHistoryForWrite();
+
       // If scale is locked and changing one scale dimension, update both
       if (scaleLocked && (key === 'scaleX' || key === 'scaleY')) {
-        updateClipTransform(selectedClip.id, { scaleX: value, scaleY: value });
+        updateClipTransform(selectedClip.id, { scaleX: value, scaleY: value }, skipHistory);
       } else {
-        updateClipTransform(selectedClip.id, { [key]: value });
+        updateClipTransform(selectedClip.id, { [key]: value }, skipHistory);
       }
     },
-    [selectedClip, updateClipTransform, scaleLocked]
+    [selectedClip, updateClipTransform, scaleLocked, skipHistoryForWrite]
   );
 
   const handleDuplicate = useCallback(() => {
@@ -236,34 +267,43 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleMaskChange = useCallback(
     (mask: ClipMask) => {
       if (!selectedClip) return;
+      const skipHistory = skipHistoryForWrite();
       if (mask.kind === 'none') {
-        updateClip(selectedClip.id, { mask: undefined });
+        updateClip(selectedClip.id, { mask: undefined }, skipHistory);
         return;
       }
-      updateClip(selectedClip.id, {
-        mask:
-          mask.kind === 'circle'
-            ? { kind: 'circle' }
-            : { kind: 'rounded', radius: mask.radius ?? DEFAULT_CLIP_MASK_RADIUS },
-      });
+      updateClip(
+        selectedClip.id,
+        {
+          mask:
+            mask.kind === 'circle'
+              ? { kind: 'circle' }
+              : { kind: 'rounded', radius: mask.radius ?? DEFAULT_CLIP_MASK_RADIUS },
+        },
+        skipHistory
+      );
     },
-    [selectedClip, updateClip]
+    [selectedClip, updateClip, skipHistoryForWrite]
   );
 
   const handleStrokeChange = useCallback(
     (stroke: ClipStroke) => {
       if (!selectedClip) return;
-      updateClip(selectedClip.id, { stroke: stroke.width > 0 ? stroke : undefined });
+      updateClip(
+        selectedClip.id,
+        { stroke: stroke.width > 0 ? stroke : undefined },
+        skipHistoryForWrite()
+      );
     },
-    [selectedClip, updateClip]
+    [selectedClip, updateClip, skipHistoryForWrite]
   );
 
   const handleBlurChange = useCallback(
     (blur: number) => {
       if (!selectedClip) return;
-      updateClipEffects(selectedClip.id, { blur });
+      updateClipEffects(selectedClip.id, { blur }, skipHistoryForWrite());
     },
-    [selectedClip, updateClipEffects]
+    [selectedClip, updateClipEffects, skipHistoryForWrite]
   );
 
   const handleTransitionTypeChange = useCallback(
@@ -366,22 +406,25 @@ export function useClipEditorActions(): ClipEditorActions {
     updateClipTransform(selectedClip.id, { scaleX: fitScale, scaleY: fitScale });
   }, [selectedClip, sourceVideo, resolution, updateClipTransform]);
 
-  // Text overlay handlers
+  // Text overlay handlers. The gesture flag is here because the Transform
+  // section's Pos X/Y sliders route through this for a text overlay; the text
+  // content controls also call it, and, having no gesture listeners on them,
+  // get `false` and their own undo entry per write exactly as before.
   const handleTextDataChange = useCallback(
     (updates: Partial<TextOverlayData>) => {
       if (!selectedClip) return;
-      updateTextOverlayData(selectedClip.id, updates);
+      updateTextOverlayData(selectedClip.id, updates, skipHistoryForWrite());
     },
-    [selectedClip, updateTextOverlayData]
+    [selectedClip, updateTextOverlayData, skipHistoryForWrite]
   );
 
-  // Shape overlay handlers
+  // Shape overlay handlers — the Pos X/Y sliders' other destination, same rule.
   const handleShapeDataChange = useCallback(
     (updates: Partial<ShapeOverlayData>) => {
       if (!selectedClip) return;
-      updateShapeOverlayData(selectedClip.id, updates);
+      updateShapeOverlayData(selectedClip.id, updates, skipHistoryForWrite());
     },
-    [selectedClip, updateShapeOverlayData]
+    [selectedClip, updateShapeOverlayData, skipHistoryForWrite]
   );
 
   // Add overlay handlers
@@ -413,6 +456,7 @@ export function useClipEditorActions(): ClipEditorActions {
     clipPosition,
     frameWidth: resolution.width,
     keyframePanelOpen,
+    sliderGesture,
     handleSplitAtPlayhead,
     handleDeleteClip,
     handleGoToClip,

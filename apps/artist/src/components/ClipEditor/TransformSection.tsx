@@ -1,6 +1,7 @@
 import type { Clip, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { overlayPositionValue } from './clipEditorModel';
 import { CollapsibleSection } from './CollapsibleSection';
+import type { SliderGestureHandlers } from './useSliderGesture';
 import styles from './ClipEditor.module.css';
 
 interface TransformSectionProps {
@@ -30,6 +31,13 @@ interface TransformSectionProps {
   onResetToDefaults: () => void;
   /** Reset position, scale and opacity, and any overlay position data (the header's Reset). */
   onReset: () => void;
+  /**
+   * Undo-coalescing listeners for every slider in the section (ESCSUITE-75):
+   * one drag of position, scale or opacity is one undo entry rather than one per
+   * `input` event. They go on all six because the section shows at most four of
+   * them at a time and the rule is the same for each.
+   */
+  sliderGesture: SliderGestureHandlers;
 }
 
 /**
@@ -61,6 +69,7 @@ export function TransformSection({
   onFitToCanvas,
   onResetToDefaults,
   onReset,
+  sliderGesture,
 }: TransformSectionProps) {
   return (
     <CollapsibleSection
@@ -80,6 +89,7 @@ export function TransformSection({
             max={1}
             step={0.01}
             value={overlayPositionValue(clip, 'x', isOverlay)}
+            {...sliderGesture}
             onChange={(e) => {
               const val = parseFloat(e.target.value);
               if (isTextOverlay && clip.textData) {
@@ -102,6 +112,7 @@ export function TransformSection({
             max={1}
             step={0.01}
             value={overlayPositionValue(clip, 'y', isOverlay)}
+            {...sliderGesture}
             onChange={(e) => {
               const val = parseFloat(e.target.value);
               if (isTextOverlay && clip.textData) {
@@ -149,6 +160,7 @@ export function TransformSection({
                   max={2}
                   step={0.01}
                   value={clip.transform.scaleX}
+                  {...sliderGesture}
                   onChange={(e) => onTransformChange('scaleX', parseFloat(e.target.value))}
                 />
                 <span>{Math.round(clip.transform.scaleX * 100)}%</span>
@@ -163,6 +175,7 @@ export function TransformSection({
                     max={2}
                     step={0.01}
                     value={clip.transform.scaleX}
+                    {...sliderGesture}
                     onChange={(e) => onTransformChange('scaleX', parseFloat(e.target.value))}
                   />
                   <span>{Math.round(clip.transform.scaleX * 100)}%</span>
@@ -176,6 +189,7 @@ export function TransformSection({
                     max={2}
                     step={0.01}
                     value={clip.transform.scaleY}
+                    {...sliderGesture}
                     onChange={(e) => onTransformChange('scaleY', parseFloat(e.target.value))}
                   />
                   <span>{Math.round(clip.transform.scaleY * 100)}%</span>
@@ -212,6 +226,7 @@ export function TransformSection({
             max={1}
             step={0.01}
             value={clip.transform.opacity}
+            {...sliderGesture}
             onChange={(e) => onTransformChange('opacity', parseFloat(e.target.value))}
           />
           <span>{Math.round(clip.transform.opacity * 100)}%</span>

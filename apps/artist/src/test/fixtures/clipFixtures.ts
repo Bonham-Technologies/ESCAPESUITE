@@ -16,6 +16,25 @@ import type {
   Track,
 } from '../../store/types'
 import type { AnimatedOverlayValues } from '../../core/exportTypes'
+import type { SliderGestureHandlers } from '../../components/ClipEditor/useSliderGesture'
+
+/**
+ * Slider-gesture listeners that do nothing (ESCSUITE-75).
+ *
+ * The inspector's slider sections take the gesture as a prop, because the
+ * gesture belongs to the panel rather than to any one slider. A section
+ * rendered on its own has no panel, and what it does with the listeners is not
+ * what those suites are asserting — `ClipEditor.sliderHistory.test.tsx` drives
+ * the real ones end to end.
+ */
+export const inertSliderGesture: SliderGestureHandlers = {
+  onPointerDown: () => {},
+  onPointerUp: () => {},
+  onPointerCancel: () => {},
+  onKeyDown: () => {},
+  onKeyUp: () => {},
+  onBlur: () => {},
+}
 
 export function makeTrack(overrides: Partial<Track> = {}): Track {
   return {

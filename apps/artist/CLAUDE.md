@@ -875,7 +875,8 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | Module | Owns |
 |--------|------|
 | `ClipEditor.tsx` | The composition: the hook call, the empty-state early return, and the per-section guards in their fixed order. Owns `div.container` itself in both the empty and selected states, so that element's identity is stable across the empty↔selected transition |
-| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays. **No `currentTime` selector** — see the note below |
+| `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays (plus the stable `skipHistoryForWrite`, which changes no identity). **No `currentTime` selector** — see the note below |
+| `useSliderGesture.ts` | Where one slider gesture starts and stops, and the `skipHistory` flag each write inside it gets — two refs and five listeners, no state. One instance serves the whole panel; see "One drag of a slider is one undo step" below |
 | `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
 | `clipEditorOptions.ts` | The **five** `{ value, label }` option lists the dropdowns render — transitions, blend modes, clip mask kinds, animation presets, easings (the last re-exported from `utils/easingOptions.ts`) |
@@ -883,7 +884,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `ClipEditorEmptyState.tsx` | The panel's contents when nothing is selected: the prompt plus the five buttons that create an overlay from nothing. `ClipEditor.tsx` supplies the surrounding `div.container` |
 | `ClipEditorHeader.tsx` | The title block — clip type, name, delete button, and the duration/position/track rows underneath |
 | `TextContentSection.tsx` | "Text Content": the text, its font family and size, bold/italic/alignment, and the two colours. The textarea grows by writing `style.height` on the element, so no measured height lives in React state |
-| `ShapeSection.tsx` | "Shape": the shape type, then either the blur region's amount slider or the fill/stroke controls, plus size, rotation and blur. "No fill" is an alpha of `00` on the fill colour, not a separate flag |
+| `ShapeSection.tsx` | "Shape": the shape type, then either the blur region's amount slider or the fill/stroke controls, plus size, rotation and blur. "No fill" is an alpha of `00` on the fill colour, not a separate flag. All seven sliders carry the undo gesture |
 | `TransformSection.tsx` | "Transform": position, then — media clips only — scale with its aspect-ratio lock, Fit to Canvas and Reset, and opacity last |
 | `BlendModeSection.tsx` | "Blend Mode": one dropdown over `BLEND_MODES`, collapsed by default |
 | `MaskSection.tsx` | "Mask & Stroke": the mask kind over `CLIP_MASK_KINDS`, a corner-radius slider shown for `rounded` only, and the stroke's width and colour — the width labelled in **pixels at the project's resolution**, because what is stored is a fraction of the frame width and a fraction is not a number anyone can act on. Collapsed by default. Media clips only, gated exactly as Blend Mode is. It normalises nothing: "`none` with a radius" and "a width of 0 with a colour" are things a user can express, and turning them into absent fields is `useClipEditorActions`' job |
@@ -907,6 +908,53 @@ instead of ten times. `handleSplitAtPlayhead` reads `useEditorStore.getState().c
 which is what a click needs and a render does not. Measured 2026-09-13 by
 `ClipEditor.rerender.test.tsx`: ten playback ticks cost the panel 0 renders, selected or not,
 against 10 before.
+
+**One drag of a slider is one undo step** (ESCSUITE-75). A range input writes on every `input`
+event — the blur slider steps in halves from 0 to 50, so a full drag is around a hundred writes
+— and the store actions behind the inspector's sliders pushed an undo entry each time. One drag
+therefore filled the whole 50-entry `MAX_HISTORY_SIZE` stack with its own intermediate values,
+evicted everything the user had done before it, and paid a full-project `structuredClone` per
+entry; Ctrl+Z then stepped back half a pixel at a time. The rule is ESCSUITE-52's, the one
+`Preview/useTransformHandles.ts` already applies to a transform drag: **the gesture's first
+write pushes history — so the entry snapshots the state as it was before the drag — and every
+write after it passes `skipHistory`. Nothing extra happens on release**, so a drag abandoned
+half way is already undoable to where it started.
+
+`useSliderGesture` is that gesture and nothing else. A gesture opens on `pointerdown` or
+`keydown` and closes on `pointerup`, `pointercancel`, `keyup` or `blur` — `pointercancel`
+because a touch or pen gesture the browser takes away (a scroll takes over, the pen leaves
+range) gets no `pointerup`, and a gesture left open with its entry already pushed would swallow
+the *next* write's entry. A **held** arrow key is one gesture, not
+one per repetition, because a `keydown` carrying `repeat: true` leaves an open gesture alone
+(the rule the keyframe drags took in #373). Unlike `Preview/useTransformHandles.ts`, whose writes
+are throttled to an animation frame and so must read the flag inside the updater the throttler
+runs, a slider's writes are synchronous — the `input` event calls the handler, which writes — so
+here "decide at the call" and "decide at the write" are the same moment.
+`useClipEditorActions` calls it once and returns its
+listeners as `sliderGesture`, which `ClipEditor` spreads onto every slider in
+`TransformSection`, `ShapeSection`, `EffectsSection` and `MaskSection`; the handlers those sliders reach —
+`handleTransformChange`, `handleBlurChange`, `handleMaskChange`, `handleStrokeChange` and, for
+an overlay's Pos X/Y, `handleTextDataChange` / `handleShapeDataChange` — ask
+`skipHistoryForWrite()` at the moment they write. One instance for the whole panel is
+deliberate: a user drags one slider at a time, and a press on the next closes whatever the last
+one left open. **A write that belongs to no gesture pushes its own entry**, exactly as before —
+every other control on the panel, a section rendered on its own in a test, and a value set from
+code. It holds refs and no state, so no slider adds a subscription and no render count moves:
+`ClipEditor.rerender.test.tsx` is unchanged by this work, and the rule itself is held by
+`ClipEditor.sliderHistory.test.tsx` (the real panel and the real store) and
+`useSliderGesture.test.ts` (the contract, without a DOM).
+
+The flag reaches the store through the trailing optional `skipHistory` parameter on
+`updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData` and
+`updateShapeOverlayData` — the first, fourth and fifth already had it; ESCSUITE-75 added it to
+`updateClip` and `updateClipEffects` in the same shape (`history: skipHistory ? state.history :
+pushToHistory(state)`). It is optional and last, so every existing caller is one undo step
+exactly as before. **The sliders in `AnimationSection` and `TransitionSection` are not wired to
+the gesture yet** — they need the same flag on `updateClipAnimation` and `updateClipTransition`
+first, which is ESCSUITE-77, and so does `Timeline/useTrimDrag.ts`. Nor are the colour swatches
+in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the
+press and reports after the release, so a pointer gesture does not bound that interaction and
+these listeners would not help it.
 
 Two things in here will surprise the next reader, and both are preserved on purpose.
 **`CollapsibleSection` owns nothing but its own open/closed flag, which it seeds from

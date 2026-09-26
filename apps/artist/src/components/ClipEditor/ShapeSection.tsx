@@ -2,6 +2,7 @@ import type { ShapeOverlayData, ShapeType } from '../../store/types';
 import { hasVisibleFill } from '../../core/canvasRenderer';
 import { withFillRgb, toggleFill, fillAlphaPercent, withFillAlphaPercent } from './clipColorValues';
 import { CollapsibleSection } from './CollapsibleSection';
+import type { SliderGestureHandlers } from './useSliderGesture';
 import styles from './ClipEditor.module.css';
 
 interface ShapeSectionProps {
@@ -9,6 +10,16 @@ interface ShapeSectionProps {
   shapeData: ShapeOverlayData;
   /** Apply a partial change to that data. */
   onChange: (updates: Partial<ShapeOverlayData>) => void;
+  /**
+   * Undo-coalescing listeners for the section's seven sliders (ESCSUITE-75):
+   * one drag of size, rotation, blur, stroke width or fill opacity is one undo
+   * entry rather than one per `input` event.
+   *
+   * Not on the two colour swatches, for the reason given in `MaskSection`: the
+   * OS picker also reports continuously, but it opens on the press and reports
+   * after the release, so a pointer gesture does not bound that interaction.
+   */
+  sliderGesture: SliderGestureHandlers;
 }
 
 /**
@@ -20,7 +31,7 @@ interface ShapeSectionProps {
  * colour picker, the no-fill toggle and the fill-opacity row all read and
  * rewrite the same eight-digit hex string through `clipColorValues`.
  */
-export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
+export function ShapeSection({ shapeData, onChange, sliderGesture }: ShapeSectionProps) {
   return (
     <CollapsibleSection title="Shape">
       <select
@@ -46,6 +57,7 @@ export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
               max={50}
               step={1}
               value={shapeData.blurAmount ?? 10}
+              {...sliderGesture}
               onChange={(e) => onChange({ blurAmount: parseInt(e.target.value) })}
             />
             <span>{shapeData.blurAmount ?? 10}px</span>
@@ -97,6 +109,7 @@ export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
                 max={100}
                 step={1}
                 value={fillAlphaPercent(shapeData.fillColor || '#000000ff')}
+                {...sliderGesture}
                 onChange={(e) => {
                   const fillColor = shapeData.fillColor || '#000000ff';
                   onChange({ fillColor: withFillAlphaPercent(fillColor, parseInt(e.target.value)) });
@@ -114,6 +127,7 @@ export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
               max={20}
               step={1}
               value={shapeData.strokeWidth}
+              {...sliderGesture}
               onChange={(e) => onChange({ strokeWidth: parseInt(e.target.value) })}
             />
             <span>{shapeData.strokeWidth}px</span>
@@ -129,6 +143,7 @@ export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
           max={1}
           step={0.01}
           value={shapeData.width}
+          {...sliderGesture}
           onChange={(e) => onChange({ width: parseFloat(e.target.value) })}
         />
         <span>{Math.round(shapeData.width * 100)}%</span>
@@ -142,6 +157,7 @@ export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
           max={1}
           step={0.01}
           value={shapeData.height}
+          {...sliderGesture}
           onChange={(e) => onChange({ height: parseFloat(e.target.value) })}
         />
         <span>{Math.round(shapeData.height * 100)}%</span>
@@ -155,6 +171,7 @@ export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
           max={360}
           step={1}
           value={shapeData.rotation}
+          {...sliderGesture}
           onChange={(e) => onChange({ rotation: parseInt(e.target.value) })}
         />
         <span>{shapeData.rotation}°</span>
@@ -168,6 +185,7 @@ export function ShapeSection({ shapeData, onChange }: ShapeSectionProps) {
           max={50}
           step={1}
           value={shapeData.blurAmount ?? 0}
+          {...sliderGesture}
           onChange={(e) => onChange({ blurAmount: parseInt(e.target.value) })}
         />
         <span>{shapeData.blurAmount ?? 0}px</span>

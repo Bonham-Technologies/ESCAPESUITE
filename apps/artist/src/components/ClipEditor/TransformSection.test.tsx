@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TransformSection } from './TransformSection'
-import { makeClip } from '../../test/fixtures/clipFixtures'
+import { inertSliderGesture, makeClip } from '../../test/fixtures/clipFixtures'
 import { rowControl } from '../../test/domQueries'
 import { DEFAULT_TEXT_OVERLAY_DATA } from '../../store/types'
 import type { Clip } from '../../store/types'
@@ -31,6 +31,7 @@ function renderSection(overrides: Partial<Props> = {}) {
       isShapeOverlay={false}
       scaleLocked
       hasSourceVideo
+      sliderGesture={inertSliderGesture}
       {...handlers}
       {...overrides}
     />

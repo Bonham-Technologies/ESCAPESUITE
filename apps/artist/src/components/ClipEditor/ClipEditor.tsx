@@ -28,6 +28,7 @@ export function ClipEditor() {
     clipPosition,
     frameWidth,
     keyframePanelOpen,
+    sliderGesture,
     handleSplitAtPlayhead,
     handleDeleteClip,
     handleGoToClip,
@@ -82,7 +83,11 @@ export function ClipEditor() {
 
       {/* Shape Overlay Content Section */}
       {isShapeOverlay && selectedClip.shapeData && (
-        <ShapeSection shapeData={selectedClip.shapeData} onChange={handleShapeDataChange} />
+        <ShapeSection
+          shapeData={selectedClip.shapeData}
+          onChange={handleShapeDataChange}
+          sliderGesture={sliderGesture}
+        />
       )}
 
 
@@ -102,6 +107,7 @@ export function ClipEditor() {
           onFitToCanvas={handleFitToCanvas}
           onResetToDefaults={handleResetToDefaults}
           onReset={handleResetTransform}
+          sliderGesture={sliderGesture}
         />
       )}
 
@@ -123,12 +129,17 @@ export function ClipEditor() {
           frameWidth={frameWidth}
           onMaskChange={handleMaskChange}
           onStrokeChange={handleStrokeChange}
+          sliderGesture={sliderGesture}
         />
       )}
 
       {/* Effects section - for visual clips */}
       {!isAudio && !isOverlay && (
-        <EffectsSection blur={selectedClip.effects?.blur ?? 0} onBlurChange={handleBlurChange} />
+        <EffectsSection
+          blur={selectedClip.effects?.blur ?? 0}
+          onBlurChange={handleBlurChange}
+          sliderGesture={sliderGesture}
+        />
       )}
 
       {/* Animation section - for visual clips */}

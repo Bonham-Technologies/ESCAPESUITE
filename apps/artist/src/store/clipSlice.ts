@@ -278,7 +278,12 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  updateClip: (clipId: string, updates: Partial<Clip>) => set((state) => {
+  // `skipHistory` is `updateClipTransform`'s flag, in the same shape and for the
+  // same reason (ESCSUITE-75): the inspector's mask and stroke sliders write on
+  // every `input` event, so the gesture's first write pushes the undo entry and
+  // the rest of the drag passes `true`. Optional and last, so every existing
+  // caller is a single undo step exactly as before.
+  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map((clip) => {
       if (clip.id !== clipId) return clip;
 
@@ -300,7 +305,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           duration: calculateTimelineDuration(newClips),
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 
@@ -429,7 +434,10 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  updateClipEffects: (clipId: string, effectsUpdates: Partial<ClipEffects>) => set((state) => {
+  // `skipHistory` as on `updateClipTransform` and `updateClip` (ESCSUITE-75):
+  // the Effects section's blur slider steps in halves from 0 to 50, so a full
+  // drag is around a hundred writes and exactly one undo entry.
+  updateClipEffects: (clipId: string, effectsUpdates: Partial<ClipEffects>, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       return {
@@ -447,7 +455,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           clips: newClips,
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 
