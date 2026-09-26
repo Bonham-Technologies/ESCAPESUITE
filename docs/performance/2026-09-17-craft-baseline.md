@@ -206,6 +206,54 @@ see "How to read these" below.
 > which case it needs its own paired measurement first. (One invocation either side, so the
 > 0.8 f/s drop itself is not a claim — only its sign, which is all the falsification needs.)
 
+> **Resolved by ESCSUITE-86 (2026-09-26).** The paired measurement the note above asked for:
+> `mockSyntheticMedia` gained a second painter (`requestAnimationFrame`, selected by
+> `PERF_PAINTER=raf`; the historical `setInterval(…, 33)` stays the default), and
+> `apps/e2e/scripts/perf-paired.mjs` ran the screen arm three rounds each, alternating
+> `interval`/`raf` round-robin against one warm dev server (`node
+> apps/e2e/scripts/perf-paired.mjs 3`).
+>
+> | Round | Painter | fps | taskMsPerFrame |
+> |---|---|---|---|
+> | 1 | interval | 29.54 | 4.659 |
+> | 1 | raf | 29.93 | 4.922 |
+> | 2 | interval | 29.57 | 4.699 |
+> | 2 | raf | 29.95 | 4.938 |
+> | 3 | interval | 29.55 | 4.661 |
+> | 3 | raf | 29.94 | 4.905 |
+>
+> | Painter | fps min | fps median | fps max | taskMsPerFrame min | taskMsPerFrame median | taskMsPerFrame max |
+> |---|---|---|---|---|---|---|
+> | interval | 29.54 | 29.55 | 29.57 | 4.659 | 4.661 | 4.699 |
+> | raf | 29.93 | 29.94 | 29.95 | 4.905 | 4.922 | 4.938 |
+>
+> The two arms' fps ranges are disjoint. **Conclusion:** the shortfall below 30 fps is the
+> harness's `setInterval(…, 33)` painter beating with `captureStream(30)`'s sampling, exactly
+> as the falsified-starvation note above guessed — the recorder itself is not dropping frames,
+> since a painter that cannot beat against the sampler the same way (`raf`) records ~29.94,
+> visibly closer to 30. The cost of that fix is real, though: a 60 Hz painter costs the main
+> thread about 0.25 ms more per encoded frame (`taskMsPerFrame` interval 4.659–4.699 vs. raf
+> 4.905–4.938) — a harness cost, not the recorder's, but one that would move every existing
+> `taskMsPerFrame` figure in this file if it became the default.
+>
+> Two more things turned up in the raw runs, both harness bugs rather than findings about
+> ESCAPECRAFT: (1) with the rAF painter, `rafPerSecond` read 120/180/240 across a round's three
+> takes rather than holding near 60 — every `getDisplayMedia` call had been leaving its
+> previous painter loop running (fixed: the painter now stops when its track does — a rAF run
+> after the fix reads `rafPerSecond` 119.87 as the median of its three takes, i.e. the page's
+> 60 plus the one live painter's 60, at 29.97 fps), and the
+> leak was invisible under the interval painter only because nothing here counts its rate; (2)
+> the first rAF take of most rounds read 25–26 fps, with the later two at 29.9–30.2, a
+> warm-up effect the interval painter does not show.
+>
+> **Decision: `'interval'` stays the benchmark's default painter.** Every `taskMsPerFrame` and
+> `rafPerSecond` figure in this file, and in the round 1/round 2 baselines it links to, was
+> taken under the interval painter; switching the default would make all of them
+> non-comparable with anything measured after the switch, for a 0.25 ms/frame difference that
+> is the painter's cost, not something an ESCAPECRAFT change could move either way.
+> `PERF_PAINTER=raf` and `scripts/perf-paired.mjs` stay in the harness as the way to make a
+> claim about the recorded frame rate specifically, the next time one is needed.
+
 What varies with the machine, and what a comparison should therefore use, is
 `taskMsPerFrame`.
 
@@ -533,15 +581,16 @@ take composites nothing, so its `compositedFps` is 0. Each benchmark has exactly
 and the report's headline picks the right one.
 
 **The screen take's `framesPerSecond` is jointly determined by the harness.** It reads
-28.7–29.2 rather than 30, and the shortfall is most likely the source, not the recorder:
-`mockSyntheticMedia`'s capture "device" is a `setInterval(…, 33)` painter on the same main
-thread that is ~83% busy in a second-or-later take (that figure was the ESCSUITE-55 error
-loop; post-fix it is ~18% and the rate went *down* rather than up, which is the wrong way for
-this explanation — see the note under the local baseline),
-and `WebCodecsRecorder` encodes whatever the track delivers (its own gate is `targetFrameInterval * 0.8` = 26.7 ms, so it is not
-dropping the difference). So a future change that made the page *busier* could show up here
-as a lower "recorded frame rate" that has nothing to do with the recorder. Compare
-`taskMsPerFrame`. **`compositedFps` is not affected** — the compositor's rAF loop draws
+28.7–29.2 rather than 30, and this is measured, not a guess: ESCSUITE-86's paired
+`interval`/`raf` painter comparison (see the note under the local baseline) found the shortfall
+is beating between `mockSyntheticMedia`'s `setInterval(…, 33)` capture painter and
+`captureStream(30)`'s own sampling — a painter that cannot beat against the sampler the same
+way records ~29.94 instead — and not the main thread's business (that theory, from the
+ESCSUITE-55 error loop, is falsified in the note above it) or `WebCodecsRecorder`'s own gate
+(`targetFrameInterval * 0.8` = 26.7 ms, well under what would drop this difference). So a
+future change that made the page *busier* could still show up here as a lower "recorded frame
+rate" that has nothing to do with the recorder — the harness's ceiling just isn't a clean 30 to
+begin with. Compare `taskMsPerFrame`. **`compositedFps` is not affected** — the compositor's rAF loop draws
 whatever the `<video>` element currently shows, at a rate set by rAF and its own gate,
 independent of how fast the source delivers — so the compositor finding above stands on its
 own. The two rates look symmetric and are not.

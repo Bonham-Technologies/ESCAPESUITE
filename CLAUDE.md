@@ -388,6 +388,16 @@ run the benchmark spec directly, so drift affects both arms equally and cancels 
 being charged to whichever ran second. See `docs/performance/2026-09-12-profile.md`'s "After
 round 1" section for a worked example.
 
+`PERF_PAINTER=raf` (ESCAPECRAFT's `craft-recording.spec.ts` only) swaps `mockSyntheticMedia`'s
+synthetic source canvas from its default `setInterval(…, 33)` painter to a
+`requestAnimationFrame` one; `apps/e2e/scripts/perf-paired.mjs [rounds=3]` runs the screen-take
+benchmark alone, alternating the two painters round-robin, for a paired measurement of the
+recorded frame rate specifically (ESCSUITE-86: it settled why the screen take reads
+28.7–29.2 fps rather than 30 — see the note in
+[docs/performance/2026-09-17-craft-baseline.md](docs/performance/2026-09-17-craft-baseline.md) —
+and the benchmark keeps `setInterval` as its default painter regardless, so every other
+`taskMsPerFrame` figure stays comparable).
+
 CI runs them in a `perf` job that needs `build`, is `continue-on-error: true` and is
 deliberately **not** in `ci-status`'s `needs` — runner CPU varies, so a number moving is
 worth looking at and never worth blocking a merge on. It uploads `perf-report.json` (and

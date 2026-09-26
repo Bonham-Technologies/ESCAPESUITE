@@ -56,7 +56,26 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
  * main thread inside every measured window here. It is identical in every arm
  * of any comparison and small next to a 720p encode, but it is not nothing —
  * see `docs/performance/2026-09-17-craft-baseline.md`.
+ *
+ * **`PERF_PAINTER`** (ESCSUITE-86) — `raf` paints the synthetic source canvas
+ * from a `requestAnimationFrame` loop instead of the historical 33 ms
+ * `setInterval`; anything else (unset included) keeps the `setInterval`
+ * painter. The screen arm records 27.97–29.2 fps against a 30 Hz capture
+ * rather than a clean 30, and the leading theory is beating between the
+ * interval painter and the capture sampler rather than a real recorder cost —
+ * a `requestAnimationFrame` loop cannot beat against it the same way, so a
+ * paired run with `PERF_PAINTER=interval` and `PERF_PAINTER=raf` (see
+ * `scripts/perf-paired.mjs`) tells the two apart. Recorded in every result
+ * below as `painter`, so `perf-report.json` says which arm a number came from.
  */
+
+/**
+ * Which painter the synthetic source canvas uses, per `PERF_PAINTER`
+ * (ESCSUITE-86). `'raf'` opts into the `requestAnimationFrame` painter;
+ * anything else (unset included) keeps the historical `setInterval` one. See
+ * this file's header comment.
+ */
+const PERF_PAINTER: 'interval' | 'raf' = process.env.PERF_PAINTER === 'raf' ? 'raf' : 'interval'
 
 const TAKE_MODES = [
   {
@@ -94,7 +113,11 @@ for (const arm of TAKE_MODES) {
       page,
     }) => {
       await installCraftPerfInstrumentation(page)
-      await openCraft(page, { webcam: arm.webcam, separateTracks: arm.separateTracks })
+      await openCraft(page, {
+        webcam: arm.webcam,
+        separateTracks: arm.separateTracks,
+        painter: PERF_PAINTER,
+      })
 
       const cdp = await page.context().newCDPSession(page)
       await cdp.send('Performance.enable')
@@ -122,6 +145,7 @@ for (const arm of TAKE_MODES) {
       writePerfResult({
         name: arm.name,
         runs: PERF_RUNS,
+        painter: PERF_PAINTER,
         mode: arm.mode,
         recorder: arm.recorder,
         captureSize: CAPTURE_SIZE_LABEL,
@@ -186,7 +210,7 @@ for (const arm of TAKE_MODES) {
 test.describe('perf: ESCAPECRAFT MP4 conversion', () => {
   test(`converts a ${TAKE_SECONDS}s take to MP4, ${PERF_RUNS} times`, async ({ page }) => {
     await installCraftPerfInstrumentation(page)
-    await openCraft(page, { webcam: false })
+    await openCraft(page, { webcam: false, painter: PERF_PAINTER })
 
     // The same question the app's own gate asks, asked of the browser in front
     // of us rather than of its name — `tests/escapecraft/mp4-download.spec.ts`
@@ -212,6 +236,7 @@ test.describe('perf: ESCAPECRAFT MP4 conversion', () => {
     writePerfResult({
       name: 'craft-mp4-conversion',
       runs: PERF_RUNS,
+      painter: PERF_PAINTER,
       captureSize: CAPTURE_SIZE_LABEL,
       // `takeSeconds`, not `windowSeconds`: this benchmark has no measured
       // window — it times a whole conversion, click to file. What six seconds
@@ -243,7 +268,7 @@ test.describe('perf: ESCAPECRAFT composite MP4 conversion', () => {
     page,
   }) => {
     await installCraftPerfInstrumentation(page)
-    await openCraft(page, { webcam: true, separateTracks: true })
+    await openCraft(page, { webcam: true, separateTracks: true, painter: PERF_PAINTER })
 
     test.skip(!(await canConvertToMp4(page)), 'This browser cannot encode H.264')
 
@@ -265,6 +290,7 @@ test.describe('perf: ESCAPECRAFT composite MP4 conversion', () => {
     writePerfResult({
       name: 'craft-composite-mp4-conversion',
       runs: PERF_RUNS,
+      painter: PERF_PAINTER,
       captureSize: CAPTURE_SIZE_LABEL,
       takeSeconds: TAKE_SECONDS,
       wallMs: round(median(at('wallMs'))),

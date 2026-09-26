@@ -119,7 +119,7 @@ export async function mockMediaRecorder(page: Page) {
  */
 export async function mockSyntheticMedia(
   page: Page,
-  options: { width?: number; height?: number } = {}
+  options: { width?: number; height?: number; painter?: 'interval' | 'raf' } = {}
 ) {
   // Same reason as mockGetUserMedia: capture that works implies devices that
   // enumerate, and hardware-less runners enumerate none.
@@ -127,9 +127,19 @@ export async function mockSyntheticMedia(
 
   const width = options.width ?? 640
   const height = options.height ?? 360
+  // ESCSUITE-86: which loop paints the source canvas. `'interval'` is the
+  // historical painter — a bare `setInterval(…, 33)` (30.3 Hz) racing the
+  // 30 Hz `captureStream` sampler, which the ESCAPECRAFT recording benchmarks'
+  // sub-30fps numbers were suspected to be beating against rather than a real
+  // recorder cost. `'raf'` paints once per `requestAnimationFrame` callback
+  // instead, which cannot beat against the capture rate the way a fixed
+  // interval can. Selected by `PERF_PAINTER` in `tests/perf/craft-recording.spec.ts`
+  // for a paired before/after; every other caller leaves this unset and gets
+  // the unchanged `'interval'` behaviour.
+  const painter = options.painter ?? 'interval'
 
   await page.addInitScript(
-    ({ width, height }) => {
+    ({ width, height, painter }) => {
       const makeVideoTrack = (): MediaStreamTrack => {
         const canvas = document.createElement('canvas')
         canvas.width = width
@@ -138,20 +148,60 @@ export async function mockSyntheticMedia(
 
         // Animate so every captured frame differs (encoders need real motion)
         let frame = 0
-        setInterval(() => {
+        const paint = () => {
           frame += 1
           ctx.fillStyle = `hsl(${frame % 360}, 70%, 45%)`
           ctx.fillRect(0, 0, width, height)
           ctx.fillStyle = '#ffffff'
           ctx.font = `${Math.round(height / 8)}px sans-serif`
           ctx.fillText(`E2E ${frame}`, 40, height / 2)
-        }, 33)
+        }
 
-        return (canvas as HTMLCanvasElement & {
+        // ESCSUITE-86: stop painting when the track stops. Before this, every
+        // `getDisplayMedia`/`getUserMedia` call started a new loop and the
+        // previous one — from a track a test had already stopped — kept
+        // painting (and, for the interval painter, kept an interval alive) for
+        // the rest of the page's life; a test that opened the mock more than
+        // once leaked one loop per open. It was invisible for the interval
+        // painter, whose rate nothing here counts, but the rAF painter's loop
+        // calls `requestAnimationFrame` itself, and the paired benchmark's own
+        // `rafPerSecond` counter (a `requestAnimationFrame` wrapper) saw every
+        // leaked loop's callbacks alongside the live one's — see the
+        // `rafPerSecond` readings of 120/180/240 across a round's three takes
+        // in the ESCSUITE-86 baseline note. `stop()` is the normal path, but a
+        // recorder can also end a track another way, so `ended` is covered too.
+        let running = true
+        let intervalId: ReturnType<typeof setInterval> | undefined
+        const stopPainting = () => {
+          running = false
+          if (intervalId !== undefined) clearInterval(intervalId)
+        }
+
+        if (painter === 'raf') {
+          const loop = () => {
+            if (!running) return
+            paint()
+            requestAnimationFrame(loop)
+          }
+          requestAnimationFrame(loop)
+        } else {
+          intervalId = setInterval(paint, 33)
+        }
+
+        const track = (canvas as HTMLCanvasElement & {
           captureStream(fps?: number): MediaStream
         })
           .captureStream(30)
           .getVideoTracks()[0]
+
+        const nativeStop = track.stop.bind(track)
+        track.stop = () => {
+          stopPainting()
+          nativeStop()
+        }
+        track.addEventListener('ended', stopPainting)
+
+        return track
       }
 
       const makeAudioTrack = (): MediaStreamTrack => {
@@ -181,7 +231,7 @@ export async function mockSyntheticMedia(
         return new MediaStream(tracks)
       }
     },
-    { width, height }
+    { width, height, painter }
   )
 }
 
