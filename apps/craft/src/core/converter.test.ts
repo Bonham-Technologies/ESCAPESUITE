@@ -24,6 +24,7 @@ import {
   lastAudioEncoder,
   getCreatedFrames,
   allFramesClosed,
+  allEncodersClosed,
   webcodecsCallLog,
   AudioEncoderDouble,
   VideoEncoderDouble,
@@ -1325,6 +1326,183 @@ describe('converter', () => {
       await expect(promise).rejects.toBeInstanceOf(ConversionAbortedError)
       expect(pendingFrameCount()).toBe(0)
       expect(allFramesClosed()).toBe(true)
+    })
+  })
+
+  // --- a throw inside a capture callback -----------------------------------
+
+  // ESCSUITE-78. Every frame of a conversion is drawn from a browser callback
+  // — a video-frame callback, an animation frame, an `ended` listener — and
+  // the browser *swallows* a throw out of one of those: it is reported to the
+  // page, and nothing else happens. The next frame is never requested, neither
+  // `resolve` nor `reject` is ever reached, the capture promise stays pending
+  // for the life of the tab, the conversion's one `finally` never runs, and
+  // the recording row never leaves "Converting…" while every encoder it built
+  // is still holding an encode session. `new VideoFrame()` on a zero-sized
+  // canvas, a `drawImage` from an element that has errored, a frame that is
+  // already closed: all raise exactly that, and ESCSUITE-74 fixed only the one
+  // case that was reachable in practice (a dead encoder's `encode()`).
+  //
+  // So these arms raise the throw the way the browser delivers it — swallowed
+  // at the dispatcher, never handed back to whatever presented the frame — and
+  // ask the only question that matters: did the conversion settle, with the
+  // error that stopped it? The one-second timeout is deliberate: a regression
+  // here is a hang, and a hang should fail in a second rather than at the
+  // runner's five.
+  //
+  // `convertToM4A` has no arm here because it has no callback to throw out of:
+  // no <video>, no playback and no canvas — its whole loop is awaited, and
+  // `converter.perf.test.ts` pins that it does no video work at all.
+  describe('a throw inside a capture callback (ESCSUITE-78)', () => {
+    const DRAW_FAILED = 'drawImage failed: the element is gone'
+    const OVERLAY_FAILED = 'the camera element is gone'
+
+    /**
+     * Present a frame the way the browser's callback dispatcher does: a throw
+     * out of the callback goes to the page's error handler, not back to
+     * whatever presented the frame. Swallowing it here is what makes these
+     * tests ask whether the conversion settles, instead of catching the throw
+     * on the conversion's behalf and proving nothing.
+     */
+    function presentFrameAsBrowser(video: VideoElementDouble, mediaTime: number): void {
+      try {
+        video.presentFrame(mediaTime)
+      } catch {
+        // The dispatcher swallows it. So does this.
+      }
+    }
+
+    /** The same, for the animation-frame dispatcher. */
+    function tickAnimationFramesAsBrowser(): void {
+      try {
+        tickAnimationFrames()
+      } catch {
+        // The dispatcher swallows it. So does this.
+      }
+    }
+
+    /** Make the next canvas draw throw, as a draw from a dead element does. */
+    function breakNextDraw(): void {
+      getLastCanvasContext()!.drawImage.mockImplementationOnce(() => {
+        throw new Error(DRAW_FAILED)
+      })
+    }
+
+    it('rejects with the drawing error when the frame callback throws', { timeout: 1000 }, async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise, video } = start(p => convertToMP4(SOURCE, p))
+      await settle()
+      video.presentFrame(0)
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+
+      breakNextDraw()
+      presentFrameAsBrowser(video, 1 / 30)
+
+      await expect(promise).rejects.toThrow(DRAW_FAILED)
+      // The capture left by the abort path's door: the loop is stopped, the
+      // element is paused, and nothing asked for another frame.
+      expect(video.pause).toHaveBeenCalled()
+      expect(video.hasPendingFrameCallback()).toBe(false)
+      expect(video.cancelledFrameCallbacks.length).toBeGreaterThan(0)
+      // …and the frame that was drawn before it, and both encoders, were let
+      // go — which is what the conversion's one `finally` does, and which a
+      // promise that never settles never reaches.
+      expect(allFramesClosed()).toBe(true)
+      expect(allEncodersClosed()).toBe(true)
+      // The `ended` listener is inert afterwards: a late end event must not
+      // top up frames into an encoder that has already been released.
+      video.fireEnded()
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+    })
+
+    it('rejects with the drawing error when the animation-frame fallback throws', { timeout: 1000 }, async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { rvfc: false })
+      await settle()
+      video.setMetadata({ currentTime: 0.02 })
+      tickAnimationFrames()
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+
+      breakNextDraw()
+      video.setMetadata({ currentTime: 0.05 })
+      tickAnimationFramesAsBrowser()
+
+      await expect(promise).rejects.toThrow(DRAW_FAILED)
+      expect(video.pause).toHaveBeenCalled()
+      expect(pendingFrameCount()).toBe(0)
+      expect(allFramesClosed()).toBe(true)
+      expect(allEncodersClosed()).toBe(true)
+    })
+
+    it('rejects when the ended handler throws topping up the last frames', { timeout: 1000 }, async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise, video } = start(p => convertToMP4(SOURCE, p))
+      await settle()
+      video.presentFrame(0)
+
+      // Two of the three frames are still owed, so ending the video runs the
+      // top-up loop — the second place in this path a draw can throw, and the
+      // one whose throw the `ended` dispatcher swallows.
+      breakNextDraw()
+      video.fireEnded()
+
+      await expect(promise).rejects.toThrow(DRAW_FAILED)
+      expect(video.pause).toHaveBeenCalled()
+      expect(allFramesClosed()).toBe(true)
+      expect(allEncodersClosed()).toBe(true)
+    })
+
+    it('rejects when the ended handler throws on the animation-frame fallback', { timeout: 1000 }, async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { rvfc: false })
+      await settle()
+      video.setMetadata({ currentTime: 0.02 })
+      tickAnimationFrames()
+
+      breakNextDraw()
+      video.fireEnded()
+
+      await expect(promise).rejects.toThrow(DRAW_FAILED)
+      expect(video.pause).toHaveBeenCalled()
+      expect(pendingFrameCount()).toBe(0)
+      expect(allFramesClosed()).toBe(true)
+      expect(allEncodersClosed()).toBe(true)
+    })
+
+    it('rejects with the overlay error when a composite frame callback throws', { timeout: 1000 }, async () => {
+      audio.decodeResult = createAudioBufferDouble({ length: 4 })
+      const promise = convertToMP4(SOURCE, () => {}, undefined, {
+        companion: {
+          blob: new Blob(['webcam'], { type: 'video/webm' }),
+          placement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+          startOffset: 0,
+        },
+      })
+      promise.catch(() => {})
+      const [screen, webcam] = getVideoDoubles()
+      screen.enableRequestVideoFrameCallback()
+      screen.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: 0.1 })
+      screen.fireLoadedMetadata()
+      webcam.setMetadata({ videoWidth: 640, videoHeight: 480, readyState: 2, duration: 0.1 })
+      webcam.fireLoadedMetadata()
+      await settle()
+      screen.presentFrame(0)
+
+      // The camera draw alone, by element identity: the screen half of the
+      // same frame still has to succeed, or this would be the plain path's arm
+      // over again rather than the overlay's.
+      getLastCanvasContext()!.drawImage.mockImplementation((source: unknown) => {
+        if (source === webcam.element) throw new Error(OVERLAY_FAILED)
+      })
+      presentFrameAsBrowser(screen, 1 / 30)
+
+      await expect(promise).rejects.toThrow(OVERLAY_FAILED)
+      // Both elements are stopped: the composite is the path with two <video>s
+      // decoding at once, and a hang here leaves both of them running.
+      expect(screen.pause).toHaveBeenCalled()
+      expect(webcam.pause).toHaveBeenCalled()
+      expect(allFramesClosed()).toBe(true)
+      expect(allEncodersClosed()).toBe(true)
     })
   })
 

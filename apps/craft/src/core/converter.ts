@@ -423,10 +423,57 @@ async function captureFramesViaPlayback(
       }
     };
 
-    const onAbort = () => {
+    /**
+     * Leave the capture with an error, by the one door: stop the loop and both
+     * elements, stop listening for a cancellation that can no longer matter,
+     * and reject with what stopped it.
+     *
+     * The abort path's own exit, which is why it is the exit a throw takes too
+     * (see `guarded` below). It removes the abort listener where `onAbort`
+     * used to leave it attached — a signal fires `abort` once, so that is the
+     * same thing happening in one place instead of two.
+     */
+    const fail = (error: unknown) => {
       cleanup();
-      reject(new ConversionAbortedError());
+      signal?.removeEventListener('abort', onAbort);
+      reject(error);
     };
+
+    /** …and the same door for a capture that got every frame it was owed. */
+    const finish = () => {
+      cleanup();
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    };
+
+    const onAbort = () => fail(new ConversionAbortedError());
+
+    /**
+     * Run one callback body, and turn a synchronous throw into that same
+     * failure exit (ESCSUITE-78).
+     *
+     * Everything below runs from a browser callback — a video-frame callback,
+     * an animation frame, an `ended` listener — and the browser *swallows* a
+     * throw out of one of those: it is reported to the page and nothing else
+     * happens. The next frame is never requested, neither `resolve` nor
+     * `reject` is ever reached, so this promise stays pending for the life of
+     * the tab, the conversion's one `finally` never runs, every encoder it
+     * built stays open and the recording row never leaves "Converting…".
+     * `new VideoFrame()` on a zero-sized canvas, a `drawImage` or
+     * `drawOverlay` from an element that has errored or detached, a frame that
+     * is already closed: all raise exactly that. ESCSUITE-74 fixed the one
+     * case that was reachable in practice — a dead encoder's `encode()` — by
+     * removing its cause; this is the shape, whatever the cause.
+     */
+    const guarded =
+      <A extends unknown[]>(body: (...args: A) => void) =>
+      (...args: A): void => {
+        try {
+          body(...args);
+        } catch (error) {
+          fail(error);
+        }
+      };
 
     signal?.addEventListener('abort', onAbort);
 
@@ -474,7 +521,7 @@ async function captureFramesViaPlayback(
 
     if (hasRVFC) {
       // Use requestVideoFrameCallback for precise frame capture
-      const rvfcCallback = (_now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => {
+      const rvfcCallback = guarded((_now: DOMHighResTimeStamp, metadata: VideoFrameCallbackMetadata) => {
         if (signal?.aborted || isFinished) return;
 
         const currentTime = metadata.mediaTime;
@@ -489,24 +536,20 @@ async function captureFramesViaPlayback(
         if (!video.ended && !video.paused && frameIndex < totalFrames) {
           rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
         }
-      };
+      });
 
-      video.addEventListener('ended', () => {
+      video.addEventListener('ended', guarded(() => {
         if (isFinished) return;
         // Capture any remaining frames using the last displayed frame
         while (frameIndex < totalFrames) {
           captureCurrentFrame();
           lastCaptureTime += frameDuration;
         }
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      });
+        finish();
+      }));
 
       video.addEventListener('error', () => {
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        reject(new Error('Video playback error'));
+        fail(new Error('Video playback error'));
       });
 
       rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
@@ -514,7 +557,7 @@ async function captureFramesViaPlayback(
       video.play().catch(reject);
     } else {
       // Fallback: use requestAnimationFrame with time-based capture
-      const rafCallback = () => {
+      const rafCallback = guarded(() => {
         if (signal?.aborted || isFinished) return;
 
         const currentTime = video.currentTime;
@@ -534,28 +577,22 @@ async function captureFramesViaPlayback(
             captureCurrentFrame();
             lastCaptureTime += frameDuration;
           }
-          cleanup();
-          signal?.removeEventListener('abort', onAbort);
-          resolve();
+          finish();
         }
-      };
+      });
 
-      video.addEventListener('ended', () => {
+      video.addEventListener('ended', guarded(() => {
         if (isFinished) return;
         // Capture any remaining frames
         while (frameIndex < totalFrames) {
           captureCurrentFrame();
           lastCaptureTime += frameDuration;
         }
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      });
+        finish();
+      }));
 
       video.addEventListener('error', () => {
-        cleanup();
-        signal?.removeEventListener('abort', onAbort);
-        reject(new Error('Video playback error'));
+        fail(new Error('Video playback error'));
       });
 
       video.currentTime = 0;
