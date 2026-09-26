@@ -730,7 +730,6 @@ describe('projectStore remaining behaviours', () => {
     it('refuses to change the animation of a clip on it', () => refuses(() => store().updateClipAnimation('h1', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
     it('refuses to duplicate a clip on it', () => refuses(() => store().duplicateClip('h1')))
     it('refuses to shift the clips on it', () => refuses(() => store().shiftClipsAfter(held, 1, 2)))
-    it('refuses a shift over every track when any shifted clip is on it', () => refuses(() => store().shiftClipsAfter(undefined, 1, 2)))
     it('still shifts the clips on an unlocked track', () => {
       addClip('f2', 4, 2, free)
       store().shiftClipsAfter(free, 1, 2)

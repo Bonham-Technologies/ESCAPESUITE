@@ -11,7 +11,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATI
 import { cloneClip } from '../utils/deepClone';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
-import { anyClipOnLockedTrack, clipOnLockedTrack, isTrackLocked } from './trackLock';
+import { clipOnLockedTrack, isTrackLocked } from './trackLock';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
@@ -272,15 +272,11 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => set((state) => {
     if (delta === 0) return state;
 
-    // A locked track holds its clips where they are (ESCSUITE-84) — and the
-    // shift is all-or-nothing, so one locked row among the rows that would move
-    // refuses the whole call. With a `trackId` that is the same as asking whether
-    // that row is locked; without one, whether any clip past `afterTime` is.
-    const { clips, tracks } = state.project.timeline;
-    const shifting = clips.filter(
-      (clip) => (trackId === undefined || clip.trackId === trackId) && clip.timelinePosition >= afterTime
-    );
-    if (anyClipOnLockedTrack(clips, tracks, shifting.map((clip) => clip.id))) return state; // ESCSUITE-84
+    // A locked track holds its clips where they are (ESCSUITE-84). One row is
+    // the whole question here: the shift below only moves clips whose
+    // `trackId` matches, so an undefined `trackId` moves nothing and has
+    // nothing to refuse.
+    if (isTrackLocked(state.project.timeline.tracks, trackId)) return state; // ESCSUITE-84
 
     const newClips = state.project.timeline.clips.map((clip) => {
       // Shift clips on the same track that start at or after the given time
