@@ -2,8 +2,8 @@
 '@escapesuite/craft': patch
 ---
 
-Leaving the recorder while it is still setting up no longer leaves codecs, outputs or an
-audio-level loop running.
+Leaving the recorder while it is still setting up no longer leaves codecs, outputs and an
+audio graph behind, and no longer reports a failure for a recording that never existed.
 
 `WebCodecsRecorder.initialize()` awaits half a dozen times — the capture `<video>` starting,
 the AudioContext resuming, the muxer's `Output.start()`, each codec's `configure()`, each
