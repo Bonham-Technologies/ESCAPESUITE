@@ -7,6 +7,7 @@ import type { StateCreator } from 'zustand';
 import type { EditorState, Track } from './types';
 import { pushToHistory } from './storeHistory';
 import { calculateTimelineDuration } from './projectFactory';
+import { isTrackLocked } from './trackLock';
 
 export type TrackSlice = Pick<EditorState, 'addTrack' | 'removeTrack' | 'updateTrack' | 'reorderTracks'>;
 
@@ -45,6 +46,7 @@ export const createTrackSlice: StateCreator<EditorState, [], [], TrackSlice> = (
   removeTrack: (trackId: string) => set((state) => {
     const tracks = state.project.timeline.tracks;
     if (tracks.length <= 1) return state; // Keep at least one track
+    if (isTrackLocked(tracks, trackId)) return state; // ESCSUITE-84
 
     const newTracks = tracks.filter(t => t.id !== trackId);
     const newClips = state.project.timeline.clips.filter(c => c.trackId !== trackId);

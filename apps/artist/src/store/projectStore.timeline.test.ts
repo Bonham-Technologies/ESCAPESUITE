@@ -154,6 +154,31 @@ describe('projectStore integration', () => {
       expect(track.muted).toBe(true)
       expect(track.visible).toBe(false)
     })
+
+    it('does not remove a locked track, or its clips, and pushes no history entry (ESCSUITE-84)', () => {
+      useEditorStore.getState().addTrack()
+      const trackId = useEditorStore.getState().project.timeline.tracks[1].id
+      useEditorStore.getState().addClipToTimeline({
+        id: 'clip1',
+        name: 'Test Clip',
+        sourceVideoId: 'video1',
+        startTime: 0,
+        endTime: 5,
+        duration: 5,
+      }, trackId, 0)
+      useEditorStore.getState().updateTrack(trackId, { locked: true })
+      // updateTrack and addClipToTimeline each push their own history entry;
+      // clear those so the assertion below is about removeTrack's own effect.
+      useEditorStore.setState({ history: { past: [], future: [] } })
+
+      useEditorStore.getState().removeTrack(trackId)
+
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.tracks).toHaveLength(2)
+      expect(state.project.timeline.tracks.some(t => t.id === trackId)).toBe(true)
+      expect(state.project.timeline.clips).toHaveLength(1)
+      expect(state.history.past.length).toBe(0)
+    })
   })
 
   describe('clip operations', () => {
