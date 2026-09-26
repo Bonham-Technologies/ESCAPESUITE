@@ -265,12 +265,15 @@ export async function installCraftPerfInstrumentation(page: Page): Promise<void>
  * async and the source toggles stay `disabled` until it answers; a take started
  * before then acquires no stream, and a benchmark would report the cost of
  * recording nothing.
+ *
+ * `painter` (ESCSUITE-86) forwards straight to `mockSyntheticMedia` — unset,
+ * every caller gets its default `'interval'` painter unchanged.
  */
 export async function openCraft(
   page: Page,
-  options: { webcam: boolean; separateTracks?: boolean }
+  options: { webcam: boolean; separateTracks?: boolean; painter?: 'interval' | 'raf' }
 ): Promise<void> {
-  await mockSyntheticMedia(page, CAPTURE_SIZE)
+  await mockSyntheticMedia(page, { ...CAPTURE_SIZE, painter: options.painter })
   await grantMediaPermissions(page)
 
   await page.goto(CRAFT_URL)

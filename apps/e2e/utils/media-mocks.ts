@@ -119,7 +119,7 @@ export async function mockMediaRecorder(page: Page) {
  */
 export async function mockSyntheticMedia(
   page: Page,
-  options: { width?: number; height?: number } = {}
+  options: { width?: number; height?: number; painter?: 'interval' | 'raf' } = {}
 ) {
   // Same reason as mockGetUserMedia: capture that works implies devices that
   // enumerate, and hardware-less runners enumerate none.
@@ -127,9 +127,19 @@ export async function mockSyntheticMedia(
 
   const width = options.width ?? 640
   const height = options.height ?? 360
+  // ESCSUITE-86: which loop paints the source canvas. `'interval'` is the
+  // historical painter — a bare `setInterval(…, 33)` (30.3 Hz) racing the
+  // 30 Hz `captureStream` sampler, which the ESCAPECRAFT recording benchmarks'
+  // sub-30fps numbers were suspected to be beating against rather than a real
+  // recorder cost. `'raf'` paints once per `requestAnimationFrame` callback
+  // instead, which cannot beat against the capture rate the way a fixed
+  // interval can. Selected by `PERF_PAINTER` in `tests/perf/craft-recording.spec.ts`
+  // for a paired before/after; every other caller leaves this unset and gets
+  // the unchanged `'interval'` behaviour.
+  const painter = options.painter ?? 'interval'
 
   await page.addInitScript(
-    ({ width, height }) => {
+    ({ width, height, painter }) => {
       const makeVideoTrack = (): MediaStreamTrack => {
         const canvas = document.createElement('canvas')
         canvas.width = width
@@ -138,14 +148,24 @@ export async function mockSyntheticMedia(
 
         // Animate so every captured frame differs (encoders need real motion)
         let frame = 0
-        setInterval(() => {
+        const paint = () => {
           frame += 1
           ctx.fillStyle = `hsl(${frame % 360}, 70%, 45%)`
           ctx.fillRect(0, 0, width, height)
           ctx.fillStyle = '#ffffff'
           ctx.font = `${Math.round(height / 8)}px sans-serif`
           ctx.fillText(`E2E ${frame}`, 40, height / 2)
-        }, 33)
+        }
+
+        if (painter === 'raf') {
+          const loop = () => {
+            paint()
+            requestAnimationFrame(loop)
+          }
+          requestAnimationFrame(loop)
+        } else {
+          setInterval(paint, 33)
+        }
 
         return (canvas as HTMLCanvasElement & {
           captureStream(fps?: number): MediaStream
@@ -181,7 +201,7 @@ export async function mockSyntheticMedia(
         return new MediaStream(tracks)
       }
     },
-    { width, height }
+    { width, height, painter }
   )
 }
 
