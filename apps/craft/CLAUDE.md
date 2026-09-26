@@ -1062,6 +1062,11 @@ message and navigate to its own editor itself.
   built on a zero-sized canvas) to the same `fail()` the abort path takes, so the conversion
   rejects with that error and releases every encoder rather than sitting on "Converting…" for
   the life of the tab, which is what the browser swallowing the throw used to leave behind.
+  A `play()` the browser **refuses** goes out by that same `fail()` door since ESCSUITE-81 —
+  it used to reject the capture directly, which settled the conversion but left the frame
+  callback registered on the line above it, the abort listener attached, the element unpaused
+  and, on a composite, the camera element still playing with nothing said about the picture it
+  never contributed.
 - **Cancelling is not failing.** Cancel aborts through an `AbortSignal`; the converter
   rejects with `ConversionAbortedError`, the row returns to idle, no file is written and
   **no notice is raised**. Any other rejection becomes `mp4ConversionFailed(message)` in
