@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { TransitionSection } from './TransitionSection'
 import { TRANSITION_TYPES } from './clipEditorOptions'
 import { rowControl, rowSelect } from '../../test/domQueries'
+import { inertSliderGesture } from '../../test/fixtures/clipFixtures'
 
 type Props = React.ComponentProps<typeof TransitionSection>
 
@@ -18,6 +19,7 @@ async function renderOpen(overrides: Partial<Props> = {}) {
       clipDuration={10}
       onTypeChange={onTypeChange}
       onDurationChange={onDurationChange}
+      sliderGesture={inertSliderGesture}
       {...overrides}
     />
   )
@@ -33,6 +35,7 @@ describe('TransitionSection', () => {
         clipDuration={10}
         onTypeChange={vi.fn()}
         onDurationChange={vi.fn()}
+        sliderGesture={inertSliderGesture}
       />
     )
 

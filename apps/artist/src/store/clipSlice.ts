@@ -459,7 +459,11 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>) => set((state) => {
+  // `skipHistory` as on `updateClipTransform`, `updateClip` and
+  // `updateClipEffects` (ESCSUITE-77 finishing ESCSUITE-75): the Transition Out
+  // section's duration slider writes on every `input` event, so the gesture's
+  // first write pushes the undo entry and the rest of the drag passes `true`.
+  updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       // Seed from DEFAULT_TRANSITION the way updateClipAnimation seeds from DEFAULT_ANIMATION:
@@ -480,11 +484,15 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           clips: newClips,
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 
-  updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>) => set((state) => {
+  // `skipHistory` again (ESCSUITE-77): the Animation section's two duration
+  // sliders, Animate In and Animate Out, write on every `input` event. The
+  // preset and easing selects reach this action too and never pass the flag, so
+  // they keep their own entry each.
+  updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>, skipHistory?: boolean) => set((state) => {
     const newClips = state.project.timeline.clips.map(clip => {
       if (clip.id !== clipId) return clip;
       const currentAnimation = clip.animation || { ...DEFAULT_ANIMATION };
@@ -510,7 +518,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           clips: newClips,
         },
       },
-      history: pushToHistory(state),
+      history: skipHistory ? state.history : pushToHistory(state),
     };
   }),
 

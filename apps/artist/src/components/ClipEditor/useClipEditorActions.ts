@@ -314,12 +314,14 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClipTransition]
   );
 
+  // The Transition Out section's one slider (ESCSUITE-77). The type select
+  // above it keeps its own entry per change, so it does not ask.
   const handleTransitionDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipTransition(selectedClip.id, { duration });
+      updateClipTransition(selectedClip.id, { duration }, skipHistoryForWrite());
     },
-    [selectedClip, updateClipTransition]
+    [selectedClip, updateClipTransition, skipHistoryForWrite]
   );
 
   // Animation handlers
@@ -331,12 +333,15 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClipAnimation]
   );
 
+  // The Animation section's two sliders (ESCSUITE-77), Animate In and Animate
+  // Out. The four preset and easing selects around them are single changes and
+  // keep an entry each, so only these two ask.
   const handleAnimationInDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { in: { type: selectedClip.animation?.in.type ?? 'none', duration, easing: selectedClip.animation?.in.easing ?? 'ease-out' } });
+      updateClipAnimation(selectedClip.id, { in: { type: selectedClip.animation?.in.type ?? 'none', duration, easing: selectedClip.animation?.in.easing ?? 'ease-out' } }, skipHistoryForWrite());
     },
-    [selectedClip, updateClipAnimation]
+    [selectedClip, updateClipAnimation, skipHistoryForWrite]
   );
 
   const handleAnimationInEasingChange = useCallback(
@@ -358,9 +363,9 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleAnimationOutDurationChange = useCallback(
     (duration: number) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { out: { type: selectedClip.animation?.out.type ?? 'none', duration, easing: selectedClip.animation?.out.easing ?? 'ease-in' } });
+      updateClipAnimation(selectedClip.id, { out: { type: selectedClip.animation?.out.type ?? 'none', duration, easing: selectedClip.animation?.out.easing ?? 'ease-in' } }, skipHistoryForWrite());
     },
-    [selectedClip, updateClipAnimation]
+    [selectedClip, updateClipAnimation, skipHistoryForWrite]
   );
 
   const handleAnimationOutEasingChange = useCallback(

@@ -586,8 +586,8 @@ export interface EditorState {
   updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => void;
   updateClipBlendMode: (clipId: string, blendMode: BlendMode) => void;
   updateClipEffects: (clipId: string, effects: Partial<ClipEffects>, skipHistory?: boolean) => void;
-  updateClipTransition: (clipId: string, transition: Partial<Transition>) => void;
-  updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>) => void;
+  updateClipTransition: (clipId: string, transition: Partial<Transition>, skipHistory?: boolean) => void;
+  updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>, skipHistory?: boolean) => void;
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => void;
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => void;
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => void;

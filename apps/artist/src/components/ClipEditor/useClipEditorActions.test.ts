@@ -523,7 +523,7 @@ describe('useClipEditorActions appearance', () => {
     act(() => result.current.handleTransitionDurationChange(0.75))
 
     expect(spies.updateClipTransition).toHaveBeenNthCalledWith(1, clip.id, { type: 'dissolve' })
-    expect(spies.updateClipTransition).toHaveBeenNthCalledWith(2, clip.id, { duration: 0.75 })
+    expect(spies.updateClipTransition).toHaveBeenNthCalledWith(2, clip.id, { duration: 0.75 }, false)
     expect(clipNow(clip.id).transition).toMatchObject({ type: 'dissolve', duration: 0.75 })
   })
 
@@ -591,7 +591,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       in: { type: 'none', duration: 1.1, easing: 'ease-out' },
-    })
+    }, false)
   })
 
   it('fills the out duration change from the handler\'s own fallbacks on a fresh clip', () => {
@@ -602,7 +602,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       out: { type: 'none', duration: 1.1, easing: 'ease-in' },
-    })
+    }, false)
   })
 
   it('carries the clip\'s existing in duration and easing through a type change', () => {
@@ -636,7 +636,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       in: { type: 'fade', duration: 1.25, easing: 'linear' },
-    })
+    }, false)
     expect(clipNow(clip.id).animation?.in).toMatchObject({ type: 'fade', duration: 1.25 })
   })
 
@@ -666,7 +666,7 @@ describe('useClipEditorActions animation', () => {
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
       out: { type: 'fade', duration: 0.9, easing: 'linear' },
-    })
+    }, false)
     expect(clipNow(clip.id).animation?.out).toMatchObject({ duration: 0.9 })
   })
 

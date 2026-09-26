@@ -242,4 +242,55 @@ describe('an inspector slider drag and the undo stack', () => {
 
     expect(past() - before).toBe(2)
   })
+  it('records one entry for an animation duration drag', async () => {
+    const { clip } = await selectedClipEditor()
+    // The duration row only exists once a preset other than `none` is chosen.
+    store().updateClipAnimation(clip.id, {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+    })
+    const before = past()
+
+    drag(rowControl('Duration'), [0.6, 0.7, 0.8, 0.9, 1])
+
+    expect(clipNow().animation?.in.duration).toBe(1)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a bare change on an animation duration slider', async () => {
+    const { clip } = await selectedClipEditor()
+    store().updateClipAnimation(clip.id, {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+    })
+    const before = past()
+
+    slide(rowControl('Duration'), 2)
+
+    expect(clipNow().animation?.in.duration).toBe(2)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a transition duration drag', async () => {
+    const { user, clip } = await selectedClipEditor()
+    // Same as Animation: `none` hides the duration row.
+    store().updateClipTransition(clip.id, { type: 'fade' })
+    await openSection(user, 'Transition Out')
+    const before = past()
+
+    drag(rowControl('Duration'), [0.6, 0.7, 0.8, 0.9, 1])
+
+    expect(clipNow().transition?.duration).toBe(1)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a bare change on the transition duration slider', async () => {
+    const { user, clip } = await selectedClipEditor()
+    store().updateClipTransition(clip.id, { type: 'fade' })
+    await openSection(user, 'Transition Out')
+    const before = past()
+
+    slide(rowControl('Duration'), 2)
+
+    expect(clipNow().transition?.duration).toBe(2)
+    expect(past() - before).toBe(1)
+  })
 })
