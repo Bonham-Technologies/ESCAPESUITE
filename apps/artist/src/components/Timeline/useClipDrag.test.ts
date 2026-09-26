@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import { act, renderHook } from '@testing-library/react'
 import type React from 'react'
 import { useClipDrag, type ClipDragDeps } from './useClipDrag'
+import type { Clip } from '../../store/types'
 import { useEditorStore } from '../../store/projectStore'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import { setRect } from '../../test/doubles/layout'
@@ -596,5 +597,182 @@ describe('useClipDrag and the undo stack', () => {
     expect(theClip('clip1').timelinePosition).toBe(4)
     expect(theClip('clip2').timelinePosition).toBe(8)
     expect(past() - before).toBe(1)
+  })
+})
+
+// ESCSUITE-80. A multi-selection's drop was gated on `deltaTime !== 0` and
+// committed with a hard-coded row delta of 0, so it got both cross-track cases
+// wrong. A group dragged to another row at the *same time* fell through to the
+// single-clip commit below and moved the clip the pointer held and nothing
+// else, silently splitting the selection; a diagonal drag took the bulk path
+// and moved every clip in time and none of them in row.
+//
+// The commit is now gated on either delta, and the group's veto is
+// all-or-nothing: if any member would land off the stack or on top of another
+// clip, the drop writes nothing. It is silent, exactly like the single-clip
+// veto one branch down — neither raises the app's notice.
+describe('useClipDrag committing a multi-selection across rows', () => {
+  /** How many undo entries the stack holds right now. */
+  const past = () => useEditorStore.getState().history.past.length
+
+  beforeEach(() => {
+    store().setSnapEnabled(false)
+  })
+
+  /** Grab any clip at `GRAB` px from its left edge and let the effect bind. */
+  function grab(result: { current: ReturnType<typeof useClipDrag> }, clip: Clip) {
+    const el = clipElement(clip.timelinePosition, clip.duration)
+    act(() => {
+      result.current.handleClipMouseDown(
+        press(el, LEFT + clip.timelinePosition * PPS + GRAB),
+        clip
+      )
+    })
+  }
+
+  it('takes every selected clip to the new row when the drop changed no time', () => {
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+    const before = past()
+
+    move(pointerFor(2), 80)
+    release()
+
+    expect(actions.moveSelectedClips).toHaveBeenCalledWith(0, 1)
+    expect(actions.moveClipToTrack).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackB, timelinePosition: 2 })
+    expect(theClip('clip2')).toMatchObject({ trackId: trackB, timelinePosition: 6 })
+    expect(past() - before).toBe(1)
+  })
+
+  it('takes every selected clip to the new row and the new time at once', () => {
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+    const before = past()
+
+    move(pointerFor(4), 80)
+    release()
+
+    expect(actions.moveSelectedClips).toHaveBeenCalledWith(2, 1)
+    expect(theClip('clip1')).toMatchObject({ trackId: trackB, timelinePosition: 4 })
+    expect(theClip('clip2')).toMatchObject({ trackId: trackB, timelinePosition: 8 })
+    expect(past() - before).toBe(1)
+  })
+
+  it('undoes a diagonal group drag in one step', () => {
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+
+    move(pointerFor(4), 80)
+    release()
+
+    // Both halves of the drop really happened to both clips, so the undo below
+    // cannot pass by having moved nothing in the first place.
+    expect(theClip('clip1')).toMatchObject({ trackId: trackB, timelinePosition: 4 })
+    expect(theClip('clip2')).toMatchObject({ trackId: trackB, timelinePosition: 8 })
+
+    store().undo()
+
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(theClip('clip2')).toMatchObject({ trackId: trackA, timelinePosition: 6 })
+  })
+
+  it('lets the group slide over ground one of its own members is vacating', () => {
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+
+    // clip1 lands on 6s-8s, which is exactly where clip2 is standing — and
+    // clip2 is moving out of it in the same write.
+    move(pointerFor(6))
+    release()
+
+    expect(actions.moveSelectedClips).toHaveBeenCalledWith(4, 0)
+    expect(theClip('clip1').timelinePosition).toBe(6)
+    expect(theClip('clip2').timelinePosition).toBe(10)
+  })
+
+  it('refuses the whole drop when a member would fall off the bottom of the stack', () => {
+    addClip('clip3', 2, 2, trackB)
+    store().selectClipsInRange(['clip1', 'clip3'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+    const before = past()
+
+    move(pointerFor(4), 80)
+    release()
+
+    expect(actions.moveSelectedClips).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(theClip('clip3')).toMatchObject({ trackId: trackB, timelinePosition: 2 })
+    expect(past() - before).toBe(0)
+  })
+
+  it('refuses the whole drop when a member would fall off the top of the stack', () => {
+    addClip('clip3', 2, 2, trackB)
+    store().selectClipsInRange(['clip1', 'clip3'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip3'))
+    const before = past()
+
+    move(pointerFor(4), 10)
+    release()
+
+    expect(actions.moveSelectedClips).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(theClip('clip3')).toMatchObject({ trackId: trackB, timelinePosition: 2 })
+    expect(past() - before).toBe(0)
+  })
+
+  it('refuses the whole drop when a member that is not the dragged clip would overlap', () => {
+    // Nothing is in clip1's way on track B; clip2's landing spot is taken.
+    addClip('clip3', 6, 2, trackB)
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+    const before = past()
+
+    move(pointerFor(2), 80)
+    release()
+
+    expect(actions.moveSelectedClips).not.toHaveBeenCalled()
+    expect(actions.moveClipToTrack).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(theClip('clip2')).toMatchObject({ trackId: trackA, timelinePosition: 6 })
+    expect(past() - before).toBe(0)
+  })
+
+  it('refuses a drop onto a row that has left the timeline mid-drag', () => {
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+
+    move(pointerFor(2), 80)
+    act(() => {
+      store().removeTrack(trackB)
+    })
+    const before = past()
+
+    release()
+
+    expect(actions.moveSelectedClips).not.toHaveBeenCalled()
+    expect(actions.moveClipToTrack).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ trackId: trackA, timelinePosition: 2 })
+    expect(past() - before).toBe(0)
+  })
+
+  it('commits nothing when a multi-selection is released where it was picked up', () => {
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grab(result, theClip('clip1'))
+
+    release()
+
+    expect(actions.moveSelectedClips).not.toHaveBeenCalled()
+    expect(actions.moveClipToTrack).not.toHaveBeenCalled()
+    expect(actions.setClipTimelinePosition).not.toHaveBeenCalled()
   })
 })

@@ -7,7 +7,15 @@
 // store, so the timeline's geometry and drag handlers can import them without
 // pulling the store module into their graph. `projectStore.ts` re-exports all three
 // for the callers that have always reached them through it.
-import type { Clip } from './types';
+//
+// `trackIndexDelta` and `canMoveSelectedClips` (ESCSUITE-80) are the same kind of
+// thing one level up: the two questions a *multi-selection's* drop asks before it
+// commits — how many rows the gesture moved, and whether every clip in the group
+// can take that move. They are here rather than in the drag hook because they are
+// arithmetic over clips and tracks with no DOM and no store in them, and because
+// they are answers about `selectionSlice.moveSelectedClips` — the action they
+// guard — whose index space they share.
+import type { Clip, Track } from './types';
 
 // Get snap points from all clip edges
 export function getSnapPoints(clips: Clip[], excludeClipId?: string): number[] {
@@ -64,4 +72,109 @@ export function wouldOverlap(
   }
 
   return false;
+}
+
+/**
+ * The timeline's track ids in the order `selectionSlice.moveSelectedClips`
+ * indexes them: ascending `index`, which is bottom-to-top on screen (the
+ * timeline draws the highest index at the top). The two helpers below are its
+ * only callers, and they exist to agree with that action's arithmetic.
+ */
+function orderedTrackIds(tracks: Track[]): string[] {
+  return [...tracks].sort((a, b) => a.index - b.index).map((track) => track.id);
+}
+
+/**
+ * How many rows a drop moved the clip the pointer was holding, in
+ * `moveSelectedClips`' index space — or **null** when either row is not on the
+ * timeline, which a caller must refuse outright rather than read as "no row
+ * change". Reachable: a track removed while a drag over it is live.
+ */
+export function trackIndexDelta(
+  tracks: Track[],
+  fromTrackId: string,
+  toTrackId: string
+): number | null {
+  const order = orderedTrackIds(tracks);
+  const from = order.indexOf(fromTrackId);
+  const to = order.indexOf(toTrackId);
+  if (from === -1 || to === -1) return null;
+  return to - from;
+}
+
+/** A move `moveSelectedClips` would make, asked about before it is made. */
+export interface BulkMove {
+  /** Every clip on the timeline — the movers and the ones they could land on. */
+  clips: Clip[];
+  /** Every track, for the row arithmetic and the edges of the stack. */
+  tracks: Track[];
+  /** Which clips are moving. */
+  selectedClipIds: ReadonlySet<string>;
+  /** Seconds every member moves along the timeline. */
+  deltaTime: number;
+  /** Rows every member moves, in `orderedTrackIds` space. */
+  deltaTrack: number;
+}
+
+/**
+ * Whether **every** selected clip can take the move — so the caller can commit
+ * all of it or none of it.
+ *
+ * Three ways a member refuses, matching the single-clip drop's own veto one
+ * rung down in `useClipDrag`: its current row is not on the timeline, the row
+ * it would land on is off the top or the bottom of the stack, or its landing
+ * spot is taken. A member's *old* placement is never in the way — the group
+ * vacates it in the same write — so a selection sliding along its own run
+ * never vetoes itself.
+ *
+ * There is no audio-versus-video row check here, and that is not an omission:
+ * ARTIST's `Track` has no kind. A clip is audio because its *source* media is
+ * (`TimelineTrack` reads `sourceMedia?.mediaType`), and any clip may sit on any
+ * track — which is exactly what the single-clip drop allows too.
+ *
+ * Positions are computed the way `moveSelectedClips` computes them, the
+ * `Math.max(0, …)` clamp included, so what is checked is what would be written.
+ */
+export function canMoveSelectedClips({
+  clips,
+  tracks,
+  selectedClipIds,
+  deltaTime,
+  deltaTrack,
+}: BulkMove): boolean {
+  const order = orderedTrackIds(tracks);
+  const trackIndex = new Map(order.map((id, index) => [id, index]));
+
+  /** The clips nothing is moving, and then each member as it is placed. */
+  const settled: Clip[] = [];
+  const moved: Clip[] = [];
+
+  for (const clip of clips) {
+    if (!selectedClipIds.has(clip.id)) {
+      settled.push(clip);
+      continue;
+    }
+
+    const from = trackIndex.get(clip.trackId);
+    if (from === undefined) return false;
+    const to = from + deltaTrack;
+    if (to < 0 || to >= order.length) return false;
+
+    moved.push({
+      ...clip,
+      trackId: order[to],
+      timelinePosition: Math.max(0, clip.timelinePosition + deltaTime),
+    });
+  }
+
+  for (const clip of moved) {
+    // No `excludeClipId`: a member's own old placement is not in `settled` — it
+    // is in `moved` — so there is nothing of its own for it to collide with.
+    if (wouldOverlap(settled, clip.trackId, clip.timelinePosition, clip.duration)) {
+      return false;
+    }
+    settled.push(clip);
+  }
+
+  return true;
 }

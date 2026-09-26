@@ -22,6 +22,18 @@
 // the second passes `skipHistory`, the shape `updateClip` and `shiftClipsAfter`
 // already carry.
 //
+// **A multi-selection moves in rows as well as in time, all of it or none of
+// it** (ESCSUITE-80). The bulk branch used to be gated on `deltaTime !== 0` and
+// to pass a hard-coded row delta of 0, which got both cross-track cases wrong:
+// a group dragged to another row at the same time fell through to the
+// single-clip commit and moved the clip the pointer held and nothing else —
+// splitting the group silently — and a diagonal drag moved every clip in time
+// and none of them in row. The commit now carries the real row delta and asks
+// `canMoveSelectedClips` first, so a drop that any member could not take
+// commits nothing at all. Like the single-clip veto below it, a refused drop is
+// silent: the clip springs back to where it was picked up and no notice is
+// raised.
+//
 // **One listener pair, one measurement, one snap array — per gesture, not per
 // pointer frame.** The listeners go through `useDocumentListener`, whose
 // `enabled` flag is `dragState !== null`: a boolean that flips twice a gesture,
@@ -36,7 +48,12 @@
 import type * as React from 'react';
 import { useCallback, useRef, useState, type RefObject } from 'react';
 import { useDocumentListener } from '../../hooks/useDocumentListener';
-import { getSnapPoints, wouldOverlap } from '../../store/timelineSnapping';
+import {
+  canMoveSelectedClips,
+  getSnapPoints,
+  trackIndexDelta,
+  wouldOverlap,
+} from '../../store/timelineSnapping';
 import type { Clip, ToolType, Track } from '../../store/types';
 import { pixelsToTime } from '../../utils/timeUtils';
 import { getSplitOffset, pointerTime, snapDragPosition } from './timelineGeometry';
@@ -63,6 +80,12 @@ export interface ClipDragDeps {
   activeTool: ToolType;
   setSelectedClipId: (id: string | null) => void;
   toggleClipSelection: (clipId: string) => void;
+  /**
+   * The store's `moveSelectedClips`. Both deltas are real (ESCSUITE-80): it
+   * moves every selected clip inside one `set` with one history push, rows
+   * included, so a group drag stays one undo entry however many clips and rows
+   * it crosses.
+   */
   moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
   /**
    * The store's `setClipTimelinePosition`. The trailing `skipHistory` is
@@ -175,9 +198,31 @@ export function useClipDrag({
       if (clip) {
         const deltaTime = drag.currentPosition - drag.originalPosition;
 
-        // Bulk drag: if dragged clip is part of multi-selection, move all selected clips
-        if (selectedClipIds.has(drag.clipId) && selectedClipIds.size > 1 && deltaTime !== 0) {
-          moveSelectedClips(deltaTime, 0);
+        // Bulk drag: the dragged clip is part of a multi-selection, so the
+        // whole selection moves — in time, across rows, or both (ESCSUITE-80).
+        if (selectedClipIds.has(drag.clipId) && selectedClipIds.size > 1) {
+          const deltaTrack = trackIndexDelta(
+            tracks,
+            drag.originalTrackId,
+            drag.currentTrackId
+          );
+          if (
+            // A drop onto a row that left the timeline mid-drag: refused whole,
+            // like any other row the selection cannot take. Reading it as "no
+            // row change" would commit the time half of a move the user aimed
+            // somewhere else.
+            deltaTrack !== null &&
+            // A release where the drag began writes nothing — the same "did
+            // anything actually move?" gate the single-clip commit applies to
+            // each of its two writes.
+            (deltaTime !== 0 || deltaTrack !== 0) &&
+            // All or nothing. One member off the stack or onto another clip
+            // vetoes the drop entire, rather than the group arriving with some
+            // of its clips stacked up against the edge.
+            canMoveSelectedClips({ clips, tracks, selectedClipIds, deltaTime, deltaTrack })
+          ) {
+            moveSelectedClips(deltaTime, deltaTrack);
+          }
         } else {
           // Single clip move
           // Check for overlaps before committing
