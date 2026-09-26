@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.11.3
+
+### Patch Changes
+
+- 98bd2f7: Leaving the recorder while it is still setting up no longer leaves codecs, outputs and an
+  audio graph behind, and no longer reports a failure for a recording that never existed.
+  
+  `WebCodecsRecorder.initialize()` awaits half a dozen times — the capture `<video>` starting,
+  the AudioContext resuming, the muxer's `Output.start()`, each codec's `configure()`, each
+  companion pipeline — and a take can be thrown away inside any one of those awaits: closing or
+  navigating away from the recorder calls `dispose()` synchronously while the start it is parked
+  on carries on underneath, and so does the recorder itself when the capture ends mid-setup. The
+  teardown had already run and cleared its registries by the time the parked step resolved, so
+  everything setup went on to build afterwards was built into a recorder nothing would ever tear
+  down again: a second AudioContext with its own node graph, up to four Mediabunny outputs
+  holding their encoders and their targets open, up to five codecs each holding a hardware
+  encoder session, and a capture-track listener that could no longer be removed. Setup then
+  walked into one of the fields the teardown had nulled and failed — and the failure was reported
+  to the user as "The recording could not be started" for a take they had already walked away
+  from. The level meters got one stray zeroed reading pushed at the app on the way past, which is
+  a whole re-render on behalf of a recording that no longer existed.
+  
+  Setting up now stops where it stands: the teardown raises a flag, every await in the setup path
+  is followed by a check, and whatever the resolving step produced is released — the codec
+  closed, the output cancelled — through the same registries a cancelled take uses, so the
+  recorder's conservation laws (every codec closed, every started output cancelled or finalized,
+  every source node disconnected) hold for this exit too. Level monitoring is now started from
+  outside that path, so it cannot be reached at all once a take has been disposed. `initialize()`
+  resolves quietly rather than failing, and the start path drops a countdown it can no longer run
+  — a capture stopped during setup used to leave a 3-2-1 counting down over a recorder that was
+  already gone — and withholds the notice, so nothing is said about a recording that never
+  existed. Nothing changes for a take that is recorded, stopped and saved.
+
 ## 2.11.0
 
 ### Patch Changes
