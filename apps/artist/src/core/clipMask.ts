@@ -28,6 +28,19 @@ export type MaskPath =
   | { shape: 'rounded'; x: number; y: number; width: number; height: number; radius: number };
 
 /**
+ * The drawn box itself — this module's way of saying **there is nothing to
+ * mask**, built only where it is actually returned.
+ *
+ * A function rather than one `const` at the top of `maskPathFor`, because that
+ * const allocated a `MaskPath` every circle and every rounded mask threw away,
+ * and Task 3 calls `maskPathFor` twice per clip per frame (once for the mask,
+ * once for the stroke).
+ */
+function rectPath(x: number, y: number, width: number, height: number): MaskPath {
+  return { shape: 'rect', x, y, width, height };
+}
+
+/**
  * The outline a mask of this kind describes inside the box `(x, y, width,
  * height)` — the rectangle the clip's picture is about to be drawn into.
  *
@@ -50,12 +63,10 @@ export function maskPathFor(
   width: number,
   height: number
 ): MaskPath {
-  const rect = { shape: 'rect' as const, x, y, width, height };
-
   // A clip at scale 0 has no outline. A circle of radius 0 would clip the whole
   // frame away, which looks like the renderer breaking rather than like a clip
   // nobody can see.
-  if (width <= 0 || height <= 0) return rect;
+  if (width <= 0 || height <= 0) return rectPath(x, y, width, height);
 
   const shorter = Math.min(width, height);
 
@@ -72,10 +83,12 @@ export function maskPathFor(
     const corner = Math.min((radius ?? 0) * shorter, shorter / 2);
     // A rounded rectangle with square corners is a rectangle: nothing to mask,
     // and nothing for a stroke to trace but the box itself.
-    return corner > 0 ? { shape: 'rounded', x, y, width, height, radius: corner } : rect;
+    return corner > 0
+      ? { shape: 'rounded', x, y, width, height, radius: corner }
+      : rectPath(x, y, width, height);
   }
 
-  return rect;
+  return rectPath(x, y, width, height);
 }
 
 /**

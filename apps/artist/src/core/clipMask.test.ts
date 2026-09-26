@@ -127,13 +127,27 @@ describe('applyClipMask', () => {
     expect(ctx.calls).toEqual([])
   })
 
+  it('touches the context not at all for a box with no area', () => {
+    applyClipMask(asCtx(), { kind: 'circle' }, BOX.x, BOX.y, 0, 0)
+
+    // maskPathFor's zero-area arm, reached through the call site rather than
+    // asserted on in isolation: a circle inscribed in nothing has radius 0, and
+    // clipping to that would take the whole frame away.
+    expect(ctx.calls).toEqual([])
+  })
+
   it('builds the rounded path from arcTo when the browser has no roundRect', () => {
     // Safari gained roundRect in 16.4 and `pnpm test:e2e:browsers` runs WebKit.
     // A throw inside a preview frame kills the whole frame, not just the mask,
     // so this is a correctness path rather than an optimisation — and it costs
     // five calls instead of one, which is why the perf ceilings are measured
     // with roundRect present.
-    const withoutRoundRect = { ...(ctx as object) } as RecordingCanvasRenderingContext2D
+    //
+    // A second double of its own, rather than a spread copy of `ctx`: a spread
+    // only records into `ctx.calls` because the double happens to be a plain
+    // object literal sharing that array by reference, which would break
+    // confusingly the day the double grows a class or an accessor.
+    const withoutRoundRect = createRecordingContext()
     delete (withoutRoundRect as unknown as Record<string, unknown>).roundRect
 
     applyClipMask(
@@ -145,7 +159,7 @@ describe('applyClipMask', () => {
       BOX.height
     )
 
-    expect(ctx.calls.map((c) => c.method)).toEqual([
+    expect(withoutRoundRect.calls.map((c) => c.method)).toEqual([
       'beginPath',
       'moveTo',
       'arcTo',
@@ -156,8 +170,8 @@ describe('applyClipMask', () => {
     ])
     // Clockwise from the top edge, each corner turning into the next: the same
     // rectangle roundRect(50, 30, 200, 100, 20) describes.
-    expect(ctx.argsFor('moveTo')[0]).toEqual([70, 30])
-    expect(ctx.argsFor('arcTo')).toEqual([
+    expect(withoutRoundRect.argsFor('moveTo')[0]).toEqual([70, 30])
+    expect(withoutRoundRect.argsFor('arcTo')).toEqual([
       [250, 30, 250, 130, 20],
       [250, 130, 50, 130, 20],
       [50, 130, 50, 30, 20],
