@@ -1,6 +1,12 @@
-// The lock's four questions, over the clips and tracks they are handed (ESCSUITE-84).
+// The lock's five questions, over the clips and tracks they are handed (ESCSUITE-84).
 import { describe, it, expect } from 'vitest'
-import { anyClipOnLockedTrack, clipOnLockedTrack, isTrackLocked, lockedTrackIds } from './trackLock'
+import {
+  anyClipOnLockedTrack,
+  clipOnLockedTrack,
+  isTrackLocked,
+  lockedSourceVideoIds,
+  lockedTrackIds,
+} from './trackLock'
 import type { Clip, Track } from './types'
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from './types'
 
@@ -45,5 +51,18 @@ describe('anyClipOnLockedTrack', () => {
   })
   it('takes a Set as well as an array', () => {
     expect(anyClipOnLockedTrack(clips, tracks, new Set(['b']))).toBe(true)
+  })
+})
+
+describe('lockedSourceVideoIds', () => {
+  it('names the media a clip on a locked track uses', () => {
+    expect([...lockedSourceVideoIds(clips, tracks)]).toEqual(['v'])
+  })
+  it('is empty when no track is locked at all', () => {
+    expect(lockedSourceVideoIds(clips, [track('free', false), track('held', false)]).size).toBe(0)
+  })
+  it('is empty when the locked track holds only overlay clips, which use no media', () => {
+    const overlay: Clip = { ...clip('c', 'held'), sourceVideoId: '' }
+    expect(lockedSourceVideoIds([clip('a', 'free'), overlay], tracks).size).toBe(0)
   })
 })

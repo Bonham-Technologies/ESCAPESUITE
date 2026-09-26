@@ -736,6 +736,28 @@ describe('projectStore remaining behaviours', () => {
       store().shiftClipsAfter(free, 1, 2)
       expect(clipsRef().find((c) => c.id === 'f2')!.timelinePosition).toBe(6)
     })
+    it('refuses to remove a source video a clip on it uses', () => {
+      const before = clipsRef(); const entries = past()
+
+      store().removeSourceVideo(video.id)
+
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toContain(video.id)
+    })
+    it('still removes a source video only unlocked clips use', () => {
+      store().addSourceVideo({ ...video, id: 'video2' })
+      store().addClipToTimeline(
+        { id: 'f2', sourceVideoId: 'video2', name: 'f2', startTime: 0, endTime: 2, duration: 2 },
+        free,
+        8
+      )
+
+      store().removeSourceVideo('video2')
+
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual([video.id])
+      expect(clipsRef().some((c) => c.id === 'f2')).toBe(false)
+    })
     it('still edits a clip on an unlocked track while another track is locked', () => {
       store().updateClipBlendMode('f1', 'multiply')
       expect(clipsRef().find((c) => c.id === 'f1')!.blendMode).toBe('multiply')

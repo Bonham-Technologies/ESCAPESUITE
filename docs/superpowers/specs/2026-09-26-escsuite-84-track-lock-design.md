@@ -67,6 +67,7 @@ refused action `return state`.
 
 | Slice | Action | Refuses when |
 |---|---|---|
+| project | `removeSourceVideo` | a clip on a locked track uses the source (all-or-nothing: the source and every clip stay) |
 | clip | `addClipToTimeline` | an explicit `trackId` is locked (no `trackId`: `findEmptyTrack` skips locked) |
 | clip | `placeTakeOnTimeline` | never — the primary goes through `findEmptyTrack`, companions to new tracks |
 | clip | `removeClipFromTimeline`, `rippleDeleteClip`, `updateClip`, `splitClip`, `setClipTimelinePosition`, `updateClipTransform`, `updateClipBlendMode`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`, `duplicateClip` | the clip is on a locked track |

@@ -5,6 +5,7 @@ import { getStorageEstimate, clearAllVideos, deleteVideo } from '../core/storage
 import { getFrameCache } from '../core/frameCache';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
+import { lockedSourceVideoIds } from '../store/trackLock';
 import styles from './VideoUploader.module.css';
 
 interface UploadProgress {
@@ -46,8 +47,18 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
 
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const clips = useEditorStore((state) => state.project.timeline.clips);
+  const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addSourceVideo = useEditorStore((state) => state.addSourceVideo);
   const removeSourceVideo = useEditorStore((state) => state.removeSourceVideo);
+
+  /**
+   * The media a clip on a locked track uses, which nothing here may delete
+   * (ESCSUITE-84). The store refuses `removeSourceVideo` for it, but clear-all
+   * wipes the blobs out of IndexedDB *first* — a refusal after that would
+   * leave the locked clip pointing at bytes that are gone — so clear-all is
+   * all-or-nothing here instead.
+   */
+  const lockedMedia = useMemo(() => lockedSourceVideoIds(clips, tracks), [clips, tracks]);
 
   // Calculate which videos are unused (not referenced by any clip)
   const { unusedVideos, unusedSize } = useMemo(() => {
@@ -118,6 +129,7 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
 
   // Clear all storage (IndexedDB + in-memory state)
   const handleClearAllStorage = useCallback(async () => {
+    if (lockedMedia.size > 0) return; // ESCSUITE-84
     if (confirm('Clear ALL stored media? This cannot be undone.')) {
       try {
         await clearAllVideos();
@@ -132,7 +144,7 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
         console.error('Failed to clear storage:', e);
       }
     }
-  }, [sourceVideos, removeSourceVideo, refreshStorageInfo]);
+  }, [lockedMedia, sourceVideos, removeSourceVideo, refreshStorageInfo]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const allFiles = Array.from(files);
@@ -320,7 +332,10 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
               <button
                 className={`${styles.storageClearButton} ${styles.clearAll}`}
                 onClick={handleClearAllStorage}
-                title="Clear all stored media and cache"
+                disabled={lockedMedia.size > 0}
+                title={lockedMedia.size > 0
+                  ? 'Media is used by a clip on a locked track'
+                  : 'Clear all stored media and cache'}
               >
                 Clear All
               </button>
@@ -384,8 +399,14 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
 // Check if media dimensions differ significantly from project resolution
 export function VideoLibrary() {
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
+  const clips = useEditorStore((state) => state.project.timeline.clips);
+  const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addClipToTimeline = useEditorStore((state) => state.addClipToTimeline);
   const removeSourceVideo = useEditorStore((state) => state.removeSourceVideo);
+
+  // The media the store will refuse to remove, because a clip on a locked
+  // track uses it (ESCSUITE-84) — the row says so rather than doing nothing.
+  const lockedMedia = useMemo(() => lockedSourceVideoIds(clips, tracks), [clips, tracks]);
 
   const handleAddToTimeline = useCallback(
     (media: typeof sourceVideos[0]) => {
@@ -434,6 +455,7 @@ export function VideoLibrary() {
         {sourceVideos.map((media) => {
           const isImage = media.mediaType === 'image';
           const isAudio = media.mediaType === 'audio';
+          const locked = lockedMedia.has(media.id);
           return (
             <div key={media.id} className={styles.videoItem}>
               <div className={styles.thumbnail}>
@@ -490,7 +512,8 @@ export function VideoLibrary() {
                 <button
                   className={styles.removeButton}
                   onClick={() => handleRemoveVideo(media.id)}
-                  title="Remove media"
+                  disabled={locked}
+                  title={locked ? 'Used by a clip on a locked track' : 'Remove media'}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18" />

@@ -29,6 +29,7 @@ import type { ClipTransform, TextOverlayData, ShapeOverlayData } from '../../sto
 import * as geometry from './previewGeometry';
 import * as hitTest from './hitTest';
 import { clipsIntersectingMarquee, measureDragStart, textClipAtPoint } from './dragGeometry';
+import { clipOnLockedTrack } from '../../store/trackLock';
 import { getCursorForMode } from './cursor';
 import type { DragMode, ManipulableClipType } from './types';
 
@@ -605,7 +606,9 @@ export function useTransformHandles({
     const clip = textClipAtPoint(
       mouseX, mouseY, canvas, clips, tracks, currentTime, sourceVideos, projectSize
     );
-    if (clip) {
+    // A locked row's clip would open the editor and then lose every keystroke
+    // to the store's refusal, silently — so it does not open (ESCSUITE-84).
+    if (clip && !clipOnLockedTrack(clips, tracks, clip.id)) {
       e.preventDefault();
       e.stopPropagation();
       setEditingTextClipId(clip.id);

@@ -36,6 +36,27 @@ export function clipOnLockedTrack(clips: Clip[], tracks: Track[], clipId: string
 }
 
 /**
+ * Ids of the source videos a clip on a locked track uses.
+ *
+ * Removing a source video removes every clip that references it, and a clip on
+ * a locked track cannot be removed — so this is the media the library has to
+ * hold on to. Asked once and answered in one place, for the store's refusal and
+ * for the two buttons in the media library that say why they are disabled.
+ *
+ * An overlay clip carries `sourceVideoId: ''` and uses no media, so it names
+ * nothing here however locked its row is.
+ */
+export function lockedSourceVideoIds(clips: Clip[], tracks: Track[]): Set<string> {
+  const used = new Set<string>();
+  const locked = lockedTrackIds(tracks);
+  if (locked.size === 0) return used;
+  for (const clip of clips) {
+    if (clip.sourceVideoId !== '' && locked.has(clip.trackId)) used.add(clip.sourceVideoId);
+  }
+  return used;
+}
+
+/**
  * Whether ANY of the named clips sits on a locked track — the all-or-nothing
  * question a group action asks before it touches anything.
  */

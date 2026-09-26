@@ -425,6 +425,28 @@ describe('VideoUploader', () => {
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('kept')
     })
 
+    // ESCSUITE-84: clear-all deletes the BLOBS before it touches the store, so
+    // a store refusal afterwards would leave a locked clip pointing at bytes
+    // that are gone. It is all-or-nothing here instead.
+    it('refuses to clear everything while a clip on a locked track uses media', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      const clip = addClip('clip1', 0, 4)
+      store().updateTrack(clip.trackId, { locked: true })
+      render(<VideoUploader onProjectFile={onProjectFile} />)
+
+      const button = await screen.findByTitle('Media is used by a clip on a locked track')
+      expect(button).toBeDisabled()
+
+      // The handler refuses too, however the click reaches it.
+      fireEvent.click(button)
+      await act(async () => { await Promise.resolve() })
+
+      expect(globalThis.confirm).not.toHaveBeenCalled()
+      expect(store().sourceVideos).toHaveLength(1)
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
+    })
+
     it('hides the clear-all button when almost nothing is stored', async () => {
       scriptStorage(1024, 500 * MB)
       render(<VideoUploader onProjectFile={onProjectFile} />)
@@ -578,6 +600,30 @@ describe('VideoLibrary', () => {
 
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
     expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('video1')
+  })
+
+  // ESCSUITE-84: removing media takes every clip that uses it, so a clip on a
+  // locked track makes its media un-removable — the store refuses, and the
+  // button says so rather than doing nothing.
+  it('refuses to remove media a clip on a locked track uses', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    const clip = addClip('clip1', 0, 4)
+    store().updateTrack(clip.trackId, { locked: true })
+    render(<VideoLibrary />)
+
+    const button = screen.getByTitle('Used by a clip on a locked track')
+    expect(button).toBeDisabled()
+    expect(screen.queryByTitle('Remove media')).not.toBeInTheDocument()
+  })
+
+  it('still offers to remove media only unlocked clips use', () => {
+    store().addSourceVideo(videoMeta)
+    const clip = addClip('clip1', 0, 4)
+    store().updateTrack(clip.trackId, { locked: false })
+    render(<VideoLibrary />)
+
+    expect(screen.getByTitle('Remove media')).toBeEnabled()
   })
 
   it('keeps the video when the confirmation is declined', async () => {
