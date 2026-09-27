@@ -327,4 +327,103 @@ describe('projectStore remaining behaviours', () => {
       expect(store().keyframePanelState.selectedProperty).toBeNull()
     })
   })
+
+  // ESCSUITE-95: splitClip used to build both halves with `{ ...clip }`, so
+  // both inherited the parent's whole `animation` — same keyframe times
+  // (clip-relative, so the second half replayed from its own start) and the
+  // same in/out presets (so one fade became two, one per half), with
+  // `animation` and `transform` aliased between the two halves.
+  describe('splitClip and keyframes (ESCSUITE-95)', () => {
+    const halves = () => {
+      const clips = store().project.timeline.clips
+      const first = clips.find((c) => c.name.endsWith('(1)'))!
+      const second = clips.find((c) => c.name.endsWith('(2)'))!
+      return { first, second }
+    }
+
+    it('rebases a custom keyframe track instead of copying it onto both halves', () => {
+      addClip('clip1', 0, 10)
+      store().setClipKeyframe('clip1', 'opacity', { time: 0, value: 0, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 1, easing: 'ease-in' })
+
+      store().splitClip('clip1', 5)
+
+      const { first, second } = halves()
+      // First half (0-5s): the fade finished at t=2, well before the cut, so
+      // both original keyframes are kept unchanged and nothing is appended —
+      // the last value already holds to the new end.
+      expect(first.animation!.keyframes.opacity).toEqual([
+        { time: 0, value: 0, easing: 'linear' },
+        { time: 2, value: 1, easing: 'ease-in' },
+      ])
+      // Second half (0-5s, was clip time 5-10): no keyframe of its own left
+      // at or after the cut, so a single synthesised keyframe at its new
+      // start (0) holds the value the fade had already settled on (1) —
+      // NOT the two originals replayed from t=0.
+      expect(second.animation!.keyframes.opacity).toEqual([
+        { time: 0, value: 1, easing: 'ease-in' },
+      ])
+    })
+
+    it('shifts a keyframe that survives past the split and synthesises both boundary values', () => {
+      addClip('clip1', 0, 10)
+      store().setClipKeyframe('clip1', 'x', { time: 0, value: 0, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'x', { time: 4, value: 0.5, easing: 'ease-in' })
+      store().setClipKeyframe('clip1', 'x', { time: 8, value: 1, easing: 'linear' })
+
+      store().splitClip('clip1', 6)
+
+      const { first, second } = halves()
+      expect(first.animation!.keyframes.x).toHaveLength(3)
+      expect(first.animation!.keyframes.x![2]).toMatchObject({ time: 6, easing: 'linear' })
+      expect(first.animation!.keyframes.x![2].value).toBeCloseTo(0.625, 5)
+
+      // Shifted by -6: the keyframe at 8 becomes 2.
+      expect(second.animation!.keyframes.x![1]).toEqual({ time: 2, value: 1, easing: 'linear' })
+      expect(second.animation!.keyframes.x![0].time).toBe(0)
+      expect(second.animation!.keyframes.x![0].value).toBeCloseTo(0.625, 5)
+    })
+
+    it('gives the in-preset to the first half and the out-preset to the second, clearing the other side', () => {
+      addClip('clip1', 0, 10)
+      store().updateClipAnimation('clip1', {
+        in: { type: 'fade', duration: 1, easing: 'ease-out' },
+        out: { type: 'fade', duration: 1, easing: 'ease-in' },
+      })
+
+      store().splitClip('clip1', 5)
+
+      const { first, second } = halves()
+      expect(first.animation!.in.type).toBe('fade')
+      expect(first.animation!.out.type).toBe('none')
+      expect(second.animation!.in.type).toBe('none')
+      expect(second.animation!.out.type).toBe('fade')
+    })
+
+    it('leaves a clip with no animation split as before', () => {
+      addClip('clip1', 0, 10)
+
+      store().splitClip('clip1', 5)
+
+      const { first, second } = halves()
+      expect(first.animation).toBeUndefined()
+      expect(second.animation).toBeUndefined()
+    })
+
+    it('does not alias animation or transform between the two halves', () => {
+      addClip('clip1', 0, 10)
+      store().updateClipAnimation('clip1', { in: { type: 'fade', duration: 1, easing: 'ease-out' } })
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().updateClipTransform('clip1', { x: 0.3 })
+
+      store().splitClip('clip1', 5)
+
+      const { first, second } = halves()
+      expect(first.animation).not.toBe(second.animation)
+      expect(first.transform).not.toBe(second.transform)
+
+      store().updateClipTransform(first.id, { x: 0.9 })
+      expect(store().project.timeline.clips.find((c) => c.id === second.id)!.transform.x).toBe(0.3)
+    })
+  })
 })
