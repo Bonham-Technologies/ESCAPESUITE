@@ -437,6 +437,17 @@ describe('KeyframeGraph', () => {
       expect(value).toBeCloseTo(0.25, 6)
     })
 
+    // ESCSUITE-88: the store would refuse the keyframe, so the graph does not ask
+    // for it. Same point as the unlocked case above, which is the control.
+    it('adds nothing on a double-click while the track is locked', () => {
+      const { container, onAddKeyframe } = renderGraph('opacity', { locked: true })
+      const svg = measureGraph(container)
+
+      fireEvent.doubleClick(svg, { clientX: xForTime(2), clientY: yForUnitValue(0.25) })
+
+      expect(onAddKeyframe).not.toHaveBeenCalled()
+    })
+
     it('accounts for the letterboxing when the svg box is a different shape', () => {
       const { container, onAddKeyframe } = renderGraph('opacity')
       // 1000x200 box: the 500x200 viewBox is drawn at scale 1, centred, so

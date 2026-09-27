@@ -1122,16 +1122,16 @@ take a trailing `skipHistory` (`shiftClipsAfter`, `updateClip`, `setClipTimeline
 `updateClipTransform`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`,
 `setClipKeyframe`, `moveClipKeyframe`, `updateTextOverlayData`, `updateShapeOverlayData`) plus
 `moveClipToTrack` — which takes no flag but is the *first* write of the clip drag's two-write
-commit — therefore return `boolean` (ESCSUITE-88 added a thirteenth for the same reason at one
-remove: `removeClipKeyframe` threads no flag either, but the keyframe graph's `Delete`
-*announces* the removal, so it has to be able to tell a refusal from a write): `true` when they wrote, `false` when the lock guard refused
-(or, `shiftClipsAfter` alone, when the delta was zero and nothing moved). Their guard moves out
-of the `set` updater and in front of it, reading through `get()` the way `addTrack` already
-does, so the action can answer without writing; every updater body is otherwise unchanged, and
-the other locked-track guards — the ones nothing threads a flag through — stay inside their
-updaters as `return state`. The shared doc comment on `EditorState` in `store/types.ts` is the
-contract: **`false` means no state changed and no undo entry was pushed, and a caller passing
-`skipHistory` to a later write must look at it.**
+commit — therefore return `boolean`: `true` when they wrote, `false` when the lock guard refused
+(or, `shiftClipsAfter` alone, when the delta was zero and nothing moved). ESCSUITE-88 added a
+thirteenth, for the same reason at one remove: `removeClipKeyframe` threads no flag either, but
+the keyframe graph's `Delete` *announces* the removal, so it has to be able to tell a refusal
+from a write. Their guard moves out of the `set` updater and in front of it, reading through
+`get()` the way `addTrack` already does, so the action can answer without writing; every updater
+body is otherwise unchanged, and the other locked-track guards — the ones nothing threads a flag
+through — stay inside their updaters as `return state`. The shared doc comment on `EditorState`
+in `store/types.ts` is the contract: **`false` means no state changed and no undo entry was
+pushed, and a caller passing `skipHistory` to a later write must look at it.**
 
 `hooks/useGestureHistory.ts` is the one mechanism that does. `createGestureHistory()` (and the
 `useGestureHistory()` that holds one per component) is `begin` / `resume` / `end` / `commit`,
