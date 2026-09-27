@@ -704,6 +704,20 @@ the preset ownership — and every one is reached from both sides by that functi
 `store/clipSlice.ts`'s `splitClip` gained no branch: it replaced a spread with `cloneClip` and one
 call. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-94 (the export resolution presets
+rescale the project onto the output raster instead of letterboxing or cropping it):
+99.41 / **98.77** / **94.06** / 99.01 against the 99.41 / 98.76 / 94.03 / 99.01 the commit this branch
+was rebased onto measures — statements up a hundredth, branches up three, lines and functions unmoved.
+Measured in one sitting, the base gives 4,243 / 4,512 branches and this branch 4,266 / 4,535:
+twenty-three new branches, twenty-three covered, the same 269 uncovered as before, and the same on
+the other three metrics (statements 7,858 / 7,956 → 7,872 / 7,970, lines 6,989 / 7,030 →
+7,002 / 7,043, functions 1,713 / 1,730 → 1,717 / 1,734 — every denominator grew by exactly what the
+numerator did). The new module `core/outputTransform.ts` is 100% on all four: its two degenerate-size
+guards, the two "exact fit or bar" ternaries in the offset, and `getResolution`'s aspect-source ternary
+are each reached from both sides by the tests that drive a 0×0 project, a taller raster, a wider raster
+and the exact-fit case, and each exporter's `projectResolution && w > 0 && h > 0` clause is evaluated by
+every test that passes a resolution. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -711,7 +725,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.76 | 94.03 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.77 | 94.06 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
