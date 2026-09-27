@@ -558,6 +558,17 @@ in all three states:
   lands in that window, and reporting it as an error would have the controller dispose the muxer
   mid-finalize and lose the recording
 
+That same synchronous `state` flip used to cost `recorder.ts` a correct duration when Stop was
+pressed **while paused** (ESCSUITE-105): `getDuration()` only subtracted the open pause while
+`state === 'paused'`, but `stop()` had already flipped it to `'inactive'` by the time `onstop`
+(and the controller's `cleanup()` read) ran, so the whole open pause counted as recorded time — a
+10s take paused for 60s and then stopped read as 70s. `stop()` now latches
+`pausedDuration += Date.now() - pauseStartTime` itself before calling `mediaRecorder.stop()`, the
+same bookkeeping `resume()` already does, so the paused arm and the stopped arm of `getDuration()`
+agree by construction. `WebCodecsRecorder` never had this bug: its `stop()` leaves
+`isPausedState` untouched, so its own `getDuration()` keeps subtracting the open pause straight
+through finalization.
+
 **A separate-tracks take has up to three companion pipelines, and none of them ends the take.**
 `WebCodecsRecorder` holds `companions: CompanionPipeline[]` — one `kind: 'video'` pipeline for the
 webcam and one `kind: 'audio'` pipeline per audio source the take really has — each with its own

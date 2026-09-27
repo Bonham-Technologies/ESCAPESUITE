@@ -637,7 +637,7 @@ describe('Recorder', () => {
       vi.advanceTimersByTime(60000) // 60 seconds paused, never resumed
 
       let durationAtStop = -1
-      callbacks.onStop.mockImplementation(() => {
+      vi.mocked(callbacks.onStop).mockImplementation(() => {
         durationAtStop = recorder.getDuration()
       })
 
