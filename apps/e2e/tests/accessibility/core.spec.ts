@@ -395,7 +395,9 @@ test.describe('ESCAPEARTIST Accessibility', () => {
       await addToTimeline.click()
       // Just the clip: how many tracks the default project starts with is not
       // this test's business.
-      await expect(page.getByText(/1 clip/)).toBeVisible({ timeout: 15_000 })
+      // Two elements can say "1 clip" (the info bar and the media card's usage
+      // line), so this is not a strict single match.
+      await expect(page.getByText(/1 clip/).first()).toBeVisible({ timeout: 15_000 })
 
       // Select it the way a user does, and prove the inspector is showing a
       // clip rather than its empty state.
