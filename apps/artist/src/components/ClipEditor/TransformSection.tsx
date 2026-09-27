@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { Clip, TextOverlayData, ShapeOverlayData } from '../../store/types';
 import { overlayPositionValue } from './clipEditorModel';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -78,6 +79,12 @@ export function TransformSection({
   sliderGesture,
   disabled,
 }: TransformSectionProps) {
+  // One id for the section, one `<label htmlFor>` per control off it
+  // (ESCSUITE-89). Nothing else about these rows moves — their text, classes
+  // and positions are what they were, because `CollapsibleSection` seeds a
+  // section's open/closed state positionally.
+  const id = useId();
+
   return (
     <CollapsibleSection
       title="Transform"
@@ -94,8 +101,9 @@ export function TransformSection({
     >
       <div className={styles.transformControls}>
         <div className={styles.transformRow}>
-          <label>Pos X</label>
+          <label htmlFor={`${id}-pos-x`}>Pos X</label>
           <input
+            id={`${id}-pos-x`}
             type="range"
             min={0}
             max={1}
@@ -117,8 +125,9 @@ export function TransformSection({
         </div>
 
         <div className={styles.transformRow}>
-          <label>Pos Y</label>
+          <label htmlFor={`${id}-pos-y`}>Pos Y</label>
           <input
+            id={`${id}-pos-y`}
             type="range"
             min={0}
             max={1}
@@ -148,6 +157,14 @@ export function TransformSection({
                 className={`${styles.lockButton} ${scaleLocked ? styles.locked : ''}`}
                 onClick={() => onScaleLockedChange(!scaleLocked)}
                 title={scaleLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+                // ESCSUITE-89: the name says what the control *is* and
+                // `aria-pressed` says what state it is in — "Lock aspect ratio,
+                // pressed". A name that changed with the state would announce
+                // "Unlock aspect ratio, pressed", which contradicts itself. The
+                // `title` still says what a click will do, which is what a
+                // tooltip is for.
+                aria-label="Lock aspect ratio"
+                aria-pressed={scaleLocked}
               >
                 {scaleLocked ? (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -165,8 +182,9 @@ export function TransformSection({
 
             {scaleLocked ? (
               <div className={styles.transformRow}>
-                <label>Scale</label>
+                <label htmlFor={`${id}-scale`}>Scale</label>
                 <input
+                  id={`${id}-scale`}
                   type="range"
                   min={0.1}
                   max={2}
@@ -180,8 +198,9 @@ export function TransformSection({
             ) : (
               <>
                 <div className={styles.transformRow}>
-                  <label>Scale X</label>
+                  <label htmlFor={`${id}-scale-x`}>Scale X</label>
                   <input
+                    id={`${id}-scale-x`}
                     type="range"
                     min={0.1}
                     max={2}
@@ -194,8 +213,9 @@ export function TransformSection({
                 </div>
 
                 <div className={styles.transformRow}>
-                  <label>Scale Y</label>
+                  <label htmlFor={`${id}-scale-y`}>Scale Y</label>
                   <input
+                    id={`${id}-scale-y`}
                     type="range"
                     min={0.1}
                     max={2}
@@ -231,8 +251,9 @@ export function TransformSection({
         )}
 
         <div className={styles.transformRow}>
-          <label>Opacity</label>
+          <label htmlFor={`${id}-opacity`}>Opacity</label>
           <input
+            id={`${id}-opacity`}
             type="range"
             min={0}
             max={1}

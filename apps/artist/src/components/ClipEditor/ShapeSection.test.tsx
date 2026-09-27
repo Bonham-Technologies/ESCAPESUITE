@@ -37,8 +37,14 @@ function slide(input: HTMLInputElement, value: number | string) {
   fireEvent.change(input, { target: { value: String(value) } })
 }
 
-/** The no-fill toggle, which is the only button in the section. */
-const fillToggle = () => screen.getByRole('button', { name: /[⊗⊘]/ })
+/**
+ * The no-fill toggle, which is the only button in the section body.
+ *
+ * Addressed by name, which since ESCSUITE-89 is its `aria-label` — "No fill"
+ * or "Enable fill", whichever it would do next — rather than the ⊗/⊘ glyph it
+ * draws. The glyph is still asserted where it matters, below.
+ */
+const fillToggle = () => screen.getByRole('button', { name: /^(No|Enable) fill$/ })
 
 describe('ShapeSection', () => {
   it('sits inside a Shape section showing the shape type', async () => {

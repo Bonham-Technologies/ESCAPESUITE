@@ -1,3 +1,5 @@
+import { dirname, resolve as resolvePath } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test, expect, type Page } from '@playwright/test'
 import {
   mockGetUserMedia,
@@ -12,7 +14,17 @@ import {
   checkFormLabels,
   checkLinkText,
 } from '../../utils/accessibility'
-import { seedTextClip } from '../../utils/artist'
+import { ARTIST_URL, seedTextClip } from '../../utils/artist'
+
+/**
+ * The same one-second fixture the integration and perf suites import — the
+ * cheapest way to get a *media* clip onto the timeline, which is the only clip
+ * kind whose inspector shows Blend Mode, Mask & Stroke, Effects and Transition.
+ */
+const ARTIST_FIXTURE_MP4 = resolvePath(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../fixtures/headless/source.mp4'
+)
 
 test.describe('ESCAPEPLAN Accessibility', () => {
   test.beforeEach(async ({ page }) => {
@@ -288,6 +300,152 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   test('form inputs have associated labels', async ({ page }) => {
     const { unlabeled } = await checkFormLabels(page)
     expect(unlabeled).toHaveLength(0)
+  })
+
+  /**
+   * The clip inspector, which the audit above never sees.
+   *
+   * `form inputs have associated labels` runs with nothing selected, so the
+   * inspector is its empty state — a prompt and five buttons — and not one of
+   * the panel's twenty-odd controls was ever in front of it. They had no names:
+   * every row was a `<label>Blur</label><input/>` pair with no `htmlFor`.
+   * ESCSUITE-89 named them all, and this is the end-to-end half of that
+   * contract — in a real browser, where the name is the browser's own
+   * computation and axe's, not a test's.
+   *
+   * Run over the three clip kinds whose sections differ: a media clip (the only
+   * one with Blend Mode, Mask & Stroke, Effects and Transition Out), a text
+   * overlay and a shape overlay. Each one's sections are opened first — four
+   * default closed, and a closed section renders none of its controls — and the
+   * dropdowns that hide rows behind a choice are given one, so the conditional
+   * rows are audited too.
+   */
+  test("the clip inspector's controls have associated labels", async ({ page }) => {
+    // A real media import, then three axe passes over a panel of twenty-odd
+    // controls.
+    test.setTimeout(180_000)
+
+    /**
+     * Open every section that is currently closed.
+     *
+     * Addressed by shape rather than by a list of titles: the point is to reach
+     * whatever the panel renders for this clip, and a list here would go stale
+     * the next time a section is added. A section is the element that holds a
+     * collapsible header; it renders its body only while it is open.
+     */
+    const openEverySection = async () => {
+      const sections = page.locator('[class*="section"]:has(> [class*="collapsibleHeader"])')
+      const count = await sections.count()
+      expect(count).toBeGreaterThan(3)
+
+      for (let i = 0; i < count; i++) {
+        const section = sections.nth(i)
+        const body = section.locator('[class*="collapsibleContent"]')
+        if ((await body.count()) === 0) {
+          await section.locator('[class*="collapsibleToggle"]').click()
+          await expect(body).toBeVisible()
+        }
+      }
+    }
+
+    /**
+     * Put the panel back to its empty state, which is the only place the
+     * overlay-creating buttons live.
+     *
+     * Escape is the editor's deselect, and `useAppKeyboardShortcuts` ignores
+     * every key while focus is in an input, a select or a textarea — so focus a
+     * plain button first. A section header is one, and focusing it toggles
+     * nothing.
+     */
+    const deselectClip = async () => {
+      await page.locator('[class*="collapsibleToggle"]').first().focus()
+      await page.keyboard.press('Escape')
+      await expect(page.getByText('Select a clip to edit')).toBeVisible()
+    }
+
+    /** Both audits over whatever the inspector is currently showing. */
+    const auditInspector = async (what: string) => {
+      const { labeled, unlabeled } = await checkFormLabels(page)
+      expect(unlabeled, `unlabeled controls with ${what} selected`).toEqual([])
+      // An empty panel would report no unlabeled controls either, so prove the
+      // audit had the inspector in front of it: the page chrome alone carries a
+      // handful of fields, an open inspector carries a dozen and a half more.
+      expect(labeled, `labeled controls with ${what} selected`).toBeGreaterThan(14)
+
+      const results = await runAxeCheck(page, {
+        // Same carve-out as the editor audit above: the canvas timeline's
+        // contrast is not something axe can compute.
+        disableRules: ['color-contrast'],
+      })
+      const serious = results.violations.filter(
+        (v) => v.impact === 'serious' || v.impact === 'critical'
+      )
+      expect(serious, `axe violations with ${what} selected`).toEqual([])
+    }
+
+    // `?suppressRestore=1` so an autosaved session from an earlier test in this
+    // worker cannot put a dialog in front of the panel.
+    await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
+    await page.waitForLoadState('networkidle')
+
+    await test.step('a media clip', async () => {
+      await page.locator('input[type="file"]').setInputFiles(ARTIST_FIXTURE_MP4)
+      const addToTimeline = page.getByRole('button', { name: 'Add to timeline' })
+      await expect(addToTimeline).toBeVisible({ timeout: 60_000 })
+      await addToTimeline.click()
+      // Just the clip: how many tracks the default project starts with is not
+      // this test's business.
+      // Two elements can say "1 clip" (the info bar and the media card's usage
+      // line), so this is not a strict single match.
+      await expect(page.getByText(/1 clip/).first()).toBeVisible({ timeout: 15_000 })
+
+      // Select it the way a user does, and prove the inspector is showing a
+      // clip rather than its empty state.
+      await page.locator('[data-clip-id]').first().click()
+      await expect(page.getByRole('button', { name: 'Transform', exact: true })).toBeVisible()
+
+      await openEverySection()
+
+      // Four rows exist only once a choice has been made: each animation
+      // group's duration and easing, the transition's duration, and the mask's
+      // corner radius. Choosing through the controls' own names is also a check
+      // that those names are what this ticket says they are.
+      await page.getByLabel('Animate In', { exact: true }).selectOption('fade')
+      await page.getByLabel('Animate Out', { exact: true }).selectOption('fade')
+      await page.getByLabel('Type', { exact: true }).selectOption('fade')
+      await page.getByLabel('Mask shape', { exact: true }).selectOption('rounded')
+      await expect(page.getByLabel('Corner Radius', { exact: true })).toBeVisible()
+      // The duration slider's name is composed by `aria-labelledby` (the group
+      // heading plus its own label), which a role query resolves and a label
+      // query does not.
+      await expect(page.getByRole('slider', { name: 'Animate In Duration', exact: true })).toBeVisible()
+
+      await auditInspector('a media clip')
+    })
+
+    await test.step('a text overlay', async () => {
+      await deselectClip()
+      await page.getByRole('button', { name: 'Add Text' }).click()
+      await expect(page.getByRole('button', { name: 'Text Content', exact: true })).toBeVisible()
+
+      await openEverySection()
+      await page.getByLabel('Animate In', { exact: true }).selectOption('fade')
+      await page.getByLabel('Animate Out', { exact: true }).selectOption('fade')
+
+      await auditInspector('a text overlay')
+    })
+
+    await test.step('a shape overlay', async () => {
+      await deselectClip()
+      await page.getByRole('button', { name: 'Rectangle' }).click()
+      await expect(page.getByRole('button', { name: 'Shape', exact: true })).toBeVisible()
+
+      await openEverySection()
+      await page.getByLabel('Animate In', { exact: true }).selectOption('fade')
+      await page.getByLabel('Animate Out', { exact: true }).selectOption('fade')
+
+      await auditInspector('a shape overlay')
+    })
   })
 
   /**

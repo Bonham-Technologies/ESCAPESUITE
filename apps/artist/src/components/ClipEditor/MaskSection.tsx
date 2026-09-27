@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ClipMask, ClipMaskKind, ClipStroke } from '../../store/types';
 import { DEFAULT_CLIP_MASK_RADIUS, DEFAULT_CLIP_STROKE_COLOR } from '../../store/types';
 import { CLIP_MASK_KINDS } from './clipEditorOptions';
@@ -83,6 +84,8 @@ export function MaskSection({
   sliderGesture,
   disabled,
 }: MaskSectionProps) {
+  // ESCSUITE-89: one id for the section, one label wired to each control.
+  const id = useId();
   const kind = mask?.kind ?? 'none';
   const radius = mask?.radius ?? DEFAULT_CLIP_MASK_RADIUS;
   const strokeWidth = stroke?.width ?? 0;
@@ -90,8 +93,13 @@ export function MaskSection({
 
   return (
     <CollapsibleSection title="Mask & Stroke" defaultOpen={false} disabled={disabled}>
+      {/* The mask's shape has no visible label of its own — the section title
+          heads the whole block — so it is named outright (ESCSUITE-89). The
+          name says shape because the options do: None, Circle, Rounded
+          Rectangle. */}
       <select
         className={styles.select}
+        aria-label="Mask shape"
         value={kind}
         onChange={(e) => onMaskChange({ kind: e.target.value as ClipMaskKind, radius })}
       >
@@ -105,8 +113,9 @@ export function MaskSection({
       <div className={styles.transformControls}>
         {kind === 'rounded' && (
           <div className={styles.transformRow}>
-            <label>Corner Radius</label>
+            <label htmlFor={`${id}-radius`}>Corner Radius</label>
             <input
+              id={`${id}-radius`}
               type="range"
               min={0}
               max={0.5}
@@ -122,8 +131,9 @@ export function MaskSection({
         )}
 
         <div className={styles.transformRow}>
-          <label>Stroke Width</label>
+          <label htmlFor={`${id}-stroke-width`}>Stroke Width</label>
           <input
+            id={`${id}-stroke-width`}
             type="range"
             min={0}
             max={0.02}
@@ -139,8 +149,9 @@ export function MaskSection({
 
         <div className={styles.row}>
           <div className={styles.colorInput}>
-            <span>Stroke Color</span>
+            <label htmlFor={`${id}-stroke-color`}>Stroke Color</label>
             <input
+              id={`${id}-stroke-color`}
               type="color"
               value={swatchValue(stroke?.color)}
               disabled={strokeWidth <= 0}

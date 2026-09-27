@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { Transition, TransitionType } from '../../store/types';
 import { maxPresetDuration } from './clipEditorModel';
 import { TRANSITION_TYPES } from './clipEditorOptions';
@@ -30,12 +31,19 @@ interface TransitionSectionProps {
  * `none`, how long it takes.
  */
 export function TransitionSection({ transition, clipDuration, onTypeChange, onDurationChange, sliderGesture, disabled }: TransitionSectionProps) {
+  // ESCSUITE-89: both controls are named by the labels already beside them.
+  // "Duration" is unambiguous here — Animation's two duration sliders carry
+  // their group in their names, so this is the only plain "Duration" in the
+  // panel.
+  const id = useId();
+
   return (
     <CollapsibleSection title="Transition Out" defaultOpen={false} disabled={disabled}>
       <div className={styles.transitionControls}>
         <div className={styles.transitionRow}>
-          <label>Type</label>
+          <label htmlFor={`${id}-type`}>Type</label>
           <select
+            id={`${id}-type`}
             className={styles.select}
             value={transition?.type ?? 'none'}
             onChange={(e) => onTypeChange(e.target.value as TransitionType)}
@@ -54,8 +62,9 @@ export function TransitionSection({ transition, clipDuration, onTypeChange, onDu
             `duration` is required on it, so no fallback is reachable. */}
         {transition && transition.type !== 'none' && (
           <div className={styles.transformRow}>
-            <label>Duration</label>
+            <label htmlFor={`${id}-duration`}>Duration</label>
             <input
+              id={`${id}-duration`}
               type="range"
               min={0.1}
               max={maxPresetDuration(clipDuration)}

@@ -187,7 +187,10 @@ describe('TransformSection', () => {
       const user = userEvent.setup()
       const { onScaleLockedChange } = renderSection()
 
-      const lock = screen.getByRole('button', { name: 'Unlock aspect ratio' })
+      // Since ESCSUITE-89 the padlock's *name* is fixed and its state is
+      // `aria-pressed`, so what it will do is the tooltip's job alone.
+      const lock = screen.getByRole('button', { name: 'Lock aspect ratio', pressed: true })
+      expect(lock).toHaveAttribute('title', 'Unlock aspect ratio')
       expect(lock.className).toContain(styles.locked)
 
       await user.click(lock)
@@ -199,7 +202,8 @@ describe('TransformSection', () => {
       const user = userEvent.setup()
       const { onScaleLockedChange } = renderSection({ scaleLocked: false })
 
-      const lock = screen.getByRole('button', { name: 'Lock aspect ratio' })
+      const lock = screen.getByRole('button', { name: 'Lock aspect ratio', pressed: false })
+      expect(lock).toHaveAttribute('title', 'Lock aspect ratio')
       expect(lock.className).not.toContain(styles.locked)
 
       await user.click(lock)

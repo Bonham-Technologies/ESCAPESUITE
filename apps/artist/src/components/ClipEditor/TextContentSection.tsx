@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { TextAlign, TextOverlayData } from '../../store/types';
 import { clampFontSize, withBackgroundAlpha } from './clipColorValues';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -21,10 +22,30 @@ interface TextContentSectionProps {
  * React state, so a re-render never fights the resize.
  */
 export function TextContentSection({ textData, onChange, disabled }: TextContentSectionProps) {
+  /**
+   * One id for the section (ESCSUITE-89).
+   *
+   * Five of these controls have no visible label at all — the textarea, the
+   * font family, the font size and the alignment dropdown are read from their
+   * own contents by a sighted user — so they are named outright. The two
+   * swatches do have a word beside them, "Text" and "BG", which became
+   * `<label htmlFor>`s; they also carry an `aria-label`, because "Text" is
+   * already the textarea's name and "BG" alone does not say it is a colour.
+   * Both names keep the visible word — "Text color", "BG color" — because
+   * WCAG 2.5.3 wants the name to contain the label, so "Background color"
+   * would be a worse name than the abbreviation is.
+   *
+   * The bold and italic buttons are named "B" and "I" by their own content, as
+   * they always were, and gain the `aria-pressed` their `styles.active` class
+   * was the only sign of.
+   */
+  const id = useId();
+
   return (
     <CollapsibleSection title="Text Content" disabled={disabled}>
       <textarea
         className={styles.textarea}
+        aria-label="Text"
         value={textData.text}
         onChange={(e) => {
           onChange({ text: e.target.value });
@@ -46,6 +67,7 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
       <div className={styles.row}>
         <select
           className={styles.select}
+          aria-label="Font family"
           style={{ flex: '1 1 0', width: 'auto' }}
           value={textData.fontFamily}
           onChange={(e) => onChange({ fontFamily: e.target.value })}
@@ -66,6 +88,7 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
           min={8}
           max={200}
           title="Font size"
+          aria-label="Font size"
         />
       </div>
 
@@ -73,18 +96,21 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
         <button
           className={`${styles.styleButton} ${textData.fontWeight === 'bold' ? styles.active : ''}`}
           onClick={() => onChange({ fontWeight: textData.fontWeight === 'bold' ? 'normal' : 'bold' })}
+          aria-pressed={textData.fontWeight === 'bold'}
         >
           B
         </button>
         <button
           className={`${styles.styleButton} ${textData.fontStyle === 'italic' ? styles.active : ''}`}
           onClick={() => onChange({ fontStyle: textData.fontStyle === 'italic' ? 'normal' : 'italic' })}
+          aria-pressed={textData.fontStyle === 'italic'}
           style={{ fontStyle: 'italic' }}
         >
           I
         </button>
         <select
           className={styles.select}
+          aria-label="Text alignment"
           value={textData.textAlign}
           onChange={(e) => onChange({ textAlign: e.target.value as TextAlign })}
         >
@@ -96,16 +122,20 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
 
       <div className={styles.row}>
         <div className={styles.colorInput}>
-          <span>Text</span>
+          <label htmlFor={`${id}-color`}>Text</label>
           <input
+            id={`${id}-color`}
+            aria-label="Text color"
             type="color"
             value={textData.color}
             onChange={(e) => onChange({ color: e.target.value })}
           />
         </div>
         <div className={styles.colorInput}>
-          <span>BG</span>
+          <label htmlFor={`${id}-background`}>BG</label>
           <input
+            id={`${id}-background`}
+            aria-label="BG color"
             type="color"
             value={textData.backgroundColor.substring(0, 7)}
             onChange={(e) => onChange({ backgroundColor: withBackgroundAlpha(e.target.value) })}
