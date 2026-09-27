@@ -181,7 +181,13 @@ export function getBaseDimensions(
  * Get resolution dimensions.
  * When resolution is 'project', uses projectResolution if provided.
  * When resolution is 'original', uses the source video dimensions.
- * Preset resolutions (1080p, 720p, 480p) scale based on the source aspect ratio.
+ *
+ * A preset (1080p, 720p, 480p) is a **height**, and the box it fills is the
+ * **project's** shape: width = round-to-even(height x project aspect). It used
+ * to take that aspect from `getBaseDimensions` — the bottom clip's source — so a
+ * 16:9 project whose bottom clip happened to be 4:3 exported 960x720 for "720p"
+ * (ESCSUITE-94). Only a caller with no project resolution at all falls back to
+ * the source aspect, which is the same fallback 'project' itself takes.
  */
 export function getResolution(
   resolution: ExportOptions['resolution'],
@@ -211,7 +217,11 @@ export function getResolution(
   };
 
   const targetHeight = targetHeights[resolution] || originalHeight;
-  const aspectRatio = originalWidth / originalHeight;
+  const aspectSource =
+    projectResolution && projectResolution.width > 0 && projectResolution.height > 0
+      ? projectResolution
+      : { width: originalWidth, height: originalHeight };
+  const aspectRatio = aspectSource.width / aspectSource.height;
   const width = Math.round(targetHeight * aspectRatio);
 
   return {

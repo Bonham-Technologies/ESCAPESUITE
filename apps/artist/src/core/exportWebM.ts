@@ -14,7 +14,8 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
-import type { ProgressCallback } from './exportTypes';
+import type { MediaDrawOptions, ProgressCallback } from './exportTypes';
+import { openOutputFrame, projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
   isWebMExportSupported,
@@ -70,6 +71,20 @@ export async function exportToWebM(
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;
+
+  // The space every draw call below is in, as against the raster they land on.
+  // A caller with no project resolution (only the tests, today — both the editor
+  // and the headless renderer always pass one) gets the base dimensions, which is
+  // the same stand-in `getResolution` uses for 'project'.
+  const projectSize = projectResolution && projectResolution.width > 0 && projectResolution.height > 0
+    ? { width: projectResolution.width, height: projectResolution.height }
+    : { width: baseWidth, height: baseHeight };
+  // Hoisted out of the frame loop: both are constant for the whole export, and
+  // neither should cost an allocation per frame.
+  const outputSize = { width, height };
+  const drawOptions: MediaDrawOptions = {
+    filterScale: projectToOutputScale(projectSize, outputSize),
+  };
 
   // Calculate total duration, respecting timeRange if specified
   const fullDuration = calculateTimelineDuration(clips);
@@ -266,9 +281,9 @@ export async function exportToWebM(
       // Get all clips at current time
       const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
 
-      // Clear canvas to black
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, width, height);
+      // Clear the raster to black and put the context in project pixels: every
+      // draw below is project-space, exactly as the preview's is.
+      openOutputFrame(ctx, projectSize, outputSize);
 
       // Separate media clips from overlay clips
       const mediaClips: typeof activeClips = [];
@@ -338,19 +353,26 @@ export async function exportToWebM(
         // Try video first, then image - require readyState >= 2 (frame data available)
         const video = videoElements.get(clip.sourceVideoId);
         if (video && video.readyState >= 2) {
-          drawClipToCanvas(ctx, video, clip, clipTime, width, height);
+          drawClipToCanvas(
+            ctx, video, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
+          );
           continue;
         }
 
         const image = imageElements.get(clip.sourceVideoId);
         if (image) {
-          drawImageToCanvasWithModifiers(ctx, image, clip, clipTime, width, height);
+          drawImageToCanvasWithModifiers(
+            ctx, image, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
+          );
         }
       }
 
       // Draw transition if active
       if (activeTransition) {
-        drawTransition(ctx, videoElements, imageElements, activeTransition, currentTime, width, height);
+        drawTransition(
+          ctx, videoElements, imageElements, activeTransition, currentTime,
+          projectSize.width, projectSize.height, drawOptions
+        );
       }
 
       // Draw overlay clips in track order (lower index = rendered first = behind)
@@ -394,9 +416,14 @@ export async function exportToWebM(
         );
 
         if (clip.overlayType === 'shape' && clip.shapeData) {
-          drawShapeOverlayToCanvasAnimated(ctx, clip.shapeData, width, height, animated, canvas);
+          drawShapeOverlayToCanvasAnimated(
+            ctx, clip.shapeData, projectSize.width, projectSize.height, animated, canvas,
+            undefined, drawOptions.filterScale
+          );
         } else if (clip.overlayType === 'text' && clip.textData) {
-          drawTextOverlayToCanvasAnimated(ctx, clip.textData, width, height, animated);
+          drawTextOverlayToCanvasAnimated(
+            ctx, clip.textData, projectSize.width, projectSize.height, animated, drawOptions.filterScale
+          );
         }
       }
 

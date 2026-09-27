@@ -56,9 +56,10 @@ export function hasVisibleFill(fillColor: string): boolean {
  *
  * `filter` lengths are pixels of the output bitmap and ignore the current
  * transform, so a caller whose canvas is not 1:1 with the coordinates it draws
- * in has to say so (see `MediaDrawOptions.filterScale`). For every canvas that
- * is its own project — all of them but the preview — the scale is 1 and this is
- * the string it always was.
+ * in has to say so (see `MediaDrawOptions.filterScale`). For a canvas that *is*
+ * 1:1 with that space the scale is 1 and this is the string it always was —
+ * which since ESCSUITE-94 is neither the preview (it rasterises at the size it
+ * is displayed at) nor an export at anything but the project's own resolution.
  */
 function blurFilter(radius: number, filterScale: number = 1): string {
   return `blur(${radius * filterScale}px)`;
@@ -461,17 +462,18 @@ export function drawMediaWithFrame(
   clipTime: number,
   canvasWidth: number,
   canvasHeight: number,
-  modifiers?: TransitionModifiers
+  modifiers?: TransitionModifiers,
+  options?: MediaDrawOptions
 ): boolean {
   if (!frame) return false;
 
   if (frame instanceof HTMLImageElement) {
-    drawImageToCanvasWithModifiers(ctx, frame, clip, clipTime, canvasWidth, canvasHeight, modifiers);
+    drawImageToCanvasWithModifiers(ctx, frame, clip, clipTime, canvasWidth, canvasHeight, modifiers, options);
     return true;
   }
 
   // VideoFrame or HTMLVideoElement
-  drawClipToCanvas(ctx, frame, clip, clipTime, canvasWidth, canvasHeight, modifiers);
+  drawClipToCanvas(ctx, frame, clip, clipTime, canvasWidth, canvasHeight, modifiers, options);
   return true;
 }
 
@@ -730,7 +732,8 @@ export function drawTransitionWithFrames(
   transition: TransitionInfo,
   currentTime: number,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  options?: MediaDrawOptions
 ): boolean {
   const { outgoingClip, incomingClip, progress, type } = transition;
 
@@ -764,17 +767,21 @@ export function drawTransitionWithFrames(
       clipTime,
       w,
       h,
-      transitionModifiersFor(type, progress, side, w, h) ?? crossfade(side)
+      transitionModifiersFor(type, progress, side, w, h) ?? crossfade(side),
+      options
     );
   };
 
   if (type === 'dissolve') {
-    // No filterScale here: this pipeline draws decoded VideoFrames, which only
-    // an export has, and an export's canvas is always its own project.
+    // The `filterScale` matters here too, though it took ESCSUITE-94 to notice:
+    // this pipeline draws decoded VideoFrames, which only an export has, and an
+    // export's canvas was believed to be its own project. It is the size the
+    // resolution option asked for, so a 3px dissolve blur over a 720p project is
+    // 4.5 pixels of a 1080p raster.
     const dissolveBlur = Math.sin(progress * Math.PI) * 3;
     ctx.save();
     if (dissolveBlur > 0) {
-      ctx.filter = `blur(${dissolveBlur}px)`;
+      ctx.filter = blurFilter(dissolveBlur, options?.filterScale);
     }
     const drewOutgoing = hasOutgoing && drawSide('outgoing');
     const drewIncoming = hasIncoming && drawSide('incoming');

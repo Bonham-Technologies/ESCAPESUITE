@@ -9,6 +9,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getFrameCache } from '../../core/frameCache';
+import { setOutputTransform } from '../../core/outputTransform';
 import { drawPreviewFrame } from './drawFrame';
 import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
@@ -147,9 +148,14 @@ export function PreviewPlayer() {
         // The bitmap was captured off this canvas at whatever size it was
         // rasterised at then; drawing it at the project size under the same
         // transform every frame uses puts it back where it came from, and
-        // rescales it if the window has changed size since.
-        const scale = canvas.width / canvasDimensions.width;
-        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        // rescales it if the window has changed size since. The transform is
+        // `core/outputTransform`'s — the *whole* matrix, not a scale this path
+        // divides out and re-assembles, so a cache hit and a cache miss cannot
+        // put the picture in two places. (They would differ only by the
+        // sub-pixel bar `previewRaster`'s height rounding can leave, which is
+        // also the only respect in which mapping the raster onto the project
+        // rect is not 1:1 — and centred is the better of the two answers there.)
+        setOutputTransform(ctx, canvasDimensions, canvas);
         ctx.drawImage(cachedFrame, 0, 0, canvasDimensions.width, canvasDimensions.height);
         return;
       }

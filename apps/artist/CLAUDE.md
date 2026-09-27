@@ -107,6 +107,9 @@ pnpm lint                # Run ESLint
 - `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
   - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
+- `outputTransform.ts`: the one place project space is carried onto an output raster —
+  `projectToOutputScale`, `setOutputTransform` and `openOutputFrame`, called by the preview and
+  by both exporters. See "Export Resolution" below
 - `projectManager.ts`: Project save/load to JSON files with embedded video references
 - `exportScheduler.ts`: Background export queue management
 - `frameCache.ts`: LRU cache for decoded video frames
@@ -659,18 +662,25 @@ computed size actually changes, because assigning either clears the canvas and r
 context state. Everything in this directory still computes in **project pixels** — nothing
 in `previewGeometry`, `hitTest`, `selectionOverlay`, `dragGeometry` or `drawFrame`'s draw
 calls changed coordinate systems. The one thing that carries project space onto the raster is
-`drawPreviewFrame` opening every frame with `ctx.setTransform(k, 0, 0, k, 0, 0)`, where
-`k = canvas.width / projectSize.width` is read back off the canvas' actual backing store (so
-it can never disagree with a resize that hasn't been redrawn yet). The frame cache's
-cached-frame path sets the same transform before blitting, so a bitmap captured at one box
-size is simply rescaled if the window has changed size since — there is no cache
-invalidation on resize, only a redraw at the new scale.
+`drawPreviewFrame` opening every frame with `openOutputFrame(ctx, projectSize, canvas)` —
+**`core/outputTransform.ts`, shared with both exporters since ESCSUITE-94** (see the Export
+section) — which sets `ctx.setTransform(k, 0, 0, k, 0, 0)` and clears the raster in one step.
+`k` is read back off the canvas' actual backing store (so it can never disagree with a resize
+that hasn't been redrawn yet). The frame cache's cached-frame path sets the same transform
+before blitting — `setOutputTransform`, the **whole matrix** and not a scale it re-assembles,
+because `previewRaster` rounds the raster's height and a cache hit and a cache miss would
+otherwise place the picture a sub-pixel apart — so a bitmap captured at one box size is simply
+rescaled if the window has changed size since; there is no cache invalidation on resize, only a
+redraw at the new scale.
 
 `ctx.filter` is the one thing the transform does not reach: a CSS filter's length (a blur
 radius) is in output-bitmap pixels, unaffected by the CTM. Left alone, every blur in the
 preview would render `k`× too wide at any raster smaller than the project. `MediaDrawOptions.filterScale`
 (default `1`) converts a project-space blur radius into device pixels at every `ctx.filter` site on the preview's draw
-call sites; every export passes nothing and gets `blur(Xpx)` byte-identical to before.
+call sites. **Since ESCSUITE-94 an export passes it too** — it was written for the preview, on the
+belief that an export's canvas is always its own project, which the resolution presets disproved —
+so it is `1` only when the output raster *is* the project, and a 4px blur of a 720p project comes
+out `blur(6px)` in a 1080p export.
 `devicePixelRatio` is read at draw time, not subscribed to, so moving the window
 to a different-DPI display re-rasterises only on the next resize or edit, not immediately.
 
@@ -1646,6 +1656,63 @@ name and `aria-modal`, plus "an open modal covers the keyframe panel, so a point
 the graph behind it", which checks `elementFromPoint` at the graph's centre before and after the
 sheet opens and then clicks there. **If `--z-panel` is ever raised above `--z-modal`, that test is
 what fails.**
+
+### Export Resolution (`src/core/outputTransform.ts`, `src/core/exportTypes.ts`)
+
+**The exporters draw in project pixels and one transform per frame puts them on the output
+raster** (ESCSUITE-94). `core/canvasRenderer` sizes a media clip as its native source pixels
+times its scale and positions it as a fraction of the frame, and the two exporters' overlay
+loops place text and shapes the same way — so the numbers those calls take are **project**
+pixels, not the canvas'. The canvas is whatever size the chosen resolution asked for. Nothing
+joined the two spaces until this ticket, so Export → Advanced → Resolution was wrong at every
+setting but its default: a 1080p export of a 1280x720 project drew the clip at `0, 0, 1280,
+720` in a 1920x1080 frame (pillar/letterboxed in black) and a 480p one drew it at `-213, -120,
+1280, 720` in an 854x480 frame (cropped). "Project" was right, which is why it survived.
+
+`openOutputFrame(ctx, project, output)` is the whole mechanism, and the preview calls it too —
+it was the preview's inline `setTransform`, lifted rather than copied, because a drawing
+behaviour one pipeline has to remember to reproduce is a behaviour that drifts. It delegates the
+matrix to `setOutputTransform` — `ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)`,
+exported separately for the one caller that wants the transform without a clear (the preview's
+cached-frame blit) — then clears the raster to black and returns the scale, which is also the
+frame's `filterScale`. `projectToOutputScale` is `Math.min` of the two ratios, so **a frame is
+never stretched**: what a rounding disagreement can leave is a sub-pixel bar, never a crop. A
+degenerate project (a zero resolution, which the store never writes but a hand-built headless
+request could) scales by 1 rather than dividing by zero.
+
+**The letterbox is deliberate and now rare.** Where the output aspect differs from the
+project's, the project rect is fitted inside the raster, centred, and the leftover is black
+bar. The clear is the *whole raster expressed in project coordinates* rather than the project
+rect, so one fill paints the picture's ground and its bars together. A resolution preset no
+longer produces that case beyond sub-pixel rounding, because `getResolution` derives a preset's
+width from the **project's** aspect: preset height is fixed (1080/720/480), width is
+round-to-even(height x project aspect), and `'project'` stays exact. It used to take the aspect
+from `getBaseDimensions` — the bottom clip's source — so a 16:9 project whose bottom clip was
+4:3 exported 960x720 for "720p". Only a caller with no project resolution at all falls back to
+the source aspect, the same fallback `'project'` itself takes. What is left is `'original'`,
+whose output *is* the bottom clip's source size and can legitimately be a different shape from
+the project — that export is centred with bars rather than stretched or cropped.
+
+`ctx.filter` is the one length the transform does not reach, so both exporters pass
+`MediaDrawOptions.filterScale` now (see the Preview section, where it was born). That needed
+`drawMediaWithFrame` and `drawTransitionWithFrames` to take `MediaDrawOptions` as well — the
+comment on the latter saying "an export's canvas is always its own project" was exactly the
+premise this ticket falsified.
+
+**Nothing else composites.** `workers/decodeWorker.ts` decodes and holds frames; it has no
+canvas at all. `workers/exportWorker.ts` computes frame metadata and mixes audio and says so at
+the top of the file ("Main thread still handles … Canvas rendering"), and only its audio half is
+wired up (`core/audioMixer.ts`). `core/exportScheduler.ts` is a queue. The compositing is in
+`exportWebM.ts` and `exportMP4.ts` and nowhere else, which is why two call sites were the whole
+fix. The headless kit drives these same exporters through `window.__renderProject`, so it gets
+the fix for free — including the manifest, which `headless/renderProject.ts` sizes with the same
+`getResolution`.
+
+`exportMP4.perf.test.ts` pins the cost: **exactly one `setTransform` per frame** (a version
+that set it per clip would slip under a per-frame call ceiling and would have to be wrong about
+what it multiplied), and the per-frame call ceiling itself re-measured 24 → 25 for that one
+call, with every other figure — `drawImage`, save/restore pairs, animation lookups,
+`getContext`, `VideoFrame`s created and closed — unchanged.
 
 ### Export Performance Optimizations (`src/core/exporter.ts`)
 The export pipeline includes several optimizations to improve performance:

@@ -109,17 +109,27 @@ afterEach(() => {
 /**
  * Split the recorded calls into frames.
  *
- * Every export frame opens by clearing the whole canvas to black, and nothing
- * else fills a rect the size of the output.
+ * Every export frame opens the way every preview frame does (ESCSUITE-94, and
+ * `src/test/renderPreview.tsx` splits on the same pair): the transform is set to
+ * the project-to-output scale and the whole raster is filled black. Nothing else
+ * makes those two calls back to back — the blur overlay resets the transform too,
+ * but follows it with a blurred `drawImage`, not a full fill.
+ *
+ * Matched on the transform's *shape* — a pure scale, no skew, no translation —
+ * rather than on a number, so it holds whatever resolution a case exports at.
  */
 function splitFrames(calls: CanvasCall[]): CanvasCall[][] {
-  const isClear = (call: CanvasCall) =>
-    call.method === 'fillRect' &&
+  const isFrameTransform = (args: unknown[]) =>
+    args.length === 6 && args[1] === 0 && args[2] === 0 && args[4] === 0 && args[5] === 0
+  const isClear = (call: CanvasCall | undefined) =>
+    call?.method === 'fillRect' &&
     String(call.args) === String([0, 0, SCENE_RESOLUTION.width, SCENE_RESOLUTION.height])
 
   const frames: CanvasCall[][] = []
-  for (const call of calls) {
-    if (isClear(call)) frames.push([])
+  for (const [index, call] of calls.entries()) {
+    if (call.method === 'setTransform' && isFrameTransform(call.args) && isClear(calls[index + 1])) {
+      frames.push([])
+    }
     frames[frames.length - 1]?.push(call)
   }
   return frames
@@ -135,6 +145,11 @@ interface ExportMeasurement {
   /** 2D-context method calls in the median frame. */
   callsPerFrame: number
   drawImagesPerFrame: number
+  /**
+   * `setTransform` calls in the median frame — the one that carries project
+   * space onto the output raster, and nothing else (ESCSUITE-94).
+   */
+  setTransformsPerFrame: number
   savesPerFrame: number
   restoresPerFrame: number
   /** getAnimatedValues() calls per frame, through the module boundary. */
@@ -175,6 +190,7 @@ async function measureExport(clips: Clip[] = buildSceneClips()): Promise<ExportM
     framesEncoded: frames.length,
     callsPerFrame: median(frames.map((f) => f.length)),
     drawImagesPerFrame: median(frames.map((f) => f.filter((c) => c.method === 'drawImage').length)),
+    setTransformsPerFrame: median(frames.map((f) => f.filter((c) => c.method === 'setTransform').length)),
     savesPerFrame: median(frames.map((f) => f.filter((c) => c.method === 'save').length)),
     restoresPerFrame: median(frames.map((f) => f.filter((c) => c.method === 'restore').length)),
     animationLookupsPerFrame: lookups / frames.length,
@@ -195,11 +211,26 @@ describe('export per-frame work', () => {
 
     expect(measured.framesEncoded).toBe(FRAMES)
 
-    // Measured 2026-09-12: 24 calls, 2 drawImage, 4 save/restore pairs,
-    // 4 animation lookups per frame.
-    expect(measured.callsPerFrame).toBeLessThanOrEqual(48)
+    // Measured 2026-09-27: 25 calls, 2 drawImage, 4 save/restore pairs,
+    // 4 animation lookups per frame. Re-measured from 24 for ESCSUITE-94, which
+    // adds exactly one call — the frame's own `setTransform`, pinned exactly
+    // below — and nothing else: every other figure here came back unchanged.
+    expect(measured.callsPerFrame).toBeLessThanOrEqual(50)
     expect(measured.drawImagesPerFrame).toBeLessThanOrEqual(4)
     expect(measured.animationLookupsPerFrame).toBeLessThanOrEqual(8)
+    // **Exact, not a ceiling** (measured 2026-09-27: 1). The transform is a
+    // property of the *frame*, not of a clip: a version that set it per draw
+    // would still slip under the ceiling above on a four-clip frame, and would
+    // have to be wrong about what it multiplied — the renderer draws in project
+    // pixels, so there is one mapping onto the raster per frame and no more.
+    //
+    // It is 1 for *this* scene rather than for any scene: a shape overlay that
+    // blurs its background resets the transform to the identity itself, to hand
+    // the capture back in the canvas' own pixels (`canvasRenderer.ts`'s
+    // `drawShapeOverlayToCanvasAnimated`), so a scene carrying one would
+    // legitimately measure 2. The benchmark scene's shape does not blur; a future
+    // edit that gave it one should raise this number and say so, not delete it.
+    expect(measured.setTransformsPerFrame).toBe(1)
     // Exact: an export that leaked a save() would drift the whole file.
     expect(measured.savesPerFrame).toBe(measured.restoresPerFrame)
     // Exact: one canvas for the whole export, not one per frame.
@@ -214,13 +245,16 @@ describe('export per-frame work', () => {
 
     expect(measured.framesEncoded).toBe(FRAMES)
 
-    // Measured 2026-09-25: 40 calls per frame, 2 drawImage, 6 save/restore
+    // Measured 2026-09-27: 41 calls per frame, 2 drawImage, 6 save/restore
     // pairs, 4 animation lookups per frame.
     //
     // Derived the same way as the preview ceiling: 3 calls for a mask, 5 for a
-    // stroke, two media clips live over this second, so the plain 24 calls per
-    // frame become 24 + 2 x 8 = 40, which is what was measured.
-    expect(measured.callsPerFrame).toBeLessThanOrEqual(80)
+    // stroke, two media clips live over this second, so the plain 25 calls per
+    // frame become 25 + 2 x 8 = 41, which is what was measured. (40 before
+    // ESCSUITE-94, whose one `setTransform` per frame is the whole difference.)
+    expect(measured.callsPerFrame).toBeLessThanOrEqual(82)
+    // Exact, and unchanged by the masks: still one frame transform per frame.
+    expect(measured.setTransformsPerFrame).toBe(1)
     // **Exact, not a ceiling** (measured 2026-09-25: 2): a mask draws no second
     // image, so this is one `drawImage` per live media clip. A 2x ceiling would
     // have absorbed a mask that re-drew the picture to composite itself.
