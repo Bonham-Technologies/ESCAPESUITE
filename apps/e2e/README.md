@@ -62,7 +62,7 @@ tests/
 │   ├── video-import.spec.ts # Video import functionality
 │   ├── timeline-editing.spec.ts # Timeline operations
 │   └── components.spec.ts   # Editor panels and dialogs
-├── accessibility/           # axe-core audits, keyboard, screen reader
+├── accessibility/           # axe-core audits of each app's states (idle, dialogs, a take, a clip)
 ├── errors/                  # Permission, export, network, input failures
 ├── responsive/              # Mobile / tablet / desktop layouts
 ├── integration/             # Cross-app integration tests
