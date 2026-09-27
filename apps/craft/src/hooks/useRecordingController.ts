@@ -23,7 +23,7 @@ import {
   getRecorderType,
   type AnyRecorder,
 } from '../core/recorder-factory';
-import { hasSystemAudio } from '../core/permissions';
+import { hasSystemAudio, stopStream } from '../core/permissions';
 import {
   CAPTURE_REFUSED,
   NO_SYSTEM_AUDIO,
@@ -123,6 +123,14 @@ export function useRecordingController({
   // been cancelled or the screen has gone away. The blob is then nobody's: it
   // belongs to a recording the user threw away, and must not be saved.
   const cancelledRef = useRef(false);
+  // Whether a start is already on its way (ESCSUITE-93). `state` is the
+  // *rendered* truth and is one render behind the click, so two fast clicks —
+  // or two R presses — both saw 'idle' and both ran: two pickers, two
+  // compositors, and a second `recorderRef.current =` that orphaned the first
+  // recorder with its AudioContext, its rAF level monitor and its muxer, and
+  // nothing left that could ever dispose them. This ref is the synchronous
+  // truth, raised at entry and dropped in the `finally` of the same attempt.
+  const startingRef = useRef(false);
 
   // Capture thumbnail from preview (video element or compositor canvas)
   const capturePreviewThumbnail = useCallback((): Promise<Blob | null> => {
@@ -268,6 +276,11 @@ export function useRecordingController({
 
   // Handle start recording button
   const handleStartRecording = useCallback(async () => {
+    // One start at a time. The rendered `state` cannot say this — it is written
+    // below and read a render later — so a second click inside the same tick is
+    // dropped here (ESCSUITE-93).
+    if (startingRef.current) return;
+    startingRef.current = true;
     try {
       cancelledRef.current = false;
       // Starting a take is the "next successful action" that clears whatever
@@ -290,6 +303,24 @@ export function useRecordingController({
       // `recordBlockedReason`, so a take with nowhere to go is refused by a
       // disabled button before the click ever happens.
       const { screen, webcam, mic } = await acquireStreams();
+
+      // The take can be thrown away while that request is outstanding — the
+      // picker is on screen, or the camera prompt is — and a cancel there can
+      // clean up nothing: `stopAllStreams()` reads the streams out of the
+      // store, and nothing has put them there yet (ESCSUITE-93). So the
+      // resumed start releases what it was handed and builds nothing on top of
+      // it: no `setStreams` (the store would mirror a capture already being
+      // thrown away, on a component that may be unmounted), no compositor, no
+      // recorder. This is the earliest exit that leaves nothing live, which is
+      // why it is the one that does the releasing — every guard below it has a
+      // recorder to dispose as well.
+      if (cancelledRef.current) {
+        stopStream(screen);
+        stopStream(webcam);
+        stopStream(mic);
+        return;
+      }
+
       setStreams(screen, webcam);
       micStreamRef.current = mic;
 
@@ -487,7 +518,18 @@ export function useRecordingController({
       // module-singleton store that was just reset to idle and leaves an
       // interval ticking against `recorderRef.current === null` — a 3-2-1 over
       // nothing, and a next mount that comes up inside it.
-      if (cancelledRef.current || !recorderRef.current) return;
+      //
+      // It tears down rather than bare-returning (ESCSUITE-93). Both paths that
+      // reach it today have already disposed the recorder and released the
+      // capture, so both calls are no-ops — `disposeRecorder()` nulls the ref
+      // and `stopAllStreams()` is idempotent — but a bare return is a promise
+      // that every future way of arriving here will have cleaned up first, and
+      // that is the promise this ticket's own window broke.
+      if (cancelledRef.current || !recorderRef.current) {
+        disposeRecorder();
+        stopAllStreams();
+        return;
+      }
 
       // Start countdown or record immediately
       if (config.countdownSeconds > 0) {
@@ -511,6 +553,9 @@ export function useRecordingController({
       disposeRecorder();
       setState('idle');
       stopAllStreams();
+    } finally {
+      // Per attempt, not a latch: the next click has to be able to start a take.
+      startingRef.current = false;
     }
   }, [
     acquireStreams,
