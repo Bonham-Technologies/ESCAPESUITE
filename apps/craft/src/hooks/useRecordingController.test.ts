@@ -1451,5 +1451,163 @@ describe('useRecordingController teardown', () => {
       expect(useRecorderStore.getState().notice).toBeNull()
       expect(state()).toBe('idle')
     })
+
+    // ESCSUITE-93. The window *before* `recorderRef.current` is assigned — and
+    // the one a cancel cannot clean up after, because `stopAllStreams()` reads
+    // the streams out of the store and the start has not put them there yet.
+    // The picker is on screen, or the camera prompt is; Escape raises the flag
+    // and returns the app to idle; and the start that resumes afterwards used
+    // to go on and do all of it — set the live streams, start the compositor,
+    // build a recorder and initialize it — before reaching the ESCSUITE-73
+    // guard, which returned without disposing any of it. The sharing bar and
+    // the camera light then stayed on for the rest of the session behind a UI
+    // that said idle.
+    describe('while the capture request is still outstanding', () => {
+      let raf: RafDouble
+
+      beforeEach(() => {
+        // A start that walks past the cancel builds a compositor and starts it,
+        // so the doubles are installed here to keep a failure reading as the
+        // assertion it is rather than as jsdom refusing captureStream().
+        installCanvasCaptureStreamDouble()
+        raf = installRafDouble()
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+      })
+
+      afterEach(() => {
+        raf.uninstall()
+        uninstallCanvasCaptureStreamDouble()
+      })
+
+      /** An acquireStreams held open, as a picker waiting on the user is. */
+      function parkedAcquire(): () => void {
+        let release!: () => void
+        const gate = new Promise<void>(resolve => { release = resolve })
+        harness.acquireStreams.mockImplementation(async () => {
+          await gate
+          return harness.streams
+        })
+        return release
+      }
+
+      /** Every track of every capture the request handed back. */
+      function acquiredTracks(): MediaStreamTrack[] {
+        const { screen, webcam, mic } = harness.streams
+        return [screen, webcam, mic].flatMap(stream => stream?.getTracks() ?? [])
+      }
+
+      /**
+       * Nothing live, and nothing built on the far side of the cancel: the
+       * earliest exit is the one that leaves no compositor to dispose and no
+       * recorder to orphan, so the law here is that neither was ever made.
+       */
+      function expectNothingLive(): void {
+        expect(recorderFactory.recorders).toHaveLength(0)
+        expect(harness.deps.compositorRef.current).toBeNull()
+        expect(harness.setIsPiPActive).not.toHaveBeenCalled()
+        expect(harness.setPreviewStream).not.toHaveBeenCalled()
+        // The store never sees the streams, so no render mirrors a capture that
+        // is already being thrown away.
+        expect(useRecorderStore.getState().screenStream).toBeNull()
+        expect(useRecorderStore.getState().webcamStream).toBeNull()
+        expect(harness.deps.micStreamRef.current).toBeNull()
+        // ...and every track the request did hand back is stopped, which is the
+        // sharing bar and the camera light going out.
+        for (const track of acquiredTracks()) {
+          expect(track.stop).toHaveBeenCalledTimes(1)
+        }
+        expect(state()).toBe('idle')
+        expect(vi.getTimerCount()).toBe(0)
+        expect(useRecorderStore.getState().notice).toBeNull()
+      }
+
+      /** A screen+webcam+mic take parked on its capture request. */
+      function mountParked() {
+        const view = mountController(
+          {
+            screenEnabled: true,
+            webcamEnabled: true,
+            microphoneEnabled: true,
+            countdownSeconds: 3,
+          },
+          { screen: screenStream(), webcam: webcamStream(), mic: micStreamWithTrack() }
+        )
+        return { ...view, release: parkedAcquire() }
+      }
+
+      it('releases the capture for a take cancelled before it arrived', async () => {
+        const { result, release } = mountParked()
+        let start!: Promise<void>
+        await act(async () => {
+          start = result.current.handleStartRecording()
+        })
+        // Parked on the request: nothing built yet, and nothing in the store
+        // for a cancel to find.
+        expect(state()).toBe('preparing')
+        expect(recorderFactory.recorders).toHaveLength(0)
+
+        // Escape in 'preparing' is handleCancelRecording — see
+        // useKeyboardShortcuts: only 'countdown' goes to cancelCountdown.
+        act(() => { result.current.handleCancelRecording() })
+        expect(state()).toBe('idle')
+
+        release()
+        await act(async () => { await start })
+
+        expectNothingLive()
+      })
+
+      it('releases the capture when the screen goes away before it arrived', async () => {
+        const { result, unmount, release } = mountParked()
+        let start!: Promise<void>
+        await act(async () => {
+          start = result.current.handleStartRecording()
+        })
+
+        unmount()
+        release()
+        await act(async () => { await start })
+
+        expectNothingLive()
+      })
+    })
+  })
+})
+
+// ESCSUITE-93, the second door to the same leak. Nothing but the rendered
+// `state` stood between two fast clicks — or two R presses — and two
+// overlapping starts, and the second `recorderRef.current =` orphaned the
+// first recorder: an AudioContext, an rAF level monitor and a muxer with
+// nothing left that could ever dispose them. The state is the *rendered*
+// truth, one render behind; a ref is the synchronous one.
+describe('useRecordingController two starts at once', () => {
+  it('builds one recorder for two starts in the same tick', async () => {
+    const { result } = mountController({ countdownSeconds: 3 })
+
+    await act(async () => {
+      await Promise.all([
+        result.current.handleStartRecording(),
+        result.current.handleStartRecording(),
+      ])
+    })
+
+    // One capture request, one recorder, one setup — and one countdown.
+    expect(harness.acquireStreams).toHaveBeenCalledTimes(1)
+    expect(recorderFactory.recorders).toHaveLength(1)
+    expect(recorderFactory.last().initializeCalls).toHaveLength(1)
+    expect(state()).toBe('countdown')
+  })
+
+  it('takes a second start once the first has finished setting up', async () => {
+    const { result } = mountController({ countdownSeconds: 3 })
+    await startTake(result)
+    expect(recorderFactory.recorders).toHaveLength(1)
+
+    act(() => { result.current.cancelCountdown() })
+    await startTake(result)
+
+    // The guard is per attempt, not a latch that closes the app for good.
+    expect(recorderFactory.recorders).toHaveLength(2)
+    expect(state()).toBe('countdown')
   })
 })
