@@ -33,12 +33,21 @@ const BLOCKED_REASON_ID = 'record-blocked-reason';
  *
  * Which controls exist depends on the state: pause/resume only while a take is
  * running, cancel only while something is running, and the record button
- * itself changes meaning. Its `onClick` is a three-way ladder — start when
- * idle, stop while active, and nothing at all in the two in-between states
- * (`preparing` and `saving`), which is what the `undefined` arm is for. Those
- * same two states set `disabled`, so the `undefined` arm and the disabled
- * attribute say the same thing twice; both are kept, because the button's
- * label and title still read "Stop" there and a handler would be a lie.
+ * itself changes meaning. Its `onClick` is a four-way ladder — start when
+ * idle, **cancel** (not stop) during the countdown, stop once a take is
+ * actually recording or paused, and nothing at all in the two in-between
+ * states (`preparing` and `saving`), which is what the `undefined` arm is
+ * for. Those same two states set `disabled`, so the `undefined` arm and the
+ * disabled attribute say the same thing twice; both are kept, because the
+ * button's label and title still read "Stop" there and a handler would be a
+ * lie.
+ *
+ * The countdown arm exists because `recorder.stop()` is a no-op before
+ * `start()` — clicking a button labelled "Stop recording" during the 3-2-1
+ * count did nothing but leave the ticker running and the take starting
+ * anyway. During `countdown` the button reads "Cancel countdown" instead and
+ * calls `onCancel`, the same action Escape and the bar's own Cancel button
+ * already take (ESCSUITE-106), so all three agree.
  *
  * `blockedReason` sits in front of that ladder: while it is set there is
  * nothing the button could usefully do, so it loses its handler, goes
@@ -88,13 +97,20 @@ export function RecorderControls({
               ? undefined
               : state === 'idle'
               ? onStart
+              : state === 'countdown'
+              ? onCancel
               : isRecordingActive
               ? onStop
               : undefined
           }
           disabled={blocked || state === 'preparing' || state === 'saving'}
-          title={blockedReason ?? (state === 'idle' ? 'Record (R)' : 'Stop (S)')}
-          aria-label={state === 'idle' ? 'Start recording' : 'Stop recording'}
+          title={
+            blockedReason ??
+            (state === 'idle' ? 'Record (R)' : state === 'countdown' ? 'Cancel countdown (Esc)' : 'Stop (S)')
+          }
+          aria-label={
+            state === 'idle' ? 'Start recording' : state === 'countdown' ? 'Cancel countdown' : 'Stop recording'
+          }
           aria-describedby={blocked ? BLOCKED_REASON_ID : undefined}
         >
           <span className={styles.recordButtonInner} aria-hidden="true" />
