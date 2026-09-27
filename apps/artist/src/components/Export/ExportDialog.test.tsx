@@ -596,11 +596,194 @@ describe('ExportDialog', () => {
       expect(signal.aborted).toBe(true)
       expect(onClose).toHaveBeenCalledTimes(1)
 
+      // A late progress report from the run Cancel just stopped must not
+      // resurrect it: handleCancel clears latestExportRef too, so this
+      // solo run's own onProgress is now inert, not just a later run's.
+      await scripted.report({ phase: 'encoding', progress: 77, message: 'Should not appear' })
+      expect(screen.queryByText('Should not appear')).not.toBeInTheDocument()
+      expect(primaryExport()).toBeInTheDocument()
+
       scripted.rejectExport(new ExportAbortedError())
       await settle()
 
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       expect(mockSendMessage).not.toHaveBeenCalled()
+    })
+
+    /** Like scriptedExport, but tracks every call so two overlapping exports
+     * can be driven independently — export A cancelled, then export B
+     * started before A's promise actually settles. */
+    function scriptedExports() {
+      const calls: Array<{
+        report: (p: ExportProgress) => void
+        resolve: (blob: Blob) => void
+        reject: (e: unknown) => void
+      }> = []
+      mockExportToWebM.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise((resolve, reject) => {
+            calls.push({ report: args[3] as (p: ExportProgress) => void, resolve, reject })
+          })
+      )
+      return calls
+    }
+
+    it("does not let export A's late rejection clear export B's abort controller (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      // Export A starts, then is cancelled. The dialog stays mounted between
+      // opens (as it does in the real app), so its abort controller ref
+      // survives past the Cancel click.
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(1))
+      const signalA = webmArgs()[5]
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+      expect(signalA.aborted).toBe(true)
+
+      // Export B starts before A's promise has actually settled.
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(2))
+      const signalB = mockExportToWebM.mock.calls[1][5] as AbortSignal
+      expect(signalB.aborted).toBe(false)
+
+      // A's aborted promise rejects late — its own `finally` runs after B's
+      // controller is already sitting in the ref.
+      calls[0].reject(new ExportAbortedError())
+      await settle()
+
+      // Cancelling now must abort B: the button on screen is for B's export.
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+      expect(signalB.aborted).toBe(true)
+    })
+
+    it("keeps export B's progress showing while export A's cancelled promise reports late and then rejects (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(2))
+      await act(async () => calls[1].report({ phase: 'encoding', progress: 55, message: 'Encoding frames' }))
+      expect(screen.getByText('55%')).toBeInTheDocument()
+
+      // A keeps reporting progress after being superseded — its own onProgress
+      // callback must be inert now, not overwrite B's.
+      await act(async () => calls[0].report({ phase: 'encoding', progress: 10, message: 'Stale report' }))
+      expect(screen.getByText('55%')).toBeInTheDocument()
+      expect(screen.queryByText('Stale report')).not.toBeInTheDocument()
+
+      calls[0].reject(new ExportAbortedError())
+      await settle()
+
+      // B is still exporting: its progress is still on screen and Cancel
+      // still targets a live export rather than a no-op on a finished dialog.
+      expect(screen.getByText('55%')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
+    })
+
+    it("does not let export A's late (non-abort) success flip export B's dialog to complete, download A's file, or notify a host about it (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(2))
+      await act(async () => calls[1].report({ phase: 'encoding', progress: 40, message: 'Encoding frames' }))
+      expect(screen.getByText('40%')).toBeInTheDocument()
+
+      // A actually finishes successfully despite being cancelled — a
+      // defensive edge case the exporter's own abort re-check is meant to
+      // prevent, but the dialog must not trust it blindly either.
+      const staleBlob = new Blob(['stale-a-bytes'])
+      await act(async () => {
+        calls[0].resolve(staleBlob)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      await settle()
+
+      // B's progress must still be on screen — A's stale success must not
+      // have flipped the dialog to "complete" or scheduled its own close.
+      expect(screen.getByText('40%')).toBeInTheDocument()
+      expect(screen.queryByText('Export complete!')).not.toBeInTheDocument()
+
+      // Nor must A's stale success have downloaded its file or told an
+      // embedding host about it — that side effect belongs only to the
+      // export the user is actually looking at.
+      expect(clickedLinks).toHaveLength(0)
+      expect(URL.createObjectURL).not.toHaveBeenCalledWith(staleBlob)
+      expect(mockSendMessage).not.toHaveBeenCalled()
+    })
+
+    it("does not let export A's late (non-abort) failure reset export B's progress or show an error (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(calls).toHaveLength(1))
+        fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(calls).toHaveLength(2))
+        await act(async () => calls[1].report({ phase: 'encoding', progress: 60, message: 'Encoding frames' }))
+        expect(screen.getByText('60%')).toBeInTheDocument()
+
+        calls[0].reject(new Error('Stale encoder failure'))
+        await settle()
+
+        // B's progress must still be on screen and no error banner from A's
+        // stale failure should appear over it.
+        expect(screen.getByText('60%')).toBeInTheDocument()
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    it("does not let export A's delayed self-close fire once export B is already running (ESCSUITE-98)", async () => {
+      // The × renders unconditionally, even while a finished export is
+      // sitting in its 2 s "complete" window — so a user can close out of A,
+      // start B, and only then have A's pending self-close timer fire.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      // A finishes normally and schedules its own close two seconds out.
+      fireEvent.click(primaryExport())
+      await settle()
+      expect(screen.getByText('Export complete!')).toBeInTheDocument()
+
+      // The user closes via × before that timer fires...
+      fireEvent.click(screen.getByTitle('Close'))
+      expect(onClose).toHaveBeenCalledTimes(1)
+
+      // ...and starts a second export before A's pending timeout does.
+      // (waitFor's own polling relies on real timers, so with fake ones
+      // active the mock's synchronous call — it pushes onto `calls` the
+      // instant `exportToWebM` runs, before its promise ever resolves — is
+      // asserted directly instead.)
+      const calls = scriptedExports()
+      fireEvent.click(primaryExport())
+      expect(calls).toHaveLength(1)
+      await act(async () => calls[0].report({ phase: 'encoding', progress: 65, message: 'Encoding frames' }))
+      expect(screen.getByText('65%')).toBeInTheDocument()
+
+      // A's 2 s timeout now fires. It must be inert: no second onClose call,
+      // and B's progress must be untouched.
+      act(() => {
+        vi.advanceTimersByTime(2000)
+      })
+
+      expect(screen.getByText('65%')).toBeInTheDocument()
+      expect(onClose).toHaveBeenCalledTimes(1)
     })
 
     it('hides the Cancel button once the export is complete', async () => {

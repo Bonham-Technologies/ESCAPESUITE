@@ -45,8 +45,20 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const [error, setError] = useState<string | null>(null);
   const [mp4FailedError, setMp4FailedError] = useState<string | null>(null);
 
-  // AbortController for cancelling exports
+  // The export currently in flight, if any — the only thing Cancel, ×, and
+  // Escape can actually abort. Cleared both by a run's own `finally` (once
+  // it finishes) and by handleCancel, so it always names "the run that still
+  // needs stopping" and never a stale one — which is not the same question
+  // as "am I still the run being displayed" below.
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Identity of the most recently *started* export. Unlike abortControllerRef,
+  // this is never cleared by a run's own completion — only overwritten when a
+  // *newer* run starts, and explicitly nulled by handleCancel so a cancelled
+  // run's late callbacks cannot resurrect its own progress either. A run's
+  // async continuation compares against this to tell whether it is still the
+  // one the user is looking at, so its own completion or cancellation never
+  // makes it look current to itself again later.
+  const latestExportRef = useRef<AbortController | null>(null);
 
   const mp4Supported = isMP4ExportSupported();
 
@@ -76,9 +88,18 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     setMp4FailedError(null);
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
-    // Create new AbortController for this export
+    // Create new AbortController for this export. Cancelling one export and
+    // starting another right away is a normal user action — the export
+    // buttons reappear the instant Cancel is clicked, well before the
+    // cancelled export's promise actually settles (it typically rejects only
+    // at its next `await` inside the exporter). Every state write this run
+    // makes below is guarded on isCurrentRun(), so a run that has been
+    // superseded by a later one can still clear its own abort controller but
+    // can never reset a later run's progress, error state or "exporting" UI.
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    latestExportRef.current = abortController;
+    const isCurrentRun = () => latestExportRef.current === abortController;
 
     // Determine options: primary button uses defaults, advanced button uses configured options
     const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
@@ -100,7 +121,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     }
 
     try {
-      const onProgress = (p: ExportProgress) => setProgress(p);
+      const onProgress = (p: ExportProgress) => {
+        if (isCurrentRun()) setProgress(p);
+      };
 
       let blob: Blob;
       let extension: string;
@@ -113,28 +136,33 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         extension = 'webm';
       }
 
-      const fileName = `${projectName || 'export'}.${extension}`;
+      // A superseded run must neither download nor notify a host: both are
+      // user/host-visible side effects that belong only to the export the
+      // user is actually looking at.
+      if (isCurrentRun()) {
+        const fileName = `${projectName || 'export'}.${extension}`;
 
-      // Create download link
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
 
-      // Hand the finished file to an embedding host (no-op when not embedded).
-      // The download above has already happened, so a host channel that throws
-      // (a closed frame, a rejected target origin) must not fail the export.
-      try {
-        sendMessage({
-          type: 'EXPORT_COMPLETE',
-          payload: { blob, format: extension, name: fileName },
-        });
-      } catch (hostError) {
-        console.error('Failed to notify host of completed export:', hostError);
+        // Hand the finished file to an embedding host (no-op when not embedded).
+        // The download above has already happened, so a host channel that throws
+        // (a closed frame, a rejected target origin) must not fail the export.
+        try {
+          sendMessage({
+            type: 'EXPORT_COMPLETE',
+            payload: { blob, format: extension, name: fileName },
+          });
+        } catch (hostError) {
+          console.error('Failed to notify host of completed export:', hostError);
+        }
       }
 
       // Calculate total export duration from clips
@@ -144,17 +172,22 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       }, 0);
 
       analytics.exportCompleted(extension as 'webm' | 'mp4', totalDuration);
-      setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
-      // Close dialog after a delay
-      setTimeout(() => {
-        onClose();
-        setProgress(null);
-      }, 2000);
+      if (isCurrentRun()) {
+        setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
+
+        // Close dialog after a delay
+        setTimeout(() => {
+          if (isCurrentRun()) {
+            onClose();
+            setProgress(null);
+          }
+        }, 2000);
+      }
     } catch (err) {
       // Don't show error for user-initiated cancellation
       if (err instanceof ExportAbortedError) {
-        setProgress(null);
+        if (isCurrentRun()) setProgress(null);
         return;
       }
 
@@ -171,16 +204,24 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       analytics.exportFailed(format, errorType, failProgress);
 
       // If MP4 failed, show the fallback dialog instead of just an error
-      if (format === 'mp4') {
-        setMp4FailedError(errorMessage);
-        setProgress(null);
-      } else {
-        setError(errorMessage);
+      if (isCurrentRun()) {
+        if (format === 'mp4') {
+          setMp4FailedError(errorMessage);
+        } else {
+          setError(errorMessage);
+        }
         setProgress(null);
       }
     } finally {
-      // Clear the abort controller reference
-      abortControllerRef.current = null;
+      // Clear the abort controller reference — but only if it is still this
+      // run's own controller. A cancelled run's `finally` can fire after a
+      // later run has already stored its controller here (the cancelled
+      // run's promise usually only rejects at its next internal `await`),
+      // and clobbering that later controller would leave Cancel / × / Escape
+      // unable to abort the export the user is actually looking at.
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, timeRange]);
 
@@ -190,6 +231,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    // A cancelled run is no longer "current" even to itself: without this, a
+    // solo run's own late onProgress/success/failure callbacks would still
+    // pass isCurrentRun() and could resurrect its progress if the dialog is
+    // reopened before its promise actually settles.
+    latestExportRef.current = null;
     setProgress(null);
     setMp4FailedError(null);
     // The dialog stays mounted, so a stale alert would be re-announced the next
