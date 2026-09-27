@@ -149,7 +149,7 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
         const currentKeyframes = currentAnimation.keyframes[property];
         if (!currentKeyframes) return clip;
 
-        const newKeyframes = currentKeyframes.filter(kf => Math.abs(kf.time - time) >= 0.001);
+        const newKeyframes = currentKeyframes.filter(kf => Math.abs(kf.time - time) >= KEYFRAME_TIME_EPSILON);
 
         return {
           ...clip,

@@ -427,9 +427,13 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     // ESCSUITE-101: the original clip is gone — replaced by the two halves —
     // so it has to leave selectedClipIds too if a multi-selection held it;
     // pruneSelection does that. selectedClipId is still explicitly the first
-    // half, exactly as before: that override wins regardless of what pruning
-    // would have left it as.
-    const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
+    // half, exactly as before. But if the original was one of a multi-selection,
+    // dropping it and leaving selectedClipId pointing at a clip the Set does
+    // NOT contain would disagree with itself — so a selection that held the
+    // original swaps it for the first half, keeping the two in step.
+    const wasSelected = state.selectedClipIds.has(clipId);
+    const prunedIds = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds).selectedClipIds;
+    const selectedClipIds = wasSelected ? new Set([...prunedIds, firstClip.id]) : prunedIds;
     return {
       project: {
         ...state.project,
@@ -441,7 +445,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         },
       },
       selectedClipId: firstClip.id,
-      selectedClipIds: pruned.selectedClipIds,
+      selectedClipIds,
       history: pushToHistory(state),
     };
   }),

@@ -166,6 +166,11 @@ describe('keyframe actions and the undo stack', () => {
       refusesFalse(() => store().removeClipKeyframe('no-such-clip', 'opacity', 1))
     })
 
+    it('refuses for a clip that exists but has no animation at all', () => {
+      addClip('clip2', 6, 2) // never had setClipKeyframe called on it — animation is undefined
+      refusesFalse(() => store().removeClipKeyframe('clip2', 'opacity', 0))
+    })
+
     it('refuses for a property the clip has no keyframes on', () => {
       refusesFalse(() => store().removeClipKeyframe('clip1', 'scaleX', 1))
     })

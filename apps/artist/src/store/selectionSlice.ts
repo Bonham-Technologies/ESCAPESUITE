@@ -10,6 +10,7 @@ import { cloneClip } from '../utils/deepClone';
 import { pushToHistory } from './storeHistory';
 import { calculateTimelineDuration } from './projectFactory';
 import { anyClipOnLockedTrack, lockedTrackIds } from './trackLock';
+import { pruneSelection } from './selectionPrune';
 
 export type SelectionSlice = Pick<EditorState, 'selectedClipId' | 'selectedClipIds' | 'selectedTrackId' | 'clipboard' | 'setSelectedClipId' | 'setSelectedTrackId' | 'toggleClipSelection' | 'selectClipsInRange' | 'clearMultiSelection' | 'moveSelectedClips' | 'deleteSelectedClips' | 'copySelectedClips' | 'pasteClips' | 'muteSelectedClips' | 'unmuteSelectedClips'>;
 
@@ -126,9 +127,10 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     if (state.selectedClipIds.size === 0) return false;
 
     const clips = state.project.timeline.clips;
-    const toDelete = new Set(
-      [...state.selectedClipIds].filter((id) => clips.some((clip) => clip.id === id))
-    );
+    // Reuses pruneSelection's own existing-ids Set rather than an O(n*m)
+    // `filter(id => clips.some(...))` — passing `null` for selectedClipId
+    // asks only about the ids Set, which is all this needs.
+    const toDelete = pruneSelection(clips, null, state.selectedClipIds).selectedClipIds;
     if (toDelete.size === 0) return false; // every selected id is a ghost
 
     if (anyClipOnLockedTrack(clips, state.project.timeline.tracks, toDelete)) return false; // ESCSUITE-84

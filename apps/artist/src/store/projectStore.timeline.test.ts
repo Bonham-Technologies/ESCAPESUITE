@@ -869,20 +869,38 @@ describe('projectStore remaining behaviours', () => {
       expect([...store().selectedClipIds]).toEqual(['clip2'])
     })
 
-    it('splitClip drops the original (now-retired) clip id from selectedClipIds', () => {
+    it('splitClip drops the original (now-retired) clip id from selectedClipIds, swapping in the first half when it was selected', () => {
       const first = addClip('clip1', 0, 4)
       addClip('clip2', 8, 2, first.trackId)
       store().toggleClipSelection('clip2')
-      store().toggleClipSelection('clip1')
+      store().toggleClipSelection('clip1') // multi-selection holds the clip about to split
 
       store().splitClip('clip1', 2)
 
+      // splitClip's own contract is unchanged: the first half is selected.
+      const selectedId = store().selectedClipId
+      expect(selectedId).not.toBeNull()
+      expect(selectedId).not.toBe('clip1')
+
       // clip1 no longer exists — split into two new clips — so it cannot
       // remain in the Set even though splitClip never named it as "removed".
+      // Because it WAS part of the multi-selection, the first half takes its
+      // place there too, so selectedClipId and selectedClipIds agree.
+      expect([...store().selectedClipIds].sort()).toEqual(['clip2', selectedId].sort())
+      expect(store().selectedClipIds.has(selectedId!)).toBe(true)
+    })
+
+    it('splitClip leaves an UNSELECTED multi-selection untouched by the first half', () => {
+      const first = addClip('clip1', 0, 4)
+      addClip('clip2', 8, 2, first.trackId)
+      store().toggleClipSelection('clip2') // clip1 is not part of the multi-selection
+
+      store().splitClip('clip1', 2)
+
+      // The first half becomes the sole selection (splitClip's own contract),
+      // but the multi-selection Set never held clip1, so it is untouched —
+      // the first half is NOT added to a selection it was never part of.
       expect([...store().selectedClipIds]).toEqual(['clip2'])
-      // splitClip's own contract is unchanged: the first half is selected.
-      expect(store().selectedClipId).not.toBeNull()
-      expect(store().selectedClipId).not.toBe('clip1')
     })
 
     it('removeTrack drops the ids of the clips it takes with it', () => {

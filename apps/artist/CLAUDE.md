@@ -1254,6 +1254,16 @@ through — stay inside their updaters as `return state`. The shared doc comment
 in `store/types.ts` is the contract: **`false` means no state changed and no undo entry was
 pushed, and a caller passing `skipHistory` to a later write must look at it.**
 
+A third reason a write answers `false` joined the lock with ESCSUITE-101: **nothing to do**.
+`pasteClips` started this (below) refusing when a clone's track is no longer on the timeline;
+`deleteSelectedClips` refuses when its selection names no clip on the timeline, or when any one
+that does exist sits on a locked track; `muteSelectedClips`/`unmuteSelectedClips` refuse when
+every relevant track already has the mute state being asked for; and `removeClipKeyframe` —
+already on the list above for the lock — also refuses for three reasons that have nothing to do
+with it: an unknown clip, a property the clip has no keyframes on, or no keyframe within
+`KEYFRAME_TIME_EPSILON` of the given time. All of them still mean exactly what `false` means
+above.
+
 `hooks/useGestureHistory.ts` is the one mechanism that does. `createGestureHistory()` (and the
 `useGestureHistory()` that holds one per component) is `begin` / `resume` / `end` / `commit`,
 two booleans in a closure and no state or subscription of any kind: `commit(write)` runs one
@@ -1408,7 +1418,8 @@ the other half of ESCSUITE-87's contract for the same reason: `deleteSelectedCli
 `false` and writes nothing when the ids it finds among `selectedClipIds` all name no clip on the
 timeline (belt-and-braces, the same shape as `pasteClips`'s "track no longer on the timeline"
 check — pruning running everywhere else means a ghost should rarely reach here at all) or when
-every one that does exist sits on a locked track (ESCSUITE-84, unchanged); `removeClipKeyframe`
+any one of the ids that DO still exist sits on a locked track (`anyClipOnLockedTrack`,
+all-or-nothing, ESCSUITE-84, unchanged); `removeClipKeyframe`
 answers `false` for an unknown clip id, a property the clip has no keyframes on, or a time with
 no keyframe within `KEYFRAME_TIME_EPSILON` (exported from `utils/animation.ts` for exactly this
 question) — the three ways it used to push an undo entry that removed nothing; and

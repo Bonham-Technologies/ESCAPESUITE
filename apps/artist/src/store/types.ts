@@ -592,6 +592,18 @@ export interface EditorState {
    * asked to** — and NOT that any value is now different: writing a clip the
    * position it already holds runs, records an entry and answers `true`.
    *
+   * A third reason joined the first two with ESCSUITE-101: **nothing to do**.
+   * `pasteClips` started this (ESCSUITE-100, below) refusing when a clone's
+   * track is no longer on the timeline; `deleteSelectedClips` refuses when its
+   * selection names no clip actually on the timeline, or when every one that
+   * does sits on a locked track; `muteSelectedClips`/`unmuteSelectedClips`
+   * refuse when every relevant track already has the mute state being asked
+   * for; and `removeClipKeyframe` — already in this list for the lock —
+   * refuses for three more reasons that have nothing to do with the lock: an
+   * unknown clip, a property the clip has no keyframes on, or no keyframe
+   * within `KEYFRAME_TIME_EPSILON` of the given time. All of them still mean
+   * exactly what `false` means above: no state changed, no undo entry pushed.
+   *
    * A caller that passes `skipHistory: true` to a *later* write of the same
    * gesture MUST look at it. `skipHistory` says "an earlier write of this
    * gesture already pushed the undo entry", and a refused write pushed nothing
@@ -642,8 +654,10 @@ export interface EditorState {
    * `boolean` since ESCSUITE-101, the same contract as `pasteClips` below:
    * `false` when the selection names no clip actually on the timeline (every
    * id a ghost — ESCSUITE-100's belt-and-braces shape, applied to the
-   * selection instead of the clipboard) or when every one of them sits on a
-   * locked track (ESCSUITE-84) — no state changed, no undo entry pushed.
+   * selection instead of the clipboard) or when any one of the ids that DO
+   * still exist sits on a locked track (`anyClipOnLockedTrack`, ESCSUITE-84 —
+   * all-or-nothing, the same as `pasteClips`'s lock check below) — no state
+   * changed, no undo entry pushed.
    */
   deleteSelectedClips: () => boolean;
   copySelectedClips: () => void;

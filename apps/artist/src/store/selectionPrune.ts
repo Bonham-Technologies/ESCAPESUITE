@@ -35,6 +35,14 @@ export function pruneSelection(
   selectedClipId: string | null,
   selectedClipIds: Set<string>
 ): PrunedSelection {
+  // Nothing selected, nothing to prune — the common case for undo/redo, which
+  // ask this on every keypress whether or not anything is selected. Skips
+  // building a Set of every clip id on the timeline for a question whose
+  // answer is already known.
+  if (selectedClipId === null && selectedClipIds.size === 0) {
+    return { selectedClipId, selectedClipIds };
+  }
+
   const existing = new Set(clips.map((clip) => clip.id));
 
   let prunedIds = selectedClipIds;
