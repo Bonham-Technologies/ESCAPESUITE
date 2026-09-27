@@ -50,6 +50,13 @@ export const createTrackSlice: StateCreator<EditorState, [], [], TrackSlice> = (
 
     const newTracks = tracks.filter(t => t.id !== trackId);
     const newClips = state.project.timeline.clips.filter(c => c.trackId !== trackId);
+    // ESCSUITE-100: a clipboard entry naming this track cannot land anywhere
+    // once it's gone, so drop it here rather than leave pasteClips's own
+    // all-or-nothing guard as the only thing standing between a paste and a
+    // clip on no track at all.
+    const newClipboard = state.clipboard && state.clipboard.some((c) => c.trackId === trackId)
+      ? state.clipboard.filter((c) => c.trackId !== trackId)
+      : state.clipboard;
 
     return {
       project: {
@@ -63,6 +70,7 @@ export const createTrackSlice: StateCreator<EditorState, [], [], TrackSlice> = (
         },
       },
       selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
+      clipboard: newClipboard,
       history: pushToHistory(state),
     };
   }),

@@ -80,7 +80,7 @@ export interface AppKeyboardShortcutsDeps {
   selectedClipIds: Set<string>;
   deleteSelectedClips: () => void;
   copySelectedClips: () => void;
-  pasteClips: () => void;
+  pasteClips: () => boolean;
   clipboard: Clip[] | null;
   clearMultiSelection: () => void;
   setInPoint: (time: number) => void;
@@ -230,7 +230,14 @@ export function useAppKeyboardShortcuts({
             showNotification('Track is locked', 'info');
             return;
           }
-          pasteClips();
+          // ESCSUITE-100: a clone can also refuse because its clipboard
+          // trackId names no track at all (a project load replaced the
+          // tracks) — the lock check above can't see that, so the store's own
+          // all-or-nothing refusal is the one source of truth here.
+          if (!pasteClips()) {
+            showNotification('Nothing to paste here', 'info');
+            return;
+          }
           showNotification(clipCountMessage(clipboard.length, 'pasted'), 'info');
           return;
         }

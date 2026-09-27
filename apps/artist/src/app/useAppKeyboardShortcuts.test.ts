@@ -79,7 +79,7 @@ beforeEach(() => {
     selectedClipIds: new Set<string>(),
     deleteSelectedClips: vi.fn(),
     copySelectedClips: vi.fn(),
-    pasteClips: vi.fn(),
+    pasteClips: vi.fn(() => true),
     clipboard: null,
     clearMultiSelection: vi.fn(),
     setInPoint: vi.fn(),
@@ -252,6 +252,19 @@ describe('copy, paste and duplicate', () => {
 
     expect(deps.pasteClips).not.toHaveBeenCalled()
     expect(deps.setActiveTool).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-100: pasteClips refuses (and writes nothing) when a clone would
+  // land on a track that is no longer on the timeline — the lock check above
+  // it can't see that, so the cascade has to look at the store's own answer.
+  it('Ctrl+V toasts and does not claim success when pasteClips refuses', () => {
+    mountShortcuts({ clipboard: [clip], pasteClips: vi.fn(() => false) })
+
+    press('v', { ctrlKey: true })
+
+    expect(deps.pasteClips).toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith('Nothing to paste here', 'info')
+    expect(deps.showNotification).not.toHaveBeenCalledWith(expect.stringContaining('pasted'), 'info')
   })
 
   it('Ctrl+D duplicates the selected clip', () => {

@@ -640,7 +640,13 @@ export interface EditorState {
   moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
   deleteSelectedClips: () => void;
   copySelectedClips: () => void;
-  pasteClips: () => void;
+  /**
+   * `boolean` for the same reason as the clip actions above (ESCSUITE-87):
+   * `false` when any clone would land on a locked track (ESCSUITE-84) or on
+   * a track no longer on the timeline (ESCSUITE-100) — all-or-nothing, no
+   * state changed, no undo entry pushed.
+   */
+  pasteClips: () => boolean;
   muteSelectedClips: () => void;
   unmuteSelectedClips: () => void;
 

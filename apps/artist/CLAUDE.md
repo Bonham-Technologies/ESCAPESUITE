@@ -1219,7 +1219,9 @@ today. `findEmptyTrack` (`projectFactory.ts`) never picks a locked track for a p
 none, so the media library, the overlay buttons and the ESCAPECRAFT handoff skip locked rows
 without knowing "locked" exists. Selection-slice group actions are **all-or-nothing**:
 `anyClipOnLockedTrack` vetoes `deleteSelectedClips`, `pasteClips` (asked about the clones' own
-`trackId`, since they haven't landed) and `moveSelectedClips` as one yes/no over the whole set.
+`trackId`, since they haven't landed — ESCSUITE-100 added a second, identically-shaped
+all-or-nothing check right beside it, for a clone whose `trackId` names no track at all) and
+`moveSelectedClips` as one yes/no over the whole set.
 `muteSelectedClips`/`unmuteSelectedClips`, `updateTrack` and `reorderTracks` stay untouched —
 track properties, not clip contents — and `removeTrack` refuses, since deleting a locked track
 deletes its clips. So does the project slice's `removeSourceVideo`, all-or-nothing: it removes
@@ -1357,6 +1359,26 @@ Fit to Canvas spreads `DEFAULT_TRANSFORM` wholesale — rotation and `scaleLocke
 and only exists when the clip has a source video (`handleResetToDefaults`). The only thing
 that tells them apart in the DOM is that the second carries a `title`, which is how
 `ClipEditor.test.tsx` distinguishes them.
+
+**A paste can refuse for a second reason now, and the playhead default was wrong (ESCSUITE-100).**
+`pasteClips` placed its earliest clone at `state.currentTime || minPosition + 0.5` — `currentTime`
+is never undefined, so that `||` only ever fired for a playhead sitting at exactly 0, and treated
+it as "no playhead": Home, then Ctrl+V, pasted a clip copied from 3s at 3.5s rather than 0. Paste
+now always lands at the playhead, 0 included, with every other clone keeping its offset from the
+first. Its clones also keep the clipboard's `trackId`, and that track can be gone without the lock
+ever being involved — deleted by `removeTrack`, or swapped out from under an existing clipboard by
+a project load — so `pasteClips` reads the current tracks through `get()` and refuses whole,
+writing nothing, when any clone's `trackId` names none of them; the same all-or-nothing shape as
+the lock check beside it. That guard is meant to be a rare belt-and-braces check rather than the
+normal path: `removeTrack` and the project slice's `removeSourceVideo` now prune the clipboard
+themselves — an entry naming the track (or the source) they just removed is filtered out in the
+same `set`, before `pasteClips` is ever asked, the way the source removal already dropped every
+clip that used it. `pasteClips` moved out of its `set` updater and into the `get()`-then-`set()`
+shape `moveClipToTrack` uses, so it can answer `false` without writing at all — ESCSUITE-87's
+boolean contract, one more action added to the list — and `useAppKeyboardShortcuts`'s Ctrl+V
+branch toasts "Nothing to paste here" on that `false`; its own pre-check still catches a *locked*
+target and toasts "Track is locked" before the call, so this is what catches the case the
+pre-check can't see, a target that isn't on the timeline at all.
 
 ### App (`src/App.tsx`)
 `App.tsx` is wiring only — the seven `useState` calls the JSX and the hooks need, the store selectors, nine

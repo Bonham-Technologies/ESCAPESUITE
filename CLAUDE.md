@@ -770,6 +770,20 @@ reached from both sides by the cases that start a conversion and delete its row,
 existence re-read is parked, make that re-read throw, reload the library twice, and make the second
 companion's delete reject. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-100 (paste always lands at the playhead
+and refuses a track that no longer exists): 99.41 / 98.77 / **94.12** / 99.02 against the
+99.41 / 98.77 / 94.08 / 99.02 the commit this branch was rebased onto measures — branches up four
+hundredths, the other three unmoved. Measured in one sitting, the base gives 4,280 / 4,549 branches
+and this branch 4,291 / 4,559: ten more branches in the denominator but eleven more covered, because the
+deleted `state.currentTime || minPosition + 0.5` default took its never-tested arm with it, so the
+uncovered count fell 269 → 268 — the one time this week a paragraph has had *fewer* uncovered branches
+to report. The eleven new ones are `pasteClips`' off-timeline `some()` guard, the `clipboard &&
+clipboard.some(...)` ternaries in `removeTrack` and `removeSourceVideo`, and the keyboard paste's toast on
+`false`, each reached from both sides by the new refusal, pruning and paste-at-zero cases against the
+successful pastes that were already there (statements 7,883 / 7,981 → 7,897 / 7,995, lines
+7,011 / 7,052 → 7,021 / 7,062, functions 1,718 / 1,735 → 1,724 / 1,741, every denominator growing by
+exactly what the numerator did). **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -777,7 +791,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.63 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.77 | 94.08 | 99.02 |
+| `@escapesuite/artist` | 99.41 | 98.77 | 94.12 | 99.02 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

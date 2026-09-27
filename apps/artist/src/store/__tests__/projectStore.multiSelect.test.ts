@@ -401,14 +401,72 @@ describe('Multi-Select Store', () => {
 
       // Set playhead position for paste
       useEditorStore.setState({ currentTime: 10 })
-      useEditorStore.getState().pasteClips()
+      const result = useEditorStore.getState().pasteClips()
 
+      expect(result).toBe(true) // ESCSUITE-87: a write that landed says so
       const state = useEditorStore.getState()
       expect(state.project.timeline.clips).toHaveLength(2)
 
       const pastedClip = state.project.timeline.clips[1]
       expect(pastedClip.id).not.toBe('clip-1') // new ID
       expect(pastedClip.timelinePosition).toBe(10) // at playhead
+    })
+
+    // ESCSUITE-100: `state.currentTime || minPosition + 0.5` treated a playhead
+    // at 0 as "no playhead" — Home-then-Ctrl+V pasted at `minPosition + 0.5`
+    // instead of 0. `currentTime` is never undefined, so paste always lands at
+    // the playhead, 0 included.
+    it('pastes at the playhead even when the playhead is at 0', () => {
+      const tracks = [createTestTrack()]
+      const clips = [createTestClip({ id: 'clip-1', timelinePosition: 3 })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().copySelectedClips()
+
+      useEditorStore.setState({ currentTime: 0 })
+      useEditorStore.getState().pasteClips()
+
+      const state = useEditorStore.getState()
+      const pastedClip = state.project.timeline.clips[1]
+      expect(pastedClip.timelinePosition).toBe(0)
+    })
+
+    // ESCSUITE-100: a clone keeps its clipboard `trackId`, and that track can
+    // be gone by the time paste runs — `removeTrack`/`removeSourceVideo` prune
+    // the clipboard themselves, so the only way to reach this is a project
+    // load that replaced the tracks out from under an existing clipboard.
+    // All-or-nothing, like the lock: refuse, write nothing, no history entry.
+    it('pasteClips refuses whole when a clone would land on a track no longer on the timeline', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0 }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1 }),
+      ]
+      const clips = [createTestClip({ id: 'clip-1', trackId: 'track-2', timelinePosition: 0 })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().copySelectedClips()
+
+      // Replace the timeline's tracks the way a project load would — setProject
+      // does not know about the clipboard, so this is the one way a clipboard
+      // entry can end up naming a track that is no longer there.
+      const current = useEditorStore.getState().project
+      useEditorStore.getState().setProject({
+        ...current,
+        timeline: { ...current.timeline, tracks: [tracks[0]], clips: [] },
+      })
+      useEditorStore.setState({ history: { past: [], future: [] } })
+
+      const clipsBefore = useEditorStore.getState().project.timeline.clips
+      const historyBefore = useEditorStore.getState().history.past.length
+
+      const result = useEditorStore.getState().pasteClips()
+
+      expect(result).toBe(false)
+      const state = useEditorStore.getState()
+      expect(state.project.timeline.clips).toBe(clipsBefore)
+      expect(state.history.past.length).toBe(historyBefore)
     })
 
     it('paste pushes to undo history', () => {
@@ -473,8 +531,9 @@ describe('Multi-Select Store', () => {
     })
 
     it('paste does nothing when clipboard is empty', () => {
-      useEditorStore.getState().pasteClips()
+      const result = useEditorStore.getState().pasteClips()
 
+      expect(result).toBe(false)
       const state = useEditorStore.getState()
       expect(state.project.timeline.clips).toHaveLength(0)
       expect(state.history.past.length).toBe(0)
@@ -674,8 +733,9 @@ describe('Multi-Select Store', () => {
       const clipsBefore = useEditorStore.getState().project.timeline.clips
       const selectionBefore = useEditorStore.getState().selectedClipIds
 
-      useEditorStore.getState().pasteClips()
+      const result = useEditorStore.getState().pasteClips()
 
+      expect(result).toBe(false) // ESCSUITE-87/100: a refusal says so
       const state = useEditorStore.getState()
       expect(state.project.timeline.clips).toBe(clipsBefore)
       expect(state.project.timeline.clips).toHaveLength(1)
@@ -701,8 +761,9 @@ describe('Multi-Select Store', () => {
       const clipsBefore = useEditorStore.getState().project.timeline.clips
       const selectionBefore = useEditorStore.getState().selectedClipIds
 
-      useEditorStore.getState().pasteClips()
+      const result = useEditorStore.getState().pasteClips()
 
+      expect(result).toBe(false) // ESCSUITE-87/100: a refusal says so
       const state = useEditorStore.getState()
       expect(state.project.timeline.clips).toBe(clipsBefore)
       expect(state.project.timeline.clips).toHaveLength(2)

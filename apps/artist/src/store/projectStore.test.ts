@@ -150,6 +150,80 @@ describe('projectStore integration', () => {
       useEditorStore.getState().removeSourceVideo('video1')
       expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
     })
+
+    // ESCSUITE-100: a clipboard entry that used to point at this source can
+    // never be pasted back once the source — and every clip that used it — is
+    // gone, so removeSourceVideo drops it the same way removeTrack drops a
+    // clipboard entry for a track it removes.
+    it('drops clipboard entries that reference the source it removes', () => {
+      const removed: SourceVideo = {
+        id: 'removed-video',
+        name: 'removed.mp4',
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
+      }
+      useEditorStore.getState().addSourceVideo({
+        id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+        frameRate: 30, mimeType: 'video/mp4', size: 1000000,
+      })
+      useEditorStore.getState().addSourceVideo(removed)
+      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+
+      useEditorStore.getState().addClipToTimeline(
+        { id: 'clip-kept', sourceVideoId: 'video1', name: 'Kept', startTime: 0, endTime: 5, duration: 5 },
+        trackId, 0
+      )
+      useEditorStore.getState().addClipToTimeline(
+        { id: 'clip-removed', sourceVideoId: 'removed-video', name: 'Removed', startTime: 0, endTime: 5, duration: 5 },
+        trackId, 5
+      )
+
+      useEditorStore.getState().toggleClipSelection('clip-kept')
+      useEditorStore.getState().toggleClipSelection('clip-removed')
+      useEditorStore.getState().copySelectedClips()
+      expect(useEditorStore.getState().clipboard).toHaveLength(2)
+
+      useEditorStore.getState().removeSourceVideo('removed-video')
+
+      const clipboard = useEditorStore.getState().clipboard!
+      expect(clipboard).toHaveLength(1)
+      expect(clipboard[0].id).toBe('clip-kept')
+    })
+
+    it('leaves the clipboard untouched when nothing copied used the removed source', () => {
+      const removed: SourceVideo = {
+        id: 'removed-video',
+        name: 'removed.mp4',
+        duration: 10,
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        mimeType: 'video/mp4',
+        size: 1000000,
+      }
+      useEditorStore.getState().addSourceVideo({
+        id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+        frameRate: 30, mimeType: 'video/mp4', size: 1000000,
+      })
+      useEditorStore.getState().addSourceVideo(removed)
+      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+
+      useEditorStore.getState().addClipToTimeline(
+        { id: 'clip-kept', sourceVideoId: 'video1', name: 'Kept', startTime: 0, endTime: 5, duration: 5 },
+        trackId, 0
+      )
+      useEditorStore.getState().toggleClipSelection('clip-kept')
+      useEditorStore.getState().copySelectedClips()
+      const clipboardBefore = useEditorStore.getState().clipboard
+
+      useEditorStore.getState().removeSourceVideo('removed-video')
+
+      expect(useEditorStore.getState().clipboard).toBe(clipboardBefore)
+    })
   })
 
   describe('undo/redo', () => {
