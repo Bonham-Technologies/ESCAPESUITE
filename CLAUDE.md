@@ -756,13 +756,27 @@ the self-close timer's, uncovered and claimed unreachable; it is reachable throu
 fake-timer case that drives it is why the count is fourteen of fourteen. **No floor crossed**; artist's
 floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-27 for ESCSUITE-103 (deleting the recording that is
+converting aborts the conversion instead of stranding the one slot; thumbnail URLs revoked on remove and
+reload; the cascade delete companions-first with one notice on failure): 100.00 / 99.50 / **97.63** /
+100.00 against the 100.00 / 99.50 / 97.61 / 100.00 the commit this branch was rebased onto measures —
+branches up two hundredths, the other three unmoved. Measured in one sitting, the base gives
+1,268 / 1,299 branches and this branch 1,280 / 1,311, statements 2,398 / 2,410 → 2,425 / 2,437: twelve
+new branches and twenty-seven new statements, every one covered, the same 31 branches and 12 statements
+uncovered as before. The new decisions are the delete handler's "is this the converting row" check, the
+post-read abort re-check and the throw-as-still-exists arm in `useMp4Download`, the `blob:` guards on both
+revocations in `recorderStore`, and the per-part try/catch in `useRecordingLibrary`'s cascade — each
+reached from both sides by the cases that start a conversion and delete its row, cancel while the
+existence re-read is parked, make that re-read throw, reload the library twice, and make the second
+companion's delete reject. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.50 | 97.61 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.50 | 97.63 | 100.00 |
 | `@escapesuite/artist` | 99.41 | 98.77 | 94.08 | 99.02 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
