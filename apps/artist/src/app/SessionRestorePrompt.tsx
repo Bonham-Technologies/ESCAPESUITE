@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import type { SessionState } from '../core/storage';
 import styles from '../App.module.css';
@@ -45,6 +46,24 @@ function swallowEscape(): void {
  */
 export function SessionRestorePrompt({ session, onRestore, onDecline }: SessionRestorePromptProps) {
   const dialogRef = useDialogBehaviour(swallowEscape);
+  // Both buttons answer the same question, so once either is clicked neither
+  // should fire again: a restore's own reads take a moment (ESCSUITE-96), and
+  // a second click in that window — the same button again, or the other one
+  // — must not reach the hook a second time. Disabling both is the first line
+  // of defence, stopping the click from happening at all; `useSessionRestore`
+  // guards the race itself (a ref, checked before a restore commits) as the
+  // one that matters if this one is ever bypassed.
+  const [answered, setAnswered] = useState(false);
+
+  const handleRestore = () => {
+    setAnswered(true);
+    onRestore(session);
+  };
+
+  const handleDecline = () => {
+    setAnswered(true);
+    onDecline();
+  };
 
   return (
     <div className={styles.loadingOverlay}>
@@ -70,13 +89,15 @@ export function SessionRestorePrompt({ session, onRestore, onDecline }: SessionR
         <div className={styles.sessionPromptButtons}>
           <button
             className={styles.sessionRestoreButton}
-            onClick={() => onRestore(session)}
+            onClick={handleRestore}
+            disabled={answered}
           >
             Restore Session
           </button>
           <button
             className={styles.sessionDeclineButton}
-            onClick={onDecline}
+            onClick={handleDecline}
+            disabled={answered}
           >
             Start Fresh
           </button>

@@ -8,7 +8,7 @@
 // `suppressRestore` arrives as a boolean rather than the whole `urlParams`
 // object: it is the only field this concern reads, and the dependency the
 // effect carried inline was `urlParams.suppressRestore`.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSessionState, clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
@@ -37,7 +37,7 @@ export interface SessionRestore {
   showSessionPrompt: boolean;
   /** The session the prompt is offering, or `null`. */
   pendingSession: SessionState | null;
-  handleRestoreSession: (session: SessionState) => void;
+  handleRestoreSession: (session: SessionState) => Promise<void>;
   handleDeclineSession: () => void;
 }
 
@@ -55,6 +55,22 @@ export function useSessionRestore({
   const [showSessionPrompt, setShowSessionPrompt] = useState(false);
   const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
 
+  // Which restore is still allowed to land, or none. Set at the top of
+  // `handleRestoreSession`, checked again after its `await` — the only two
+  // places this needs to live, because a restore has exactly one point where
+  // time passes. A restore reads every thumbnail before it commits anything
+  // (ESCSUITE-96), and that read is exactly the window in which the user can
+  // click "Start Fresh", or click "Restore Session" again:
+  // - a truthy ref at entry means a restore is already in flight, so a second
+  //   call (a double click, a repeated Enter) is a no-op rather than a second
+  //   pass of `addSourceVideo` over the same sources;
+  // - `handleDeclineSession` clears it, so a restore already past that guard
+  //   finds it changed when its reads come back and does not commit — the
+  //   decline it lost the race to already ran `clearSessionState()` and
+  //   closed the prompt, and a restore that lands anyway would silently
+  //   undo the user's answer.
+  const restoreAttemptRef = useRef<object | null>(null);
+
   // Restore session on app start. A saved `thumbnailUrl` is an
   // `URL.createObjectURL` handle from the previous document — dead the moment
   // this one loaded — so every source is rebuilt from its stored thumbnail
@@ -63,12 +79,21 @@ export function useSessionRestore({
   // every card already showing the right picture rather than a broken one
   // that fixes itself a beat later.
   const handleRestoreSession = useCallback(async (session: SessionState) => {
+    if (restoreAttemptRef.current) return; // already restoring — see the ref's own comment
+    const attempt = {};
+    restoreAttemptRef.current = attempt;
+
     const sourceVideos = await Promise.all(
       session.sourceVideos.map(async (video) => ({
         ...video,
         thumbnailUrl: await resolveThumbnailUrl(video.id),
       }))
     );
+
+    // Declined while the reads were in flight: that answer already ran and
+    // closed the prompt, so this restore must not override it.
+    if (restoreAttemptRef.current !== attempt) return;
+
     setProject(session.project);
     sourceVideos.forEach(addSourceVideo);
     setCurrentTime(session.currentTime);
@@ -82,6 +107,8 @@ export function useSessionRestore({
   }, [setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification]);
 
   const handleDeclineSession = useCallback(() => {
+    // Cancel a restore in flight — see restoreAttemptRef's comment above.
+    restoreAttemptRef.current = null;
     // Not awaited: the answer lands now whatever storage does about it. The
     // catch is only so a rejection is logged rather than left unhandled.
     clearSessionState().catch(console.error);
