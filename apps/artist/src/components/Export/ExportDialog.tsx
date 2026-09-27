@@ -47,6 +47,12 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
   // AbortController for cancelling exports
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Identity of the most recently *started* export, kept separately from
+  // abortControllerRef (which a finished run clears back to null on its own
+  // success). A run's async continuation compares against this — not against
+  // abortControllerRef — to tell whether it is still the one the user is
+  // looking at, so its own completion never makes it look stale to itself.
+  const latestExportRef = useRef<AbortController | null>(null);
 
   const mp4Supported = isMP4ExportSupported();
 
@@ -76,9 +82,18 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     setMp4FailedError(null);
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
-    // Create new AbortController for this export
+    // Create new AbortController for this export. Cancelling one export and
+    // starting another right away is a normal user action — the export
+    // buttons reappear the instant Cancel is clicked, well before the
+    // cancelled export's promise actually settles (it typically rejects only
+    // at its next `await` inside the exporter). Every state write this run
+    // makes below is guarded on isCurrentRun(), so a run that has been
+    // superseded by a later one can still clear its own abort controller but
+    // can never reset a later run's progress, error state or "exporting" UI.
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    latestExportRef.current = abortController;
+    const isCurrentRun = () => latestExportRef.current === abortController;
 
     // Determine options: primary button uses defaults, advanced button uses configured options
     const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
@@ -100,7 +115,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     }
 
     try {
-      const onProgress = (p: ExportProgress) => setProgress(p);
+      const onProgress = (p: ExportProgress) => {
+        if (isCurrentRun()) setProgress(p);
+      };
 
       let blob: Blob;
       let extension: string;
@@ -144,17 +161,22 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       }, 0);
 
       analytics.exportCompleted(extension as 'webm' | 'mp4', totalDuration);
-      setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
-      // Close dialog after a delay
-      setTimeout(() => {
-        onClose();
-        setProgress(null);
-      }, 2000);
+      if (isCurrentRun()) {
+        setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
+
+        // Close dialog after a delay
+        setTimeout(() => {
+          if (isCurrentRun()) {
+            onClose();
+            setProgress(null);
+          }
+        }, 2000);
+      }
     } catch (err) {
       // Don't show error for user-initiated cancellation
       if (err instanceof ExportAbortedError) {
-        setProgress(null);
+        if (isCurrentRun()) setProgress(null);
         return;
       }
 
@@ -171,16 +193,24 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       analytics.exportFailed(format, errorType, failProgress);
 
       // If MP4 failed, show the fallback dialog instead of just an error
-      if (format === 'mp4') {
-        setMp4FailedError(errorMessage);
-        setProgress(null);
-      } else {
-        setError(errorMessage);
+      if (isCurrentRun()) {
+        if (format === 'mp4') {
+          setMp4FailedError(errorMessage);
+        } else {
+          setError(errorMessage);
+        }
         setProgress(null);
       }
     } finally {
-      // Clear the abort controller reference
-      abortControllerRef.current = null;
+      // Clear the abort controller reference — but only if it is still this
+      // run's own controller. A cancelled run's `finally` can fire after a
+      // later run has already stored its controller here (the cancelled
+      // run's promise usually only rejects at its next internal `await`),
+      // and clobbering that later controller would leave Cancel / × / Escape
+      // unable to abort the export the user is actually looking at.
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, timeRange]);
 
