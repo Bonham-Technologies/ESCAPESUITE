@@ -464,6 +464,15 @@ describe('PreviewPlayer cursor', () => {
     expect(await hover(preview, 960, 540 - SHAPE.halfH - 25)).toBe('crosshair')
   })
 
+  // ESCSUITE-88: a locked row refuses the gesture at the press, so the canvas
+  // says so before the press.
+  it('offers not-allowed over a clip on a locked track', async () => {
+    const { shape, preview } = await selectedShape()
+    store().updateTrack(clipOf(shape.id).trackId, { locked: true })
+
+    expect(await hover(preview, 960, 540)).toBe('not-allowed')
+  })
+
   it('falls back to the default cursor over empty canvas', async () => {
     const { preview } = await selectedShape()
     expect(await hover(preview, 100, 100)).toBe('default')

@@ -228,29 +228,38 @@ describe('preview drags and the undo stack', () => {
 
   // ESCSUITE-87. "The first write pushes" has to mean the first write that
   // LANDED. A clip on a locked row refuses the write and pushes nothing
-  // (ESCSUITE-84), and the preview lets the drag start anyway — nothing moves,
-  // which is the refusal being visible. A gesture that marked itself pushed on
-  // that refused write would then hand `skipHistory` to the write that did land
-  // and leave the whole drag off the undo stack.
+  // (ESCSUITE-84), and a gesture that marked itself pushed on that refused write
+  // would then hand `skipHistory` to the write that did land and leave the whole
+  // drag off the undo stack.
+  //
+  // The row is locked *while the button is down* rather than before the press:
+  // since ESCSUITE-88 a press on a locked row starts no gesture at all, so this
+  // is the only way the preview can still reach a refused first write — and it
+  // is a real one, the track header being clickable throughout a canvas drag.
   it('pushes the entry on the first write that lands, when a locked row refused the first', async () => {
     const shape = addShape()
     const trackId = clipOf(shape.id).trackId
-    store().updateTrack(trackId, { locked: true })
 
     const preview = await renderPreview()
-    const before = past()
 
     fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
     await settle()
+
+    // Locked with the gesture already under way. `updateTrack` is a track
+    // property, not clip contents, so it is allowed — and pushes its own entry,
+    // which is why the count is re-read here rather than before the press.
+    store().updateTrack(trackId, { locked: true })
+    const locked = past()
+
     fireEvent.mouseMove(window, preview.at(960 + STEP, 540))
     await settle(FRAME_MS)
 
     // Refused: the shape has not moved, and there is no entry for the rest of
     // the drag to join.
     expect(clipOf(shape.id).shapeData!.x).toBeCloseTo(0.5, 5)
-    expect(past()).toBe(before)
+    expect(past()).toBe(locked)
 
-    // The row is unlocked while the button is still down.
+    // The row is unlocked again, still without releasing the button.
     store().updateTrack(trackId, { locked: false })
     const unlocked = past()
 

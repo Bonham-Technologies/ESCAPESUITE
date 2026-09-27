@@ -128,6 +128,29 @@ describe('useTransformHandles drag listeners', () => {
     expect(result.current.marqueeActive).toBe(false)
   })
 
+  // ESCSUITE-88. A press on a clip whose row is locked selects it — so the
+  // inspector can show it, and say why it is read-only — and stops there: no
+  // undo bookkeeping, no drag state, and nothing bound to the window, so the
+  // clip cannot be moved, resized or rotated.
+  it('selects a clip on a locked track without starting a gesture', async () => {
+    const shape = addShape()
+    store().updateTrack(shape.trackId, { locked: true })
+    store().setSelectedClipId(null)
+    const { result } = mountHandles()
+
+    await act(async () => result.current.handleMouseDown(at(960, 540)))
+
+    expect(store().selectedClipId).toBe(shape.id)
+    expect(dragTypes(addListener)).toEqual([])
+    expect(result.current.marqueeStart).toBeNull()
+
+    // And there is no drag state to answer for the cursor: away from the clip it
+    // is the default again, where a live gesture would still say 'move'.
+    await act(async () => result.current.handleMouseMoveForCursor(at(100, 100)))
+    await settle()
+    expect(result.current.cursor).toBe('default')
+  })
+
   it('binds nothing while the transport is playing', async () => {
     addShape()
     store().setIsPlaying(true)
@@ -172,6 +195,19 @@ describe('useTransformHandles cursor', () => {
     expect(await cursorAt(960, 540 - SHAPE.halfH - 25)).toBe('crosshair')
   })
 
+  // ESCSUITE-88: the pointer's promise has to match what a press would do, and
+  // on a locked row a press does nothing but select.
+  it('offers not-allowed over a clip on a locked track', async () => {
+    const shape = addShape()
+    store().updateTrack(shape.trackId, { locked: true })
+
+    expect(await cursorAt(960, 540)).toBe('not-allowed')
+    expect(await cursorAt(960 - SHAPE.halfW, 540 - SHAPE.halfH)).toBe('not-allowed')
+    expect(await cursorAt(960, 540 - SHAPE.halfH - 25)).toBe('not-allowed')
+    // Empty canvas is still empty canvas — the marquee is unaffected.
+    expect(await cursorAt(100, 100)).toBe('default')
+  })
+
   it('offers the default cursor over empty canvas', async () => {
     addShape()
     expect(await cursorAt(100, 100)).toBe('default')
@@ -181,6 +217,25 @@ describe('useTransformHandles cursor', () => {
     addShape()
     store().setIsPlaying(true)
     expect(await cursorAt(960, 540)).toBe('default')
+  })
+
+  // The other half of the same promise: a row locked with the button already
+  // down is the one way a gesture can still be under way over a locked clip, and
+  // from that moment every write it makes is refused.
+  it('switches to not-allowed when the row is locked mid-gesture', async () => {
+    const shape = addShape()
+    const { result } = mountHandles()
+
+    await act(async () => result.current.handleMouseDown(at(960, 540)))
+    await act(async () => result.current.handleMouseMoveForCursor(at(960 + 10, 540)))
+    await settle()
+    expect(result.current.cursor).toBe('move')
+
+    store().updateTrack(shape.trackId, { locked: true })
+    await act(async () => result.current.handleMouseMoveForCursor(at(960 + 20, 540)))
+    await settle()
+
+    expect(result.current.cursor).toBe('not-allowed')
   })
 
   it('keeps the drag cursor once a gesture is under way', async () => {
