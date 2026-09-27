@@ -35,6 +35,16 @@ interface SourceTogglesProps {
    */
   disabled: boolean;
   /**
+   * True only for countdown, recording and paused — `App`'s own
+   * `isRecordingActive`, not the wider `disabled` above. Kept apart from
+   * `disabled` on purpose (ESCSUITE-104 review): the meters draw *live*
+   * levels, and the store never resets them between takes, so gating the
+   * meter block on `disabled` would leave it on screen — frozen at the last
+   * level pushed — for the whole time a just-finished take is saving, when
+   * there is no take left to meter.
+   */
+  showMeters: boolean;
+  /**
    * Whether the running take actually got a system-audio track. False greys
    * the System meter: the toggle asked for the audio, the share dialog did not
    * hand it over, and a live-looking meter stuck at 0 is a lie.
@@ -64,6 +74,7 @@ export function SourceToggles({
   detailedCapabilities,
   audioLevels,
   disabled,
+  showMeters,
   systemAudioShared,
   onToggleSource,
 }: SourceTogglesProps) {
@@ -161,7 +172,7 @@ export function SourceToggles({
       </div>
 
       {/* Audio meters */}
-      {(config.microphoneEnabled || config.systemAudioEnabled) && disabled && (
+      {(config.microphoneEnabled || config.systemAudioEnabled) && showMeters && (
         <div className={styles.audioMeters}>
           {config.microphoneEnabled && (
             <div className={styles.audioMeter}>

@@ -170,6 +170,13 @@ export function useRecordingSave({
     // field the save path reads once. Still the streams' answer rather than the
     // blob's — reading the file back would mean a decode on the save path.
     const { systemAudioShared } = useRecorderStore.getState();
+    // `resolveHasAudio` still takes `systemAudioEnabled` as its own argument
+    // rather than reading it off `captured` itself — deliberately narrow
+    // (`Pick<CapturedTake, 'micAcquired'>`, `utils/recordingMetadata.ts`)
+    // so that a field added to `CapturedTake` later cannot oblige every
+    // caller of this pure function to answer a question about audio that is
+    // not one. Handing it `captured.systemAudioEnabled` here is this call
+    // site's own business, not a widening of the function's contract.
     const hasAudio = resolveHasAudio(captured, captured.systemAudioEnabled, systemAudioShared);
 
     // A companion take is one take in several files: the primary names it (its
