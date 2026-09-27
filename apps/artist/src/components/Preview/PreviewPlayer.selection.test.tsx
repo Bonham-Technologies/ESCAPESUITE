@@ -826,6 +826,21 @@ describe('handles at a constant screen size (ESCSUITE-90)', () => {
     expect(preview.frame().argsFor('arc')).toEqual([[0, -halfH - 25, 8, 0, Math.PI * 2]])
   })
 
+  it('falls back to the plain size when the box has collapsed to nothing', async () => {
+    // A preview in a panel that has been dragged shut reports a 0x0 box, and
+    // the scale is project pixels *per CSS pixel* — dividing by zero would put
+    // an infinity into every handle rectangle.
+    const shape = addShape()
+    store().setSelectedClipId(shape.id)
+    store().setProjectResolution(3840, 2160)
+    const preview = await renderPreview({ rect: RECT })
+    preview.clearCalls()
+    preview.resize({ width: 0, height: 0 })
+    await settle(FRAME_MS)
+
+    expect(preview.frame().argsFor('arc')).toEqual([[0, -216 - 25, 8, 0, Math.PI * 2]])
+  })
+
   it('reaches the corner of a 4K project from 30 project px away', async () => {
     const { preview, halfW, halfH } = await shapeIn(3840, 2160)
 

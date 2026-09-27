@@ -631,13 +631,31 @@ invalidation on resize, only a redraw at the new scale.
 radius) is in output-bitmap pixels, unaffected by the CTM. Left alone, every blur in the
 preview would render `k`× too wide at any raster smaller than the project. `MediaDrawOptions.filterScale`
 (default `1`) converts a project-space blur radius into device pixels at every `ctx.filter` site on the preview's draw
-call sites; every export passes nothing and gets `blur(Xpx)` byte-identical to before. Handles
-stay sized in project pixels deliberately (no behaviour change) — their on-screen size is
-unchanged today only because `project px × k` cancels back out to the same CSS pixels CSS
-used to scale them to; making them a **constant screen size** regardless of project
-resolution is a follow-up, not yet done (divide the handle size by `k` at the draw site and in
-`hitTest`). `devicePixelRatio` is read at draw time, not subscribed to, so moving the window
+call sites; every export passes nothing and gets `blur(Xpx)` byte-identical to before.
+`devicePixelRatio` is read at draw time, not subscribed to, so moving the window
 to a different-DPI display re-rasterises only on the next resize or edit, not immediately.
+
+**The selection chrome is a constant size on screen** (ESCSUITE-90). `HANDLE_SIZE` (8) and
+`ROTATION_HANDLE_OFFSET` (25) are screen pixels, not project pixels, so
+`drawSelectionHandles` / `drawMultiSelectHandles` and `hitTestHandles` / `hitHandlesOnClip`
+all take a final **`screenScale`** — project pixels per CSS pixel — and multiply by it every
+constant that is a screen size: the handle squares and the 80% side handles, the rotation grip
+and its offset above the box, `lineWidth`, and the dash arrays. Positions (corners, edges,
+centre) are the clip's own geometry and never scale, and the body hit test is untouched. A 4K
+project in a 700px preview drew ~1.5px handles before this; it now draws 44-project-pixel ones,
+which are the same 8px under the pointer as a 720p project's.
+
+`screenScale` defaults to **1** — the right answer for a canvas that *is* its own screen (both
+exporters, the headless bundle, the unit tests that build one) and for the preview before its
+first `ResizeObserver` callback — so every caller that passes nothing behaves exactly as it did.
+The preview's two callers get the real number, each from a measurement it already had and
+**neither by reading layout again**: the draw callbacks from `1 / contentBox(canvas,
+displayBoxRef.current, canvasDimensions).scaleX` (`contentBox` is pure arithmetic over the rect
+it is handed, and the box is the one the observer above already reports, so no frame forces a
+reflow), and the pointer path from `getCanvasPosition`, which carries the content box' `scaleX`
+out on its result — the hit test wants `1 / scale`, and asking for it separately would mean a
+second `getBoundingClientRect` per pointer move for a number that call had already computed.
+It is derived at draw time and held in no state.
 
 **The playhead position does not re-render the preview, the timeline body, or `App`.**
 `usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every
