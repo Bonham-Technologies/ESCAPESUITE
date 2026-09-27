@@ -129,6 +129,17 @@ describe('useKeyboardShortcuts P and S', () => {
 
     expect(handlers.handleStopRecording).not.toHaveBeenCalled()
   })
+
+  // ESCSUITE-106: recorder.stop() is a no-op before start(), so S must stay
+  // gated away from the countdown the same way it always has — the button
+  // fix is a separate concern from this shortcut's own gate.
+  it('ignores S during the countdown', () => {
+    mountShortcuts('countdown')
+
+    press('s')
+
+    expect(handlers.handleStopRecording).not.toHaveBeenCalled()
+  })
 })
 
 describe('useKeyboardShortcuts Escape', () => {

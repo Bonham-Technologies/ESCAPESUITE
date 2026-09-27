@@ -54,7 +54,9 @@ function renderControls(
 }
 
 function recordButton(): HTMLButtonElement {
-  return screen.getByRole('button', { name: /^(start|stop) recording$/i }) as HTMLButtonElement
+  return screen.getByRole('button', {
+    name: /^(start recording|stop recording|cancel countdown)$/i,
+  }) as HTMLButtonElement
 }
 
 describe('RecorderControls while idle', () => {
@@ -148,6 +150,25 @@ describe('RecorderControls mid-take', () => {
     expect(screen.queryByRole('button', { name: 'Pause recording' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Resume recording' })).not.toBeInTheDocument()
     expect(recordButton()).toHaveClass(styles.recording)
+  })
+
+  // ESCSUITE-106: recorder.stop() is a no-op before start(), so a record
+  // button still labelled and wired as "Stop recording" during the 3-2-1
+  // count did nothing — the ticker kept running and the take started anyway.
+  // The button now agrees with Escape and its own neighbouring Cancel button.
+  it('reads "Cancel countdown" during the countdown and cancels rather than stops', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderControls({ state: 'countdown' })
+
+    const record = recordButton()
+    expect(record).toHaveAccessibleName('Cancel countdown')
+    expect(record).toHaveAttribute('title', 'Cancel countdown (Esc)')
+
+    await user.click(record)
+
+    expect(calls.onCancel).toHaveBeenCalledTimes(1)
+    expect(calls.onStop).not.toHaveBeenCalled()
+    expect(calls.onStart).not.toHaveBeenCalled()
   })
 })
 

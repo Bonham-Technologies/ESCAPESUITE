@@ -73,7 +73,9 @@ function expectedConsoleError(): ReturnType<typeof vi.spyOn> {
 }
 
 function recordButton(): HTMLButtonElement {
-  return screen.getByRole('button', { name: /^(start|stop) recording$/i }) as HTMLButtonElement;
+  return screen.getByRole('button', {
+    name: /^(start recording|stop recording|cancel countdown)$/i,
+  }) as HTMLButtonElement;
 }
 
 function state(): string {
@@ -330,6 +332,29 @@ describe('App countdown', () => {
     });
 
     expect(state()).toBe('idle');
+  });
+
+  it('cancels the countdown from the record button instead of trying to stop it', async () => {
+    armScreenCapture();
+    resetRecorderStore({ countdownSeconds: 3 });
+    await renderApp();
+    await startRecordingViaButton();
+
+    expect(state()).toBe('countdown');
+
+    // The button is the same element the take was started from — it now
+    // reads "Cancel countdown" rather than "Stop recording", which is why
+    // recordButton() finds it by that name too.
+    await user().click(recordButton());
+
+    expect(state()).toBe('idle');
+
+    // A no-op recorder.stop() would have left the ticker running; prove the
+    // countdown never reaches the recorder's start().
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(recorderFactory.last().start).not.toHaveBeenCalled();
   });
 });
 
