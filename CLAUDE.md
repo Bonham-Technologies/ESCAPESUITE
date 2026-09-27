@@ -740,6 +740,22 @@ six stop-while-recording cases that were already there; the same 31 branches are
 `WebCodecsRecorder` gained a twin case and no code — it never had the bug. **No floor crossed**;
 craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-98 (a cancelled export can no longer
+clobber the export started after it): 99.41 / 98.77 / **94.08** / **99.02** against the
+99.41 / 98.77 / 94.06 / 99.01 the commit this branch was rebased onto measures — branches up two
+hundredths, functions up one, lines and statements unmoved. Measured in one sitting, the base gives
+4,266 / 4,535 branches and this branch 4,280 / 4,549: fourteen new branches, fourteen covered, the same
+269 uncovered as before (statements 7,872 / 7,970 → 7,883 / 7,981, lines 7,002 / 7,043 →
+7,011 / 7,052, functions 1,717 / 1,734 → 1,718 / 1,735, every denominator growing by exactly what the
+numerator did). The new branches are the `isCurrentRun()` guards in `ExportDialog.tsx` — around the
+progress write, the complete write, the download and the `EXPORT_COMPLETE` post, the self-close timer,
+and the identity check in the `finally` — each reached from both sides by the stale-run cases (late
+progress, late success, late failure, the × during the complete window) against the ordinary single-run
+export that still downloads and posts exactly once. The review's first pass found one of those guards,
+the self-close timer's, uncovered and claimed unreachable; it is reachable through the header ×, and the
+fake-timer case that drives it is why the count is fourteen of fourteen. **No floor crossed**; artist's
+floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -747,7 +763,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.61 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.77 | 94.06 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.77 | 94.08 | 99.02 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
