@@ -729,13 +729,24 @@ sides by the new cases (the button mid-countdown, and every other state's button
 is untouched, so the per-tick render pins hold by construction. **No floor crossed**; craft's floors
 stay 100 / 99 / 97 / 100.
 
+`@escapesuite/craft` was re-measured 2026-09-27 for ESCSUITE-105 (the MediaRecorder path's
+`getDuration()` no longer counts the final pause when a take is stopped while paused):
+100.00 / 99.50 / **97.61** / 100.00 against the 100.00 / 99.50 / 97.60 / 100.00 the commit this branch
+was rebased onto measures — branches up a hundredth, the other three unmoved. Measured in one sitting,
+the base gives 1,266 / 1,297 branches and this branch 1,268 / 1,299, statements 2,396 / 2,408 →
+2,398 / 2,410: the change is one `if (state === 'paused')` latch in `Recorder.stop()`, two branches
+and two statements, reached from both sides by the new fake-timer case (stopped while paused) and the
+six stop-while-recording cases that were already there; the same 31 branches are uncovered as before.
+`WebCodecsRecorder` gained a twin case and no code — it never had the bug. **No floor crossed**;
+craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.50 | 97.60 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.50 | 97.61 | 100.00 |
 | `@escapesuite/artist` | 99.41 | 98.77 | 94.06 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
