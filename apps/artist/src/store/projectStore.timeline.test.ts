@@ -179,6 +179,67 @@ describe('projectStore integration', () => {
       expect(state.project.timeline.clips).toHaveLength(1)
       expect(state.history.past.length).toBe(0)
     })
+
+    // ESCSUITE-100: a clipboard entry naming a track that's just been removed
+    // can never be pasted back — dropping it here is what keeps pasteClips's
+    // own "track no longer on the timeline" refusal a rare belt-and-braces
+    // check rather than the normal way this is reached.
+    it('drops clipboard entries whose track it removes', () => {
+      useEditorStore.getState().addTrack()
+      const tracks = useEditorStore.getState().project.timeline.tracks
+      const [keptTrack, removedTrack] = tracks
+
+      useEditorStore.getState().addClipToTimeline({
+        id: 'clip-kept',
+        name: 'Kept',
+        sourceVideoId: 'video1',
+        startTime: 0,
+        endTime: 5,
+        duration: 5,
+      }, keptTrack.id, 0)
+      useEditorStore.getState().addClipToTimeline({
+        id: 'clip-removed',
+        name: 'Removed',
+        sourceVideoId: 'video1',
+        startTime: 0,
+        endTime: 5,
+        duration: 5,
+      }, removedTrack.id, 0)
+
+      useEditorStore.getState().toggleClipSelection('clip-kept')
+      useEditorStore.getState().toggleClipSelection('clip-removed')
+      useEditorStore.getState().copySelectedClips()
+      expect(useEditorStore.getState().clipboard).toHaveLength(2)
+
+      useEditorStore.getState().removeTrack(removedTrack.id)
+
+      const clipboard = useEditorStore.getState().clipboard!
+      expect(clipboard).toHaveLength(1)
+      expect(clipboard[0].id).toBe('clip-kept')
+    })
+
+    it('leaves the clipboard untouched when the removed track holds nothing copied', () => {
+      useEditorStore.getState().addTrack()
+      const tracks = useEditorStore.getState().project.timeline.tracks
+      const [keptTrack, removedTrack] = tracks
+
+      useEditorStore.getState().addClipToTimeline({
+        id: 'clip-kept',
+        name: 'Kept',
+        sourceVideoId: 'video1',
+        startTime: 0,
+        endTime: 5,
+        duration: 5,
+      }, keptTrack.id, 0)
+
+      useEditorStore.getState().toggleClipSelection('clip-kept')
+      useEditorStore.getState().copySelectedClips()
+      const clipboardBefore = useEditorStore.getState().clipboard
+
+      useEditorStore.getState().removeTrack(removedTrack.id)
+
+      expect(useEditorStore.getState().clipboard).toBe(clipboardBefore)
+    })
   })
 
   describe('clip operations', () => {
