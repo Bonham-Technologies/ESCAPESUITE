@@ -411,7 +411,10 @@ test.describe('ESCAPEARTIST Accessibility', () => {
       await page.getByLabel('Type', { exact: true }).selectOption('fade')
       await page.getByLabel('Mask shape', { exact: true }).selectOption('rounded')
       await expect(page.getByLabel('Corner Radius', { exact: true })).toBeVisible()
-      await expect(page.getByLabel('Animate In Duration', { exact: true })).toBeVisible()
+      // The duration slider's name is composed by `aria-labelledby` (the group
+      // heading plus its own label), which a role query resolves and a label
+      // query does not.
+      await expect(page.getByRole('slider', { name: 'Animate In Duration', exact: true })).toBeVisible()
 
       await auditInspector('a media clip')
     })
