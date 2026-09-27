@@ -440,6 +440,29 @@ Clips support animated properties via keyframes:
   string concat and a `Map.set` per clip per frame; a preview cannot use a time-keyed cache
   at all, because it redraws the same clip at the same time after every edit. Deleted
   2026-09-12 — `exportMP4.perf.test.ts` pins the lookup count at frames x active clips.
+- **Splitting a clip rebases its animation, it does not copy it (ESCSUITE-95)**. Before this,
+  `splitClip` built both halves with `{ ...clip }`, so both inherited the parent's whole
+  `animation` — same keyframe times, since those are clip-relative, so a fade near the start of
+  the original clip replayed from the second half's own start too; and the same in/out presets,
+  regenerated against each half's own shorter duration, so one fade-in/out became two.
+  `utils/animation.ts`'s `splitAnimation(animation, splitOffset, firstDuration, secondDuration)`
+  is the pure fix `splitClip` calls: per property track, the first half keeps every keyframe with
+  `time < splitOffset` and — only when the parent has a keyframe at or past the split —
+  appends one synthesised keyframe at `splitOffset` holding `interpolateKeyframes`' own value
+  there, so the picture does not jump at the new end (when nothing sits at or past the cut, the
+  last kept value already holds, and nothing is appended); the second half keeps every keyframe
+  with `time >= splitOffset` shifted by `-splitOffset`, prepending a synthesised keyframe at 0 the
+  same way when the parent has a keyframe before the split and none exactly at it. A synthesised
+  keyframe's easing copies the neighbour it stands in for — the keyframe that followed it in the
+  parent for the first half, the one that preceded it for the second. Presets split by ownership
+  rather than by geometry: the in-preset stays with the first half and the out-preset with the
+  second (fade in at the start, fade out at the end, exactly that literally), the half that loses
+  a preset resets that side to `DEFAULT_ANIMATION`'s "none" shape, and a kept preset's `duration`
+  is clamped to its own half's new duration so a fade that used to fit inside the whole clip
+  cannot now run longer than the piece it animates. `animation` and `transform` are also
+  deep-copied for each half, closing the latent aliasing where both halves shared one `animation`
+  object and one `transform` object and only survived it because every writer replaces rather than
+  mutates.
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
