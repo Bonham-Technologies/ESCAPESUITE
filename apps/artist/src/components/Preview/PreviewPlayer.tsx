@@ -9,6 +9,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getFrameCache } from '../../core/frameCache';
+import { projectToOutputScale } from '../../core/outputTransform';
 import { drawPreviewFrame } from './drawFrame';
 import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
@@ -147,8 +148,10 @@ export function PreviewPlayer() {
         // The bitmap was captured off this canvas at whatever size it was
         // rasterised at then; drawing it at the project size under the same
         // transform every frame uses puts it back where it came from, and
-        // rescales it if the window has changed size since.
-        const scale = canvas.width / canvasDimensions.width;
+        // rescales it if the window has changed size since. The scale comes from
+        // `core/outputTransform` rather than a division of its own, so it cannot
+        // disagree with the one `drawPreviewFrame` sets on the miss path.
+        const scale = projectToOutputScale(canvasDimensions, canvas);
         ctx.setTransform(scale, 0, 0, scale, 0, 0);
         ctx.drawImage(cachedFrame, 0, 0, canvasDimensions.width, canvasDimensions.height);
         return;
