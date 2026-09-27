@@ -126,7 +126,7 @@ dist/
 
 ### ESCAPEARTIST (apps/artist)
 - Zustand store in `src/store/projectStore.ts`
-- Core modules in `src/core/`: `storage.ts`, `videoProcessor.ts`, `exporter.ts`, `projectManager.ts`, `exportScheduler.ts`, `frameCache.ts`, `videoDecodeManager.ts`, `frameSource.ts`
+- Core modules in `src/core/`: `storage.ts`, `videoProcessor.ts`, `exporter.ts`, `projectManager.ts`, `videoDecodeManager.ts`, `frameSource.ts`
 - Video decode worker in `src/workers/decodeWorker.ts` for background-capable MP4 exports
 - Keyframe animation system in `src/utils/animation.ts`
 - Audio waveform visualization in `src/utils/waveform.ts`

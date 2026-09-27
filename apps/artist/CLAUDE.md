@@ -111,8 +111,6 @@ pnpm lint                # Run ESLint
   `projectToOutputScale`, `setOutputTransform` and `openOutputFrame`, called by the preview and
   by both exporters. See "Export Resolution" below
 - `projectManager.ts`: Project save/load to JSON files with embedded video references
-- `exportScheduler.ts`: Background export queue management
-- `frameCache.ts`: LRU cache for decoded video frames
 - `videoDecodeManager.ts`: Main thread API for WebCodecs video decoding via Web Worker
 - `frameSource.ts`: Abstraction layer for frame sources (WebCodecs or HTMLVideoElement fallback)
 
@@ -624,7 +622,7 @@ Clips support animated properties via keyframes:
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
-`drawFrame` that consults the frame cache before delegating. Everything it used to do
+`drawFrame` that sizes the raster and delegates. Everything it used to do
 inline lives in one module each, all of them pure or hook-shaped; the pure modules, the hooks and `PlaybackControls.tsx` have their own test files, while `drawFrame.ts` and `cursor.ts` are covered through the component tests:
 
 | Module | Owns |
@@ -666,12 +664,7 @@ calls changed coordinate systems. The one thing that carries project space onto 
 **`core/outputTransform.ts`, shared with both exporters since ESCSUITE-94** (see the Export
 section) — which sets `ctx.setTransform(k, 0, 0, k, 0, 0)` and clears the raster in one step.
 `k` is read back off the canvas' actual backing store (so it can never disagree with a resize
-that hasn't been redrawn yet). The frame cache's cached-frame path sets the same transform
-before blitting — `setOutputTransform`, the **whole matrix** and not a scale it re-assembles,
-because `previewRaster` rounds the raster's height and a cache hit and a cache miss would
-otherwise place the picture a sub-pixel apart — so a bitmap captured at one box size is simply
-rescaled if the window has changed size since; there is no cache invalidation on resize, only a
-redraw at the new scale.
+that hasn't been redrawn yet).
 
 `ctx.filter` is the one thing the transform does not reach: a CSS filter's length (a blur
 radius) is in output-bitmap pixels, unaffected by the CTM. Left alone, every blur in the
@@ -1694,9 +1687,8 @@ setting but its default: a 1080p export of a 1280x720 project drew the clip at `
 `openOutputFrame(ctx, project, output)` is the whole mechanism, and the preview calls it too —
 it was the preview's inline `setTransform`, lifted rather than copied, because a drawing
 behaviour one pipeline has to remember to reproduce is a behaviour that drifts. It delegates the
-matrix to `setOutputTransform` — `ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)`,
-exported separately for the one caller that wants the transform without a clear (the preview's
-cached-frame blit) — then clears the raster to black and returns the scale, which is also the
+matrix to `setOutputTransform` — `ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)` —
+then clears the raster to black and returns the scale, which is also the
 frame's `filterScale`. `projectToOutputScale` is `Math.min` of the two ratios, so **a frame is
 never stretched**: what a rounding disagreement can leave is a sub-pixel bar, never a crop. A
 degenerate project (a zero resolution, which the store never writes but a hand-built headless
@@ -1724,7 +1716,7 @@ premise this ticket falsified.
 **Nothing else composites.** `workers/decodeWorker.ts` decodes and holds frames; it has no
 canvas at all. `workers/exportWorker.ts` computes frame metadata and mixes audio and says so at
 the top of the file ("Main thread still handles … Canvas rendering"), and only its audio half is
-wired up (`core/audioMixer.ts`). `core/exportScheduler.ts` is a queue. The compositing is in
+wired up (`core/audioMixer.ts`). The compositing is in
 `exportWebM.ts` and `exportMP4.ts` and nowhere else, which is why two call sites were the whole
 fix. The headless kit drives these same exporters through `window.__renderProject`, so it gets
 the fix for free — including the manifest, which `headless/renderProject.ts` sizes with the same
