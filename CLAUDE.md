@@ -682,13 +682,22 @@ unlocked cases, so that file measures 37 / 37. The branch figure reads two hundr
 base gives 4,225 / 4,494 and this branch 4,227 / 4,496 — both 94.01 — so the 94.03 was the
 previous run's arithmetic on a slightly different denominator, and the row is corrected to what two
 matched runs agree on. **No floor is crossed**; artist's floors stay 99 / 98 / 94 / 99.
+`@escapesuite/craft` was re-measured 2026-09-27 for ESCSUITE-93 (a take cancelled while the capture
+request is outstanding releases what it was handed, and one start at a time): lines still exactly
+100.00, functions still exactly 100.00, statements 99.49 → **99.50** and branches unchanged at 97.59,
+against a merge base measured in the same sitting at 100.00 / 99.49 / 97.59 / 100.00. The change adds
+exactly four branches — `if (startingRef.current)` and the post-`acquireStreams()`
+`if (cancelledRef.current)`, two each — and every one is reached from both sides by the three new
+controller cases, so the uncovered branch count is the same 31 it was. **No floor crossed**; craft's
+floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.50 | 97.59 | 100.00 |
 | `@escapesuite/artist` | 99.41 | 98.76 | 94.01 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
