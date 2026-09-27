@@ -676,11 +676,12 @@ uncovered in `PreviewPlayer.tsx` all predate this ticket.
 
 `@escapesuite/artist` was re-measured 2026-09-27 at the end of ESCSUITE-91 (the toolbar's Delete
 greys out for a selection that touches a locked track): 99.41 / 98.76 / **94.01** / 99.01. The
-change adds four branches to `Toolbar.tsx` — the `disabled` and `title` ternaries, each reached
-from both sides by the new locked and unlocked cases, so that file measures 37 / 37 — and the
-branch total moves 4,224 / 4,492 → 4,227 / 4,496: one more uncovered branch than a hundredth ago
-sits outside this change, in a file this ticket did not touch, which is the ordinary drift of a
-suite this size between two runs and **no floor is crossed**; artist's floors stay 99 / 98 / 94 / 99.
+change adds one ternary — two branches — to `Toolbar.tsx`, both reached by the new locked and
+unlocked cases, so that file measures 37 / 37. The branch figure reads two hundredths *below* the
+94.03 the ESCSUITE-90 row recorded, and that is not this change: measured in one sitting, the merge
+base gives 4,225 / 4,494 and this branch 4,227 / 4,496 — both 94.01 — so the 94.03 was the
+previous run's arithmetic on a slightly different denominator, and the row is corrected to what two
+matched runs agree on. **No floor is crossed**; artist's floors stay 99 / 98 / 94 / 99.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

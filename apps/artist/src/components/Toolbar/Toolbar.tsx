@@ -37,7 +37,11 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
   // zustand compares with Object.is, so the toolbar re-renders only when the
   // answer flips — never on a clip edit or a playhead tick — which is what
   // `Toolbar.rerender.test.tsx` pins. Mute / Unmute stay live: they write a
-  // track property, which the lock does not freeze.
+  // track property, which the lock does not freeze. The selector body does run
+  // on every store write (zustand re-invokes every subscriber, then compares the
+  // result), and with a live selection it scans the tracks and clips once and
+  // builds one Set; with no selection or no locked track it returns before any
+  // allocation, which is the common case and the whole of a playback tick.
   const selectionTouchesLockedTrack = useEditorStore((state) =>
     anyClipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, state.selectedClipIds)
   );
