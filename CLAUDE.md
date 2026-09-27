@@ -718,13 +718,24 @@ are each reached from both sides by the tests that drive a 0×0 project, a talle
 and the exact-fit case, and each exporter's `projectResolution && w > 0 && h > 0` clause is evaluated by
 every test that passes a resolution. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-27 for ESCSUITE-106 (during the 3-2-1 countdown the
+record button cancels the countdown instead of pretending to stop a take that has not started):
+100.00 / 99.50 / **97.60** / 100.00 against the 100.00 / 99.50 / 97.59 / 100.00 the commit this branch
+was rebased onto measures — branches up a hundredth, the other three unmoved. Measured in one sitting,
+the base gives 1,260 / 1,291 branches and this branch 1,266 / 1,297: six new branches, six covered, the
+same 31 uncovered as before, and the statement count unchanged at 2,396 / 2,408 — the change is the
+`countdown` arm of `RecorderControls`' label, title and handler ternaries, each reached from both
+sides by the new cases (the button mid-countdown, and every other state's button unchanged). `App.tsx`
+is untouched, so the per-tick render pins hold by construction. **No floor crossed**; craft's floors
+stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.50 | 97.59 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.50 | 97.60 | 100.00 |
 | `@escapesuite/artist` | 99.41 | 98.77 | 94.06 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
