@@ -13,7 +13,7 @@ import { anyClipOnLockedTrack, lockedTrackIds } from './trackLock';
 
 export type SelectionSlice = Pick<EditorState, 'selectedClipId' | 'selectedClipIds' | 'selectedTrackId' | 'clipboard' | 'setSelectedClipId' | 'setSelectedTrackId' | 'toggleClipSelection' | 'selectClipsInRange' | 'clearMultiSelection' | 'moveSelectedClips' | 'deleteSelectedClips' | 'copySelectedClips' | 'pasteClips' | 'muteSelectedClips' | 'unmuteSelectedClips'>;
 
-export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSlice> = (set) => ({
+export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSlice> = (set, get) => ({
   selectedClipId: null,
   selectedClipIds: new Set<string>(),
   selectedTrackId: null,
@@ -146,42 +146,60 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     return { clipboard: selectedClips };
   }),
 
-  pasteClips: () => set((state) => {
-    if (!state.clipboard || state.clipboard.length === 0) return state;
+  // ESCSUITE-100: reads through `get()` before writing, the way `moveClipToTrack`
+  // does, so it can refuse and answer `false` without a `set` call at all.
+  pasteClips: () => {
+    const state = get();
+    if (!state.clipboard || state.clipboard.length === 0) return false;
 
     // Find the earliest position among clipboard clips to calculate offsets
     const minPosition = Math.min(...state.clipboard.map(c => c.timelinePosition));
 
+    // Paste always lands at the playhead: the earliest clone at `currentTime`,
+    // the rest keeping their relative offsets. `currentTime` is never
+    // undefined, so there is no "no playhead" case to default away from —
+    // the old `|| minPosition + 0.5` treated a playhead at 0 as missing and
+    // pasted a clip copied from 3s at 3.5s instead of 0.
     const newClips = state.clipboard.map(clip => ({
       ...cloneClip(clip),
       id: uuidv4(),
-      timelinePosition: clip.timelinePosition - minPosition + (state.currentTime || minPosition + 0.5),
+      timelinePosition: clip.timelinePosition - minPosition + state.currentTime,
     }));
+
+    // A clone keeps its clipboard trackId, and that track can be gone by the
+    // time paste runs — `removeTrack`/`removeSourceVideo` prune the clipboard
+    // themselves, so this is a belt-and-braces guard reached only through a
+    // project load that replaced the tracks out from under an existing
+    // clipboard. All-or-nothing, like the lock right below.
+    const trackIds = new Set(state.project.timeline.tracks.map((t) => t.id));
+    if (newClips.some((clip) => !trackIds.has(clip.trackId))) return false; // ESCSUITE-100
 
     // ESCSUITE-84: a clone keeps its clipboard trackId, so a paste lands
     // exactly where it was copied from — the check is on the clones, and it
     // is all-or-nothing.
     const locked = lockedTrackIds(state.project.timeline.tracks);
-    if (newClips.some((clip) => locked.has(clip.trackId))) return state; // ESCSUITE-84
+    if (newClips.some((clip) => locked.has(clip.trackId))) return false; // ESCSUITE-84
 
-    const allClips = [...state.project.timeline.clips, ...newClips];
-    const newSelectedIds = new Set(newClips.map(c => c.id));
-
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: allClips,
-          duration: calculateTimelineDuration(allClips),
+    set((s) => {
+      const allClips = [...s.project.timeline.clips, ...newClips];
+      return {
+        project: {
+          ...s.project,
+          modified: Date.now(),
+          timeline: {
+            ...s.project.timeline,
+            clips: allClips,
+            duration: calculateTimelineDuration(allClips),
+          },
         },
-      },
-      selectedClipIds: newSelectedIds,
-      selectedClipId: newClips[newClips.length - 1].id,
-      history: pushToHistory(state),
-    };
-  }),
+        selectedClipIds: new Set(newClips.map(c => c.id)),
+        selectedClipId: newClips[newClips.length - 1].id,
+        history: pushToHistory(s),
+      };
+    });
+
+    return true;
+  },
 
   muteSelectedClips: () => set((state) => {
     if (state.selectedClipIds.size === 0) return state;

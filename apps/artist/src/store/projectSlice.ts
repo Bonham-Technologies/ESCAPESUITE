@@ -74,6 +74,12 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     const { clips, tracks } = state.project.timeline;
     if (lockedSourceVideoIds(clips, tracks).has(id)) return state; // ESCSUITE-84
     const kept = clips.filter((c) => c.sourceVideoId !== id);
+    // ESCSUITE-100: a clipboard entry that used to point at this source can
+    // never be pasted back — the same belt-and-braces pruning `removeTrack`
+    // does for a deleted track.
+    const newClipboard = state.clipboard && state.clipboard.some((c) => c.sourceVideoId === id)
+      ? state.clipboard.filter((c) => c.sourceVideoId !== id)
+      : state.clipboard;
     return {
       sourceVideos: state.sourceVideos.filter((v) => v.id !== id),
       project: {
@@ -85,6 +91,7 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
           duration: calculateTimelineDuration(kept),
         },
       },
+      clipboard: newClipboard,
       history: pushToHistory(state),
     };
   }),
