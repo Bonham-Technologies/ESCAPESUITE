@@ -29,7 +29,7 @@ interface SourceTogglesProps {
   /** Live mic / system levels, 0–1; only drawn during a take. */
   audioLevels: AudioLevels;
   /**
-   * True for countdown, recording and paused, and while the take that just
+   * True for preparing, countdown, recording and paused, and while the take that just
    * finished is still being saved — sources are frozen for as long as the
    * take is live, not just while it is actively recording (ESCSUITE-104).
    */
