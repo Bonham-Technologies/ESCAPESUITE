@@ -1122,6 +1122,35 @@ describe('WebCodecsRecorder', () => {
       now += 1000
       expect(recorder.getDuration()).toBeCloseTo(2, 1)
     })
+
+    // ESCSUITE-105 twin: the MediaRecorder path's getDuration() briefly
+    // counted a stop-while-paused's open pause as recorded time, because
+    // mediaRecorder.state flips to 'inactive' before onstop fires and
+    // getDuration() only subtracted the open pause while state was 'paused'.
+    // WebCodecsRecorder already gets this right — stop() never clears
+    // isPausedState — so this pins the invariant rather than fixing a bug:
+    // whatever onStop reads must match what getDuration() already reported
+    // while still paused.
+    it('does not count the open pause when stopped while paused', async () => {
+      recorder.start()
+      now += 10000 // 10 seconds recording
+      recorder.pause()
+
+      const duringPause = recorder.getDuration()
+      expect(duringPause).toBeCloseTo(10, 1)
+
+      now += 60000 // 60 seconds paused, never resumed
+
+      let durationAtStop = -1
+      callbacks.onStop.mockImplementation(() => {
+        durationAtStop = recorder.getDuration()
+      })
+
+      await recorder.stop()
+
+      expect(durationAtStop).toBeCloseTo(duringPause, 1)
+      expect(durationAtStop).toBeCloseTo(10, 1)
+    })
   })
 
   // --- dispose ------------------------------------------------------------

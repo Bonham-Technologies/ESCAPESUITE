@@ -610,6 +610,44 @@ describe('Recorder', () => {
       // Even with edge cases, duration should be >= 0
       expect(recorder.getDuration()).toBeGreaterThanOrEqual(0)
     })
+
+    // ESCSUITE-105: stop() flips mediaRecorder.state to 'inactive'
+    // synchronously and onstop fires before cleanup() — so a naive
+    // getDuration() that only subtracts the open pause while state is
+    // 'paused' stops subtracting it the instant stop() runs, and the whole
+    // paused span gets counted as recorded time. A 10s take paused for 60s
+    // must still read ~10s wherever onStop reads it, not 70.
+    it('does not count the open pause when stopped while paused', async () => {
+      await recorder.initialize(
+        mockScreenStream,
+        null,
+        mockMicStream,
+        defaultConfig
+      )
+
+      vi.setSystemTime(new Date('2025-01-06T12:00:00Z'))
+      recorder.start()
+
+      vi.advanceTimersByTime(10000) // 10 seconds recording
+      recorder.pause()
+
+      const duringPause = recorder.getDuration()
+      expect(duringPause).toBeCloseTo(10, 1)
+
+      vi.advanceTimersByTime(60000) // 60 seconds paused, never resumed
+
+      let durationAtStop = -1
+      callbacks.onStop.mockImplementation(() => {
+        durationAtStop = recorder.getDuration()
+      })
+
+      recorder.stop()
+
+      // The invariant the bug broke: whatever onStop reads must match what
+      // getDuration() already reported while still paused.
+      expect(durationAtStop).toBeCloseTo(duringPause, 1)
+      expect(durationAtStop).toBeCloseTo(10, 1)
+    })
   })
 
   describe('isRecording', () => {
