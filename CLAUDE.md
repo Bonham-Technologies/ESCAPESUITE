@@ -636,6 +636,19 @@ files this ticket touches predates it, and all of them are defensive null guards
 section's `onSelect` arrow in `KeyframePanel.tsx`, and the `if (!clip)`-shaped guards in
 `useTransformHandles.ts` and `keyframeSlice.ts`.
 
+`@escapesuite/artist` was re-measured 2026-09-26 for ESCSUITE-89 (every control in the clip
+inspector carrying an accessible name): **99.41 / 98.76 / 94.02 / 99.01** against the
+99.41 / 98.75 / 94.01 / 99.01 the commit this branch started from measures — lines and functions
+unmoved, statements and branches each up a hundredth. The change is labels, so there is almost
+nothing new to count: six new branches, all covered, being the two ternaries that keep a toggle's
+name truthful (the aspect-ratio padlock's "Lock"/"Unlock aspect ratio", the no-fill button's
+"No fill"/"Enable fill") and the `useId()` line each section gained. **The branches floor goes
+93 → 94** in `apps/artist/vite.config.ts` and `scripts/coverage-report.mjs`, leaving artist's
+floors 99 / 98 / **94** / 99 — and almost none of that rise is this ticket's: branches crossed 94
+in ESCSUITE-88, whose paragraph above reports 94.01, updates the table row to match and then says
+"no floor crossed", which was a miscount of that one figure. The floor is raised here because a
+floor is the achieved coverage rounded down, not because these labels earned a percent.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -643,7 +656,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.75 | 94.01 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.76 | 94.02 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

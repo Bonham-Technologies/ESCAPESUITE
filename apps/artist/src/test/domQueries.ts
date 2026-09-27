@@ -1,11 +1,17 @@
 // Queries for the inspector panels' label/control rows.
 //
 // The inspector panels lay their controls out as a row that holds a <label>
-// (or a <span>) and an unlabelled <input> — the label is never wired to
-// the input with htmlFor/id, so getByLabelText cannot reach these controls and
-// they carry no accessible name of their own. These helpers walk from the
-// visible text to the control that sits in the same row, which is the closest
-// a test can get to "the slider the user sees next to that word".
+// (or a <span>) and the control beside it. These helpers walk from the visible
+// text to the control that sits in the same row, which is the closest a test
+// can get to "the slider the user sees next to that word".
+//
+// Since ESCSUITE-89 those controls do have accessible names — the clip
+// inspector's labels carry `htmlFor`, and the handful with no visible label
+// carry `aria-label` — so `getByLabelText` can reach them too. These helpers
+// are deliberately unchanged and still used by every suite that had them:
+// they ask a different question ("what is in the row that says Blur?") and
+// answering it by position is what keeps them honest about the layout. A new
+// test is free to use either.
 //
 // Lives under src/test/ so neither the vitest `include` glob nor the coverage
 // `include` glob picks it up as production code.

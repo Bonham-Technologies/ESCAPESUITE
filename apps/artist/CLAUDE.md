@@ -950,6 +950,42 @@ which is what a click needs and a render does not. Measured 2026-09-13 by
 `ClipEditor.rerender.test.tsx`: ten playback ticks cost the panel 0 renders, selected or not,
 against 10 before.
 
+**Every control has a name** (ESCSUITE-89). The panel's rows are laid out as a `<label>` and a
+sibling control, and for most of its life none of those labels was wired to anything: a screen
+reader met the inspector as a couple of dozen unnamed sliders, dropdowns and swatches, and the
+e2e label audit never saw it because that audit runs with nothing selected. Every section now
+takes **one `useId()`**, gives each control an `id` built from it, and points that row's
+`<label htmlFor>` at the id; where there was no visible label at all — Blend Mode's and Mask & Stroke's and
+Shape's dropdowns, Text Content's text area, font family, font size and alignment — the control
+carries an `aria-label` instead, and where the visible word was a `<span>` that is plainly a
+label (the colour swatches' "Fill", "Stroke", "Stroke Color", "Text", "BG"; each animation
+group's "Animate In" / "Animate Out") the span **became** a `<label>` with the same class, the
+same text and the same position. Nothing else about the DOM moved, for the reason at the bottom
+of this section: `CollapsibleSection` seeds a section's open/closed state positionally, so a
+moved element is a behaviour change. `ClipEditor.module.css`'s `.colorInput span` rule followed
+its five labels and is now `.colorInput label`, so those rows look exactly as they did.
+
+**Two controls may not share a name**, and three rows in the panel would have. Both animation
+groups call theirs "Duration" and "Easing", so those four take `aria-labelledby` naming the
+group heading *and* the row's own label — "Animate In Duration", "Animate Out Easing" — built
+from the text on screen rather than from a string in the component that the visible label could
+drift away from; Transition Out's plain "Duration" is then unambiguous. Shape's stroke *width*
+slider and its stroke *swatch* both say "Stroke", so the two swatches take the fuller
+`aria-label` ("Fill color", "Stroke color") and the sliders keep the words beside them. Three
+buttons were named by something that is not a name: the delete button and the aspect-ratio
+padlock by their `title` alone (both now carry the `aria-label` their title already said, and
+the padlock the `aria-pressed` its glyph was the only sign of), and the no-fill toggle by the
+glyph "⊗". Bold and italic are still "B" and "I" — that is what a sighted user calls them — and
+they gained `aria-pressed` too. **`ClipEditor.a11y.test.tsx` is the contract**: with every
+section open it walks each input, select, textarea and button the panel renders for five clip
+shapes and demands a non-empty name for each and distinct names for the value controls, so a
+control added later is covered the day it lands. The sibling suites were *not* rewritten to
+`getByLabelText` — `test/domQueries`' `rowControl` / `rowSelect` / `rowColor` still walk from
+the visible text to the control in the same row, which is what they have always done — and
+`apps/e2e`'s `the clip inspector's controls have associated labels` runs `checkFormLabels` and
+axe over the panel with a media clip, a text overlay and a shape overlay selected, which is the
+first time that audit has seen these controls at all.
+
 **One drag of a slider is one undo step** (ESCSUITE-75). A range input writes on every `input`
 event — the blur slider steps in halves from 0 to 50, so a full drag is around a hundred writes
 — and the store actions behind the inspector's sliders pushed an undo entry each time. One drag
