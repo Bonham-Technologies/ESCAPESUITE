@@ -30,7 +30,10 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
    * own contents by a sighted user — so they are named outright. The two
    * swatches do have a word beside them, "Text" and "BG", which became
    * `<label htmlFor>`s; they also carry an `aria-label`, because "Text" is
-   * already the textarea's name and "BG" is not a word.
+   * already the textarea's name and "BG" alone does not say it is a colour.
+   * Both names keep the visible word — "Text color", "BG color" — because
+   * WCAG 2.5.3 wants the name to contain the label, so "Background color"
+   * would be a worse name than the abbreviation is.
    *
    * The bold and italic buttons are named "B" and "I" by their own content, as
    * they always were, and gain the `aria-pressed` their `styles.active` class
@@ -132,7 +135,7 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
           <label htmlFor={`${id}-background`}>BG</label>
           <input
             id={`${id}-background`}
-            aria-label="Background color"
+            aria-label="BG color"
             type="color"
             value={textData.backgroundColor.substring(0, 7)}
             onChange={(e) => onChange({ backgroundColor: withBackgroundAlpha(e.target.value) })}

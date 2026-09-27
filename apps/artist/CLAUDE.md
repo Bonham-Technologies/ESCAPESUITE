@@ -973,13 +973,27 @@ drift away from; Transition Out's plain "Duration" is then unambiguous. Shape's 
 slider and its stroke *swatch* both say "Stroke", so the two swatches take the fuller
 `aria-label` ("Fill color", "Stroke color") and the sliders keep the words beside them. Three
 buttons were named by something that is not a name: the delete button and the aspect-ratio
-padlock by their `title` alone (both now carry the `aria-label` their title already said, and
-the padlock the `aria-pressed` its glyph was the only sign of), and the no-fill toggle by the
-glyph "⊗". Bold and italic are still "B" and "I" — that is what a sighted user calls them — and
-they gained `aria-pressed` too. **`ClipEditor.a11y.test.tsx` is the contract**: with every
+padlock by their `title` alone, and the no-fill toggle by the glyph "⊗". The delete button now
+says what its title said. The padlock is **not** named after its title, which changes with the
+state ("Unlock aspect ratio" while locked): it is `aria-label="Lock aspect ratio"` plus
+`aria-pressed`, because a name that moves with the state announces "Unlock aspect ratio,
+pressed" and contradicts itself — the name says what the control is, `aria-pressed` says what
+state it is in, and the title goes on saying what a click will do. Bold and italic are still
+"B" and "I" — that is what a sighted user calls them — and they gained `aria-pressed` too.
+A name also has to *contain* the word on screen (WCAG 2.5.3), which is why the background
+swatch is "BG color" and not "Background color".
+
+**`ClipEditor.a11y.test.tsx` is the contract**: with every
 section open it walks each input, select, textarea and button the panel renders for five clip
 shapes and demands a non-empty name for each and distinct names for the value controls, so a
-control added later is covered the day it lands. The sibling suites were *not* rewritten to
+control added later is covered the day it lands. It computes the name itself, in about thirty
+lines, rather than with `dom-accessibility-api`'s `computeAccessibleName`: that package is a
+transitive dependency of @testing-library/dom and is **not resolvable from `apps/artist`**, so
+using it would mean a new devDependency and a lockfile change for one assertion. The one thing
+the hand-rolled version leaves out is the `placeholder` fallback that accname — and therefore
+axe — accepts, which makes the sweep *stricter* than the e2e audit rather than looser: the text
+area's "Enter text..." would have satisfied axe on its own, and the sweep made it earn
+`aria-label="Text"`. The sibling suites were *not* rewritten to
 `getByLabelText` — `test/domQueries`' `rowControl` / `rowSelect` / `rowColor` still walk from
 the visible text to the control in the same row, which is what they have always done — and
 `apps/e2e`'s `the clip inspector's controls have associated labels` runs `checkFormLabels` and

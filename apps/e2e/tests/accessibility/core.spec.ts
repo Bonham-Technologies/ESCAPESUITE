@@ -393,7 +393,9 @@ test.describe('ESCAPEARTIST Accessibility', () => {
       const addToTimeline = page.getByRole('button', { name: 'Add to timeline' })
       await expect(addToTimeline).toBeVisible({ timeout: 60_000 })
       await addToTimeline.click()
-      await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible({ timeout: 15_000 })
+      // Just the clip: how many tracks the default project starts with is not
+      // this test's business.
+      await expect(page.getByText(/1 clip/)).toBeVisible({ timeout: 15_000 })
 
       // Select it the way a user does, and prove the inspector is showing a
       // clip rather than its empty state.

@@ -157,7 +157,13 @@ export function TransformSection({
                 className={`${styles.lockButton} ${scaleLocked ? styles.locked : ''}`}
                 onClick={() => onScaleLockedChange(!scaleLocked)}
                 title={scaleLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
-                aria-label={scaleLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+                // ESCSUITE-89: the name says what the control *is* and
+                // `aria-pressed` says what state it is in — "Lock aspect ratio,
+                // pressed". A name that changed with the state would announce
+                // "Unlock aspect ratio, pressed", which contradicts itself. The
+                // `title` still says what a click will do, which is what a
+                // tooltip is for.
+                aria-label="Lock aspect ratio"
                 aria-pressed={scaleLocked}
               >
                 {scaleLocked ? (
