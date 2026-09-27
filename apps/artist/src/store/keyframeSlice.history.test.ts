@@ -144,4 +144,42 @@ describe('keyframe actions and the undo stack', () => {
       expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
     })
   })
+
+  describe('removeClipKeyframe with nothing to remove (ESCSUITE-101)', () => {
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    beforeEach(() => {
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      clearHistoryAndModified()
+    })
+
+    /** Assert the call answered false and wrote nothing: same clips array, no history entry. */
+    const refusesFalse = (act: () => boolean) => {
+      const before = clipsRef(); const entries = past()
+      expect(act()).toBe(false)
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
+    it('refuses for an unknown clip id', () => {
+      refusesFalse(() => store().removeClipKeyframe('no-such-clip', 'opacity', 1))
+    })
+
+    it('refuses for a property the clip has no keyframes on', () => {
+      refusesFalse(() => store().removeClipKeyframe('clip1', 'scaleX', 1))
+    })
+
+    it('refuses for a time with no keyframe (outside KEYFRAME_TIME_EPSILON)', () => {
+      refusesFalse(() => store().removeClipKeyframe('clip1', 'opacity', 5))
+      // The keyframes that DO exist are untouched.
+      expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
+    })
+
+    it('still removes, and reports true, for a keyframe that actually exists', () => {
+      expect(store().removeClipKeyframe('clip1', 'opacity', 1)).toBe(true)
+      expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0])
+      expect(past()).toBe(1)
+    })
+  })
 })
