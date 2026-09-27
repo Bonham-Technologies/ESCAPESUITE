@@ -235,6 +235,55 @@ describe('answering the prompt', () => {
     )
   })
 
+  it('a decline that lands while the restore is still reading thumbnails wins — the restore must not commit after it', async () => {
+    let releaseThumbnail: (thumbnail: Blob | undefined) => void = () => {}
+    vi.mocked(getThumbnail).mockImplementation(
+      () => new Promise((resolve) => { releaseThumbnail = resolve })
+    )
+    const session = savedSession()
+    const { result } = await mountWithPendingSession(session)
+
+    let restorePromise!: Promise<void>
+    act(() => {
+      restorePromise = result.current.handleRestoreSession(session)
+    })
+    // "Start Fresh" while the restore's reads are still in flight.
+    act(() => result.current.handleDeclineSession())
+
+    expect(clearSessionState).toHaveBeenCalled()
+    expect(result.current.showSessionPrompt).toBe(false)
+    expect(result.current.sessionRestored).toBe(true)
+
+    // The restore's read finally comes back — it must find its answer
+    // overruled rather than write over the decline that already ran.
+    await act(async () => {
+      releaseThumbnail(undefined)
+      await restorePromise
+    })
+
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
+  it('a second restore call while the first is still reading thumbnails is a no-op', async () => {
+    vi.mocked(getThumbnail).mockResolvedValue(undefined)
+    const session = savedSession()
+    const { result } = await mountWithPendingSession(session)
+
+    // Two clicks (or a click and a repeated Enter) before the first
+    // resolves — each source must still be added exactly once.
+    await act(async () => {
+      await Promise.all([
+        result.current.handleRestoreSession(session),
+        result.current.handleRestoreSession(session),
+      ])
+    })
+
+    expect(deps.addSourceVideo).toHaveBeenCalledTimes(1)
+    expect(deps.showNotification).toHaveBeenCalledTimes(1)
+  })
+
   it('declining throws the stored session away and writes nothing', async () => {
     const { result } = await mountWithPendingSession(savedSession())
 
