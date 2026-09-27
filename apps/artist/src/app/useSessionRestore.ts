@@ -56,11 +56,11 @@ export function useSessionRestore({
   const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
 
   // Which restore is still allowed to land, or none. Set at the top of
-  // `handleRestoreSession`, checked again after its `await` — the only two
-  // places this needs to live, because a restore has exactly one point where
-  // time passes. A restore reads every thumbnail before it commits anything
-  // (ESCSUITE-96), and that read is exactly the window in which the user can
-  // click "Start Fresh", or click "Restore Session" again:
+  // `handleRestoreSession`, checked again after its `await` settles — either
+  // resolved or rejected. A restore reads every thumbnail before it commits
+  // anything (ESCSUITE-96), and that read is exactly the window in which the
+  // user can click "Start Fresh", or click "Restore Session" again, or the
+  // read itself can fail:
   // - a truthy ref at entry means a restore is already in flight, so a second
   //   call (a double click, a repeated Enter) is a no-op rather than a second
   //   pass of `addSourceVideo` over the same sources;
@@ -68,7 +68,10 @@ export function useSessionRestore({
   //   finds it changed when its reads come back and does not commit — the
   //   decline it lost the race to already ran `clearSessionState()` and
   //   closed the prompt, and a restore that lands anyway would silently
-  //   undo the user's answer.
+  //   undo the user's answer;
+  // - a rejected read clears it itself (in the `catch` below), so a restore
+  //   that cannot go on does not leave every later attempt permanently
+  //   blocked on a token nothing will ever match again.
   const restoreAttemptRef = useRef<object | null>(null);
 
   // Restore session on app start. A saved `thumbnailUrl` is an
@@ -83,12 +86,32 @@ export function useSessionRestore({
     const attempt = {};
     restoreAttemptRef.current = attempt;
 
-    const sourceVideos = await Promise.all(
-      session.sourceVideos.map(async (video) => ({
-        ...video,
-        thumbnailUrl: await resolveThumbnailUrl(video.id),
-      }))
-    );
+    let sourceVideos: SourceVideo[];
+    try {
+      sourceVideos = await Promise.all(
+        session.sourceVideos.map(async (video) => ({
+          ...video,
+          thumbnailUrl: await resolveThumbnailUrl(video.id),
+        }))
+      );
+    } catch (error) {
+      console.error('Failed to restore session:', error);
+      // Only settle the question if nobody declined while we were reading —
+      // a decline already ran this exact landing (fresh project, question
+      // settled) and there is nothing this failure should add to it beyond
+      // the log line above.
+      if (restoreAttemptRef.current === attempt) {
+        restoreAttemptRef.current = null;
+        // The saved session is left in storage — this was not the user's
+        // answer, so a reload should still offer it, the same way a failed
+        // startup lookup leaves it in place (see the effect below).
+        setShowSessionPrompt(false);
+        setPendingSession(null);
+        setSessionRestored(true);
+        showNotification('Failed to restore session', 'error');
+      }
+      return;
+    }
 
     // Declined while the reads were in flight: that answer already ran and
     // closed the prompt, so this restore must not override it.
