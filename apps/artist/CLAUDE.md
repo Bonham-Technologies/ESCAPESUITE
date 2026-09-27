@@ -1485,7 +1485,7 @@ calls whatever it is handed, so the five answers are the five arguments:
 
 | Modal | Escape calls | Why |
 |-------|--------------|-----|
-| `ExportDialog` | `handleCancel` | closes, aborting an export in flight exactly as the × and Cancel do |
+| `ExportDialog` | `handleCancel` | closes, aborting an export in flight exactly as the × and Cancel do (ESCSUITE-98: `handleExport`'s own promise chain checks a per-run identity — a fresh `AbortController` and a `latestExportRef` set at the start of each run — before writing progress, error or abort-controller state, so a cancelled export's late rejection can never clobber a second export started right after it) |
 | `KeyboardShortcuts` | `onClose` | the sheet holds no state and destroys nothing, so dismissing it is free |
 | `ProjectLoadDialog` | `onCancel` | the other two answers both replace the current timeline; cancelling is the only one that leaves the editor as the user left it |
 | `ResolutionPicker`'s confirm | `handleCancel` | confirming rewrites the project's resolution, which "may affect overlay positions and scaling" and cannot be undone automatically; cancelling costs nothing, and the select is controlled by the store's resolution so it snaps back to the preset still in force |
