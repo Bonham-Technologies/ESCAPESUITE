@@ -173,6 +173,29 @@ describe('opening a project', () => {
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to load project', 'error')
     expect(result.current.isLoading).toBe(false)
   })
+
+  it('rejects a malformed project without emptying the editor first (ESCSUITE-102)', async () => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    // A file that parses as JSON but is not a shape parseProject accepts —
+    // no clips array on the timeline.
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { id: 'p', name: 'Bad', created: 1, modified: 1, resolution: { width: 1920, height: 1080 }, timeline: {} } as never,
+      sourceVideos: [],
+    })
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(deps.resetProject).not.toHaveBeenCalled()
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to load project'),
+      'error'
+    )
+    expect(result.current.isLoading).toBe(false)
+  })
 })
 
 describe('a project file handed in from elsewhere', () => {

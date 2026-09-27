@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
+import { parseProject } from './projectMigration'
 import type { Project } from './types'
 import { getSessionState, saveSessionState, type SessionState } from '../core/storage'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
@@ -299,5 +300,116 @@ describe('projectStore remaining behaviours', () => {
       expect(copy.mask).toEqual({ kind: 'circle' })
       expect(copy.stroke).toEqual({ color: '#ff0000', width: 0.004 })
     })
+  })
+})
+
+describe('parseProject (ESCSUITE-102)', () => {
+  /** A project that passes every check without migration doing any work. */
+  const validProject = (): Project => ({
+    id: 'p',
+    name: 'Valid',
+    created: 1,
+    modified: 1,
+    resolution: { width: 1920, height: 1080 },
+    timeline: {
+      tracks: [
+        { id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },
+      ],
+      clips: [
+        {
+          id: 'c1', sourceVideoId: 'v1', name: 'c1', startTime: 0, endTime: 2, duration: 2,
+          trackId: 't1', timelinePosition: 0, blendMode: 'normal',
+          transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+          effects: { blur: 0 }, transition: { type: 'none', duration: 0.5 },
+        },
+      ],
+      textOverlays: [],
+      shapeOverlays: [],
+      duration: 2,
+    },
+  })
+
+  it('accepts a well-formed project and returns it migrated', () => {
+    const result = parseProject(validProject())
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project.timeline.clips).toHaveLength(1)
+      expect(result.project.timeline.tracks).toHaveLength(1)
+    }
+  })
+
+  it('rejects a project whose timeline has no tracks or clips arrays', () => {
+    const result = parseProject({
+      id: 'p', name: 'Bad', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: {},
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/clip/i)
+    }
+  })
+
+  it('migrates a project with no tracks at all, rather than rejecting it', () => {
+    // ensureTimelineHasTracks's own migration branch handles an absent/empty
+    // `tracks` array — parseProject must let that through, not reject it.
+    const result = parseProject({
+      id: 'p', name: 'Trackless', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: { clips: [] },
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project.timeline.tracks).toHaveLength(1)
+    }
+  })
+
+  it('rejects a clip whose trackId names a track that does not exist', () => {
+    const bad = validProject()
+    bad.timeline.clips[0].trackId = 'no-such-track'
+
+    const result = parseProject(bad)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/track/i)
+    }
+  })
+
+  it('rejects duplicate clip ids', () => {
+    const bad = validProject()
+    const second = { ...bad.timeline.clips[0] }
+    bad.timeline.clips = [bad.timeline.clips[0], second]
+
+    const result = parseProject(bad)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/duplicate/i)
+    }
+  })
+
+  it('rejects input with no timeline at all', () => {
+    const result = parseProject({ id: 'p', name: 'No timeline' })
+
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects a non-object payload', () => {
+    expect(parseProject(null).ok).toBe(false)
+    expect(parseProject('a string').ok).toBe(false)
+    expect(parseProject(42).ok).toBe(false)
+  })
+
+  it('does not reject a clip whose sourceVideoId matches nothing — media is re-linked separately', () => {
+    const project = validProject()
+    project.timeline.clips[0].sourceVideoId = 'not-in-any-library'
+
+    const result = parseProject(project)
+
+    expect(result.ok).toBe(true)
   })
 })
