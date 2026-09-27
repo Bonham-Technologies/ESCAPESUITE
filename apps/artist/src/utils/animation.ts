@@ -593,3 +593,130 @@ export function hasVolumeKeyframes(animation: ClipAnimation | undefined): boolea
   const volumeKeyframes = animation.keyframes.volume;
   return volumeKeyframes !== undefined && volumeKeyframes.length > 0;
 }
+
+// ============================================
+// SPLIT (ESCSUITE-95)
+// ============================================
+
+const KEYFRAME_TIME_EPSILON = 0.001;
+
+export interface SplitAnimationResult {
+  first: ClipAnimation;
+  second: ClipAnimation;
+}
+
+/**
+ * Split a clip's animation in two at `splitOffset` (clip-relative seconds, the
+ * same unit `Keyframe.time` uses), for the razor/Ctrl+B/inspector Split
+ * (ESCSUITE-95). Before this, `splitClip` copied the whole `animation` object
+ * onto both halves: a fade at the start of the original clip replayed from
+ * the second half's own start too, and a preset was regenerated against each
+ * half's shorter `clipDuration`, so one fade-in/out became two.
+ *
+ * Presets: the in-preset stays with the first half and the out-preset with
+ * the second — "fade in at the start, fade out at the end" survives a cut
+ * exactly that literally. The half that loses a preset has that side reset to
+ * `DEFAULT_ANIMATION`'s "none" shape (rather than carrying a `type: 'none'`
+ * preset with a stale, unused `duration`/`easing`). A kept preset's
+ * `duration` is clamped to its own half's new duration, so a fade that used
+ * to fit inside the whole clip cannot now run longer than the piece it
+ * animates.
+ *
+ * Keyframes: per property track, the first half keeps every keyframe with
+ * `time < splitOffset` and — only when the parent track has a keyframe at or
+ * past the split — appends one synthesised keyframe at `splitOffset` holding
+ * the curve's own interpolated value there, so the first half does not jump
+ * at its new end (when no such keyframe exists, the last kept value already
+ * holds all the way to the cut, and nothing is appended). The second half
+ * keeps every keyframe with `time >= splitOffset`, shifted by `-splitOffset`,
+ * and — only when the parent has a keyframe before the split and none
+ * exactly at it — prepends one synthesised keyframe at 0 holding the same
+ * interpolated value, so the second half does not jump at its new start.
+ * `interpolateKeyframes` (the store's one interpolator) computes both
+ * synthesised values against the *parent's* track, before it is cut.
+ *
+ * A synthesised keyframe's easing copies the neighbour it stands in for — the
+ * keyframe that followed it in the parent for the first half's boundary, the
+ * one that preceded it for the second half's. That neighbour always exists
+ * when this function decides to synthesise (it is exactly what the
+ * `atOrAfter.length > 0` / `before.length > 0` conditions above test for),
+ * so there is no "no neighbour" case to fall back from.
+ *
+ * `animation` is read, never written: the two returned halves are deep
+ * copies that share no keyframe, preset or array with the parent or with
+ * each other.
+ */
+export function splitAnimation(
+  animation: ClipAnimation,
+  splitOffset: number,
+  firstDuration: number,
+  secondDuration: number
+): SplitAnimationResult {
+  const first: ClipAnimation = {
+    in: { ...animation.in },
+    out: { ...DEFAULT_ANIMATION.out },
+    keyframes: {},
+  };
+  first.in.duration = Math.min(first.in.duration, firstDuration);
+
+  const second: ClipAnimation = {
+    in: { ...DEFAULT_ANIMATION.in },
+    out: { ...animation.out },
+    keyframes: {},
+  };
+  second.out.duration = Math.min(second.out.duration, secondDuration);
+
+  const properties = Object.keys(animation.keyframes) as AnimatableProperty[];
+
+  for (const property of properties) {
+    const track = animation.keyframes[property];
+    if (!track || track.length === 0) continue;
+
+    const sorted = ensureKeyframesSorted(track);
+    const before = sorted.filter((kf) => kf.time < splitOffset);
+    const atOrAfter = sorted.filter((kf) => kf.time >= splitOffset);
+
+    // First half: everything before the cut, plus a synthesised boundary
+    // value only when the parent has something at or past the cut (otherwise
+    // the last kept keyframe's value already holds to the new end). `track`
+    // is non-empty here (the `continue` above), so every keyframe falls into
+    // `before` or `atOrAfter` and `firstTrack` always ends up with at least
+    // one entry — there is no empty case to guard.
+    const firstTrack: Keyframe[] = before.map((kf) => ({ ...kf }));
+    if (atOrAfter.length > 0) {
+      const followingKeyframe = atOrAfter[0];
+      const value = interpolateKeyframes(sorted, splitOffset, followingKeyframe.value);
+      firstTrack.push({
+        time: splitOffset,
+        value,
+        easing: followingKeyframe.easing,
+      });
+    }
+    first.keyframes[property] = firstTrack;
+
+    // Second half: everything at or after the cut, shifted to start at 0,
+    // plus a synthesised boundary value only when the parent has something
+    // before the cut and nothing exactly at it (a keyframe exactly at the
+    // cut already shifts to time 0 and supplies that value itself). Same
+    // non-empty guarantee as `firstTrack` above.
+    const secondTrack: Keyframe[] = atOrAfter.map((kf) => ({
+      time: kf.time - splitOffset,
+      value: kf.value,
+      easing: kf.easing,
+    }));
+    const hasExactAtSplit =
+      atOrAfter.length > 0 && Math.abs(atOrAfter[0].time - splitOffset) < KEYFRAME_TIME_EPSILON;
+    if (before.length > 0 && !hasExactAtSplit) {
+      const precedingKeyframe = before[before.length - 1];
+      const value = interpolateKeyframes(sorted, splitOffset, precedingKeyframe.value);
+      secondTrack.unshift({
+        time: 0,
+        value,
+        easing: precedingKeyframe.easing,
+      });
+    }
+    second.keyframes[property] = secondTrack;
+  }
+
+  return { first, second };
+}
