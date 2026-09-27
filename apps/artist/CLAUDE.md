@@ -445,24 +445,40 @@ Clips support animated properties via keyframes:
   `animation` — same keyframe times, since those are clip-relative, so a fade near the start of
   the original clip replayed from the second half's own start too; and the same in/out presets,
   regenerated against each half's own shorter duration, so one fade-in/out became two.
-  `utils/animation.ts`'s `splitAnimation(animation, splitOffset, firstDuration, secondDuration)`
-  is the pure fix `splitClip` calls: per property track, the first half keeps every keyframe with
-  `time < splitOffset` and — only when the parent has a keyframe at or past the split —
-  appends one synthesised keyframe at `splitOffset` holding `interpolateKeyframes`' own value
-  there, so the picture does not jump at the new end (when nothing sits at or past the cut, the
-  last kept value already holds, and nothing is appended); the second half keeps every keyframe
-  with `time >= splitOffset` shifted by `-splitOffset`, prepending a synthesised keyframe at 0 the
-  same way when the parent has a keyframe before the split and none exactly at it. A synthesised
-  keyframe's easing copies the neighbour it stands in for — the keyframe that followed it in the
-  parent for the first half, the one that preceded it for the second. Presets split by ownership
-  rather than by geometry: the in-preset stays with the first half and the out-preset with the
-  second (fade in at the start, fade out at the end, exactly that literally), the half that loses
-  a preset resets that side to `DEFAULT_ANIMATION`'s "none" shape, and a kept preset's `duration`
-  is clamped to its own half's new duration so a fade that used to fit inside the whole clip
-  cannot now run longer than the piece it animates. `animation` and `transform` are also
-  deep-copied for each half, closing the latent aliasing where both halves shared one `animation`
-  object and one `transform` object and only survived it because every writer replaces rather than
-  mutates.
+  `utils/animation.ts`'s `splitAnimation(animation, splitOffset)` is the pure fix `splitClip`
+  calls: per property track, the first half keeps every keyframe with `time < splitOffset` and —
+  only when the parent has a keyframe at or past the split — appends one synthesised keyframe at
+  `splitOffset` holding `interpolateKeyframes`' own value there, so the picture does not jump at
+  the new end (when nothing sits at or past the cut, the last kept value already holds, and
+  nothing is appended); the second half keeps every keyframe with `time >= splitOffset` shifted by
+  `-splitOffset`, prepending a synthesised keyframe at 0 the same way when the parent has a
+  keyframe before the split and none at it. A keyframe within `KEYFRAME_TIME_EPSILON` (0.001s,
+  the same tolerance `mergeKeyframes` uses to decide two keyframe times are "the same") of
+  `splitOffset` counts as sitting at the split either way, so it shifts onto the second half at an
+  exact 0 rather than a small residual, and the first half still gets its usual synthesised
+  boundary in its place. A synthesised keyframe's easing copies the neighbour it stands in for —
+  the keyframe that followed it in the parent for the first half, the one that preceded it for the
+  second. Presets split by ownership rather than by geometry: the in-preset stays with the first
+  half and the out-preset with the second (fade in at the start, fade out at the end, exactly that
+  literally), and the half that loses a preset resets that side to `DEFAULT_ANIMATION`'s "none"
+  shape — but a **kept** preset's `duration` is left exactly as authored, even past its own half's
+  new, shorter length. That was a deliberate call, not an oversight: nothing else in the app
+  clamps a preset to the clip it sits on (trimming a clip leaves a 2s fade on a 1s result alone),
+  the inspector's own slider bound (`maxPresetDuration()` in `clipEditorModel.ts`) is a UI limit on
+  new input, not an invariant every writer must also enforce, and an unclamped 3s fade-in on a 2s
+  first half still renders bit-identically to what the parent clip showed over those same two
+  seconds — clamping the duration would have changed the picture instead of preserving it. `split`
+  builds each half with `cloneClip` (the same `structuredClone` helper `duplicateClip` uses)
+  rather than `{ ...clip }`, so `transform`, `effects`, `transition`, `mask` and `stroke` are all
+  deep-copied too, closing the latent aliasing where every field above shared one object between
+  the two halves and only survived it because every writer replaces rather than mutates.
+  **What a split does not preserve exactly**: only the two boundary values (and a keyframe already
+  sitting at the split) carry over exact. A segment that straddled the cut is re-eased over a
+  shorter span on each side — the parent's easing ran end-to-end over its own two real keyframes,
+  while each half now runs the same easing function over a fraction of that gap — so for any
+  easing other than `linear`, the curve between a synthesised boundary keyframe and its neighbour
+  differs slightly from the parent's curve over that same stretch, even though both halves meet at
+  the same value at the cut.
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
