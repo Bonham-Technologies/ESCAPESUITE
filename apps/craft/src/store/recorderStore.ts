@@ -154,16 +154,6 @@ export const useRecorderStore = create<RecorderStore>((set, get) => ({
   },
 
   loadRecordings: async () => {
-    // Every call mints a fresh thumbnail URL per recording (below), so the
-    // outgoing set is revoked first — before the new one exists to replace it
-    // — or a second `loadRecordings` (a reload, the CRAFT/ARTIST handoff) leaks
-    // the set it is about to discard.
-    for (const recording of get().recordings) {
-      if (recording.thumbnailUrl?.startsWith('blob:')) {
-        revokeBlobUrl(recording.thumbnailUrl);
-      }
-    }
-
     const metadata = await getRecordingsMetadata();
 
     const recordings: Recording[] = await Promise.all(
@@ -196,6 +186,19 @@ export const useRecorderStore = create<RecorderStore>((set, get) => ({
         };
       })
     );
+
+    // The outgoing set's thumbnail URLs are revoked only now, once the read
+    // has actually resolved and the new set exists to replace them — a
+    // failing `getRecordingsMetadata()`/`getThumbnail()` must not leave the
+    // library's rendered thumbnails pointing at URLs this call already threw
+    // away. Every call mints a fresh URL per recording (above), so a second
+    // `loadRecordings` (a reload, the CRAFT/ARTIST handoff) would otherwise
+    // leak the whole set it is about to discard.
+    for (const recording of get().recordings) {
+      if (recording.thumbnailUrl?.startsWith('blob:')) {
+        revokeBlobUrl(recording.thumbnailUrl);
+      }
+    }
 
     // Newest take first, each take's companion rows directly under its primary
     // — the grouping ESCSUITE-14's save path wrote, rebuilt for the panel.

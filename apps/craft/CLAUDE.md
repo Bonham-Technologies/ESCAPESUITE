@@ -1339,7 +1339,12 @@ stored said whether a take had a camera in it. It is written from the config by 
 exactly as `hasAudio` has been since ESCSUITE-60, and read back as `m.hasWebcam ?? false` for
 records saved before it. Nothing is gated on it, so the fallback costs a legacy row nothing.
 
-**Library.** `loadRecordings` orders through `orderTakes` (`utils/takeOrder.ts`): newest take
+**Library.** `loadRecordings` mints one thumbnail object URL per recording, and revokes the
+outgoing set once the read has actually resolved and the new set exists to replace it
+(so a failed reload does not revoke URLs the library is still showing); `removeRecording`
+revokes the one URL a deleted recording carried, the same way (ESCSUITE-103) — neither used
+to, and a URL outlived the recording it named for the life of the tab. `loadRecordings`
+orders through `orderTakes` (`utils/takeOrder.ts`): newest take
 first, a take's companions directly under its primary (placed by the primary's date, never by
 their own — every part of a take is saved with one `now` and the companions are written first, so
 by date alone a webcam row would float above the screen row it describes) and **ranked by role**

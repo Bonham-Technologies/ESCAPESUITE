@@ -15,7 +15,7 @@ import {
 } from './useMp4Download'
 import type { ConversionFormat } from './useMp4Download'
 import { MP4_SAVED_WITHOUT_AUDIO, MP4_SAVED_WITHOUT_WEBCAM } from '../utils/notices'
-import { storeVideo, getDB, deleteVideo } from '../core/storage'
+import { storeVideo, getDB, deleteVideo, getVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { preserveBlobsInStorage } from '../test/blobStorage'
 import {
@@ -37,6 +37,14 @@ vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).an
 vi.mock('../utils/takeParts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils/takeParts')>()
   return { ...actual, loadWebcamCompanion: vi.fn(actual.loadWebcamCompanion) }
+})
+// `getVideo` runs for real (fake-indexeddb) everywhere but the two
+// post-conversion re-check tests below, which need to control the timing or
+// the outcome of that specific second call without touching the first one
+// that fetches the blob to convert.
+vi.mock('../core/storage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../core/storage')>()
+  return { ...actual, getVideo: vi.fn(actual.getVideo) }
 })
 
 let setNotice: ReturnType<typeof vi.fn<(notice: string | null) => void>>
@@ -420,6 +428,82 @@ describe('useMp4Download and a recording deleted mid-conversion', () => {
     expect(clicks).toEqual([])
     expect(analyticsModule.track).not.toHaveBeenCalledWith('Recording Downloaded', undefined)
     expect(setNotice).not.toHaveBeenCalled()
+  })
+
+  it('downloads nothing when cancelled while the existence re-check is still reading', async () => {
+    // Fix round 1. The re-check added above is itself an `await`, sitting
+    // between the `controller.signal.aborted` check and `downloadBlob` — so a
+    // Cancel that lands while that read is still in flight must not fall
+    // through to a download either. The signal is re-checked once the read
+    // resolves for exactly this gap.
+    await seed('take-1', 'Take One')
+    const conversion = deferConversion()
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One')
+    })
+    await act(async () => {
+      await conversion.started
+    })
+
+    let releaseCheck: (value: { blob: Blob; metadata: SourceVideo } | undefined) => void = () => {}
+    const checkStarted = new Promise<void>((resolveCheckStarted) => {
+      vi.mocked(getVideo).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseCheck = resolve
+            resolveCheckStarted()
+          })
+      )
+    })
+
+    await act(async () => {
+      conversion.settle(new Blob(['mp4-bytes'], { type: 'video/mp4' }))
+      await checkStarted
+    })
+
+    // The cancel lands while the re-check is parked on its read.
+    act(() => {
+      result.current.cancelMp4Download()
+    })
+
+    await act(async () => {
+      releaseCheck({ blob: new Blob(['video-bytes']), metadata: metadata('take-1', 'Take One') })
+    })
+    await waitFor(() => expect(result.current.converting).toBeNull())
+
+    expect(clicks).toEqual([])
+    expect(analyticsModule.track).not.toHaveBeenCalledWith('Recording Downloaded', undefined)
+    expect(setNotice).not.toHaveBeenCalled()
+  })
+
+  it('downloads normally when the existence re-check throws — a storage hiccup is not proof the recording is gone', async () => {
+    // Fix round 1. Only a read that resolves and comes back empty means
+    // "gone"; a read that throws (a storage blip right after a conversion
+    // succeeded) must not turn a finished conversion into `Conversion failed`.
+    await seed('take-1', 'Take One')
+    const conversion = deferConversion()
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One')
+    })
+    await act(async () => {
+      await conversion.started
+    })
+
+    vi.mocked(getVideo).mockImplementationOnce(async () => {
+      throw new Error('IndexedDB is blocked')
+    })
+
+    await act(async () => {
+      conversion.settle(new Blob(['mp4-bytes'], { type: 'video/mp4' }))
+    })
+    await waitFor(() => expect(result.current.converting).toBeNull())
+
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(setNotice).toHaveBeenLastCalledWith(null)
   })
 })
 
