@@ -362,6 +362,21 @@ export function useRecordingController({
       const micAcquired =
         config.microphoneEnabled && (mic?.getAudioTracks().length ?? 0) > 0;
 
+      // The rest of what `captured` carries to the save path (ESCSUITE-104):
+      // the System Audio and webcam toggles, and the overlay geometry, all
+      // read here and nowhere else. `useRecordingSave` has no `config` of its
+      // own — a save that is still awaiting its container repair, its
+      // metadata probe, its thumbnail decode and its two IndexedDB writes must
+      // describe the take it was handed, not whatever the sidebar has moved to
+      // by the time one of those settles.
+      const systemAudioEnabled = config.systemAudioEnabled;
+      const webcamEnabled = config.webcamEnabled;
+      const overlayPlacement = {
+        position: config.webcamPosition,
+        size: config.webcamSize,
+        shape: config.webcamShape,
+      };
+
       // How many extra files this take is asking for: the camera, and one per
       // audio source it really has. The same two questions the recorder asks
       // when it builds the pipelines — a stream with a track in it AND its
@@ -443,14 +458,18 @@ export function useRecordingController({
           setCurrentDuration(0);
           stopAllStreams();
           // Save in background
-          // Both fields travel in the closure, not through a ref: each is a
+          // Every field travels in the closure, not through a ref: each is a
           // fact about *this* take, resolved before the countdown. A late
           // onStop must not be given the next take's answer — nor the answer
           // the sidebar gives now, which is what the save path would otherwise
-          // have to read for the mode (ESCSUITE-68).
+          // have to read for the mode (ESCSUITE-68) or for System Audio, the
+          // webcam toggle and the overlay geometry (ESCSUITE-104).
           saveRecording(blob, recordedDuration, companions, {
             micAcquired,
             separateTracks,
+            systemAudioEnabled,
+            webcamEnabled,
+            overlayPlacement,
           }).then(() => {
             setState('idle');
           }).catch((err) => {

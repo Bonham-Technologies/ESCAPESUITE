@@ -100,10 +100,12 @@ function App() {
     acquireStreams,
   } = useMediaStreams({ config, capabilities, setStreams });
 
+  // No `config`: every field the save path needs travels on the take itself
+  // (`CapturedTake`, resolved by the controller at start), never read live —
+  // see `apps/craft/CLAUDE.md`'s `useRecordingSave` row (ESCSUITE-104).
   const saveRecording = useRecordingSave({
     recorderTypeRef,
     capturedThumbnailRef,
-    config,
     setState,
     addRecording,
     setNotice,
@@ -189,6 +191,15 @@ function App() {
   };
 
   const isRecordingActive = state === 'recording' || state === 'paused' || state === 'countdown';
+  // The sidebar's own lock, wider than the button's: `isRecordingActive` also
+  // decides the transport bar's stop/cancel arm and label (ESCSUITE-106), and
+  // 'saving' is not a state that button may claim to be able to stop or
+  // cancel — the take is already gone, only the write to storage remains. The
+  // Sources panel and the overlay settings have no such claim to protect:
+  // both feed a take that is still being saved from the config it was
+  // actually captured with (`CapturedTake`, ESCSUITE-104), so they stay
+  // disabled until that write is done, not just until recording stops.
+  const sidebarLocked = isRecordingActive || state === 'saving';
 
   return (
     <div className={styles.app}>
@@ -201,7 +212,7 @@ function App() {
         <aside className={styles.sidebar}>
           {/* Sources */}
           <SourceTogglesPanel
-            isRecordingActive={isRecordingActive}
+            disabled={sidebarLocked}
             onToggleSource={toggleSource}
           />
 
@@ -210,7 +221,7 @@ function App() {
           {config.screenEnabled && config.webcamEnabled && (
             <WebcamOverlaySettingsPanel
               config={config}
-              disabled={isRecordingActive}
+              disabled={sidebarLocked}
               onChange={setConfig}
             />
           )}

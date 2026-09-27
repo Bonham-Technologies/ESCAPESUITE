@@ -6,7 +6,10 @@ import type { RecordingConfig } from '../../store/types';
 
 interface WebcamOverlaySettingsPanelProps {
   config: RecordingConfig;
-  /** True while a take is in progress — the overlay is baked in by then. */
+  /**
+   * True while a take is in progress and while it is being saved
+   * (ESCSUITE-104) — see `App`'s `sidebarLocked`.
+   */
   disabled: boolean;
   /** A partial config patch, exactly as the store's `setConfig` takes it. */
   onChange: (config: Partial<RecordingConfig>) => void;

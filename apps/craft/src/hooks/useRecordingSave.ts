@@ -21,14 +21,13 @@ import {
 } from '../utils/recordingMetadata';
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { NOT_SEEKABLE, SEPARATE_TRACK_NOT_SAVED } from '../utils/notices';
-import type { CompanionPart, Recording, RecordingConfig, RecordingState } from '../store/types';
+import type { CompanionPart, Recording, RecordingState } from '../store/types';
 
 export interface RecordingSaveDeps {
   /** Which recorder produced the blob — written by handleStartRecording. */
   recorderTypeRef: RefObject<'webcodecs' | 'mediarecorder'>;
   /** The frame grabbed from the live preview before the recorder stopped. */
   capturedThumbnailRef: RefObject<Blob | null>;
-  config: RecordingConfig;
   setState: (state: RecordingState) => void;
   addRecording: (recording: Recording) => void;
   /** The one notice channel — see utils/notices.ts. */
@@ -40,6 +39,21 @@ export interface RecordingSaveDeps {
 // reads its audio half.
 export type { CapturedTake };
 
+/**
+ * What a caller that says nothing about a take is taken to have recorded: no
+ * sources beyond a bare screen, one file, and the overlay geometry nobody set.
+ * A default of `true` for any of these would be the bug ESCSUITE-70 deleted,
+ * reached again by leaving an argument out; nothing in the app takes this
+ * path, since the controller always says.
+ */
+const NOTHING_CAPTURED: CapturedTake = {
+  micAcquired: false,
+  separateTracks: false,
+  systemAudioEnabled: false,
+  webcamEnabled: false,
+  overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+};
+
 /** Save a finished take. `recordedDuration` is what the recorder timed. */
 export type SaveRecording = (
   rawBlob: Blob,
@@ -50,11 +64,9 @@ export type SaveRecording = (
    */
   companions?: CompanionPart[] | null,
   /**
-   * What the take was resolved to be. Optional so the three-argument call still
-   * reads, and every field defaults to the modest answer: no microphone,
-   * because a default of `true` would be exactly the bug this argument exists to
-   * delete, and not separate tracks, because a take nobody said that about is
-   * one file.
+   * What the take was resolved to be, read from nowhere else (ESCSUITE-104):
+   * this hook has no `config` of its own to fall back on. Optional so the
+   * three-argument call still reads — see `NOTHING_CAPTURED`.
    */
   captured?: CapturedTake
 ) => Promise<void>;
@@ -62,7 +74,6 @@ export type SaveRecording = (
 export function useRecordingSave({
   recorderTypeRef,
   capturedThumbnailRef,
-  config,
   setState,
   addRecording,
   setNotice,
@@ -72,7 +83,7 @@ export function useRecordingSave({
     rawBlob: Blob,
     recordedDuration: number,
     companions?: CompanionPart[] | null,
-    captured: CapturedTake = { micAcquired: false, separateTracks: false }
+    captured: CapturedTake = NOTHING_CAPTURED
   ) => {
     setState('saving');
 
@@ -133,13 +144,17 @@ export function useRecordingSave({
     // The expression itself is `resolveHasAudio`, so the pins on it and this
     // call site cannot drift apart.
     //
-    // Neither half is the config's alone, because a toggle only *asks* — but
-    // the two halves are not resolved at the same moment, and that is worth
-    // being exact about:
+    // Neither half is a toggle's live answer, because a toggle only *asks* —
+    // but the two halves are not resolved at the same moment, and that is
+    // worth being exact about:
     //
-    // - `micAcquired` is the controller's answer about the stream it acquired,
-    //   resolved when the take started and carried here in `onStop`'s own
-    //   closure. It therefore always describes *this* take (ESCSUITE-70).
+    // - `micAcquired` and `systemAudioEnabled` are the controller's answers,
+    //   resolved when the take started and carried here on `captured`, in
+    //   `onStop`'s own closure. They therefore always describe *this* take
+    //   (ESCSUITE-70, ESCSUITE-104) — never the live `config` a later render
+    //   could have moved while this save was still awaiting its container
+    //   repair, its metadata probe, its thumbnail decode and its two IndexedDB
+    //   writes.
     // - `systemAudioShared` is read from the store here, at save time. The
     //   controller writes it at take start and resets it only when the *next*
     //   take starts, so it describes this take for as long as no other take
@@ -155,7 +170,7 @@ export function useRecordingSave({
     // field the save path reads once. Still the streams' answer rather than the
     // blob's — reading the file back would mean a decode on the save path.
     const { systemAudioShared } = useRecorderStore.getState();
-    const hasAudio = resolveHasAudio(captured, config.systemAudioEnabled, systemAudioShared);
+    const hasAudio = resolveHasAudio(captured, captured.systemAudioEnabled, systemAudioShared);
 
     // A companion take is one take in several files: the primary names it (its
     // own id is the takeId), carries the mixed audio and the overlay geometry,
@@ -171,19 +186,18 @@ export function useRecordingSave({
     // an ordinary take delivers, and such a take is still a separate-tracks
     // take — its primary is still named by its own `takeId`, still carries the
     // role, and still carries the geometry the camera was framed at, which is
-    // the only record of it that survives. `config.separateTracks` would be a
-    // different question: what the sidebar asks for now. The companions are
-    // still enough on their own — the only caller today always says so, and
-    // the arm is kept for a test that hands parts over without the mode.
+    // the only record of it that survives. A live `config.separateTracks`
+    // would be a different question: what the sidebar asks for now. The
+    // companions are still enough on their own — the only caller today always
+    // says so, and the arm is kept for a test that hands parts over without
+    // the mode.
     const isCompanionTake =
       captured.separateTracks || (companions != null && companions.length > 0);
-    const overlayPlacement = isCompanionTake
-      ? {
-          position: config.webcamPosition,
-          size: config.webcamSize,
-          shape: config.webcamShape,
-        }
-      : undefined;
+    // The take's own geometry, copied by the controller at the same moment it
+    // built the compositor — never the live config, which a companion take's
+    // own settings panel is free to move once the take has stopped recording
+    // and before its save has finished (ESCSUITE-104).
+    const overlayPlacement = isCompanionTake ? captured.overlayPlacement : undefined;
 
     const sourceVideo = buildSourceVideo({
       id,
@@ -193,7 +207,7 @@ export function useRecordingSave({
       width: metadata.width,
       height: metadata.height,
       hasAudio,
-      hasWebcam: config.webcamEnabled,
+      hasWebcam: captured.webcamEnabled,
       ...(isCompanionTake
         ? { takeId: id, role: 'screen' as const, startOffset: 0, overlayPlacement }
         : {}),
@@ -296,10 +310,10 @@ export function useRecordingSave({
       now,
       size: blob.size,
       thumbnailUrl: createBlobUrl(thumbnail),
-      hasWebcam: config.webcamEnabled,
+      hasWebcam: captured.webcamEnabled,
       hasAudio,
     }));
-  }, [setState, addRecording, setNotice, config, recorderTypeRef, capturedThumbnailRef]);
+  }, [setState, addRecording, setNotice, recorderTypeRef, capturedThumbnailRef]);
 
   return saveRecording;
 }

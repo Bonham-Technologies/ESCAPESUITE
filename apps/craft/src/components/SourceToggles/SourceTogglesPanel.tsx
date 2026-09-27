@@ -2,8 +2,14 @@ import { useRecorderStore } from '../../store/recorderStore';
 import { SourceToggles, type RecordingSource } from './SourceToggles';
 
 interface SourceTogglesPanelProps {
-  /** True for countdown, recording and paused — sources are frozen mid-take. */
-  isRecordingActive: boolean;
+  /**
+   * True while a take is live and while it is being saved — sources are
+   * frozen from the moment recording starts until the write to storage is
+   * done, not just while it is actively recording (ESCSUITE-104): `App`
+   * derives it as `sidebarLocked`, wider than the transport bar's own
+   * `isRecordingActive`.
+   */
+  disabled: boolean;
   onToggleSource: (source: RecordingSource) => void;
 }
 
@@ -23,10 +29,11 @@ interface SourceTogglesPanelProps {
  * subscription: `detailedCapabilities`, `audioLevels` and `systemAudioShared`
  * reach nothing else in the tree, and `config` and `capabilities` are read by
  * `App` too — selecting them twice costs a subscription and no extra render,
- * and it keeps the panel's inputs in one place. `isRecordingActive` stays a
- * prop because `App` derives it from `state` for the transport bar as well.
+ * and it keeps the panel's inputs in one place. `disabled` stays a prop
+ * because `App` derives it from `state`, alongside the transport bar's own
+ * (narrower) reading of it.
  */
-export function SourceTogglesPanel({ isRecordingActive, onToggleSource }: SourceTogglesPanelProps) {
+export function SourceTogglesPanel({ disabled, onToggleSource }: SourceTogglesPanelProps) {
   const config = useRecorderStore((s) => s.config);
   const capabilities = useRecorderStore((s) => s.capabilities);
   const detailedCapabilities = useRecorderStore((s) => s.detailedCapabilities);
@@ -39,7 +46,7 @@ export function SourceTogglesPanel({ isRecordingActive, onToggleSource }: Source
       capabilities={capabilities}
       detailedCapabilities={detailedCapabilities}
       audioLevels={audioLevels}
-      isRecordingActive={isRecordingActive}
+      disabled={disabled}
       systemAudioShared={systemAudioShared}
       onToggleSource={onToggleSource}
     />
