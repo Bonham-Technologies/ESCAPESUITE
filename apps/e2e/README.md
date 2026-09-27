@@ -62,7 +62,11 @@ tests/
 │   ├── video-import.spec.ts # Video import functionality
 │   ├── timeline-editing.spec.ts # Timeline operations
 │   └── components.spec.ts   # Editor panels and dialogs
-├── accessibility/           # axe-core audits, keyboard, screen reader
+├── accessibility/           # axe-core audits, keyboard, screen reader — each app in the
+│                            # states a user spends time in: ESCAPECRAFT idle, mid-take, its two
+│                            # dialogs and the library with a finished take and a conversion
+│                            # running (ESCSUITE-92); ESCAPEARTIST idle, its five modals and the
+│                            # inspector with a clip of each kind selected (ESCSUITE-89)
 ├── errors/                  # Permission, export, network, input failures
 ├── responsive/              # Mobile / tablet / desktop layouts
 ├── integration/             # Cross-app integration tests

@@ -202,6 +202,70 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
     expect(await seriousViolations(page)).toHaveLength(0)
   })
 
+  /**
+   * The library with a finished take in it (ESCSUITE-92). The audits above see
+   * the recorder idle, mid-take and its two dialogs; none of them sees a
+   * recording ROW — Play, the three downloads, Open in Editor, Delete — or the
+   * conversion progress row that replaces the downloads while an MP4 is being
+   * made. Same shape as the playback audit: record a take, then audit the page
+   * with the row in it, then start a conversion and audit again while the
+   * progress row is up.
+   */
+  test('the library with a finished take passes axe-core audit, rows and conversion included', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000)
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto('http://localhost:5174')
+    await page.waitForLoadState('networkidle')
+    await waitForCapabilities(page)
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+      timeout: 30_000,
+    })
+    await page.waitForTimeout(2000)
+    await page.getByRole('button', { name: 'Stop recording' }).click()
+
+    const play = page.getByRole('button', { name: /^Play / })
+    await expect(play).toBeVisible({ timeout: 30_000 })
+
+    // The row: every control named, and named for the take.
+    const list = page.getByRole('region', { name: 'Recordings' }).or(
+      page.locator('section', { has: page.getByRole('heading', { name: 'Recordings' }) })
+    )
+    const rowButtons = list.getByRole('button')
+    const count = await rowButtons.count()
+    expect(count).toBeGreaterThanOrEqual(5)
+    for (let i = 0; i < count; i++) {
+      await expect(rowButtons.nth(i)).toHaveAccessibleName(/\S/)
+    }
+    await expect(list.getByRole('button', { name: /^Download .+ as MP4$/ })).toBeVisible()
+    await expect(list.getByRole('button', { name: /^Delete / })).toBeVisible()
+
+    expect(await seriousViolations(page)).toHaveLength(0)
+    const { unlabeled } = await checkFormLabels(page)
+    expect(unlabeled).toHaveLength(0)
+
+    // The conversion row. The synthetic take is a WebCodecs recording in
+    // Chromium, so the MP4 button is enabled; the conversion is bound to
+    // playback speed, which leaves the progress row up long enough to audit.
+    const mp4 = list.getByRole('button', { name: /^Download .+ as MP4$/ })
+    await expect(mp4).toBeEnabled()
+    await mp4.click()
+    const bar = list.getByRole('progressbar')
+    await expect(bar).toBeVisible({ timeout: 15_000 })
+    await expect(bar).toHaveAccessibleName(/^Converting .+ to MP4$/)
+    await expect(list.getByRole('button', { name: /^Cancel MP4 conversion of / })).toBeVisible()
+
+    expect(await seriousViolations(page)).toHaveLength(0)
+
+    await list.getByRole('button', { name: /^Cancel MP4 conversion of / }).click()
+    await expect(bar).toBeHidden({ timeout: 15_000 })
+  })
+
   // Both themes, because a take in progress is where the app draws its one red
   // text — the "Recording" label and the running timer — and a colour token
   // tuned for one palette is a contrast failure in the other. `?theme=` is the
