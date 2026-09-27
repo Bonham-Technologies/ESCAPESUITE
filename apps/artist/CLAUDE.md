@@ -146,13 +146,12 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`,
 **Outgoing `EXPORT_COMPLETE`**: sent from `ExportDialog` right after a successful export (alongside the normal browser download, which is unchanged). Not sent when the export fails or is cancelled.
 
 **Inbound `LOAD_PROJECT` is validated (ESCSUITE-102)**: the payload is the project object itself
-(not wrapped in a `data` field), and `useHostIntegration` runs it through the same
-`parseProject` a dropped `.veditor` file goes through before `setProject` ever sees it — a host
-is no better placed than a malformed file to hand a project ARTIST's migration can walk with no
-guards. A payload that fails validation is answered with
-`{ type: 'ERROR', payload: { message, context: 'LOAD_PROJECT' } }` — `context` rather than
-`ERROR`'s usual `code`, because there is no fixed set of validation reasons to enumerate — and
-the current project is left untouched, undo history included.
+(not wrapped in a `data` field), and `useHostIntegration` runs a *present* payload through the
+same `parseProject` a dropped `.veditor` file goes through before `setProject` ever sees it — a
+host is no better placed than a malformed file to hand a project ARTIST's migration can walk with
+no guards. A payload that fails validation is answered with
+`{ type: 'ERROR', payload: { message, code: 'INVALID_PROJECT' } }` and the current project is left
+untouched, undo history included. An absent payload is still silently ignored, as it always was.
 
 ```ts
 { type: 'EXPORT_COMPLETE', payload: { blob: Blob, format: 'mp4' | 'webm', name: string } }

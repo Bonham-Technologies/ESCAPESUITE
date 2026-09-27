@@ -146,7 +146,7 @@ describe('inbound messages', () => {
     expect(deps.setProject).not.toHaveBeenCalled()
     expect(sendMessage).toHaveBeenCalledWith({
       type: 'ERROR',
-      payload: { message: expect.any(String), context: 'LOAD_PROJECT' },
+      payload: { message: expect.any(String), code: 'INVALID_PROJECT' },
     })
   })
 

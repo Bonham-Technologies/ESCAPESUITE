@@ -181,7 +181,7 @@ export function useHostIntegration({
             } else {
               sendMessage({
                 type: 'ERROR',
-                payload: { message: parsed.reason, context: 'LOAD_PROJECT' },
+                payload: { message: parsed.reason, code: 'INVALID_PROJECT' },
               });
             }
           }

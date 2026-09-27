@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
 import { parseProject } from './projectMigration'
+import { DEFAULT_ANIMATION } from './types'
 import type { Project } from './types'
+import { buildMaskedSceneProject } from '../test/fixtures/perfScene'
 import { getSessionState, saveSessionState, type SessionState } from '../core/storage'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 
@@ -336,6 +338,50 @@ describe('parseProject (ESCSUITE-102)', () => {
     if (result.ok) {
       expect(result.project.timeline.clips).toHaveLength(1)
       expect(result.project.timeline.tracks).toHaveLength(1)
+    }
+  })
+
+  it('round-trips a rich, already-valid project unchanged — keyframes, mask, stroke, text and shape overlays (review round 1)', () => {
+    // buildMaskedSceneProject already carries a mask and a stroke on every media
+    // clip plus a text overlay clip and a shape overlay clip (perfScene.ts); the
+    // only thing it has none of is keyframes, added here on one clip so this
+    // fixture exercises everything the ticket named without inventing a second
+    // scene builder.
+    const base = buildMaskedSceneProject()
+    const rich: Project = {
+      ...base,
+      timeline: {
+        ...base.timeline,
+        clips: base.timeline.clips.map((clip, index) =>
+          index === 0
+            ? {
+                ...clip,
+                animation: {
+                  ...DEFAULT_ANIMATION,
+                  keyframes: {
+                    opacity: [
+                      { time: 0, value: 0, easing: 'ease-out' },
+                      { time: 1, value: 1, easing: 'linear' },
+                    ],
+                  },
+                },
+              }
+            : clip
+        ),
+      },
+    }
+    // Sanity on the fixture itself, so a future change to perfScene.ts that
+    // quietly drops one of these can't turn this into a test of nothing.
+    expect(rich.timeline.clips.some((c) => c.mask && c.stroke)).toBe(true)
+    expect(rich.timeline.clips.some((c) => c.overlayType === 'text')).toBe(true)
+    expect(rich.timeline.clips.some((c) => c.overlayType === 'shape')).toBe(true)
+    expect(rich.timeline.clips.some((c) => c.animation?.keyframes.opacity)).toBe(true)
+
+    const result = parseProject(rich)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project).toEqual(rich)
     }
   })
 

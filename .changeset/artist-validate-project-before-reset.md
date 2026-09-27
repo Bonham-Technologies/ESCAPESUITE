@@ -9,5 +9,5 @@ clear the current project first and only then discover the file could not be rea
 "Failed to load project" notice appeared over a blank, if undo-able, editor. A bad file is now
 checked before anything is reset, so a failure leaves the project exactly as it was and names
 what was wrong with the file. The same check now guards a host's `LOAD_PROJECT` message: a
-malformed payload gets an `ERROR` reply instead of either being silently ignored or throwing
-partway through.
+present but malformed payload gets an `ERROR` reply instead of throwing partway through and
+leaving the project in whatever state the migration got to.
