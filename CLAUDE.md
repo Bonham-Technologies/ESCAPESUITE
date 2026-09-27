@@ -784,13 +784,27 @@ successful pastes that were already there (statements 7,883 / 7,981 → 7,897 / 
 7,011 / 7,052 → 7,021 / 7,062, functions 1,718 / 1,735 → 1,724 / 1,741, every denominator growing by
 exactly what the numerator did). **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-27 for ESCSUITE-104 (the save reads the take's own
+config for system audio, the webcam and its placement, and the sidebar locks from preparing through
+saving while the meters show only for a live take): 100.00 / 99.50 / **97.64** / 100.00 against the
+100.00 / 99.50 / 97.63 / 100.00 the commit this branch was rebased onto measures — branches up a
+hundredth, the other three unmoved. Measured in one sitting, the base gives 1,280 / 1,311 branches and
+this branch 1,283 / 1,314, statements 2,425 / 2,437 → 2,430 / 2,442: three new branches and five new
+statements, every one covered, the same 31 branches and 12 statements uncovered as before. The three
+are `App.tsx`'s `sidebarLocked` disjunction (reached from the mid-take, preparing and saving cases
+against idle) and the `showMeters` gate that keeps the audio meters on the live-take states only —
+which the review caught this branch's first version sweeping into the same flag, so the bars lingered
+through the save frozen at the last level; the case that pins them absent in `'saving'` is why the
+count is three of three. `RecordingSaveDeps` lost its `config` field outright, so nothing new branches
+in `useRecordingSave`. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.50 | 97.63 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
 | `@escapesuite/artist` | 99.41 | 98.77 | 94.12 | 99.02 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
