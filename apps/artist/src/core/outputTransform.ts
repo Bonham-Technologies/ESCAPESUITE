@@ -64,14 +64,8 @@ function outputOffset(projectLength: number, outputLength: number, scale: number
 /**
  * Put `ctx` in project pixels — the **whole matrix**, built in one place.
  *
- * Separate from {@link openOutputFrame} because there is a second entry point
- * that wants the transform without the clear: `PreviewPlayer`'s cached-frame
- * blit, which paints a bitmap over the entire raster and has nothing to clear
- * first. That path used to assemble its own `setTransform(k, 0, 0, k, 0, 0)` from
- * a scale it divided out itself, which agreed with this one on the scale and not
- * on the translation — `previewRaster` rounds the raster's height, so a preview
- * can carry a sub-pixel bar and then a cache hit and a cache miss would put the
- * picture in two slightly different places. Both call this now.
+ * Factored out of {@link openOutputFrame}, which is its one caller: the matrix
+ * on its own, with the raster-clearing half kept separate below.
  *
  * Returns the scale, which is also the `filterScale` every `ctx.filter` under
  * this transform needs (see `MediaDrawOptions.filterScale` — a CSS filter's

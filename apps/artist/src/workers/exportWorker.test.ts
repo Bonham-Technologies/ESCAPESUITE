@@ -317,6 +317,13 @@ describe('COMPUTE_FRAME animation', () => {
     expect(await valueAt('ease-out-cubic', 2)).toBeCloseTo(0.875, 6)
     expect(await valueAt('ease-in-out', 1)).toBeCloseTo(0.125, 6)
     expect(await valueAt('nonsense', 2)).toBeCloseTo(0.5, 6) // falls back to linear
+    // The "-quad" family and 'ease-in-out-cubic' are real KeyframePanel options
+    // (KeyframeGraph.test.tsx sets 'ease-in-out-quad' through the same select)
+    // that nothing here had exercised yet.
+    expect(await valueAt('ease-in-quad', 2)).toBeCloseTo(0.25, 6)
+    expect(await valueAt('ease-out-quad', 2)).toBeCloseTo(0.75, 6)
+    expect(await valueAt('ease-in-out-quad', 1)).toBeCloseTo(0.125, 6)
+    expect(await valueAt('ease-in-out-cubic', 1)).toBeCloseTo(0.0625, 6)
   })
 
   it('holds the first and last keyframe outside their range', async () => {
@@ -436,6 +443,21 @@ describe('COMPUTE_FRAME transitions', () => {
     await init([withTransition()], [makeTrack()])
 
     expect((await frameAt(4.5)).transition).toBeNull()
+  })
+
+  it('picks the earliest candidate when several clips could be the incoming side', async () => {
+    // Both candidates sit on the outgoing clip's own track at or after its end,
+    // so the same-track filter finds two and has to sort them to pick one.
+    await init(
+      [
+        withTransition(),
+        makeClip({ id: 'in-late', timelinePosition: 6, duration: 5, endTime: 5 }),
+        makeClip({ id: 'in-early', timelinePosition: 5, duration: 5, endTime: 5 }),
+      ],
+      [makeTrack()]
+    )
+
+    expect((await frameAt(4.5)).transition).toMatchObject({ incomingClipId: 'in-early' })
   })
 
   it('falls back to the topmost clip on another track', async () => {

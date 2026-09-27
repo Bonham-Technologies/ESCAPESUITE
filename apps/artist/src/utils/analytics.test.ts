@@ -93,4 +93,15 @@ describe('analytics', () => {
       expect(trackEvent).toHaveBeenCalledWith('Export Completed', { format: 'webm', duration: 90 })
     })
   })
+
+  describe('analytics.exportFailed', () => {
+    it('tracks a failed export with its error type and progress as a percentage', () => {
+      analytics.exportFailed('mp4', 'encoder-error', 0.567)
+      expect(trackEvent).toHaveBeenCalledWith('Export Failed', {
+        format: 'mp4',
+        errorType: 'encoder-error',
+        progress: 57,
+      })
+    })
+  })
 })
