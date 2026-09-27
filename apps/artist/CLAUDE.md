@@ -1284,7 +1284,11 @@ on a single clip, Ctrl+V, Ctrl+D and Ctrl+B — and toasts "Track is locked" ins
 the action and letting the store swallow it silently. ESCSUITE-88 closed the limit this ticket
 stated: the keyframe panel and the preview's transform handles, which used to let the user try
 and show nothing, now both refuse at the gesture's start and say so (the two paragraphs above).
-The toolbar's delete button is what is left — it still relies on the store's refusal alone.
+The toolbar's Delete button was the last of them, and ESCSUITE-91 closed it: one **boolean** selector
+(`anyClipOnLockedTrack(clips, tracks, selectedClipIds)`, so the toolbar re-renders only when the answer
+flips and `Toolbar.rerender.test.tsx`'s pin holds) disables the button and titles it `Track is locked`
+while the selection touches a locked track; Mute and Unmute stay live, since a track property is not what
+the lock freezes. Every surface that can edit a clip now shows the lock before the store has to refuse.
 
 The one documented exception is the colour swatches
 in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the

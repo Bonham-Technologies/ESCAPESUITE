@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useEditorStore } from '../../store/projectStore';
+import { anyClipOnLockedTrack } from '../../store/trackLock';
 import { formatTimecode } from '../../utils/timeUtils';
 import type { ToolType } from '../../store/types';
 import styles from './Toolbar.module.css';
@@ -30,6 +31,16 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
   const muteSelectedClips = useEditorStore((state) => state.muteSelectedClips);
   const unmuteSelectedClips = useEditorStore((state) => state.unmuteSelectedClips);
   const clearMultiSelection = useEditorStore((state) => state.clearMultiSelection);
+  // Whether the selection touches a locked track (ESCSUITE-91): `deleteSelectedClips`
+  // refuses all-or-nothing when it does, so the Delete button says so instead of
+  // looking live and doing nothing. One BOOLEAN selector, not `clips` + `tracks`:
+  // zustand compares with Object.is, so the toolbar re-renders only when the
+  // answer flips — never on a clip edit or a playhead tick — which is what
+  // `Toolbar.rerender.test.tsx` pins. Mute / Unmute stay live: they write a
+  // track property, which the lock does not freeze.
+  const selectionTouchesLockedTrack = useEditorStore((state) =>
+    anyClipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, state.selectedClipIds)
+  );
 
   const handleToolChange = useCallback((tool: ToolType) => {
     setActiveTool(tool);
@@ -244,7 +255,8 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
               <button
                 className={`${styles.toolButton} ${styles.deleteButton}`}
                 onClick={deleteSelectedClips}
-                title="Delete selected clips (Delete)"
+                disabled={selectionTouchesLockedTrack}
+                title={selectionTouchesLockedTrack ? 'Track is locked' : 'Delete selected clips (Delete)'}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="3 6 5 6 21 6" />
