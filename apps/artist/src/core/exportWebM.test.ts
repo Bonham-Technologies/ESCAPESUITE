@@ -426,7 +426,9 @@ describe('exportToWebM rendering', () => {
     await run({ clips, tracks })
 
     const methods = ctx().calls.map((c) => c.method)
-    const firstFrame = methods.slice(0, methods.indexOf('fillRect', 1))
+    // A frame is ['setTransform', 'fillRect', ...draws], so the second frame
+    // starts at the second clear — searched from index 2, past the first one.
+    const firstFrame = methods.slice(0, methods.indexOf('fillRect', 2))
     expect(firstFrame.indexOf('drawImage')).toBeLessThan(firstFrame.indexOf('ellipse'))
     expect(firstFrame.indexOf('ellipse')).toBeLessThan(firstFrame.indexOf('fillText'))
     expect(ctx().argsFor('fillText')[0][0]).toBe('Overlay')

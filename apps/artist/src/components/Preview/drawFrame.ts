@@ -18,6 +18,7 @@ import {
   shapeBlursBackground,
 } from '../../core/canvasRenderer';
 import type { MediaDrawOptions, TransitionModifiers } from '../../core/exportTypes';
+import { openOutputFrame } from '../../core/outputTransform';
 import { getClipsAtTime } from '../../store/projectStore';
 import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
@@ -249,15 +250,13 @@ export function drawPreviewFrame(
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
   ctx.filter = 'none';
-  // Project pixels to device pixels, and the transform reset in one call.
-  const scale = canvas.width / projectSize.width;
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  // Project pixels to device pixels, the transform reset and the frame cleared:
+  // the one mechanism all three pipelines share (`core/outputTransform`), read
+  // back off the canvas' actual backing store so it can never disagree with a
+  // resize that has not been redrawn yet.
+  const scale = openOutputFrame(ctx, projectSize, canvas);
   // …except `ctx.filter`, whose lengths the transform does not touch.
   const options = drawOptionsFor(scale);
-
-  // Clear canvas
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, projectSize.width, projectSize.height);
 
   // Check for active transitions
   const activeTransition = getActiveTransition(clips, tracks, time);

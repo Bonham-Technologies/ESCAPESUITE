@@ -84,7 +84,14 @@ describe('renderProject', () => {
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 10
     input.options = { format: 'mp4', quality: 'high', resolution: '720p', timeRange: { start: 2, end: 5 } }
     const res = await renderProject(input)
-    expect(res.meta).toMatchObject({ width: 1280, height: 720, durationSec: 3 })
+    // The kit renders through the editor's own exporters, so ESCSUITE-94 reaches
+    // it for free — including the half of that fix that lives in
+    // `getResolution`. A preset's height is fixed and its width follows the
+    // **project's** aspect: this project is 64x48 (4:3), so 720p is 960x720. It
+    // used to take the aspect from the bottom clip's source (1920x1080) and
+    // report 1280x720 — a 16:9 file for a 4:3 project, which the exporter then
+    // pillarboxed. The manifest and the bytes have to agree, and both now do.
+    expect(res.meta).toMatchObject({ width: 960, height: 720, durationSec: 3 })
     // and the engine received the same options untouched
     expect(((exportToMP4.mock.calls[0] as unknown[])[2] as { timeRange: unknown }).timeRange).toEqual({ start: 2, end: 5 })
   })
