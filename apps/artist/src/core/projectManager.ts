@@ -1,7 +1,7 @@
 // Project save/load functionality
 
 import type { Project, SourceVideo, Clip } from '../store/types';
-import { getVideo, storeVideo, storeThumbnail, getThumbnail } from './storage';
+import { getVideo, storeVideo, storeThumbnail, getThumbnail, resolveThumbnailUrl } from './storage';
 
 export interface ProjectFile {
   version: number;
@@ -158,7 +158,7 @@ export async function loadProject(
     if (videoData.thumbnail) {
       const thumbnailBlob = base64ToBlob(videoData.thumbnail, 'image/jpeg');
       await storeThumbnail(videoData.id, thumbnailBlob);
-      metadata.thumbnailUrl = URL.createObjectURL(thumbnailBlob);
+      metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
     }
 
     sourceVideos.push(metadata);

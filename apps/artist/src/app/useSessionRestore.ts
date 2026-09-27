@@ -9,7 +9,7 @@
 // object: it is the only field this concern reads, and the dependency the
 // effect carried inline was `urlParams.suppressRestore`.
 import { useCallback, useEffect, useState } from 'react';
-import { getSessionState, clearSessionState, type SessionState } from '../core/storage';
+import { getSessionState, clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -55,10 +55,22 @@ export function useSessionRestore({
   const [showSessionPrompt, setShowSessionPrompt] = useState(false);
   const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
 
-  // Restore session on app start
-  const handleRestoreSession = useCallback((session: SessionState) => {
+  // Restore session on app start. A saved `thumbnailUrl` is an
+  // `URL.createObjectURL` handle from the previous document — dead the moment
+  // this one loaded — so every source is rebuilt from its stored thumbnail
+  // rather than trusted (ESCSUITE-96). The sources are independent reads, so
+  // `Promise.all` runs them together and the store is written once, with
+  // every card already showing the right picture rather than a broken one
+  // that fixes itself a beat later.
+  const handleRestoreSession = useCallback(async (session: SessionState) => {
+    const sourceVideos = await Promise.all(
+      session.sourceVideos.map(async (video) => ({
+        ...video,
+        thumbnailUrl: await resolveThumbnailUrl(video.id),
+      }))
+    );
     setProject(session.project);
-    session.sourceVideos.forEach(addSourceVideo);
+    sourceVideos.forEach(addSourceVideo);
     setCurrentTime(session.currentTime);
     setSelectedClipId(session.selectedClipId);
     setZoom(session.zoom);

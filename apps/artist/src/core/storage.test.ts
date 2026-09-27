@@ -158,6 +158,29 @@ describe('storage', () => {
     })
   })
 
+  describe('resolveThumbnailUrl', () => {
+    // The one mechanism projectManager.loadProject and
+    // useSessionRestore.handleRestoreSession both use to give a restored
+    // source video a live thumbnailUrl (ESCSUITE-96) — a fresh object URL
+    // built from whatever is actually in storage, never a persisted handle.
+    it('builds a fresh object URL from a stored thumbnail', async () => {
+      const storage = await getStorageModule()
+      await storage.storeThumbnail('thumb1', new Blob(['thumbnail data'], { type: 'image/jpeg' }))
+
+      const url = await storage.resolveThumbnailUrl('thumb1')
+
+      expect(url).toEqual(expect.stringMatching(/^blob:/))
+    })
+
+    it('resolves undefined when nothing is stored', async () => {
+      const storage = await getStorageModule()
+
+      const url = await storage.resolveThumbnailUrl('non-existent')
+
+      expect(url).toBeUndefined()
+    })
+  })
+
   describe('project operations', () => {
     const createTestProject = (id: string, name: string): Project => ({
       id,
