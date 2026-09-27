@@ -410,17 +410,31 @@ describe('projectStore remaining behaviours', () => {
       expect(second.animation).toBeUndefined()
     })
 
-    it('does not alias animation or transform between the two halves', () => {
+    it('does not alias animation, transform, effects, transition, mask or stroke between the two halves', () => {
       addClip('clip1', 0, 10)
       store().updateClipAnimation('clip1', { in: { type: 'fade', duration: 1, easing: 'ease-out' } })
       store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
       store().updateClipTransform('clip1', { x: 0.3 })
+      store().updateClip('clip1', {
+        mask: { kind: 'circle' },
+        stroke: { color: '#ffffff', width: 0.01 },
+      })
 
       store().splitClip('clip1', 5)
 
       const { first, second } = halves()
+      // cloneClip (structuredClone) gives every object-valued field of the
+      // clip its own copy, so nothing survives split as a shared reference —
+      // not just animation/transform, which used to alias before ESCSUITE-95.
       expect(first.animation).not.toBe(second.animation)
       expect(first.transform).not.toBe(second.transform)
+      expect(first.effects).not.toBe(second.effects)
+      expect(first.transition).not.toBe(second.transition)
+      expect(first.mask).not.toBe(second.mask)
+      expect(first.stroke).not.toBe(second.stroke)
+      // Both halves start with the same values, mask/stroke included.
+      expect(second.mask).toEqual({ kind: 'circle' })
+      expect(second.stroke).toEqual({ color: '#ffffff', width: 0.01 })
 
       store().updateClipTransform(first.id, { x: 0.9 })
       expect(store().project.timeline.clips.find((c) => c.id === second.id)!.transform.x).toBe(0.3)

@@ -375,36 +375,37 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const secondDuration = clip.endTime - sourceTime;
 
     // ESCSUITE-95: `{ ...clip }` alone would hand both halves the same
-    // `animation` and `transform` references. `splitAnimation` rebases the
-    // keyframes and reassigns the in/out presets instead of copying the
-    // whole thing onto both; a clip with no animation has nothing to split,
-    // so both halves keep `undefined` exactly as before.
+    // `animation` and `transform` (and effects/transition/mask/stroke/
+    // textData/shapeData) references. `cloneClip` (structuredClone, already
+    // used by duplicateClip) gives each half its own deep copy of the whole
+    // clip up front; `splitAnimation` then rebases the keyframes and
+    // reassigns the in/out presets instead of leaving the cloned `animation`
+    // duplicated on both halves. A clip with no animation has nothing to
+    // split, so both halves keep `undefined` exactly as before.
     let firstAnimation = clip.animation;
     let secondAnimation = clip.animation;
     if (clip.animation) {
-      const split = splitAnimation(clip.animation, splitTime, firstDuration, secondDuration);
+      const split = splitAnimation(clip.animation, splitTime);
       firstAnimation = split.first;
       secondAnimation = split.second;
     }
 
     const firstClip: Clip = {
-      ...clip,
+      ...cloneClip(clip),
       id: uuidv4(),
       endTime: sourceTime,
       duration: firstDuration,
       name: `${clip.name} (1)`,
-      transform: structuredClone(clip.transform),
       animation: firstAnimation,
     };
 
     const secondClip: Clip = {
-      ...clip,
+      ...cloneClip(clip),
       id: uuidv4(),
       startTime: sourceTime,
       duration: secondDuration,
       timelinePosition: clip.timelinePosition + firstDuration,
       name: `${clip.name} (2)`,
-      transform: structuredClone(clip.transform),
       animation: secondAnimation,
     };
 

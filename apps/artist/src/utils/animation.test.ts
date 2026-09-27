@@ -563,7 +563,7 @@ describe('splitAnimation (ESCSUITE-95)', () => {
       keyframes: emptyKeyframes,
     }
 
-    const { first, second } = splitAnimation(animation, 5, 5, 5)
+    const { first, second } = splitAnimation(animation, 5)
 
     expect(first.in).toEqual({ type: 'fade', duration: 1, easing: 'ease-out' })
     expect(second.in).toEqual({ type: 'none', duration: 0.5, easing: 'ease-out' })
@@ -576,50 +576,35 @@ describe('splitAnimation (ESCSUITE-95)', () => {
       keyframes: emptyKeyframes,
     }
 
-    const { first, second } = splitAnimation(animation, 5, 5, 5)
+    const { first, second } = splitAnimation(animation, 5)
 
     expect(first.out).toEqual({ type: 'none', duration: 0.5, easing: 'ease-in' })
     expect(second.out).toEqual({ type: 'fade', duration: 1, easing: 'ease-in' })
   })
 
-  it('clamps a kept preset duration to its own half duration', () => {
+  it("leaves a kept preset's duration untouched, even past its own half's new length", () => {
     const animation: ClipAnimation = {
       in: { type: 'fade', duration: 3, easing: 'ease-out' },
       out: { type: 'fade', duration: 3, easing: 'ease-in' },
       keyframes: emptyKeyframes,
     }
 
-    // Split a 10s clip at 2s: first half is 2s long, second half 8s.
-    const { first, second } = splitAnimation(animation, 2, 2, 8)
+    // Split a 10s clip at 2s: the first half is only 2s long, shorter than
+    // the in-preset's own 3s duration. Nothing else in the app clamps a
+    // preset's duration to the clip it sits on (trimming a clip leaves a
+    // longer preset alone), and an unclamped 3s fade-in on a 2s first half
+    // still renders bit-identically to what the parent showed over those
+    // same two seconds — so splitAnimation carries the duration over exactly
+    // as authored rather than shortening it.
+    const { first, second } = splitAnimation(animation, 2)
 
-    expect(first.in.duration).toBe(2) // clamped down from 3
-    expect(second.out.duration).toBe(3) // untouched, 3 <= 8
+    expect(first.in.duration).toBe(3)
+    expect(second.out.duration).toBe(3)
   })
 
-  it('keeps every keyframe before the split as-is, appending nothing when none sit at or past it', () => {
-    const animation: ClipAnimation = {
-      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
-      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
-      keyframes: {
-        opacity: [
-          { time: 0, value: 0, easing: 'linear' },
-          { time: 2, value: 1, easing: 'ease-in' },
-        ],
-      },
-    }
-
+  describe('when nothing survives past the cut', () => {
     // 0-10s clip, opacity fades 0->1 over [0,2]. Split at 5s: the fade has
-    // long finished, so the first half needs no synthesised boundary — the
-    // last real keyframe's value (1) already holds all the way to the cut.
-    const { first } = splitAnimation(animation, 5, 5, 5)
-
-    expect(first.keyframes.opacity).toEqual([
-      { time: 0, value: 0, easing: 'linear' },
-      { time: 2, value: 1, easing: 'ease-in' },
-    ])
-  })
-
-  it('shifts the second half keyframes and prepends the boundary value when the split falls between two keyframes', () => {
+    // long finished before the cut.
     const animation: ClipAnimation = {
       in: { type: 'none', duration: 0.5, easing: 'ease-out' },
       out: { type: 'none', duration: 0.5, easing: 'ease-in' },
@@ -631,15 +616,28 @@ describe('splitAnimation (ESCSUITE-95)', () => {
       },
     }
 
-    const { second } = splitAnimation(animation, 5, 5, 5)
+    it("keeps the first half's keyframes as-is, appending nothing", () => {
+      const { first } = splitAnimation(animation, 5)
 
-    // Nothing in the parent's opacity track sits at or after t=5, so the
-    // second half has no real keyframe to shift — but it must still hold the
-    // last value (1) from its own start, or the picture would jump to the
-    // base value.
-    expect(second.keyframes.opacity).toEqual([
-      { time: 0, value: 1, easing: 'ease-in' }, // easing copied from the preceding parent keyframe
-    ])
+      // The last real keyframe's value (1) already holds all the way to the
+      // cut, so the first half needs no synthesised boundary.
+      expect(first.keyframes.opacity).toEqual([
+        { time: 0, value: 0, easing: 'linear' },
+        { time: 2, value: 1, easing: 'ease-in' },
+      ])
+    })
+
+    it('gives the second half a single synthesised keyframe holding the last value', () => {
+      const { second } = splitAnimation(animation, 5)
+
+      // Nothing in the parent's opacity track sits at or after t=5, so the
+      // second half has no real keyframe to shift — but it must still hold
+      // the last value (1) from its own start, or the picture would jump to
+      // the base value.
+      expect(second.keyframes.opacity).toEqual([
+        { time: 0, value: 1, easing: 'ease-in' }, // easing copied from the preceding parent keyframe
+      ])
+    })
   })
 
   it('splits a keyframe track that spans the cut: clips before, shifts at-or-after, synthesises both boundaries', () => {
@@ -658,7 +656,7 @@ describe('splitAnimation (ESCSUITE-95)', () => {
     // 0-10s clip, split at 6s (between the keyframes at 4 and 8). Interpolating
     // the parent track at t=6 (halfway between 4 and 8, using kf@4's
     // 'ease-in' easing: t=0.5 eases to 0.25) gives 0.5 + 0.5 * 0.25 = 0.625.
-    const { first, second } = splitAnimation(animation, 6, 6, 4)
+    const { first, second } = splitAnimation(animation, 6)
 
     // First half: keyframes before 6 (at 0 and 4), plus a synthesised one at
     // 6 holding that interpolated value, using the easing of the keyframe
@@ -678,6 +676,34 @@ describe('splitAnimation (ESCSUITE-95)', () => {
     expect(second.keyframes.x?.[1]).toEqual({ time: 2, value: 1, easing: 'linear' })
   })
 
+  it('holds the interpolated value on both halves when the split falls before the first keyframe', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
+      keyframes: {
+        x: [
+          { time: 4, value: 0, easing: 'linear' },
+          { time: 8, value: 1, easing: 'linear' },
+        ],
+      },
+    }
+
+    // Split at 2s, before the track's own first keyframe (at 4): `before` is
+    // empty, so there is nothing for the first half to keep other than the
+    // synthesised boundary itself, and the second half's prepend condition
+    // (`before.length > 0`) does not fire — the shifted keyframe at 4 (now 2)
+    // already supplies the value there.
+    const { first, second } = splitAnimation(animation, 2)
+
+    expect(first.keyframes.x).toEqual([
+      { time: 2, value: 0, easing: 'linear' },
+    ])
+    expect(second.keyframes.x).toEqual([
+      { time: 2, value: 0, easing: 'linear' },
+      { time: 6, value: 1, easing: 'linear' },
+    ])
+  })
+
   it('does not prepend a boundary keyframe when one already sits exactly at the split', () => {
     const animation: ClipAnimation = {
       in: { type: 'none', duration: 0.5, easing: 'ease-out' },
@@ -690,11 +716,29 @@ describe('splitAnimation (ESCSUITE-95)', () => {
       },
     }
 
-    const { second } = splitAnimation(animation, 5, 5, 5)
+    const { second } = splitAnimation(animation, 5)
 
     expect(second.keyframes.x).toEqual([
       { time: 0, value: 1, easing: 'ease-in' },
     ])
+  })
+
+  it('treats a keyframe within tolerance of the split exactly like one sitting exactly at it', () => {
+    const makeAnimation = (nearSplitTime: number): ClipAnimation => ({
+      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
+      keyframes: {
+        x: [
+          { time: 0, value: 0, easing: 'linear' },
+          { time: nearSplitTime, value: 1, easing: 'ease-in' },
+        ],
+      },
+    })
+
+    // KEYFRAME_TIME_EPSILON is 0.001, so 5 - 0.0005 is within tolerance of
+    // the split at 5 and must partition, shift and synthesise exactly as if
+    // the keyframe sat exactly at 5.
+    expect(splitAnimation(makeAnimation(5 - 0.0005), 5)).toEqual(splitAnimation(makeAnimation(5), 5))
   })
 
   it('leaves a property with no keyframes out of both halves', () => {
@@ -704,7 +748,7 @@ describe('splitAnimation (ESCSUITE-95)', () => {
       keyframes: { opacity: [] },
     }
 
-    const { first, second } = splitAnimation(animation, 5, 5, 5)
+    const { first, second } = splitAnimation(animation, 5)
 
     expect(first.keyframes.opacity).toBeUndefined()
     expect(second.keyframes.opacity).toBeUndefined()
@@ -722,7 +766,7 @@ describe('splitAnimation (ESCSUITE-95)', () => {
       },
     }
 
-    const { first, second } = splitAnimation(animation, 5, 5, 5)
+    const { first, second } = splitAnimation(animation, 5)
 
     expect(first).not.toBe(animation)
     expect(second).not.toBe(animation)
