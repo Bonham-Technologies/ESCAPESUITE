@@ -8,13 +8,14 @@
 // host asked for is no longer in storage or cannot be read at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import 'fake-indexeddb/auto'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RecordingsListPanel } from './RecordingsListPanel'
 import { useRecorderStore } from '../../store/recorderStore'
 import { uploadToHost } from '../../utils/uploadToHost'
 import { UPLOAD_UNAVAILABLE } from '../../utils/notices'
 import { converterModule, resetAppDoubles } from '../../test/appDoubles'
+import type { ConversionProgressLike } from '../../test/appDoubles'
 import { storeVideo } from '../../core/storage'
 import { clearAllRecordings } from '../../test/recordingsDb'
 import type { Recording } from '../../store/types'
@@ -230,5 +231,115 @@ describe('RecordingsListPanel upload to host', () => {
       role: 'screen',
       takeId: 'take-1',
     })
+  })
+})
+
+describe('RecordingsListPanel deleting the row that is converting', () => {
+  const secondRecording: Recording = { ...baseRecording, id: 'r8', name: 'Take Eight' }
+
+  beforeEach(async () => {
+    await storeVideo('r8', new Blob(['video-bytes'], { type: 'video/webm' }), {
+      id: 'r8',
+      name: 'Take Eight',
+      duration: 5,
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      mimeType: 'video/webm',
+      size: 2048,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1_000,
+    })
+  })
+
+  /** A conversion the test drives by hand and can watch for its abort signal. */
+  function deferConversion() {
+    let signal: AbortSignal | undefined
+    const started = new Promise<void>((resolveStarted) => {
+      convertToMP4.mockImplementation(
+        (_blob: Blob, _onProgress: (progress: ConversionProgressLike) => void, abortSignal?: AbortSignal) =>
+          new Promise<Blob>((_resolve, reject) => {
+            signal = abortSignal
+            abortSignal?.addEventListener('abort', () =>
+              reject(new converterModule.ConversionAbortedError())
+            )
+            resolveStarted()
+          })
+      )
+    })
+    return { started, get signal() { return signal } }
+  }
+
+  it('aborts the conversion in flight, so deleting it frees the slot for other rows', async () => {
+    // ESCSUITE-103: the row being deleted is the row holding the one
+    // conversion slot. Its progress readout and its Cancel button unmount with
+    // it, but `useMp4Download`'s `converting` and `abortRef` used to stay set
+    // — every other row's MP4/M4A buttons stayed disabled for however long the
+    // orphaned conversion still needed, with nothing left on screen to cancel
+    // it.
+    const user = userEvent.setup()
+    const conversion = deferConversion()
+    const onDelete = vi.fn()
+    render(
+      <RecordingsListPanel
+        recordings={[baseRecording, secondRecording]}
+        onPlay={vi.fn()}
+        onDownload={vi.fn()}
+        onSendToEditor={vi.fn()}
+        onDelete={onDelete}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as MP4' }))
+    await act(async () => {
+      await conversion.started
+    })
+
+    // The other row is blocked for as long as the conversion runs.
+    expect(screen.getByRole('button', { name: 'Download Take Eight as MP4' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Delete Take Seven' }))
+
+    // The conversion is aborted before the caller's own delete runs — "the
+    // user asked for the take to go" is honoured before the row goes.
+    expect(conversion.signal?.aborted).toBe(true)
+    expect(onDelete).toHaveBeenCalledWith('r7')
+
+    // The slot is freed: the other row's MP4 button re-enables without
+    // waiting for the orphaned conversion, and there is no Cancel button left
+    // pointing at a conversion nothing can reach any more.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Download Take Eight as MP4' })).toBeEnabled()
+    })
+    expect(screen.queryByRole('button', { name: /^Cancel .* conversion of/ })).toBeNull()
+  })
+
+  it('deletes a row that is not converting without touching the conversion running elsewhere', async () => {
+    const user = userEvent.setup()
+    const conversion = deferConversion()
+    const onDelete = vi.fn()
+    render(
+      <RecordingsListPanel
+        recordings={[baseRecording, secondRecording]}
+        onPlay={vi.fn()}
+        onDownload={vi.fn()}
+        onSendToEditor={vi.fn()}
+        onDelete={onDelete}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as MP4' }))
+    await act(async () => {
+      await conversion.started
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Delete Take Eight' }))
+
+    expect(conversion.signal?.aborted).toBe(false)
+    expect(onDelete).toHaveBeenCalledWith('r8')
+    expect(
+      screen.getByRole('button', { name: 'Cancel MP4 conversion of Take Seven' })
+    ).toBeInTheDocument()
   })
 })

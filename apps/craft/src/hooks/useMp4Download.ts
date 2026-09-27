@@ -277,6 +277,29 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
       // user asked for no file.
       if (controller.signal.aborted) return
 
+      // Deleting a recording aborts its conversion (see
+      // `RecordingsListPanel`), but that goes through the same signal checked
+      // above, which leaves the same `finalize()` gap open to a delete as it
+      // does to a cancel. A cheap re-read of the same record is the guard that
+      // gap needs: gone from storage means gone, whatever the signal says
+      // (ESCSUITE-103) — the user asked for the take to go, not for a file
+      // named after it. A read that *throws* is a different fact — a storage
+      // hiccup right after a conversion succeeded is not proof the recording
+      // is gone — so only a read that resolves and comes back empty counts;
+      // a throw is treated as "still there" and falls through to the
+      // download, exactly as it always has.
+      let stillThere = true
+      try {
+        stillThere = (await getVideo(id)) !== undefined
+      } catch {
+        stillThere = true
+      }
+      // The read itself can straddle a cancel that arrives while it is in
+      // flight, so the signal is checked again now for the same reason it was
+      // checked above — otherwise this very guard would be the thing that
+      // hands back a file the user just cancelled.
+      if (!stillThere || controller.signal.aborted) return
+
       analytics.recordingDownloaded()
       // A conversion that worked makes any earlier "MP4 conversion failed"
       // untrue, and this is the one channel, so it is cleared here. It clears

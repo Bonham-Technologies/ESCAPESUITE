@@ -11,6 +11,7 @@ import { analytics } from '../utils/analytics';
 import { downloadBlob } from '../utils/downloadBlob';
 import { sendToEditor } from '../utils/sendToEditor';
 import { safeFileName } from '../utils/recordingFormat';
+import { DELETE_FAILED } from '../utils/notices';
 import type { Recording } from '../store/types';
 
 export interface RecordingLibraryDeps {
@@ -23,6 +24,8 @@ export interface RecordingLibraryDeps {
    * stays disabled after the user has done what it asked.
    */
   refreshStorageSpace: () => Promise<void>;
+  /** The app's one notice channel — see "Errors and notices" in CLAUDE.md. */
+  setNotice: (notice: string | null) => void;
 }
 
 export interface RecordingLibrary {
@@ -41,6 +44,7 @@ export function useRecordingLibrary({
   recordings,
   removeRecording,
   refreshStorageSpace,
+  setNotice,
 }: RecordingLibraryDeps): RecordingLibrary {
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
@@ -54,13 +58,36 @@ export function useRecordingLibrary({
     // companion alone deletes only that companion — the primary keeps its
     // takeId and renders as a plain take (see `utils/takeOrder.ts`), so
     // nothing is rewritten.
+    //
+    // Companions go first and the primary last, each in its own try/catch: a
+    // `deleteVideo` that throws partway through used to leave whatever came
+    // after it undeleted, and doing the primary first could leave a
+    // primary-less companion behind it — a webcam file with no take, taking
+    // room the user thought they had freed. One throw costs one file rather
+    // than the rest of the cascade, and is worth one notice rather than an
+    // unhandled rejection at this call site.
     const companions = recordings.filter((r) => r.takeId === id && r.id !== id);
 
-    await deleteVideo(id);
-    removeRecording(id);
+    let failed = false;
     for (const companion of companions) {
-      await deleteVideo(companion.id);
-      removeRecording(companion.id);
+      try {
+        await deleteVideo(companion.id);
+        removeRecording(companion.id);
+      } catch (error) {
+        failed = true;
+        console.error(`Could not delete companion recording ${companion.id}:`, error);
+      }
+    }
+    try {
+      await deleteVideo(id);
+      removeRecording(id);
+    } catch (error) {
+      failed = true;
+      console.error(`Could not delete recording ${id}:`, error);
+    }
+
+    if (failed) {
+      setNotice(DELETE_FAILED);
     }
     // Never rejects — see the store action.
     void refreshStorageSpace();

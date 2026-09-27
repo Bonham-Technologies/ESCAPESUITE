@@ -152,7 +152,7 @@ function App() {
     handlePlayRecording,
     handleClosePlayback,
     handleDownload,
-  } = useRecordingLibrary({ recordings, removeRecording, refreshStorageSpace });
+  } = useRecordingLibrary({ recordings, removeRecording, refreshStorageSpace, setNotice });
 
   useKeyboardShortcuts({
     state,

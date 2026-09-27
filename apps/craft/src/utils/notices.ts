@@ -91,3 +91,13 @@ export const UPLOAD_UNAVAILABLE =
  */
 export const MP4_SAVED_WITHOUT_WEBCAM =
   'Saved as MP4 — without the webcam: its own track could not be read'
+
+/**
+ * Said when a delete — a take's own, or one of its companions' — threw partway
+ * through the cascade. One sentence for either: which file survives is a
+ * console detail (`handleDeleteRecording` logs it), and the fact the user can
+ * act on is the same either way — the library may still be showing something
+ * that storage has already lost track of, so a reload is the honest next step.
+ */
+export const DELETE_FAILED =
+  'That recording could not be fully deleted — reload the library to see what is left.'

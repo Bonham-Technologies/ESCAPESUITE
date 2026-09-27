@@ -10,6 +10,7 @@ vi.mock('../core/storage', () => ({
   getRecordingsMetadata: vi.fn(),
   getThumbnail: vi.fn(),
   createBlobUrl: vi.fn(),
+  revokeBlobUrl: vi.fn(),
   hasSpaceForRecording: vi.fn(),
 }))
 
@@ -17,6 +18,7 @@ import {
   getRecordingsMetadata,
   getThumbnail,
   createBlobUrl,
+  revokeBlobUrl,
   hasSpaceForRecording,
 } from '../core/storage'
 
@@ -216,6 +218,48 @@ describe('recorderStore', () => {
       expect(recordings).toHaveLength(1)
       expect(recordings[0].id).toBe('test-2')
     })
+
+    // ESCSUITE-103. `loadRecordings` mints one object URL per recording's
+    // thumbnail, and nothing was revoking a deleted recording's — it used to
+    // outlive the recording it named for the life of the tab.
+    it('revokes a removed recording\'s thumbnail URL', () => {
+      vi.mocked(revokeBlobUrl).mockClear()
+      const { addRecording, removeRecording } = useRecorderStore.getState()
+
+      addRecording({
+        id: 'test-1',
+        name: 'Has A Thumb',
+        duration: 60,
+        createdAt: Date.now(),
+        size: 1000000,
+        thumbnailUrl: 'blob:thumb-1',
+        hasWebcam: false,
+        hasAudio: true,
+      })
+
+      removeRecording('test-1')
+
+      expect(revokeBlobUrl).toHaveBeenCalledWith('blob:thumb-1')
+    })
+
+    it('revokes nothing for a recording with no thumbnail', () => {
+      vi.mocked(revokeBlobUrl).mockClear()
+      const { addRecording, removeRecording } = useRecorderStore.getState()
+
+      addRecording({
+        id: 'test-1',
+        name: 'No Thumb',
+        duration: 60,
+        createdAt: Date.now(),
+        size: 1000000,
+        hasWebcam: false,
+        hasAudio: true,
+      })
+
+      removeRecording('test-1')
+
+      expect(revokeBlobUrl).not.toHaveBeenCalled()
+    })
   })
 
   describe('setStreams', () => {
@@ -286,6 +330,7 @@ describe('recorderStore', () => {
       vi.mocked(getRecordingsMetadata).mockReset()
       vi.mocked(getThumbnail).mockReset()
       vi.mocked(createBlobUrl).mockReset()
+      vi.mocked(revokeBlobUrl).mockReset()
     })
 
     it('sorts recordings newest-first and resolves thumbnail URLs where available', async () => {
@@ -400,6 +445,47 @@ describe('recorderStore', () => {
       await useRecorderStore.getState().loadRecordings()
 
       expect(useRecorderStore.getState().recordings).toEqual([])
+    })
+
+    // ESCSUITE-103. Every call mints a fresh thumbnail URL per recording, so a
+    // second `loadRecordings` — a reload, the CRAFT/ARTIST handoff — used to
+    // leak the whole outgoing set.
+    it('revokes the outgoing set\'s thumbnail URLs before minting the new one', async () => {
+      useRecorderStore.setState({
+        recordings: [
+          {
+            id: 'old-1',
+            name: 'Old One',
+            duration: 5,
+            createdAt: 1,
+            size: 10,
+            thumbnailUrl: 'blob:old-1',
+            hasWebcam: false,
+            hasAudio: true,
+          },
+          {
+            id: 'old-2',
+            name: 'Old Two',
+            duration: 5,
+            createdAt: 2,
+            size: 10,
+            hasWebcam: false,
+            hasAudio: true,
+          },
+        ],
+      })
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        { id: 'new-1', name: 'New One', duration: 5, size: 10, recordedAt: 3 } as SourceVideo,
+      ])
+      vi.mocked(getThumbnail).mockResolvedValue(undefined)
+
+      await useRecorderStore.getState().loadRecordings()
+
+      // The one recording with a blob URL is revoked; the one with none costs
+      // nothing.
+      expect(revokeBlobUrl).toHaveBeenCalledTimes(1)
+      expect(revokeBlobUrl).toHaveBeenCalledWith('blob:old-1')
+      expect(useRecorderStore.getState().recordings.map((r) => r.id)).toEqual(['new-1'])
     })
   })
 

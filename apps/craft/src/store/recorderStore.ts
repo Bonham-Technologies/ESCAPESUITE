@@ -14,6 +14,7 @@ import {
   getRecordingsMetadata,
   getThumbnail,
   createBlobUrl,
+  revokeBlobUrl,
   hasSpaceForRecording,
 } from '../core/storage';
 import { orderTakes } from '../utils/takeOrder';
@@ -40,7 +41,7 @@ const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
  */
 const SEPARATE_TRACKS_SIZE_FACTOR = 2;
 
-export const useRecorderStore = create<RecorderStore>((set) => ({
+export const useRecorderStore = create<RecorderStore>((set, get) => ({
   // Initial state
   state: 'idle',
   config: defaultConfig,
@@ -136,10 +137,21 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
       recordings: [recording, ...state.recordings],
     })),
 
-  removeRecording: (id: string) =>
+  removeRecording: (id: string) => {
+    // `loadRecordings` mints one object URL per recording's thumbnail, and
+    // nothing else was revoking them: a deleted recording's URL used to
+    // outlive the recording it named, held by the browser for the life of the
+    // tab. The prefix guard is what a mint through `createBlobUrl` always
+    // produces — nothing else stored here ever will be — so it does nothing on
+    // a recording with no thumbnail.
+    const removed = get().recordings.find((r) => r.id === id);
+    if (removed?.thumbnailUrl?.startsWith('blob:')) {
+      revokeBlobUrl(removed.thumbnailUrl);
+    }
     set((state) => ({
       recordings: state.recordings.filter((r) => r.id !== id),
-    })),
+    }));
+  },
 
   loadRecordings: async () => {
     const metadata = await getRecordingsMetadata();
@@ -174,6 +186,19 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
         };
       })
     );
+
+    // The outgoing set's thumbnail URLs are revoked only now, once the read
+    // has actually resolved and the new set exists to replace them — a
+    // failing `getRecordingsMetadata()`/`getThumbnail()` must not leave the
+    // library's rendered thumbnails pointing at URLs this call already threw
+    // away. Every call mints a fresh URL per recording (above), so a second
+    // `loadRecordings` (a reload, the CRAFT/ARTIST handoff) would otherwise
+    // leak the whole set it is about to discard.
+    for (const recording of get().recordings) {
+      if (recording.thumbnailUrl?.startsWith('blob:')) {
+        revokeBlobUrl(recording.thumbnailUrl);
+      }
+    }
 
     // Newest take first, each take's companion rows directly under its primary
     // — the grouping ESCSUITE-14's save path wrote, rebuilt for the panel.
