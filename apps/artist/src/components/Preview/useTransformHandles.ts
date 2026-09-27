@@ -164,6 +164,14 @@ export function useTransformHandles({
   // is drawn at a constant size on screen, so its hit zones are that size in
   // project pixels (ESCSUITE-90); it is `1 / pos.scale` from the position the
   // caller has already measured.
+  /**
+   * Project pixels per CSS pixel for a hit test, from the position's own
+   * `scale` (CSS per project). A collapsed box reports 0, and dividing by it
+   * would make every tolerance infinite and every point a rotate handle — the
+   * same fallback the draw path takes: treat it as 1.
+   */
+  const screenScaleOf = (pos: { scale: number }): number => (pos.scale > 0 ? 1 / pos.scale : 1);
+
   const hitTestHandles = useCallback((
     normalizedX: number,
     normalizedY: number,
@@ -186,7 +194,7 @@ export function useTransformHandles({
     if (isPlaying) return; // Don't allow dragging during playback
 
     const pos = getCanvasPosition(e);
-    const hit = hitTestHandles(pos.x, pos.y, 1 / pos.scale);
+    const hit = hitTestHandles(pos.x, pos.y, screenScaleOf(pos));
 
     if (hit) {
       e.preventDefault();
@@ -655,7 +663,7 @@ export function useTransformHandles({
     }
 
     const pos = getCanvasPosition(e);
-    const hit = hitTestHandles(pos.x, pos.y, 1 / pos.scale);
+    const hit = hitTestHandles(pos.x, pos.y, screenScaleOf(pos));
     if (!hit) return 'default';
     return clipOnLockedTrack(clips, tracks, hit.clipId)
       ? 'not-allowed'

@@ -483,7 +483,7 @@ describe('the handle zones at a screen scale', () => {
     expect(hitAt(CENTER_X, CENTER_Y - HALF_H - 12, selected)).toBeNull()
   })
 
-  it('reaches hitHandlesOnClip, which the keyframe pass calls directly', () => {
+  it('reaches hitHandlesOnClip, which hitTestHandles’ own keyframe-mode pass calls first', () => {
     const context = scene({ clips: [mediaClip()] })
     const options = { skipKeyframed: false, includeBody: true }
 
