@@ -45,13 +45,19 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const [error, setError] = useState<string | null>(null);
   const [mp4FailedError, setMp4FailedError] = useState<string | null>(null);
 
-  // AbortController for cancelling exports
+  // The export currently in flight, if any — the only thing Cancel, ×, and
+  // Escape can actually abort. Cleared both by a run's own `finally` (once
+  // it finishes) and by handleCancel, so it always names "the run that still
+  // needs stopping" and never a stale one — which is not the same question
+  // as "am I still the run being displayed" below.
   const abortControllerRef = useRef<AbortController | null>(null);
-  // Identity of the most recently *started* export, kept separately from
-  // abortControllerRef (which a finished run clears back to null on its own
-  // success). A run's async continuation compares against this — not against
-  // abortControllerRef — to tell whether it is still the one the user is
-  // looking at, so its own completion never makes it look stale to itself.
+  // Identity of the most recently *started* export. Unlike abortControllerRef,
+  // this is never cleared by a run's own completion — only overwritten when a
+  // *newer* run starts, and explicitly nulled by handleCancel so a cancelled
+  // run's late callbacks cannot resurrect its own progress either. A run's
+  // async continuation compares against this to tell whether it is still the
+  // one the user is looking at, so its own completion or cancellation never
+  // makes it look current to itself again later.
   const latestExportRef = useRef<AbortController | null>(null);
 
   const mp4Supported = isMP4ExportSupported();
@@ -130,28 +136,33 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         extension = 'webm';
       }
 
-      const fileName = `${projectName || 'export'}.${extension}`;
+      // A superseded run must neither download nor notify a host: both are
+      // user/host-visible side effects that belong only to the export the
+      // user is actually looking at.
+      if (isCurrentRun()) {
+        const fileName = `${projectName || 'export'}.${extension}`;
 
-      // Create download link
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
 
-      // Hand the finished file to an embedding host (no-op when not embedded).
-      // The download above has already happened, so a host channel that throws
-      // (a closed frame, a rejected target origin) must not fail the export.
-      try {
-        sendMessage({
-          type: 'EXPORT_COMPLETE',
-          payload: { blob, format: extension, name: fileName },
-        });
-      } catch (hostError) {
-        console.error('Failed to notify host of completed export:', hostError);
+        // Hand the finished file to an embedding host (no-op when not embedded).
+        // The download above has already happened, so a host channel that throws
+        // (a closed frame, a rejected target origin) must not fail the export.
+        try {
+          sendMessage({
+            type: 'EXPORT_COMPLETE',
+            payload: { blob, format: extension, name: fileName },
+          });
+        } catch (hostError) {
+          console.error('Failed to notify host of completed export:', hostError);
+        }
       }
 
       // Calculate total export duration from clips
@@ -220,6 +231,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    // A cancelled run is no longer "current" even to itself: without this, a
+    // solo run's own late onProgress/success/failure callbacks would still
+    // pass isCurrentRun() and could resurrect its progress if the dialog is
+    // reopened before its promise actually settles.
+    latestExportRef.current = null;
     setProgress(null);
     setMp4FailedError(null);
     // The dialog stays mounted, so a stale alert would be re-announced the next
