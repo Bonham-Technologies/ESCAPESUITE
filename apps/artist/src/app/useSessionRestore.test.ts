@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useSessionRestore, type SessionRestoreDeps } from './useSessionRestore'
-import { clearSessionState, getSessionState, type SessionState } from '../core/storage'
+import { clearSessionState, getSessionState, getThumbnail, type SessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
@@ -37,6 +37,7 @@ const mountRestore = (overrides: Partial<SessionRestoreDeps> = {}) => {
 beforeEach(() => {
   resetStoreForTest()
   vi.mocked(getSessionState).mockResolvedValue(undefined)
+  vi.mocked(getThumbnail).mockResolvedValue(undefined)
   deps = {
     suppressRestore: false,
     setProject: vi.fn(),
@@ -149,9 +150,16 @@ describe('answering the prompt', () => {
     const session = savedSession()
     const { result } = await mountWithPendingSession(session)
 
-    act(() => result.current.handleRestoreSession(session))
+    // Rebuilding the thumbnail is an await away (ESCSUITE-96), so restoring
+    // is no longer synchronous.
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
 
     expect(deps.setProject).toHaveBeenCalledWith(session.project)
+    // getThumbnail resolves undefined by default, so the rebuilt source
+    // carries no thumbnail — value-equal to the untouched fixture, which
+    // never had the field either.
     expect(deps.addSourceVideo).toHaveBeenCalledWith(
       session.sourceVideos[0],
       0,
@@ -168,6 +176,63 @@ describe('answering the prompt', () => {
     expect(result.current.sessionRestored).toBe(true)
     // The question is settled, so the effect must not go looking again.
     expect(getSessionState).toHaveBeenCalledTimes(1)
+  })
+
+  it('rebuilds a source thumbnail from what is actually stored, not the dead handle the session carried', async () => {
+    const staleVideo = { ...sampleVideo, thumbnailUrl: 'blob:stale' }
+    const session = savedSession({ sourceVideos: [staleVideo] })
+    const freshThumbnail = new Blob(['thumb'], { type: 'image/jpeg' })
+    vi.mocked(getThumbnail).mockResolvedValue(freshThumbnail)
+    const { result } = await mountWithPendingSession(session)
+
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+
+    expect(getThumbnail).toHaveBeenCalledWith(staleVideo.id)
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: staleVideo.id, thumbnailUrl: 'blob:mock-url' }),
+      0,
+      expect.anything()
+    )
+  })
+
+  it('restores with no thumbnail — not the dead handle — when nothing is stored for it', async () => {
+    const staleVideo = { ...sampleVideo, thumbnailUrl: 'blob:stale' }
+    const session = savedSession({ sourceVideos: [staleVideo] })
+    vi.mocked(getThumbnail).mockResolvedValue(undefined)
+    const { result } = await mountWithPendingSession(session)
+
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: staleVideo.id, thumbnailUrl: undefined }),
+      0,
+      expect.anything()
+    )
+  })
+
+  it('rebuilds every source before writing the store once, not one card at a time', async () => {
+    const videoA = { ...sampleVideo, id: 'videoA', thumbnailUrl: 'blob:stale-a' }
+    const videoB = { ...sampleVideo, id: 'videoB', thumbnailUrl: 'blob:stale-b' }
+    const session = savedSession({ sourceVideos: [videoA, videoB] })
+    vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
+    const { result } = await mountWithPendingSession(session)
+
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+
+    expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+    expect(getThumbnail).toHaveBeenCalledWith('videoA')
+    expect(getThumbnail).toHaveBeenCalledWith('videoB')
+    // Every rebuilt source is already resolved by the time the first write
+    // happens — no intermediate render carries a dead handle.
+    expect(vi.mocked(deps.setProject).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(deps.addSourceVideo).mock.invocationCallOrder[0]
+    )
   })
 
   it('declining throws the stored session away and writes nothing', async () => {

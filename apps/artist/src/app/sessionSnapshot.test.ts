@@ -2,7 +2,7 @@
 // fixtures), no App and no autosave timer.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useEditorStore } from '../store/projectStore';
-import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore';
+import { resetStoreForTest, store, addClip, video } from '../test/fixtures/projectStore';
 import { buildSessionSnapshot } from './sessionSnapshot';
 
 beforeEach(() => {
@@ -33,6 +33,15 @@ describe('buildSessionSnapshot', () => {
     const state = useEditorStore.getState();
     const snapshot = buildSessionSnapshot(state, 42);
     expect(snapshot.timestamp).toBe(42);
+  });
+
+  it('never persists a thumbnail object-URL handle — it dies with the document', () => {
+    store().addSourceVideo({ ...video, thumbnailUrl: 'blob:live-handle' });
+
+    const snapshot = buildSessionSnapshot(useEditorStore.getState(), 1);
+
+    expect(snapshot.sourceVideos[0].thumbnailUrl).toBeUndefined();
+    expect(Object.keys(snapshot.sourceVideos[0])).not.toContain('thumbnailUrl');
   });
 
   it('carries a clip mask and stroke through, because it carries the project whole', () => {

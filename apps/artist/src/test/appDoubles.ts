@@ -28,6 +28,7 @@ export const sampleVideo: SourceVideo = {
 }
 
 export function storageDouble() {
+  const getThumbnail = vi.fn((_id: string) => Promise.resolve(undefined as Blob | undefined))
   return {
     getVideoBlob: vi.fn(() => Promise.resolve(new Blob(['test'], { type: 'video/mp4' }))),
     getStorageEstimate: vi.fn(() =>
@@ -42,7 +43,14 @@ export function storageDouble() {
     // The handoff asks for the whole library when the take it was given has a
     // takeId — that is how it finds the take's other parts (ESCSUITE-14).
     getAllVideoMetadata: vi.fn(() => Promise.resolve([] as SourceVideo[])),
-    getThumbnail: vi.fn(() => Promise.resolve(undefined)),
+    getThumbnail,
+    // The real function reads getThumbnail and, if it found one, hands it to
+    // URL.createObjectURL — this mirrors that so a test can drive the whole
+    // rebuild by mocking getThumbnail alone, the way it already does (ESCSUITE-96).
+    resolveThumbnailUrl: vi.fn(async (id: string) => {
+      const thumbnail = await getThumbnail(id)
+      return thumbnail ? URL.createObjectURL(thumbnail) : undefined
+    }),
     getSetting: vi.fn(() => Promise.resolve(null)),
     setSetting: vi.fn(() => Promise.resolve()),
   }
