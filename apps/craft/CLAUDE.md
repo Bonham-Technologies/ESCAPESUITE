@@ -227,6 +227,17 @@ A missed warning ends with IndexedDB reporting its own quota error at save time,
 save path already surfaces; a false "no space" refuses the take outright with advice the
 user cannot act on. Only the first of those is recoverable.
 
+**During the 3-2-1 countdown the button cancels, not stops** (ESCSUITE-106). `recorder.stop()`
+is a no-op before `start()` — both recorders check `isRecordingActive` first — so a button that
+kept reading "Stop recording" and calling `onStop` for `countdown` did nothing when clicked:
+the ticker kept running and the take began anyway. `RecorderControls`' record button now checks
+`state` before `isRecordingActive`: `idle` starts, `countdown` calls the same `onCancel` App
+already passes it (`cancelCountdown`, via the ternary in `App.tsx`'s JSX), and only `recording` /
+`paused` call `onStop`. The button's accessible name and title become "Cancel countdown" for
+that one state, so it, Escape and the bar's own neighbouring Cancel button all agree on what
+happens to a countdown. No new prop was needed — `onCancel` already carried the right function
+for `countdown`, `RecorderControls` just wasn't using it for the big button.
+
 ### Dialogs
 
 Both modals — Recording Tips and playback — get their keyboard behaviour from one hook,
@@ -1541,3 +1552,8 @@ reach past the recorder.
 
 Typing is never interrupted either: a keydown whose target is an `<input>` or `<textarea>`
 returns before the switch.
+
+The record button agrees with this table, not just with R: during `countdown` the big button is
+itself wired to cancel (see "The record button only offers what it can deliver" — ESCSUITE-106),
+so a click there and an Esc press do the same thing, and S stays inert through the countdown as
+this table already says.
