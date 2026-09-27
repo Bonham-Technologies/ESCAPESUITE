@@ -40,6 +40,14 @@ export interface HandleCascadeOptions {
  * differ only in the two options. Null when the clip is gone, is not
  * manipulable, is not on screen at this time, has no measurable bounds, or
  * simply is not under the point.
+ *
+ * `screenScale` is project pixels per CSS pixel, the same number
+ * `drawSelectionHandles` is given: the chrome is drawn at a constant size on
+ * screen, so the zones that test it have to grow with the project's grid or the
+ * pointer would miss what it can see. The body test is the clip's own box and
+ * is not scaled. A caller with a laid-out element gets the number as
+ * `1 / contentBox(canvas, box, project).scaleX`; it defaults to 1 for a canvas
+ * that is its own screen.
  */
 export function hitHandlesOnClip(
   clipId: string,
@@ -48,7 +56,8 @@ export function hitHandlesOnClip(
   canvas: HTMLCanvasElement,
   scene: Pick<HitTestContext, 'clips' | 'sourceVideos' | 'currentTime'>,
   options: HandleCascadeOptions,
-  project: ProjectSize = canvas
+  project: ProjectSize = canvas,
+  screenScale: number = 1
 ): HandleHit | null {
   const { clips, sourceVideos, currentTime } = scene;
 
@@ -67,12 +76,12 @@ export function hitHandlesOnClip(
   const halfH = bounds.height / 2;
   const local = toLocalPoint(bounds, mouseX, mouseY);
 
-  const handleHitSize = HANDLE_SIZE * 1.5;
-  const edgeHitSize = HANDLE_SIZE * 1.2; // Narrower zone for edge detection
+  const handleHitSize = HANDLE_SIZE * 1.5 * screenScale;
+  const edgeHitSize = HANDLE_SIZE * 1.2 * screenScale; // Narrower zone for edge detection
   const hit = (mode: DragMode): HandleHit => ({ clipId, clipType, mode });
 
   // Rotation handle, above the top edge
-  const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
+  const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET * screenScale;
   if (Math.abs(local.x) < handleHitSize && Math.abs(local.y - rotationHandleY) < handleHitSize) {
     return hit('rotate');
   }
@@ -109,14 +118,16 @@ export function hitHandlesOnClip(
  * overlay bodies). The position is in the canvas' normalized 0-1 space, as
  * {@link getCanvasPosition} returns it, and the test itself runs in project
  * pixels — `project` defaults to the canvas for a canvas that is its own
- * project (see {@link getOverlayBounds}).
+ * project (see {@link getOverlayBounds}). `screenScale` is project pixels per
+ * CSS pixel and sizes the handle zones alone; see {@link hitHandlesOnClip}.
  */
 export function hitTestHandles(
   normalizedX: number,
   normalizedY: number,
   canvas: HTMLCanvasElement,
   scene: HitTestContext,
-  project: ProjectSize = canvas
+  project: ProjectSize = canvas,
+  screenScale: number = 1
 ): HandleHit | null {
   const { clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen } = scene;
 
@@ -134,7 +145,8 @@ export function hitTestHandles(
       canvas,
       scene,
       { skipKeyframed: false, includeBody: true },
-      project
+      project,
+      screenScale
     );
   }
 
@@ -165,7 +177,8 @@ export function hitTestHandles(
       canvas,
       scene,
       { skipKeyframed: true, includeBody: false },
-      project
+      project,
+      screenScale
     );
     if (handle) return handle;
   }

@@ -446,3 +446,56 @@ describe('hitHandlesOnClip', () => {
     expect(cascade(CENTER_X + HALF_W + HANDLE_SIZE * 2, CENTER_Y, context, both)).toBeNull()
   })
 })
+
+// ESCSUITE-90: the handles are a constant size on screen, so the zones around
+// them are the constants multiplied by the project pixels per CSS pixel the
+// caller passes. The tolerances at the default scale are pinned by the
+// "keeps the corner tolerance at 1.5 handles" test above.
+describe('the handle zones at a screen scale', () => {
+  const selected = scene({ clips: [mediaClip()], selectedClipId: 'clip1' })
+  const SCALE = 4
+
+  /** Hit-test a point in canvas pixels against a chrome drawn at `screenScale`. */
+  const hitAtScale = (x: number, y: number, context: HitTestContext, screenScale: number) =>
+    hitTestHandles(x / CANVAS_W, y / CANVAS_H, canvas, context, canvas, screenScale)
+
+  it('widens the corner zone with the screen scale', () => {
+    // 8 * 1.5 * 4 = 48 project px around the corner, where the default is 12.
+    expect(hitAtScale(CENTER_X - HALF_W - 40, CENTER_Y - HALF_H, selected, SCALE)?.mode)
+      .toBe('resize-nw')
+    expect(hitAtScale(CENTER_X - HALF_W - 50, CENTER_Y - HALF_H, selected, SCALE)).toBeNull()
+    expect(hitAt(CENTER_X - HALF_W - 40, CENTER_Y - HALF_H, selected)).toBeNull()
+  })
+
+  it('lifts the rotation grip with the screen scale', () => {
+    expect(hitAtScale(CENTER_X, CENTER_Y - HALF_H - ROTATION_HANDLE_OFFSET * SCALE, selected, SCALE)
+      ?.mode).toBe('rotate')
+    // Where the grip sits at the default scale it is no longer the grip — 25
+    // project px above the border is now well inside the top edge's zone.
+    expect(hitAtScale(CENTER_X, CENTER_Y - HALF_H - ROTATION_HANDLE_OFFSET, selected, SCALE)?.mode)
+      .toBe('resize-n')
+  })
+
+  it('widens the edge zone with the screen scale', () => {
+    // 8 * 1.2 * 4 = 38.4 project px either side of the border, where the
+    // default 9.6 leaves 12px above it in the gap below the grip's own zone.
+    expect(hitAtScale(CENTER_X, CENTER_Y - HALF_H - 12, selected, SCALE)?.mode).toBe('resize-n')
+    expect(hitAt(CENTER_X, CENTER_Y - HALF_H - 12, selected)).toBeNull()
+  })
+
+  it('reaches hitHandlesOnClip, which the keyframe pass calls directly', () => {
+    const context = scene({ clips: [mediaClip()] })
+    const options = { skipKeyframed: false, includeBody: true }
+
+    expect(
+      hitHandlesOnClip(
+        'clip1', CENTER_X - HALF_W - 40, CENTER_Y - HALF_H, canvas, context, options, canvas, SCALE
+      )?.mode
+    ).toBe('resize-nw')
+    expect(
+      hitHandlesOnClip(
+        'clip1', CENTER_X - HALF_W - 40, CENTER_Y - HALF_H, canvas, context, options
+      )
+    ).toBeNull()
+  })
+})
