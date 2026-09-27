@@ -12,11 +12,9 @@ import {
   settle,
   type PreviewDoubles,
 } from '../../test/renderPreview'
-import { getFrameCache, resetFrameCache } from '../../core/frameCache'
 import { getVideoBlob } from '../../core/storage'
 import { drawClipToCanvas } from '../../core/canvasRenderer'
 import { createRecordingContext } from '../../test/doubles/canvas'
-import type { Clip, TextOverlayData } from '../../store/types'
 import { PreviewPlayer } from './PreviewPlayer'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -27,27 +25,14 @@ beforeEach(() => {
   vi.useFakeTimers()
   doubles = installPreviewDoubles()
   resetStoreForTest()
-  resetFrameCache()
 })
 
 afterEach(() => {
   cleanup()
   doubles.uninstall()
-  resetFrameCache()
   vi.useRealTimers()
   vi.clearAllMocks()
 })
-
-/**
- * Adding an overlay selects it, and a selected clip is drawn with handles on
- * top. These tests are not about the handles, so they start from nothing
- * selected.
- */
-const addText = (data: Partial<TextOverlayData>, duration = 4): Clip => {
-  const clip = store().addTextOverlayClip(data, undefined, 0, duration)!
-  store().setSelectedClipId(null)
-  return clip
-}
 
 /** Put a media clip of a non-video source on the first track. */
 const addMediaClip = (id: string, sourceVideoId: string, duration = 4): void => {
@@ -271,52 +256,6 @@ describe('PreviewPlayer letterboxing', () => {
 
     expect(preview.at(0, 0)).toEqual({ clientX: 0, clientY: 30 })
     expect(preview.at(1920, 1080)).toEqual({ clientX: 960, clientY: 570 })
-  })
-})
-
-describe('PreviewPlayer frame cache', () => {
-  const fakeBitmap = () => ({ width: 1920, height: 1080, close: vi.fn() }) as unknown as ImageBitmap
-
-  it('serves a cached frame instead of recomposing it', async () => {
-    addText({ text: 'Cached' })
-
-    const preview = await renderPreview()
-    getFrameCache().set(0, fakeBitmap())
-
-    // Renaming a track re-runs the redraw effects without changing anything the
-    // cache key covers, so the debounced redraw finds the frame still cached.
-    preview.clearCalls()
-    store().updateTrack(store().project.timeline.tracks[0].id, { name: 'Renamed' })
-    await settle()
-    expect(preview.frame().of('fillText')).toHaveLength(1)
-
-    preview.clearCalls()
-    await settle(60)
-
-    // setTransform: every draw starts by putting the project-to-raster
-    // transform on the context, the cached path included, so a cached frame
-    // does not inherit whatever the last draw left there.
-    expect(preview.methods()).toEqual(['setTransform', 'drawImage'])
-    expect(preview.calls('drawImage')[0].args).toEqual([
-      getFrameCache().get(0),
-      0,
-      0,
-      1920,
-      1080,
-    ])
-  })
-
-  it('drops cached frames when the timeline content changes', async () => {
-    addClip('clip1', 0, 4)
-
-    await renderPreview()
-    getFrameCache().set(0, fakeBitmap())
-    expect(getFrameCache().has(0)).toBe(true)
-
-    store().updateClipTransform('clip1', { x: 0.25 })
-    await settle(FRAME_MS)
-
-    expect(getFrameCache().has(0)).toBe(false)
   })
 })
 

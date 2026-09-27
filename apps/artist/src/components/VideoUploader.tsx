@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processVideoFile, processImageFile, processAudioFile } from '../core/videoProcessor';
 import { getStorageEstimate, clearAllVideos, deleteVideo } from '../core/storage';
-import { getFrameCache } from '../core/frameCache';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
@@ -72,19 +71,6 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
     return { unusedVideos: unused, unusedSize: size };
   }, [clips, sourceVideos]);
 
-  // Get frame cache stats
-  const [cacheStats, setCacheStats] = useState<{ memoryBytes: number; frameCount: number } | null>(null);
-
-  useEffect(() => {
-    const updateCacheStats = () => {
-      const cache = getFrameCache();
-      setCacheStats(cache.getStats());
-    };
-    updateCacheStats();
-    const interval = setInterval(updateCacheStats, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Load storage info on mount and after uploads
   const refreshStorageInfo = useCallback(async () => {
     try {
@@ -118,15 +104,6 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
     }
   }, [unusedVideos, unusedSize, removeSourceVideo, refreshStorageInfo]);
 
-  // Clear frame cache
-  const handleClearFrameCache = useCallback(() => {
-    const cache = getFrameCache();
-    const stats = cache.getStats();
-    if (stats.frameCount === 0) return;
-    cache.clear();
-    setCacheStats({ memoryBytes: 0, frameCount: 0 });
-  }, []);
-
   // Clear all storage (IndexedDB + in-memory state)
   const handleClearAllStorage = useCallback(async () => {
     if (lockedMedia.size > 0) return; // ESCSUITE-84
@@ -135,10 +112,6 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
         await clearAllVideos();
         // Also clear any in-memory state
         sourceVideos.forEach(v => removeSourceVideo(v.id));
-        // Clear frame cache too
-        const cache = getFrameCache();
-        cache.clear();
-        setCacheStats({ memoryBytes: 0, frameCount: 0 });
         refreshStorageInfo();
       } catch (e) {
         console.error('Failed to clear storage:', e);
@@ -335,18 +308,9 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
                 disabled={lockedMedia.size > 0}
                 title={lockedMedia.size > 0
                   ? 'Media is used by a clip on a locked track'
-                  : 'Clear all stored media and cache'}
+                  : 'Clear all stored media'}
               >
                 Clear All
-              </button>
-            )}
-            {cacheStats && cacheStats.frameCount > 0 && (
-              <button
-                className={styles.storageClearButton}
-                onClick={handleClearFrameCache}
-                title={`Clear ${cacheStats.frameCount} cached frames to free memory`}
-              >
-                Clear Cache ({formatFileSize(cacheStats.memoryBytes)})
               </button>
             )}
             {unusedVideos.length > 0 && (

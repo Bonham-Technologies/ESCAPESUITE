@@ -40,7 +40,6 @@ import {
   type PreviewDoubles,
 } from '../../test/renderPreview'
 import { getContextCallCount } from '../../test/doubles/canvas'
-import { resetFrameCache } from '../../core/frameCache'
 import { useEditorStore } from '../../store/projectStore'
 import * as animation from '../../utils/animation'
 
@@ -54,7 +53,6 @@ beforeEach(() => {
     video: { videoWidth: SCENE_SOURCE_WIDTH, videoHeight: SCENE_SOURCE_HEIGHT, duration: 2 },
   })
   resetStoreForTest()
-  resetFrameCache()
   store().setProject(buildSceneProject())
   store().addSourceVideo(sceneSource)
 })
@@ -66,7 +64,6 @@ afterEach(async () => {
   }
   cleanup()
   doubles.uninstall()
-  resetFrameCache()
   vi.useRealTimers()
   vi.clearAllMocks()
 })

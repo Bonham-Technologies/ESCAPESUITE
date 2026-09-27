@@ -44,7 +44,6 @@ import {
   settle,
   type PreviewDoubles,
 } from '../../test/renderPreview'
-import { resetFrameCache } from '../../core/frameCache'
 import type { CanvasCall } from '../../test/doubles/canvas'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -66,13 +65,11 @@ beforeEach(() => {
     video: { videoWidth: SCENE_SOURCE_WIDTH, videoHeight: SCENE_SOURCE_HEIGHT, duration: 2 },
   })
   resetStoreForTest()
-  resetFrameCache()
 })
 
 afterEach(() => {
   cleanup()
   doubles.uninstall()
-  resetFrameCache()
   vi.useRealTimers()
   vi.clearAllMocks()
 })
@@ -91,7 +88,6 @@ async function compositeFrame(
   box?: { width: number; height: number }
 ): Promise<CanvasCall[]> {
   resetStoreForTest()
-  resetFrameCache()
   store().setProject(buildSceneProject())
   store().addSourceVideo(sceneSource)
 
