@@ -302,6 +302,33 @@ describe('getResolution', () => {
   it('falls back to the source height for an unknown resolution name', () => {
     expect(getResolution('4k' as never, 1000, 500)).toEqual({ width: 1000, height: 500 })
   })
+
+  // ESCSUITE-94: a preset is a *height*, and the box it fills is the project's
+  // shape. It used to take its aspect from `getBaseDimensions` — the bottom
+  // clip's source — so a 16:9 project whose bottom clip happened to be 4:3
+  // exported 960x720 for "720p" and the frame was letterboxed on top of being
+  // the wrong size.
+  it('takes a preset aspect ratio from the project, not from the source', () => {
+    const project = { width: 1280, height: 720 }
+    expect(getResolution('1080p', 640, 480, project)).toEqual({ width: 1920, height: 1080 })
+    expect(getResolution('720p', 640, 480, project)).toEqual({ width: 1280, height: 720 })
+    // 480 * 16/9 = 853.33 -> 853 -> 854, the one even width in the ladder.
+    expect(getResolution('480p', 640, 480, project)).toEqual({ width: 854, height: 480 })
+  })
+
+  it('takes a preset aspect ratio from a portrait project too', () => {
+    expect(getResolution('1080p', 1920, 1080, { width: 1080, height: 1920 }))
+      .toEqual({ width: 608, height: 1080 })
+  })
+
+  it('still uses the source aspect ratio for a preset when no project size is given', () => {
+    expect(getResolution('720p', 640, 480)).toEqual({ width: 960, height: 720 })
+  })
+
+  it('ignores a degenerate project size when scaling a preset', () => {
+    expect(getResolution('720p', 1920, 1080, { width: 0, height: 0 }))
+      .toEqual({ width: 1280, height: 720 })
+  })
 })
 
 describe('loadVideoElement / loadImageElement', () => {

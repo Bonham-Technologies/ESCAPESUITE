@@ -586,6 +586,91 @@ describe('exportToMP4 rendering', () => {
   })
 })
 
+// ESCSUITE-94, the MP4 half of it. Same claim as `exportWebM.test.ts`'s
+// "output raster" block, over the pipeline that draws decoded frames rather
+// than media elements: the canvas is the size of the output, the drawing is in
+// project pixels, and one transform per frame joins them.
+describe('exportToMP4 output raster', () => {
+  it('scales the project onto a larger preset raster instead of pillarboxing it', async () => {
+    media.script({ video: { videoWidth: 1280, videoHeight: 720 } })
+
+    await run({
+      sources: [makeSourceVideo({ width: 1280, height: 720 })],
+      options: { resolution: '1080p' },
+      projectResolution: { width: 1280, height: 720 },
+    })
+
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ width: 1920, height: 1080 })
+    expect(ctx().argsFor('setTransform')[0]).toEqual([1.5, 0, 0, 1.5, 0, 0])
+    expect(ctx().argsFor('fillRect')[0]).toEqual([0, 0, 1280, 720])
+    expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 1280, 720])
+  })
+
+  it('scales a 4K project down to 1080p instead of cropping it', async () => {
+    media.script({ video: { videoWidth: 3840, videoHeight: 2160 } })
+
+    await run({
+      sources: [makeSourceVideo({ width: 3840, height: 2160 })],
+      options: { resolution: '1080p' },
+      projectResolution: { width: 3840, height: 2160 },
+    })
+
+    expect(ctx().argsFor('setTransform')[0]).toEqual([0.5, 0, 0, 0.5, 0, 0])
+    expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 3840, 2160])
+  })
+
+  it('letterboxes deliberately when the output aspect really differs', async () => {
+    media.script({ video: { videoWidth: 640, videoHeight: 480 } })
+
+    await run({
+      sources: [makeSourceVideo({ width: 640, height: 480 })],
+      options: { resolution: 'original' },
+      projectResolution: { width: 1280, height: 720 },
+    })
+
+    expect(ctx().argsFor('setTransform')[0]).toEqual([0.5, 0, 0, 0.5, 0, 60])
+    expect(ctx().argsFor('fillRect')[0]).toEqual([0, -120, 1280, 960])
+  })
+
+  it('asks for a dissolve blur in output pixels, not in project pixels', async () => {
+    // The frame-based transition path used to say, in a comment, that "an
+    // export's canvas is always its own project" — which is the premise this
+    // ticket falsified. A dissolve's blur is 3px at its midpoint in project
+    // space, so 4.5 device pixels of a 1080p raster over a 720p project.
+    await storeSource('video2')
+    media.script({ video: { videoWidth: 1280, videoHeight: 720 } })
+    const clips = [
+      makeClip({
+        id: 'a',
+        duration: 0.2,
+        endTime: 0.2,
+        timelinePosition: 0,
+        transition: { type: 'dissolve', duration: 0.2 },
+      }),
+      makeClip({
+        id: 'b',
+        sourceVideoId: 'video2',
+        duration: 0.2,
+        endTime: 0.2,
+        timelinePosition: 0.2,
+      }),
+    ]
+    const sources = [
+      makeSourceVideo({ width: 1280, height: 720 }),
+      makeSourceVideo({ id: 'video2', width: 1280, height: 720 }),
+    ]
+
+    await run({
+      clips,
+      sources,
+      options: { resolution: '1080p', timeRange: { start: 0.1, end: 0.14 } },
+      projectResolution: { width: 1280, height: 720 },
+    })
+
+    expect(ctx().stateFor('drawImage')[0].filter).toBe('blur(4.5px)')
+  })
+})
+
 describe('exportToMP4 progress', () => {
   it('reports the phases in order, never going backwards', async () => {
     const progress: ExportProgress[] = []

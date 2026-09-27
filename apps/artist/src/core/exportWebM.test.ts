@@ -494,6 +494,100 @@ describe('exportToWebM rendering', () => {
   })
 })
 
+// ESCSUITE-94. The canvas is the size of the **output**; everything
+// `canvasRenderer` draws is in **project** pixels (a clip's size is its native
+// source pixels times its scale, its position a fraction of the frame). One
+// transform per frame carries the one space onto the other, exactly as
+// `drawPreviewFrame` does. Before this the exporter composited straight into
+// output pixels, so every resolution but "Project" was wrong: a larger raster
+// pillar/letterboxed the picture in black, a smaller one cropped it.
+describe('exportToWebM output raster', () => {
+  it('scales the project onto a larger preset raster instead of pillarboxing it', async () => {
+    media.script({ video: { videoWidth: 1280, videoHeight: 720 } })
+
+    await run({
+      sources: [makeSourceVideo({ width: 1280, height: 720 })],
+      options: { resolution: '1080p' },
+      projectResolution: { width: 1280, height: 720 },
+    })
+
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ width: 1920, height: 1080 })
+    // 1920 / 1280, and no translation: 1080p of a 16:9 project is the same
+    // shape, so there are no bars to centre the picture between.
+    expect(ctx().argsFor('setTransform')[0]).toEqual([1.5, 0, 0, 1.5, 0, 0])
+    // Project pixels from here on. The clear is the project rect and the clip,
+    // at scale 1, is its own 1280x720 — 1.5x each under the transform, which is
+    // exactly the 1920x1080 frame.
+    expect(ctx().argsFor('fillRect')[0]).toEqual([0, 0, 1280, 720])
+    expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 1280, 720])
+  })
+
+  it('scales a 4K project down to 1080p instead of cropping it', async () => {
+    media.script({ video: { videoWidth: 3840, videoHeight: 2160 } })
+
+    await run({
+      sources: [makeSourceVideo({ width: 3840, height: 2160 })],
+      options: { resolution: '1080p' },
+      projectResolution: { width: 3840, height: 2160 },
+    })
+
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ width: 1920, height: 1080 })
+    expect(ctx().argsFor('setTransform')[0]).toEqual([0.5, 0, 0, 0.5, 0, 0])
+    // The whole picture, halved — not the middle 1920x1080 of it.
+    expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 3840, 2160])
+  })
+
+  it('letterboxes deliberately when the output aspect really differs', async () => {
+    // "Original" takes the bottom clip's source size, which need not be the
+    // project's shape: a 4:3 output of a 16:9 project. The project rect is then
+    // fitted inside the raster — uniform scale, centred — and the bars are the
+    // black the whole raster was cleared to.
+    media.script({ video: { videoWidth: 640, videoHeight: 480 } })
+
+    await run({
+      sources: [makeSourceVideo({ width: 640, height: 480 })],
+      options: { resolution: 'original' },
+      projectResolution: { width: 1280, height: 720 },
+    })
+
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ width: 640, height: 480 })
+    // min(640/1280, 480/720) = 0.5, so 60 output pixels of bar above and below.
+    expect(ctx().argsFor('setTransform')[0]).toEqual([0.5, 0, 0, 0.5, 0, 60])
+    // The clear covers the whole raster, bars included, in project pixels.
+    expect(ctx().argsFor('fillRect')[0]).toEqual([0, -120, 1280, 960])
+  })
+
+  it('exports at 1:1 with no transform offsets for the project resolution', async () => {
+    media.script({ video: { videoWidth: 1280, videoHeight: 720 } })
+
+    await run({
+      sources: [makeSourceVideo({ width: 1280, height: 720 })],
+      options: { resolution: 'project' },
+      projectResolution: { width: 1280, height: 720 },
+    })
+
+    expect(ctx().argsFor('setTransform')[0]).toEqual([1, 0, 0, 1, 0, 0])
+    expect(ctx().argsFor('fillRect')[0]).toEqual([0, 0, 1280, 720])
+  })
+
+  it('asks for a blur in output pixels, not in project pixels', async () => {
+    // `ctx.filter` is the one length the transform does not reach, so a
+    // project-space blur radius has to be converted the way the preview
+    // converts it — or a 1080p export of a 720p project would blur 1.5x too
+    // little for the frame it lands in.
+    media.script({ video: { videoWidth: 1280, videoHeight: 720 } })
+
+    await run({
+      clips: [makeClip({ duration: CLIP_DURATION, endTime: CLIP_DURATION, effects: { blur: 4 } })],
+      sources: [makeSourceVideo({ width: 1280, height: 720 })],
+      options: { resolution: '1080p' },
+      projectResolution: { width: 1280, height: 720 },
+    })
+
+    expect(ctx().stateFor('drawImage')[0].filter).toBe('blur(6px)')
+  })
+})
+
 describe('exportToWebM progress', () => {
   it('reports the phases in order, never going backwards', async () => {
     const progress: ExportProgress[] = []
