@@ -603,6 +603,71 @@ describe('ExportDialog', () => {
       expect(mockSendMessage).not.toHaveBeenCalled()
     })
 
+    /** Like scriptedExport, but tracks every call so two overlapping exports
+     * can be driven independently — export A cancelled, then export B
+     * started before A's aborted promise actually rejects. */
+    function scriptedExports() {
+      const calls: Array<{ report: (p: ExportProgress) => void; reject: (e: unknown) => void }> = []
+      mockExportToWebM.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise((_resolve, reject) => {
+            calls.push({ report: args[3] as (p: ExportProgress) => void, reject })
+          })
+      )
+      return calls
+    }
+
+    it("does not let export A's late rejection clear export B's abort controller (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      // Export A starts, then is cancelled. The dialog stays mounted between
+      // opens (as it does in the real app), so its abort controller ref
+      // survives past the Cancel click.
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(1))
+      const signalA = webmArgs()[5]
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+      expect(signalA.aborted).toBe(true)
+
+      // Export B starts before A's promise has actually settled.
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(2))
+      const signalB = mockExportToWebM.mock.calls[1][5] as AbortSignal
+      expect(signalB.aborted).toBe(false)
+
+      // A's aborted promise rejects late — its own `finally` runs after B's
+      // controller is already sitting in the ref.
+      calls[0].reject(new ExportAbortedError())
+      await settle()
+
+      // Cancelling now must abort B: the button on screen is for B's export.
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+      expect(signalB.aborted).toBe(true)
+    })
+
+    it("keeps export B's progress showing when export A's cancelled promise rejects late (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(2))
+      await act(async () => calls[1].report({ phase: 'encoding', progress: 55, message: 'Encoding frames' }))
+      expect(screen.getByText('55%')).toBeInTheDocument()
+
+      calls[0].reject(new ExportAbortedError())
+      await settle()
+
+      // B is still exporting: its progress is still on screen and Cancel
+      // still targets a live export rather than a no-op on a finished dialog.
+      expect(screen.getByText('55%')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
+    })
+
     it('hides the Cancel button once the export is complete', async () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
 
