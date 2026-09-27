@@ -41,6 +41,12 @@ afterEach(() => {
 
 /** Half the width and height of a default shape overlay, in canvas pixels. */
 const SHAPE = { halfW: 192, halfH: 108 }
+/**
+ * The rotation grip's distance above the top edge, in canvas pixels:
+ * ROTATION_HANDLE_OFFSET is 25 pixels *on screen* (ESCSUITE-90) and the box is
+ * half the canvas on both axes.
+ */
+const GRIP = 50
 
 const addShape = (data: Partial<ShapeOverlayData> = {}): Clip => {
   const clip = store().addShapeOverlayClip(data, undefined, 0, 4)!
@@ -191,8 +197,8 @@ describe('useTransformHandles cursor', () => {
 
   it('offers a crosshair over the rotation handle', async () => {
     addShape()
-    // ROTATION_HANDLE_OFFSET px above the top edge.
-    expect(await cursorAt(960, 540 - SHAPE.halfH - 25)).toBe('crosshair')
+    // ROTATION_HANDLE_OFFSET screen px above the top edge.
+    expect(await cursorAt(960, 540 - SHAPE.halfH - GRIP)).toBe('crosshair')
   })
 
   // ESCSUITE-88: the pointer's promise has to match what a press would do, and
@@ -203,7 +209,7 @@ describe('useTransformHandles cursor', () => {
 
     expect(await cursorAt(960, 540)).toBe('not-allowed')
     expect(await cursorAt(960 - SHAPE.halfW, 540 - SHAPE.halfH)).toBe('not-allowed')
-    expect(await cursorAt(960, 540 - SHAPE.halfH - 25)).toBe('not-allowed')
+    expect(await cursorAt(960, 540 - SHAPE.halfH - GRIP)).toBe('not-allowed')
     // Empty canvas is still empty canvas — the marquee is unaffected.
     expect(await cursorAt(100, 100)).toBe('default')
   })

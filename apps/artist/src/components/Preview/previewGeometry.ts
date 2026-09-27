@@ -299,12 +299,20 @@ export function contentBox(
  * Get mouse position relative to canvas in normalized coordinates (0-1).
  * Accounts for object-fit: contain which letterboxes the canvas content.
  * Accepts any MouseEvent (canvas or window) so dragging works outside the canvas.
+ *
+ * `scale` is the content box' `scaleX` — CSS pixels per project pixel — carried
+ * out on the result rather than left for the caller to ask for. A pointer
+ * handler that also needs the scale (the handle hit test wants its inverse, the
+ * project pixels per CSS pixel the chrome is drawn at — see
+ * {@link hitHandlesOnClip}) would otherwise read the element's rect a second
+ * time on every move, which is a forced layout per pointer event for a number
+ * this call already computed.
  */
 export function getCanvasPosition(
   canvas: HTMLCanvasElement,
   e: { clientX: number; clientY: number },
   project: ProjectSize = canvas
-): NormalizedPoint {
+): NormalizedPoint & { scale: number } {
   const rect = canvas.getBoundingClientRect();
   const content = contentBox(canvas, rect, project);
 
@@ -316,6 +324,7 @@ export function getCanvasPosition(
   return {
     x: mouseX / content.width,
     y: mouseY / content.height,
+    scale: content.scaleX,
   };
 }
 

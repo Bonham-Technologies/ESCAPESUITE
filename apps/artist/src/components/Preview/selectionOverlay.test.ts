@@ -296,3 +296,63 @@ describe('drawMultiSelectHandles', () => {
     expect(getCanvasContext(el)).toBeUndefined()
   })
 })
+
+// ESCSUITE-90: the chrome is a constant size on screen, so every constant that
+// is a *screen* size is multiplied by the project pixels per CSS pixel the
+// caller passes. Positions — corners, edges, centre — are the clip's own
+// geometry and do not move. The default-scale numbers are pinned by the first
+// test in each describe above, which is what proves the default unchanged.
+describe('selection chrome at a screen scale', () => {
+  /** A 4K project shown in a quarter-width box: four project px per CSS px. */
+  const SCALE = 4
+
+  it('scales the handles, the grip, the line width and the dashes', () => {
+    drawSelectionHandles(canvas, 1, selection(), canvas, SCALE)
+
+    // The box is where it always was; only the pen that draws it is thicker.
+    const strokeRects = ctx.argsFor('strokeRect')
+    expect(strokeRects[0]).toEqual([-HALF_W, -HALF_H, HALF_W * 2, HALF_H * 2])
+    expect(ctx.stateFor('strokeRect').map((s) => s.lineWidth)).toEqual(
+      new Array(strokeRects.length).fill(2 * SCALE)
+    )
+
+    const handle = HANDLE_SIZE * SCALE
+    const side = handle * 0.8
+    const corners = [
+      [-HALF_W, -HALF_H],
+      [HALF_W, -HALF_H],
+      [-HALF_W, HALF_H],
+      [HALF_W, HALF_H],
+    ]
+    const sides = [
+      [0, -HALF_H],
+      [0, HALF_H],
+      [-HALF_W, 0],
+      [HALF_W, 0],
+    ]
+    const expected = [
+      ...corners.map(([x, y]) => [x - handle / 2, y - handle / 2, handle, handle]),
+      ...sides.map(([x, y]) => [x - side / 2, y - side / 2, side, side]),
+    ]
+    expect(handle).toBe(32)
+    expect(side).toBe(25.6)
+    expect(ctx.argsFor('fillRect')).toEqual(expected)
+    expect(strokeRects.slice(1)).toEqual(expected)
+
+    // The grip hangs a constant distance above the box on screen, so four
+    // times as many project pixels above it.
+    const rotationY = -HALF_H - ROTATION_HANDLE_OFFSET * SCALE
+    expect(rotationY).toBe(-HALF_H - 100)
+    expect(ctx.argsFor('lineTo')).toEqual([[0, rotationY]])
+    expect(ctx.argsFor('arc')).toEqual([[0, rotationY, handle, 0, Math.PI * 2]])
+    expect(ctx.argsFor('setLineDash')).toEqual([[[]], [[4 * SCALE, 4 * SCALE]], [[]]])
+  })
+
+  it('scales the multi-selection box dashes and line width', () => {
+    drawMultiSelectHandles(canvas, 1, multiSelection(), canvas, SCALE)
+
+    expect(ctx.argsFor('strokeRect')).toEqual([[-HALF_W, -HALF_H, HALF_W * 2, HALF_H * 2]])
+    expect(ctx.stateFor('strokeRect')[0].lineWidth).toBe(2 * SCALE)
+    expect(ctx.argsFor('setLineDash')).toEqual([[[6 * SCALE, 4 * SCALE]]])
+  })
+})

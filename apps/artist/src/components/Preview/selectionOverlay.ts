@@ -29,15 +29,27 @@ export type MultiSelectOverlayContext = Pick<
  * Draw selection handles for the selected overlay or media clip.
  *
  * Drawn in project pixels, on top of whatever transform the frame left on the
- * context — so the handles scale with the picture, exactly as they did when CSS
- * was the thing scaling it. `project` defaults to the canvas' own size for a
- * canvas that is its own project.
+ * context — so the box, the handles and the grip land on the clip wherever the
+ * frame put it. `project` defaults to the canvas' own size for a canvas that is
+ * its own project.
+ *
+ * `screenScale` is **project pixels per CSS pixel** — how much bigger the
+ * project's grid is than the box the viewer actually sees it in. Every constant
+ * below that is a *screen* size (the handle squares, the grip, its offset above
+ * the box, the pen width, the dash lengths) is multiplied by it, so the chrome
+ * is the same size under the pointer whatever the project's resolution: a 4K
+ * project in a 700px preview would otherwise draw 1.5px handles. Positions are
+ * the clip's own geometry and are never scaled. A caller with a laid-out
+ * element gets the number as `1 / contentBox(canvas, box, project).scaleX`; it
+ * defaults to 1 for a canvas that is its own screen (the exporters, the tests
+ * that build one) and for a preview that has not been measured yet.
  */
 export function drawSelectionHandles(
   canvas: HTMLCanvasElement,
   time: number,
   scene: SelectionOverlayContext,
-  project: ProjectSize = canvas
+  project: ProjectSize = canvas,
+  screenScale: number = 1
 ): void {
   const { clips, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen } = scene;
   if (!selectedClipId || isPlaying) return;
@@ -72,15 +84,15 @@ export function drawSelectionHandles(
 
   // Draw bounding box
   ctx.strokeStyle = '#2196F3';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 * screenScale;
   ctx.setLineDash([]);
   ctx.strokeRect(-halfW, -halfH, width, height);
 
   // Draw corner handles
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#2196F3';
-  ctx.lineWidth = 2;
-  const handleSize = HANDLE_SIZE;
+  ctx.lineWidth = 2 * screenScale;
+  const handleSize = HANDLE_SIZE * screenScale;
   const halfHandle = handleSize / 2;
 
   // Corner positions (relative to center)
@@ -114,11 +126,11 @@ export function drawSelectionHandles(
   }
 
   // Draw rotation handle (circle above the bounding box)
-  const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET;
+  const rotationHandleY = -halfH - ROTATION_HANDLE_OFFSET * screenScale;
 
   // Line connecting to rotation handle
   ctx.beginPath();
-  ctx.setLineDash([4, 4]);
+  ctx.setLineDash([4 * screenScale, 4 * screenScale]);
   ctx.moveTo(0, -halfH);
   ctx.lineTo(0, rotationHandleY);
   ctx.stroke();
@@ -133,12 +145,18 @@ export function drawSelectionHandles(
   ctx.restore();
 }
 
-/** Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles). */
+/**
+ * Draw lightweight bounding boxes for multi-selected overlay clips (no resize
+ * handles). `screenScale` is project pixels per CSS pixel, exactly as
+ * {@link drawSelectionHandles} takes it: it sizes the pen and the dashes, not
+ * the boxes.
+ */
 export function drawMultiSelectHandles(
   canvas: HTMLCanvasElement,
   time: number,
   scene: MultiSelectOverlayContext,
-  project: ProjectSize = canvas
+  project: ProjectSize = canvas,
+  screenScale: number = 1
 ): void {
   const { clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying } = scene;
   if (selectedClipIds.size <= 1 || isPlaying) return;
@@ -170,8 +188,8 @@ export function drawMultiSelectHandles(
 
     // Draw dashed bounding box for multi-selected clips
     ctx.strokeStyle = '#2196F3';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 2 * screenScale;
+    ctx.setLineDash([6 * screenScale, 4 * screenScale]);
     ctx.strokeRect(-halfW, -halfH, width, height);
 
     ctx.restore();

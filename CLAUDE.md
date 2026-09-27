@@ -654,6 +654,26 @@ in ESCSUITE-88, whose paragraph above reports 94.01, updates the table row to ma
 "no floor crossed", which was a miscount of that one figure. The floor is raised here because a
 floor is the achieved coverage rounded down, not because these labels earned a percent.
 
+`@escapesuite/artist` was re-measured 2026-09-26 for ESCSUITE-90 (the preview's selection chrome
+sized in screen pixels rather than project pixels): **99.41 / 98.76 / 94.03 / 99.01** against the
+99.41 / 98.76 / 94.02 / 99.01 the commit this branch started from measures — branches up a
+hundredth and the other three unmoved, with **no floor crossed**, so artist's floors stay
+99 / 98 / 94 / 99. **Nothing new is uncovered**: the uncovered counts are identical on all four
+metrics (41 lines, 98 statements, 268 branches, 17 functions), and every unit the branch adds is
+covered — lines 6,949/6,990 → 6,954/6,995, statements 7,811/7,909 → 7,817/7,915, branches
+4,216/4,484 → 4,224/4,492, functions 1,705/1,722 → 1,706/1,723. The eight new branches are the
+`screenScale` default argument in each of the four scaled functions — `drawSelectionHandles`,
+`drawMultiSelectHandles`, `hitTestHandles`, `hitHandlesOnClip`, one apiece — plus the four in
+`PreviewPlayer`'s `handleScreenScale`, its `if (!box)` and its `scaleX > 0 ? … : 1` counting two
+paths each. Every one of them is reached from both sides: the new
+`screenScale = 4` cases in `selectionOverlay.test.ts` / `hitTest.test.ts` against the
+default-scale cases that were already there, and in the component the 4K-in-a-640px-box case
+against the box-equals-the-project one. `handleScreenScale`'s `scaleX > 0 ? … : 1` guard — a
+preview whose panel has been dragged shut reports a 0x0 box, and dividing by it would put an
+infinity into every handle rectangle — has a test of its own for exactly that reason; without it
+that arm would have been the branch's single new uncovered decision. The six branches still
+uncovered in `PreviewPlayer.tsx` all predate this ticket.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -661,7 +681,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.76 | 94.02 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.76 | 94.03 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

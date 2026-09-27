@@ -509,14 +509,16 @@ describe('getCanvasPosition', () => {
     const canvas = makeCanvas()
     setRect(canvas, { left: 0, top: 0, width: 960, height: 540 })
 
-    expect(getCanvasPosition(canvas, { clientX: 480, clientY: 270 })).toEqual({ x: 0.5, y: 0.5 })
+    expect(getCanvasPosition(canvas, { clientX: 480, clientY: 270 }))
+      .toEqual({ x: 0.5, y: 0.5, scale: 0.5 })
   })
 
   it('subtracts the element’s own offset', () => {
     const canvas = makeCanvas()
     setRect(canvas, { left: 100, top: 50, width: 960, height: 540 })
 
-    expect(getCanvasPosition(canvas, { clientX: 100, clientY: 50 })).toEqual({ x: 0, y: 0 })
+    expect(getCanvasPosition(canvas, { clientX: 100, clientY: 50 }))
+      .toEqual({ x: 0, y: 0, scale: 0.5 })
   })
 
   it('skips the top and bottom bars when the canvas is wider than its box', () => {
@@ -524,8 +526,11 @@ describe('getCanvasPosition', () => {
     const canvas = makeCanvas()
     setRect(canvas, { left: 0, top: 0, width: 800, height: 800 })
 
-    expect(getCanvasPosition(canvas, { clientX: 400, clientY: 175 })).toEqual({ x: 0.5, y: 0 })
-    expect(getCanvasPosition(canvas, { clientX: 400, clientY: 625 })).toEqual({ x: 0.5, y: 1 })
+    const scale = 800 / CANVAS_W
+    expect(getCanvasPosition(canvas, { clientX: 400, clientY: 175 }))
+      .toEqual({ x: 0.5, y: 0, scale })
+    expect(getCanvasPosition(canvas, { clientX: 400, clientY: 625 }))
+      .toEqual({ x: 0.5, y: 1, scale })
   })
 
   it('skips the left and right bars when the canvas is taller than its box', () => {
@@ -533,15 +538,32 @@ describe('getCanvasPosition', () => {
     const canvas = makeCanvas({ width: CANVAS_H, height: CANVAS_W })
     setRect(canvas, { left: 0, top: 0, width: 800, height: 800 })
 
-    expect(getCanvasPosition(canvas, { clientX: 175, clientY: 400 })).toEqual({ x: 0, y: 0.5 })
-    expect(getCanvasPosition(canvas, { clientX: 625, clientY: 400 })).toEqual({ x: 1, y: 0.5 })
+    const scale = 450 / CANVAS_H
+    expect(getCanvasPosition(canvas, { clientX: 175, clientY: 400 }))
+      .toEqual({ x: 0, y: 0.5, scale })
+    expect(getCanvasPosition(canvas, { clientX: 625, clientY: 400 }))
+      .toEqual({ x: 1, y: 0.5, scale })
+  })
+
+  // ESCSUITE-90: the pointer handlers need the scale as well as the point — the
+  // selection chrome is drawn at a constant size on screen, so its hit zones are
+  // sized by it — and reading the element's rect twice per pointer move would be
+  // a second forced layout for a number this call already has.
+  it('carries the CSS-pixels-per-project-pixel scale out with the point', () => {
+    const canvas = makeCanvas()
+    setRect(canvas, { left: 0, top: 0, width: CANVAS_W / 4, height: CANVAS_H / 4 })
+
+    expect(getCanvasPosition(canvas, { clientX: 0, clientY: 0 }).scale).toBe(0.25)
+    expect(getCanvasPosition(canvas, { clientX: 0, clientY: 0 }, { width: 3840, height: 2160 })
+      .scale).toBe(0.125)
   })
 
   it('does not clamp, so a drag can run off the canvas', () => {
     const canvas = makeCanvas()
     setRect(canvas, { left: 0, top: 0, width: 960, height: 540 })
 
-    expect(getCanvasPosition(canvas, { clientX: -480, clientY: 810 })).toEqual({ x: -0.5, y: 1.5 })
+    expect(getCanvasPosition(canvas, { clientX: -480, clientY: 810 }))
+      .toEqual({ x: -0.5, y: 1.5, scale: 0.5 })
   })
 })
 
