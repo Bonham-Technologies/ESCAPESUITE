@@ -284,6 +284,85 @@ describe('answering the prompt', () => {
     expect(deps.showNotification).toHaveBeenCalledTimes(1)
   })
 
+  it('a rejected thumbnail read fails the restore instead of leaving it stuck', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(getThumbnail).mockRejectedValue(new Error('storage exploded'))
+    const session = savedSession()
+    const { result } = await mountWithPendingSession(session)
+
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to restore session:', expect.any(Error))
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith('Failed to restore session', 'error')
+    expect(result.current.showSessionPrompt).toBe(false)
+    expect(result.current.pendingSession).toBeNull()
+    expect(result.current.sessionRestored).toBe(true)
+    // This was not the user's answer — the saved session stays in storage so
+    // a reload can offer it again, unlike a decline.
+    expect(clearSessionState).not.toHaveBeenCalled()
+
+    consoleError.mockRestore()
+  })
+
+  it('a failed restore clears its attempt, so it does not permanently block a later one', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(getThumbnail).mockRejectedValueOnce(new Error('storage exploded'))
+    const session = savedSession()
+    const { result } = await mountWithPendingSession(session)
+
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
+
+    // The saved session is still there to offer again; drive the same
+    // handler a second time the way a reload's "Restore Session" would.
+    vi.mocked(getThumbnail).mockResolvedValue(undefined)
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+
+    expect(deps.addSourceVideo).toHaveBeenCalledTimes(1)
+    expect(deps.showNotification).toHaveBeenLastCalledWith('Session restored', 'success')
+
+    consoleError.mockRestore()
+  })
+
+  it('a rejected read that lands after a decline logs but does not re-announce a failure over it', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let rejectThumbnail: (error: Error) => void = () => {}
+    vi.mocked(getThumbnail).mockImplementation(
+      () => new Promise((_resolve, reject) => { rejectThumbnail = reject })
+    )
+    const session = savedSession()
+    const { result } = await mountWithPendingSession(session)
+
+    let restorePromise!: Promise<void>
+    act(() => {
+      restorePromise = result.current.handleRestoreSession(session)
+    })
+    // "Start Fresh" while the restore's read is still in flight — same as
+    // the decline-wins-the-race case above, except this read is doomed.
+    act(() => result.current.handleDeclineSession())
+
+    await act(async () => {
+      rejectThumbnail(new Error('storage exploded'))
+      await restorePromise
+    })
+
+    // The decline already settled the question and answered nothing wrong;
+    // the failed read arriving afterwards logs it and stops there — no
+    // second notification fighting over state that already moved on.
+    expect(consoleError).toHaveBeenCalledWith('Failed to restore session:', expect.any(Error))
+    expect(deps.showNotification).not.toHaveBeenCalled()
+
+    consoleError.mockRestore()
+  })
+
   it('declining throws the stored session away and writes nothing', async () => {
     const { result } = await mountWithPendingSession(savedSession())
 
