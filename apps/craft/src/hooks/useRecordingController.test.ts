@@ -1555,6 +1555,15 @@ describe('useRecordingController teardown', () => {
         await act(async () => { await start })
 
         expectNothingLive()
+
+        // ...and Record still works. The starting flag is dropped in the
+        // `finally` of the attempt, cancelled path included: one left raised
+        // would brick the button for the rest of the session, say nothing about
+        // it, and leave every other assertion in this file green.
+        harness.acquireStreams.mockResolvedValue(harness.streams)
+        await startTake(result)
+        expect(recorderFactory.recorders).toHaveLength(1)
+        expect(state()).toBe('countdown')
       })
 
       it('releases the capture when the screen goes away before it arrived', async () => {

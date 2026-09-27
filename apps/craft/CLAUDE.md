@@ -679,9 +679,11 @@ recorder — a 3-2-1 over nothing, with a next mount coming up inside it. The st
 withheld under the same pair, so a browser that *does* reject out of a half-torn-down setup (an
 AudioContext closed under a pending `resume()`) still says nothing to a user who has left. That
 guard **tears the take down** rather than returning bare (ESCSUITE-93): `disposeRecorder()` and
-`stopAllStreams()`, both of which are no-ops on the two paths that reach it today, because each
-has already done them. A bare return is a promise that every future way of arriving there will
-have cleaned up first, and the window below is the one that broke it.
+`stopAllStreams()`, both of which are no-ops on every path that reaches it today — the unmount
+teardown, the recorder's own `onError`, and `handleCancelRecording` from Escape in `'preparing'`
+while `initialize()` is parked — because each has already done them. A bare return is nevertheless
+a promise that every *future* way of arriving there will have cleaned up first, and the window
+below is the one that broke it.
 
 **There is an earlier window still, and a cancel cannot clean up after it** (ESCSUITE-93).
 `handleStartRecording` parks on `await acquireStreams()` — the screen-share picker is on screen,
@@ -701,7 +703,9 @@ AudioContexts, so later takes fail to start. So `cancelledRef` is asked again **
 unmounted), no preview, no compositor, no recorder. It is deliberately the earliest exit, and the
 only one whose law is that nothing was ever *made*: `useRecordingController.test.ts`'s "while the
 capture request is still outstanding" asserts zero recorders built, a null `compositorRef`, an
-untouched store and every acquired track stopped, once for the cancel and once for the unmount.
+untouched store and every acquired track stopped **exactly once** — in the cancel case and in the
+unmount case alike — and then that the *next* Record click still starts a take, because a starting
+flag left raised on the cancelled path would brick the button for the session and say nothing.
 
 **One start at a time.** `state` is the *rendered* truth and is written a render before it is
 read, so nothing but that lag stood between two fast clicks on Record — or two presses of R — and

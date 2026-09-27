@@ -1,12 +1,12 @@
 // The take itself: countdown, start, pause, resume, stop, cancel, the two
 // interval tickers, and the teardown that runs when the screen goes away.
 //
-// Three refs are created here and nowhere else — the recorder, the cancelled
-// flag and the two interval handles — because each is written by one path and
-// read by three. The cancelled flag in particular is reset by
-// handleStartRecording, raised by handleCancelRecording and by the unmount
-// teardown, and read by the recorder's onStop: a second copy of it would let a
-// late chunk from a thrown-away take be saved.
+// Four kinds of ref are created here and nowhere else — the recorder, the
+// cancelled flag, the starting flag and the two interval handles — because each
+// is written by one path and read by three. The cancelled flag in particular is
+// reset by handleStartRecording, raised by handleCancelRecording and by the
+// unmount teardown, and read by the recorder's onStop: a second copy of it
+// would let a late chunk from a thrown-away take be saved.
 //
 // The recorder's six callbacks are captured once, when createRecorder runs, so
 // they close over the stopAllStreams and saveRecording of the render that
@@ -519,12 +519,14 @@ export function useRecordingController({
       // interval ticking against `recorderRef.current === null` — a 3-2-1 over
       // nothing, and a next mount that comes up inside it.
       //
-      // It tears down rather than bare-returning (ESCSUITE-93). Both paths that
-      // reach it today have already disposed the recorder and released the
-      // capture, so both calls are no-ops — `disposeRecorder()` nulls the ref
-      // and `stopAllStreams()` is idempotent — but a bare return is a promise
-      // that every future way of arriving here will have cleaned up first, and
-      // that is the promise this ticket's own window broke.
+      // It tears down rather than bare-returning (ESCSUITE-93). Every path that
+      // reaches it today has already disposed the recorder and released the
+      // capture — the unmount teardown, the recorder's own `onError`, and
+      // `handleCancelRecording` from Escape in 'preparing' while `initialize()`
+      // is parked — so both calls are no-ops: `disposeRecorder()` nulls the ref
+      // and `stopAllStreams()` is idempotent. A bare return is nevertheless a
+      // promise that every *future* way of arriving here will have cleaned up
+      // first, and that is the promise this ticket's own window broke.
       if (cancelledRef.current || !recorderRef.current) {
         disposeRecorder();
         stopAllStreams();
