@@ -109,11 +109,14 @@ describe('keyframe actions and the undo stack', () => {
       ).toBe(false))
     })
 
-    it('refuses to remove a keyframe on a clip on it', () => {
+    it('refuses to remove a keyframe on a clip on it, and says so', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
       lock()
 
-      refuses(() => store().removeClipKeyframe('clip1', 'opacity', 1))
+      // ESCSUITE-88 brought this one into ESCSUITE-87's contract: the keyframe
+      // graph's Delete key announces the removal, so it has to be able to tell a
+      // refusal from a write.
+      refuses(() => expect(store().removeClipKeyframe('clip1', 'opacity', 1)).toBe(false))
       expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
     })
 
@@ -125,11 +128,12 @@ describe('keyframe actions and the undo stack', () => {
       expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
     })
 
-    it('reports true for the two that wrote (ESCSUITE-87)', () => {
+    it('reports true for the three that wrote (ESCSUITE-87, ESCSUITE-88)', () => {
       expect(
         store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
       ).toBe(true)
       expect(store().moveClipKeyframe('clip1', 'opacity', 1, 2)).toBe(true)
+      expect(store().removeClipKeyframe('clip1', 'opacity', 2)).toBe(true)
     })
 
     it('refuses to clear the keyframes of a clip on it', () => {

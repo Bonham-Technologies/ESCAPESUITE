@@ -1,6 +1,7 @@
 import { useMemo, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorStore } from '../../store/projectStore';
+import { clipOnLockedTrack } from '../../store/trackLock';
 import type { Clip, AnimatableProperty, EasingType } from '../../store/types';
 import { useDraggablePanel } from './hooks/useDraggablePanel';
 import { KeyframeTrack } from './KeyframeTrack';
@@ -54,6 +55,15 @@ export function KeyframePanel() {
     if (!selectedClipId) return null;
     return project.timeline.clips.find((c: Clip) => c.id === selectedClipId) || null;
   }, [selectedClipId, project.timeline.clips]);
+
+  // Whether the selected clip sits on a locked track (ESCSUITE-88). Derived
+  // beside `selectedClip` from the state this component already holds — the
+  // whole-store read above means the panel re-renders on every store change, so
+  // this adds no subscription of its own, and a selector here would add one.
+  const trackLocked = useMemo(() => {
+    if (!selectedClipId) return false;
+    return clipOnLockedTrack(project.timeline.clips, project.timeline.tracks, selectedClipId);
+  }, [selectedClipId, project.timeline.clips, project.timeline.tracks]);
 
   // Check if selected clip has audio (video with audio, or audio-only clip)
   const clipHasAudio = useMemo(() => {
@@ -207,11 +217,18 @@ export function KeyframePanel() {
     setClipKeyframe(selectedClipId, property, { ...existingKf, easing });
   }, [selectedClipId, setClipKeyframe]);
 
-  // Handle keyframe deletion
-  const handleDeleteKeyframe = useCallback((property: AnimatableProperty, time: number) => {
-    if (selectedClipId) {
-      removeClipKeyframe(selectedClipId, property, time);
-    }
+  // Handle keyframe deletion.
+  //
+  // Reports whether the store removed it, as the move and value handlers do
+  // (ESCSUITE-87's shape, extended to Delete by ESCSUITE-88): the graph's
+  // keyboard will not announce a removal the lock refused, or clear a selection
+  // whose keyframe is still there. No selection is no write either.
+  const handleDeleteKeyframe = useCallback((
+    property: AnimatableProperty,
+    time: number
+  ): boolean => {
+    if (!selectedClipId) return false;
+    return removeClipKeyframe(selectedClipId, property, time);
   }, [selectedClipId, removeClipKeyframe]);
 
   if (!isOpen) return null;
@@ -236,6 +253,15 @@ export function KeyframePanel() {
           ×
         </button>
       </div>
+
+      {/* The lock, said out loud (ESCSUITE-88). A plain <p>, not a status
+          region: it is a standing fact about the selected clip, not an event —
+          the same shape as ClipEditorHeader's. */}
+      {trackLocked && (
+        <p className={styles.lockedNotice}>
+          Track locked — unlock it in the timeline to edit keyframes
+        </p>
+      )}
 
       {/* Content */}
       <div className={styles.content}>
@@ -279,6 +305,7 @@ export function KeyframePanel() {
                   transform={selectedClip.transform}
                   effects={selectedClip.effects}
                   playheadTime={playheadTime}
+                  locked={trackLocked}
                   onKeyframeMoved={handleKeyframeMoved}
                   onKeyframeValueChanged={handleKeyframeValueChanged}
                   onAddKeyframe={handleAddKeyframe}
@@ -304,6 +331,7 @@ export function KeyframePanel() {
                   playheadTime={playheadTime}
                   isSelected={selectedProperty === property}
                   onSelect={() => handlePropertySelect(property)}
+                  locked={trackLocked}
                   onKeyframeMoved={handleKeyframeMoved}
                   onAddKeyframe={handleAddKeyframe}
                 />
@@ -329,6 +357,7 @@ export function KeyframePanel() {
                       playheadTime={playheadTime}
                       isSelected={selectedProperty === property}
                       onSelect={() => handlePropertySelect(property)}
+                      locked={trackLocked}
                       onKeyframeMoved={handleKeyframeMoved}
                       onAddKeyframe={handleAddKeyframe}
                     />

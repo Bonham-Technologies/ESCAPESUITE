@@ -120,42 +120,52 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
     return true;
   },
 
-  removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
-      const currentAnimation = clip.animation;
-      if (!currentAnimation) return clip;
+  // Its guard sits in front of the `set` rather than inside it, and it reports
+  // back, because the keyframe graph's Delete key *announces* the removal
+  // (ESCSUITE-88): the same reason the two beside it report (ESCSUITE-87), even
+  // though nothing threads a `skipHistory` through this one.
+  removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
 
-      const currentKeyframes = currentAnimation.keyframes[property];
-      if (!currentKeyframes) return clip;
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        const currentAnimation = clip.animation;
+        if (!currentAnimation) return clip;
 
-      const newKeyframes = currentKeyframes.filter(kf => Math.abs(kf.time - time) >= 0.001);
+        const currentKeyframes = currentAnimation.keyframes[property];
+        if (!currentKeyframes) return clip;
+
+        const newKeyframes = currentKeyframes.filter(kf => Math.abs(kf.time - time) >= 0.001);
+
+        return {
+          ...clip,
+          animation: {
+            ...currentAnimation,
+            keyframes: {
+              ...currentAnimation.keyframes,
+              [property]: newKeyframes.length > 0 ? newKeyframes : undefined,
+            },
+          },
+        };
+      });
 
       return {
-        ...clip,
-        animation: {
-          ...currentAnimation,
-          keyframes: {
-            ...currentAnimation.keyframes,
-            [property]: newKeyframes.length > 0 ? newKeyframes : undefined,
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
           },
         },
+        history: pushToHistory(state),
       };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      history: pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;

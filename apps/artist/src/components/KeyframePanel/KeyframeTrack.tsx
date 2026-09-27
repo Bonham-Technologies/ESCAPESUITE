@@ -16,6 +16,13 @@ interface KeyframeTrackProps {
   currentTime: number;  // Time relative to clip start
   playheadTime: number; // Playhead time relative to clip
   isSelected: boolean;
+  /**
+   * Whether the clip sits on a locked track (ESCSUITE-88). Clicking the row to
+   * open its graph still works — that is reading — but a diamond cannot be
+   * dragged and a double-click adds nothing, because the store would refuse both
+   * in silence.
+   */
+  locked: boolean;
   onSelect: () => void;
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number) => void;
@@ -42,6 +49,7 @@ export function KeyframeTrack({
   currentTime,
   playheadTime,
   isSelected,
+  locked,
   onSelect,
   onKeyframeMoved,
   onAddKeyframe,
@@ -99,6 +107,7 @@ export function KeyframeTrack({
   const handleTrackDoubleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    if (locked) return;
 
     const track = trackRef.current;
     if (!track) return;
@@ -109,7 +118,7 @@ export function KeyframeTrack({
     const relativeX = e.clientX - rect.left;
     const time = (relativeX / rect.width) * clipDuration;
     onAddKeyframe(property, Math.max(0, Math.min(time, clipDuration)));
-  }, [clipDuration, property, onAddKeyframe, trackRef]);
+  }, [clipDuration, locked, property, onAddKeyframe, trackRef]);
 
   // Format value for display
   const formatValue = (value: number): string => {
@@ -161,7 +170,10 @@ export function KeyframeTrack({
               className={`${styles.diamond} ${isCustom ? styles.custom : styles.preset} ${isDragging ? styles.dragging : ''}`}
               style={{ left: `${leftPercent}%` }}
               onMouseDown={(e) => {
-                if (isCustom) {
+                // The gesture is refused here rather than inside
+                // `useKeyframeDrag`, which stays lock-unaware: a drag that
+                // started would move the diamond and snap it back.
+                if (isCustom && !locked) {
                   startDrag(property, kf, e);
                 }
               }}

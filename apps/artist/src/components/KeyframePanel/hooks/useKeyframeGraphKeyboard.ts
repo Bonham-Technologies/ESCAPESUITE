@@ -71,6 +71,11 @@ export function keyframeOptionId(property: AnimatableProperty, index: number): s
 // different strings; see the live region's comment in the hook below.
 const ANNOUNCE_MARK = '\u200B';
 
+// What the live region says when an edit key is pressed on a clip whose track
+// is locked (ESCSUITE-88). The same words the editor's global shortcuts toast,
+// so the lock sounds the same wherever the user meets it.
+const LOCKED_MESSAGE = 'Track is locked';
+
 /** What the live region says after a nudge or an add. */
 function nudgeAnnouncement(property: AnimatableProperty, value: number, time: number): string {
   return `${PROPERTY_LABELS[property]} ${formatValue(value, property)} at ${time.toFixed(2)} seconds`;
@@ -91,6 +96,13 @@ interface KeyframeGraphKeyboardOptions {
   /** The property's value range — the same one the drag clamps to. */
   range: { min: number; max: number };
   /**
+   * Whether the clip sits on a locked track (ESCSUITE-88). Walking the curve,
+   * selecting and Escape are reading, and keep working; every key that would
+   * *edit* is still swallowed but calls nothing and announces `LOCKED_MESSAGE`
+   * instead — the store would refuse the write anyway, silently.
+   */
+  locked: boolean;
+  /**
    * `skipHistory` is the keydown's own `repeat` flag: false for the first press
    * of a key, true for every auto-repeat while it is held. The host passes it
    * straight to the store, which makes one held key one undo step.
@@ -103,7 +115,8 @@ interface KeyframeGraphKeyboardOptions {
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory: boolean) => boolean;
   onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory: boolean) => boolean;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
-  onDeleteKeyframe?: (property: AnimatableProperty, time: number) => void;
+  /** Returns whether the store removed the keyframe — as the two above do. */
+  onDeleteKeyframe?: (property: AnimatableProperty, time: number) => boolean;
 }
 
 /**
@@ -121,6 +134,7 @@ export function useKeyframeGraphKeyboard({
   playheadTime,
   defaultValue,
   range,
+  locked,
   onKeyframeMoved,
   onKeyframeValueChanged,
   onAddKeyframe,
@@ -261,6 +275,16 @@ export function useKeyframeGraphKeyboard({
     announce(nudgeAnnouncement(property, value, time));
   }, [playheadTime, clipDuration, keyframes, defaultValue, property, onAddKeyframe, setSelectedKeyframeTime, announce]);
 
+  // "This key would edit, and the track is locked" (ESCSUITE-88). The caller has
+  // already claimed the key, so the answer is only whether to act: the store
+  // would refuse the write in silence, and a live region that said nothing would
+  // leave a keyboard user pressing a key that does nothing with no explanation.
+  const refusedByLock = useCallback((): boolean => {
+    if (!locked) return false;
+    announce(LOCKED_MESSAGE);
+    return true;
+  }, [locked, announce]);
+
   // The propagation contract, in one place.
   //
   // While the graph has focus it owns its own keys. React attaches its listener
@@ -281,6 +305,10 @@ export function useKeyframeGraphKeyboard({
   //     once, not that the editor's one fires at all.
   //   * Everything else — Tab, Space, '?', letters — falls through untouched, so
   //     the shortcut sheet, play/pause and tool switching still work from here.
+  //
+  // A locked track changes what the claimed keys *do*, never which ones are
+  // claimed: the walking keys, the selection and Escape are reading and work as
+  // always, and the five editing keys announce the lock instead of editing.
   const handleKeyDown = useCallback((e: ReactKeyboardEvent<SVGSVGElement>) => {
     const key = e.key;
 
@@ -296,6 +324,7 @@ export function useKeyframeGraphKeyboard({
         if (e.altKey) {
           // Alt is the time modifier because the drag already means exactly
           // that (KeyframeGraph's mousedown reads e.altKey as 'time').
+          if (refusedByLock()) return;
           nudgeTime(direction, e.shiftKey, e.repeat);
         } else {
           // Neither arrow wraps; from -1 ("nothing active") either lands on the
@@ -303,6 +332,7 @@ export function useKeyframeGraphKeyboard({
           activateIndex(Math.max(0, Math.min(activeIndex + direction, last)));
         }
       } else if (key === 'ArrowUp' || key === 'ArrowDown') {
+        if (refusedByLock()) return;
         nudgeValue(key === 'ArrowUp' ? 1 : -1, e.shiftKey, e.repeat);
       } else if (key === 'Home') {
         activateIndex(0);
@@ -311,6 +341,7 @@ export function useKeyframeGraphKeyboard({
       } else {
         // Enter: the only key the guard above lets through to here. An
         // `else if` would add a branch nothing can ever take.
+        if (refusedByLock()) return;
         addAtPlayhead();
       }
       return;
@@ -319,10 +350,16 @@ export function useKeyframeGraphKeyboard({
     if ((key === 'Delete' || key === 'Backspace') && hasActive) {
       e.preventDefault();
       e.stopPropagation();
+      if (refusedByLock()) return;
       // Only a custom keyframe can be deleted; on a preset the key is swallowed
       // and nothing happens.
+      //
+      // The host reports whether the store removed it, the same way the two
+      // nudges do (ESCSUITE-87's shape, extended to Delete by ESCSUITE-88): a
+      // removal that did not happen must not be announced, and the active option
+      // and the selection must stay on the keyframe that is still there.
       if (selectedKeyframe && onDeleteKeyframe) {
-        onDeleteKeyframe(property, selectedKeyframe.time);
+        if (!onDeleteKeyframe(property, selectedKeyframe.time)) return;
         setActiveTime(null);
         setSelectedKeyframeTime(null);
         announce(
@@ -347,6 +384,7 @@ export function useKeyframeGraphKeyboard({
     addAtPlayhead,
     hasActive,
     announce,
+    refusedByLock,
     selectedKeyframe,
     setSelectedKeyframeTime,
     onDeleteKeyframe,

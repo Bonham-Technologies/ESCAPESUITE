@@ -583,7 +583,8 @@ export interface EditorState {
    *
    * Every action declared `=> boolean` below — the eleven that take a trailing
    * `skipHistory`, plus `moveClipToTrack`, which is the first write of the clip
-   * drag's two-write commit — answers `true` when it wrote and `false` when it
+   * drag's two-write commit, and `removeClipKeyframe`, whose caller *announces*
+   * the removal (ESCSUITE-88) — answers `true` when it wrote and `false` when it
    * wrote nothing: the ESCSUITE-84 lock guard refused the clip's track, or
    * (`shiftClipsAfter` alone) the delta was zero. `false` means **no state
    * changed and no undo entry was pushed**; `true` means **the action was not
@@ -610,7 +611,7 @@ export interface EditorState {
   updateClipTransition: (clipId: string, transition: Partial<Transition>, skipHistory?: boolean) => boolean;
   updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>, skipHistory?: boolean) => boolean;
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => boolean;
-  removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => void;
+  removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => boolean;
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => boolean;
   clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => void;
   duplicateClip: (clipId: string) => void;

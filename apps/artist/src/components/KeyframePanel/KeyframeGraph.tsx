@@ -20,6 +20,15 @@ interface KeyframeGraphProps {
   effects: ClipEffects;
   playheadTime: number;
   /**
+   * Whether the clip sits on a locked track (ESCSUITE-88). Reading the curve is
+   * unaffected — hover, click-to-select, the easing value on show, walking the
+   * options with the keyboard — and every edit refuses at the gesture's start
+   * rather than being swallowed by the store: no drag, no double-click add, no
+   * right-click delete, the easing `<select>` disabled, and an edit key
+   * announcing "Track is locked".
+   */
+  locked: boolean;
+  /**
    * `skipHistory` folds an auto-repeated key's edit into the previous undo step.
    * Both return whether the store wrote (ESCSUITE-87) — the keyboard reads it,
    * so a nudge the lock refused announces nothing and moves no selection.
@@ -27,7 +36,8 @@ interface KeyframeGraphProps {
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => boolean;
   onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory?: boolean) => boolean;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
-  onDeleteKeyframe?: (property: AnimatableProperty, time: number) => void;
+  /** Returns whether the store removed the keyframe — as the two above do. */
+  onDeleteKeyframe?: (property: AnimatableProperty, time: number) => boolean;
   /** Omit to hide the per-keyframe easing control entirely. */
   onKeyframeEasingChanged?: (property: AnimatableProperty, time: number, easing: EasingType) => void;
 }
@@ -54,6 +64,7 @@ export function KeyframeGraph({
   transform,
   effects,
   playheadTime,
+  locked,
   onKeyframeMoved,
   onKeyframeValueChanged,
   onAddKeyframe,
@@ -132,6 +143,7 @@ export function KeyframeGraph({
     playheadTime,
     defaultValue,
     range,
+    locked,
     onKeyframeMoved,
     onKeyframeValueChanged,
     onAddKeyframe,
@@ -229,6 +241,10 @@ export function KeyframeGraph({
   // Handle mouse down on keyframe point
   const handleKeyframeMouseDown = useCallback((e: React.MouseEvent, kf: Keyframe) => {
     if (!isCustomKeyframe(kf)) return; // Can't drag preset keyframes
+    // A locked track refuses the whole gesture rather than the write at the end
+    // of it (ESCSUITE-88): the keyframe would follow the pointer and then snap
+    // back on release, which reads as a bug. The click handler still selects it.
+    if (locked) return;
 
     e.preventDefault();
     e.stopPropagation();
@@ -244,7 +260,7 @@ export function KeyframeGraph({
       currentValue: kf.value,
       dragType: e.shiftKey ? 'value' : e.altKey ? 'time' : 'both',
     });
-  }, [isCustomKeyframe, focusGraph, setActiveTime]);
+  }, [isCustomKeyframe, locked, focusGraph, setActiveTime]);
 
   // Handle click on keyframe to select it
   const handleKeyframeClick = useCallback((e: React.MouseEvent, kf: Keyframe) => {
@@ -260,12 +276,15 @@ export function KeyframeGraph({
 
   // Handle right-click on keyframe to delete
   const handleKeyframeContextMenu = useCallback((e: React.MouseEvent, kf: Keyframe) => {
+    // preventDefault first, and whatever the lock says: the browser menu is
+    // suppressed over a keyframe either way.
     e.preventDefault();
     e.stopPropagation();
+    if (locked) return;
     if (isCustomKeyframe(kf) && onDeleteKeyframe) {
       onDeleteKeyframe(property, kf.time);
     }
-  }, [isCustomKeyframe, onDeleteKeyframe, property]);
+  }, [isCustomKeyframe, locked, onDeleteKeyframe, property]);
 
   // Convert screen coordinates to SVG viewBox coordinates
   // Must account for preserveAspectRatio="xMidYMid meet" which centers content
@@ -375,6 +394,7 @@ export function KeyframeGraph({
 
   // Handle double-click on graph to add keyframe
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (locked) return;
     const coords = screenToSvgCoords(e);
     if (!coords) return;
 
@@ -388,7 +408,7 @@ export function KeyframeGraph({
     const value = graphDimensions.yToValue(y);
 
     onAddKeyframe(property, Math.max(0, Math.min(time, clipDuration)), Math.max(range.min, Math.min(value, range.max)));
-  }, [screenToSvgCoords, graphDimensions, clipDuration, range, property, onAddKeyframe]);
+  }, [locked, screenToSvgCoords, graphDimensions, clipDuration, range, property, onAddKeyframe]);
 
   // Playhead position
   const playheadX = playheadTime >= 0 && playheadTime <= clipDuration
@@ -523,6 +543,7 @@ export function KeyframeGraph({
           <select
             className={styles.easingSelect}
             aria-label="Keyframe easing"
+            disabled={locked}
             value={selectedKeyframe.easing}
             onChange={(e) =>
               onKeyframeEasingChanged(property, selectedKeyframe.time, e.target.value as EasingType)

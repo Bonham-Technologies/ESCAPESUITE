@@ -488,6 +488,50 @@ describe('KeyframePanel', () => {
     })
   })
 
+  // ESCSUITE-88. The store has always refused an edit to a clip on a locked
+  // track; the panel used to let the user try and say nothing at all.
+  describe('a locked track (ESCSUITE-88)', () => {
+    const NOTICE = 'Track locked — unlock it in the timeline to edit keyframes'
+
+    const lockTrack = () => {
+      store().updateTrack(store().project.timeline.clips[0].trackId, { locked: true })
+    }
+
+    it('says the track is locked, and says nothing while it is not', () => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
+
+      lockTrack()
+
+      expect(screen.getByText(NOTICE)).toBeInTheDocument()
+    })
+
+    it('disables the easing select on the selected keyframe', () => {
+      openPanelWithClip()
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setKeyframePanelSelectedProperty('opacity')
+      lockTrack()
+      render(<KeyframePanel />)
+      measureGraph()
+
+      fireEvent.click(graphPoints()[1])
+
+      expect(screen.getByLabelText('Keyframe easing')).toBeDisabled()
+    })
+
+    it('adds no keyframe when a property track is double-clicked', () => {
+      openPanelWithClip()
+      lockTrack()
+      render(<KeyframePanel />)
+
+      fireEvent.doubleClick(measureTrackArea('Position X'), { clientX: 300 })
+
+      expect(keyframesOf('x')).toBeUndefined()
+    })
+  })
+
   describe('panel layout', () => {
     it('remembers a new position after the title bar is dragged', () => {
       openPanelWithClip()

@@ -38,6 +38,7 @@ function renderGraph(
     animation?: ClipAnimation | undefined
     withDelete?: boolean
     withEasing?: boolean
+    locked?: boolean
   } = {}
 ) {
   // The two that report whether the store wrote (ESCSUITE-87). `true` is the
@@ -51,7 +52,9 @@ function renderGraph(
     (_property: AnimatableProperty, _time: number, _newValue: number, _skipHistory?: boolean) => true
   )
   const onAddKeyframe = vi.fn()
-  const onDeleteKeyframe = vi.fn()
+  // Since ESCSUITE-88 the delete handler reports the same way: `true` is the
+  // store having removed the keyframe, `false` the lock refusing it.
+  const onDeleteKeyframe = vi.fn((_property: AnimatableProperty, _time: number) => true)
   const onKeyframeEasingChanged = vi.fn()
   const element = (clip: Clip) => (
     <KeyframeGraph
@@ -61,6 +64,7 @@ function renderGraph(
       transform={clip.transform}
       effects={clip.effects}
       playheadTime={options.playheadTime ?? 0}
+      locked={options.locked ?? false}
       onKeyframeMoved={onKeyframeMoved}
       onKeyframeValueChanged={onKeyframeValueChanged}
       onAddKeyframe={onAddKeyframe}
@@ -1004,6 +1008,27 @@ describe('KeyframeGraph keyboard access', () => {
       expect(svg.getAttribute('aria-activedescendant')).toBe(activeBefore)
     })
 
+    // ESCSUITE-87's shape, now for Delete too: a removal the store refused is
+    // not a removal, so nothing is announced and the selection stays put.
+    it('says nothing and keeps the selection when the host refuses the delete', async () => {
+      const user = userEvent.setup()
+      opacityKeyframes()
+      const { container, onDeleteKeyframe } = renderGraph('opacity')
+      const svg = graphSvg(container)
+      const status = screen.getByRole('status')
+      onDeleteKeyframe.mockReturnValue(false)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      const activeBefore = svg.getAttribute('aria-activedescendant')
+
+      await user.keyboard('{Delete}')
+
+      expect(onDeleteKeyframe).toHaveBeenCalledTimes(1)
+      expect(status).toHaveTextContent('')
+      expect(svg.getAttribute('aria-activedescendant')).toBe(activeBefore)
+    })
+
     it('says an identical message differently the second time', () => {
       // The region is aria-atomic, and an assistive technology does not
       // re-read an atomic region whose text did not change: two identical
@@ -1024,6 +1049,90 @@ describe('KeyframeGraph keyboard access', () => {
       expect(first).not.toBe(second)
       expect(spoken(first!)).toBe('Opacity 50% at 2.00 seconds')
       expect(spoken(second!)).toBe('Opacity 50% at 2.00 seconds')
+    })
+  })
+  // ESCSUITE-88. Walking the curve is reading, so it keeps working on a locked
+  // track; every key that would *edit* is swallowed, calls nothing, and says so.
+  describe('a locked track', () => {
+    const LOCKED = 'Track is locked'
+
+    beforeEach(() => {
+      opacityKeyframes()
+    })
+
+    it('refuses a value nudge and says the track is locked', () => {
+      const { container, onKeyframeValueChanged } = renderGraph('opacity', { locked: true })
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      fireEvent.keyDown(svg, { key: 'ArrowUp' })
+
+      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent(LOCKED)
+    })
+
+    it('refuses a time nudge and says the track is locked', () => {
+      const { container, onKeyframeMoved } = renderGraph('opacity', { locked: true })
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      fireEvent.keyDown(svg, { key: 'ArrowRight', altKey: true })
+
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent(LOCKED)
+    })
+
+    it('refuses to add a keyframe at the playhead and says the track is locked', () => {
+      const { container, onAddKeyframe } = renderGraph('opacity', { locked: true, playheadTime: 2 })
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(onAddKeyframe).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent(LOCKED)
+    })
+
+    it('refuses a delete and says the track is locked', async () => {
+      const user = userEvent.setup()
+      const { container, onDeleteKeyframe } = renderGraph('opacity', { locked: true })
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      await user.keyboard('{Delete}')
+
+      expect(onDeleteKeyframe).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent(LOCKED)
+      // Still the graph's key: the editor must not delete the clip from here.
+      expect(seen).not.toHaveBeenCalled()
+    })
+
+    it('still walks the curve', () => {
+      const { container } = renderGraph('opacity', { locked: true })
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+      expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-0')
+
+      fireEvent.keyDown(svg, { key: 'ArrowRight' })
+      expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-1')
+
+      fireEvent.keyDown(svg, { key: 'Home' })
+      expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-0')
+
+      // Reading, not editing: nothing announced.
+      expect(screen.getByRole('status')).toHaveTextContent('')
+    })
+
+    it('still clears the active option on Escape', () => {
+      const { container } = renderGraph('opacity', { locked: true })
+      const svg = graphSvg(container)
+
+      fireEvent.keyDown(svg, { key: 'End' })
+      expect(svg.getAttribute('aria-activedescendant')).toBe('kf-opacity-1')
+
+      fireEvent.keyDown(svg, { key: 'Escape' })
+      expect(svg.getAttribute('aria-activedescendant')).toBeNull()
     })
   })
 })

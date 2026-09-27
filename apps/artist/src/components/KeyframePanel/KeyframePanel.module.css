@@ -62,6 +62,16 @@
   color: #fff;
 }
 
+/* The locked-track notice (ESCSUITE-88), directly under the title bar. #888 is
+   the colour every other piece of secondary text in this panel uses: the panel
+   is painted dark whatever the app's theme is, so --text-muted would follow the
+   light theme onto a dark ground. */
+.lockedNotice {
+  margin: 4px 12px 0;
+  font-size: 12px;
+  color: #888;
+}
+
 .content {
   flex: 1;
   overflow: hidden;
