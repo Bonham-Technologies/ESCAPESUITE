@@ -79,6 +79,23 @@ export function RecordingsListPanel({
   // renders on every MP4 progress tick.
   const [uploadsInFlight] = useState(() => ({ current: new Set<string>() }));
 
+  // Deleting the row that is converting must not strand the one conversion
+  // slot: the row unmounting takes the progress readout and the only Cancel
+  // button with it, while `useMp4Download`'s `converting` and `abortRef` stay
+  // set — every other row's MP4 and M4A buttons stay disabled with
+  // `MP4_BUSY_REASON` for however long the orphaned conversion still needs. So
+  // a delete that matches the recording in flight cancels it first, before the
+  // row underneath it is asked to go — the honest reading of "the user asked
+  // for the take to go" (ESCSUITE-103). `useMp4Download` also re-checks the
+  // recording still exists before handing back a file, for the completion that
+  // races this instead of losing to it.
+  const handleDelete = (id: string): void => {
+    if (converting?.id === id) {
+      cancelMp4Download();
+    }
+    onDelete(id);
+  };
+
   const handleUploadToHost = async (id: string, name: string): Promise<void> => {
     if (uploadsInFlight.current.has(id)) return;
     uploadsInFlight.current.add(id);
@@ -126,7 +143,7 @@ export function RecordingsListPanel({
         embedded ? (id, name) => void handleUploadToHost(id, name) : undefined
       }
       onSendToEditor={onSendToEditor}
-      onDelete={onDelete}
+      onDelete={handleDelete}
     />
   );
 }

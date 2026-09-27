@@ -123,7 +123,7 @@ selector contract above.
 | `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag, starting-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using. It resolves which mode the take is before the countdown, resolves `micAcquired` (the toggle AND a track on the stream `acquireStreams` returned) with it, and counts how many companions the take asked for (`expectedCompanions` — the camera, plus one per audio source it really has), which makes it the only layer that can read a *short list* as a loss. `micAcquired` is also handed to `saveRecording` as its fourth argument, in the `onStop` closure rather than through a ref, so the count of the take's audio parts and the `hasAudio` stored for it are one answer (ESCSUITE-70): `onStop` raises `SEPARATE_TRACK_NOT_SAVED` when fewer parts arrive than were asked for, and nothing for a composited take. The resolved `separateTracks` travels in the same closure and the same argument (ESCSUITE-68), so the save path never has to re-read a setting the user can still move — the panel is disabled mid-take, the store behind it is not |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
 | `hooks/useMp4Download.ts` | One conversion at a time — MP4 or M4A, one shared slot: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, format, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the button reasons for each format (still checking, cannot, busy — plus, for M4A only, a browser with no AAC encoder), the separate visible `note` (the silent-MP4 warning, or the blocking reason when there is one worth saying), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App`. On an MP4 it first resolves the take's camera half out of storage (`utils/takeParts.ts`) and hands it to the converter with the take's stored `overlayPlacement`, so "Download as MP4" on a separate-tracks take gives you the take; `getVideo(id)` fetches the blob and that metadata in one read, and a record listed with no bytes behind it (`!record?.blob`) is still the silent no-op it always was. An M4A asks for none of it — the primary's audio track is already the mix. A camera part that was listed and could not be used raises `MP4_SAVED_WITHOUT_WEBCAM`, which outranks the silent-MP4 warning in the one channel |
-| `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete — which cascades, taking a take's companions with its primary, and re-reads the storage headroom afterwards — and the playback dialog's URL, name and duration. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
+| `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete — which cascades, taking a take's companions with its primary, and re-reads the storage headroom afterwards — and the playback dialog's URL, name and duration. The cascade deletes companions first and the primary last, each in its own try/catch (ESCSUITE-103): a `deleteVideo` that throws costs one file rather than the rest of the cascade — and doing the primary first could leave a primary-less companion behind, a webcam file with no take, taking room the user thought they had freed. Any failure raises `DELETE_FAILED` through the one notice channel once, however many files it touched, rather than an unhandled rejection at the call site. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
 
 ### Errors and notices
 
@@ -133,7 +133,7 @@ header's existing `aria-live="polite" aria-atomic="true"` region, and
 `handleStartRecording` clears it when the next take begins. Every string lives in
 `src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`, `START_FAILED`,
 `LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`,
-`UPLOAD_UNAVAILABLE`, `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM` and
+`UPLOAD_UNAVAILABLE`, `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED` and
 `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
@@ -1017,6 +1017,18 @@ message and navigate to its own editor itself.
   M4A buttons go `disabled` with `MP4_BUSY_REASON`. The row that is running shows the
   format actually running — "Converting to M4A…", "Cancel M4A conversion of …" — because
   the progress row is shared and the labels are what tell them apart.
+- **The slot is never held by a row that is gone.** Deleting the recording that is
+  converting used to strand the slot: the row unmounting took the progress readout and the
+  only Cancel button with it, while `useMp4Download`'s `converting` and `abortRef` stayed
+  set, leaving every other row's MP4 and M4A buttons `disabled` with `MP4_BUSY_REASON` for
+  however long the orphaned conversion still needed (ESCSUITE-103). `RecordingsListPanel`'s
+  delete handler now calls `cancelMp4Download()` first, whenever the row being deleted is
+  the one converting, before handing the id to the delete it was given — the honest reading
+  of "the user asked for the take to go" rather than a disabled Delete button. A conversion
+  that finishes anyway, racing the delete through the same gap the cancellation test below
+  documents, does not download: `startMp4Download` re-reads the record with `getVideo(id)`
+  right before naming a file after it, and a recording gone from storage is worth exactly
+  as little as one that was aborted.
 - **Say why, do not hide.** Where the codec probe says this browser cannot encode MP4, the
   button stays on screen, `disabled`, with the probe's own sentence in its `title` and in
   the one visible note the MP4 buttons' `aria-describedby` points at. That is the

@@ -14,6 +14,7 @@ import {
   getRecordingsMetadata,
   getThumbnail,
   createBlobUrl,
+  revokeBlobUrl,
   hasSpaceForRecording,
 } from '../core/storage';
 import { orderTakes } from '../utils/takeOrder';
@@ -40,7 +41,7 @@ const ESTIMATED_RECORDING_BYTES = 50 * 1024 * 1024;
  */
 const SEPARATE_TRACKS_SIZE_FACTOR = 2;
 
-export const useRecorderStore = create<RecorderStore>((set) => ({
+export const useRecorderStore = create<RecorderStore>((set, get) => ({
   // Initial state
   state: 'idle',
   config: defaultConfig,
@@ -136,12 +137,33 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
       recordings: [recording, ...state.recordings],
     })),
 
-  removeRecording: (id: string) =>
+  removeRecording: (id: string) => {
+    // `loadRecordings` mints one object URL per recording's thumbnail, and
+    // nothing else was revoking them: a deleted recording's URL used to
+    // outlive the recording it named, held by the browser for the life of the
+    // tab. The prefix guard is what a mint through `createBlobUrl` always
+    // produces — nothing else stored here ever will be — so it does nothing on
+    // a recording with no thumbnail.
+    const removed = get().recordings.find((r) => r.id === id);
+    if (removed?.thumbnailUrl?.startsWith('blob:')) {
+      revokeBlobUrl(removed.thumbnailUrl);
+    }
     set((state) => ({
       recordings: state.recordings.filter((r) => r.id !== id),
-    })),
+    }));
+  },
 
   loadRecordings: async () => {
+    // Every call mints a fresh thumbnail URL per recording (below), so the
+    // outgoing set is revoked first — before the new one exists to replace it
+    // — or a second `loadRecordings` (a reload, the CRAFT/ARTIST handoff) leaks
+    // the set it is about to discard.
+    for (const recording of get().recordings) {
+      if (recording.thumbnailUrl?.startsWith('blob:')) {
+        revokeBlobUrl(recording.thumbnailUrl);
+      }
+    }
+
     const metadata = await getRecordingsMetadata();
 
     const recordings: Recording[] = await Promise.all(
