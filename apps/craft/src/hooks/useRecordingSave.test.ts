@@ -9,13 +9,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { act, renderHook } from '@testing-library/react'
-import { useRecordingSave, type RecordingSaveDeps } from './useRecordingSave'
+import { useRecordingSave, type RecordingSaveDeps, type CapturedTake } from './useRecordingSave'
 import { getRecordingsMetadata, getThumbnail } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { converterModule, thumbnailModule, resetAppDoubles } from '../test/appDoubles'
 import { useRecorderStore } from '../store/recorderStore'
 import { getLastCanvasContext, resetCanvasContextDouble } from '../test/doubles/canvas'
-import { defaultConfig, type Recording, type RecordingConfig, type RecordingState } from '../store/types'
+import type { Recording, RecordingState } from '../store/types'
 import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
 
 vi.mock('../core/thumbnailGenerator', async () => (await import('../test/appDoubles')).thumbnailModule)
@@ -47,16 +47,33 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function mountSave(config: Partial<RecordingConfig> = {}) {
+function mountSave() {
   const deps: RecordingSaveDeps = {
     recorderTypeRef,
     capturedThumbnailRef,
-    config: { ...defaultConfig, ...config },
     setState: (state) => { states.push(state) },
     addRecording: (recording) => { added.push(recording) },
     setNotice: (notice) => { notices.push(notice) },
   }
   return renderHook(() => useRecordingSave(deps))
+}
+
+/**
+ * A `CapturedTake` with every field at its modest default, for a test that
+ * only cares about one or two of them (ESCSUITE-104). Mirrors the hook's own
+ * `NOTHING_CAPTURED` — deliberately a second copy rather than an import, so a
+ * test pins what the hook is actually handed rather than whatever the hook's
+ * own default happens to be today.
+ */
+function captured(overrides: Partial<CapturedTake> = {}): CapturedTake {
+  return {
+    micAcquired: false,
+    separateTracks: false,
+    systemAudioEnabled: false,
+    webcamEnabled: false,
+    overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+    ...overrides,
+  }
 }
 
 describe('useRecordingSave containers', () => {
@@ -178,17 +195,17 @@ describe('useRecordingSave thumbnails', () => {
 
 describe('useRecordingSave list entry', () => {
   it('marks a system-audio-only take as having audio and no webcam', async () => {
-    const { result } = mountSave({ webcamEnabled: false, microphoneEnabled: false, systemAudioEnabled: true })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4)
+    await result.current(RAW, 4, null, captured({ systemAudioEnabled: true }))
 
     expect(added[0]).toMatchObject({ hasAudio: true, hasWebcam: false })
   })
 
   it('marks a silent webcam take as having a webcam and no audio', async () => {
-    const { result } = mountSave({ webcamEnabled: true, microphoneEnabled: false, systemAudioEnabled: false })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4)
+    await result.current(RAW, 4, null, captured({ webcamEnabled: true }))
 
     expect(added[0]).toMatchObject({ hasAudio: false, hasWebcam: true })
   })
@@ -198,9 +215,9 @@ describe('useRecordingSave list entry', () => {
   // so the two records cannot disagree about whether the take had audio — and
   // the M4A button, which is gated on it, stays truthful after a reload.
   it('stores the same answer about audio in the metadata a reload reads back', async () => {
-    const { result } = mountSave({ webcamEnabled: false, microphoneEnabled: true, systemAudioEnabled: false })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4, null, { micAcquired: true, separateTracks: false })
+    await result.current(RAW, 4, null, captured({ micAcquired: true }))
 
     const [meta] = await getRecordingsMetadata()
     expect(meta.hasAudio).toBe(true)
@@ -208,9 +225,9 @@ describe('useRecordingSave list entry', () => {
   })
 
   it('stores a silent take as having no audio', async () => {
-    const { result } = mountSave({ webcamEnabled: true, microphoneEnabled: false, systemAudioEnabled: false })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4)
+    await result.current(RAW, 4, null, captured({ webcamEnabled: true }))
 
     const [meta] = await getRecordingsMetadata()
     expect(meta.hasAudio).toBe(false)
@@ -226,9 +243,9 @@ describe('useRecordingSave list entry', () => {
   // cost the M4A button its truth — it offered an audio download of silence.
   it('marks a take whose share picker cleared system audio as silent', async () => {
     useRecorderStore.setState({ systemAudioShared: false })
-    const { result } = mountSave({ microphoneEnabled: false, systemAudioEnabled: true })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4)
+    await result.current(RAW, 4, null, captured({ systemAudioEnabled: true }))
 
     expect(added[0].hasAudio).toBe(false)
     const [meta] = await getRecordingsMetadata()
@@ -237,9 +254,9 @@ describe('useRecordingSave list entry', () => {
 
   it('marks it audible when the picker did share system audio', async () => {
     useRecorderStore.setState({ systemAudioShared: true })
-    const { result } = mountSave({ microphoneEnabled: false, systemAudioEnabled: true })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4)
+    await result.current(RAW, 4, null, captured({ systemAudioEnabled: true }))
 
     expect(added[0].hasAudio).toBe(true)
     const [meta] = await getRecordingsMetadata()
@@ -248,9 +265,9 @@ describe('useRecordingSave list entry', () => {
 
   it('keeps a microphone take audible however the share picker answered', async () => {
     useRecorderStore.setState({ systemAudioShared: false })
-    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: true })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4, null, { micAcquired: true, separateTracks: false })
+    await result.current(RAW, 4, null, captured({ micAcquired: true, systemAudioEnabled: true }))
 
     expect(added[0].hasAudio).toBe(true)
     const [meta] = await getRecordingsMetadata()
@@ -267,9 +284,9 @@ describe('useRecordingSave list entry', () => {
   // once, when the take starts, from the stream it really acquired, and hands
   // the answer here.
   it('marks a take whose microphone never opened as silent', async () => {
-    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4, null, { micAcquired: false, separateTracks: false })
+    await result.current(RAW, 4, null, captured({ micAcquired: false }))
 
     expect(added[0].hasAudio).toBe(false)
     const [meta] = await getRecordingsMetadata()
@@ -277,9 +294,9 @@ describe('useRecordingSave list entry', () => {
   })
 
   it('marks a take whose microphone did open as audible', async () => {
-    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
+    const { result } = mountSave()
 
-    await result.current(RAW, 4, null, { micAcquired: true, separateTracks: false })
+    await result.current(RAW, 4, null, captured({ micAcquired: true }))
 
     expect(added[0].hasAudio).toBe(true)
     const [meta] = await getRecordingsMetadata()
@@ -291,11 +308,27 @@ describe('useRecordingSave list entry', () => {
   // that path (the controller always says), and a default of `true` would be
   // ESCSUITE-70 again, reached by leaving an argument out.
   it('claims no microphone when the caller says nothing about one', async () => {
-    const { result } = mountSave({ microphoneEnabled: true, systemAudioEnabled: false })
+    const { result } = mountSave()
 
     await result.current(RAW, 4)
 
     expect(added[0].hasAudio).toBe(false)
+  })
+
+  // ESCSUITE-104. `useRecordingSave` has no `config` of its own any more —
+  // `RecordingSaveDeps` carries no such field, so a future call site cannot
+  // reintroduce a live read by accident. `hasWebcam` can only come from
+  // `captured.webcamEnabled`, the take's own answer at start, and this is the
+  // one case above that never happens to pass `webcamEnabled: true` too:
+  // false in, false stored.
+  it('stores the webcam toggle the take was captured with', async () => {
+    const { result } = mountSave()
+
+    await result.current(RAW, 4, null, captured({ webcamEnabled: false }))
+
+    expect(added[0].hasWebcam).toBe(false)
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasWebcam).toBe(false)
   })
 
   // The flag is read with `getState()` on the save path, not selected: this
@@ -306,7 +339,6 @@ describe('useRecordingSave list entry', () => {
     const deps: RecordingSaveDeps = {
       recorderTypeRef,
       capturedThumbnailRef,
-      config: { ...defaultConfig, microphoneEnabled: false, systemAudioEnabled: true },
       setState: (state) => { states.push(state) },
       addRecording: (recording) => { added.push(recording) },
       setNotice: (notice) => { notices.push(notice) },
@@ -346,15 +378,14 @@ describe('useRecordingSave for a separate-tracks take', () => {
 
   it('stores both parts under one takeId, the placement on the primary only', async () => {
     recorderTypeRef.current = 'webcodecs'
-    const { result } = mountSave({
-      webcamEnabled: true,
-      separateTracks: true,
-      webcamPosition: 'top-left',
-      webcamSize: 0.3,
-      webcamShape: 'rectangle',
-    })
+    const { result } = mountSave()
 
-    await result.current(RAW, 6, [companionPart], { micAcquired: true, separateTracks: true })
+    await result.current(RAW, 6, [companionPart], captured({
+      micAcquired: true,
+      separateTracks: true,
+      webcamEnabled: true,
+      overlayPlacement: { position: 'top-left', size: 0.3, shape: 'rectangle' },
+    }))
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(2)
@@ -366,9 +397,10 @@ describe('useRecordingSave for a separate-tracks take', () => {
     expect(webcam.id).not.toBe(primary.id)
     expect(primary.startOffset).toBe(0)
     expect(webcam.startOffset).toBe(0)
-    // The overlay geometry is the primary's, copied from the config at save
-    // time: it is what ARTIST seeds the webcam clip's transform from (slice 2)
-    // and what the composite MP4 draws through (slice 4).
+    // The overlay geometry is the primary's, copied by the controller at the
+    // same moment it built the compositor (ESCSUITE-104): it is what ARTIST
+    // seeds the webcam clip's transform from (slice 2) and what the composite
+    // MP4 draws through (slice 4).
     expect(primary.overlayPlacement).toEqual({
       position: 'top-left',
       size: 0.3,
@@ -383,7 +415,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
   it('stores a thumbnail for each part, the companion decoded from its own blob', async () => {
     recorderTypeRef.current = 'webcodecs'
     capturedThumbnailRef.current = new Blob(['preview-frame'], { type: 'image/jpeg' })
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart])
 
@@ -404,7 +436,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
   it('draws a placeholder for the companion thumbnail when its own decode fails', async () => {
     recorderTypeRef.current = 'webcodecs'
     thumbnailModule.generateThumbnail.mockRejectedValue(new Error('no decoder'))
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart])
 
@@ -418,7 +450,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
   it('falls back to the timed duration for the companion when its file reports none', async () => {
     recorderTypeRef.current = 'webcodecs'
     thumbnailModule.extractVideoMetadata.mockResolvedValue({ duration: 0, width: 640, height: 480 })
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart])
 
@@ -429,7 +461,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
 
   it('puts the companion under its primary in the list, not above it', async () => {
     recorderTypeRef.current = 'webcodecs'
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart])
 
@@ -441,7 +473,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
 
   it('never repairs the companion — a WebCodecs take needs none', async () => {
     recorderTypeRef.current = 'webcodecs'
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart])
 
@@ -457,15 +489,14 @@ describe('useRecordingSave for a separate-tracks take', () => {
   // list, it used to be stored as though the take had been composited.
   it('still records the primary as the take primary when every companion was lost', async () => {
     recorderTypeRef.current = 'webcodecs'
-    const { result } = mountSave({
-      webcamEnabled: true,
-      separateTracks: true,
-      webcamPosition: 'bottom-left',
-      webcamSize: 0.25,
-      webcamShape: 'circle',
-    })
+    const { result } = mountSave()
 
-    await result.current(RAW, 6, null, { micAcquired: false, separateTracks: true })
+    await result.current(RAW, 6, null, captured({
+      micAcquired: false,
+      separateTracks: true,
+      webcamEnabled: true,
+      overlayPlacement: { position: 'bottom-left', size: 0.25, shape: 'circle' },
+    }))
 
     const stored = await getRecordingsMetadata()
     expect(stored).toHaveLength(1)
@@ -486,7 +517,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
   // before the countdown and `captured` says so (`separateTracks` defaults to
   // false). That is an ordinary composited take and is stored as one.
   it('saves one part when there is no companion, exactly as before', async () => {
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6)
 
@@ -508,7 +539,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
       if (blob === COMPANION) throw new Error('decode failed')
       return { duration: knownDuration ?? 0, width: 1920, height: 1080 }
     })
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart])
 
@@ -523,12 +554,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
 
   it('stores four parts under one takeId, the audio parts as audio', async () => {
     recorderTypeRef.current = 'webcodecs'
-    const { result } = mountSave({
-      webcamEnabled: true,
-      separateTracks: true,
-      microphoneEnabled: true,
-      systemAudioEnabled: true,
-    })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart, micPart, systemPart])
 
@@ -564,7 +590,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
   it('decodes nothing for an audio part — no metadata probe, no thumbnail', async () => {
     recorderTypeRef.current = 'webcodecs'
     capturedThumbnailRef.current = new Blob(['preview-frame'], { type: 'image/jpeg' })
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart, micPart, systemPart])
 
@@ -593,7 +619,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
 
   it('lists the parts under the primary in role order', async () => {
     recorderTypeRef.current = 'webcodecs'
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart, micPart, systemPart])
 
@@ -615,7 +641,7 @@ describe('useRecordingSave for a separate-tracks take', () => {
       if (blob === COMPANION) throw new Error('decode failed')
       return { duration: known ?? 0, width: 1920, height: 1080 }
     })
-    const { result } = mountSave({ webcamEnabled: true, separateTracks: true })
+    const { result } = mountSave()
 
     await result.current(RAW, 6, [companionPart, micPart, systemPart])
 
