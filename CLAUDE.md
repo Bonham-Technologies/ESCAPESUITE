@@ -614,6 +614,28 @@ which is one statement exactly: `KeyframePanel`'s `handleKeyframeMoved` now guar
 that `return false` is unreachable while the panel renders (its sibling in
 `handleKeyframeValueChanged` has been uncovered for the same reason since it was written). Lines
 and functions unmoved, and **no floor crossed** either way.
+
+`@escapesuite/artist` was re-measured 2026-09-26 for ESCSUITE-88 (the keyframe panel and the
+preview's transform handles honouring a locked track): **99.41 / 98.75 / 94.01 / 99.01** — lines
+and functions unmoved, branches up four hundredths and statements *down* one, with **no floor
+crossed**, so artist's floors stay 99 / 98 / 93 / 99. The whole of the movement is one line.
+**Every `locked` guard the ticket adds is covered from both sides** — the two pointer refusals
+and the double-click refusal in `KeyframeGraph.tsx`, both refusals in `KeyframeTrack.tsx`, the
+mousedown and the two cursor arms in `useTransformHandles.ts` (the `not-allowed` for a row locked
+*mid-gesture* has a test of its own) and `removeClipKeyframe`'s new pre-`set` guard — and
+`hooks/useKeyframeGraphKeyboard.ts`, which the announcement lives in, is 100% on all four
+metrics. What the branch adds to the uncovered column is **exactly one statement and the one
+branch on the same line**: `KeyframePanel.tsx`'s `handleDeleteKeyframe` guarding with
+`if (!selectedClipId) return false;`, which is unreachable while the panel renders — the graph is
+only mounted when there *is* a selected clip — and is the third sibling of a guard whose other
+two, in `handleKeyframeMoved` and `handleKeyframeValueChanged`, have been uncovered for the same
+reason since ESCSUITE-87 wrote them. Every other uncovered statement in the six measured source
+files this ticket touches predates it, and all of them are defensive null guards of the same kind:
+`if (!svg)` / `if (!coords)` / `if (!prev)` in `KeyframeGraph.tsx`, `if (!track)` in
+`KeyframeTrack.tsx`, the older `if (!selectedClipId)` / `if (!selectedClip)` guards and the audio
+section's `onSelect` arrow in `KeyframePanel.tsx`, and the `if (!clip)`-shaped guards in
+`useTransformHandles.ts` and `keyframeSlice.ts`.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -621,7 +643,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.76 | 93.97 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.75 | 94.01 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

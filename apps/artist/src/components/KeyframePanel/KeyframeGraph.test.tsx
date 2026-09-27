@@ -41,13 +41,16 @@ function renderGraph(
     animation?: ClipAnimation | undefined
     withDelete?: boolean
     withEasing?: boolean
+    locked?: boolean
   } = {}
 ) {
   const clip = currentClip()
   const onKeyframeMoved = vi.fn()
   const onKeyframeValueChanged = vi.fn()
   const onAddKeyframe = vi.fn()
-  const onDeleteKeyframe = vi.fn()
+  // Since ESCSUITE-88 the delete handler reports whether the store removed the
+  // keyframe, and the graph only clears its selection when it did.
+  const onDeleteKeyframe = vi.fn((_property: AnimatableProperty, _time: number) => true)
   const onKeyframeEasingChanged = vi.fn()
   const view = render(
     <KeyframeGraph
@@ -57,6 +60,7 @@ function renderGraph(
       transform={clip.transform}
       effects={clip.effects}
       playheadTime={options.playheadTime ?? 0}
+      locked={options.locked ?? false}
       onKeyframeMoved={onKeyframeMoved}
       onKeyframeValueChanged={onKeyframeValueChanged}
       onAddKeyframe={onAddKeyframe}
@@ -279,6 +283,16 @@ describe('KeyframeGraph', () => {
       expect(onDeleteKeyframe).not.toHaveBeenCalled()
     })
 
+    // ESCSUITE-88: the store would refuse the removal, so the right-click does
+    // not ask for it. preventDefault still runs, so no browser menu appears.
+    it('will not delete a keyframe on right-click while the track is locked', () => {
+      const { container, onDeleteKeyframe } = renderGraph('opacity', { locked: true })
+
+      fireEvent.contextMenu(points(container)[1])
+
+      expect(onDeleteKeyframe).not.toHaveBeenCalled()
+    })
+
     it('survives a right-click when the host offers no delete handler', () => {
       const { container } = renderGraph('opacity', { withDelete: false })
 
@@ -423,6 +437,17 @@ describe('KeyframeGraph', () => {
       expect(value).toBeCloseTo(0.25, 6)
     })
 
+    // ESCSUITE-88: the store would refuse the keyframe, so the graph does not ask
+    // for it. Same point as the unlocked case above, which is the control.
+    it('adds nothing on a double-click while the track is locked', () => {
+      const { container, onAddKeyframe } = renderGraph('opacity', { locked: true })
+      const svg = measureGraph(container)
+
+      fireEvent.doubleClick(svg, { clientX: xForTime(2), clientY: yForUnitValue(0.25) })
+
+      expect(onAddKeyframe).not.toHaveBeenCalled()
+    })
+
     it('accounts for the letterboxing when the svg box is a different shape', () => {
       const { container, onAddKeyframe } = renderGraph('opacity')
       // 1000x200 box: the 500x200 viewBox is drawn at scale 1, centred, so
@@ -529,6 +554,24 @@ describe('KeyframeGraph', () => {
       expect(dragged.getAttribute('r')).toBe('8')
       expect(Number(dragged.getAttribute('cx'))).toBeCloseTo(xForTime(3), 6)
       expect(Number(dragged.getAttribute('cy'))).toBeCloseTo(yForUnitValue(0.2), 6)
+    })
+
+    // ESCSUITE-88: refused at the press, so there is no drag state to draw and
+    // nothing to commit on release. A click still selects (see above).
+    it('starts no drag on a keyframe whose track is locked', () => {
+      const { container, onKeyframeMoved, onKeyframeValueChanged } =
+        renderGraph('opacity', { locked: true })
+      measureGraph(container)
+
+      fireEvent.mouseDown(points(container)[1])
+      fireEvent.mouseMove(window, { clientX: xForTime(3), clientY: yForUnitValue(0.2) })
+
+      expect(points(container)[1]).not.toHaveClass(styles.dragging)
+
+      fireEvent.mouseUp(window)
+
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
     })
 
     it('clamps a drag that leaves the plot area', () => {

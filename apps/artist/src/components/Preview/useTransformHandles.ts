@@ -180,6 +180,17 @@ export function useTransformHandles({
       const clip = clips.find(c => c.id === hit.clipId);
       if (!clip) return;
 
+      // A clip on a locked row can be picked, not moved (ESCSUITE-88). The
+      // selection still happens, so the inspector can show the clip and say why
+      // it is read-only; the gesture does not start at all — no undo entry owed,
+      // no drag state, and nothing bound to the window — because every write it
+      // would make is one the store refuses in silence. `getCursor` says the same
+      // thing before the press.
+      if (clipOnLockedTrack(clips, tracks, hit.clipId)) {
+        setSelectedClipId(hit.clipId);
+        return;
+      }
+
       // Check if we should use animated values (keyframe mode)
       const isKeyframeMode = keyframePanelOpen && clip.id === selectedClipId;
       const canvas = canvasRef.current;
@@ -221,7 +232,7 @@ export function useTransformHandles({
         setMarqueeCurrent(null);
       }
     }
-  }, [isPlaying, getCanvasPosition, hitTestHandles, clips, setSelectedClipId, sourceVideos, keyframePanelOpen, selectedClipId, currentTime, canvasRef, projectSize, gestureHistory]);
+  }, [isPlaying, getCanvasPosition, hitTestHandles, clips, tracks, setSelectedClipId, sourceVideos, keyframePanelOpen, selectedClipId, currentTime, canvasRef, projectSize, gestureHistory]);
 
   const handleMouseMove = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
     // Handle marquee drag
@@ -616,15 +627,27 @@ export function useTransformHandles({
     }
   }, [isPlaying, dragState, getCanvasPosition, clips, tracks, currentTime, sourceVideos, setSelectedClipId, canvasRef, setEditingTextClipId, projectSize]);
 
-  // Determine cursor based on hover state
+  // Determine cursor based on hover state.
+  //
+  // A clip on a locked row reads `not-allowed` (ESCSUITE-88): the cursor is the
+  // pointer's promise about what a press would start, and on a locked row a
+  // press starts nothing. The `dragState` branch asks too, defensively — a
+  // locked clip can no longer reach it, but a row locked *mid-gesture* can.
   const getCursor = useCallback((e: MouseEvent<HTMLCanvasElement>): string => {
     if (isPlaying) return 'default';
-    if (dragState) return getCursorForMode(dragState.mode);
+    if (dragState) {
+      return clipOnLockedTrack(clips, tracks, dragState.clipId)
+        ? 'not-allowed'
+        : getCursorForMode(dragState.mode);
+    }
 
     const pos = getCanvasPosition(e);
     const hit = hitTestHandles(pos.x, pos.y);
-    return hit ? getCursorForMode(hit.mode) : 'default';
-  }, [isPlaying, dragState, getCanvasPosition, hitTestHandles]);
+    if (!hit) return 'default';
+    return clipOnLockedTrack(clips, tracks, hit.clipId)
+      ? 'not-allowed'
+      : getCursorForMode(hit.mode);
+  }, [isPlaying, dragState, clips, tracks, getCanvasPosition, hitTestHandles]);
 
   const handleMouseMoveForCursor = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
     setCursor(getCursor(e));

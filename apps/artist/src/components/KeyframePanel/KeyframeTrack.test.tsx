@@ -14,7 +14,12 @@ function currentClip(): Clip {
 
 function renderTrack(
   property: AnimatableProperty,
-  overrides: { currentTime?: number; playheadTime?: number; isSelected?: boolean } = {}
+  overrides: {
+    currentTime?: number
+    playheadTime?: number
+    isSelected?: boolean
+    locked?: boolean
+  } = {}
 ) {
   const clip = currentClip()
   const onSelect = vi.fn()
@@ -32,6 +37,7 @@ function renderTrack(
       currentTime={overrides.currentTime ?? 0}
       playheadTime={overrides.playheadTime ?? 0}
       isSelected={overrides.isSelected ?? false}
+      locked={overrides.locked ?? false}
       onSelect={onSelect}
       onKeyframeMoved={onKeyframeMoved}
       onAddKeyframe={onAddKeyframe}
@@ -127,6 +133,15 @@ describe('KeyframeTrack', () => {
     expect(container.querySelector(`.${styles.track}`)).toHaveClass(styles.selected)
   })
 
+  it('adds no keyframe on a double-click while the track is locked', () => {
+    const { container, onAddKeyframe } = renderTrack('opacity', { locked: true })
+    const area = measureTrack(container)
+
+    fireEvent.doubleClick(area, { clientX: 200 })
+
+    expect(onAddKeyframe).not.toHaveBeenCalled()
+  })
+
   it('adds a keyframe at the double-clicked time', () => {
     const { container, onAddKeyframe } = renderTrack('opacity')
     const area = measureTrack(container)
@@ -208,6 +223,24 @@ describe('KeyframeTrack', () => {
       measureTrack(container)
 
       fireEvent.mouseDown(diamonds(container)[1], { clientX: 200 })
+      fireEvent.mouseUp(window)
+
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+    })
+
+    // ESCSUITE-88: the store would refuse the move, so the drag never starts —
+    // no drag state, no visual move, nothing reported to the panel.
+    it('will not drag a custom keyframe on a locked track', () => {
+      const { container, onKeyframeMoved } = renderTrack('opacity', { locked: true })
+      measureTrack(container)
+      const custom = diamonds(container)[1]
+      expect(custom).toHaveClass(styles.custom)
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 })
+
+      expect(diamonds(container)[1]).not.toHaveClass(styles.dragging)
+
       fireEvent.mouseUp(window)
 
       expect(onKeyframeMoved).not.toHaveBeenCalled()
