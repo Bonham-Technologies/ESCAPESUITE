@@ -248,6 +248,42 @@ describe('Toolbar', () => {
       expect(store().project.timeline.clips).toHaveLength(0)
     })
 
+    it('disables Delete while a selected clip sits on a locked track, and says why (ESCSUITE-91)', () => {
+      selectTwoClips()
+      const lockedTrack = store().project.timeline.clips[0].trackId
+      store().updateTrack(lockedTrack, { locked: true })
+      renderToolbar()
+
+      const del = screen.getByTitle('Track is locked')
+      expect(del).toBeDisabled()
+      expect(screen.queryByTitle(/Delete selected clips/)).not.toBeInTheDocument()
+      // Mute writes a track property, which the lock does not freeze.
+      expect(screen.getByTitle('Mute selected clips')).toBeEnabled()
+    })
+
+    it('still mutes the tracks of a selection that touches a locked track', async () => {
+      const user = userEvent.setup()
+      selectTwoClips()
+      store().updateTrack(store().project.timeline.clips[0].trackId, { locked: true })
+      renderToolbar()
+
+      await user.click(screen.getByTitle('Mute selected clips'))
+
+      expect(store().project.timeline.tracks.map((t) => t.muted)).toEqual([true, true])
+    })
+
+    it('enables Delete again once the track is unlocked', () => {
+      selectTwoClips()
+      const lockedTrack = store().project.timeline.clips[0].trackId
+      store().updateTrack(lockedTrack, { locked: true })
+      renderToolbar()
+      expect(screen.getByTitle('Track is locked')).toBeDisabled()
+
+      store().updateTrack(lockedTrack, { locked: false })
+
+      expect(screen.getByTitle(/Delete selected clips/)).toBeEnabled()
+    })
+
     it('clears the selection', async () => {
       const user = userEvent.setup()
       selectTwoClips()

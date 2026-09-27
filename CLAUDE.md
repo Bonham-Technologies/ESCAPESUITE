@@ -674,6 +674,14 @@ infinity into every handle rectangle — has a test of its own for exactly that 
 that arm would have been the branch's single new uncovered decision. The six branches still
 uncovered in `PreviewPlayer.tsx` all predate this ticket.
 
+`@escapesuite/artist` was re-measured 2026-09-27 at the end of ESCSUITE-91 (the toolbar's Delete
+greys out for a selection that touches a locked track): 99.41 / 98.76 / **94.01** / 99.01. The
+change adds one ternary — two branches — to `Toolbar.tsx`, both reached by the new locked and
+unlocked cases, so that file measures 37 / 37. The branch figure reads two hundredths *below* the
+94.03 the ESCSUITE-90 row recorded, and that is not this change: measured in one sitting, the merge
+base gives 4,225 / 4,494 and this branch 4,227 / 4,496 — both 94.01 — so the 94.03 was the
+previous run's arithmetic on a slightly different denominator, and the row is corrected to what two
+matched runs agree on. **No floor is crossed**; artist's floors stay 99 / 98 / 94 / 99.
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -681,7 +689,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.76 | 94.03 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.76 | 94.01 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
