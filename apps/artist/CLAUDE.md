@@ -554,6 +554,32 @@ Clips support animated properties via keyframes:
   moot in practice — the graph can neither be Tabbed to (the trap) nor clicked (`--z-panel` sits
   under `--z-modal`) while any of the five modals that use the hook is open. See "Dialogs" below.
 
+  **A locked track in the keyframe panel** (ESCSUITE-88). The store has refused every keyframe
+  edit to a clip on a locked row since ESCSUITE-84; the panel used to let the user try and say
+  nothing. `KeyframePanel` derives `trackLocked` with `store/trackLock.ts`'s `clipOnLockedTrack`
+  beside `selectedClip` — from the **whole-store read it already does**, so this adds no
+  subscription and deliberately uses no selector — and threads one `locked: boolean` down to
+  `KeyframeTrack`, `KeyframeGraph` and `useKeyframeGraphKeyboard`. The rule is **refuse at the
+  gesture's start, keep every read**: a plain `<p>` under the title bar (not a status region — it
+  is a standing fact about the selected clip, the same shape as `ClipEditorHeader`'s) reading
+  "Track locked — unlock it in the timeline to edit keyframes"; a diamond and a graph point refuse
+  at *mousedown*, because a drag that started would follow the pointer and snap back, which reads
+  as a bug; the double-click add on a track row and on the graph, and the right-click delete,
+  return early (the right-click still `preventDefault`s, so no browser menu appears over a
+  keyframe either way); the easing `<select>` is `disabled`. Clicking a row to open its graph,
+  clicking a point to select it, hovering, scrubbing the clip preview and reading the easing value
+  all still work. The keyboard keeps the whole propagation contract above — **which** keys are
+  claimed does not change, only what the claimed ones do: walking (the bare arrows, `Home`,
+  `End`), the selection that follows the active option, and `Escape` behave exactly as always,
+  while the five editing keys (`ArrowUp`/`ArrowDown`, `Alt+ArrowLeft`/`Alt+ArrowRight`, `Enter`,
+  `Delete`/`Backspace`) are still swallowed but call nothing and announce **"Track is locked"** —
+  the same words `useAppKeyboardShortcuts` toasts, so the lock sounds the same wherever the user
+  meets it. `Delete` also closed a gap ESCSUITE-87 left: `removeClipKeyframe` joined that ticket's
+  `=> boolean` contract, `KeyframePanel`'s `handleDeleteKeyframe` hands its answer back through
+  `onDeleteKeyframe`, and the hook only announces "deleted" and clears the active option and the
+  selection when the store actually removed the keyframe — the shape `nudgeValue` and `nudgeTime`
+  already had.
+
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
 `drawFrame` that consults the frame cache before delegating. Everything it used to do
@@ -579,7 +605,7 @@ Hooks:
 |------|------|
 | `usePreviewMedia.ts` | One object URL and one `<video>`/`<img>`/`<audio>` per source, reconciled as the timeline changes and released on unmount |
 | `usePreviewRenderLoop.ts` | When the canvas repaints: the rAF playback loop, seek-driven redraws, the debounced redraw after a media change; also the display-time publish/subscribe pair the timecode reads (below) |
-| `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports |
+| `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports. A press on a clip whose track is locked **selects it and starts nothing** (no `gestureHistory.begin()`, no drag state, no window listeners), and the cursor over it is `not-allowed` — ESCSUITE-88, see "A locked track is locked for every component" below |
 
 **The canvas backing store follows the size it is displayed at, not the project's.**
 `previewGeometry.previewRaster(project, box, devicePixelRatio)` computes it: the *contained*
@@ -1096,7 +1122,9 @@ take a trailing `skipHistory` (`shiftClipsAfter`, `updateClip`, `setClipTimeline
 `updateClipTransform`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`,
 `setClipKeyframe`, `moveClipKeyframe`, `updateTextOverlayData`, `updateShapeOverlayData`) plus
 `moveClipToTrack` — which takes no flag but is the *first* write of the clip drag's two-write
-commit — therefore return `boolean`: `true` when they wrote, `false` when the lock guard refused
+commit — therefore return `boolean` (ESCSUITE-88 added a thirteenth for the same reason at one
+remove: `removeClipKeyframe` threads no flag either, but the keyframe graph's `Delete`
+*announces* the removal, so it has to be able to tell a refusal from a write): `true` when they wrote, `false` when the lock guard refused
 (or, `shiftClipsAfter` alone, when the delta was zero and nothing moved). Their guard moves out
 of the `set` updater and in front of it, reading through `get()` the way `addTrack` already
 does, so the action can answer without writing; every updater body is otherwise unchanged, and
@@ -1137,7 +1165,7 @@ but one `if`/`else`: `if (movedTrack && !moveClipToTrack(...)) { }` — the row 
 a half-drop nobody aimed at, and one carrying `skipHistory` for an entry that was never pushed.
 The clip springs back, silently, like every other refused drop.
 
-Refusal is **silent** in the store, like every pointer veto. Four components read the lock to
+Refusal is **silent** in the store, like every pointer veto. Five components read the lock to
 say something anyway.
 
 The **inspector** disables each section's *contents*, never the panel. `useClipEditorActions`
@@ -1164,18 +1192,31 @@ as being disabled, and it is the one refusal enforced at the UI rather than in t
 `clearAllVideos()` deletes the blobs from IndexedDB *before* the per-source `removeSourceVideo`
 calls, so a store refusal afterwards would leave a locked clip pointing at bytes that are gone.
 
+The **keyframe panel** (ESCSUITE-88, see "Keyframe Panel" above): `KeyframePanel` derives
+`trackLocked` from the whole-store read it already does and threads `locked` down to
+`KeyframeTrack`, `KeyframeGraph` and `useKeyframeGraphKeyboard`. A plain `<p>` under the title
+bar — "Track locked — unlock it in the timeline to edit keyframes" — every pointer edit refused
+at mousedown rather than snapped back on release, the easing `<select>` disabled, and an edit key
+announcing "Track is locked" while every reading key still works.
+
 The **preview**: `useTransformHandles`' `handleDoubleClick` asks `clipOnLockedTrack` before
 opening the inline text editor — it already subscribes to both `clips` and `tracks`, so the
 question costs nothing — because the editor would otherwise open and then lose every keystroke
-to `updateTextOverlayData`'s refusal, silently.
+to `updateTextOverlayData`'s refusal, silently. Since ESCSUITE-88 `handleMouseDown` asks the same
+question: a press on a locked clip **selects** it (so the inspector can show it and say why it is
+read-only) and returns there — no `gestureHistory.begin()`, no drag state, nothing bound to the
+window — and `getCursor` reads `not-allowed` over it, in the hover branch and in the `dragState`
+branch, the latter for a row locked *mid-gesture*. Marquee selection on empty canvas is
+untouched.
 
 The **track header** (`TrackHeader.tsx`): the delete button is `disabled`,
 `title="Unlock the track to delete it"`. `useAppKeyboardShortcuts.ts` does the same on-demand
 read before its five editing branches — Delete/Backspace on a multi-selection, Delete/Backspace
 on a single clip, Ctrl+V, Ctrl+D and Ctrl+B — and toasts "Track is locked" instead of calling
-the action and letting the store swallow it silently. The stated limit: the keyframe panel and
-the toolbar's delete button raise no notice and rely on the store's refusal alone, showing
-nothing for a no-op edit — a visible keyframe-panel state is a follow-up, not this ticket.
+the action and letting the store swallow it silently. ESCSUITE-88 closed the limit this ticket
+stated: the keyframe panel and the preview's transform handles, which used to let the user try
+and show nothing, now both refuse at the gesture's start and say so (the two paragraphs above).
+The toolbar's delete button is what is left — it still relies on the store's refusal alone.
 
 The one documented exception is the colour swatches
 in `MaskSection` and `ShapeSection`: an OS picker reports continuously too, but it opens on the

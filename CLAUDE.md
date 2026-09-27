@@ -614,6 +614,17 @@ which is one statement exactly: `KeyframePanel`'s `handleKeyframeMoved` now guar
 that `return false` is unreachable while the panel renders (its sibling in
 `handleKeyframeValueChanged` has been uncovered for the same reason since it was written). Lines
 and functions unmoved, and **no floor crossed** either way.
+`@escapesuite/artist` was re-measured 2026-09-26 for ESCSUITE-88 (the keyframe panel and the
+preview's transform handles honouring a locked track): **99.41 / 98.74 / 93.99 / 99.01** — lines
+and functions unmoved, branches up a hundredth and statements *down* two hundredths, with **no
+floor crossed**, so artist's floors stay 99 / 98 / 93 / 99. The two statements are the arithmetic
+of the two surfaces being small: every branch the lock adds is reached from both sides by the new
+tests (`useKeyframeGraphKeyboard.ts` is 100% on all four metrics, the defensive `not-allowed` arm
+for a row locked *mid-gesture* has a test of its own), and the one new uncovered statement is
+`KeyframePanel`'s `handleDeleteKeyframe` guarding with `if (!selectedClipId) return false;` — the
+third sibling of a guard that is unreachable while the panel renders, `handleKeyframeMoved`'s and
+`handleKeyframeValueChanged`'s having been uncovered for the same reason since they were written.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -621,7 +632,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.49 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.76 | 93.97 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.74 | 93.99 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
