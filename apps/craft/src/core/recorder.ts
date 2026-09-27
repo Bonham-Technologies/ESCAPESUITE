@@ -213,6 +213,15 @@ export class Recorder {
    */
   stop(): void {
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      // Latch any open pause before handing off to the MediaRecorder: its
+      // stop() flips state to 'inactive' synchronously, and onstop fires
+      // before cleanup() reads getDuration() — so if state is 'paused' right
+      // now and this were left to getDuration()'s state check, that check
+      // would never see 'paused' again and the whole open pause would count
+      // as recorded time (ESCSUITE-105). Same math as resume().
+      if (this.mediaRecorder.state === 'paused') {
+        this.pausedDuration += Date.now() - this.pauseStartTime;
+      }
       this.mediaRecorder.stop();
     }
   }
