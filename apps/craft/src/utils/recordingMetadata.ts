@@ -24,8 +24,16 @@ import { companionPartFor } from './companionParts';
  * `saveRecording` with the blob, in `onStop`'s own closure. Every field is a
  * fact about *that* take rather than about the settings as they stand when it
  * ends, which is the whole point: the settings can move under a running take
- * (the panel is disabled, the store behind it is not), and a late `onStop` must
- * not be answered with the next take's configuration.
+ * (the sidebar is disabled for as long as the take is live, including while it
+ * saves — see `sidebarLocked` in `App.tsx`), and a late `onStop` must not be
+ * answered with the next take's configuration.
+ *
+ * `useRecordingSave` reads every one of these fields from here and none of
+ * them from live `config` (ESCSUITE-104): a save awaits a container repair, a
+ * metadata probe, a thumbnail decode and two IndexedDB writes, which is real
+ * time for the sidebar's disabled state to lapse in a future change, and a
+ * field read from `config` at that point would describe whatever the sidebar
+ * shows *then* rather than the take that is actually being saved.
  */
 export interface CapturedTake {
   /**
@@ -45,6 +53,25 @@ export interface CapturedTake {
    * (ESCSUITE-68).
    */
   separateTracks: boolean;
+  /**
+   * The System Audio toggle, as it stood when the take started — the *ask*,
+   * not the answer: whether the browser's own share dialog actually handed
+   * over a track is `systemAudioShared`, read at save time because it is the
+   * browser's own answer and not something resolved before the countdown
+   * (ESCSUITE-62). `resolveHasAudio` still takes both apart, unchanged; only
+   * where this half comes from moves (ESCSUITE-104).
+   */
+  systemAudioEnabled: boolean;
+  /** The webcam toggle, as it stood when the take started. */
+  webcamEnabled: boolean;
+  /**
+   * Where the webcam overlay sat while the take was recorded — the same
+   * values the compositor was built with, copied at the same moment
+   * (ESCSUITE-104). Read by the save path only for a companion take; carried
+   * unconditionally because it costs nothing to compute and a take that turns
+   * out not to need it never looks at it.
+   */
+  overlayPlacement: OverlayPlacement;
 }
 
 /**

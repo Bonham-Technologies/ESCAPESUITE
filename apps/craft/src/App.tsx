@@ -100,10 +100,12 @@ function App() {
     acquireStreams,
   } = useMediaStreams({ config, capabilities, setStreams });
 
+  // No `config`: every field the save path needs travels on the take itself
+  // (`CapturedTake`, resolved by the controller at start), never read live —
+  // see `apps/craft/CLAUDE.md`'s `useRecordingSave` row (ESCSUITE-104).
   const saveRecording = useRecordingSave({
     recorderTypeRef,
     capturedThumbnailRef,
-    config,
     setState,
     addRecording,
     setNotice,
@@ -189,6 +191,19 @@ function App() {
   };
 
   const isRecordingActive = state === 'recording' || state === 'paused' || state === 'countdown';
+  // The sidebar's own lock, wider than the button's: `isRecordingActive` also
+  // decides the transport bar's stop/cancel arm and label (ESCSUITE-106), and
+  // neither 'preparing' nor 'saving' is a state that button may claim to be
+  // able to stop or cancel — there is either no recorder yet or the take is
+  // already gone, with only the write to storage left. The Sources panel and
+  // the overlay settings have no such claim to protect: both feed a take
+  // whose settings are captured (`CapturedTake`, ESCSUITE-104) after
+  // `acquireStreams()` resolves, mid-'preparing', so a toggle flipped before
+  // that snapshot is taken would otherwise look live for a take it will never
+  // describe. They stay disabled for as long as the take is live — from the
+  // moment it starts preparing until the write to storage is done — not just
+  // while it is actively recording.
+  const sidebarLocked = isRecordingActive || state === 'preparing' || state === 'saving';
 
   return (
     <div className={styles.app}>
@@ -201,7 +216,8 @@ function App() {
         <aside className={styles.sidebar}>
           {/* Sources */}
           <SourceTogglesPanel
-            isRecordingActive={isRecordingActive}
+            disabled={sidebarLocked}
+            showMeters={isRecordingActive}
             onToggleSource={toggleSource}
           />
 
@@ -210,7 +226,7 @@ function App() {
           {config.screenEnabled && config.webcamEnabled && (
             <WebcamOverlaySettingsPanel
               config={config}
-              disabled={isRecordingActive}
+              disabled={sidebarLocked}
               onChange={setConfig}
             />
           )}

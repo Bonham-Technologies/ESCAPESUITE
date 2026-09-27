@@ -33,6 +33,19 @@ import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
 // changed, the agreement table below would change with it.
 import { resolveHasAudio, type CapturedTake } from '../utils/recordingMetadata'
 
+/**
+ * What `captured` carries beyond `micAcquired`/`separateTracks` for a take
+ * started from `defaultConfig` (ESCSUITE-104): System Audio and the webcam
+ * both off, and the overlay geometry nobody moved. Spread into a `toEqual`
+ * alongside the two audio fields a test actually varies, rather than repeated
+ * at every call site.
+ */
+const CAPTURED_DEFAULTS = {
+  systemAudioEnabled: false,
+  webcamEnabled: false,
+  overlayPlacement: { position: 'bottom-right' as const, size: 0.2, shape: 'circle' as const },
+}
+
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
 
@@ -555,7 +568,7 @@ describe('useRecordingController running a take', () => {
     // The MediaRecorder path calls onStop with the blob alone, so the save gets
     // no companion argument at all — which it reads as a single-part take.
     expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 9, undefined, {
-      micAcquired: false, separateTracks: false,
+      micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS,
     })
     expect(useRecorderStore.getState().currentDuration).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
@@ -600,7 +613,7 @@ describe('useRecordingController stopping a take', () => {
     expect(recorder.stop).toHaveBeenCalledTimes(1)
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Completed', { duration: 8 })
     expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 8, null, {
-      micAcquired: false, separateTracks: false,
+      micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS,
     })
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
     expect(useRecorderStore.getState().currentDuration).toBe(0)
@@ -696,7 +709,7 @@ describe('useRecordingController stopping a take', () => {
     await act(async () => { await result.current.handleStopRecording() })
 
     expect(harness.saveRecording).toHaveBeenCalledWith(recorder.stopBlob, 42, null, {
-      micAcquired: false, separateTracks: false,
+      micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS,
     })
   })
 
@@ -847,7 +860,7 @@ describe('useRecordingController what the take captured', () => {
   it('says a microphone was captured when one really was acquired', async () => {
     expect(
       await capturedAudioOf({ microphoneEnabled: true }, { mic: micStreamWithTrack() })
-    ).toEqual({ micAcquired: true, separateTracks: false })
+    ).toEqual({ micAcquired: true, separateTracks: false, ...CAPTURED_DEFAULTS })
   })
 
   // The toggle is on and the machine has no microphone, so `acquireStreams`
@@ -855,7 +868,7 @@ describe('useRecordingController what the take captured', () => {
   // recording must not claim it did.
   it('says none when the microphone the toggle asked for never arrived', async () => {
     expect(await capturedAudioOf({ microphoneEnabled: true }, { mic: null })).toEqual({
-      micAcquired: false, separateTracks: false,
+      micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS,
     })
   })
 
@@ -865,13 +878,13 @@ describe('useRecordingController what the take captured', () => {
   it('says none for a microphone stream with no track in it', async () => {
     expect(
       await capturedAudioOf({ microphoneEnabled: true }, { mic: createStreamDouble([]) })
-    ).toEqual({ micAcquired: false, separateTracks: false })
+    ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
   })
 
   it('says none when the microphone was never asked for', async () => {
     expect(
       await capturedAudioOf({ microphoneEnabled: false }, { mic: micStreamWithTrack() })
-    ).toEqual({ micAcquired: false, separateTracks: false })
+    ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
   })
 })
 
@@ -962,7 +975,7 @@ describe('a separate-tracks take', () => {
       recorder.stopBlob,
       expect.any(Number),
       recorder.companionParts,
-      { micAcquired: false, separateTracks: true }
+      { micAcquired: false, separateTracks: true, ...CAPTURED_DEFAULTS, webcamEnabled: true }
     )
   })
 
@@ -996,16 +1009,21 @@ describe('a separate-tracks take', () => {
       recorder.stopBlob,
       expect.any(Number),
       null,
-      { micAcquired: false, separateTracks: true }
+      { micAcquired: false, separateTracks: true, ...CAPTURED_DEFAULTS, webcamEnabled: true }
     )
   })
 
-  // ESCSUITE-68. The mode is resolved once, before the countdown, and handed to
-  // everything that has to agree about it — including the save path, which
-  // could previously only *infer* it, from the companions that happened to
-  // arrive. This pins the fact travelling: the settings panel is disabled
-  // mid-take, but the store behind it is not, and the take must be saved the
-  // way it was started rather than the way the sidebar reads when it ends.
+  // ESCSUITE-68 / ESCSUITE-104. The mode — and, since ESCSUITE-104, System
+  // Audio, the webcam toggle and the overlay geometry — is resolved once,
+  // before the countdown, and handed to everything that has to agree about it:
+  // the save path could previously only *infer* the mode, from the companions
+  // that happened to arrive, and read the other three straight off live
+  // `config`. This pins the fact travelling: the settings panels are disabled
+  // for as long as the take is live, but the store behind them is not, and the
+  // take must be saved the way it was started rather than the way the sidebar
+  // reads when it ends — or the way it reads later still, while the save is
+  // awaiting its container repair, its metadata probe, its thumbnail decode
+  // and its two IndexedDB writes.
   it('saves the take as it was started when the mode is switched off mid-take', async () => {
     harness = separateHarness({ countdownSeconds: 0 })
     const { result, rerender } = renderHook(() => useRecordingController(harness.deps))
@@ -1013,10 +1031,18 @@ describe('a separate-tracks take', () => {
     const recorder = recorderFactory.last()
     expect(recorder.separateTracks).toBe(true)
 
-    // The take is running and the setting moves under it.
+    // The take is running and every one of the four settings moves under it.
     harness.deps = {
       ...harness.deps,
-      config: { ...harness.deps.config, separateTracks: false },
+      config: {
+        ...harness.deps.config,
+        separateTracks: false,
+        systemAudioEnabled: true,
+        webcamEnabled: false,
+        webcamPosition: 'top-left',
+        webcamSize: 0.4,
+        webcamShape: 'rectangle',
+      },
     }
     rerender()
 
@@ -1026,7 +1052,9 @@ describe('a separate-tracks take', () => {
       recorder.stopBlob,
       expect.any(Number),
       null,
-      { micAcquired: false, separateTracks: true }
+      // Every field is the take's own, from before the setting moved — none of
+      // the four mutations above show up here.
+      { micAcquired: false, separateTracks: true, ...CAPTURED_DEFAULTS, webcamEnabled: true }
     )
   })
 

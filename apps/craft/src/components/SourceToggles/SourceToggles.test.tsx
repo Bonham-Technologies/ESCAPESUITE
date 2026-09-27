@@ -43,7 +43,16 @@ interface Options {
   capabilities?: Partial<EnvironmentCapabilities>
   detailedCapabilities?: Partial<DetailedCapabilities>
   audioLevels?: AudioLevels
-  isRecordingActive?: boolean
+  disabled?: boolean
+  /**
+   * Kept apart from `disabled` (ESCSUITE-104 review): `disabled` is now true
+   * while a take is saving too, and the meters must not sit on screen —
+   * frozen at their last level — for that whole window. Defaults to `false`,
+   * same as `disabled`, so a case that does not mention it renders idle on
+   * both counts; a "mid-take" case says so explicitly rather than inheriting
+   * it from `disabled`.
+   */
+  showMeters?: boolean
   systemAudioShared?: boolean
 }
 
@@ -55,7 +64,8 @@ function renderToggles(options: Options = {}) {
       capabilities={{ ...allCapabilities(), ...options.capabilities }}
       detailedCapabilities={{ ...allDetailed(), ...options.detailedCapabilities }}
       audioLevels={options.audioLevels ?? { microphone: 0, system: 0 }}
-      isRecordingActive={options.isRecordingActive ?? false}
+      disabled={options.disabled ?? false}
+      showMeters={options.showMeters ?? false}
       systemAudioShared={options.systemAudioShared ?? true}
       onToggleSource={onToggleSource}
     />
@@ -117,7 +127,7 @@ describe('SourceToggles availability', () => {
   })
 
   it.each(rows)('%s is disabled mid-take even though it is available', (label) => {
-    renderToggles({ isRecordingActive: true })
+    renderToggles({ disabled: true })
     expect(toggle(label)).toBeDisabled()
   })
 
@@ -173,7 +183,8 @@ describe('SourceToggles audio meters', () => {
   it('hides the meters while idle, even with both audio sources on', () => {
     const { container } = renderToggles({
       config: { microphoneEnabled: true, systemAudioEnabled: true },
-      isRecordingActive: false,
+      disabled: false,
+      showMeters: false,
     })
 
     expect(fills(container)).toHaveLength(0)
@@ -182,7 +193,8 @@ describe('SourceToggles audio meters', () => {
   it('hides the meters mid-take when no audio source is on', () => {
     const { container } = renderToggles({
       config: { microphoneEnabled: false, systemAudioEnabled: false },
-      isRecordingActive: true,
+      disabled: true,
+      showMeters: true,
     })
 
     expect(fills(container)).toHaveLength(0)
@@ -191,7 +203,8 @@ describe('SourceToggles audio meters', () => {
   it('shows only the mic meter when only the mic is on', () => {
     const { container } = renderToggles({
       config: { microphoneEnabled: true, systemAudioEnabled: false },
-      isRecordingActive: true,
+      disabled: true,
+      showMeters: true,
       audioLevels: { microphone: 0.42, system: 0.9 },
     })
 
@@ -204,7 +217,8 @@ describe('SourceToggles audio meters', () => {
   it('shows only the system meter when only system audio is on', () => {
     const { container } = renderToggles({
       config: { microphoneEnabled: false, systemAudioEnabled: true },
-      isRecordingActive: true,
+      disabled: true,
+      showMeters: true,
       audioLevels: { microphone: 0.9, system: 0.25 },
     })
 
@@ -217,7 +231,8 @@ describe('SourceToggles audio meters', () => {
   it('shows both meters, each at its own level', () => {
     const { container } = renderToggles({
       config: { microphoneEnabled: true, systemAudioEnabled: true },
-      isRecordingActive: true,
+      disabled: true,
+      showMeters: true,
       audioLevels: { microphone: 0.1, system: 1 },
     })
 
@@ -225,13 +240,32 @@ describe('SourceToggles audio meters', () => {
     expect(mic).toHaveStyle({ width: '10%' })
     expect(system).toHaveStyle({ width: '100%' })
   })
+
+  // ESCSUITE-104 review. `disabled` covers a take that is being saved as well
+  // as one still recording, but the meters draw *live* levels the store never
+  // resets between takes — leaving them on screen through the whole save
+  // would show the last level the finished take pushed, for a take that no
+  // longer exists to meter. `showMeters` is `App`'s narrower
+  // `isRecordingActive`, so it drops the instant recording stops while
+  // `disabled` is still keeping the toggles frozen underneath.
+  it('hides the meters once a take is saving, even though the toggles stay disabled', () => {
+    const { container } = renderToggles({
+      config: { microphoneEnabled: true, systemAudioEnabled: true },
+      disabled: true,
+      showMeters: false,
+      audioLevels: { microphone: 0.5, system: 0.5 },
+    })
+
+    expect(fills(container)).toHaveLength(0)
+  })
 })
 
 describe('SourceToggles system audio that never arrived', () => {
   it('greys the System meter and says why when the browser shared no audio', () => {
     const { container } = renderToggles({
       config: { systemAudioEnabled: true },
-      isRecordingActive: true,
+      disabled: true,
+      showMeters: true,
       systemAudioShared: false,
     })
 
@@ -249,7 +283,8 @@ describe('SourceToggles system audio that never arrived', () => {
   it('leaves the System meter alone when the audio did arrive', () => {
     renderToggles({
       config: { systemAudioEnabled: true },
-      isRecordingActive: true,
+      disabled: true,
+      showMeters: true,
       systemAudioShared: true,
     })
 

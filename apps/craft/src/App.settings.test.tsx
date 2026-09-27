@@ -160,6 +160,26 @@ describe('App capability detection', () => {
       expect(toggle(label)).toBeDisabled();
     }
   });
+
+  // ESCSUITE-104. `isRecordingActive` (which also arms the transport bar's
+  // stop/cancel button, ESCSUITE-106) does not cover 'saving' — the take has
+  // already stopped, only the write to storage remains — so the sidebar needs
+  // its own, wider lock (`sidebarLocked` in `App.tsx`) to stay disabled for as
+  // long as that write is still happening. Before this, a source ticked here
+  // during "Saving…" changed nothing about the take being saved (the config
+  // moved, but `useRecordingSave` already reads only from the take's own
+  // `CapturedTake`) — it just looked like it might, which is the bug: a
+  // control that appears live but is not.
+  it('locks the source toggles while the just-finished take is still saving', async () => {
+    await renderApp();
+    act(() => {
+      useRecorderStore.getState().setState('saving');
+    });
+
+    for (const label of ['Screen', 'Webcam', 'Microphone', 'System Audio']) {
+      expect(toggle(label)).toBeDisabled();
+    }
+  });
 });
 
 describe('App source toggles', () => {
@@ -235,6 +255,22 @@ describe('App webcam overlay settings', () => {
     await renderWithOverlay();
     act(() => {
       useRecorderStore.getState().setState('countdown');
+    });
+
+    expect(screen.getByRole('button', { name: 'top left' })).toBeDisabled();
+    expect(screen.getByLabelText('Webcam overlay size')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'circle' })).toBeDisabled();
+  });
+
+  // ESCSUITE-104. A companion take's stored placement is `captured` at start
+  // and is not re-read from `config` at save time, but the panel used to claim
+  // otherwise was disabled only up to 'saving' — moving the corner or the
+  // shape here while "Saving…" is on screen looked like it might still change
+  // what gets written for the take already stopped.
+  it('freezes the overlay controls while the just-finished take is still saving', async () => {
+    await renderWithOverlay();
+    act(() => {
+      useRecorderStore.getState().setState('saving');
     });
 
     expect(screen.getByRole('button', { name: 'top left' })).toBeDisabled();

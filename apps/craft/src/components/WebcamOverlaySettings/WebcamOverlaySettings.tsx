@@ -24,7 +24,12 @@ export const SEPARATE_TRACKS_HELP_ID = 'separate-tracks-help';
 
 interface WebcamOverlaySettingsProps {
   config: RecordingConfig;
-  /** True while a take is in progress — the overlay is baked in by then. */
+  /**
+   * True while a take is in progress and while it is being saved — the
+   * overlay is baked in from the moment recording starts, and the stored
+   * placement must not move while the write it is bound for is still
+   * happening (ESCSUITE-104).
+   */
   disabled: boolean;
   /**
    * Why the webcam cannot be recorded as its own track, or null when it can.

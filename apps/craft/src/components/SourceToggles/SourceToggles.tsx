@@ -28,8 +28,22 @@ interface SourceTogglesProps {
   detailedCapabilities: DetailedCapabilities;
   /** Live mic / system levels, 0–1; only drawn during a take. */
   audioLevels: AudioLevels;
-  /** True for countdown, recording and paused — sources are frozen mid-take. */
-  isRecordingActive: boolean;
+  /**
+   * True for preparing, countdown, recording and paused, and while the take that just
+   * finished is still being saved — sources are frozen for as long as the
+   * take is live, not just while it is actively recording (ESCSUITE-104).
+   */
+  disabled: boolean;
+  /**
+   * True only for countdown, recording and paused — `App`'s own
+   * `isRecordingActive`, not the wider `disabled` above. Kept apart from
+   * `disabled` on purpose (ESCSUITE-104 review): the meters draw *live*
+   * levels, and the store never resets them between takes, so gating the
+   * meter block on `disabled` would leave it on screen — frozen at the last
+   * level pushed — for the whole time a just-finished take is saving, when
+   * there is no take left to meter.
+   */
+  showMeters: boolean;
   /**
    * Whether the running take actually got a system-audio track. False greys
    * the System meter: the toggle asked for the audio, the share dialog did not
@@ -59,7 +73,8 @@ export function SourceToggles({
   capabilities,
   detailedCapabilities,
   audioLevels,
-  isRecordingActive,
+  disabled,
+  showMeters,
   systemAudioShared,
   onToggleSource,
 }: SourceTogglesProps) {
@@ -81,7 +96,7 @@ export function SourceToggles({
           <button
             className={`${styles.toggle} ${config.screenEnabled ? styles.active : ''}`}
             onClick={() => onToggleSource('screen')}
-            disabled={!capabilities.screenCapture || isRecordingActive}
+            disabled={!capabilities.screenCapture || disabled}
             aria-pressed={config.screenEnabled}
             aria-label="Screen"
           >
@@ -103,7 +118,7 @@ export function SourceToggles({
           <button
             className={`${styles.toggle} ${config.webcamEnabled ? styles.active : ''}`}
             onClick={() => onToggleSource('webcam')}
-            disabled={!capabilities.webcam || isRecordingActive}
+            disabled={!capabilities.webcam || disabled}
             aria-pressed={config.webcamEnabled}
             aria-label="Webcam"
           >
@@ -125,7 +140,7 @@ export function SourceToggles({
           <button
             className={`${styles.toggle} ${config.microphoneEnabled ? styles.active : ''}`}
             onClick={() => onToggleSource('microphone')}
-            disabled={!capabilities.microphone || isRecordingActive}
+            disabled={!capabilities.microphone || disabled}
             aria-pressed={config.microphoneEnabled}
             aria-label="Microphone"
           >
@@ -147,7 +162,7 @@ export function SourceToggles({
           <button
             className={`${styles.toggle} ${config.systemAudioEnabled ? styles.active : ''}`}
             onClick={() => onToggleSource('systemAudio')}
-            disabled={!capabilities.systemAudio || isRecordingActive}
+            disabled={!capabilities.systemAudio || disabled}
             aria-pressed={config.systemAudioEnabled}
             aria-label="System Audio"
           >
@@ -157,7 +172,7 @@ export function SourceToggles({
       </div>
 
       {/* Audio meters */}
-      {(config.microphoneEnabled || config.systemAudioEnabled) && isRecordingActive && (
+      {(config.microphoneEnabled || config.systemAudioEnabled) && showMeters && (
         <div className={styles.audioMeters}>
           {config.microphoneEnabled && (
             <div className={styles.audioMeter}>
