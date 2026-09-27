@@ -270,7 +270,14 @@ export function generateShareUrl(
  *
  * Incoming messages (from parent):
  * - LOAD_VIDEO: { url: string } - Load a video from URL
- * - LOAD_PROJECT: { data: Project } - Load a project
+ * - LOAD_PROJECT: Project - Load a project. The payload IS the project object
+ *   (not wrapped in a `data` field). Since ESCSUITE-102 it is validated the
+ *   same way a dropped .veditor file is (`parseProject` in
+ *   store/projectMigration.ts: timeline is an object, clips is an array,
+ *   clip ids are unique, every clip's trackId names a track that exists once
+ *   migration has run) before it replaces anything; a payload that fails gets
+ *   an ERROR reply instead of being applied, and the current project is left
+ *   exactly as it was.
  * - EXPORT: { format: 'webm' | 'mp4' } - Trigger export
  *   [documented but not currently implemented - App has no handler for it]
  * - GET_STATE: {} - Request current state
@@ -289,7 +296,11 @@ export function generateShareUrl(
  * - PROJECT_SAVED: {} - Project was saved
  *   [documented but not currently implemented - nothing sends it]
  * - STATE: { project: Project, videos: SourceVideo[] } - Current state
- * - ERROR: { message: string, code: string } - Error occurred
+ * - ERROR: { message: string, code: string } - Error occurred. A failed
+ *   LOAD_PROJECT answers with { message: string, context: 'LOAD_PROJECT' }
+ *   instead of a `code` — there is no fixed set of error codes for a
+ *   validation reason, so the field names which inbound message the reply is
+ *   about rather than classifying the failure.
  * - THEME_CHANGED: { preference: string, resolved: string } - Theme was changed
  * - THEME_STATE: { preference: string, resolved: string } - Current theme state
  *

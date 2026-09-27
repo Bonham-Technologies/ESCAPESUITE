@@ -19,6 +19,7 @@ import { useCallback, useState } from 'react';
 import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
 import { clearSessionState } from '../core/storage';
 import { analytics } from '../utils/analytics';
+import { parseProject } from '../store/projectMigration';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -99,9 +100,18 @@ export function useProjectActions({
     try {
       const { project: loadedProject, sourceVideos: loadedVideos } = await loadProject(file);
 
+      // Validate (and migrate) before touching anything: ensureTimelineHasTracks
+      // assumes a shape a malformed .veditor does not have, and used to throw
+      // *after* resetProject() had already emptied the editor (ESCSUITE-102).
+      const parsed = parseProject(loadedProject);
+      if (!parsed.ok) {
+        showNotification(`Failed to load project: ${parsed.reason}`, 'error');
+        return;
+      }
+
       // Reset current state and load new project
       resetProject();
-      setProject(loadedProject);
+      setProject(parsed.project);
       loadedVideos.forEach(addSourceVideo);
 
       showNotification('Project loaded successfully', 'success');
