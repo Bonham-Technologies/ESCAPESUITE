@@ -12,6 +12,7 @@ import { useRecordingLibrary } from './useRecordingLibrary'
 import { storeVideo, getVideoBlob, deleteVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { analyticsModule, sendToEditorModule, resetAppDoubles } from '../test/appDoubles'
+import { DELETE_FAILED } from '../utils/notices'
 import type { Recording, SourceVideo } from '../store/types'
 
 vi.mock('../utils/sendToEditor', async () => (await import('../test/appDoubles')).sendToEditorModule)
@@ -26,6 +27,7 @@ vi.mock('../core/storage', async () => {
 
 let removeRecording: ReturnType<typeof vi.fn<(id: string) => void>>
 let refreshStorageSpace: ReturnType<typeof vi.fn>
+let setNotice: ReturnType<typeof vi.fn<(notice: string | null) => void>>
 let clicks: Array<{ href: string; download: string }>
 let removed: string[]
 
@@ -63,6 +65,7 @@ beforeEach(async () => {
   removed = []
   removeRecording = vi.fn<(id: string) => void>((id) => { removed.push(id) })
   refreshStorageSpace = vi.fn(async () => {})
+  setNotice = vi.fn<(notice: string | null) => void>()
   clicks = []
   vi.mocked(URL.createObjectURL).mockClear()
   vi.mocked(URL.revokeObjectURL).mockClear()
@@ -83,6 +86,7 @@ function mountLibrary(recordings: Recording[] = []) {
       recordings,
       removeRecording,
       refreshStorageSpace: refreshStorageSpace as unknown as () => Promise<void>,
+      setNotice,
     })
   )
 }
@@ -253,17 +257,19 @@ describe('useRecordingLibrary list actions', () => {
     expect(sendToEditorModule.sendToEditor).toHaveBeenCalledWith('take-1')
   })
 
-  it('deletes a take with its webcam companion', async () => {
+  it('deletes a take with its webcam companion, the companion first', async () => {
     const primary = recording('take-1', 'Standup Demo')
     const companion = { ...recording('part-2', 'Standup Demo — webcam'), takeId: 'take-1', role: 'webcam' as const }
     const { result } = mountLibrary([{ ...primary, takeId: 'take-1', role: 'screen' as const }, companion])
 
     await act(async () => { await result.current.handleDeleteRecording('take-1') })
 
-    // One take is one thing to delete. A companion left behind would be a
-    // webcam file with no take, taking room the user thought they freed.
-    expect(vi.mocked(deleteVideo).mock.calls.map(([id]) => id)).toEqual(['take-1', 'part-2'])
-    expect(removed).toEqual(['take-1', 'part-2'])
+    // Companions go first and the primary last (ESCSUITE-103): the other order
+    // could leave a primary-less companion behind if the second delete threw —
+    // a webcam file with no take, taking room the user thought they freed.
+    expect(vi.mocked(deleteVideo).mock.calls.map(([id]) => id)).toEqual(['part-2', 'take-1'])
+    expect(removed).toEqual(['part-2', 'take-1'])
+    expect(setNotice).not.toHaveBeenCalled()
   })
 
   it('leaves the primary alone when the companion is deleted', async () => {
@@ -276,5 +282,53 @@ describe('useRecordingLibrary list actions', () => {
     // renders as a plain take, so no stored metadata is rewritten.
     expect(vi.mocked(deleteVideo).mock.calls.map(([id]) => id)).toEqual(['part-2'])
     expect(removed).toEqual(['part-2'])
+  })
+
+  it('deletes the remaining companions and the primary when one companion fails, and says so once', async () => {
+    // ESCSUITE-103. A `deleteVideo` that throws mid-cascade used to leave
+    // whatever came after it undeleted and the rejection unhandled at this
+    // call site. One throw now costs one file — the rest of the cascade still
+    // runs — and is worth exactly one notice, not a silent gap in the library.
+    const primary = recording('take-1', 'Standup Demo')
+    const webcam = { ...recording('part-2', 'Standup Demo — webcam'), takeId: 'take-1', role: 'webcam' as const }
+    const mic = { ...recording('part-3', 'Standup Demo — mic'), takeId: 'take-1', role: 'mic' as const }
+    const { result } = mountLibrary([
+      { ...primary, takeId: 'take-1', role: 'screen' as const },
+      webcam,
+      mic,
+    ])
+    vi.mocked(deleteVideo).mockImplementationOnce(async () => {
+      throw new Error('IndexedDB is blocked')
+    })
+
+    await act(async () => { await result.current.handleDeleteRecording('take-1') })
+
+    // The failing delete is the first one called (the webcam companion); the
+    // microphone companion and the primary are still attempted and still
+    // removed from the list.
+    expect(vi.mocked(deleteVideo).mock.calls.map(([id]) => id)).toEqual(['part-2', 'part-3', 'take-1'])
+    expect(removed).toEqual(['part-3', 'take-1'])
+    expect(setNotice).toHaveBeenCalledTimes(1)
+    expect(setNotice).toHaveBeenCalledWith(DELETE_FAILED)
+    // The remedy is still re-measured — a failed delete may still have freed
+    // some space.
+    expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
+  })
+
+  it('says so once when the primary itself cannot be deleted', async () => {
+    // The primary's own delete is a separate try/catch from the companions'
+    // loop — a take with no companions at all still has to raise the notice
+    // rather than let the rejection go unhandled.
+    const { result } = mountLibrary([listed('take-1', 'Standup Demo', 10)])
+    vi.mocked(deleteVideo).mockImplementationOnce(async () => {
+      throw new Error('IndexedDB is blocked')
+    })
+
+    await act(async () => { await result.current.handleDeleteRecording('take-1') })
+
+    expect(removed).toEqual([])
+    expect(setNotice).toHaveBeenCalledTimes(1)
+    expect(setNotice).toHaveBeenCalledWith(DELETE_FAILED)
+    expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
   })
 })

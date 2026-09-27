@@ -15,7 +15,7 @@ import {
 } from './useMp4Download'
 import type { ConversionFormat } from './useMp4Download'
 import { MP4_SAVED_WITHOUT_AUDIO, MP4_SAVED_WITHOUT_WEBCAM } from '../utils/notices'
-import { storeVideo, getDB } from '../core/storage'
+import { storeVideo, getDB, deleteVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { preserveBlobsInStorage } from '../test/blobStorage'
 import {
@@ -385,6 +385,40 @@ describe('useMp4Download cancellation', () => {
     expect(conversion.signal?.aborted).toBe(true)
     await flushMicrotasks()
     expect(clicks).toEqual([])
+    expect(setNotice).not.toHaveBeenCalled()
+  })
+})
+
+describe('useMp4Download and a recording deleted mid-conversion', () => {
+  it('downloads nothing when the recording is gone by the time the conversion finishes', async () => {
+    // ESCSUITE-103. Deleting a recording aborts its conversion (see
+    // `RecordingsListPanel`), but that goes through the same signal the
+    // "finishes after being cancelled" test above shows the converter can
+    // ignore — so a delete that races a conversion honestly finishing must not
+    // hand back a file named after a recording that is no longer there. This
+    // is the guard that does not depend on the signal at all: the stored
+    // record itself is gone, and a cheap re-read says so.
+    await seed('take-1', 'Take One')
+    const conversion = deferConversion()
+    const { result } = renderMp4Download()
+
+    act(() => {
+      void result.current.startMp4Download('take-1', 'Take One')
+    })
+    await act(async () => {
+      await conversion.started
+    })
+
+    await deleteVideo('take-1')
+
+    // The conversion itself was never cancelled — it finishes normally.
+    await act(async () => {
+      conversion.settle(new Blob(['mp4-bytes'], { type: 'video/mp4' }))
+    })
+    await waitFor(() => expect(result.current.converting).toBeNull())
+
+    expect(clicks).toEqual([])
+    expect(analyticsModule.track).not.toHaveBeenCalledWith('Recording Downloaded', undefined)
     expect(setNotice).not.toHaveBeenCalled()
   })
 })
