@@ -147,15 +147,28 @@ export function useTransformHandles({
   const throttledTransformUpdate = useThrottledDragUpdate<{ id: string; transform: Partial<ClipTransform> }>();
 
   // Get mouse position relative to canvas in normalized coordinates (0-1)
-  // Accepts any MouseEvent (canvas or window) so dragging works outside the canvas
+  // Accepts any MouseEvent (canvas or window) so dragging works outside the canvas.
+  //
+  // `scale` comes out with the point: CSS pixels per project pixel, measured off
+  // the same rect this call already read. Its inverse is what the handle hit
+  // test needs (ESCSUITE-90), and taking it from here is what keeps a pointer
+  // move to one forced layout instead of two.
   const getCanvasPosition = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+    if (!canvas) return { x: 0, y: 0, scale: 1 };
     return geometry.getCanvasPosition(canvas, e, projectSize);
   }, [canvasRef, projectSize]);
 
-  // Hit test: find what's at the given position (handles take priority over overlay bodies)
-  const hitTestHandles = useCallback((normalizedX: number, normalizedY: number) => {
+  // Hit test: find what's at the given position (handles take priority over
+  // overlay bodies). `screenScale` is project pixels per CSS pixel — the chrome
+  // is drawn at a constant size on screen, so its hit zones are that size in
+  // project pixels (ESCSUITE-90); it is `1 / pos.scale` from the position the
+  // caller has already measured.
+  const hitTestHandles = useCallback((
+    normalizedX: number,
+    normalizedY: number,
+    screenScale: number
+  ) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     return hitTest.hitTestHandles(normalizedX, normalizedY, canvas, {
@@ -165,7 +178,7 @@ export function useTransformHandles({
       currentTime,
       selectedClipId,
       keyframePanelOpen,
-    }, projectSize);
+    }, projectSize, screenScale);
   }, [canvasRef, clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen, projectSize]);
 
   // Mouse event handlers for drag-and-drop
@@ -173,7 +186,7 @@ export function useTransformHandles({
     if (isPlaying) return; // Don't allow dragging during playback
 
     const pos = getCanvasPosition(e);
-    const hit = hitTestHandles(pos.x, pos.y);
+    const hit = hitTestHandles(pos.x, pos.y, 1 / pos.scale);
 
     if (hit) {
       e.preventDefault();
@@ -642,7 +655,7 @@ export function useTransformHandles({
     }
 
     const pos = getCanvasPosition(e);
-    const hit = hitTestHandles(pos.x, pos.y);
+    const hit = hitTestHandles(pos.x, pos.y, 1 / pos.scale);
     if (!hit) return 'default';
     return clipOnLockedTrack(clips, tracks, hit.clipId)
       ? 'not-allowed'

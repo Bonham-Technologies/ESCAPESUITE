@@ -10,7 +10,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getFrameCache } from '../../core/frameCache';
 import { drawPreviewFrame } from './drawFrame';
-import { previewRaster, projectSizeOf } from './previewGeometry';
+import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
 import { usePreviewMedia } from './usePreviewMedia';
 import { usePreviewRenderLoop } from './usePreviewRenderLoop';
@@ -175,6 +175,28 @@ export function PreviewPlayer() {
   }, [canvasDimensions, clips, tracks, sourceVideos, editingTextClipId,
       videoElementsRef, imageElementsRef]);
 
+  /**
+   * Project pixels per CSS pixel of the box the canvas is laid out in.
+   *
+   * The chrome the two callbacks below draw is the one thing on the canvas that
+   * is a *screen* size rather than a part of the picture: a handle should be the
+   * same 8px under the pointer whatever the project's resolution, which in the
+   * project space everything here draws in means 8 times this number
+   * (ESCSUITE-90). Derived at draw time rather than held in state — it is a
+   * function of two things the component already has, and the box is a ref
+   * precisely so a resize does not re-render the subtree.
+   *
+   * `contentBox` is pure arithmetic over the rect it is handed, so this reads no
+   * layout: the box comes from the ResizeObserver below. Before that observer's
+   * first callback there is no box, and 1 is what the preview always drew.
+   */
+  const handleScreenScale = useCallback((canvas: HTMLCanvasElement) => {
+    const box = displayBoxRef.current;
+    if (!box) return 1;
+    const { scaleX } = contentBox(canvas, box, canvasDimensions);
+    return scaleX > 0 ? 1 / scaleX : 1;
+  }, [canvasDimensions]);
+
   // Draw selection handles for the selected overlay or media clip
   const drawSelectionHandles = useCallback((time: number) => {
     const canvas = canvasRef.current;
@@ -185,8 +207,9 @@ export function PreviewPlayer() {
       selectedClipId,
       isPlaying,
       keyframePanelOpen,
-    }, canvasDimensions);
-  }, [canvasDimensions, clips, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen]);
+    }, canvasDimensions, handleScreenScale(canvas));
+  }, [canvasDimensions, clips, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
+      handleScreenScale]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
   const drawMultiSelectHandles = useCallback((time: number) => {
@@ -198,8 +221,9 @@ export function PreviewPlayer() {
       selectedClipId,
       selectedClipIds,
       isPlaying,
-    }, canvasDimensions);
-  }, [canvasDimensions, clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying]);
+    }, canvasDimensions, handleScreenScale(canvas));
+  }, [canvasDimensions, clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying,
+      handleScreenScale]);
 
   // Everything a pointer does to the canvas: drag a handle, sweep a marquee,
   // double-click into the text editor — and the cursor that advertises it.

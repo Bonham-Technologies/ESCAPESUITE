@@ -461,7 +461,9 @@ describe('PreviewPlayer cursor', () => {
 
   it('offers a crosshair on the rotation grip', async () => {
     const { preview } = await selectedShape()
-    expect(await hover(preview, 960, 540 - SHAPE.halfH - 25)).toBe('crosshair')
+    // The grip's 25px offset is 25 pixels *on screen* (ESCSUITE-90), and this
+    // box is half the project on both axes.
+    expect(await hover(preview, 960, 540 - SHAPE.halfH - 50)).toBe('crosshair')
   })
 
   // ESCSUITE-88: a locked row refuses the gesture at the press, so the canvas
@@ -763,5 +765,84 @@ describe('PreviewPlayer hit testing through the letterbox', () => {
     expect(store().selectedClipId).toBe(text.id)
     fireEvent.mouseUp(window)
     await settle()
+  })
+})
+
+// ESCSUITE-90: the chrome used to be drawn and hit-tested in project pixels, so
+// a 4K project in a small preview got handles a pixel and a half wide. The
+// preview now hands both the project pixels per CSS pixel of the box it is laid
+// out in, so the chrome is a constant size on screen — which in project pixels
+// means it grows with the resolution.
+describe('handles at a constant screen size (ESCSUITE-90)', () => {
+  /** The canvas' CSS box throughout: 16:9, so no case below letterboxes. */
+  const BOX = { width: 640, height: 360 }
+  const RECT = { left: 0, top: 0, ...BOX }
+
+  /**
+   * A selected default shape in a project of the given size, laid out in BOX.
+   * The default shape is a fifth of the frame each way, so its half-extents are
+   * a tenth of the project.
+   */
+  const shapeIn = async (width: number, height: number) => {
+    const shape = addShape()
+    store().setSelectedClipId(shape.id)
+    store().setProjectResolution(width, height)
+    const preview = await renderPreview({ rect: RECT })
+    preview.clearCalls()
+    preview.resize(BOX)
+    await settle(FRAME_MS)
+    return { shape, preview, halfW: width / 10, halfH: height / 10 }
+  }
+
+  it('draws a 4K project a handle six times the size, on the same corners', async () => {
+    const { preview, halfW, halfH } = await shapeIn(3840, 2160)
+
+    // 3840 project px across a 640px box: six project px per CSS px, so an
+    // 8px-on-screen handle is 48 project px wide.
+    const handle = 48
+    const side = handle * 0.8
+    expect(preview.frame().argsFor('strokeRect')).toEqual([
+      [-halfW, -halfH, halfW * 2, halfH * 2],
+      [-halfW - handle / 2, -halfH - handle / 2, handle, handle],
+      [halfW - handle / 2, -halfH - handle / 2, handle, handle],
+      [-halfW - handle / 2, halfH - handle / 2, handle, handle],
+      [halfW - handle / 2, halfH - handle / 2, handle, handle],
+      [-side / 2, -halfH - side / 2, side, side],
+      [-side / 2, halfH - side / 2, side, side],
+      [-halfW - side / 2, -side / 2, side, side],
+      [halfW - side / 2, -side / 2, side, side],
+    ])
+    // The grip keeps its 25 CSS px of air above the box: 150 project px.
+    expect(preview.frame().argsFor('arc')).toEqual([[0, -halfH - 150, handle, 0, Math.PI * 2]])
+  })
+
+  it('draws the handles at their plain size when the box is the project', async () => {
+    const { preview, halfW, halfH } = await shapeIn(BOX.width, BOX.height)
+
+    expect(preview.frame().argsFor('strokeRect').slice(0, 2)).toEqual([
+      [-halfW, -halfH, halfW * 2, halfH * 2],
+      [-halfW - 4, -halfH - 4, 8, 8],
+    ])
+    expect(preview.frame().argsFor('arc')).toEqual([[0, -halfH - 25, 8, 0, Math.PI * 2]])
+  })
+
+  it('reaches the corner of a 4K project from 30 project px away', async () => {
+    const { preview, halfW, halfH } = await shapeIn(3840, 2160)
+
+    // 8 * 1.5 * 6 = 72 project px of tolerance, so 30 is well inside it.
+    fireEvent.mouseMove(preview.canvas, preview.at(1920 - halfW - 30, 1080 - halfH))
+    await settle()
+
+    expect(preview.canvas.style.cursor).toBe('nwse-resize')
+  })
+
+  it('does not reach it from 30 project px away at 720p in the same box', async () => {
+    const { preview, halfW, halfH } = await shapeIn(1280, 720)
+
+    // Two project px per CSS px there, so the tolerance is 24 and 30 misses.
+    fireEvent.mouseMove(preview.canvas, preview.at(640 - halfW - 30, 360 - halfH))
+    await settle()
+
+    expect(preview.canvas.style.cursor).toBe('default')
   })
 })

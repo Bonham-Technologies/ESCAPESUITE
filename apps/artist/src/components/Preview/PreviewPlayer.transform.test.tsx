@@ -45,6 +45,13 @@ afterEach(() => {
 const SHAPE = { halfW: 192, halfH: 108 }
 /** The same for a default 48px text overlay. */
 const TEXT = { halfW: 50, halfH: 28.8 }
+/**
+ * The rotation grip's distance above the top edge, in canvas pixels.
+ *
+ * ROTATION_HANDLE_OFFSET is 25 pixels *on screen* (ESCSUITE-90), and the box
+ * above is half the project on both axes, so it is 50 project pixels here.
+ */
+const GRIP = 50
 
 const clipOf = (id: string): Clip => store().project.timeline.clips.find((c) => c.id === id)!
 
@@ -180,7 +187,7 @@ describe('PreviewPlayer rotate drags', () => {
 
     const preview = await renderPreview()
     await drag(preview, [
-      [960, 540 - SHAPE.halfH - 25],
+      [960, 540 - SHAPE.halfH - GRIP],
       [1500, 540],
     ])
 
@@ -193,7 +200,7 @@ describe('PreviewPlayer rotate drags', () => {
 
     const preview = await renderPreview()
     await drag(preview, [
-      [960, 540 - TEXT.halfH - 25],
+      [960, 540 - TEXT.halfH - GRIP],
       [200, 540],
     ])
 
@@ -208,7 +215,7 @@ describe('PreviewPlayer rotate drags', () => {
 
     const preview = await renderPreview()
     await drag(preview, [
-      [960, 540 - 540 - 25],
+      [960, 540 - 540 - GRIP],
       [1500, 540],
     ])
 
@@ -225,8 +232,9 @@ describe('PreviewPlayer rotate drags', () => {
     const shape = addShape({ rotation: 45 })
 
     const preview = await renderPreview({ rect: { left: 0, top: 0, width: 540, height: 540 } })
-    // The grip travels with the box, so grab it where the rotation puts it.
-    const radius = 108 + 25
+    // The grip travels with the box, so grab it where the rotation puts it. The
+    // 540px box is half this project too, so the grip's 25 screen pixels are 50.
+    const radius = 108 + GRIP
     await drag(preview, [
       [540 + radius * Math.SQRT1_2, 540 - radius * Math.SQRT1_2],
       [1000, 540],
@@ -245,11 +253,12 @@ describe('PreviewPlayer rotate drags', () => {
     const shape = addShape()
 
     const preview = await renderPreview()
-    // The grip sits 97px straight above the centre (half of 0.2 * 720, plus the
-    // 25px offset). The release point is exactly 45 degrees clockwise of it:
-    // 200px right and 200px up from the centre, a square step on screen.
+    // The grip sits half of 0.2 * 720 above the centre, plus its 25 screen
+    // pixels — which are 1280/960 project pixels each here (ESCSUITE-90). The
+    // release point is exactly 45 degrees clockwise of it: 200px right and
+    // 200px up from the centre, a square step on screen.
     await drag(preview, [
-      [640, 360 - 72 - 25],
+      [640, 360 - 72 - 25 * (1280 / 960)],
       [640 + 200, 360 - 200],
     ])
 
@@ -549,7 +558,7 @@ describe('PreviewPlayer keyframe-mode drags', () => {
 
     const preview = await renderPreview()
     await drag(preview, [
-      [960, 540 - SHAPE.halfH - 25],
+      [960, 540 - SHAPE.halfH - GRIP],
       [1500, 540],
     ])
 
@@ -660,7 +669,7 @@ describe('PreviewPlayer keyframe-mode drags', () => {
 
     const preview = await renderPreview()
     await drag(preview, [
-      [960, 540 - SHAPE.halfH - 25],
+      [960, 540 - SHAPE.halfH - GRIP],
       [1500, 540],
     ])
 
