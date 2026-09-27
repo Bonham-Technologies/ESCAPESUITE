@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ClipAnimation, AnimationPresetType, EasingType } from '../../store/types';
 import { hasAnimation } from '../../utils/animation';
 import { maxPresetDuration, keyframeCount } from './clipEditorModel';
@@ -67,6 +68,21 @@ export function AnimationSection({
   sliderGesture,
   disabled,
 }: AnimationSectionProps) {
+  /**
+   * One id for the section, and the two groups' labels are wired from it
+   * (ESCSUITE-89).
+   *
+   * Each group's heading was a `<span>`; it is the preset dropdown's visible
+   * label, so it became a `<label htmlFor>` — same class, same text, same
+   * position. The duration and easing rows are the one place in the panel where
+   * two controls share a word: both groups call theirs "Duration" and "Easing".
+   * They are told apart with `aria-labelledby` pointing at the group heading
+   * *and* the row's own label, so each name is built from the text on screen —
+   * "Animate In Duration", "Animate Out Easing" — rather than from a string
+   * written here that the visible label could drift away from.
+   */
+  const id = useId();
+
   return (
     <CollapsibleSection
       title="Animation"
@@ -94,9 +110,10 @@ export function AnimationSection({
     >
       {/* Animate In */}
       <div className={styles.animationGroup}>
-        <span className={styles.animationLabel}>Animate In</span>
+        <label className={styles.animationLabel} id={`${id}-in-group`} htmlFor={`${id}-in-preset`}>Animate In</label>
         <div className={styles.animationRow}>
           <select
+            id={`${id}-in-preset`}
             className={styles.select}
             value={animation?.in.type ?? 'none'}
             onChange={(e) => onInTypeChange(e.target.value as AnimationPresetType)}
@@ -111,8 +128,10 @@ export function AnimationSection({
         {animation?.in.type !== 'none' && animation?.in.type && (
           <>
             <div className={styles.transformRow}>
-              <label>Duration</label>
+              <label id={`${id}-in-duration-label`} htmlFor={`${id}-in-duration`}>Duration</label>
               <input
+                id={`${id}-in-duration`}
+                aria-labelledby={`${id}-in-group ${id}-in-duration-label`}
                 type="range"
                 min={0.1}
                 max={maxPresetDuration(clipDuration)}
@@ -124,8 +143,10 @@ export function AnimationSection({
               <span>{animation.in.duration.toFixed(1)}s</span>
             </div>
             <div className={styles.transformRow}>
-              <label>Easing</label>
+              <label id={`${id}-in-easing-label`} htmlFor={`${id}-in-easing`}>Easing</label>
               <select
+                id={`${id}-in-easing`}
+                aria-labelledby={`${id}-in-group ${id}-in-easing-label`}
                 className={styles.selectSmall}
                 value={animation.in.easing}
                 onChange={(e) => onInEasingChange(e.target.value as EasingType)}
@@ -143,9 +164,10 @@ export function AnimationSection({
 
       {/* Animate Out */}
       <div className={styles.animationGroup}>
-        <span className={styles.animationLabel}>Animate Out</span>
+        <label className={styles.animationLabel} id={`${id}-out-group`} htmlFor={`${id}-out-preset`}>Animate Out</label>
         <div className={styles.animationRow}>
           <select
+            id={`${id}-out-preset`}
             className={styles.select}
             value={animation?.out.type ?? 'none'}
             onChange={(e) => onOutTypeChange(e.target.value as AnimationPresetType)}
@@ -160,8 +182,10 @@ export function AnimationSection({
         {animation?.out.type !== 'none' && animation?.out.type && (
           <>
             <div className={styles.transformRow}>
-              <label>Duration</label>
+              <label id={`${id}-out-duration-label`} htmlFor={`${id}-out-duration`}>Duration</label>
               <input
+                id={`${id}-out-duration`}
+                aria-labelledby={`${id}-out-group ${id}-out-duration-label`}
                 type="range"
                 min={0.1}
                 max={maxPresetDuration(clipDuration)}
@@ -173,8 +197,10 @@ export function AnimationSection({
               <span>{animation.out.duration.toFixed(1)}s</span>
             </div>
             <div className={styles.transformRow}>
-              <label>Easing</label>
+              <label id={`${id}-out-easing-label`} htmlFor={`${id}-out-easing`}>Easing</label>
               <select
+                id={`${id}-out-easing`}
+                aria-labelledby={`${id}-out-group ${id}-out-easing-label`}
                 className={styles.selectSmall}
                 value={animation.out.easing}
                 onChange={(e) => onOutEasingChange(e.target.value as EasingType)}

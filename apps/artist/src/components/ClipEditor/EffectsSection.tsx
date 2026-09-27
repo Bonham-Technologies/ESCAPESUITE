@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { CollapsibleSection } from './CollapsibleSection';
 import type { SliderGestureHandlers } from './useSliderGesture';
 import styles from './ClipEditor.module.css';
@@ -23,12 +24,16 @@ interface EffectsSectionProps {
  * halves.
  */
 export function EffectsSection({ blur, onBlurChange, sliderGesture, disabled }: EffectsSectionProps) {
+  // ESCSUITE-89: the slider is named by the label beside it.
+  const id = useId();
+
   return (
     <CollapsibleSection title="Effects" defaultOpen={false} disabled={disabled}>
       <div className={styles.transformControls}>
         <div className={styles.transformRow}>
-          <label>Blur</label>
+          <label htmlFor={`${id}-blur`}>Blur</label>
           <input
+            id={`${id}-blur`}
             type="range"
             min={0}
             max={50}

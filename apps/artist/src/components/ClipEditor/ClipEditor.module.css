@@ -642,7 +642,10 @@
   flex: 1;
 }
 
-.colorInput span {
+/* The word beside a swatch. A <label> since ESCSUITE-89 — it names the colour
+   input it sits next to — where it used to be a bare <span>; the rule follows it
+   so the row looks exactly as it did. */
+.colorInput label {
   font-size: 10px;
   color: var(--text-muted);
 }

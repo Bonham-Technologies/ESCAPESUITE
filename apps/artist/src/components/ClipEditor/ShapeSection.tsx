@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ShapeOverlayData, ShapeType } from '../../store/types';
 import { hasVisibleFill } from '../../core/canvasRenderer';
 import { withFillRgb, toggleFill, fillAlphaPercent, withFillAlphaPercent } from './clipColorValues';
@@ -34,10 +35,26 @@ interface ShapeSectionProps {
  * rewrite the same eight-digit hex string through `clipColorValues`.
  */
 export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: ShapeSectionProps) {
+  /**
+   * One id for the section, one label wired to each control (ESCSUITE-89).
+   *
+   * The two swatches carry an `aria-label` as well as the label beside them:
+   * "Fill" and "Stroke" are what the row says, but the stroke *width* slider
+   * further down says "Stroke" too, and two value controls with one name are
+   * two rows a screen-reader user cannot tell apart. The swatches take the
+   * fuller name — "Fill color", "Stroke color" — and the sliders keep the
+   * words on screen. The label still points at the swatch, so clicking the
+   * word still opens the picker.
+   */
+  const id = useId();
+
   return (
     <CollapsibleSection title="Shape" disabled={disabled}>
+      {/* No visible label of its own — the section title heads the block — so
+          it is named outright (ESCSUITE-89). */}
       <select
         className={styles.select}
+        aria-label="Shape type"
         value={shapeData.type}
         onChange={(e) => onChange({ type: e.target.value as ShapeType })}
       >
@@ -52,8 +69,9 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
       {shapeData.type === 'blur' ? (
         <>
           <div className={styles.transformRow}>
-            <label>Blur Amount</label>
+            <label htmlFor={`${id}-blur-amount`}>Blur Amount</label>
             <input
+              id={`${id}-blur-amount`}
               type="range"
               min={1}
               max={50}
@@ -70,8 +88,10 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
         <>
           <div className={styles.row}>
             <div className={styles.colorInput}>
-              <span>Fill</span>
+              <label htmlFor={`${id}-fill-color`}>Fill</label>
               <input
+                id={`${id}-fill-color`}
+                aria-label="Fill color"
                 type="color"
                 value={shapeData.fillColor.substring(0, 7)}
                 onChange={(e) => {
@@ -88,13 +108,16 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
                   onChange({ fillColor: toggleFill(fillColor) });
                 }}
                 title={hasVisibleFill(shapeData.fillColor || '#000000ff') ? 'No fill (transparent)' : 'Enable fill'}
+                aria-label={hasVisibleFill(shapeData.fillColor || '#000000ff') ? 'No fill' : 'Enable fill'}
               >
                 {hasVisibleFill(shapeData.fillColor || '#000000ff') ? '⊗' : '⊘'}
               </button>
             </div>
             <div className={styles.colorInput}>
-              <span>Stroke</span>
+              <label htmlFor={`${id}-stroke-color`}>Stroke</label>
               <input
+                id={`${id}-stroke-color`}
+                aria-label="Stroke color"
                 type="color"
                 value={shapeData.strokeColor}
                 onChange={(e) => onChange({ strokeColor: e.target.value })}
@@ -104,8 +127,9 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
 
           {hasVisibleFill(shapeData.fillColor || '#000000ff') && (
             <div className={styles.transformRow}>
-              <label>Fill opacity</label>
+              <label htmlFor={`${id}-fill-opacity`}>Fill opacity</label>
               <input
+                id={`${id}-fill-opacity`}
                 type="range"
                 min={1}
                 max={100}
@@ -122,8 +146,9 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
           )}
 
           <div className={styles.transformRow}>
-            <label>Stroke</label>
+            <label htmlFor={`${id}-stroke-width`}>Stroke</label>
             <input
+              id={`${id}-stroke-width`}
               type="range"
               min={0}
               max={20}
@@ -138,8 +163,9 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
       )}
 
       <div className={styles.transformRow}>
-        <label>Size W</label>
+        <label htmlFor={`${id}-size-w`}>Size W</label>
         <input
+          id={`${id}-size-w`}
           type="range"
           min={0.01}
           max={1}
@@ -152,8 +178,9 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
       </div>
 
       <div className={styles.transformRow}>
-        <label>Size H</label>
+        <label htmlFor={`${id}-size-h`}>Size H</label>
         <input
+          id={`${id}-size-h`}
           type="range"
           min={0.01}
           max={1}
@@ -166,8 +193,9 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
       </div>
 
       <div className={styles.transformRow}>
-        <label>Rotation</label>
+        <label htmlFor={`${id}-rotation`}>Rotation</label>
         <input
+          id={`${id}-rotation`}
           type="range"
           min={0}
           max={360}
@@ -180,8 +208,9 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
       </div>
 
       <div className={styles.transformRow}>
-        <label>Blur</label>
+        <label htmlFor={`${id}-blur`}>Blur</label>
         <input
+          id={`${id}-blur`}
           type="range"
           min={0}
           max={50}
