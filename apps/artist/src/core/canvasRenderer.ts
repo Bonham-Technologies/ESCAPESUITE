@@ -56,9 +56,10 @@ export function hasVisibleFill(fillColor: string): boolean {
  *
  * `filter` lengths are pixels of the output bitmap and ignore the current
  * transform, so a caller whose canvas is not 1:1 with the coordinates it draws
- * in has to say so (see `MediaDrawOptions.filterScale`). For every canvas that
- * is its own project — all of them but the preview — the scale is 1 and this is
- * the string it always was.
+ * in has to say so (see `MediaDrawOptions.filterScale`). For a canvas that *is*
+ * 1:1 with that space the scale is 1 and this is the string it always was —
+ * which since ESCSUITE-94 is neither the preview (it rasterises at the size it
+ * is displayed at) nor an export at anything but the project's own resolution.
  */
 function blurFilter(radius: number, filterScale: number = 1): string {
   return `blur(${radius * filterScale}px)`;

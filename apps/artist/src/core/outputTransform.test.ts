@@ -4,7 +4,7 @@
 // clear, and the clear's rectangle is what says whether the bars were painted.
 import { describe, it, expect } from 'vitest'
 import { createRecordingContext } from '../test/doubles/canvas'
-import { openOutputFrame, projectToOutputScale } from './outputTransform'
+import { openOutputFrame, projectToOutputScale, setOutputTransform } from './outputTransform'
 
 describe('projectToOutputScale', () => {
   it('is 1 when the raster is the project', () => {
@@ -27,6 +27,45 @@ describe('projectToOutputScale', () => {
   it('refuses to divide by a degenerate project size', () => {
     expect(projectToOutputScale({ width: 0, height: 0 }, { width: 1920, height: 1080 })).toBe(1)
     expect(projectToOutputScale({ width: 1920, height: 0 }, { width: 1920, height: 1080 })).toBe(1)
+  })
+})
+
+describe('setOutputTransform', () => {
+  it('is a pure scale, and returns it, when the fit is exact', () => {
+    const ctx = createRecordingContext()
+
+    const scale = setOutputTransform(
+      ctx as unknown as CanvasRenderingContext2D,
+      { width: 1280, height: 720 },
+      { width: 1920, height: 1080 }
+    )
+
+    expect(scale).toBe(1.5)
+    expect(ctx.argsFor('setTransform')).toEqual([[1.5, 0, 0, 1.5, 0, 0]])
+    // The transform alone: nothing is cleared, because the one caller that wants
+    // it without a clear is about to paint over the whole raster.
+    expect(ctx.argsFor('fillRect')).toEqual([])
+  })
+
+  it('carries the translation, so both entry points place the picture identically', () => {
+    // A raster one pixel short of the project's aspect — `previewRaster` rounds
+    // the height, so this is the preview's own rounding, not a contrived case.
+    // 960x539 of a 1920x1080 project fits at 539/1080, which leaves a sub-pixel
+    // pillar bar. The cache-hit path used to write `(k, 0, 0, k, 0, 0)` here and
+    // disagree with the frame path by exactly that bar.
+    const direct = createRecordingContext()
+    const viaFrame = createRecordingContext()
+    const project = { width: 1920, height: 1080 }
+    const raster = { width: 960, height: 539 }
+
+    setOutputTransform(direct as unknown as CanvasRenderingContext2D, project, raster)
+    openOutputFrame(viaFrame as unknown as CanvasRenderingContext2D, project, raster)
+
+    const [matrix] = direct.argsFor('setTransform')
+    expect(viaFrame.argsFor('setTransform')).toEqual([matrix])
+    // Meaningful only if there really is a translation to agree about.
+    expect(matrix[4]).not.toBe(0)
+    expect(matrix[5]).toBe(0)
   })
 })
 

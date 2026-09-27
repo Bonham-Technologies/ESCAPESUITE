@@ -223,6 +223,13 @@ describe('export per-frame work', () => {
     // would still slip under the ceiling above on a four-clip frame, and would
     // have to be wrong about what it multiplied — the renderer draws in project
     // pixels, so there is one mapping onto the raster per frame and no more.
+    //
+    // It is 1 for *this* scene rather than for any scene: a shape overlay that
+    // blurs its background resets the transform to the identity itself, to hand
+    // the capture back in the canvas' own pixels (`canvasRenderer.ts`'s
+    // `drawShapeOverlayToCanvasAnimated`), so a scene carrying one would
+    // legitimately measure 2. The benchmark scene's shape does not blur; a future
+    // edit that gave it one should raise this number and say so, not delete it.
     expect(measured.setTransformsPerFrame).toBe(1)
     // Exact: an export that leaked a save() would drift the whole file.
     expect(measured.savesPerFrame).toBe(measured.restoresPerFrame)

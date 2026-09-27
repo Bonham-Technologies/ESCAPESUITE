@@ -198,10 +198,13 @@ export function applyClipMask(
  * strokes it), which is why a handed-over webcam clip looks like the recording.
  *
  * `strokeStyle` is the stored colour as given, including the `rgba()` the
- * handoff carries. The line width is `stroke.width x frameWidth`: the export
- * canvas *is* the project resolution and the preview canvas scales uniformly
- * through the CTM, so one number serves both. (Unlike `ctx.filter`, whose
- * lengths the CTM does not reach — see `MediaDrawOptions.filterScale`.)
+ * handoff carries. The line width is `stroke.width x frameWidth`, a project-space
+ * length: every pipeline now scales uniformly through the CTM — the preview onto
+ * its display-size raster, and since ESCSUITE-94 an export onto whatever
+ * resolution was asked for — so one number serves all of them, and it serves them
+ * more squarely than when the export canvas was believed to be the project
+ * itself. (Unlike `ctx.filter`, whose lengths the CTM does not reach — see
+ * `MediaDrawOptions.filterScale`.)
  */
 export function applyClipStroke(
   ctx: CanvasRenderingContext2D,

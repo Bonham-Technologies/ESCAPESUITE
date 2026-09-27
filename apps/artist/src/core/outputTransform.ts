@@ -31,12 +31,17 @@ export interface PixelSize {
  * Output pixels per project pixel: the project rect fitted inside the raster,
  * uniformly.
  *
- * `Math.min` rather than a per-axis scale, so a frame is never stretched. Where
- * the two aspect ratios match — which is every resolution preset since
- * ESCSUITE-94, because a preset's width is derived from the project's own aspect
- * — both ratios are the same number and the fit is exact. Where they genuinely
- * differ (an "Original" export whose bottom clip is not the project's shape) the
- * leftover is a black bar, which is the deliberate letterbox; see
+ * `Math.min` rather than a per-axis scale, so a frame is never stretched. Since
+ * ESCSUITE-94 a resolution preset's width is derived from the project's own
+ * aspect, so the two ratios are *near* enough to equal that a preset export
+ * fills its frame — but not exactly equal wherever the round-to-even step moved
+ * that width. 480p of a 1280x720 project is 854x480, and 854/1280 (0.66719) is
+ * not 480/720 (0.66667), so `Math.min` picks the height's ratio and the frame
+ * carries a **third of an output pixel** of pillar bar on each side. That is the
+ * point of taking the minimum: what a rounding disagreement can leave is a
+ * sub-pixel *bar*, never a crop. Where the two ratios genuinely differ (an
+ * "Original" export whose bottom clip is not the project's shape) the leftover
+ * is a real black bar, which is the deliberate letterbox; see
  * {@link openOutputFrame}.
  *
  * A degenerate project (a resolution of zero, which the store never writes but
@@ -48,11 +53,50 @@ export function projectToOutputScale(project: PixelSize, output: PixelSize): num
 }
 
 /**
- * Open a frame: clear the whole raster to black and leave `ctx` drawing in
- * project pixels. Returns the scale, which is also the `filterScale` every
- * `ctx.filter` on the frame needs (see `MediaDrawOptions.filterScale` — a CSS
- * filter's lengths are in output-bitmap pixels and the transform does not reach
- * them).
+ * The bar on one axis: half of whatever is left of the raster once the project
+ * has been scaled into it. One definition, called by both the matrix and the
+ * clear rectangle below, so the two cannot be written differently.
+ */
+function outputOffset(projectLength: number, outputLength: number, scale: number): number {
+  return (outputLength - projectLength * scale) / 2;
+}
+
+/**
+ * Put `ctx` in project pixels — the **whole matrix**, built in one place.
+ *
+ * Separate from {@link openOutputFrame} because there is a second entry point
+ * that wants the transform without the clear: `PreviewPlayer`'s cached-frame
+ * blit, which paints a bitmap over the entire raster and has nothing to clear
+ * first. That path used to assemble its own `setTransform(k, 0, 0, k, 0, 0)` from
+ * a scale it divided out itself, which agreed with this one on the scale and not
+ * on the translation — `previewRaster` rounds the raster's height, so a preview
+ * can carry a sub-pixel bar and then a cache hit and a cache miss would put the
+ * picture in two slightly different places. Both call this now.
+ *
+ * Returns the scale, which is also the `filterScale` every `ctx.filter` under
+ * this transform needs (see `MediaDrawOptions.filterScale` — a CSS filter's
+ * lengths are in output-bitmap pixels and the transform does not reach them).
+ */
+export function setOutputTransform(
+  ctx: CanvasRenderingContext2D,
+  project: PixelSize,
+  output: PixelSize
+): number {
+  const scale = projectToOutputScale(project, output);
+  ctx.setTransform(
+    scale,
+    0,
+    0,
+    scale,
+    outputOffset(project.width, output.width, scale),
+    outputOffset(project.height, output.height, scale)
+  );
+  return scale;
+}
+
+/**
+ * Open a frame: put `ctx` in project pixels ({@link setOutputTransform}) and
+ * clear the whole raster to black. Returns the same scale that does.
  *
  * The clear is the *whole raster* expressed in project coordinates, not the
  * project rect: where the project is letterboxed inside the output, the bars are
@@ -66,11 +110,10 @@ export function openOutputFrame(
   project: PixelSize,
   output: PixelSize
 ): number {
-  const scale = projectToOutputScale(project, output);
-  const offsetX = (output.width - project.width * scale) / 2;
-  const offsetY = (output.height - project.height * scale) / 2;
+  const scale = setOutputTransform(ctx, project, output);
+  const offsetX = outputOffset(project.width, output.width, scale);
+  const offsetY = outputOffset(project.height, output.height, scale);
 
-  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
   ctx.fillStyle = '#000000';
   // `-0 / scale` is `-0`, which is a different number from `0` to anything
   // comparing with Object.is — the assertions on these arguments included.

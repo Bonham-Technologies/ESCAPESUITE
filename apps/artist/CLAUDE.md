@@ -108,8 +108,8 @@ pnpm lint                # Run ESLint
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
   - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
 - `outputTransform.ts`: the one place project space is carried onto an output raster —
-  `projectToOutputScale` and `openOutputFrame`, called by the preview and by both exporters.
-  See "Export Resolution" below
+  `projectToOutputScale`, `setOutputTransform` and `openOutputFrame`, called by the preview and
+  by both exporters. See "Export Resolution" below
 - `projectManager.ts`: Project save/load to JSON files with embedded video references
 - `exportScheduler.ts`: Background export queue management
 - `frameCache.ts`: LRU cache for decoded video frames
@@ -667,9 +667,11 @@ calls changed coordinate systems. The one thing that carries project space onto 
 section) — which sets `ctx.setTransform(k, 0, 0, k, 0, 0)` and clears the raster in one step.
 `k` is read back off the canvas' actual backing store (so it can never disagree with a resize
 that hasn't been redrawn yet). The frame cache's cached-frame path sets the same transform
-before blitting, taking `k` from the same `projectToOutputScale` rather than dividing again, so
-a bitmap captured at one box size is simply rescaled if the window has changed size since —
-there is no cache invalidation on resize, only a redraw at the new scale.
+before blitting — `setOutputTransform`, the **whole matrix** and not a scale it re-assembles,
+because `previewRaster` rounds the raster's height and a cache hit and a cache miss would
+otherwise place the picture a sub-pixel apart — so a bitmap captured at one box size is simply
+rescaled if the window has changed size since; there is no cache invalidation on resize, only a
+redraw at the new scale.
 
 `ctx.filter` is the one thing the transform does not reach: a CSS filter's length (a blur
 radius) is in output-bitmap pixels, unaffected by the CTM. Left alone, every blur in the
@@ -1669,12 +1671,14 @@ setting but its default: a 1080p export of a 1280x720 project drew the clip at `
 
 `openOutputFrame(ctx, project, output)` is the whole mechanism, and the preview calls it too —
 it was the preview's inline `setTransform`, lifted rather than copied, because a drawing
-behaviour one pipeline has to remember to reproduce is a behaviour that drifts. It sets
-`ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)`, clears the raster to black, and
-returns the scale, which is also the frame's `filterScale`. `projectToOutputScale` is
-`Math.min` of the two ratios, so **a frame is never stretched**; a degenerate project (a zero
-resolution, which the store never writes but a hand-built headless request could) scales by 1
-rather than dividing by zero.
+behaviour one pipeline has to remember to reproduce is a behaviour that drifts. It delegates the
+matrix to `setOutputTransform` — `ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)`,
+exported separately for the one caller that wants the transform without a clear (the preview's
+cached-frame blit) — then clears the raster to black and returns the scale, which is also the
+frame's `filterScale`. `projectToOutputScale` is `Math.min` of the two ratios, so **a frame is
+never stretched**: what a rounding disagreement can leave is a sub-pixel bar, never a crop. A
+degenerate project (a zero resolution, which the store never writes but a hand-built headless
+request could) scales by 1 rather than dividing by zero.
 
 **The letterbox is deliberate and now rare.** Where the output aspect differs from the
 project's, the project rect is fitted inside the raster, centred, and the leftover is black
