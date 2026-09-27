@@ -605,13 +605,17 @@ describe('ExportDialog', () => {
 
     /** Like scriptedExport, but tracks every call so two overlapping exports
      * can be driven independently — export A cancelled, then export B
-     * started before A's aborted promise actually rejects. */
+     * started before A's promise actually settles. */
     function scriptedExports() {
-      const calls: Array<{ report: (p: ExportProgress) => void; reject: (e: unknown) => void }> = []
+      const calls: Array<{
+        report: (p: ExportProgress) => void
+        resolve: (blob: Blob) => void
+        reject: (e: unknown) => void
+      }> = []
       mockExportToWebM.mockImplementation(
         (...args: unknown[]) =>
-          new Promise((_resolve, reject) => {
-            calls.push({ report: args[3] as (p: ExportProgress) => void, reject })
+          new Promise((resolve, reject) => {
+            calls.push({ report: args[3] as (p: ExportProgress) => void, resolve, reject })
           })
       )
       return calls
@@ -646,7 +650,7 @@ describe('ExportDialog', () => {
       expect(signalB.aborted).toBe(true)
     })
 
-    it("keeps export B's progress showing when export A's cancelled promise rejects late (ESCSUITE-98)", async () => {
+    it("keeps export B's progress showing while export A's cancelled promise reports late and then rejects (ESCSUITE-98)", async () => {
       const calls = scriptedExports()
       render(<ExportDialog isOpen={true} onClose={onClose} />)
 
@@ -659,6 +663,12 @@ describe('ExportDialog', () => {
       await act(async () => calls[1].report({ phase: 'encoding', progress: 55, message: 'Encoding frames' }))
       expect(screen.getByText('55%')).toBeInTheDocument()
 
+      // A keeps reporting progress after being superseded — its own onProgress
+      // callback must be inert now, not overwrite B's.
+      await act(async () => calls[0].report({ phase: 'encoding', progress: 10, message: 'Stale report' }))
+      expect(screen.getByText('55%')).toBeInTheDocument()
+      expect(screen.queryByText('Stale report')).not.toBeInTheDocument()
+
       calls[0].reject(new ExportAbortedError())
       await settle()
 
@@ -666,6 +676,62 @@ describe('ExportDialog', () => {
       // still targets a live export rather than a no-op on a finished dialog.
       expect(screen.getByText('55%')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
+    })
+
+    it("does not let export A's late (non-abort) success flip export B's dialog to complete (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(calls).toHaveLength(2))
+      await act(async () => calls[1].report({ phase: 'encoding', progress: 40, message: 'Encoding frames' }))
+      expect(screen.getByText('40%')).toBeInTheDocument()
+
+      // A actually finishes successfully despite being cancelled — a
+      // defensive edge case the exporter's own abort re-check is meant to
+      // prevent, but the dialog must not trust it blindly either.
+      await act(async () => {
+        calls[0].resolve(new Blob())
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      await settle()
+
+      // B's progress must still be on screen — A's stale success must not
+      // have flipped the dialog to "complete" or scheduled its own close.
+      expect(screen.getByText('40%')).toBeInTheDocument()
+      expect(screen.queryByText('Export complete!')).not.toBeInTheDocument()
+    })
+
+    it("does not let export A's late (non-abort) failure reset export B's progress or show an error (ESCSUITE-98)", async () => {
+      const calls = scriptedExports()
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(calls).toHaveLength(1))
+        fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(calls).toHaveLength(2))
+        await act(async () => calls[1].report({ phase: 'encoding', progress: 60, message: 'Encoding frames' }))
+        expect(screen.getByText('60%')).toBeInTheDocument()
+
+        calls[0].reject(new Error('Stale encoder failure'))
+        await settle()
+
+        // B's progress must still be on screen and no error banner from A's
+        // stale failure should appear over it.
+        expect(screen.getByText('60%')).toBeInTheDocument()
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+      }
     })
 
     it('hides the Cancel button once the export is complete', async () => {
