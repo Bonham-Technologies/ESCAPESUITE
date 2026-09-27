@@ -233,9 +233,9 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
     await expect(play).toBeVisible({ timeout: 30_000 })
 
     // The row: every control named, and named for the take.
-    const list = page.getByRole('region', { name: 'Recordings' }).or(
-      page.locator('section', { has: page.getByRole('heading', { name: 'Recordings' }) })
-    )
+    // The library is the one <section> headed "Recordings" (it carries no
+    // landmark role of its own).
+    const list = page.locator('section', { has: page.getByRole('heading', { name: 'Recordings' }) })
     const rowButtons = list.getByRole('button')
     const count = await rowButtons.count()
     expect(count).toBeGreaterThanOrEqual(5)
