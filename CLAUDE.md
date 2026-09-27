@@ -691,6 +691,19 @@ exactly four branches — `if (startingRef.current)` and the post-`acquireStream
 controller cases, so the uncovered branch count is the same 31 it was. **No floor crossed**; craft's
 floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-95 (splitting a clip rebases its
+keyframes and presets instead of copying the whole animation onto both halves):
+99.41 / 98.76 / **94.03** / 99.01 against the 99.41 / 98.76 / 94.01 / 99.01 of the commit this
+branch started from — branches up two hundredths, the other three unmoved. Measured in one sitting,
+the merge base gives 4,227 / 4,496 branches and this branch 4,243 / 4,512: sixteen new branches,
+sixteen covered, the same 269 uncovered as before. They are all in `utils/animation.ts`'s
+`splitAnimation` — the two partition filters, the two "is there a keyframe at or past / before the
+cut" conditions that decide whether a boundary keyframe is synthesised, the exact-at-split check and
+the preset ownership — and every one is reached from both sides by that function's own unit cases
+(the split-before-the-first-keyframe and the within-epsilon cases exist for exactly that reason).
+`store/clipSlice.ts`'s `splitClip` gained no branch: it replaced a spread with `cloneClip` and one
+call. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -698,7 +711,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.59 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.76 | 94.01 | 99.01 |
+| `@escapesuite/artist` | 99.41 | 98.76 | 94.03 | 99.01 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

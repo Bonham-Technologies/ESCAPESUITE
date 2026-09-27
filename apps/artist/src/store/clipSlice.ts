@@ -9,6 +9,7 @@ import type { StateCreator } from 'zustand';
 import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATION } from './types';
 import { cloneClip } from '../utils/deepClone';
+import { splitAnimation } from '../utils/animation';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { clipOnLockedTrack, isTrackLocked } from './trackLock';
@@ -360,7 +361,9 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const clip = state.project.timeline.clips.find((c) => c.id === clipId);
     if (!clip) return state;
 
-    // splitTime is relative to the clip's start on the timeline
+    // splitTime is relative to the clip's start on the timeline, which is
+    // also the unit keyframes are stored in (0 = clip start) — so it doubles
+    // as the split offset splitAnimation needs.
     const sourceTime = clip.startTime + splitTime;
 
     // Validate split point is within clip bounds
@@ -368,21 +371,42 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
       return state;
     }
 
+    const firstDuration = sourceTime - clip.startTime;
+    const secondDuration = clip.endTime - sourceTime;
+
+    // ESCSUITE-95: `{ ...clip }` alone would hand both halves the same
+    // `animation` and `transform` (and effects/transition/mask/stroke/
+    // textData/shapeData) references. `cloneClip` (structuredClone, already
+    // used by duplicateClip) gives each half its own deep copy of the whole
+    // clip up front; `splitAnimation` then rebases the keyframes and
+    // reassigns the in/out presets instead of leaving the cloned `animation`
+    // duplicated on both halves. A clip with no animation has nothing to
+    // split, so both halves keep `undefined` exactly as before.
+    let firstAnimation = clip.animation;
+    let secondAnimation = clip.animation;
+    if (clip.animation) {
+      const split = splitAnimation(clip.animation, splitTime);
+      firstAnimation = split.first;
+      secondAnimation = split.second;
+    }
+
     const firstClip: Clip = {
-      ...clip,
+      ...cloneClip(clip),
       id: uuidv4(),
       endTime: sourceTime,
-      duration: sourceTime - clip.startTime,
+      duration: firstDuration,
       name: `${clip.name} (1)`,
+      animation: firstAnimation,
     };
 
     const secondClip: Clip = {
-      ...clip,
+      ...cloneClip(clip),
       id: uuidv4(),
       startTime: sourceTime,
-      duration: clip.endTime - sourceTime,
-      timelinePosition: clip.timelinePosition + firstClip.duration,
+      duration: secondDuration,
+      timelinePosition: clip.timelinePosition + firstDuration,
       name: `${clip.name} (2)`,
+      animation: secondAnimation,
     };
 
     const newClips = state.project.timeline.clips
