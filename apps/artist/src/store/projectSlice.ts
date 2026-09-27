@@ -9,6 +9,7 @@ import { createEmptyProject, calculateTimelineDuration } from './projectFactory'
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
 import { lockedSourceVideoIds } from './trackLock';
+import { pruneSelection } from './selectionPrune';
 
 export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo'>;
 
@@ -80,6 +81,10 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     const newClipboard = state.clipboard && state.clipboard.some((c) => c.sourceVideoId === id)
       ? state.clipboard.filter((c) => c.sourceVideoId !== id)
       : state.clipboard;
+    // ESCSUITE-101: the same reconciliation as the clipboard's, for the
+    // selection — a clip whose source just left the library leaves the
+    // timeline with it.
+    const pruned = pruneSelection(kept, state.selectedClipId, state.selectedClipIds);
     return {
       sourceVideos: state.sourceVideos.filter((v) => v.id !== id),
       project: {
@@ -91,6 +96,8 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
           duration: calculateTimelineDuration(kept),
         },
       },
+      selectedClipId: pruned.selectedClipId,
+      selectedClipIds: pruned.selectedClipIds,
       clipboard: newClipboard,
       history: pushToHistory(state),
     };

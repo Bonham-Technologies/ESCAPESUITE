@@ -638,7 +638,14 @@ export interface EditorState {
   selectClipsInRange: (clipIds: string[]) => void;
   clearMultiSelection: () => void;
   moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
-  deleteSelectedClips: () => void;
+  /**
+   * `boolean` since ESCSUITE-101, the same contract as `pasteClips` below:
+   * `false` when the selection names no clip actually on the timeline (every
+   * id a ghost — ESCSUITE-100's belt-and-braces shape, applied to the
+   * selection instead of the clipboard) or when every one of them sits on a
+   * locked track (ESCSUITE-84) — no state changed, no undo entry pushed.
+   */
+  deleteSelectedClips: () => boolean;
   copySelectedClips: () => void;
   /**
    * `boolean` for the same reason as the clip actions above (ESCSUITE-87):
@@ -647,8 +654,14 @@ export interface EditorState {
    * state changed, no undo entry pushed.
    */
   pasteClips: () => boolean;
-  muteSelectedClips: () => void;
-  unmuteSelectedClips: () => void;
+  /**
+   * `boolean` since ESCSUITE-101: `false` when every selected clip's track
+   * is already muted (unmuted for `unmuteSelectedClips`) — nothing would
+   * change, so nothing is written and no undo entry is pushed. When only
+   * some would change, only those tracks are rewritten; still one entry.
+   */
+  muteSelectedClips: () => boolean;
+  unmuteSelectedClips: () => boolean;
 
   // Actions - In/Out Points
   setInPoint: (time: number) => void;

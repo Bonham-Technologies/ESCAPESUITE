@@ -112,29 +112,48 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     };
   }),
 
-  deleteSelectedClips: () => set((state) => {
-    if (state.selectedClipIds.size === 0) return state;
-    if (anyClipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, state.selectedClipIds)) return state; // ESCSUITE-84
+  // ESCSUITE-101: reports `false` and writes nothing, the get()-then-set()
+  // shape `pasteClips` uses, for two reasons a selection can have nothing to
+  // delete — every id it names is a ghost (the clip already left some other
+  // way: an undo, a track or source-video removal, a split), or the ids that
+  // DO still exist all sit on a locked track (ESCSUITE-84). Belt-and-braces
+  // for the first: `pruneSelection` running in every removing action and in
+  // undo/redo means a ghost should rarely reach here at all, the same way
+  // `pasteClips`'s "track no longer on the timeline" check rarely fires now
+  // that `removeTrack`/`removeSourceVideo` prune the clipboard themselves.
+  deleteSelectedClips: () => {
+    const state = get();
+    if (state.selectedClipIds.size === 0) return false;
 
-    const newClips = state.project.timeline.clips.filter(
-      clip => !state.selectedClipIds.has(clip.id)
+    const clips = state.project.timeline.clips;
+    const toDelete = new Set(
+      [...state.selectedClipIds].filter((id) => clips.some((clip) => clip.id === id))
     );
+    if (toDelete.size === 0) return false; // every selected id is a ghost
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-          duration: calculateTimelineDuration(newClips),
+    if (anyClipOnLockedTrack(clips, state.project.timeline.tracks, toDelete)) return false; // ESCSUITE-84
+
+    set((s) => {
+      const newClips = s.project.timeline.clips.filter((clip) => !toDelete.has(clip.id));
+
+      return {
+        project: {
+          ...s.project,
+          modified: Date.now(),
+          timeline: {
+            ...s.project.timeline,
+            clips: newClips,
+            duration: calculateTimelineDuration(newClips),
+          },
         },
-      },
-      selectedClipId: null,
-      selectedClipIds: new Set<string>(),
-      history: pushToHistory(state),
-    };
-  }),
+        selectedClipId: null,
+        selectedClipIds: new Set<string>(),
+        history: pushToHistory(s),
+      };
+    });
+
+    return true;
+  },
 
   copySelectedClips: () => set((state) => {
     if (state.selectedClipIds.size === 0) return state;
@@ -201,10 +220,16 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     return true;
   },
 
-  muteSelectedClips: () => set((state) => {
-    if (state.selectedClipIds.size === 0) return state;
+  // ESCSUITE-101: `false`, with nothing written, when every track a selected
+  // clip sits on already has the mute state being asked for — Mute on an
+  // already-muted track used to be an undo entry that undid nothing. When
+  // only some of them would change, only those are rewritten (the rest keep
+  // their existing track object, not a same-value copy of it), still as one
+  // history entry.
+  muteSelectedClips: () => {
+    const state = get();
+    if (state.selectedClipIds.size === 0) return false;
 
-    // Find which tracks contain selected clips
     const trackIdsToMute = new Set<string>();
     for (const clip of state.project.timeline.clips) {
       if (state.selectedClipIds.has(clip.id)) {
@@ -212,30 +237,36 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
       }
     }
 
-    const newTracks = state.project.timeline.tracks.map(track => {
-      if (trackIdsToMute.has(track.id)) {
-        return { ...track, muted: true };
-      }
-      return track;
+    const changing = state.project.timeline.tracks.some(
+      (track) => trackIdsToMute.has(track.id) && !track.muted
+    );
+    if (!changing) return false;
+
+    set((s) => {
+      const newTracks = s.project.timeline.tracks.map((track) =>
+        trackIdsToMute.has(track.id) && !track.muted ? { ...track, muted: true } : track
+      );
+
+      return {
+        project: {
+          ...s.project,
+          modified: Date.now(),
+          timeline: {
+            ...s.project.timeline,
+            tracks: newTracks,
+          },
+        },
+        history: pushToHistory(s),
+      };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          tracks: newTracks,
-        },
-      },
-      history: pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
-  unmuteSelectedClips: () => set((state) => {
-    if (state.selectedClipIds.size === 0) return state;
+  unmuteSelectedClips: () => {
+    const state = get();
+    if (state.selectedClipIds.size === 0) return false;
 
-    // Find which tracks contain selected clips
     const trackIdsToUnmute = new Set<string>();
     for (const clip of state.project.timeline.clips) {
       if (state.selectedClipIds.has(clip.id)) {
@@ -243,23 +274,29 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
       }
     }
 
-    const newTracks = state.project.timeline.tracks.map(track => {
-      if (trackIdsToUnmute.has(track.id)) {
-        return { ...track, muted: false };
-      }
-      return track;
+    const changing = state.project.timeline.tracks.some(
+      (track) => trackIdsToUnmute.has(track.id) && track.muted
+    );
+    if (!changing) return false;
+
+    set((s) => {
+      const newTracks = s.project.timeline.tracks.map((track) =>
+        trackIdsToUnmute.has(track.id) && track.muted ? { ...track, muted: false } : track
+      );
+
+      return {
+        project: {
+          ...s.project,
+          modified: Date.now(),
+          timeline: {
+            ...s.project.timeline,
+            tracks: newTracks,
+          },
+        },
+        history: pushToHistory(s),
+      };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          tracks: newTracks,
-        },
-      },
-      history: pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 });

@@ -21,6 +21,7 @@ import type { EditorState, ClipTransform, AnimatableProperty, Keyframe } from '.
 import { DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { pushToHistory } from './storeHistory';
 import { clipOnLockedTrack } from './trackLock';
+import { KEYFRAME_TIME_EPSILON } from '../utils/animation';
 
 export type KeyframeSlice = Pick<EditorState, 'keyframePanelState' | 'setClipKeyframe' | 'removeClipKeyframe' | 'moveClipKeyframe' | 'clearClipKeyframes' | 'setKeyframePanelOpen' | 'setKeyframePanelPosition' | 'setKeyframePanelSize' | 'setKeyframePanelSelectedProperty' | 'setKeyframePanelZoom'>;
 
@@ -127,6 +128,17 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    // ESCSUITE-101: false, with nothing written, for an unknown clip, a
+    // property the clip has no keyframes on, or a time with no keyframe
+    // within KEYFRAME_TIME_EPSILON — the three ways this used to push an undo
+    // entry that removed nothing at all.
+    const targetClip = clips.find((c) => c.id === clipId);
+    const targetKeyframes = targetClip?.animation?.keyframes[property];
+    const hasMatch = targetKeyframes?.some(
+      (kf) => Math.abs(kf.time - time) < KEYFRAME_TIME_EPSILON
+    ) ?? false;
+    if (!hasMatch) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
