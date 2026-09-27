@@ -798,6 +798,22 @@ through the save frozen at the last level; the case that pins them absent in `'s
 count is three of three. `RecordingSaveDeps` lost its `config` field outright, so nothing new branches
 in `useRecordingSave`. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-96 (restoring a session rebuilds each
+thumbnail from storage instead of a dead `blob:` handle, and the now-asynchronous restore is guarded
+against a decline, a second click and a rejected read): **99.42** / 98.77 / **94.13** / 99.02 against the
+99.41 / 98.77 / 94.12 / 99.02 the commit this branch was rebased onto measures — lines and branches up a
+hundredth each, statements and functions unmoved. Measured in one sitting, the base gives
+4,291 / 4,559 branches and this branch 4,301 / 4,569: ten new branches, ten covered, the same 268
+uncovered as before (statements 7,897 / 7,995 → 7,928 / 8,026, lines 7,021 / 7,062 → 7,049 / 7,090,
+functions 1,724 / 1,741 → 1,728 / 1,745, every denominator growing by exactly what the numerator did).
+The ten are `resolveThumbnailUrl`'s stored-or-not ternary in `core/storage.ts`, the snapshot's
+"already undefined" guard in `app/sessionSnapshot.ts`, and in `app/useSessionRestore.ts` the re-entry
+guard, the attempt check before the commit, and the failure arm's own attempt check — each reached from
+both sides by the restore, decline-during-restore, double-click and rejected-read cases, against the
+plain restore that was already there. Two review rounds put the last five there: the first found the
+async restore racing "Start Fresh", the second found a rejected read stranding the prompt with the guard
+set. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -805,7 +821,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
-| `@escapesuite/artist` | 99.41 | 98.77 | 94.12 | 99.02 |
+| `@escapesuite/artist` | 99.42 | 98.77 | 94.13 | 99.02 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

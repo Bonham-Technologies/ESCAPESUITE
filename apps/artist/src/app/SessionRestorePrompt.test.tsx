@@ -103,6 +103,29 @@ describe('SessionRestorePrompt', () => {
     expect(onDecline).toHaveBeenCalledTimes(1);
   });
 
+  it('disables both buttons once either is clicked, so a second click cannot answer twice', async () => {
+    const user = userEvent.setup();
+    const onRestore = vi.fn();
+    const onDecline = vi.fn();
+    render(<SessionRestorePrompt session={sessionWith(1, 1)} onRestore={onRestore} onDecline={onDecline} />);
+
+    const restoreButton = screen.getByRole('button', { name: 'Restore Session' });
+    const declineButton = screen.getByRole('button', { name: 'Start Fresh' });
+
+    await user.click(restoreButton);
+
+    expect(restoreButton).toBeDisabled();
+    expect(declineButton).toBeDisabled();
+    expect(onRestore).toHaveBeenCalledTimes(1);
+
+    // Neither button — not even the one already clicked — answers again.
+    await user.click(restoreButton);
+    await user.click(declineButton);
+
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(onDecline).not.toHaveBeenCalled();
+  });
+
   describe('modal keyboard behaviour', () => {
     // The prompt gets its trap, its initial focus and its focus restore from
     // the shared `useDialogBehaviour`. These pin the wiring; the mechanics are

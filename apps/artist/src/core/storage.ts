@@ -25,7 +25,7 @@ export {
 // Re-export SourceVideo type for convenience
 export type { SourceVideo } from '@escapesuite/shared/types'
 
-import { getDB, getStorageEstimate, type VideoEditorDB } from '@escapesuite/shared/storage'
+import { getDB, getStorageEstimate, getThumbnail, createBlobUrl, type VideoEditorDB } from '@escapesuite/shared/storage'
 import type { IDBPDatabase } from 'idb'
 import type { SourceVideo } from '@escapesuite/shared/types'
 
@@ -37,6 +37,19 @@ export interface SessionState {
   selectedClipId: string | null
   zoom: number
   timestamp: number
+}
+
+/**
+ * Turn a source video's *stored* thumbnail into a fresh object URL, or
+ * `undefined` when none is stored. `thumbnailUrl` is only ever an
+ * `URL.createObjectURL` handle, and those die with the document — so this is
+ * the one mechanism both `projectManager.loadProject` and
+ * `useSessionRestore.handleRestoreSession` use to give a restored source video
+ * a live URL, rather than trusting one that came from disk (ESCSUITE-96).
+ */
+export async function resolveThumbnailUrl(id: string): Promise<string | undefined> {
+  const thumbnail = await getThumbnail(id)
+  return thumbnail ? createBlobUrl(thumbnail) : undefined
 }
 
 // Project operations
