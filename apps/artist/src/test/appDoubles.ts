@@ -60,6 +60,11 @@ export function storageDouble() {
         if (source.thumbnailUrl?.startsWith('blob:')) URL.revokeObjectURL(source.thumbnailUrl)
       }
     }),
+    // The one-URL entry point the two share: `setSourceThumbnail` frees a
+    // rebuilt handle that lost its race with a real load (ESCSUITE-117).
+    revokeThumbnailUrl: vi.fn((url: string | undefined) => {
+      if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
+    }),
     getSetting: vi.fn(() => Promise.resolve(null)),
     setSetting: vi.fn(() => Promise.resolve()),
   }

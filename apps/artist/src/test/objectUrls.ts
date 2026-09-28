@@ -14,7 +14,7 @@ import { vi } from 'vitest'
 export const OBJECT_URL_PATTERN = /^blob:mock-url-\d+$/
 
 /** Every handle `URL.createObjectURL` has minted so far, in call order. */
-export function createdObjectUrls(): string[] {
+function createdObjectUrls(): string[] {
   return vi.mocked(URL.createObjectURL).mock.results
     .filter((result) => result.type === 'return')
     .map((result) => result.value as string)

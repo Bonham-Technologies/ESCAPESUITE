@@ -219,7 +219,7 @@ describe('importTake', () => {
     expect(added.map((v) => v.id)).toEqual(['take-1', 'take-1-webcam'])
   })
 
-  it('carries each part thumbnail as a blob URL for the caller to revoke', async () => {
+  it('reports each part thumbnail as the blob URL the library entry carries', async () => {
     vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
 
     const take = await importTake(primary, addSourceVideo)

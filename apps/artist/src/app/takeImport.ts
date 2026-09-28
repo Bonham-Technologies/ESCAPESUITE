@@ -290,11 +290,11 @@ export async function importTake(
       });
     }
   } catch (error) {
-    // The URLs escape only on the success path, so a throw is the last moment
-    // anything can see them: the caller revokes what it was returned, and a
-    // rejected import returns nothing. (The hook this was lifted out of kept
-    // its one URL in an effect-scoped variable its cleanup always saw; this is
-    // what replaces that.)
+    // A throw is the last moment anything can see these: the URLs are reported
+    // only on the success path, and a rejected import returns nothing at all.
+    // So this frees what THIS function minted, before anything else could have
+    // taken ownership of it — not the caller's handles, which by definition it
+    // was never given.
     for (const url of thumbnailUrls) URL.revokeObjectURL(url);
     throw error;
   }

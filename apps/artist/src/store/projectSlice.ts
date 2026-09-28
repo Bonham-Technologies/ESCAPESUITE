@@ -10,7 +10,7 @@ import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
 import { lockedSourceVideoIds } from './trackLock';
 import { pruneSelection } from './selectionPrune';
-import { revokeSourceThumbnails } from '../core/storage';
+import { revokeSourceThumbnails, revokeThumbnailUrl } from '../core/storage';
 
 export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo' | 'setSourceThumbnail'>;
 
@@ -177,7 +177,7 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
       // live handle here while the read was in flight. The library's is the one
       // on screen, so the one that lost the race is freed rather than replacing
       // it — otherwise this leaks it.
-      revokeSourceThumbnails([{ ...existing, thumbnailUrl }]);
+      revokeThumbnailUrl(thumbnailUrl);
       return state;
     }
     return {
