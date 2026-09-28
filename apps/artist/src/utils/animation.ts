@@ -627,10 +627,10 @@ export function maxPresetDuration(clipDuration: number): number {
  *
  * The shared arithmetic behind `splitAnimation`'s first half and
  * `trimAnimation`'s trim-from-the-end. `sorted` is also the track
- * `interpolateKeyframes` reads the synthesised value from — a caller cutting
- * both ends (`trimAnimation`) must interpolate against the *original* track
- * for this cut, before calling `cutStart` for the other (the original track
- * is unchanged before `boundary`, so this is safe either way).
+ * `interpolateKeyframes` reads the synthesised value from. `trimAnimation`
+ * calls this one first, against the untouched original track, so there is no
+ * "which track to interpolate against" question here the way there is for
+ * `cutStart` below.
  */
 function cutEnd(sorted: Keyframe[], boundary: number): Keyframe[] {
   const before = sorted.filter((kf) => kf.time < boundary - KEYFRAME_TIME_EPSILON);
@@ -650,22 +650,33 @@ function cutEnd(sorted: Keyframe[], boundary: number): Keyframe[] {
 }
 
 /**
- * The keyframes of `sorted` (already time-sorted) at or after `boundary`,
+ * The keyframes of `track` (already time-sorted) at or after `boundary`,
  * shifted so `boundary` becomes time 0 — snapped exactly to 0 for a keyframe
  * already within `KEYFRAME_TIME_EPSILON` of it, rather than left at a small
- * residual — plus one synthesised keyframe prepended at 0 when the track has
+ * residual — plus one synthesised keyframe prepended at 0 when `track` has
  * something before `boundary` and nothing exactly at it (a keyframe already
  * at the boundary shifts to 0 and supplies that value itself).
  *
  * The shared arithmetic behind `splitAnimation`'s second half and
- * `trimAnimation`'s trim-from-the-start. See `cutEnd`'s note on which track
- * to pass a synthesised value's interpolation against.
+ * `trimAnimation`'s trim-from-the-start.
+ *
+ * `reference` (defaulting to `track` itself, which is all `splitAnimation`
+ * ever needs) is what the synthesised keyframe's value is interpolated
+ * against. `trimAnimation` passes the *original*, un-end-cropped track here
+ * rather than its own `cutEnd`-cropped one: interpolating against the cropped
+ * track would read the segment leading up to `boundary` as running to
+ * whatever `cutEnd` synthesised at the new end, re-easing it a SECOND time
+ * over that shorter span — a different (and for any easing but `linear`,
+ * wrong) answer from interpolating the original segment once, directly, at
+ * `boundary`. `before`'s own last real keyframe is identical either way
+ * (nothing before `boundary` ever moves), so only the interpolation target
+ * differs.
  */
-function cutStart(sorted: Keyframe[], boundary: number): Keyframe[] {
-  const before = sorted.filter((kf) => kf.time < boundary - KEYFRAME_TIME_EPSILON);
-  const atOrAfter = sorted.filter((kf) => kf.time >= boundary - KEYFRAME_TIME_EPSILON);
+function cutStart(track: Keyframe[], boundary: number, reference: Keyframe[] = track): Keyframe[] {
+  const before = track.filter((kf) => kf.time < boundary - KEYFRAME_TIME_EPSILON);
+  const atOrAfter = track.filter((kf) => kf.time >= boundary - KEYFRAME_TIME_EPSILON);
 
-  const track: Keyframe[] = atOrAfter.map((kf) => ({
+  const result: Keyframe[] = atOrAfter.map((kf) => ({
     time: Math.abs(kf.time - boundary) < KEYFRAME_TIME_EPSILON ? 0 : kf.time - boundary,
     value: kf.value,
     easing: kf.easing,
@@ -674,14 +685,14 @@ function cutStart(sorted: Keyframe[], boundary: number): Keyframe[] {
     atOrAfter.length > 0 && Math.abs(atOrAfter[0].time - boundary) < KEYFRAME_TIME_EPSILON;
   if (before.length > 0 && !hasExactAtBoundary) {
     const precedingKeyframe = before[before.length - 1];
-    const value = interpolateKeyframes(sorted, boundary, precedingKeyframe.value);
-    track.unshift({
+    const value = interpolateKeyframes(reference, boundary, precedingKeyframe.value);
+    result.unshift({
       time: 0,
       value,
       easing: precedingKeyframe.easing,
     });
   }
-  return track;
+  return result;
 }
 
 export interface SplitAnimationResult {
@@ -801,23 +812,30 @@ export interface TrimAnimationRange {
 
 /**
  * Rebase a clip's animation onto a shorter clip after a trim (ESCSUITE-110):
- * `useTrimDrag`'s commit and the store's `updateClip`, for every trim that
- * shortens a clip — trimming it longer changes nothing, by the caller simply
- * not calling this. Unlike `splitAnimation`, trimming does not create a
- * second clip, so there is nothing to divide ownership of: both `in` and
- * `out` presets stay right where they are, on the one clip that remains.
+ * the store's `trimClip` calls this (review round 1 split it out of the
+ * generic `updateClip`, which `useTrimDrag`'s commit used to go through) for
+ * every trim that shortens a clip — trimming it longer changes nothing, by
+ * the caller simply not calling this. Unlike `splitAnimation`, trimming does
+ * not create a second clip, so there is nothing to divide ownership of: both
+ * `in` and `out` presets stay right where they are, on the one clip that
+ * remains.
  *
  * Presets: a kept preset's `duration` is clamped to `maxPresetDuration(end -
- * start)` — the same bound the inspector's own sliders enforce on new input.
- * Before this, nothing clamped a trimmed clip's presets at all, so a 2s
- * fade-out surviving a trim down to a 1s clip left
+ * start)` — the same bound the inspector's own sliders enforce on new input —
+ * UNLESS the preset's `type` is `'none'`, in which case its `duration` is left
+ * alone: a `'none'` preset's `duration` does nothing (`generateInPresetKeyframes`
+ * / `generateOutPresetKeyframes` both bail out before reading it), so clamping
+ * it would report a number the UI never actually used, and would throw away
+ * whatever the field held if the clip's preset is later switched back on.
+ * Before this clamp existed at all, nothing bounded a trimmed clip's presets,
+ * so a 2s fade-out surviving a trim down to a 1s clip left
  * `generateOutPresetKeyframes` computing `startTime = clipDuration - duration
  * = 1 - 2 = -1`: the clip opened already part-faded, and the keyframe panel
  * plotted the keyframe at a negative time. (`splitAnimation` deliberately
- * does NOT do this — see its own doc comment — because an unclamped preset
- * on a split half still renders bit-identically to what the parent showed;
- * a trim has no "what the parent showed" to fall back on, since the trimmed
- * content is gone.)
+ * does NOT clamp an active preset's duration — see its own doc comment —
+ * because an unclamped preset on a split half still renders bit-identically
+ * to what the parent showed; a trim has no "what the parent showed" to fall
+ * back on, since the trimmed content is gone.)
  *
  * Keyframes: cropped and shifted with the exact arithmetic `splitAnimation`
  * uses — trimming from the end is that function's first half (`cutEnd`,
@@ -827,10 +845,17 @@ export interface TrimAnimationRange {
  * a caller never needs to know which edge moved, only the interval that
  * survives: `start` and `end` are applied as `cutEnd` first (drop anything
  * past `end`, synthesising a boundary there) and then `cutStart` on ITS
- * result (drop anything before `start`, synthesising a boundary at 0) — safe
- * because `cutEnd` never touches anything before `end`, and `start <= end`
- * always holds for a trim, so `cutStart`'s own interpolation reads a track
- * `cutEnd` has left unchanged around `start`.
+ * result (drop anything before `start`, synthesising a boundary at 0). The
+ * synthesised boundary AT `start`, though, is interpolated against the
+ * ORIGINAL track, not `cutEnd`'s output — `cutStart`'s `reference` parameter
+ * — so a segment spanning both cuts is re-eased exactly once (over
+ * `[precedingKeyframe, start]` directly) rather than twice (once implicitly
+ * inside `cutEnd`'s synthesised point at `end`, and again by `cutStart`
+ * treating that synthesised point as the segment's real far end). The two
+ * synthesised boundaries themselves — the one `cutEnd` places at `end` and
+ * the one `cutStart` places at `start` — are otherwise exact regardless of
+ * easing, the same guarantee `splitAnimation` documents for its own two
+ * halves.
  *
  * `animation` is read, never written: the result shares no keyframe, preset
  * or array with it.
@@ -840,10 +865,12 @@ export function trimAnimation(
   { start, end }: TrimAnimationRange
 ): ClipAnimation {
   const cap = maxPresetDuration(end - start);
+  const clampPreset = (preset: ClipAnimation['in']): ClipAnimation['in'] =>
+    preset.type === 'none' ? { ...preset } : { ...preset, duration: Math.min(preset.duration, cap) };
 
   const result: ClipAnimation = {
-    in: { ...animation.in, duration: Math.min(animation.in.duration, cap) },
-    out: { ...animation.out, duration: Math.min(animation.out.duration, cap) },
+    in: clampPreset(animation.in),
+    out: clampPreset(animation.out),
     keyframes: {},
   };
 
@@ -856,7 +883,7 @@ export function trimAnimation(
     const sorted = ensureKeyframesSorted(track);
     const croppedAtEnd = cutEnd(sorted, end);
     result.keyframes[property] =
-      start > KEYFRAME_TIME_EPSILON ? cutStart(croppedAtEnd, start) : croppedAtEnd;
+      start > KEYFRAME_TIME_EPSILON ? cutStart(croppedAtEnd, start, sorted) : croppedAtEnd;
   }
 
   return result;

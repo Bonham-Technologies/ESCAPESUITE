@@ -58,7 +58,7 @@ pnpm lint                # Run ESLint
 | `historySlice.ts` | `history`, and `undo`/`redo`/`canUndo`/`canRedo`/`clearHistory`. The only slice that reads the history stacks, and the only one whose actions restore state instead of recording it |
 | `projectSlice.ts` | `project` and `sourceVideos`: `setProject` (through `ensureTimelineHasTracks`), `resetProject`, `setProjectResolution`, `addSourceVideo`, `removeSourceVideo` |
 | `trackSlice.ts` | The four track actions — `addTrack` (returns the new track, so it reads through `get`), `removeTrack`, `updateTrack`, `reorderTracks`. Declares no state of its own; tracks live inside `project.timeline` |
-| `clipSlice.ts` | The thirteen clip actions (`addClipToTimeline`, `removeClipFromTimeline`, `rippleDeleteClip`, `shiftClipsAfter`, `updateClip`, `splitClip`, `moveClipToTrack`, `setClipTimelinePosition`, `updateClipTransform`, `updateClipBlendMode`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`), plus `duplicateClip` and `recalculateTimelineDuration` — the one mutating action that touches neither `history` nor `modified` |
+| `clipSlice.ts` | The fourteen clip actions (`addClipToTimeline`, `removeClipFromTimeline`, `rippleDeleteClip`, `shiftClipsAfter`, `updateClip`, `trimClip`, `splitClip`, `moveClipToTrack`, `setClipTimelinePosition`, `updateClipTransform`, `updateClipBlendMode`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`), plus `duplicateClip` and `recalculateTimelineDuration` — the one mutating action that touches neither `history` nor `modified` |
 | `keyframeSlice.ts` | Keyframe data (`setClipKeyframe`, `removeClipKeyframe`, `moveClipKeyframe`, `clearClipKeyframes`) **and** the keyframe panel's own UI state: `keyframePanelState` with its five `setKeyframePanel*` setters. Panel UI, but *keyframe* panel UI, so it sits beside the data it edits rather than in `uiSlice` |
 | `overlaySlice.ts` | The overlay clip actions: `addTextOverlayClip` and `addShapeOverlayClip` (both return the new clip, so both read through `get`), `updateTextOverlayData`, `updateShapeOverlayData`. Overlay *clips* only — the legacy overlay arrays are `legacyOverlays.ts`'s business and are already folded into clips by the time a project reaches here |
 | `selectionSlice.ts` | `selectedClipId`, `selectedClipIds`, `selectedTrackId`, `clipboard`, and the eleven actions over them: `setSelectedClipId`, `setSelectedTrackId`, `toggleClipSelection`, `selectClipsInRange`, `clearMultiSelection`, `moveSelectedClips`, `deleteSelectedClips`, `copySelectedClips`, `pasteClips`, `muteSelectedClips`, `unmuteSelectedClips` |
@@ -533,33 +533,61 @@ Clips support animated properties via keyframes:
   differs slightly from the parent's curve over that same stretch, even though both halves meet at
   the same value at the cut.
 - **Trimming a clip rebases its animation too (ESCSUITE-110)**. Shortening a clip from either
-  timeline handle (`useTrimDrag`'s commit, which is the store's `updateClip` — the only action
-  that moves a clip's `startTime`/`endTime`; there is no separate inspector trim input) used to
-  touch neither the clip's keyframes nor its preset durations: a keyframe past the new end sat
-  there as dead weight (still listed in the keyframe panel, never played), and a preset longer than
-  the trimmed clip could leave `generateOutPresetKeyframes` computing a negative `startTime` — a 2s
-  fade-out on a clip trimmed to 1s opened the clip already part-faded, with the keyframe panel
-  plotting that keyframe off the left edge. `utils/animation.ts`'s `trimAnimation(animation, {
-  start, end })` fixes both, sharing its keyframe arithmetic with `splitAnimation` rather than
-  keeping a second copy of it: `cutEnd`/`cutStart`, the two halves of `splitAnimation`'s old inline
-  loop, are now standalone functions both call. `start` and `end` are the surviving interval in the
-  clip's ORIGINAL (pre-trim) local-time coordinates, so `end - start` is always the trimmed clip's
-  new duration; trimming from the end is `cutEnd(sorted, end)` alone (`start` is 0), trimming from
-  the start is that result's `cutStart(_, start)` (dropping and shifting the front), and a
-  combined trim of both edges — not something the UI's single-handle drag produces, but the
-  function itself does not assume otherwise — composes the two in one pass. Unlike a split, a trim
-  makes only one clip, so there is no ownership question for the presets: both `in` and `out` stay
-  on the one clip that remains, each with its `duration` clamped to `maxPresetDuration(end -
-  start)` — the same bound the inspector's own sliders enforce, and, since this ticket, exported
-  from `utils/animation.ts` rather than `clipEditorModel.ts` (still re-exported from there for
-  every existing import) so `trimAnimation` does not need a util importing from a component
-  directory. That clamp is the one place a trim's behaviour deliberately parts ways with a split's:
+  timeline handle used to touch neither the clip's keyframes nor its preset durations: a keyframe
+  past the new end sat there as dead weight (still listed in the keyframe panel, never played), and
+  a preset longer than the trimmed clip could leave `generateOutPresetKeyframes` computing a
+  negative `startTime` — a 2s fade-out on a clip trimmed to 1s opened the clip already part-faded,
+  with the keyframe panel plotting that keyframe off the left edge. `utils/animation.ts`'s
+  `trimAnimation(animation, { start, end })` fixes both, sharing its keyframe arithmetic with
+  `splitAnimation` rather than keeping a second copy of it: `cutEnd`/`cutStart`, the two halves of
+  `splitAnimation`'s old inline loop, are now standalone functions both call. `start` and `end` are
+  the surviving interval in the clip's ORIGINAL (pre-trim) local-time coordinates, so `end - start`
+  is always the trimmed clip's new duration; trimming from the end is `cutEnd(sorted, end)` alone
+  (`start` is 0), trimming from the start is that result's `cutStart(_, start, sorted)` (dropping
+  and shifting the front — `sorted`, the ORIGINAL uncropped track, is `cutStart`'s `reference`
+  argument for the boundary it synthesises at `start`, not `cutEnd`'s already-cropped output: doing
+  it the other way re-eases the segment leading up to `start` a second time, over the wrong span,
+  and gives a different — for any easing but `linear`, wrong — answer than interpolating the
+  original segment once, directly, at `start`), and a combined trim of both edges — not something
+  the UI's single-handle drag produces, but the function itself does not assume otherwise —
+  composes the two in one pass. Unlike a split, a trim makes only one clip, so there is no ownership
+  question for the presets: both `in` and `out` stay on the one clip that remains, each with its
+  `duration` clamped to `maxPresetDuration(end - start)` — the same bound the inspector's own
+  sliders enforce, and, since this ticket, exported from `utils/animation.ts` rather than
+  `clipEditorModel.ts` (still re-exported from there for every existing import) so `trimAnimation`
+  does not need a util importing from a component directory — UNLESS the preset's `type` is
+  `'none'`, in which case its `duration` is left alone: that field does nothing for a `'none'`
+  preset (both generators bail out before reading it), so clamping it would report a number the UI
+  never used and would lose whatever it held if the preset were switched back on later. That clamp
+  is otherwise the one place a trim's behaviour deliberately parts ways with a split's:
   `splitAnimation` leaves a kept preset's duration untouched even past its own half's new length,
   because an unclamped preset there still renders bit-identically to what the parent clip showed —
   a trim has no such fallback, since the trimmed-off content is simply gone, so the clamp is the
   only way to keep the picture sane. Lengthening a clip (dragging a handle outward) changes nothing
-  about its animation at all — `updateClip` only calls `trimAnimation` when the new duration is
+  about its animation at all — the store only calls `trimAnimation` when the new duration is
   strictly shorter than the old one, by construction rather than by any special-case check.
+
+  **The write goes through `trimClip`, not `updateClip` (review round 1).** The first version of
+  this fix put the rebase inside `updateClip` — the one action that moves a clip's `startTime`/
+  `endTime` — rebasing from the clip's CURRENT `animation` on every write. A trim writes on every
+  mousemove, though, so "current" meant "whatever the previous move of the SAME gesture had already
+  cropped it to": dragging a handle in past a keyframe and back out past where the gesture started
+  compounded the crop on every move instead of undoing it, and the dropped keyframe never came
+  back. `trimClip(clipId, edge, updates, origin, skipHistory?)` is `updateClip`'s replacement for
+  this one write, and fixes it two ways. First, GESTURE SAFETY: `origin` — the clip's trim/position
+  **and animation** exactly as they stood when the gesture began, threaded from `useTrimDrag`'s
+  `TrimOrigin` (captured once, on mousedown) all the way to the store — is what every move rebases
+  from, never the clip's live one, so the write is a pure function of (origin, current pointer
+  position) rather than of the gesture's history: moving back to exactly where the drag started
+  restores the original animation exactly, however many moves came between. Second, EXPLICITNESS:
+  which edge moved is `edge`, passed straight through from `TrimState.edge` (the value `useTrimDrag`
+  already tracks) rather than inferred inside the action from which of `updates`' fields happen to
+  be set — the inference was correct (`updates.startTime` for a source clip's own trim point,
+  `updates.timelinePosition` for an extendable overlay/image clip, which has no source to trim so
+  its front-trim moves `timelinePosition` instead) but invisible from the type, and its
+  `timelinePosition` arm went untested. `updateClip` itself is back to carrying no animation logic
+  at all, for its one other caller (`useClipEditorActions.ts`'s mask/stroke handlers, which never
+  touch `startTime`/`endTime`) to trip over.
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
@@ -1189,7 +1217,9 @@ and fifth already had it; ESCSUITE-75 added it to
 `setClipTimelinePosition`, all six in the same shape
 (`history: skipHistory ? state.history :
 pushToHistory(state)`). It is optional and last, so every existing caller is one undo step
-exactly as before.
+exactly as before. `trimClip` (ESCSUITE-110 review round 1) takes it the same way, having taken
+over the timeline trim's own write from `updateClip` — which still carries the flag today, now
+purely for the mask/stroke sliders in `useClipEditorActions.ts`.
 
 **Every slider in the inspector and the trim drag on the timeline now follow the one-entry-per-gesture
 rule** (ESCSUITE-77 finished what ESCSUITE-75 started). `Timeline/useTrimDrag.ts` is the one that
@@ -1309,13 +1339,14 @@ an action that refused and an action that wrote were both `void`, and three gest
 already threading a `skipHistory` flag through a *second* store write on the strength of the
 first having pushed the undo entry. A refused first write pushes nothing, so those gestures
 would hand `skipHistory` to the write that did land and leave the whole gesture off the undo
-stack — one Ctrl+Z after it would then eat the edit *before* it instead. The eleven actions that
-take a trailing `skipHistory` (`shiftClipsAfter`, `updateClip`, `setClipTimelinePosition`,
-`updateClipTransform`, `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`,
-`setClipKeyframe`, `moveClipKeyframe`, `updateTextOverlayData`, `updateShapeOverlayData`) plus
-`moveClipToTrack` — which takes no flag but is the *first* write of the clip drag's two-write
-commit — therefore return `boolean`: `true` when they wrote, `false` when the lock guard refused
-(or, `shiftClipsAfter` alone, when the delta was zero and nothing moved). ESCSUITE-88 added a
+stack — one Ctrl+Z after it would then eat the edit *before* it instead. The twelve actions that
+take a trailing `skipHistory` (`shiftClipsAfter`, `updateClip`, `trimClip`,
+`setClipTimelinePosition`, `updateClipTransform`, `updateClipEffects`, `updateClipTransition`,
+`updateClipAnimation`, `setClipKeyframe`, `moveClipKeyframe`, `updateTextOverlayData`,
+`updateShapeOverlayData`) plus `moveClipToTrack` — which takes no flag but is the *first* write of
+the clip drag's two-write commit — therefore return `boolean`: `true` when they wrote, `false`
+when the lock guard refused (or, `shiftClipsAfter` alone, when the delta was zero and nothing
+moved). ESCSUITE-88 added a
 thirteenth, for the same reason at one remove: `removeClipKeyframe` threads no flag either, but
 the keyframe graph's `Delete` *announces* the removal, so it has to be able to tell a refusal
 from a write. Their guard moves out of the `set` updater and in front of it, reading through

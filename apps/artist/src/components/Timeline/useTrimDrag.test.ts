@@ -1,9 +1,12 @@
 // The trim gesture's lifecycle: what it binds, what it writes, what it ripples.
 //
 // A trim differs from a clip drag in that it commits continuously — every
-// mousemove is a store write — so these tests watch `updateClip` rather than a
+// mousemove is a store write — so these tests watch `trimClip` rather than a
 // preview, and they watch that the origin recorded on mousedown is what the
-// arithmetic measures against, not the clip's live values.
+// arithmetic measures against, not the clip's live values. Since ESCSUITE-110
+// review round 1, that origin travels all the way to the store on every move
+// (`ORIGIN` below), not just the geometry `computeTrimUpdate` reads from it —
+// see "gesture safety" further down for why.
 //
 // The trailing `skipHistory` those argument assertions carry is ESCSUITE-77's:
 // the gesture's first write pushes the undo entry (`false`) and every write
@@ -30,7 +33,10 @@ let addListener: MockInstance
 let removeListener: MockInstance
 let containerRef: { current: HTMLDivElement | null }
 let trackA: string
-let actions: Pick<TrimDragDeps, 'setSelectedClipId' | 'updateClip' | 'shiftClipsAfter'>
+let actions: Pick<TrimDragDeps, 'setSelectedClipId' | 'trimClip' | 'shiftClipsAfter'>
+
+/** clip1's trim origin at the start of every test below: no animation, so `trimClip` never rebases one. */
+const ORIGIN = { startTime: 0, endTime: 2, timelinePosition: 2, animation: undefined }
 
 beforeEach(() => {
   resetStoreForTest()
@@ -49,7 +55,7 @@ beforeEach(() => {
   const state = useEditorStore.getState()
   actions = {
     setSelectedClipId: vi.fn(state.setSelectedClipId),
-    updateClip: vi.fn(state.updateClip),
+    trimClip: vi.fn(state.trimClip),
     shiftClipsAfter: vi.fn(state.shiftClipsAfter),
   }
 })
@@ -193,10 +199,10 @@ describe('useTrimDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(actions.updateClip).toHaveBeenCalledWith('clip1', {
+    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'start', {
       startTime: 0.5,
       timelinePosition: 2.5,
-    }, false)
+    }, ORIGIN, false)
     expect(theClip('clip1').duration).toBe(1.5)
   })
 
@@ -206,10 +212,10 @@ describe('useTrimDrag following the pointer', () => {
 
     moveTo(1)
 
-    expect(actions.updateClip).toHaveBeenCalledWith('clip1', {
+    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'start', {
       startTime: 0,
       timelinePosition: 2,
-    }, false)
+    }, ORIGIN, false)
   })
 
   it('takes the end edge out into the rest of the source', () => {
@@ -218,7 +224,7 @@ describe('useTrimDrag following the pointer', () => {
 
     moveTo(5)
 
-    expect(actions.updateClip).toHaveBeenCalledWith('clip1', { endTime: 3 }, false)
+    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'end', { endTime: 3 }, ORIGIN, false)
     expect(theClip('clip1').duration).toBe(3)
   })
 
@@ -231,10 +237,10 @@ describe('useTrimDrag following the pointer', () => {
 
     // The second write of the gesture, so it skips history — the first one
     // pushed the entry the whole trim undoes to.
-    expect(actions.updateClip).toHaveBeenLastCalledWith('clip1', {
+    expect(actions.trimClip).toHaveBeenLastCalledWith('clip1', 'start', {
       startTime: 0.25,
       timelinePosition: 2.25,
-    }, true)
+    }, ORIGIN, true)
   })
 
   it('writes nothing when the clip has no source to trim against', () => {
@@ -246,7 +252,7 @@ describe('useTrimDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(actions.updateClip).not.toHaveBeenCalled()
+    expect(actions.trimClip).not.toHaveBeenCalled()
   })
 
   it('writes nothing once the track area has gone', () => {
@@ -256,7 +262,7 @@ describe('useTrimDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(actions.updateClip).not.toHaveBeenCalled()
+    expect(actions.trimClip).not.toHaveBeenCalled()
   })
 
   it('writes nothing when the clip has left the timeline mid-trim', () => {
@@ -268,7 +274,55 @@ describe('useTrimDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(actions.updateClip).not.toHaveBeenCalled()
+    expect(actions.trimClip).not.toHaveBeenCalled()
+  })
+})
+
+// ESCSUITE-110 review round 1 (MAJOR 1): the store rebases a trimmed clip's
+// animation from `origin.animation`, never from the clip's current one, so a
+// whole gesture's overshoot-and-return is exact. That guarantee depends on
+// this hook capturing the origin once, on mousedown, and handing the SAME
+// object to every move — these tests are the hook's half of that contract,
+// with the store's half (the actual rebase arithmetic) in
+// `store/projectStore.timeline.test.ts`'s "gesture safety" tests.
+describe("useTrimDrag's origin carries the animation the clip had at mousedown", () => {
+  const animatedTrack = {
+    keyframes: {
+      x: [
+        { time: 0, value: 0, easing: 'linear' as const },
+        { time: 1.5, value: 1, easing: 'linear' as const },
+      ],
+    },
+  }
+
+  it('captures it at mousedown', () => {
+    store().updateClipAnimation('clip1', animatedTrack)
+    const startingAnimation = theClip('clip1').animation
+    const { result } = mountTrim()
+
+    grabEdge(result, 'end')
+
+    expect(result.current.trimState?.origin.animation).toBe(startingAnimation)
+  })
+
+  it('hands the SAME origin to every move of the gesture, even after the store has rebased the live clip', () => {
+    store().updateClipAnimation('clip1', animatedTrack)
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+    const origin = result.current.trimState?.origin
+
+    // Move 1 shrinks clip1 past its own keyframe at 1.5s, so the STORE's
+    // rebase already leaves the live clip's animation different from
+    // `origin.animation` by the second move — the exact condition that made
+    // the pre-round-1 version compound the crop.
+    moveTo(2.2)
+    moveTo(2.4)
+
+    expect(actions.trimClip).toHaveBeenNthCalledWith(1, 'clip1', 'end', expect.anything(), origin, false)
+    expect(actions.trimClip).toHaveBeenNthCalledWith(2, 'clip1', 'end', expect.anything(), origin, true)
+    // Sanity: the gesture really did rebase the live clip away from the
+    // origin's animation, so the assertions above are not passing vacuously.
+    expect(theClip('clip1').animation?.keyframes.x).not.toEqual(origin?.animation?.keyframes.x)
   })
 })
 
@@ -361,7 +415,7 @@ describe('useTrimDrag and the undo stack', () => {
 
     // The trim really ran, all five moves of it — otherwise "one entry" would
     // pass by writing nothing at all.
-    expect(actions.updateClip).toHaveBeenCalledTimes(5)
+    expect(actions.trimClip).toHaveBeenCalledTimes(5)
     expect(theClip('clip1').endTime).toBe(3)
     expect(past() - before).toBe(1)
   })
@@ -373,8 +427,8 @@ describe('useTrimDrag and the undo stack', () => {
     moveTo(4.5)
     moveTo(5)
 
-    expect(actions.updateClip).toHaveBeenNthCalledWith(1, 'clip1', { endTime: 2.5 }, false)
-    expect(actions.updateClip).toHaveBeenNthCalledWith(2, 'clip1', { endTime: 3 }, true)
+    expect(actions.trimClip).toHaveBeenNthCalledWith(1, 'clip1', 'end', { endTime: 2.5 }, ORIGIN, false)
+    expect(actions.trimClip).toHaveBeenNthCalledWith(2, 'clip1', 'end', { endTime: 3 }, ORIGIN, true)
   })
 
   it('undoes the whole trim, back to the in and out points it started at', () => {
@@ -449,8 +503,8 @@ describe('useTrimDrag and the undo stack', () => {
     moveTo(5)
     release()
 
-    expect(actions.updateClip).toHaveBeenCalledTimes(1)
-    expect(actions.updateClip).toHaveBeenCalledWith('clip1', { duration: 3, endTime: 3 }, false)
+    expect(actions.trimClip).toHaveBeenCalledTimes(1)
+    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'end', { duration: 3, endTime: 3 }, ORIGIN, false)
     expect(past() - before).toBe(1)
   })
 
@@ -475,8 +529,8 @@ describe('useTrimDrag and the undo stack', () => {
     moveTo(5)
     release()
 
-    expect(actions.updateClip).toHaveBeenNthCalledWith(1, 'clip1', { endTime: 2.5 }, false)
-    expect(actions.updateClip).toHaveBeenNthCalledWith(2, 'clip1', { endTime: 3 }, false)
+    expect(actions.trimClip).toHaveBeenNthCalledWith(1, 'clip1', 'end', { endTime: 2.5 }, ORIGIN, false)
+    expect(actions.trimClip).toHaveBeenNthCalledWith(2, 'clip1', 'end', { endTime: 3 }, ORIGIN, false)
     expect(theClip('clip1').endTime).toBe(3)
     expect(past() - before).toBe(1)
   })

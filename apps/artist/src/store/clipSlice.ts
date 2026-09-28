@@ -20,7 +20,7 @@ import {
   strokeForPlacement,
 } from '../utils/overlayPlacement';
 
-export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
+export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'trimClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
 
 export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (set, get) => ({
   // Clip actions
@@ -334,6 +334,11 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // every `input` event, so the gesture's first write pushes the undo entry and
   // the rest of the drag passes `true`. Optional and last, so every existing
   // caller is a single undo step exactly as before.
+  //
+  // Carries no animation logic (ESCSUITE-110 review round 1 moved it out, into
+  // `trimClip` below): this action's other caller, `useClipEditorActions.ts`'s
+  // mask/stroke handlers, never touches `startTime`/`endTime`, and a timeline
+  // trim goes through `trimClip` instead.
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
@@ -346,33 +351,100 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         // Recalculate duration if start/end times changed
         if (updates.startTime !== undefined || updates.endTime !== undefined) {
           updated.duration = updated.endTime - updated.startTime;
+        }
+        return updated;
+      });
 
-          // ESCSUITE-110: a trim that SHORTENS the clip rebases its
-          // animation onto the new, shorter duration — a keyframe past the
-          // new end becomes dead weight (never played, still listed in the
-          // panel) and a preset longer than the clip can make
-          // `generateOutPresetKeyframes` compute a negative `startTime`.
-          // Trimming outward changes nothing: it is exactly the case this
-          // `if` does not enter. `trimAnimation` wants the kept interval in
-          // the clip's ORIGINAL (pre-trim) local-time coordinates — `start`
-          // is how much was cut from the front, which `useTrimDrag`'s start
-          // edge reports as either a moved `startTime` (a video/audio clip's
-          // trim point in its source) or, for an extendable overlay/image
-          // clip with no source to trim, a moved `timelinePosition` instead;
-          // `end` is simply `start` plus the clip's new duration, since
-          // nothing before `start` or after `end` survives the trim either
-          // way.
-          if (clip.animation && updated.duration < clip.duration - KEYFRAME_TIME_EPSILON) {
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+            duration: calculateTimelineDuration(newClips),
+          },
+        },
+        history: skipHistory ? state.history : pushToHistory(state),
+      };
+    });
+
+    return true;
+  },
+
+  // ESCSUITE-110 (review round 1): the one write a timeline trim goes
+  // through — `useTrimDrag`'s commit, on every mousemove of the gesture. Split
+  // out of `updateClip` for two reasons the review raised:
+  //
+  // 1. GESTURE SAFETY. A trim writes on every mousemove, so `updates` only
+  //    ever carries the one edge's new position — rebasing from the clip's
+  //    CURRENT `animation` (as the first version of this fix did) rebases from
+  //    whatever the PREVIOUS move in the same gesture already cropped it to,
+  //    compounding the loss on every move and making an overshoot
+  //    irrecoverable: drag inward past a keyframe, then back out past where it
+  //    started, and the keyframe the first move dropped is gone for good
+  //    rather than restored. `origin.animation` is the clip's animation as it
+  //    stood BEFORE the gesture began (captured once, on mousedown, by
+  //    `useTrimDrag`'s `TrimOrigin`) — every move rebases from that same
+  //    pristine value, so the write this function produces is a pure function
+  //    of (origin, current pointer position), not of the gesture's history.
+  //    Moving back to exactly where the gesture started reproduces the
+  //    original animation exactly, however many moves came between.
+  // 2. EXPLICITNESS. Which edge moved is `edge`, passed straight through from
+  //    `TrimState.edge` — the value `useTrimDrag` already tracks — rather than
+  //    inferred from which of `updates`' fields happen to be set. The
+  //    prior version sniffed `updates.startTime` vs `updates.timelinePosition`
+  //    to tell a source clip's own trim point from an extendable
+  //    overlay/image clip's (which has no source to trim, so its front trim
+  //    moves `timelinePosition` instead) — correct, but a caller could not see
+  //    that from the type, and the `timelinePosition` arm went untested.
+  //
+  // The arithmetic: `origin.timelinePosition` is where the clip's front sat
+  // before the gesture; `updates.timelinePosition` is where it sits now
+  // (`computeTrimUpdate` sends this for a start-edge trim on EITHER clip kind
+  // — a source clip's start-trim moves both `startTime` and `timelinePosition`
+  // together, an extendable clip's moves only `timelinePosition` — so reading
+  // it needs no branch on clip kind, only on `edge`). Their difference is how
+  // much the front was cut, in the clip's own original local-time coordinates
+  // (the same units `Keyframe.time` and `trimAnimation`'s `start`/`end` use):
+  // 0 for an end-edge trim, where the front never moves. `end` is simply
+  // `start` plus the new duration, since nothing before `start` or after `end`
+  // survives the trim either way — see `trimAnimation`'s own doc comment.
+  trimClip: (
+    clipId: string,
+    edge: 'start' | 'end',
+    updates: Partial<Clip>,
+    origin: { startTime: number; endTime: number; timelinePosition: number; animation?: ClipAnimation },
+    skipHistory?: boolean
+  ) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map((clip) => {
+        if (clip.id !== clipId) return clip;
+
+        const updated = { ...clip, ...updates };
+        if (updates.startTime !== undefined || updates.endTime !== undefined || updates.duration !== undefined) {
+          updated.duration = updated.endTime - updated.startTime;
+        }
+
+        if (origin.animation) {
+          const originDuration = origin.endTime - origin.startTime;
+          if (updated.duration < originDuration - KEYFRAME_TIME_EPSILON) {
             const frontCut =
-              updates.startTime !== undefined
-                ? updated.startTime - clip.startTime
-                : updates.timelinePosition !== undefined
-                  ? updated.timelinePosition - clip.timelinePosition
-                  : 0;
+              edge === 'start' ? (updates.timelinePosition ?? origin.timelinePosition) - origin.timelinePosition : 0;
             const start = frontCut > KEYFRAME_TIME_EPSILON ? frontCut : 0;
-            updated.animation = trimAnimation(clip.animation, { start, end: start + updated.duration });
+            updated.animation = trimAnimation(origin.animation, { start, end: start + updated.duration });
+          } else {
+            // Not shorter than the gesture's own start (lengthening, or back
+            // to exactly where it began): restore the origin's animation
+            // exactly, rather than leaving whatever the last inward move of
+            // this same gesture had cropped it to.
+            updated.animation = origin.animation;
           }
         }
+
         return updated;
       });
 

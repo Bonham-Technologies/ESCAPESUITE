@@ -251,17 +251,17 @@ describe('a trim whose last move lands after the release', () => {
       tracks: state.project.timeline.tracks,
       activeTool: state.activeTool,
       setSelectedClipId: state.setSelectedClipId,
-      updateClip: state.updateClip,
+      trimClip: state.trimClip,
       shiftClipsAfter: state.shiftClipsAfter,
     }
   }
 
   it('writes nothing for a move batched with the mouseup', () => {
-    // Spied *before* the render: `deps()` reads `updateClip` off the store on
+    // Spied *before* the render: `deps()` reads `trimClip` off the store on
     // every render, so a spy installed after the mousedown would never be the
     // function the handler holds and the assertion below would pass whatever
     // the handler did.
-    const updateClip = vi.spyOn(useEditorStore.getState(), 'updateClip')
+    const trimClip = vi.spyOn(useEditorStore.getState(), 'trimClip')
     const { result } = renderHook(() => {
       useEditorStore((state) => state.project.timeline.clips)
       return useTrimDrag(deps())
@@ -278,7 +278,7 @@ describe('a trim whose last move lands after the release', () => {
     // handler actually calls — otherwise "not called again" below would be
     // satisfied by a spy nothing was ever wired to.
     move(LEFT + 5 * PPS)
-    expect(updateClip).toHaveBeenCalledTimes(1)
+    expect(trimClip).toHaveBeenCalledTimes(1)
     expect(theClip('clip1').duration).toBe(3)
 
     // Both events go through one `act()` so they land in one batch, which is
@@ -288,7 +288,7 @@ describe('a trim whose last move lands after the release', () => {
       document.dispatchEvent(new MouseEvent('mousemove', { clientX: LEFT + 6 * PPS }))
     })
 
-    expect(updateClip).toHaveBeenCalledTimes(1)
+    expect(trimClip).toHaveBeenCalledTimes(1)
     expect(result.current.trimState).toBeNull()
     expect(theClip('clip1').duration).toBe(3)
   })

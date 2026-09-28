@@ -614,6 +614,30 @@ export interface EditorState {
    */
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => boolean;
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => boolean;
+  /**
+   * The one write a timeline trim goes through (`useTrimDrag`'s commit) —
+   * split out of `updateClip` by ESCSUITE-110's review round 1, so
+   * `updateClip` itself carries no animation logic for its other callers
+   * (the mask/stroke handlers in `useClipEditorActions.ts`) to trip over.
+   *
+   * `edge` is which handle is being dragged, exactly as `useTrimDrag` already
+   * tracks it — an explicit value, never inferred from which of `updates`'
+   * fields happen to be present (round 1 flagged the inference this replaced
+   * as untested on one of its two arms and, worse, ambiguous by
+   * construction). `origin` is the clip's trim/position **and animation**
+   * when the gesture began: every move rebases `origin.animation` fresh —
+   * never the clip's current, possibly-already-cropped one — so the whole
+   * gesture is idempotent and an outward move restores exactly what an
+   * inward move over-cropped, however many moves came between. See the
+   * implementation's own comment for the arithmetic.
+   */
+  trimClip: (
+    clipId: string,
+    edge: 'start' | 'end',
+    updates: Partial<Clip>,
+    origin: { startTime: number; endTime: number; timelinePosition: number; animation?: ClipAnimation },
+    skipHistory?: boolean
+  ) => boolean;
   splitClip: (clipId: string, splitTime: number) => void;
   moveClipToTrack: (clipId: string, trackId: string) => boolean;
   setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => boolean;

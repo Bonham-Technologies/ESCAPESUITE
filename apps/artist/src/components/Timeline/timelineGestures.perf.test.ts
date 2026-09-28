@@ -408,7 +408,7 @@ describe('useTrimDrag per-move work', () => {
       tracks: state.project.timeline.tracks,
       activeTool: state.activeTool,
       setSelectedClipId: state.setSelectedClipId,
-      updateClip: state.updateClip,
+      trimClip: state.trimClip,
       shiftClipsAfter: state.shiftClipsAfter,
     }
   }

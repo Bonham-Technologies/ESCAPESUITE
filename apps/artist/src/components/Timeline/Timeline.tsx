@@ -57,7 +57,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const updateTrack = useEditorStore((state) => state.updateTrack);
   const removeTrack = useEditorStore((state) => state.removeTrack);
   const reorderTracks = useEditorStore((state) => state.reorderTracks);
-  const updateClip = useEditorStore((state) => state.updateClip);
+  const trimClip = useEditorStore((state) => state.trimClip);
   const shiftClipsAfter = useEditorStore((state) => state.shiftClipsAfter);
   const markers = useEditorStore((state) => state.markers);
   const removeMarker = useEditorStore((state) => state.removeMarker);
@@ -174,7 +174,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     tracks,
     activeTool,
     setSelectedClipId,
-    updateClip,
+    trimClip,
     shiftClipsAfter,
   });
 

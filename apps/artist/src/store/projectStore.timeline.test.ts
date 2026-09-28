@@ -669,10 +669,52 @@ describe('projectStore remaining behaviours', () => {
       expect(store().project.timeline.clips[0].name).toBe('Renamed')
     })
 
-    // ESCSUITE-110: trimming a clip leaves keyframes past its new end as dead
-    // weight and can leave an out-preset's duration longer than the clip
-    // (`generateOutPresetKeyframes` then computes a negative `startTime`).
-    describe('rebasing the animation on a trim (ESCSUITE-110)', () => {
+    // ESCSUITE-110 review round 1: the animation rebase moved out of this
+    // action entirely, into `trimClip` below — a timeline trim no longer
+    // goes through `updateClip` at all. This pins that `updateClip` itself
+    // carries no such logic, so a future change to its other caller
+    // (`useClipEditorActions.ts`'s mask/stroke handlers) cannot silently
+    // reintroduce it.
+    it('carries no animation logic: shortening a clip through this action leaves its animation untouched', () => {
+      addClip('clip1', 0, 10)
+      store().updateClipAnimation('clip1', { out: { type: 'fade', duration: 2, easing: 'ease-in' } })
+      const before = store().project.timeline.clips[0].animation
+
+      store().updateClip('clip1', { endTime: 1 })
+
+      const clip = store().project.timeline.clips[0]
+      expect(clip.duration).toBe(1)
+      expect(clip.animation).toBe(before)
+    })
+  })
+
+  // ESCSUITE-110: trimming a clip leaves keyframes past its new end as dead
+  // weight and can leave an out-preset's duration longer than the clip
+  // (`generateOutPresetKeyframes` then computes a negative `startTime`).
+  // Review round 1 split this out of `updateClip` into its own action,
+  // `trimClip`, for gesture safety (MAJOR 1) and an explicit edge instead of
+  // an inferred one (MAJOR 2) — see `clipSlice.ts`'s doc comment on it.
+  describe('trimClip (ESCSUITE-110)', () => {
+    /** The origin `useTrimDrag` would capture on mousedown, from a clip snapshot. */
+    const originOf = (clip: ReturnType<typeof store>['project']['timeline']['clips'][number]) => ({
+      startTime: clip.startTime,
+      endTime: clip.endTime,
+      timelinePosition: clip.timelinePosition,
+      animation: clip.animation,
+    })
+
+    it('recomputes the clip duration the same way updateClip used to', () => {
+      addClip('clip1', 0, 10)
+      const origin = originOf(store().project.timeline.clips[0])
+
+      store().trimClip('clip1', 'end', { endTime: 6 }, origin)
+
+      const clip = store().project.timeline.clips[0]
+      expect(clip.duration).toBe(6)
+      expect(store().project.timeline.duration).toBe(6)
+    })
+
+    describe('rebasing the animation on a trim', () => {
       it('drops a keyframe past the new end and synthesises a boundary, trimming from the end', () => {
         addClip('clip1', 0, 10)
         store().updateClipAnimation('clip1', {
@@ -684,9 +726,10 @@ describe('projectStore remaining behaviours', () => {
             ],
           },
         })
+        const origin = originOf(store().project.timeline.clips[0])
 
         // Trim the end in from 10s to 6s.
-        store().updateClip('clip1', { endTime: 6 })
+        store().trimClip('clip1', 'end', { endTime: 6 }, origin)
 
         const clip = store().project.timeline.clips[0]
         expect(clip.duration).toBe(6)
@@ -707,10 +750,11 @@ describe('projectStore remaining behaviours', () => {
             ],
           },
         })
+        const origin = originOf(store().project.timeline.clips[0])
 
         // Trim the start in by 6s: startTime moves to 6, and the trim drag
         // moves timelinePosition by the same amount (endTime untouched).
-        store().updateClip('clip1', { startTime: 6, timelinePosition: 6 })
+        store().trimClip('clip1', 'start', { startTime: 6, timelinePosition: 6 }, origin)
 
         const clip = store().project.timeline.clips[0]
         expect(clip.duration).toBe(4)
@@ -723,10 +767,11 @@ describe('projectStore remaining behaviours', () => {
       it("clamps a kept out-preset's duration so it can no longer start before 0", () => {
         addClip('clip1', 0, 10)
         store().updateClipAnimation('clip1', { out: { type: 'fade', duration: 2, easing: 'ease-in' } })
+        const origin = originOf(store().project.timeline.clips[0])
 
         // Trim the clip down to 1s — an unclamped 2s fade-out would make
         // generateOutPresetKeyframes compute startTime = 1 - 2 = -1.
-        store().updateClip('clip1', { endTime: 1 })
+        store().trimClip('clip1', 'end', { endTime: 1 }, origin)
 
         const clip = store().project.timeline.clips[0]
         expect(clip.duration).toBe(1)
@@ -746,13 +791,106 @@ describe('projectStore remaining behaviours', () => {
           keyframes: { x: [{ time: 0, value: 0, easing: 'linear' }, { time: 4, value: 1, easing: 'linear' }] },
         })
         const before = store().project.timeline.clips[0].animation
+        const origin = originOf(store().project.timeline.clips[0])
 
         // Drag the end handle outward: 6 -> 9, so duration grows 4 -> 7.
-        store().updateClip('clip1', { endTime: 9 })
+        store().trimClip('clip1', 'end', { endTime: 9 }, origin)
 
         const clip = store().project.timeline.clips[0]
         expect(clip.duration).toBe(7)
         expect(clip.animation).toBe(before)
+      })
+    })
+
+    // MAJOR 1 from the review: the first version of this fix rebased from the
+    // clip's CURRENT animation, which — since a trim writes on every
+    // mousemove — was already whatever the previous move in the same gesture
+    // had cropped it to. Compounding that on every move made an overshoot
+    // irrecoverable. `trimClip` now always rebases from `origin.animation`,
+    // captured once when the gesture began, so it is a pure function of
+    // (origin, current pointer position) and an overshoot-and-return is
+    // exact.
+    describe('gesture safety: rebasing from the origin across multiple moves', () => {
+      it('overshooting past a keyframe and back to the start restores it exactly', () => {
+        addClip('clip1', 0, 10)
+        store().updateClipAnimation('clip1', {
+          keyframes: { x: [{ time: 0, value: 0, easing: 'linear' }, { time: 8, value: 1, easing: 'linear' }] },
+        })
+        const startingAnimation = store().project.timeline.clips[0].animation
+        const origin = originOf(store().project.timeline.clips[0])
+
+        // Move 1: drag the end handle in to 6s — past the keyframe at 8,
+        // which a single-move trim would crop into a synthesised boundary.
+        store().trimClip('clip1', 'end', { endTime: 6 }, origin, false)
+        expect(store().project.timeline.clips[0].animation?.keyframes.x).not.toEqual(
+          startingAnimation?.keyframes.x
+        )
+
+        // Move 2: the SAME gesture (same `origin`) moves back out to exactly
+        // where it started, 10s.
+        store().trimClip('clip1', 'end', { endTime: 10 }, origin, true)
+
+        const clip = store().project.timeline.clips[0]
+        expect(clip.duration).toBe(10)
+        expect(clip.animation?.keyframes.x).toEqual(startingAnimation?.keyframes.x)
+      })
+
+      it('overshooting to the shortest a trim may leave and back restores the authored preset duration', () => {
+        // 0.1s is MIN_CLIP_DURATION (components/Timeline/timelineGeometry.ts)
+        // — the shortest a trim drag may leave a clip.
+        const MIN_CLIP_DURATION = 0.1
+        addClip('clip1', 0, 10)
+        store().updateClipAnimation('clip1', { out: { type: 'fade', duration: 2, easing: 'ease-in' } })
+        const origin = originOf(store().project.timeline.clips[0])
+
+        // Move 1: overshoot all the way in — clamps the fade-out hard.
+        store().trimClip('clip1', 'end', { endTime: MIN_CLIP_DURATION }, origin, false)
+        expect(store().project.timeline.clips[0].animation?.out.duration).toBeLessThan(2)
+
+        // Move 2: back out to the origin's own length.
+        store().trimClip('clip1', 'end', { endTime: 10 }, origin, true)
+
+        const clip = store().project.timeline.clips[0]
+        expect(clip.duration).toBe(10)
+        expect(clip.animation?.out.duration).toBe(2)
+      })
+    })
+
+    // MAJOR 2 from the review: which edge moved is `edge`, passed straight
+    // through from `TrimState.edge` — never inferred from which of `updates`'
+    // fields happen to be present. An extendable clip (an overlay, or an
+    // image) has no source to trim, so ITS front-trim moves `timelinePosition`
+    // rather than `startTime` — the one arm the old sniffing-based version
+    // left untested.
+    describe('the front-cut for an extendable clip (no startTime to move)', () => {
+      it('shifts keyframes back when an overlay clip is trimmed from the start', () => {
+        store().addClipToTimeline(
+          { id: 'overlay1', sourceVideoId: '', name: 'overlay1', overlayType: 'shape', startTime: 0, endTime: 10, duration: 10 },
+          undefined,
+          0
+        )
+        store().updateClipAnimation('overlay1', {
+          keyframes: {
+            x: [
+              { time: 0, value: 0, easing: 'linear' },
+              { time: 4, value: 0.5, easing: 'ease-in' },
+              { time: 8, value: 1, easing: 'linear' },
+            ],
+          },
+        })
+        const origin = originOf(store().project.timeline.clips[0])
+
+        // computeTrimUpdate's extendable start-edge case: timelinePosition,
+        // duration and endTime move; startTime never does (it stays 0).
+        store().trimClip('overlay1', 'start', { timelinePosition: 6, duration: 4, endTime: 4 }, origin)
+
+        const clip = store().project.timeline.clips[0]
+        expect(clip.duration).toBe(4)
+        expect(clip.timelinePosition).toBe(6)
+        expect(clip.animation?.keyframes.x).toHaveLength(2)
+        expect(clip.animation?.keyframes.x?.[0].time).toBe(0)
+        expect(clip.animation?.keyframes.x?.[0].value).toBeCloseTo(0.625, 5)
+        expect(clip.animation?.keyframes.x?.[1]).toEqual({ time: 2, value: 1, easing: 'linear' })
       })
     })
   })
@@ -879,6 +1017,8 @@ describe('projectStore remaining behaviours', () => {
     it('refuses to remove a clip on it', () => refuses(() => store().removeClipFromTimeline('h1')))
     it('refuses to ripple-delete a clip on it', () => refuses(() => store().rippleDeleteClip('h1')))
     it('refuses to update a clip on it', () => reportsRefusal(() => store().updateClip('h1', { endTime: 1 })))
+    it('refuses to trim a clip on it', () => reportsRefusal(() =>
+      store().trimClip('h1', 'end', { endTime: 1 }, { startTime: 0, endTime: 2, timelinePosition: 0 })))
     it('refuses to split a clip on it', () => refuses(() => store().splitClip('h1', 1)))
     it('refuses to move a clip on it in time', () => reportsRefusal(() => store().setClipTimelinePosition('h1', 8)))
     it('refuses to move a clip on it to another track', () => reportsRefusal(() => store().moveClipToTrack('h1', free)))
