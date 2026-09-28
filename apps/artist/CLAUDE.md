@@ -127,9 +127,18 @@ pnpm lint                # Run ESLint
   problem `loadMediaDuration` (`videoProcessor.ts`) already solved for import and for the
   CRAFT handoff, just re-introduced by this third hand-rolled probe. `extractMetadataFromBlob`'s
   video and audio branches now call that same exported `loadMediaDuration`, so an old file's
-  duration is recovered the same way an import's is, and cannot come back infinite. A file with
-  `meta` skips the probe (and the blob) entirely — waveform peaks and take identity are trusted
-  from what was actually recorded or computed, not guessed at from the bytes.
+  duration is recovered the same way an import's is, and cannot come back infinite.
+  `headless/seedSources.ts` shares that same fallback for a source it wasn't handed full
+  metadata for, so a headless render of a headerless source that used to complete instantly
+  with a silently wrong `Infinity` duration can now take up to the probe's 5s timeout and reject
+  instead — the correct outcome, but a latency and failure-mode change for that one caller.
+  A file with `meta` skips the blob probe for whichever of `duration`/`width`/`height` it holds
+  a usable number for — waveform peaks and take identity are trusted from what was actually
+  recorded or computed, not guessed at from the bytes — but `meta` came out of `JSON.parse`, not
+  the type checker, so `loadProject` still recovers any of those three from the blob if a
+  hand-edited file's value is not a real, non-negative finite number (review round 1); a
+  `thumbnailUrl` inside `meta` is never trusted either way; the only source of one is
+  `resolveThumbnailUrl` over what is actually stored, exactly as ESCSUITE-96 already required.
 - `videoDecodeManager.ts`: Main thread API for WebCodecs video decoding via Web Worker
 - `frameSource.ts`: Abstraction layer for frame sources (WebCodecs or HTMLVideoElement fallback)
 

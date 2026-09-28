@@ -424,6 +424,117 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     expect(Number.isFinite(sourceVideos[0].duration)).toBe(true)
     expect(sourceVideos[0].frameRate).toBe(30) // the hard-coded fallback, unchanged for an old file
   })
+
+  /** A .veditor file whose `meta` is built by hand rather than by saveProject. */
+  function veditorFileWithMeta(videoId: string, meta: Record<string, unknown>, thumbnail?: string): File {
+    return new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(videoId),
+          videos: [
+            {
+              id: videoId,
+              name: 'corrupt.webm',
+              mimeType: 'video/webm',
+              data: base64Of([1, 2, 3]),
+              ...(thumbnail !== undefined ? { thumbnail } : {}),
+              meta,
+            },
+          ],
+        }),
+      ],
+      'corrupt.veditor',
+      { type: 'application/json' }
+    )
+  }
+
+  it("recovers a saved take's duration from the blob when meta.duration is not a usable number (review round 1)", async () => {
+    media.script({ video: { duration: Infinity, durationAfterSeek: 9, durationStaysUnknown: true } })
+    const videoId = uniqueId('corrupt-duration')
+
+    const { sourceVideos } = await loadProject(
+      veditorFileWithMeta(videoId, { duration: null, width: 1280, height: 720, frameRate: 24 })
+    )
+
+    expect(sourceVideos[0].duration).toBe(9)
+    expect(sourceVideos[0].frameRate).toBe(24) // the rest of meta is still trusted
+    expect(media.videos).toHaveLength(1) // this time the blob really was probed
+  })
+
+  it('trusts a usable meta.duration outright and never probes the blob for it', async () => {
+    const videoId = uniqueId('usable-duration')
+
+    const { sourceVideos } = await loadProject(
+      veditorFileWithMeta(videoId, { duration: 9, width: 1280, height: 720, frameRate: 24 })
+    )
+
+    expect(sourceVideos[0].duration).toBe(9)
+    expect(media.videos).toHaveLength(0)
+  })
+
+  it("recovers a saved take's width/height from the blob when meta's values are not usable numbers (review round 1)", async () => {
+    media.script({ video: { duration: 9, videoWidth: 640, videoHeight: 480 } })
+    const videoId = uniqueId('corrupt-dims')
+
+    const { sourceVideos } = await loadProject(
+      veditorFileWithMeta(videoId, { duration: 9, width: -1, height: null, frameRate: 24 })
+    )
+
+    expect(sourceVideos[0].width).toBe(640)
+    expect(sourceVideos[0].height).toBe(480)
+  })
+
+  it("keeps meta's zero width/height for an audio-only take instead of treating them as unusable", async () => {
+    const videoId = uniqueId('audio-dims')
+
+    const { sourceVideos } = await loadProject(
+      veditorFileWithMeta(videoId, { duration: 9, width: 0, height: 0, frameRate: 0, mediaType: 'audio' })
+    )
+
+    expect(sourceVideos[0].width).toBe(0)
+    expect(sourceVideos[0].height).toBe(0)
+    expect(media.videos).toHaveLength(0)
+    expect(media.audios).toHaveLength(0)
+  })
+
+  it('never lets a thumbnailUrl smuggled into meta reach the stored record or the returned source video (review round 1)', async () => {
+    const videoId = uniqueId('spoofed-thumb')
+
+    const { sourceVideos } = await loadProject(
+      veditorFileWithMeta(
+        videoId,
+        { duration: 9, width: 1280, height: 720, frameRate: 24, thumbnailUrl: 'blob:stale' },
+        btoa('real-thumbnail-bytes')
+      )
+    )
+
+    // The real, stored thumbnail resolves to the mocked object URL — not the
+    // value smuggled into meta.
+    expect(sourceVideos[0].thumbnailUrl).toBe('blob:mock-url')
+
+    const stored = await getVideo(videoId)
+    expect(stored?.metadata.thumbnailUrl).not.toBe('blob:stale')
+  })
+
+  it('leaves thumbnailUrl unset when meta smuggles one in but the file has no real thumbnail to resolve', async () => {
+    const videoId = uniqueId('spoofed-thumb-only')
+
+    const { sourceVideos } = await loadProject(
+      veditorFileWithMeta(videoId, {
+        duration: 9,
+        width: 1280,
+        height: 720,
+        frameRate: 24,
+        thumbnailUrl: 'blob:stale',
+      })
+    )
+
+    expect(sourceVideos[0].thumbnailUrl).toBeUndefined()
+
+    const stored = await getVideo(videoId)
+    expect(stored?.metadata.thumbnailUrl).toBeUndefined()
+  })
 })
 
 describe('extractMetadataFromBlob', () => {
