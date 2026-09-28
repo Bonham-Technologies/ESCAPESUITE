@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { VideoUploader, VideoLibrary } from './VideoUploader'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore'
-import { getFrameCache, resetFrameCache } from '../core/frameCache'
 import { storeVideo, getAllVideoMetadata } from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { SourceVideo } from '../store/types'
@@ -68,10 +67,6 @@ function scriptStorage(used: number, quota: number): void {
   })
 }
 
-function fakeBitmap(width = 100, height = 100) {
-  return { width, height, close: vi.fn() } as unknown as ImageBitmap
-}
-
 const file = (name: string, type: string, content = 'x') => new File([content], name, { type })
 
 /**
@@ -96,7 +91,6 @@ describe('VideoUploader', () => {
     vi.clearAllMocks()
     resetStoreForTest()
     store().removeSourceVideo('video1')
-    resetFrameCache()
     scriptStorage(50 * MB, 500 * MB)
     mockProcessVideoFile.mockResolvedValue(videoMeta)
     mockProcessImageFile.mockResolvedValue(imageMeta)
@@ -399,8 +393,6 @@ describe('VideoUploader', () => {
     it('clears every stored video once confirmed', async () => {
       await storeVideo('video1', new Blob(['bytes']), videoMeta)
       store().addSourceVideo(videoMeta)
-      const bitmap = fakeBitmap()
-      getFrameCache().set(0, bitmap)
       render(<VideoUploader onProjectFile={onProjectFile} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
@@ -408,8 +400,6 @@ describe('VideoUploader', () => {
       await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
       expect(globalThis.confirm).toHaveBeenCalledWith('Clear ALL stored media? This cannot be undone.')
       expect(await getAllVideoMetadata()).toHaveLength(0)
-      expect(getFrameCache().getStats().frameCount).toBe(0)
-      expect(bitmap.close).toHaveBeenCalled()
     })
 
     it('keeps everything when the confirmation is declined', async () => {
@@ -453,25 +443,6 @@ describe('VideoUploader', () => {
 
       await screen.findByText('1.0 KB / 500.0 MB')
       expect(screen.queryByRole('button', { name: 'Clear All' })).not.toBeInTheDocument()
-    })
-
-    it('offers to clear the frame cache only while frames are held', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
-      await screen.findByText('50.0 MB / 500.0 MB')
-      expect(screen.queryByRole('button', { name: /Clear Cache/ })).not.toBeInTheDocument()
-    })
-
-    it('clears the frame cache', async () => {
-      const bitmap = fakeBitmap()
-      getFrameCache().set(0, bitmap)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
-
-      // 100x100 RGBA = 40000 bytes
-      fireEvent.click(await screen.findByRole('button', { name: 'Clear Cache (39.1 KB)' }))
-
-      expect(getFrameCache().getStats().frameCount).toBe(0)
-      expect(bitmap.close).toHaveBeenCalled()
-      expect(screen.queryByRole('button', { name: /Clear Cache/ })).not.toBeInTheDocument()
     })
 
     it('offers to clear only the media no clip uses', async () => {

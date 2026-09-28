@@ -8,7 +8,6 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { PreviewPlayer } from './PreviewPlayer'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import { installPreviewDoubles, renderPreview, settle, type PreviewDoubles } from '../../test/renderPreview'
-import { resetFrameCache } from '../../core/frameCache'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
 
@@ -18,13 +17,11 @@ beforeEach(() => {
   vi.useFakeTimers()
   doubles = installPreviewDoubles()
   resetStoreForTest()
-  resetFrameCache()
 })
 
 afterEach(() => {
   cleanup()
   doubles.uninstall()
-  resetFrameCache()
   vi.useRealTimers()
   vi.clearAllMocks()
 })

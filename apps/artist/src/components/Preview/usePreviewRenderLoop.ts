@@ -17,15 +17,14 @@
 // rather than the whole preview subtree — and only ten times a second.
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
-import { getFrameCache } from '../../core/frameCache';
 import { getAnimatedVolume } from '../../utils/animation';
 import type { Clip, Track } from '../../store/types';
 import { getActiveTransition } from './transitions';
 
 /** Everything the render loop needs that does not come from the store. */
 export interface PreviewRenderLoopDeps {
-  /** Paint one composited frame; `useCache` is the frame cache opt-out. */
-  drawFrame: (time: number, useCache?: boolean) => void;
+  /** Paint one composited frame. */
+  drawFrame: (time: number) => void;
   /** Paint the selected clip's transform handles over the frame. */
   drawSelectionHandles: (time: number) => void;
   /** Paint the multi-selection's bounding boxes over the frame. */
@@ -152,7 +151,7 @@ export function usePreviewRenderLoop({
 
     // No active clips — draw black, done
     if (activeClips.length === 0) {
-      drawFrame(currentTime, false);
+      drawFrame(currentTime);
       drawSelectionHandles(currentTime);
       drawMultiSelectHandles(currentTime);
       return;
@@ -208,7 +207,7 @@ export function usePreviewRenderLoop({
     // If no video seeking needed (overlays only, or videos already at position),
     // draw once and be done — no poll needed
     if (!needsVideoSeek) {
-      drawFrame(currentTime, false);
+      drawFrame(currentTime);
       drawSelectionHandles(currentTime);
       drawMultiSelectHandles(currentTime);
       return;
@@ -223,7 +222,7 @@ export function usePreviewRenderLoop({
       settled = true;
       // One final accurate draw after seek completes
       requestAnimationFrame(() => {
-        drawFrame(currentTime, false);
+        drawFrame(currentTime);
         drawSelectionHandles(currentTime);
         drawMultiSelectHandles(currentTime);
       });
@@ -240,7 +239,7 @@ export function usePreviewRenderLoop({
     }
 
     // Draw once immediately with best available frame
-    drawFrame(currentTime, false);
+    drawFrame(currentTime);
     drawSelectionHandles(currentTime);
     drawMultiSelectHandles(currentTime);
 
@@ -248,7 +247,7 @@ export function usePreviewRenderLoop({
     const fallbackTimeout = setTimeout(() => {
       if (!settled) {
         settled = true;
-        drawFrame(currentTime, false);
+        drawFrame(currentTime);
         drawSelectionHandles(currentTime);
         drawMultiSelectHandles(currentTime);
       }
@@ -263,24 +262,6 @@ export function usePreviewRenderLoop({
       }
     };
   }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
-
-  // Invalidate frame cache when timeline content changes
-  // This ensures we don't show stale cached frames after edits
-  const timelineContentKey = useMemo(() => {
-    // Create a key that changes when timeline content changes
-    // We check: clip positions, durations, transforms, effects, overlays, track visibility
-    return clips.map(c =>
-      `${c.id}:${c.timelinePosition}:${c.duration}:${c.startTime}:${c.endTime}:` +
-      `${JSON.stringify(c.transform)}:${JSON.stringify(c.effects)}:${JSON.stringify(c.animation)}:` +
-      `${JSON.stringify(c.textData)}:${JSON.stringify(c.shapeData)}`
-    ).join('|') + '||' + tracks.map(t => `${t.id}:${t.visible}`).join('|');
-  }, [clips, tracks]);
-
-  useEffect(() => {
-    // Clear frame cache when timeline content changes
-    const frameCache = getFrameCache();
-    frameCache.clear();
-  }, [timelineContentKey]);
 
   // Handle playback
   useEffect(() => {

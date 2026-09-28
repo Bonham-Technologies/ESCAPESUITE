@@ -11,7 +11,6 @@ import {
   settle,
   type PreviewDoubles,
 } from '../../test/renderPreview'
-import { resetFrameCache } from '../../core/frameCache'
 import type { TransitionType } from '../../store/types'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -22,13 +21,11 @@ beforeEach(() => {
   vi.useFakeTimers()
   doubles = installPreviewDoubles()
   resetStoreForTest()
-  resetFrameCache()
 })
 
 afterEach(() => {
   cleanup()
   doubles.uninstall()
-  resetFrameCache()
   vi.useRealTimers()
   vi.clearAllMocks()
 })

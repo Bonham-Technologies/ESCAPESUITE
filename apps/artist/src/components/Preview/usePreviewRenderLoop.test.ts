@@ -15,7 +15,6 @@ import {
 } from './usePreviewRenderLoop'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { FRAME_MS, installPreviewDoubles, last, settle, type PreviewDoubles } from '../../test/renderPreview'
-import { resetFrameCache } from '../../core/frameCache'
 
 let doubles: PreviewDoubles
 
@@ -23,12 +22,10 @@ beforeEach(() => {
   vi.useFakeTimers()
   doubles = installPreviewDoubles()
   resetStoreForTest()
-  resetFrameCache()
 })
 
 afterEach(() => {
   doubles.uninstall()
-  resetFrameCache()
   vi.useRealTimers()
   vi.clearAllMocks()
 })
@@ -85,7 +82,7 @@ function harness(sources: string[] = [video.id]): LoopHarness {
   }
 }
 
-/** Every drawFrame call so far, as `[time]` or `[time, useCache]`. */
+/** Every drawFrame call so far, as `[time]`. */
 function draws(deps: PreviewRenderLoopDeps): unknown[][] {
   return vi.mocked(deps.drawFrame).mock.calls
 }
@@ -93,14 +90,6 @@ function draws(deps: PreviewRenderLoopDeps): unknown[][] {
 /** The `time` argument of every drawFrame call so far. */
 function drawnTimes(deps: PreviewRenderLoopDeps): number[] {
   return vi.mocked(deps.drawFrame).mock.calls.map((call) => call[0])
-}
-
-/**
- * The frames the playback loop drew. Only it leaves `useCache` at its default;
- * every other redraw in the hook passes `false` explicitly.
- */
-function playbackDraws(deps: PreviewRenderLoopDeps): number[] {
-  return draws(deps).filter((call) => call.length === 1).map((call) => call[0] as number)
 }
 
 describe('usePreviewRenderLoop playback', () => {
@@ -114,7 +103,7 @@ describe('usePreviewRenderLoop playback', () => {
     play()
     await settle(FRAME_MS * 3)
 
-    const times = playbackDraws(deps)
+    const times = drawnTimes(deps)
     expect(times.length).toBeGreaterThanOrEqual(3)
     // The loop runs off performance.now(), so each frame draws a later time.
     expect(times[times.length - 1]).toBeGreaterThan(times[0])
@@ -128,8 +117,7 @@ describe('usePreviewRenderLoop playback', () => {
     play()
     await settle(FRAME_MS * 3)
 
-    const drawnWhilePlaying = playbackDraws(deps).length
-    expect(drawnWhilePlaying).toBeGreaterThan(0)
+    expect(drawnTimes(deps).length).toBeGreaterThan(0)
 
     pause()
     // Long enough for the stop to settle its own frame and the 50ms redraw.
@@ -139,7 +127,6 @@ describe('usePreviewRenderLoop playback', () => {
     await settle(FRAME_MS * 10)
 
     expect(drawnTimes(deps).length).toBe(drawnWhenStopped)
-    expect(playbackDraws(deps).length).toBeLessThanOrEqual(drawnWhilePlaying + 1)
   })
 
   it('pauses every media element when playback stops', async () => {
@@ -214,8 +201,8 @@ describe('usePreviewRenderLoop scrubbing', () => {
 
     renderHook(() => usePreviewRenderLoop(deps))
 
-    // No clips at all: black frame, drawn once, with the cache bypassed.
-    expect(vi.mocked(deps.drawFrame).mock.calls).toEqual([[0, false]])
+    // No clips at all: black frame, drawn once.
+    expect(vi.mocked(deps.drawFrame).mock.calls).toEqual([[0]])
     expect(deps.drawSelectionHandles).toHaveBeenCalledWith(0)
     expect(deps.drawMultiSelectHandles).toHaveBeenCalledWith(0)
   })
@@ -254,7 +241,7 @@ describe('usePreviewRenderLoop scrubbing', () => {
     await settle(250)
 
     expect(draws(deps).length).toBe(drawnBeforeFallback + 1)
-    expect(draws(deps)[drawnBeforeFallback]).toEqual([1, false])
+    expect(draws(deps)[drawnBeforeFallback]).toEqual([1])
   })
 
   it('redraws after a media URL change, once the elements have settled', async () => {
@@ -301,7 +288,7 @@ describe('usePreviewRenderLoop display time', () => {
 
     // A second of 16ms frames is ~60 draws but must be at most 10 publishes
     // (plus the leading one the first frame of playback is allowed).
-    expect(playbackDraws(deps).length).toBeGreaterThan(30)
+    expect(drawnTimes(deps).length).toBeGreaterThan(30)
     expect(published.length).toBeLessThanOrEqual(11)
     expect(published.length).toBeGreaterThanOrEqual(5)
     // Consecutive publishes are a throttle window apart, not a frame apart.

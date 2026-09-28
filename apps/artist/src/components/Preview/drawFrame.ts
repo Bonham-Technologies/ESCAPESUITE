@@ -6,9 +6,9 @@
 // which clips a transition takes over, and the decisions about what is
 // drawable at all mid-scrub.
 //
-// Everything it reads is a parameter. The component owns the canvas, the
-// cached 2D context and the frame cache; this owns none of them, which is why
-// the whole of it can be exercised without a React render.
+// Everything it reads is a parameter. The component owns the canvas and the
+// cached 2D context; this owns none of them, which is why the whole of it can
+// be exercised without a React render.
 import {
   drawClipToCanvas,
   drawImageToCanvasWithModifiers,

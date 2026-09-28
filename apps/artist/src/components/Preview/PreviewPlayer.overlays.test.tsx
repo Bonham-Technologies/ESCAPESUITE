@@ -13,7 +13,6 @@ import {
   settle,
   type PreviewDoubles,
 } from '../../test/renderPreview'
-import { resetFrameCache } from '../../core/frameCache'
 import type {
   Clip,
   ShapeOverlay,
@@ -30,13 +29,11 @@ beforeEach(() => {
   vi.useFakeTimers()
   doubles = installPreviewDoubles()
   resetStoreForTest()
-  resetFrameCache()
 })
 
 afterEach(() => {
   cleanup()
   doubles.uninstall()
-  resetFrameCache()
   vi.useRealTimers()
   vi.clearAllMocks()
 })

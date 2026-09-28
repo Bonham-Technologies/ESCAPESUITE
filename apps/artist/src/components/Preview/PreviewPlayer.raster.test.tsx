@@ -22,7 +22,6 @@ import {
   type Preview,
   type PreviewDoubles,
 } from '../../test/renderPreview'
-import { resetFrameCache } from '../../core/frameCache'
 import type { ShapeOverlayData } from '../../store/types'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -93,12 +92,10 @@ describe('PreviewPlayer raster', () => {
     vi.useFakeTimers()
     doubles = installPreviewDoubles()
     resetStoreForTest()
-    resetFrameCache()
   })
 
   afterEach(() => {
     doubles.uninstall()
-    resetFrameCache()
     vi.useRealTimers()
     vi.clearAllMocks()
   })
@@ -182,29 +179,6 @@ describe('PreviewPlayer raster', () => {
 
     const captured = preview.frame().of('drawImage')
     expect(captured[captured.length - 1].state.filter).toBe('blur(5px)')
-  })
-
-  it('draws a cached frame at the project size, under the raster transform', async () => {
-    addShape()
-    const preview = await renderPreview()
-    preview.resize(DISPLAY_BOX)
-    const bitmap = { width: 960, height: 540, close: vi.fn() } as unknown as ImageBitmap
-    const { getFrameCache } = await import('../../core/frameCache')
-    getFrameCache().set(0, bitmap)
-
-    // Renaming a track re-runs the redraw effects without changing anything
-    // the cache key covers; the debounced redraw 50ms later finds the frame
-    // still cached and serves it.
-    store().updateTrack(store().project.timeline.tracks[0].id, { name: 'Renamed' })
-    await settle()
-    preview.clearCalls()
-    await settle(60)
-
-    // The cached bitmap, then the selected shape's handles over it — no
-    // recomposition of the frame itself.
-    expect(preview.methods().slice(0, 2)).toEqual(['setTransform', 'drawImage'])
-    expect(preview.calls('drawImage')[0].args).toEqual([bitmap, 0, 0, 1920, 1080])
-    expect(preview.calls('setTransform')[0].args).toEqual([0.5, 0, 0, 0.5, 0, 0])
   })
 
   it('still hits the handle a project coordinate points at', async () => {
