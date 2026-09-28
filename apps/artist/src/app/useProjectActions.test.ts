@@ -231,6 +231,34 @@ describe('opening a project', () => {
     expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming])
   })
 
+  // ESCSUITE-113 (round 2 re-review): the loop shrinks `mintedButNotYetOwned`
+  // after every successful addSourceVideo, so a throw partway through a
+  // multi-source load revokes only the sources the store never took in —
+  // never the ones already live and on screen. A plain forEach would revoke
+  // all three here.
+  it('revokes only the sources the store never took in when addSourceVideo throws partway through', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    const incoming = ['a', 'b', 'c'].map((id) => ({ ...sampleVideo, id, thumbnailUrl: `blob:${id}` }))
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Opened' },
+      sourceVideos: incoming,
+    })
+    vi.mocked(deps.addSourceVideo)
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => { throw new Error('store exploded') })
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
+    expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+    expect(revokeSourceThumbnails).toHaveBeenCalledTimes(1)
+    expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming[1], incoming[2]])
+  })
+
   it('does not revoke a source that made it into the store before a load is reported successful', async () => {
     vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
     vi.mocked(loadProject).mockResolvedValue({
