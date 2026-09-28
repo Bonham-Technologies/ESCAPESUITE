@@ -2114,6 +2114,22 @@ describe('useRecordingController a capture request the browser never answers', (
     return release
   }
 
+  /**
+   * A request that answers only when the test says so, but reports `partial`
+   * through `onPartial` the moment it is called — as a picker answered but a
+   * camera prompt left sitting does (ESCSUITE-116) — and resolves to `final`
+   * once released.
+   */
+  function parkedAcquireWithPartial(partial: AcquiredDoubles, final: AcquiredDoubles = partial): () => void {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    harness.acquireStreams.mockImplementation((onPartial?: (p: AcquiredDoubles) => void) => {
+      onPartial?.(partial)
+      return gate.then(() => final)
+    })
+    return release
+  }
+
   /** Every track the parked request would eventually hand over. */
   function acquiredTracks(): MediaStreamTrack[] {
     const { screen, webcam, mic } = harness.streams
@@ -2230,6 +2246,55 @@ describe('useRecordingController a capture request the browser never answers', (
     expect(useRecorderStore.getState().notice).toBe(CAPTURE_UNANSWERED)
     expect(state()).toBe('idle')
     expect(recorderFactory.recorders).toHaveLength(0)
+  })
+
+  it('stops the display capture at the deadline, before the parked webcam ever answers (ESCSUITE-116)', async () => {
+    const { result } = mountController({ countdownSeconds: 3, webcamEnabled: true })
+    const screen = harness.streams.screen!
+    const release = parkedAcquireWithPartial({ screen, webcam: null, mic: null })
+    const { start } = await startParked(result)
+
+    await act(async () => { vi.advanceTimersByTime(CAPTURE_TIMEOUT_MS) })
+    await act(async () => { await start })
+
+    // The share bar comes down the moment the clock runs out — not whenever
+    // the parked camera prompt is finally settled.
+    for (const track of screen.getTracks()) {
+      expect(track.stop).toHaveBeenCalledTimes(1)
+    }
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).toBe(CAPTURE_UNANSWERED)
+
+    release()
+    await settle()
+  })
+
+  it('releases the webcam too once it settles after the deadline, on top of the screen already stopped', async () => {
+    const { result } = mountController({ countdownSeconds: 3, webcamEnabled: true })
+    const screen = harness.streams.screen!
+    const webcam = webcamStream()
+    const release = parkedAcquireWithPartial(
+      { screen, webcam: null, mic: null },
+      { screen, webcam, mic: null }
+    )
+    const { start } = await startParked(result)
+
+    await act(async () => { vi.advanceTimersByTime(CAPTURE_TIMEOUT_MS) })
+    await act(async () => { await start })
+    expect(useRecorderStore.getState().notice).toBe(CAPTURE_UNANSWERED)
+
+    release()
+    await settle()
+
+    for (const track of webcam.getTracks()) {
+      expect(track.stop).toHaveBeenCalledTimes(1)
+    }
+    // The screen was already stopped at the deadline; the late-arrival release
+    // stops it a second time, which is a harmless no-op — assert it happened
+    // at least once rather than pin the exact count.
+    for (const track of screen.getTracks()) {
+      expect(track.stop).toHaveBeenCalled()
+    }
   })
 
   it('never starts the clock for a request that answers at once', async () => {
