@@ -81,14 +81,23 @@ export function useSessionRestore({
   // `Promise.all` runs them together and the store is written once, with
   // every card already showing the right picture rather than a broken one
   // that fixes itself a beat later.
+  //
+  // This does not revoke anything on its own: the library is not
+  // reliably empty here — the CRAFT handoff adds a take's parts to it as
+  // soon as it arrives, well before the placement that waits on this
+  // question settling — so a blanket revoke of "whatever is here" would
+  // kill the handoff's still-live thumbnails too. `addSourceVideo`
+  // (`store/projectSlice.ts`) is the one place that owns freeing a
+  // replaced source's *old* thumbnailUrl, exactly when a restored source
+  // happens to share an id the handoff already added (ESCSUITE-113).
   const handleRestoreSession = useCallback(async (session: SessionState) => {
     if (restoreAttemptRef.current) return; // already restoring — see the ref's own comment
     const attempt = {};
     restoreAttemptRef.current = attempt;
 
-    let sourceVideos: SourceVideo[];
+    let restoredSourceVideos: SourceVideo[];
     try {
-      sourceVideos = await Promise.all(
+      restoredSourceVideos = await Promise.all(
         session.sourceVideos.map(async (video) => ({
           ...video,
           thumbnailUrl: await resolveThumbnailUrl(video.id),
@@ -118,7 +127,7 @@ export function useSessionRestore({
     if (restoreAttemptRef.current !== attempt) return;
 
     setProject(session.project);
-    sourceVideos.forEach(addSourceVideo);
+    restoredSourceVideos.forEach(addSourceVideo);
     setCurrentTime(session.currentTime);
     setSelectedClipId(session.selectedClipId);
     setZoom(session.zoom);

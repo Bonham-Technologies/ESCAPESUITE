@@ -181,6 +181,72 @@ describe('storage', () => {
     })
   })
 
+  describe('revokeSourceThumbnails', () => {
+    // The other half of resolveThumbnailUrl: nothing else ever frees the
+    // URL.createObjectURL handle a thumbnailUrl is (ESCSUITE-113).
+    beforeEach(() => {
+      vi.mocked(URL.revokeObjectURL).mockClear()
+    })
+
+    const video = (overrides: Partial<SourceVideo> = {}): SourceVideo => ({
+      id: 'video1',
+      name: 'test.mp4',
+      duration: 10,
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      mimeType: 'video/mp4',
+      size: 1000,
+      ...overrides,
+    })
+
+    it('revokes a blob: thumbnail URL exactly once', async () => {
+      const storage = await getStorageModule()
+
+      storage.revokeSourceThumbnails([video({ thumbnailUrl: 'blob:thumb-1' })])
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
+    })
+
+    it('revokes each source in a list exactly once', async () => {
+      const storage = await getStorageModule()
+
+      storage.revokeSourceThumbnails([
+        video({ id: 'a', thumbnailUrl: 'blob:a' }),
+        video({ id: 'b', thumbnailUrl: 'blob:b' }),
+      ])
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:a')
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:b')
+    })
+
+    it('does nothing for a source with no thumbnail', async () => {
+      const storage = await getStorageModule()
+
+      storage.revokeSourceThumbnails([video({ thumbnailUrl: undefined })])
+
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    })
+
+    it('does nothing for a thumbnail URL that is not a blob: handle', async () => {
+      const storage = await getStorageModule()
+
+      storage.revokeSourceThumbnails([video({ thumbnailUrl: 'https://example.com/thumb.jpg' })])
+
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    })
+
+    it('does nothing for an empty list', async () => {
+      const storage = await getStorageModule()
+
+      storage.revokeSourceThumbnails([])
+
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    })
+  })
+
   describe('project operations', () => {
     const createTestProject = (id: string, name: string): Project => ({
       id,

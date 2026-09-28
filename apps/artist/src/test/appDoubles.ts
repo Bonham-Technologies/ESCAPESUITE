@@ -51,6 +51,15 @@ export function storageDouble() {
       const thumbnail = await getThumbnail(id)
       return thumbnail ? URL.createObjectURL(thumbnail) : undefined
     }),
+    // The mirror image: frees a thumbnailUrl a source is done with —
+    // removeSourceVideo's one, resetProject's teardown, addSourceVideo's
+    // replace-in-place branch (the previous entry's stale handle), and a
+    // refused load's incoming sources (ESCSUITE-113).
+    revokeSourceThumbnails: vi.fn((sources: SourceVideo[]) => {
+      for (const source of sources) {
+        if (source.thumbnailUrl?.startsWith('blob:')) URL.revokeObjectURL(source.thumbnailUrl)
+      }
+    }),
     getSetting: vi.fn(() => Promise.resolve(null)),
     setSetting: vi.fn(() => Promise.resolve()),
   }

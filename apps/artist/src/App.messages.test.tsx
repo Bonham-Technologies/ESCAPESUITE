@@ -211,6 +211,14 @@ describe('App inbound messages', () => {
 describe('App URL parameters', () => {
   beforeEach(() => {
     resetStoreForTest()
+    // A prior test in this describe can leave a source in the (module-
+    // singleton) store with a live thumbnailUrl if it never unmounted —
+    // resetStoreForTest()'s own resetProject() call just freed that handle
+    // (ESCSUITE-113), which is real cleanup, not something this test did.
+    // Every mock URL is the same literal string ('blob:mock-url'), so left
+    // uncleared that revoke reads as if THIS test's own handoff thumbnail had
+    // already been revoked before it was even minted.
+    vi.mocked(URL.revokeObjectURL).mockClear()
     store().clearHistory()
     installCanvasDouble()
     urlParams()

@@ -4,12 +4,13 @@
 
 import type { StateCreator } from 'zustand';
 import type { EditorState, Project, SourceVideo } from './types';
-import { pushToHistory } from './storeHistory';
+import { pushToHistory, scrubDeadThumbnails } from './storeHistory';
 import { createEmptyProject, calculateTimelineDuration } from './projectFactory';
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
 import { lockedSourceVideoIds } from './trackLock';
 import { pruneSelection } from './selectionPrune';
+import { revokeSourceThumbnails } from '../core/storage';
 
 export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo'>;
 
@@ -23,20 +24,33 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     history: pushToHistory(state),
   })),
 
-  resetProject: () => set((state) => ({
-    project: createEmptyProject(),
-    sourceVideos: [],
-    currentTime: 0,
-    isPlaying: false,
-    selectedClipId: null,
-    selectedClipIds: new Set<string>(),
-    selectedTrackId: null,
-    clipboard: null,
-    inPoint: null,
-    outPoint: null,
-    markers: [],
-    history: pushToHistory(state),
-  })),
+  // ESCSUITE-113: every source video leaving the library on a reset held a
+  // live `URL.createObjectURL` handle (thumbnailUrl) that nothing else was
+  // ever going to free. Revoked here, all at once, before the tear-down
+  // itself — and scrubbed out of the history this same action pushes (and
+  // everything already in it), so an undo that later walks back past this
+  // reset does not hand a source a thumbnailUrl nothing can open (see
+  // `scrubDeadThumbnails`).
+  resetProject: () => set((state) => {
+    revokeSourceThumbnails(state.sourceVideos);
+    const deadThumbnailUrls = state.sourceVideos
+      .map((v) => v.thumbnailUrl)
+      .filter((url): url is string => Boolean(url));
+    return {
+      project: createEmptyProject(),
+      sourceVideos: [],
+      currentTime: 0,
+      isPlaying: false,
+      selectedClipId: null,
+      selectedClipIds: new Set<string>(),
+      selectedTrackId: null,
+      clipboard: null,
+      inPoint: null,
+      outPoint: null,
+      markers: [],
+      history: scrubDeadThumbnails(pushToHistory(state), deadThumbnailUrls),
+    };
+  }),
 
   setProjectResolution: (width: number, height: number) => set((state) => ({
     project: {
@@ -57,13 +71,28 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
   // A re-add carrying identical metadata changes nothing, so it records nothing:
   // an undo step that restores an identical library reads to the user as an undo
   // that did nothing.
+  // ESCSUITE-113: a replace-in-place is the one way a source's thumbnailUrl
+  // changes without the source itself ever leaving the library — nothing
+  // else would free the URL it is replacing, so this is the one place that
+  // owns it. Only when the URL actually changes: a re-add carrying the same
+  // live handle (the identical string — sameSourceVideo already sent an
+  // *unchanged* re-add home above) must not revoke out from under whatever
+  // still shows it, and a session restore landing on a library the CRAFT
+  // handoff already filled must free only the session's own stale URL, never
+  // the handoff's still-live one.
   addSourceVideo: (video: SourceVideo) => set((state) => {
     const existing = state.sourceVideos.findIndex((v) => v.id === video.id)
     if (existing !== -1 && sameSourceVideo(state.sourceVideos[existing], video)) return state
+    const previous = existing !== -1 ? state.sourceVideos[existing] : undefined
     const sourceVideos = existing === -1
       ? [...state.sourceVideos, video]
       : state.sourceVideos.map((v, i) => (i === existing ? video : v))
-    return { sourceVideos, history: pushToHistory(state) }
+    let history = pushToHistory(state)
+    if (previous && previous.thumbnailUrl && previous.thumbnailUrl !== video.thumbnailUrl) {
+      revokeSourceThumbnails([previous])
+      history = scrubDeadThumbnails(history, [previous.thumbnailUrl])
+    }
+    return { sourceVideos, history }
   }),
 
   removeSourceVideo: (id: string) => set((state) => {
@@ -74,6 +103,15 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     // deletes the blobs before the store hears about it.
     const { clips, tracks } = state.project.timeline;
     if (lockedSourceVideoIds(clips, tracks).has(id)) return state; // ESCSUITE-84
+    const removed = state.sourceVideos.find((v) => v.id === id);
+    // An id naming no source is a no-op, not an edit: nothing to write,
+    // nothing to revoke, and no undo step recording a "removal" that changed
+    // nothing (ESCSUITE-113 review).
+    if (!removed) return state;
+    // ESCSUITE-113: the source leaving the library may hold a live
+    // thumbnailUrl (a `URL.createObjectURL` handle) — the one place this
+    // action owns freeing, and nothing else ever will.
+    revokeSourceThumbnails([removed]);
     const kept = clips.filter((c) => c.sourceVideoId !== id);
     // ESCSUITE-100: a clipboard entry that used to point at this source can
     // never be pasted back — the same belt-and-braces pruning `removeTrack`
@@ -85,6 +123,11 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     // selection — a clip whose source just left the library leaves the
     // timeline with it.
     const pruned = pruneSelection(kept, state.selectedClipId, state.selectedClipIds);
+    // The revoked thumbnailUrl above is also scrubbed out of history (this
+    // push and everything already in it) — see `scrubDeadThumbnails`.
+    const history = removed.thumbnailUrl
+      ? scrubDeadThumbnails(pushToHistory(state), [removed.thumbnailUrl])
+      : pushToHistory(state);
     return {
       sourceVideos: state.sourceVideos.filter((v) => v.id !== id),
       project: {
@@ -99,7 +142,7 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
       selectedClipId: pruned.selectedClipId,
       selectedClipIds: pruned.selectedClipIds,
       clipboard: newClipboard,
-      history: pushToHistory(state),
+      history,
     };
   }),
 });

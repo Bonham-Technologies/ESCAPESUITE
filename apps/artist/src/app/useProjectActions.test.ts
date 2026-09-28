@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
 import { loadProject, saveProject, showOpenProjectDialog } from '../core/projectManager'
-import { clearSessionState } from '../core/storage'
+import { clearSessionState, revokeSourceThumbnails } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
@@ -30,6 +30,10 @@ const mountActions = (overrides: Partial<ProjectActionsDeps> = {}) => {
 
 beforeEach(() => {
   resetStoreForTest()
+  // resetStoreForTest() drives the REAL store's resetProject(), which calls
+  // the same (mocked) revokeSourceThumbnails this file asserts on — clear
+  // that setup call so a test's own assertion only sees what it did itself.
+  vi.mocked(revokeSourceThumbnails).mockClear()
   // Put the doubles back to their quiet defaults: vi.clearAllMocks() forgets
   // the calls but keeps whatever implementation the last test installed.
   vi.mocked(saveProject).mockResolvedValue(undefined)
@@ -118,11 +122,10 @@ describe('opening a project', () => {
 
     expect(deps.resetProject).toHaveBeenCalled()
     expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'Opened' }))
-    expect(deps.addSourceVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ id: sampleVideo.id }),
-      0,
-      expect.any(Array)
-    )
+    // ESCSUITE-113 (review round 2): addSourceVideo is now called from an
+    // explicit loop rather than `loadedVideos.forEach`, so it is called with
+    // just the source — not forEach's incidental (element, index, array).
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(expect.objectContaining({ id: sampleVideo.id }))
     expect(deps.showNotification).toHaveBeenCalledWith('Project loaded successfully', 'success')
     expect(result.current.showProjectLoadDialog).toBe(false)
     expect(result.current.isLoading).toBe(false)
@@ -172,15 +175,19 @@ describe('opening a project', () => {
     expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to load project', 'error')
     expect(result.current.isLoading).toBe(false)
+    // loadProject itself is what threw — there is nothing it minted to revoke.
+    expect(revokeSourceThumbnails).not.toHaveBeenCalled()
   })
 
-  it('rejects a malformed project without emptying the editor first (ESCSUITE-102)', async () => {
+  it('rejects a malformed project without emptying the editor first (ESCSUITE-102), and revokes the incoming thumbnails loadProject already minted', async () => {
     vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
     // A file that parses as JSON but is not a shape parseProject accepts —
-    // no clips array on the timeline.
+    // no clips array on the timeline. loadProject still minted a thumbnail
+    // for whatever it read before parseProject ever saw the result.
+    const incoming = { ...sampleVideo, id: 'incoming', thumbnailUrl: 'blob:incoming' }
     vi.mocked(loadProject).mockResolvedValue({
       project: { id: 'p', name: 'Bad', created: 1, modified: 1, resolution: { width: 1920, height: 1080 }, timeline: {} } as never,
-      sourceVideos: [],
+      sourceVideos: [incoming],
     })
     const { result } = mountActions({ clipCount: 0 })
 
@@ -190,11 +197,109 @@ describe('opening a project', () => {
 
     expect(deps.resetProject).not.toHaveBeenCalled()
     expect(deps.setProject).not.toHaveBeenCalled()
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
     expect(deps.showNotification).toHaveBeenCalledWith(
       expect.stringContaining('Failed to load project'),
       'error'
     )
     expect(result.current.isLoading).toBe(false)
+    // ESCSUITE-113: nothing is ever going to render these now, and nothing
+    // else would ever free them either.
+    expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming])
+  })
+
+  // ESCSUITE-113: loadProject succeeded (it minted thumbnails) but something
+  // after it — here, parseProject itself — threw before the sources ever
+  // reached the store. The outer catch is the only place left that can free
+  // them.
+  it('revokes what loadProject minted when something after it throws before the sources are ever added', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    const incoming = { ...sampleVideo, id: 'incoming', thumbnailUrl: 'blob:incoming' }
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Opened' },
+      sourceVideos: [incoming],
+    })
+    vi.mocked(deps.setProject).mockImplementation(() => { throw new Error('store exploded') })
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
+    expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming])
+  })
+
+  // ESCSUITE-113 (round 2 re-review): the loop shrinks `mintedButNotYetOwned`
+  // after every successful addSourceVideo, so a throw partway through a
+  // multi-source load revokes only the sources the store never took in —
+  // never the ones already live and on screen. A plain forEach would revoke
+  // all three here.
+  it('revokes only the sources the store never took in when addSourceVideo throws partway through', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    const incoming = ['a', 'b', 'c'].map((id) => ({ ...sampleVideo, id, thumbnailUrl: `blob:${id}` }))
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Opened' },
+      sourceVideos: incoming,
+    })
+    vi.mocked(deps.addSourceVideo)
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => { throw new Error('store exploded') })
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
+    expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
+    expect(revokeSourceThumbnails).toHaveBeenCalledTimes(1)
+    expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming[1], incoming[2]])
+  })
+
+  it('does not revoke a source that made it into the store before a load is reported successful', async () => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Opened' },
+      sourceVideos: [{ ...sampleVideo, id: 'incoming', thumbnailUrl: 'blob:incoming' }],
+    })
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(deps.addSourceVideo).toHaveBeenCalled()
+    expect(revokeSourceThumbnails).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-113 (MINOR 1 review): resetProject() itself owns revoking the
+  // outgoing library — real behaviour pinned through the REAL store, the
+  // same pattern the ESCSUITE-102 review test below uses, rather than a
+  // mocked resetProject that would hide whether the real one still does it.
+  it('revoking the outgoing library on load goes through the REAL resetProject, not a second call from this hook', async () => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Opened' },
+      sourceVideos: [],
+    })
+    store().addSourceVideo({ ...sampleVideo, id: 'outgoing', thumbnailUrl: 'blob:outgoing' })
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    const { result } = mountActions({
+      clipCount: 0,
+      resetProject: () => store().resetProject(),
+      setProject: (p) => store().setProject(p),
+      addSourceVideo: (v) => store().addSourceVideo(v),
+    })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:outgoing')
+    expect(store().sourceVideos.find((v) => v.id === 'outgoing')).toBeUndefined()
   })
 
   it('leaves the REAL store untouched by a bad file — same project reference, no history entry (ESCSUITE-102 review)', async () => {

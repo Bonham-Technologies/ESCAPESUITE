@@ -17,7 +17,7 @@
 // dependency both of them carried inline.
 import { useCallback, useState } from 'react';
 import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
-import { clearSessionState } from '../core/storage';
+import { clearSessionState, revokeSourceThumbnails } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
 import type { Project, SourceVideo } from '../store/types';
@@ -97,26 +97,52 @@ export function useProjectActions({
   // Load a project file (shared by Ctrl+O and drag-drop paths)
   const loadProjectFile = useCallback(async (file: File) => {
     setIsLoading(true);
+    // Set once `loadProject(file)` returns, so a throw between here and the
+    // reset below (ESCSUITE-113) knows there is something to clean up; and
+    // set back to `undefined` once `resetProject()`/`addSourceVideo` have
+    // actually taken the sources in, so the catch below never revokes a
+    // thumbnail that is already live in the store and on screen.
+    let mintedButNotYetOwned: SourceVideo[] | undefined;
     try {
       const { project: loadedProject, sourceVideos: loadedVideos } = await loadProject(file);
+      mintedButNotYetOwned = loadedVideos;
 
       // Validate (and migrate) before touching anything: ensureTimelineHasTracks
       // assumes a shape a malformed .veditor does not have, and used to throw
       // *after* resetProject() had already emptied the editor (ESCSUITE-102).
       const parsed = parseProject(loadedProject);
       if (!parsed.ok) {
+        // loadProject already minted a thumbnailUrl for each of these —
+        // nothing is ever going to render them now, and nothing else would
+        // ever free them either (ESCSUITE-113).
+        revokeSourceThumbnails(loadedVideos);
+        mintedButNotYetOwned = undefined;
         showNotification(`Failed to load project: ${parsed.reason}`, 'error');
         return;
       }
 
-      // Reset current state and load new project
+      // Reset current state and load new project. resetProject() owns
+      // revoking the OUTGOING library's thumbnails itself (ESCSUITE-113) —
+      // this callback does not also revoke `sourceVideos`, or the same URLs
+      // would be freed twice.
       resetProject();
       setProject(parsed.project);
-      loadedVideos.forEach(addSourceVideo);
+      // A plain `forEach` would leave `mintedButNotYetOwned` covering every
+      // source until the whole loop finished — if `addSourceVideo` threw
+      // partway through, the catch below would revoke sources that had
+      // already been handed to the store and were already on screen. Shrinking
+      // it after each one keeps the catch's cleanup limited to sources that
+      // genuinely never made it in.
+      for (let i = 0; i < loadedVideos.length; i++) {
+        addSourceVideo(loadedVideos[i]);
+        mintedButNotYetOwned = loadedVideos.slice(i + 1);
+      }
+      mintedButNotYetOwned = undefined;
 
       showNotification('Project loaded successfully', 'success');
     } catch (error) {
       console.error('Load failed:', error);
+      if (mintedButNotYetOwned) revokeSourceThumbnails(mintedButNotYetOwned);
       showNotification('Failed to load project', 'error');
     } finally {
       setIsLoading(false);

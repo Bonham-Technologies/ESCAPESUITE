@@ -10,9 +10,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useSessionRestore, type SessionRestoreDeps } from './useSessionRestore'
-import { clearSessionState, getSessionState, getThumbnail, type SessionState } from '../core/storage'
+import { clearSessionState, getSessionState, getThumbnail, revokeSourceThumbnails, type SessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
-import { resetStoreForTest } from '../test/fixtures/projectStore'
+import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
@@ -36,6 +36,10 @@ const mountRestore = (overrides: Partial<SessionRestoreDeps> = {}) => {
 
 beforeEach(() => {
   resetStoreForTest()
+  // resetStoreForTest() drives the REAL store's resetProject(), which calls
+  // the same (mocked) revokeSourceThumbnails this file asserts on — clear
+  // that setup call so a test's own assertion only sees what it did itself.
+  vi.mocked(revokeSourceThumbnails).mockClear()
   vi.mocked(getSessionState).mockResolvedValue(undefined)
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
   deps = {
@@ -195,6 +199,39 @@ describe('answering the prompt', () => {
       0,
       expect.anything()
     )
+  })
+
+  // ESCSUITE-113: the library is not reliably empty when a restore lands —
+  // the CRAFT handoff (`importTake`) adds a take's parts to it as soon as
+  // they arrive, well before the placement that waits on this question
+  // settling. A restore must not blanket-revoke "whatever is here": it would
+  // kill the handoff's still-live thumbnails. Wired to the REAL store's
+  // `addSourceVideo` (not the `vi.fn()` every other case in this file uses),
+  // because the fix this pins lives there, not in this hook.
+  it('restoring over a handoff-filled library leaves the handoff\'s thumbnails live and revokes only the id it actually replaces', async () => {
+    const handoffOnly = { ...sampleVideo, id: 'handoff-only', thumbnailUrl: 'blob:handoff-only' }
+    const handoffShared = { ...sampleVideo, id: 'shared', thumbnailUrl: 'blob:handoff-shared' }
+    store().addSourceVideo(handoffOnly)
+    store().addSourceVideo(handoffShared)
+    const session = savedSession({ sourceVideos: [{ ...sampleVideo, id: 'shared' }] })
+    vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
+    vi.mocked(getSessionState).mockResolvedValue(session)
+    const { result } = mountRestore({ addSourceVideo: (v) => store().addSourceVideo(v) })
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+
+    // Never touched — no clip of this take is even in the session.
+    expect(store().sourceVideos.find((v) => v.id === 'handoff-only')?.thumbnailUrl).toBe('blob:handoff-only')
+    expect(revokeSourceThumbnails).not.toHaveBeenCalledWith([handoffOnly])
+    // The shared id's stale (handoff) URL is what actually gets revoked —
+    // by addSourceVideo's replace-in-place, not by this hook up front.
+    expect(revokeSourceThumbnails).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'shared', thumbnailUrl: 'blob:handoff-shared' }),
+    ])
+    expect(store().sourceVideos.find((v) => v.id === 'shared')?.thumbnailUrl).toBe('blob:mock-url')
   })
 
   it('restores with no thumbnail — not the dead handle — when nothing is stored for it', async () => {
