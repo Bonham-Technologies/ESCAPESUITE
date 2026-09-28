@@ -97,6 +97,41 @@ describe('useMediaStreams acquiring', () => {
     expect(screenTrack.stop).toHaveBeenCalledTimes(1)
     expect(permissionsOverrides.requestMicrophone).not.toHaveBeenCalled()
   })
+
+  it('reports what has arrived after each stage, so a caller can stop it early (ESCSUITE-116)', async () => {
+    const screen = streamWith(createTrackDouble('video', { id: 'screen' }))
+    const webcam = streamWith(createTrackDouble('video', { id: 'webcam' }))
+    const mic = streamWith(createTrackDouble('audio', { id: 'mic' }))
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screen)
+    permissionsOverrides.requestWebcam.mockResolvedValue(webcam)
+    permissionsOverrides.requestMicrophone.mockResolvedValue(mic)
+
+    const { result } = mountStreams(
+      deps({ screenEnabled: true, webcamEnabled: true, microphoneEnabled: true })
+    )
+    const onPartial = vi.fn()
+    const acquired = await result.current.acquireStreams(onPartial)
+
+    expect(acquired).toEqual({ screen, webcam, mic })
+    expect(onPartial).toHaveBeenNthCalledWith(1, { screen, webcam: null, mic: null })
+    expect(onPartial).toHaveBeenNthCalledWith(2, { screen, webcam, mic: null })
+    expect(onPartial).toHaveBeenNthCalledWith(3, { screen, webcam, mic })
+    expect(onPartial).toHaveBeenCalledTimes(3)
+  })
+
+  it('reports once when only the first enabled stage runs', async () => {
+    const screen = streamWith(createTrackDouble('video', { id: 'screen' }))
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screen)
+
+    const { result } = mountStreams(
+      deps({ screenEnabled: true, webcamEnabled: false, microphoneEnabled: false })
+    )
+    const onPartial = vi.fn()
+    await result.current.acquireStreams(onPartial)
+
+    expect(onPartial).toHaveBeenCalledTimes(1)
+    expect(onPartial).toHaveBeenCalledWith({ screen, webcam: null, mic: null })
+  })
 })
 
 describe('useMediaStreams releasing', () => {

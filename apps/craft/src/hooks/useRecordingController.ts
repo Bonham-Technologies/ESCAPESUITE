@@ -54,7 +54,7 @@ export interface RecordingControllerDeps {
   setAudioLevels: (levels: AudioLevels) => void;
   setStreams: (screen: MediaStream | null, webcam: MediaStream | null) => void;
   /** From useMediaStreams: the capture, the release, and the handles both use. */
-  acquireStreams: () => Promise<AcquiredStreams>;
+  acquireStreams: (onPartial?: (partial: AcquiredStreams) => void) => Promise<AcquiredStreams>;
   stopAllStreams: () => void;
   stopAllStreamsRef: RefObject<() => void>;
   compositorRef: RefObject<Compositor | null>;
@@ -375,7 +375,20 @@ export function useRecordingController({
       // each save, after each delete — and read back through
       // `recordBlockedReason`, so a take with nowhere to go is refused by a
       // disabled button before the click ever happens.
-      const request = acquireStreams();
+
+      // Whatever acquireStreams has handed over so far, updated after each
+      // stage lands. `expired` starts false and flips true the moment the
+      // clock wins below; a stage that lands *after* that — the camera prompt
+      // finally answered a minute late, well past the deadline release — is
+      // released the instant `onPartial` reports it instead of sitting live
+      // until the whole request eventually settles, which could be never
+      // (ESCSUITE-116).
+      let partial: AcquiredStreams = { screen: null, webcam: null, mic: null };
+      let expired = false;
+      const request = acquireStreams((p) => {
+        partial = p;
+        if (expired) releaseAcquired(p);
+      });
 
       // A request the browser never answers — a picker or a permission prompt
       // left on screen, a camera or microphone driver wedged so that
@@ -406,11 +419,24 @@ export function useRecordingController({
       const abandoned = myAttempt !== attemptRef.current || cancelledRef.current;
 
       if (acquired === null) {
-        // The clock won. The request is still out there, so whatever it hands
-        // over is released on arrival — the same release the guard below does,
-        // moved onto a promise nobody is awaiting any more. A request that
-        // *rejects* after we stopped waiting has nothing to release and nothing
-        // to say: the user was told when the clock ran out.
+        // The clock won. Release what the browser has already handed over —
+        // the share bar goes down NOW, not whenever a stalled camera or
+        // microphone prompt eventually settles (ESCSUITE-116) — and mark the
+        // request expired, so a stage that lands afterwards is released by
+        // `onPartial` itself instead of sitting live until the whole request
+        // eventually settles. Whatever the request hands over at the end is
+        // released on arrival regardless, the same release the guard below
+        // does, moved onto a promise nobody is awaiting any more. A request
+        // that *rejects* after we stopped waiting has nothing to release and
+        // nothing to say: the user was told when the clock ran out.
+        expired = true;
+        releaseAcquired(partial);
+        // `partial`, whatever a late `onPartial` report already released
+        // above, and whatever `request` eventually resolves to all overlap —
+        // a stage reported once is handed back again wherever it is still
+        // held. So the screen (or webcam, or mic) stream released here is
+        // released a second (or third) time below. That is safe: `stopStream`
+        // stops tracks, and stopping an already-stopped track is a no-op.
         void request.then(releaseAcquired, () => {});
         // Nothing is said for an attempt the user had already thrown away: the
         // notice lives in the module-singleton store and would be read out on the

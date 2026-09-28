@@ -1068,6 +1068,23 @@ owner (the cleanup revoke and the drop-time revoke) and its tests were rewritten
 deleted, so nothing there is less covered than before. **No floor crossed**; artist's floors stay
 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-28 for ESCSUITE-116 (a capture request answered in
+part — the share picker, then a camera or microphone prompt left open — is released at the deadline,
+not when the stalled prompt settles): 100.00 / 99.51 / 97.67 / 100.00, byte-identical to the
+100.00 / 99.51 / 97.67 / 100.00 the commit this branch was rebased onto measures. Measured in one
+sitting, the base gives 1,301 / 1,332 branches and this branch 1,303 / 1,334: two new branches, two
+covered, the same 31 uncovered as before (statements 2,474 / 2,486 → 2,484 / 2,496, lines
+2,324 → 2,333, functions 450 → 451, every denominator growing by exactly what the numerator did; the
+same 12 statements uncovered). The two are the `onPartial?.()` optional call in
+`hooks/useMediaStreams.ts`'s `acquireStreams` — reached with the reporter present by the two new
+stage-by-stage cases and absent by the no-argument cases that were already there — and the
+`if (expired)` inside the controller's reporter, which releases a stage that lands only after the
+deadline, reached from both sides by the after-the-deadline and before-the-deadline cases. The
+deadline-time `releaseAcquired(partial)` and `expired = true` are statements, not decisions, and
+the cancelled-while-parked case pins that the partial release sits ahead of the abandoned-attempt
+gate rather than adding a branch to it. The review's one substantive finding — the post-deadline
+window — is the `expired` arm. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

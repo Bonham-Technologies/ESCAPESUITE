@@ -834,15 +834,36 @@ camera or microphone driver wedged such that `getUserMedia` never settles — us
 Record inert behind it (ESCSUITE-109). So the request is raced against
 `CAPTURE_TIMEOUT_MS` (60 s, a constant in `useRecordingController.ts`, generous because the share
 picker is a dialog a user may legitimately leave sitting). On expiry the app raises
-`CAPTURE_UNANSWERED` through the one notice channel, returns to `'idle'` and frees Record; the
-request is still out there, so whatever it hands over afterwards is **released on arrival** —
-`releaseAcquired`, the same three `stopStream()` calls the cancelled path makes, moved onto a
-promise nobody is awaiting any more — and a request that *rejects* after the clock ran out says
-nothing, because the user was already told. The token is the abort: nothing is plumbed into the
-browser APIs, which would not take it. The clock is armed *after* the request is issued and with
-nothing awaited in between, so it costs the click's user activation nothing, and it is cleared
-however the race ends, including by the request throwing — a 60-second timer left armed behind
-every take is a leak, which
+`CAPTURE_UNANSWERED` through the one notice channel, returns to `'idle'` and frees Record. The
+request is still out there, so `acquireStreams` is not a black box for the deadline branch:
+`acquireStreams` takes an optional `onPartial` reporter, called after each stage lands
+(screen, then webcam, then microphone) with the streams acquired so far — nulls for stages not
+yet reached — and `handleStartRecording` keeps the latest report in a local, closed over by
+nothing but this one attempt. Answered-and-parked used to mean live: the picker settled, the
+camera prompt never did, and the browser's "sharing your screen" bar stayed up until *that*
+prompt eventually settled too (ESCSUITE-116). Now the deadline branch releases the latest
+partial report immediately — the share bar goes down at the deadline, not whenever the stalled
+prompt gets around to it — whether or not the take had already been cancelled (the release sits
+before the `abandoned` guard that decides whether to say anything, so a thrown-away take still
+gets its screen share stopped, silently). A second, narrower window stays open past the deadline
+itself: a stage that lands *after* the clock has given up but before the whole request finally
+settles — the camera prompt answered a minute late, the microphone driver unwedging itself an
+hour later — used to sit in `onPartial`'s latest report with nothing reading it again until the
+request settled, which could be never. An `expired` flag closes it: once the deadline branch has
+fired, the same `onPartial` callback releases whatever it is handed on the spot, rather than only
+updating the local the deadline branch already read. Only *then* — whether through the deadline's
+own release, the `expired` callback, or both — does whatever the request eventually hands over
+also get released on arrival, same as before: `releaseAcquired`, the same three `stopStream()`
+calls the cancelled path makes, moved onto a promise nobody is awaiting any more. The releases can
+name the same stream more than once — a stage already reported through `onPartial`, before or
+after the deadline, is handed back again inside the final `acquired` once the request does settle
+— and that is safe on purpose: `stopStream` stops tracks, and stopping an already-stopped track is
+a no-op. A request that *rejects* after the clock ran out still says nothing, because the user was
+already told. The token is the abort:
+nothing is plumbed into the browser APIs, which would not take it. The clock is armed *after* the
+request is issued and with nothing awaited in between, so it costs the click's user activation
+nothing, and it is cleared however the race ends, including by the request throwing — a 60-second
+timer left armed behind every take is a leak, which
 `useRecordingController.test.ts`'s "never starts the clock for a request that answers at once"
 pins by counting the timers a started take leaves running.
 
