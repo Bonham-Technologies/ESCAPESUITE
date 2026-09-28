@@ -753,6 +753,70 @@ describe('useRecordingController stopping a take', () => {
   })
 })
 
+// ESCSUITE-114. Neither recorder's monitor ever emits a zero on its own (a
+// take with nothing to measure sends one hard-coded {0, 0} at start and then
+// stops, and a take that IS measuring something just keeps emitting whatever
+// it last read) — so without a write here, the store keeps a finished take's
+// last level forever, and the next take's meter — SourceToggles' `showMeters`
+// gate makes it visible for 'countdown', 'recording' and 'paused' — opens on
+// a stale, frozen bar instead of a silent one.
+describe('useRecordingController audio levels', () => {
+  function levels(): { microphone: number; system: number } {
+    return useRecorderStore.getState().audioLevels
+  }
+
+  it('reports the levels the recorder emits while the take is live', async () => {
+    const { recorder } = await startLiveTake()
+
+    act(() => { recorder.emitAudioLevels({ microphone: 0.6, system: 0.2 }) })
+
+    expect(levels()).toEqual({ microphone: 0.6, system: 0.2 })
+  })
+
+  it('zeroes the levels once the take stops, whether the stop was asked for or the recorder finished on its own', async () => {
+    const { result, recorder } = await startLiveTake()
+    act(() => { recorder.emitAudioLevels({ microphone: 0.6, system: 0.2 }) })
+    expect(levels()).toEqual({ microphone: 0.6, system: 0.2 })
+
+    await act(async () => { await result.current.handleStopRecording() })
+
+    expect(levels()).toEqual({ microphone: 0, system: 0 })
+  })
+
+  it('zeroes the levels for a stop the recorder fires on its own, not through handleStopRecording', async () => {
+    // The video track ending mid-take is exactly this: the recorder calls its
+    // own stop() and fires onStop without anyone having gone through
+    // handleStopRecording, so a write placed there alone would miss it.
+    const { recorder } = await startLiveTake()
+    act(() => { recorder.emitAudioLevels({ microphone: 0.6, system: 0.2 }) })
+
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob) })
+
+    expect(levels()).toEqual({ microphone: 0, system: 0 })
+  })
+
+  it('leaves nothing stale for the next take to show the moment its meter opens', async () => {
+    const { result, recorder } = await startLiveTake()
+    act(() => { recorder.emitAudioLevels({ microphone: 0.9, system: 0.7 }) })
+    await act(async () => { await result.current.handleStopRecording() })
+    expect(levels()).toEqual({ microphone: 0, system: 0 })
+
+    // Start the next take and park it in 'preparing', before its own monitor
+    // has had the chance to emit anything of its own.
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    harness.acquireStreams.mockImplementation(() => gate.then(() => harness.streams))
+    let start!: Promise<void>
+    await act(async () => { start = result.current.handleStartRecording() })
+
+    expect(state()).toBe('preparing')
+    expect(levels()).toEqual({ microphone: 0, system: 0 })
+
+    release()
+    await act(async () => { await start })
+  })
+})
+
 describe('useRecordingController cancelling a take', () => {
   it('throws the take away, disposes the recorder and stops the ticker', async () => {
     const { result } = mountController({ countdownSeconds: 0 })
