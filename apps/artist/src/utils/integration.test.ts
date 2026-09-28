@@ -639,4 +639,11 @@ describe('integration', () => {
       expect(decodeProjectData(projectParam!)).toEqual(project)
     })
   })
+
+  describe('keeps the suite\'s global stubs (ESCSUITE-119)', () => {
+    it('leaves src/test/setup.ts\'s URL stub in place for the tests after it', () => {
+      expect(vi.isMockFunction(URL.createObjectURL)).toBe(true)
+      expect(vi.isMockFunction(URL.revokeObjectURL)).toBe(true)
+    })
+  })
 })
