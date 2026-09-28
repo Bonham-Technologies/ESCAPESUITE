@@ -68,15 +68,6 @@ interface PendingTake {
   /** The take's name, for the toast raised when it is finally placed. */
   name: string;
   missingParts: number;
-  /**
-   * The blob URLs this take's thumbnails were made as.
-   *
-   * Carried here — as well as in the effect's own array, which the cleanup
-   * revokes on unmount — for the one path that ends in neither: a take dropped
-   * at placement time because the restored project already has it. Revoking
-   * twice is a no-op, so the two cost nothing between them.
-   */
-  thumbnailUrls: string[];
 }
 
 export function useHostIntegration({
@@ -124,9 +115,12 @@ export function useHostIntegration({
    * second placement would duplicate anyway.
    *
    * A dropped take is dropped **silently** — the same nothing a take already in
-   * the library has always been answered with — and hands its thumbnail URLs
-   * back, because the restore re-added its own library entries over the
-   * import's and nothing is pointing at them any more.
+   * the library has always been answered with. Its parts stay in the library,
+   * and so do their thumbnails: since ESCSUITE-113 the store owns every
+   * `SourceVideo.thumbnailUrl`, and what frees the import's handles is the
+   * restore re-adding its own entries under the same ids (`addSourceVideo`'s
+   * replace-in-place branch). Freeing them here as well would, for any part the
+   * restore did not replace, blank a tile whose media is on the timeline.
    */
   const placePendingTake = useCallback(() => {
     const take = pendingTake.current;
@@ -138,7 +132,6 @@ export function useHostIntegration({
         placed.some((clip) => clip.sourceVideoId === part.sourceVideoId)
       )
     ) {
-      for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
       return;
     }
     useEditorStore.getState().placeTakeOnTimeline(take.clipParts);
@@ -224,12 +217,6 @@ export function useHostIntegration({
     // Check for URL parameters (parsed once at startup)
     const { videos, loadVideoId, title } = urlParams;
 
-    // The ?loadVideo= thumbnails' blob URLs, handed back in the cleanup below.
-    // They are handed to `addSourceVideo` and live as long as the media library
-    // entries, so they cannot be revoked at the point they are created. A take
-    // can be several parts since ESCSUITE-14, so there can be several.
-    const thumbnailObjectUrls: string[] = [];
-
     // Set by the cleanup, read by the import once its storage reads land. The
     // import is far longer than the effect it belongs to can be relied on to
     // outlive — a metadata scan plus a getVideo and a getThumbnail per part —
@@ -242,9 +229,8 @@ export function useHostIntegration({
     //     whose effect is gone knowing to stand down keeps the take from being
     //     placed twice. `addSourceVideo` is idempotent by id, so the library
     //     survived this before there was anything to place;
-    //   * an unmount mid-import would otherwise have the cleanup revoke an
-    //     array that is still empty, leaving the URLs pushed after it leaked,
-    //     and land a `placeTakeOnTimeline` in a project the editor has left.
+    //   * an unmount mid-import would otherwise land a `placeTakeOnTimeline` in
+    //     a project the editor has left.
     let cancelled = false;
 
     // Load videos from URL parameters
@@ -289,21 +275,22 @@ export function useHostIntegration({
               useEditorStore.getState().sourceVideos.some((v) => v.id === id)
             );
             if (cancelled) {
-              // This effect is gone: its parts are in the library (harmless,
-              // and the run that replaced it adds the same ids), but the
-              // timeline and the toast belong to whoever is still mounted.
-              for (const url of take.thumbnailUrls) URL.revokeObjectURL(url);
+              // This effect is gone: its parts are in the library, and so are
+              // their thumbnails — the store owns freeing those (ESCSUITE-113).
+              // Revoking them here is what left the take's tiles dead under
+              // StrictMode's double mount: the run that replaced this one finds
+              // the parts already in the library and mints nothing to replace
+              // them with (ESCSUITE-117). The timeline and the toast belong to
+              // whoever is still mounted.
               return;
             }
             // Nothing was imported, so there is nothing to place and — as ever
             // for a take already in the library — nothing to say about it.
             if (take.alreadyInLibrary) return;
-            thumbnailObjectUrls.push(...take.thumbnailUrls);
             pendingTake.current = {
               clipParts: take.clipParts,
               name: videoData.metadata.name,
               missingParts: take.missingParts,
-              thumbnailUrls: take.thumbnailUrls,
             };
             // Once the question is settled this places the take on the same
             // tick it always did; while it is open this is a no-op and the
@@ -335,7 +322,6 @@ export function useHostIntegration({
     return () => {
       cancelled = true;
       cleanup();
-      for (const url of thumbnailObjectUrls) URL.revokeObjectURL(url);
     };
   }, []);
 

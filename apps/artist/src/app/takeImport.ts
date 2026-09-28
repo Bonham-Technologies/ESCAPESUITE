@@ -42,7 +42,17 @@ import type { SourceVideo, TakeClipPart } from '../store/types';
 export interface ImportedTake {
   /** Every part that can be placed, primary first. */
   clipParts: TakeClipPart[];
-  /** The blob URLs made for the parts' thumbnails. The caller owns revoking them. */
+  /**
+   * The blob URLs made for the parts' thumbnails, in part order.
+   *
+   * NOT the caller's to revoke: every one of them went to `addSourceVideo` with
+   * its part, and since ESCSUITE-113 the store owns freeing a
+   * `SourceVideo.thumbnailUrl` — `removeSourceVideo`, `resetProject` and
+   * `addSourceVideo`'s replace-in-place branch. The handoff revoking them on its
+   * effect's cleanup is exactly what blanked the take's tiles under StrictMode
+   * (ESCSUITE-117). They are reported because an import that throws part-way
+   * frees what it had minted, and because a test can then name them.
+   */
   thumbnailUrls: string[];
   /** Parts the take names whose blob is no longer in storage. */
   missingParts: number;
