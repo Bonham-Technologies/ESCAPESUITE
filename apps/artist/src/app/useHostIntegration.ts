@@ -30,6 +30,7 @@ import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
 import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
 import { processVideoFile } from '../core/videoProcessor';
 import { getVideo } from '../core/storage';
+import { parseProject } from '../store/projectMigration';
 import { importTake } from './takeImport';
 import { takeLoadedMessage } from './appFormat';
 import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@escapesuite/shared/theme';
@@ -169,7 +170,20 @@ export function useHostIntegration({
 
         case 'LOAD_PROJECT':
           if (message.payload) {
-            setProject(message.payload as any);
+            // Validated the same way a dropped .veditor is (ESCSUITE-102):
+            // ensureTimelineHasTracks assumes a shape this payload has never
+            // been checked against, and a host is in no better position than
+            // a malformed file to hand one — it gets an ERROR reply instead of
+            // a thrown exception silently leaving the project untouched.
+            const parsed = parseProject(message.payload);
+            if (parsed.ok) {
+              setProject(parsed.project);
+            } else {
+              sendMessage({
+                type: 'ERROR',
+                payload: { message: parsed.reason, code: 'INVALID_PROJECT' },
+              });
+            }
           }
           break;
 

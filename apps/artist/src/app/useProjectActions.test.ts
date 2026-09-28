@@ -11,7 +11,7 @@ import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
 import { loadProject, saveProject, showOpenProjectDialog } from '../core/projectManager'
 import { clearSessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
-import { resetStoreForTest } from '../test/fixtures/projectStore'
+import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
@@ -172,6 +172,57 @@ describe('opening a project', () => {
     expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to load project', 'error')
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it('rejects a malformed project without emptying the editor first (ESCSUITE-102)', async () => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    // A file that parses as JSON but is not a shape parseProject accepts —
+    // no clips array on the timeline.
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { id: 'p', name: 'Bad', created: 1, modified: 1, resolution: { width: 1920, height: 1080 }, timeline: {} } as never,
+      sourceVideos: [],
+    })
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(deps.resetProject).not.toHaveBeenCalled()
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to load project'),
+      'error'
+    )
+    expect(result.current.isLoading).toBe(false)
+  })
+
+  it('leaves the REAL store untouched by a bad file — same project reference, no history entry (ESCSUITE-102 review)', async () => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    vi.mocked(loadProject).mockResolvedValue({
+      project: {
+        id: 'p', name: 'Bad', created: 1, modified: 1,
+        resolution: { width: 1920, height: 1080 }, timeline: {},
+      } as never,
+      sourceVideos: [],
+    })
+    const projectBefore = useEditorStore.getState().project
+    const historyLengthBefore = useEditorStore.getState().history.past.length
+    // Wired to the real store's own actions, not the vi.fn() doubles every
+    // other test in this file uses — this test is about what the store
+    // itself ends up holding, not about which callback was invoked.
+    const { result } = mountActions({
+      resetProject: () => store().resetProject(),
+      setProject: (p) => store().setProject(p),
+      clipCount: 0,
+    })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(useEditorStore.getState().project).toBe(projectBefore)
+    expect(useEditorStore.getState().history.past).toHaveLength(historyLengthBefore)
   })
 })
 

@@ -121,12 +121,13 @@ describe('inbound messages', () => {
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
-  it('LOAD_PROJECT replaces the project with whatever it was handed', async () => {
+  it('LOAD_PROJECT replaces the project with whatever well-formed project it was handed', async () => {
     await mountIntegration()
+    const hostProject = { ...useEditorStore.getState().project, name: 'From Host' }
 
-    await dispatch({ type: 'LOAD_PROJECT', payload: { name: 'From Host' } })
+    await dispatch({ type: 'LOAD_PROJECT', payload: hostProject })
 
-    expect(deps.setProject).toHaveBeenCalledWith({ name: 'From Host' })
+    expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'From Host' }))
   })
 
   it('LOAD_PROJECT ignores an empty payload', async () => {
@@ -135,6 +136,18 @@ describe('inbound messages', () => {
     await dispatch({ type: 'LOAD_PROJECT' })
 
     expect(deps.setProject).not.toHaveBeenCalled()
+  })
+
+  it('LOAD_PROJECT answers a malformed payload with ERROR instead of applying it (ESCSUITE-102)', async () => {
+    await mountIntegration()
+
+    await dispatch({ type: 'LOAD_PROJECT', payload: { timeline: {} } })
+
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'ERROR',
+      payload: { message: expect.any(String), code: 'INVALID_PROJECT' },
+    })
   })
 
   it('GET_STATE answers with the store as it is now, not as it was at mount', async () => {

@@ -270,7 +270,15 @@ export function generateShareUrl(
  *
  * Incoming messages (from parent):
  * - LOAD_VIDEO: { url: string } - Load a video from URL
- * - LOAD_PROJECT: { data: Project } - Load a project
+ * - LOAD_PROJECT: Project - Load a project. The payload IS the project object
+ *   (not wrapped in a `data` field). Since ESCSUITE-102 a present payload is
+ *   validated the same way a dropped .veditor file is (`parseProject` in
+ *   store/projectMigration.ts: timeline is an object, clips is an array,
+ *   clip ids are unique, every clip's trackId names a track that exists once
+ *   migration has run) before it replaces anything; a payload that fails gets
+ *   an ERROR reply (code: 'INVALID_PROJECT', see below) instead of being
+ *   applied, and the current project is left exactly as it was. An absent
+ *   payload is still silently ignored, as it always was.
  * - EXPORT: { format: 'webm' | 'mp4' } - Trigger export
  *   [documented but not currently implemented - App has no handler for it]
  * - GET_STATE: {} - Request current state
@@ -289,7 +297,10 @@ export function generateShareUrl(
  * - PROJECT_SAVED: {} - Project was saved
  *   [documented but not currently implemented - nothing sends it]
  * - STATE: { project: Project, videos: SourceVideo[] } - Current state
- * - ERROR: { message: string, code: string } - Error occurred
+ * - ERROR: { message: string, code: string } - Error occurred. One shape for
+ *   every failure; `code` values in use today are 'LOAD_ERROR' (a LOAD_VIDEO
+ *   fetch failed) and 'INVALID_PROJECT' (a LOAD_PROJECT payload failed
+ *   `parseProject`'s shape checks — `message` carries the specific reason).
  * - THEME_CHANGED: { preference: string, resolved: string } - Theme was changed
  * - THEME_STATE: { preference: string, resolved: string } - Current theme state
  *

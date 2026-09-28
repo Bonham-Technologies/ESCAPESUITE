@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
+import { parseProject } from './projectMigration'
+import { DEFAULT_ANIMATION } from './types'
 import type { Project } from './types'
+import { buildMaskedSceneProject } from '../test/fixtures/perfScene'
 import { getSessionState, saveSessionState, type SessionState } from '../core/storage'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 
@@ -299,5 +302,183 @@ describe('projectStore remaining behaviours', () => {
       expect(copy.mask).toEqual({ kind: 'circle' })
       expect(copy.stroke).toEqual({ color: '#ff0000', width: 0.004 })
     })
+  })
+})
+
+describe('parseProject (ESCSUITE-102)', () => {
+  /** A project that passes every check without migration doing any work. */
+  const validProject = (): Project => ({
+    id: 'p',
+    name: 'Valid',
+    created: 1,
+    modified: 1,
+    resolution: { width: 1920, height: 1080 },
+    timeline: {
+      tracks: [
+        { id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },
+      ],
+      clips: [
+        {
+          id: 'c1', sourceVideoId: 'v1', name: 'c1', startTime: 0, endTime: 2, duration: 2,
+          trackId: 't1', timelinePosition: 0, blendMode: 'normal',
+          transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+          effects: { blur: 0 }, transition: { type: 'none', duration: 0.5 },
+        },
+      ],
+      textOverlays: [],
+      shapeOverlays: [],
+      duration: 2,
+    },
+  })
+
+  it('accepts a well-formed project and returns it migrated', () => {
+    const result = parseProject(validProject())
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project.timeline.clips).toHaveLength(1)
+      expect(result.project.timeline.tracks).toHaveLength(1)
+    }
+  })
+
+  it('round-trips a rich, already-valid project unchanged — keyframes, mask, stroke, text and shape overlays (review round 1)', () => {
+    // buildMaskedSceneProject already carries a mask and a stroke on every media
+    // clip plus a text overlay clip and a shape overlay clip (perfScene.ts); the
+    // only thing it has none of is keyframes, added here on one clip so this
+    // fixture exercises everything the ticket named without inventing a second
+    // scene builder.
+    const base = buildMaskedSceneProject()
+    const rich: Project = {
+      ...base,
+      timeline: {
+        ...base.timeline,
+        clips: base.timeline.clips.map((clip, index) =>
+          index === 0
+            ? {
+                ...clip,
+                animation: {
+                  ...DEFAULT_ANIMATION,
+                  keyframes: {
+                    opacity: [
+                      { time: 0, value: 0, easing: 'ease-out' },
+                      { time: 1, value: 1, easing: 'linear' },
+                    ],
+                  },
+                },
+              }
+            : clip
+        ),
+      },
+    }
+    // Sanity on the fixture itself, so a future change to perfScene.ts that
+    // quietly drops one of these can't turn this into a test of nothing.
+    expect(rich.timeline.clips.some((c) => c.mask && c.stroke)).toBe(true)
+    expect(rich.timeline.clips.some((c) => c.overlayType === 'text')).toBe(true)
+    expect(rich.timeline.clips.some((c) => c.overlayType === 'shape')).toBe(true)
+    expect(rich.timeline.clips.some((c) => c.animation?.keyframes.opacity)).toBe(true)
+
+    const result = parseProject(rich)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project).toEqual(rich)
+    }
+  })
+
+  it('rejects a project whose timeline has no tracks or clips arrays', () => {
+    const result = parseProject({
+      id: 'p', name: 'Bad', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: {},
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/clip/i)
+    }
+  })
+
+  it('rejects a timeline whose tracks is present but not a list (ESCSUITE-102 review round 2)', () => {
+    const result = parseProject({
+      id: 'p', name: 'Bad', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: { tracks: { not: 'an array' }, clips: [] },
+    })
+
+    expect(result).toEqual({ ok: false, reason: 'Timeline tracks is not a list' })
+  })
+
+  it.each([
+    ['a clip with no id at all', {}],
+    ['a clip whose id is not a string', { id: 42 }],
+  ])('rejects %s (ESCSUITE-102 review round 2)', (_label, badClip) => {
+    const result = parseProject({
+      id: 'p', name: 'Bad', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: { tracks: [], clips: [badClip] },
+    })
+
+    expect(result).toEqual({ ok: false, reason: 'A clip is missing an id' })
+  })
+
+  it('migrates a project with no tracks at all, rather than rejecting it', () => {
+    // ensureTimelineHasTracks's own migration branch handles an absent/empty
+    // `tracks` array — parseProject must let that through, not reject it.
+    const result = parseProject({
+      id: 'p', name: 'Trackless', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: { clips: [] },
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project.timeline.tracks).toHaveLength(1)
+    }
+  })
+
+  it('rejects a clip whose trackId names a track that does not exist', () => {
+    const bad = validProject()
+    bad.timeline.clips[0].trackId = 'no-such-track'
+
+    const result = parseProject(bad)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/track/i)
+    }
+  })
+
+  it('rejects duplicate clip ids', () => {
+    const bad = validProject()
+    const second = { ...bad.timeline.clips[0] }
+    bad.timeline.clips = [bad.timeline.clips[0], second]
+
+    const result = parseProject(bad)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/duplicate/i)
+    }
+  })
+
+  it('rejects input with no timeline at all', () => {
+    const result = parseProject({ id: 'p', name: 'No timeline' })
+
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects a non-object payload', () => {
+    expect(parseProject(null).ok).toBe(false)
+    expect(parseProject('a string').ok).toBe(false)
+    expect(parseProject(42).ok).toBe(false)
+  })
+
+  it('does not reject a clip whose sourceVideoId matches nothing — media is re-linked separately', () => {
+    const project = validProject()
+    project.timeline.clips[0].sourceVideoId = 'not-in-any-library'
+
+    const result = parseProject(project)
+
+    expect(result.ok).toBe(true)
   })
 })
