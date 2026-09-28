@@ -668,6 +668,93 @@ describe('projectStore remaining behaviours', () => {
       expect(store().project.timeline.clips[0].duration).toBe(10)
       expect(store().project.timeline.clips[0].name).toBe('Renamed')
     })
+
+    // ESCSUITE-110: trimming a clip leaves keyframes past its new end as dead
+    // weight and can leave an out-preset's duration longer than the clip
+    // (`generateOutPresetKeyframes` then computes a negative `startTime`).
+    describe('rebasing the animation on a trim (ESCSUITE-110)', () => {
+      it('drops a keyframe past the new end and synthesises a boundary, trimming from the end', () => {
+        addClip('clip1', 0, 10)
+        store().updateClipAnimation('clip1', {
+          keyframes: {
+            x: [
+              { time: 0, value: 0, easing: 'linear' },
+              { time: 4, value: 0.5, easing: 'ease-in' },
+              { time: 8, value: 1, easing: 'linear' },
+            ],
+          },
+        })
+
+        // Trim the end in from 10s to 6s.
+        store().updateClip('clip1', { endTime: 6 })
+
+        const clip = store().project.timeline.clips[0]
+        expect(clip.duration).toBe(6)
+        expect(clip.animation?.keyframes.x).toHaveLength(3)
+        expect(clip.animation?.keyframes.x?.[1]).toEqual({ time: 4, value: 0.5, easing: 'ease-in' })
+        expect(clip.animation?.keyframes.x?.[2].time).toBe(6)
+        expect(clip.animation?.keyframes.x?.[2].value).toBeCloseTo(0.625, 5)
+      })
+
+      it('shifts keyframes back to 0, trimming from the start', () => {
+        addClip('clip1', 0, 10)
+        store().updateClipAnimation('clip1', {
+          keyframes: {
+            x: [
+              { time: 0, value: 0, easing: 'linear' },
+              { time: 4, value: 0.5, easing: 'ease-in' },
+              { time: 8, value: 1, easing: 'linear' },
+            ],
+          },
+        })
+
+        // Trim the start in by 6s: startTime moves to 6, and the trim drag
+        // moves timelinePosition by the same amount (endTime untouched).
+        store().updateClip('clip1', { startTime: 6, timelinePosition: 6 })
+
+        const clip = store().project.timeline.clips[0]
+        expect(clip.duration).toBe(4)
+        expect(clip.animation?.keyframes.x).toHaveLength(2)
+        expect(clip.animation?.keyframes.x?.[0].time).toBe(0)
+        expect(clip.animation?.keyframes.x?.[0].value).toBeCloseTo(0.625, 5)
+        expect(clip.animation?.keyframes.x?.[1]).toEqual({ time: 2, value: 1, easing: 'linear' })
+      })
+
+      it("clamps a kept out-preset's duration so it can no longer start before 0", () => {
+        addClip('clip1', 0, 10)
+        store().updateClipAnimation('clip1', { out: { type: 'fade', duration: 2, easing: 'ease-in' } })
+
+        // Trim the clip down to 1s — an unclamped 2s fade-out would make
+        // generateOutPresetKeyframes compute startTime = 1 - 2 = -1.
+        store().updateClip('clip1', { endTime: 1 })
+
+        const clip = store().project.timeline.clips[0]
+        expect(clip.duration).toBe(1)
+        expect(clip.animation?.out.duration).toBe(0.5) // maxPresetDuration(1)
+      })
+
+      it('leaves the animation alone when the trim lengthens the clip', () => {
+        // A clip trimmed in from a longer source, so there is room to trim
+        // back out again.
+        store().addClipToTimeline(
+          { id: 'clip1', sourceVideoId: video.id, name: 'clip1', startTime: 2, endTime: 6, duration: 4 },
+          undefined,
+          0
+        )
+        store().updateClipAnimation('clip1', {
+          out: { type: 'fade', duration: 1, easing: 'ease-in' },
+          keyframes: { x: [{ time: 0, value: 0, easing: 'linear' }, { time: 4, value: 1, easing: 'linear' }] },
+        })
+        const before = store().project.timeline.clips[0].animation
+
+        // Drag the end handle outward: 6 -> 9, so duration grows 4 -> 7.
+        store().updateClip('clip1', { endTime: 9 })
+
+        const clip = store().project.timeline.clips[0]
+        expect(clip.duration).toBe(7)
+        expect(clip.animation).toBe(before)
+      })
+    })
   })
 
   describe('splitClip', () => {

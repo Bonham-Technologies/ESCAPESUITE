@@ -6,6 +6,8 @@ import {
   getAnimatedVolume,
   hasVolumeKeyframes,
   splitAnimation,
+  trimAnimation,
+  maxPresetDuration,
 } from './animation'
 import type { ClipAnimation, ClipTransform } from '../store/types'
 import { baseEffects, baseTransform } from '../test/fixtures/animation'
@@ -781,5 +783,153 @@ describe('splitAnimation (ESCSUITE-95)', () => {
     first.keyframes.opacity![0].value = 99
     expect(animation.keyframes.opacity![0].value).toBe(0)
     expect(second.keyframes.opacity![0].value).toBe(1)
+  })
+})
+
+describe('trimAnimation (ESCSUITE-110)', () => {
+  it("clamps a kept out-preset's duration so it can never start before 0", () => {
+    // A 2s fade-out survives untouched by a plain trim today, so shortening
+    // the clip to 1s leaves `generateOutPresetKeyframes` computing
+    // `startTime = clipDuration - duration = 1 - 2 = -1`: the clip opens
+    // already part-faded, and the keyframe panel plots a negative time.
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'fade', duration: 2, easing: 'ease-in' },
+      keyframes: {},
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 1 })
+
+    expect(result.out.duration).toBe(maxPresetDuration(1))
+    expect(result.out.duration).toBe(0.5)
+    // The invariant the clamp exists for: an out-preset can never demand a
+    // startTime before the clip's own start.
+    expect(1 - result.out.duration).toBeGreaterThanOrEqual(0)
+  })
+
+  it("clamps a kept in-preset's duration the same way", () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 2, easing: 'ease-out' },
+      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
+      keyframes: {},
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 1 })
+
+    expect(result.in.duration).toBe(maxPresetDuration(1))
+  })
+
+  it('leaves a preset duration that already fits the trimmed clip untouched', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.2, easing: 'ease-out' },
+      out: { type: 'fade', duration: 0.2, easing: 'ease-in' },
+      keyframes: {},
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 10 })
+
+    expect(result.in.duration).toBe(0.2)
+    expect(result.out.duration).toBe(0.2)
+  })
+
+  it('drops a keyframe past the new end and synthesises a boundary in its place (trim-from-the-end)', () => {
+    // Same track and numbers as splitAnimation's "spans the cut" case: a 0-10s
+    // clip trimmed down to 6s should treat 6 exactly like a split's first half.
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
+      keyframes: {
+        x: [
+          { time: 0, value: 0, easing: 'linear' },
+          { time: 4, value: 0.5, easing: 'ease-in' },
+          { time: 8, value: 1, easing: 'linear' },
+        ],
+      },
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 6 })
+
+    expect(result.keyframes.x).toHaveLength(3)
+    expect(result.keyframes.x?.[0]).toEqual({ time: 0, value: 0, easing: 'linear' })
+    expect(result.keyframes.x?.[1]).toEqual({ time: 4, value: 0.5, easing: 'ease-in' })
+    // Synthesised boundary at the new end, holding the interpolated value
+    // (same 0.625 as the split test), with the easing of the keyframe it
+    // stands in for (the one at 8, now dropped).
+    expect(result.keyframes.x?.[2].time).toBe(6)
+    expect(result.keyframes.x?.[2].value).toBeCloseTo(0.625, 5)
+    expect(result.keyframes.x?.[2].easing).toBe('linear')
+  })
+
+  it('shifts keyframes back and synthesises a boundary at 0 (trim-from-the-start)', () => {
+    // Cutting the first 6s off the same 0-10s clip: everything before 6 is
+    // gone, the keyframe at 8 shifts to 2, and a boundary is synthesised at 0
+    // holding the value the parent track had at the cut (0.625, as above)
+    // with the easing of the keyframe it stands in for (the one at 4).
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
+      keyframes: {
+        x: [
+          { time: 0, value: 0, easing: 'linear' },
+          { time: 4, value: 0.5, easing: 'ease-in' },
+          { time: 8, value: 1, easing: 'linear' },
+        ],
+      },
+    }
+
+    const result = trimAnimation(animation, { start: 6, end: 10 })
+
+    expect(result.keyframes.x).toHaveLength(2)
+    expect(result.keyframes.x?.[0].time).toBe(0)
+    expect(result.keyframes.x?.[0].value).toBeCloseTo(0.625, 5)
+    expect(result.keyframes.x?.[0].easing).toBe('ease-in')
+    expect(result.keyframes.x?.[1]).toEqual({ time: 2, value: 1, easing: 'linear' })
+  })
+
+  it('is the identity when nothing is trimmed off either end', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'fade', duration: 0.5, easing: 'ease-in' },
+      keyframes: {
+        opacity: [
+          { time: 0, value: 0, easing: 'linear' },
+          { time: 10, value: 1, easing: 'linear' },
+        ],
+      },
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 10 })
+
+    expect(result.keyframes.opacity).toEqual(animation.keyframes.opacity)
+  })
+
+  it('leaves a property with no keyframes out of the result', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
+      keyframes: { opacity: [] },
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 5 })
+
+    expect(result.keyframes.opacity).toBeUndefined()
+  })
+
+  it('shares no references with the parent', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'fade', duration: 0.5, easing: 'ease-in' },
+      keyframes: {
+        opacity: [{ time: 0, value: 0, easing: 'linear' }],
+      },
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 5 })
+
+    expect(result).not.toBe(animation)
+    expect(result.in).not.toBe(animation.in)
+    expect(result.out).not.toBe(animation.out)
+    expect(result.keyframes.opacity).not.toBe(animation.keyframes.opacity)
+    expect(result.keyframes.opacity?.[0]).not.toBe(animation.keyframes.opacity?.[0])
   })
 })
