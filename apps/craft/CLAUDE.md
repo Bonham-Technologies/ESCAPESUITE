@@ -1624,19 +1624,37 @@ the outcome, not on the double.
   for it through this module.
   `flush(rounds = 3)` runs a **fixed** number of real `setTimeout(0)` turns — right for settling
   a render pin (`App.rerender.test.tsx`, `App.mp4rerender.test.tsx` count exactly how many turns
-  a given change costs, which is the one place a fixed count is the thing under test) and wrong
-  for anything whose depth isn't fixed. The save chain is the sharpest example:
-  `fixWebMMetadata` → `extractVideoMetadata` → `generateThumbnail` → `storeVideo` →
-  `storeThumbnail` runs through two real fake-indexeddb transactions, and under load three
-  rounds is not a promise the chain drains in — ESCSUITE-114 saw it fail 18 assertions at once
-  in `App.saving.test.tsx`, green in isolation and in the runs either side of it. A call
-  waiting on an *outcome* — a saved row, a deleted one, a download, a notice — uses
-  `@testing-library/react`'s `waitFor(() => expect(...))` instead, polling the real DOM
-  (jsdom's `MutationObserver` runs on real microtasks, not the faked `setInterval` these suites
-  fake for the countdown and duration tickers) until the assertion holds or its own timeout
-  passes. `App.saving.test.tsx` and the delete/MP4 cases in `App.library.test.tsx` are the ones
-  that do; the rest of the suite's `flush()` calls settle a mocked capture promise or a
-  keyboard-shortcut dispatch, neither of which has an unbounded chain behind it.
+  a given change costs, which is the one place a fixed count is the thing under test, and both
+  files stay byte-for-byte on `flush()`'s fixed shape) and wrong for anything whose depth isn't
+  fixed. The save chain is the sharpest example: `fixWebMMetadata` → `extractVideoMetadata` →
+  `generateThumbnail` → `storeVideo` → `storeThumbnail` runs through two real fake-indexeddb
+  transactions, and under load three rounds is not a promise the chain drains in —
+  ESCSUITE-114 saw it fail 18 assertions at once in `App.saving.test.tsx`, green in isolation
+  and in the runs either side of it. `renderApp()`'s own `flush()` carries the same risk on
+  every mount, not just a save: `App` mounting kicks off `useCapabilityBootstrap`'s
+  `loadRecordings()`, which is `getRecordingsMetadata()` plus one `getThumbnail()` per stored
+  recording — real fake-indexeddb transactions again, one more of them for every recording a
+  test has seeded. A call waiting on an *outcome* — a saved row, a deleted one, a download, a
+  notice, the library itself — uses `@testing-library/react`'s `waitFor(() => expect(...))`
+  instead, polling the real DOM until the assertion holds or its own timeout passes.
+  `App.saving.test.tsx`, the delete/MP4 cases in `App.library.test.tsx`, and
+  **`renderAppWithLibrary(expectedCount)`** — `renderApp()` plus a `waitFor` on the store
+  holding that many `recordings`, used by every test in `App.library.test.tsx` that seeds
+  IndexedDB before rendering, since `renderApp()` itself is left exactly as it is — are the
+  ones that do; a `flush()` call elsewhere in the suite that isn't behind one of those settles a
+  mocked capture promise or a keyboard-shortcut dispatch, neither of which has an unbounded
+  chain behind it.
+
+  **Why `waitFor` is safe here even though `setInterval` is faked:** every suite that fakes
+  timers does it narrowly — `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })`,
+  for the countdown and duration tickers only — and leaves `setTimeout` **real**. `waitFor`'s
+  50 ms poll interval is dead weight under that (jsdom's `MutationObserver`, which runs on real
+  microtasks regardless of any faked timer, is what actually re-checks the assertion after every
+  DOM mutation), but its 1000 ms give-up timer is a real `setTimeout` and does fire — a
+  deliberately wrong expectation was confirmed to fail in ~3 test-seconds with the assertion's
+  own line, not hang. This is load-bearing: widen that `toFake` list to include `setTimeout` in
+  a suite that also uses `waitFor`, and every converted call hangs to `testTimeout` instead of
+  failing with a useful message.
 - **`*.perf.test.ts` files are ceilings, not benchmarks.** `core/compositor.perf.test.ts`,
   `core/converter.perf.test.ts`, `core/webcodecsRecorder.perf.test.ts` and
   `core/recorder.perf.test.ts` count what a frame, a take or a second of monitoring costs —
