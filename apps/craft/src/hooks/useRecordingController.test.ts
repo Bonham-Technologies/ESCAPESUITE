@@ -11,7 +11,12 @@
 // setTimeout stays real so promise chains still settle.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
-import { useRecordingController, type RecordingControllerDeps } from './useRecordingController'
+import {
+  CAPTURE_TIMEOUT_MS,
+  useRecordingController,
+  type RecordingController,
+  type RecordingControllerDeps,
+} from './useRecordingController'
 import type { Compositor } from '../core/compositor'
 import { useRecorderStore } from '../store/recorderStore'
 import { defaultConfig, type RecordingConfig } from '../store/types'
@@ -28,7 +33,7 @@ import {
 } from '../test/doubles/canvas'
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastream'
-import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
+import { CAPTURE_UNANSWERED, SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
 // The save path's own expression, not a copy of it: if `resolveHasAudio`
 // changed, the agreement table below would change with it.
 import { resolveHasAudio, type CapturedTake } from '../utils/recordingMetadata'
@@ -443,6 +448,28 @@ describe('useRecordingController starting a take', () => {
     expect(state()).toBe('idle')
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
     expect(recorderFactory.createRecorder).not.toHaveBeenCalled()
+  })
+
+  it('takes a fresh start after one that failed', async () => {
+    // A failure is not a latch either. The attempt's gate is dropped in the
+    // `finally`, which the failing path runs through as well, so the click that
+    // answers the notice is a take and not a no-op.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 3 })
+    harness.acquireStreams.mockRejectedValueOnce(new Error('Camera in use'))
+
+    await startTake(result)
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).not.toBeNull()
+    expect(recorderFactory.recorders).toHaveLength(0)
+
+    await startTake(result)
+
+    expect(recorderFactory.recorders).toHaveLength(1)
+    expect(state()).toBe('countdown')
+    // ...and the next take clears what the last one had to report.
+    expect(useRecorderStore.getState().notice).toBeNull()
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error))
   })
 })
 
@@ -1480,6 +1507,79 @@ describe('useRecordingController teardown', () => {
       expect(state()).toBe('idle')
     })
 
+    // ESCSUITE-109, fix round 1: the same supersession one `await` later. A
+    // cancel frees Record while `initialize()` is still parked, so the next take
+    // can have acquired its capture and built *its* recorder by the time the
+    // older setup resumes — and `recorderRef`, the store's streams and
+    // `stopAllStreams` all belong to that newer take by then. The ESCSUITE-73
+    // guard tears down what it finds, which was right while the only way to
+    // reach it was a take that had already been torn down, and is the newer
+    // take's recorder and capture now. A superseded attempt must touch nothing:
+    // its own everything was released by the cancel that superseded it.
+    describe('when a newer take is already being set up', () => {
+      /** A capture of its own per request, so the store can be read back. */
+      function acquirePerAttempt(): AcquiredDoubles[] {
+        const acquired: AcquiredDoubles[] = []
+        harness.acquireStreams.mockImplementation(async () => {
+          const streams: AcquiredDoubles = { screen: screenStream(), webcam: null, mic: null }
+          acquired.push(streams)
+          return streams
+        })
+        return acquired
+      }
+
+      it('touches nothing of it when the older setup resumes', async () => {
+        const releaseFirst = parkedInitialize()
+        const { result } = mountController({ countdownSeconds: 3 })
+        const acquired = acquirePerAttempt()
+
+        let first!: Promise<void>
+        await act(async () => { first = result.current.handleStartRecording() })
+        // Parked inside the first initialize(), with its recorder built.
+        expect(recorderFactory.recorders).toHaveLength(1)
+
+        // Escape in 'preparing' disposes that recorder and frees Record.
+        act(() => { result.current.handleCancelRecording() })
+        expect(recorderFactory.last().dispose).toHaveBeenCalledTimes(1)
+        expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+
+        // The next take gets all the way to its own parked initialize().
+        const releaseSecond = parkedInitialize()
+        let second!: Promise<void>
+        await act(async () => { second = result.current.handleStartRecording() })
+        expect(recorderFactory.recorders).toHaveLength(2)
+        const newer = recorderFactory.last()
+        expect(useRecorderStore.getState().screenStream).toBe(acquired[1].screen)
+
+        // Now the abandoned setup resumes.
+        releaseFirst()
+        await act(async () => { await first })
+
+        // It disposed the newer take's recorder and released its capture — the
+        // sharing bar going out mid-take — and then the newer take's own resume
+        // found a null recorder ref and returned without a state, leaving the UI
+        // stuck in 'preparing': no Record button, no Cancel button, nothing but a
+        // reload.
+        expect(newer.dispose).not.toHaveBeenCalled()
+        expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+        expect(useRecorderStore.getState().screenStream).toBe(acquired[1].screen)
+        for (const track of acquired[1].screen?.getTracks() ?? []) {
+          expect(track.stop).not.toHaveBeenCalled()
+        }
+        expect(state()).toBe('preparing')
+
+        // ...and the newer take goes on to run, exactly as if the older one had
+        // never resumed at all.
+        releaseSecond()
+        await act(async () => { await second })
+
+        expect(state()).toBe('countdown')
+        act(() => { vi.advanceTimersByTime(3000) })
+        expect(newer.start).toHaveBeenCalledTimes(1)
+        expect(recorderFactory.recorders).toHaveLength(2)
+      })
+    })
+
     // ESCSUITE-93. The window *before* `recorderRef.current` is assigned — and
     // the one a cancel cannot clean up after, because `stopAllStreams()` reads
     // the streams out of the store and the start has not put them there yet.
@@ -1584,10 +1684,11 @@ describe('useRecordingController teardown', () => {
 
         expectNothingLive()
 
-        // ...and Record still works. The starting flag is dropped in the
-        // `finally` of the attempt, cancelled path included: one left raised
-        // would brick the button for the rest of the session, say nothing about
-        // it, and leave every other assertion in this file green.
+        // ...and Record still works. The cancel drops the attempt token, and
+        // the `finally` of the attempt drops it too if it is still its own: a
+        // gate left closed would brick the button for the rest of the session,
+        // say nothing about it, and leave every other assertion in this file
+        // green.
         harness.acquireStreams.mockResolvedValue(harness.streams)
         await startTake(result)
         expect(recorderFactory.recorders).toHaveLength(1)
@@ -1606,6 +1707,130 @@ describe('useRecordingController teardown', () => {
         await act(async () => { await start })
 
         expectNothingLive()
+      })
+
+      // ESCSUITE-109. The cancel above frees Record the instant it happens,
+      // but the request it abandoned is still outstanding — a picker still on
+      // screen, a camera prompt nobody has answered — so the *next* take is
+      // started while the first request is still in the air. ESCSUITE-93's
+      // boolean could not allow that: it was dropped only when the abandoned
+      // request settled, which for a picker nobody answers is never, so Record
+      // was silently dead with no notice. An attempt token frees the gate at
+      // cancel time without letting the abandoned attempt walk on: the start
+      // that resumes finds a token that is no longer its own, releases what it
+      // was handed and touches nothing of the take that is now live.
+      describe('and the next take is started before it arrives', () => {
+        /**
+         * One held-open request per call, each with captures of its own, so a
+         * test can say *which* attempt's tracks were stopped.
+         */
+        function queuedAcquires(): Array<{ streams: AcquiredDoubles; release: () => void }> {
+          const requests: Array<{ streams: AcquiredDoubles; release: () => void }> = []
+          harness.acquireStreams.mockImplementation(() => {
+            const streams: AcquiredDoubles = {
+              screen: screenStream(),
+              webcam: webcamStream(),
+              mic: micStreamWithTrack(),
+            }
+            let release!: () => void
+            const gate = new Promise<void>(resolve => { release = resolve })
+            requests.push({ streams, release })
+            return gate.then(() => streams)
+          })
+          return requests
+        }
+
+        function tracksOf(streams: AcquiredDoubles): MediaStreamTrack[] {
+          return [streams.screen, streams.webcam, streams.mic].flatMap(s => s?.getTracks() ?? [])
+        }
+
+        /** Mount a screen+webcam+mic take whose every request is held open. */
+        function mountQueued() {
+          const view = mountController({
+            screenEnabled: true,
+            webcamEnabled: true,
+            microphoneEnabled: true,
+            countdownSeconds: 3,
+          })
+          return { ...view, requests: queuedAcquires() }
+        }
+
+        /** Start, cancel underneath the parked request, start again. */
+        async function cancelAndRestart(result: { current: RecordingController }) {
+          let first!: Promise<void>
+          await act(async () => { first = result.current.handleStartRecording() })
+          expect(state()).toBe('preparing')
+
+          act(() => { result.current.handleCancelRecording() })
+          expect(state()).toBe('idle')
+
+          let second!: Promise<void>
+          await act(async () => { second = result.current.handleStartRecording() })
+          return { first, second }
+        }
+
+        it('takes the second take, and releases the first request when it answers last', async () => {
+          const { result, requests } = mountQueued()
+          const { first, second } = await cancelAndRestart(result)
+
+          // Record was not inert behind the abandoned request: the second take
+          // asked for its own capture.
+          expect(requests).toHaveLength(2)
+          expect(state()).toBe('preparing')
+
+          // The second take's own request answers, and it is the one that runs.
+          requests[1].release()
+          await act(async () => { await second })
+          expect(recorderFactory.recorders).toHaveLength(1)
+          expect(state()).toBe('countdown')
+
+          // ...and only then does the first picker finally get an answer.
+          requests[0].release()
+          await act(async () => { await first })
+
+          for (const track of tracksOf(requests[0].streams)) {
+            expect(track.stop).toHaveBeenCalledTimes(1)
+          }
+          // Nothing of the live take is touched: its tracks, its recorder and
+          // its countdown are all exactly as the second start left them.
+          for (const track of tracksOf(requests[1].streams)) {
+            expect(track.stop).not.toHaveBeenCalled()
+          }
+          expect(recorderFactory.recorders).toHaveLength(1)
+          expect(recorderFactory.last().dispose).not.toHaveBeenCalled()
+          expect(state()).toBe('countdown')
+          expect(useRecorderStore.getState().screenStream).toBe(requests[1].streams.screen)
+        })
+
+        it('releases the first request when it answers first, and still runs the second', async () => {
+          const { result, requests } = mountQueued()
+          const { first, second } = await cancelAndRestart(result)
+          expect(requests).toHaveLength(2)
+
+          // The abandoned picker answers while the second take is still
+          // waiting on its own: nothing is built, and nothing of the second
+          // take's is disturbed.
+          requests[0].release()
+          await act(async () => { await first })
+
+          for (const track of tracksOf(requests[0].streams)) {
+            expect(track.stop).toHaveBeenCalledTimes(1)
+          }
+          expect(recorderFactory.recorders).toHaveLength(0)
+          expect(harness.deps.compositorRef.current).toBeNull()
+          expect(useRecorderStore.getState().screenStream).toBeNull()
+          expect(state()).toBe('preparing')
+          expect(useRecorderStore.getState().notice).toBeNull()
+
+          requests[1].release()
+          await act(async () => { await second })
+
+          for (const track of tracksOf(requests[1].streams)) {
+            expect(track.stop).not.toHaveBeenCalled()
+          }
+          expect(recorderFactory.recorders).toHaveLength(1)
+          expect(state()).toBe('countdown')
+        })
       })
     })
   })
@@ -1646,5 +1871,160 @@ describe('useRecordingController two starts at once', () => {
     // The guard is per attempt, not a latch that closes the app for good.
     expect(recorderFactory.recorders).toHaveLength(2)
     expect(state()).toBe('countdown')
+  })
+})
+
+// ESCSUITE-109. A share picker nobody answers, a camera permission prompt left
+// on screen, a microphone driver wedged so that getUserMedia never settles:
+// `acquireStreams()` then never resolves and never rejects. The app sat in
+// 'preparing' with no way out but a reload, and Record — gated on a start being
+// on its way — was dead for the rest of the session with nothing said about it.
+// The browser APIs take no AbortController, so a deadline is what gives the
+// user the app back.
+describe('useRecordingController a capture request the browser never answers', () => {
+  beforeEach(() => {
+    // The deadline is a setTimeout, which this file deliberately leaves real so
+    // promise chains settle — so fake it here, and only here, alongside the
+    // interval tickers the rest of the file drives.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  })
+
+  /** A request that answers only when the test says so, as a picker does. */
+  function parkedAcquire(): () => void {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    harness.acquireStreams.mockImplementation(() => gate.then(() => harness.streams))
+    return release
+  }
+
+  /** Every track the parked request would eventually hand over. */
+  function acquiredTracks(): MediaStreamTrack[] {
+    const { screen, webcam, mic } = harness.streams
+    return [screen, webcam, mic].flatMap(stream => stream?.getTracks() ?? [])
+  }
+
+  /** Let the chain behind a released request run to its end. */
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  /**
+   * Start a take and leave it parked on its request. The promise comes back
+   * wrapped, because an async function that returns one hands back what it
+   * resolves to — and this one never resolves until the clock runs out.
+   */
+  async function startParked(result: { current: RecordingController }): Promise<{ start: Promise<void> }> {
+    let start!: Promise<void>
+    await act(async () => { start = result.current.handleStartRecording() })
+    expect(state()).toBe('preparing')
+    return { start }
+  }
+
+  it('gives up on the request, says so, and returns the app to idle', async () => {
+    const { result } = mountController({ countdownSeconds: 3 })
+    const release = parkedAcquire()
+    const { start } = await startParked(result)
+
+    await act(async () => { vi.advanceTimersByTime(CAPTURE_TIMEOUT_MS) })
+    await act(async () => { await start })
+
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).toBe(CAPTURE_UNANSWERED)
+    // Nothing was built on top of a capture that never arrived.
+    expect(recorderFactory.recorders).toHaveLength(0)
+    expect(harness.setPreviewStream).not.toHaveBeenCalled()
+    expect(useRecorderStore.getState().screenStream).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+
+    // ...and the capture the browser eventually hands over is released, rather
+    // than left running behind a UI that says idle.
+    release()
+    await settle()
+    for (const track of acquiredTracks()) {
+      expect(track.stop).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('leaves Record working', async () => {
+    const { result } = mountController({ countdownSeconds: 3 })
+    parkedAcquire()
+    const { start } = await startParked(result)
+
+    await act(async () => { vi.advanceTimersByTime(CAPTURE_TIMEOUT_MS) })
+    await act(async () => { await start })
+
+    // The gate is per attempt: one left raised on this path would brick the
+    // button for the rest of the session, which is half of what this fixes.
+    harness.acquireStreams.mockResolvedValue(harness.streams)
+    await startTake(result)
+
+    expect(recorderFactory.recorders).toHaveLength(1)
+    expect(state()).toBe('countdown')
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('says nothing about a take the user had already thrown away', async () => {
+    const { result } = mountController({ countdownSeconds: 3 })
+    const release = parkedAcquire()
+    const { start } = await startParked(result)
+
+    // Escape in 'preparing' — the user gave up long before the clock did.
+    act(() => { result.current.handleCancelRecording() })
+    await act(async () => { vi.advanceTimersByTime(CAPTURE_TIMEOUT_MS) })
+    await act(async () => { await start })
+
+    // The notice lives in the module-singleton store, so one raised here would
+    // be read out on the next mount about a take nobody was waiting for.
+    expect(useRecorderStore.getState().notice).toBeNull()
+    expect(state()).toBe('idle')
+
+    release()
+    await settle()
+    for (const track of acquiredTracks()) {
+      expect(track.stop).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('stays quiet when the request it gave up on fails later', async () => {
+    // The other way a request the clock gave up on can end: the picker is
+    // finally dismissed, or the camera prompt is denied, and it rejects. There
+    // is nothing to release and nothing to say — the user was told when the
+    // clock ran out, and a second sentence about it would be about a take they
+    // have already moved on from. What must not happen is an unhandled
+    // rejection out of a promise nobody is awaiting any more.
+    const { result } = mountController({ countdownSeconds: 3 })
+    let refuse!: (error: Error) => void
+    const gate = new Promise<never>((_resolve, reject) => { refuse = reject })
+    harness.acquireStreams.mockImplementation(() => gate)
+    const { start } = await startParked(result)
+
+    await act(async () => { vi.advanceTimersByTime(CAPTURE_TIMEOUT_MS) })
+    await act(async () => { await start })
+    expect(useRecorderStore.getState().notice).toBe(CAPTURE_UNANSWERED)
+
+    const refused = new DOMException('Permission denied', 'NotAllowedError')
+    await act(async () => { refuse(refused) })
+    await settle()
+
+    expect(useRecorderStore.getState().notice).toBe(CAPTURE_UNANSWERED)
+    expect(state()).toBe('idle')
+    expect(recorderFactory.recorders).toHaveLength(0)
+  })
+
+  it('never starts the clock for a request that answers at once', async () => {
+    const { result } = mountController({ countdownSeconds: 3 })
+    await startTake(result)
+
+    // Exactly one timer is left running, and it is the countdown ticker: the
+    // deadline is cleared by the request settling, whichever way it settled,
+    // because a 60-second timer left armed behind every take is a leak.
+    expect(vi.getTimerCount()).toBe(1)
+    expect(state()).toBe('countdown')
+    act(() => { vi.advanceTimersByTime(3000) })
+    expect(recorderFactory.last().start).toHaveBeenCalledTimes(1)
   })
 })

@@ -81,7 +81,7 @@ reference: `useRecordingController` writes them while a take runs, `useRecording
 them when the recorder's `onStop` fires. Every ref in the screen is created in exactly one
 place — a second `useRef()` in either hook would leave the save reading a recorder type and a
 thumbnail nobody wrote. The same rule puts `compositorRef`, `micStreamRef`, `previewRef` and
-`canvasPreviewRef` in `useMediaStreams`, and the recorder, cancelled-flag, starting-flag and
+`canvasPreviewRef` in `useMediaStreams`, and the recorder, cancelled-flag, attempt-token and
 interval refs in `useRecordingController`, each passed on to whoever else reads it.
 
 Every module below has its own test file; `App.tsx` itself is covered through
@@ -120,7 +120,7 @@ selector contract above.
 | `hooks/useCapabilityBootstrap.ts` | The way in: capability detection, the MP4 codec probe (`probeMP4Support()` → `store.mp4Support`) and the initial `loadRecordings()`, all in one effect as they were inline — splitting them would change the order the store is written on mount. Raises `capabilitiesReady` (on success *and* on failure) and reports either failure as a notice |
 | `hooks/useMediaStreams.ts` | Everything capture is held in and released through: the preview stream, the PiP compositor, the microphone stream the store does not hold, the two preview DOM handles, `acquireStreams`, `stopAllStreams` and the ref that mirrors it. Registers the preview attach and then the mirror |
 | `hooks/useRecordingSave.ts` | Turning a finished take into a stored recording: the WebM container repair, metadata extraction, the thumbnail fallback chain, both storage writes, and the new entry at the top of the list. Only `storeVideo` — the blob and its metadata — is load-bearing: a thumbnail is cosmetic, so `storeThumbnail` failing (a quota error, most likely, since the thumbnail is written after the multi-MB blob) or `generateThumbnail` itself throwing is caught, warned once (`'Recording thumbnail could not be saved:'`), and the take is still added to the list with no `thumbnailUrl` and the companions still written (ESCSUITE-107) — before this fix the whole save rejected over a take that was in fact already stored: invisible until reload, already readable by ARTIST, and its companions never reached. A separate-tracks take's other blobs are written here too, one loop, each part in its own try/catch — the webcam with its own decoded thumbnail and `hasAudio: false`, the microphone and the system audio with `mediaType: 'audio'`, `frameRate: 0` (both derived from the role by `buildSourceVideo`), 0x0, the recorder's own duration and **no thumbnail and no decode at all** (`extractVideoMetadata` reports `videoWidth || 1920`, so probing an audio file would store it as 1920x1080). They are added in **reverse role order**, because `addRecording` prepends. Losing one costs that one and nothing else; one `SEPARATE_TRACK_NOT_SAVED` covers however many were lost, and the console carries which (`<Track> track could not be saved:`). That is the **storage** half of the loss only: a part lost inside the recorder arrives as a list that is simply *shorter*, which this hook cannot tell from a take that asked for fewer, so the controller raises the same notice for it (see "Recorder lifecycle"). Reads the recorder type and the captured thumbnail through refs, because `onStop` fires from callbacks captured a render earlier. Owns the one `hasAudio` expression the *primary's* two records are given — `captured.micAcquired || (systemAudioEnabled && systemAudioShared)`, the flag read through `getState()` so the hook adds no render. Each audio part carries `true` and the camera's part `false`, so the take's parts do not all answer alike. Neither half is the config alone, and the expression itself is `resolveHasAudio` in `utils/recordingMetadata.ts` so that nothing derives the rule twice: `micAcquired` arrives as the save's fourth argument (`CapturedTake`), resolved once by the controller from the stream it really acquired, so a microphone toggle with no device behind it is no longer stored as audio (ESCSUITE-70). That same argument carries `separateTracks` — the mode the take was *resolved* on, not the setting as it stands now (ESCSUITE-68) — and it, not the companion list, is what makes the take a companion take: every way the recorder can lose *all* of a take's parts delivers the same empty list an ordinary take delivers, and such a take's primary must still be named by its own `takeId`, with its role and the overlay geometry the camera was framed at. A companion list is still enough on its own, so a caller that hands parts over without saying so is not quietly demoted. The argument is optional and defaults to `NOTHING_CAPTURED` — a caller that says nothing claims no microphone, because a default of `true` would be that bug again, and claims one file. The two halves are resolved at different moments, which the comment above the expression states outright: the microphone half travels in `onStop`'s closure and always describes *this* take, while `systemAudioShared` is read from the store at save time and is only reset by the *next* take's start. Since ESCSUITE-104, `CapturedTake` also carries `systemAudioEnabled`, `webcamEnabled` and `overlayPlacement` — the System Audio toggle, the webcam toggle and the overlay geometry, all resolved by the controller at start and read nowhere else: `RecordingSaveDeps` has no `config` field any more, so `hasWebcam` and the overlay written on a companion take's primary come from `captured` rather than from whatever the Sources or Webcam Overlay panel shows by the time this hook's several awaits (the container repair, the metadata probe, the thumbnail decode, the two IndexedDB writes) resolve |
-| `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag, starting-flag and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using. It resolves which mode the take is before the countdown, resolves `micAcquired` (the toggle AND a track on the stream `acquireStreams` returned) with it, and counts how many companions the take asked for (`expectedCompanions` — the camera, plus one per audio source it really has), which makes it the only layer that can read a *short list* as a loss. `micAcquired` is also handed to `saveRecording` as its fourth argument, in the `onStop` closure rather than through a ref, so the count of the take's audio parts and the `hasAudio` stored for it are one answer (ESCSUITE-70): `onStop` raises `SEPARATE_TRACK_NOT_SAVED` when fewer parts arrive than were asked for, and nothing for a composited take. The resolved `separateTracks` travels in the same closure and the same argument (ESCSUITE-68), so the save path never has to re-read a setting the user can still move while the take is disabled — and, since ESCSUITE-104, three more fields travel the same way for the same reason: `systemAudioEnabled`, `webcamEnabled` and `overlayPlacement` (`{ position, size, shape }`, copied from `config.webcamPosition/Size/Shape` at the same moment the compositor is built), each a local const resolved once here and handed to `saveRecording` in the `onStop` closure rather than left for the save path to read off live `config`. The panels are disabled from the moment the take starts preparing until the write to storage is done (`App`'s `sidebarLocked`), but the fields are still captured here rather than trusted to that: a save reads only what it is handed |
+| `hooks/useRecordingController.ts` | The take itself: countdown, start, pause, resume, stop, cancel, the two interval tickers, and the ordered unmount teardown. Creates the recorder, cancelled-flag, attempt-token and interval refs, and holds the recorder's six callbacks — captured once, at `createRecorder` time, so a late `onStop` releases the capture *that* take was using. It resolves which mode the take is before the countdown, resolves `micAcquired` (the toggle AND a track on the stream `acquireStreams` returned) with it, and counts how many companions the take asked for (`expectedCompanions` — the camera, plus one per audio source it really has), which makes it the only layer that can read a *short list* as a loss. `micAcquired` is also handed to `saveRecording` as its fourth argument, in the `onStop` closure rather than through a ref, so the count of the take's audio parts and the `hasAudio` stored for it are one answer (ESCSUITE-70): `onStop` raises `SEPARATE_TRACK_NOT_SAVED` when fewer parts arrive than were asked for, and nothing for a composited take. The resolved `separateTracks` travels in the same closure and the same argument (ESCSUITE-68), so the save path never has to re-read a setting the user can still move while the take is disabled — and, since ESCSUITE-104, three more fields travel the same way for the same reason: `systemAudioEnabled`, `webcamEnabled` and `overlayPlacement` (`{ position, size, shape }`, copied from `config.webcamPosition/Size/Shape` at the same moment the compositor is built), each a local const resolved once here and handed to `saveRecording` in the `onStop` closure rather than left for the save path to read off live `config`. The panels are disabled from the moment the take starts preparing until the write to storage is done (`App`'s `sidebarLocked`), but the fields are still captured here rather than trusted to that: a save reads only what it is handed |
 | `hooks/useKeyboardShortcuts.ts` | The window-level R / P / S / Escape shortcuts, each gated on `state` — and R additionally on `canRecord`, so the keyboard cannot do what the button refuses — with the whole set gated on `modalOpen`. Its dependency array is copied verbatim rather than trimmed, so the listener re-binds whenever any handler changes identity — including on every `config` change |
 | `hooks/useMp4Download.ts` | One conversion at a time — MP4 or M4A, one shared slot: the `AbortController` (aborted on cancel *and* on unmount), the `{ id, format, message, progress }` the row draws, the post-`await` `signal.aborted` re-check that stops a late cancel still downloading, the button reasons for each format (still checking, cannot, busy — plus, for M4A only, a browser with no AAC encoder), the separate visible `note` (the silent-MP4 warning, or the blocking reason when there is one worth saying), and the failure that becomes a notice. Gated on `store.mp4Support`, handed in by `RecordingsListPanel`. Called by `RecordingsListPanel`, never by `App`. On an MP4 it first resolves the take's camera half out of storage (`utils/takeParts.ts`) and hands it to the converter with the take's stored `overlayPlacement`, so "Download as MP4" on a separate-tracks take gives you the take; `getVideo(id)` fetches the blob and that metadata in one read, and a record listed with no bytes behind it (`!record?.blob`) is still the silent no-op it always was. An M4A asks for none of it — the primary's audio track is already the mix. A camera part that was listed and could not be used raises `MP4_SAVED_WITHOUT_WEBCAM`, which outranks the silent-MP4 warning in the one channel |
 | `hooks/useRecordingLibrary.ts` | The recordings already in storage: play, download, send to editor, delete — which cascades, taking a take's companions with its primary, and re-reads the storage headroom afterwards — and the playback dialog's URL, name and duration. The cascade deletes companions first and the primary last, each in its own try/catch (ESCSUITE-103): a `deleteVideo` that throws costs one file rather than the rest of the cascade — and doing the primary first could leave a primary-less companion behind, a webcam file with no take, taking room the user thought they had freed. Any failure raises `DELETE_FAILED` through the one notice channel once, however many files it touched, rather than an unhandled rejection at the call site. The five handlers stay plain functions recreated on every render, as they were inline — memoising them would change how often the sidebar and the dialog re-render. Binds no effect |
@@ -131,9 +131,10 @@ selector contract above.
 in `recorderStore` is the whole notification surface: `AppHeader` renders it inside the
 header's existing `aria-live="polite" aria-atomic="true"` region, and
 `handleStartRecording` clears it when the next take begins. Every string lives in
-`src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`, `START_FAILED`,
-`LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`,
-`UPLOAD_UNAVAILABLE`, `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED` and
+`src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`,
+`CAPTURE_UNANSWERED`, `START_FAILED`, `LIBRARY_UNREADABLE`, `DETECTION_FAILED`,
+`NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
+`SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED` and
 `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
@@ -166,7 +167,10 @@ Two related rules follow from it:
   separate-tracks take, its companions never written at all;
   `loadRecordings()` is caught in the bootstrap; a start that throws raises
   `CAPTURE_REFUSED` (the browser said no — a cancelled picker, a denied permission, an
-  expired user activation) or `START_FAILED`; `fixWebMMetadata()` failing still keeps the
+  expired user activation) or `START_FAILED`, and a start whose capture request is never
+  answered at all raises `CAPTURE_UNANSWERED` when its deadline expires (ESCSUITE-109) —
+  a silence has to be reported too, because the alternative is a UI parked in
+  `'preparing'` for good; `fixWebMMetadata()` failing still keeps the
   raw blob, but it now warns *and* raises `NOT_SEEKABLE` — an unrepaired MediaRecorder
   WebM plays and refuses to scrub, and saving it with no trace is how ESCSUITE-2 comes
   back.
@@ -697,21 +701,39 @@ guard. That move is **structural**, not a repair of anything the loop did: monit
 unreachable after a dispose, so neither the rAF loop nor that one stray sample can belong to a
 take that is gone.
 
-The controller closes the same window from its own side, and has to ask **two** questions,
-because the two ways a take is thrown away mid-setup look nothing alike:
-`handleStartRecording` returns without starting a countdown when `cancelledRef` is raised (the
-unmount teardown) **or** when `recorderRef.current` is null (any `disposeRecorder()`, including
-the `onError` path, which cancels nothing and so raises no flag). Without the second, a capture
-stopped during setup left `'countdown'` in the store and an interval ticking against a null
-recorder — a 3-2-1 over nothing, with a next mount coming up inside it. The start notice is
-withheld under the same pair, so a browser that *does* reject out of a half-torn-down setup (an
-AudioContext closed under a pending `resume()`) still says nothing to a user who has left. That
-guard **tears the take down** rather than returning bare (ESCSUITE-93): `disposeRecorder()` and
-`stopAllStreams()`, both of which are no-ops on every path that reaches it today — the unmount
-teardown, the recorder's own `onError`, and `handleCancelRecording` from Escape in `'preparing'`
-while `initialize()` is parked — because each has already done them. A bare return is nevertheless
-a promise that every *future* way of arriving there will have cleaned up first, and the window
-below is the one that broke it.
+The controller closes the same window from its own side, with **two** guards after
+`initialize()`, because being superseded and being torn down are different facts and want
+different answers (ESCSUITE-109):
+
+1. **Superseded — touch nothing.** `if (attemptRef.current !== null && attemptRef.current !==
+   myAttempt) return;`. A cancel frees Record while this await is parked, so by the time it
+   resumes the next take may have acquired its capture and built *its* recorder — and
+   `recorderRef`, the store's streams and `stopAllStreams` all belong to that take by then.
+   Whatever this attempt owned was released by the cancel that superseded it, so it has nothing
+   left to do and no right to do anything.
+2. **Torn down — tear down.** `if (!recorderRef.current) { disposeRecorder(); stopAllStreams();
+   return; }`. Any `disposeRecorder()` nulls that ref: the unmount teardown, both cancels, and
+   the recorder's own `onError`, which cancels nothing and so raises no flag — the case
+   `cancelledRef` alone cannot see. Without it, a capture stopped during setup left `'countdown'`
+   in the store and an interval ticking against a null recorder: a 3-2-1 over nothing, with a
+   next mount coming up inside it. `cancelledRef` is deliberately *not* asked here — every path
+   that raises it disposes the recorder on the same line, so the ref answers for it, and asking
+   both would be a decision that can never go the other way.
+
+Getting that split wrong is not a cosmetic bug and has its own test ("when a newer take is
+already being set up"): one guard that tore down on both facts disposed the newer take's recorder
+and put its sharing bar out mid-take, and then the newer take's own resume found a null recorder
+ref and returned **without setting a state** — leaving the UI in `'preparing'`, where the record
+button is disabled and Cancel does not render, with a reload as the only way out.
+
+The start notice is withheld on both of them — the `catch` returns as soon as the token is not its
+own — so a browser that *does* reject out of a half-torn-down setup (an AudioContext closed under
+a pending `resume()`) still says nothing to a user who has left. Guard 2 **tears the take down**
+rather than returning bare (ESCSUITE-93): both calls are no-ops on every path that reaches it
+today — the unmount teardown, the recorder's own `onError`, and `handleCancelRecording` from
+Escape in `'preparing'` while `initialize()` is parked — because each has already done them. A
+bare return is nevertheless a promise that every *future* way of arriving there will have cleaned
+up first, and the window below is the one that broke it.
 
 **There is an earlier window still, and a cancel cannot clean up after it** (ESCSUITE-93).
 `handleStartRecording` parks on `await acquireStreams()` — the screen-share picker is on screen,
@@ -724,23 +746,67 @@ started, `createRecorder()`, `await initialize()` — and only then reached the 
 returned without disposing: the sharing bar and the camera light stayed on for the rest of the
 session behind a UI that said idle, a compositor rAF loop drew forever in PiP, and an orphaned
 recorder pushed audio levels ~12x/s into the store. Repeat it and Chrome refuses further
-AudioContexts, so later takes fail to start. So `cancelledRef` is asked again **immediately after
-`acquireStreams()` resolves**, and that exit releases what the request handed back itself —
+AudioContexts, so later takes fail to start. So the attempt is asked again **immediately after
+`acquireStreams()` answers** — the token and `cancelledRef` together, one `abandoned` question
+(ESCSUITE-109) — and that exit releases what the request handed back itself —
 `stopStream()` on each of the three captures — and builds nothing on top of it: no `setStreams`
 (the store would mirror a capture already being thrown away, on a component that may be
 unmounted), no preview, no compositor, no recorder. It is deliberately the earliest exit, and the
 only one whose law is that nothing was ever *made*: `useRecordingController.test.ts`'s "while the
 capture request is still outstanding" asserts zero recorders built, a null `compositorRef`, an
 untouched store and every acquired track stopped **exactly once** — in the cancel case and in the
-unmount case alike — and then that the *next* Record click still starts a take, because a starting
-flag left raised on the cancelled path would brick the button for the session and say nothing.
+unmount case alike — and then that the *next* Record click still starts a take, because a gate
+left closed on the cancelled path would brick the button for the session and say nothing.
 
-**One start at a time.** `state` is the *rendered* truth and is written a render before it is
-read, so nothing but that lag stood between two fast clicks on Record — or two presses of R — and
-two overlapping starts, with the second `recorderRef.current =` orphaning the first recorder's
-AudioContext, level monitor and muxer where no `dispose()` could ever reach them.
-`startingRef` is the synchronous truth: raised at entry, dropped in the `finally` of the same
-attempt (per attempt, not a latch), and a second call while it is up is a no-op.
+**One start at a time, and the token that says which start.** `state` is the *rendered* truth and
+is written a render before it is read, so nothing but that lag stood between two fast clicks on
+Record — or two presses of R — and two overlapping starts, with the second `recorderRef.current =`
+orphaning the first recorder's AudioContext, level monitor and muxer where no `dispose()` could
+ever reach them. `attemptRef` is the synchronous truth: an **attempt token** — an empty object,
+because identity is all it carries — set at entry and dropped in the `finally` of the same attempt
+(per attempt, not a latch), with a second call while one is in flight a no-op.
+
+It replaced a boolean (ESCSUITE-109) because a boolean could only be dropped when the attempt
+*settled*: a take cancelled while the picker was still on screen left Record inert until that
+picker was answered — bounded and sub-second when a device opens normally, and for a picker nobody
+ever answers, dead for the rest of the session with nothing said about it. So
+`handleCancelRecording`, `cancelCountdown` and the unmount teardown all **drop the token**, which
+does both halves at once: Record is free at cancel time, and the attempt that resumes afterwards
+finds a token that is no longer its own. **Every post-`await` guard in the start path asks it** —
+the one after `acquireStreams()` and the pair after `initialize()` (see "two guards" below) — so
+an abandoned attempt
+releases what it was handed and builds nothing, rather than walking on into a take that is now
+live; and the `catch` asks it first of all, because tearing down there would tear down *that*
+take. A stale attempt has nothing of its own to release beyond what the request handed it: only a
+cancel or the unmount teardown can drop the token mid-flight, and both dispose the recorder and
+release the capture on their way past. `useRecordingController.test.ts`'s "and the next take is
+started before it arrives" drives the ordering both ways round — the abandoned request answering
+before the new take's own, and after it — and asserts the abandoned tracks stopped exactly once
+with the live take's recorder, streams and countdown untouched.
+
+`cancelCountdown` raises `cancelledRef` as well, so the two cancel paths have one shape
+(ESCSUITE-109). It is the only cancel that used to be visible to the post-`initialize()` guard
+solely through the recorder ref it nulled, and to a start still parked on its capture request not
+at all.
+
+**A capture request the browser never answers gets a deadline.** `getDisplayMedia` and
+`getUserMedia` take no `AbortController`, so a picker or a permission prompt left on screen — or a
+camera or microphone driver wedged such that `getUserMedia` never settles — used to park
+`handleStartRecording` for the life of the tab: `'preparing'` with no way out but a reload, and
+Record inert behind it (ESCSUITE-109). So the request is raced against
+`CAPTURE_TIMEOUT_MS` (60 s, a constant in `useRecordingController.ts`, generous because the share
+picker is a dialog a user may legitimately leave sitting). On expiry the app raises
+`CAPTURE_UNANSWERED` through the one notice channel, returns to `'idle'` and frees Record; the
+request is still out there, so whatever it hands over afterwards is **released on arrival** —
+`releaseAcquired`, the same three `stopStream()` calls the cancelled path makes, moved onto a
+promise nobody is awaiting any more — and a request that *rejects* after the clock ran out says
+nothing, because the user was already told. The token is the abort: nothing is plumbed into the
+browser APIs, which would not take it. The clock is armed *after* the request is issued and with
+nothing awaited in between, so it costs the click's user activation nothing, and it is cleared
+however the race ends, including by the request throwing — a 60-second timer left armed behind
+every take is a leak, which
+`useRecordingController.test.ts`'s "never starts the clock for a request that answers at once"
+pins by counting the timers a started take leaves running.
 
 `webcodecsRecorder.perf.test.ts` pins the whole of it as exact conservation over one such take
 ("one take disposed while it was still setting up"): three codecs closed, two outputs

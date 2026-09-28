@@ -931,13 +931,27 @@ now pinned at the exporter level too (480p of 1280×720 → `setTransform` `[2/3
 both exporters), replacing the two deleted `'original'` letterbox tests. **No floor crossed**; artist's
 floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-28 for ESCSUITE-109 (an attempt token replaces the start
+gate, and the capture request has a deadline): 100.00 / **99.51** / **97.65** / 100.00 against the
+100.00 / 99.50 / 97.64 / 100.00 the commit this branch was rebased onto measures — statements and
+branches up a hundredth each, lines and functions still exactly 100. Measured in one sitting, the base
+gives 1,283 / 1,314 branches and this branch 1,293 / 1,324, statements 2,433 / 2,445 → 2,459 / 2,471:
+ten new branches and twenty-six new statements, every one covered, the same 31 branches and 12
+statements uncovered as before. The new decisions are the token comparisons after each `await` in the
+start path — the "someone else owns the refs" return that the review's first pass found missing (a
+stale attempt's `initialize()` was tearing down the take that replaced it and leaving the UI parked in
+`preparing`), and the reduced tear-down guard beside it — plus the deadline race and the late-arrival
+release, each reached from both sides by the cancel-then-restart cases in both settle orders, the
+superseded-setup case, the expiry, late-arrival and late-rejection cases, and the fresh start after a
+failed one. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.51 | 97.65 | 100.00 |
 | `@escapesuite/artist` | 99.52 | 98.86 | 94.53 | 99.39 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
