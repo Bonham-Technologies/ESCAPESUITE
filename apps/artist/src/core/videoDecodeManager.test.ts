@@ -60,7 +60,13 @@ class MockVideoDecoder {
 }
 
 describe('VideoDecodeManager', () => {
+  let originalWorker: typeof globalThis.Worker;
+  let originalVideoDecoder: typeof globalThis.VideoDecoder;
+
   beforeEach(() => {
+    originalWorker = globalThis.Worker;
+    originalVideoDecoder = globalThis.VideoDecoder;
+
     // Mock Worker constructor
     vi.stubGlobal('Worker', function(url: URL | string, options?: WorkerOptions) {
       mockWorkerInstance = new MockWorker(url, options);
@@ -74,7 +80,8 @@ describe('VideoDecodeManager', () => {
   afterEach(() => {
     resetVideoDecodeManager();
     mockWorkerInstance = null;
-    vi.unstubAllGlobals();
+    vi.stubGlobal('Worker', originalWorker);
+    vi.stubGlobal('VideoDecoder', originalVideoDecoder);
   });
 
   describe('isSupported', () => {

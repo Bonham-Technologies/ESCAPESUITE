@@ -166,10 +166,14 @@ describe('throttle utilities', () => {
   describe('throttleRAF', () => {
     let rafCallbacks: FrameRequestCallback[] = [];
     let rafId = 0;
+    let originalRAF: typeof globalThis.requestAnimationFrame;
+    let originalCAF: typeof globalThis.cancelAnimationFrame;
 
     beforeEach(() => {
       rafCallbacks = [];
       rafId = 0;
+      originalRAF = globalThis.requestAnimationFrame;
+      originalCAF = globalThis.cancelAnimationFrame;
 
       vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
         rafCallbacks.push(callback);
@@ -186,7 +190,8 @@ describe('throttle utilities', () => {
     });
 
     afterEach(() => {
-      vi.unstubAllGlobals();
+      vi.stubGlobal('requestAnimationFrame', originalRAF);
+      vi.stubGlobal('cancelAnimationFrame', originalCAF);
     });
 
     const flushRAF = () => {

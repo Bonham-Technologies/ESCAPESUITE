@@ -416,12 +416,15 @@ describe('integration', () => {
   })
 
   describe('loadVideoFromUrl', () => {
+    let originalFetch: typeof globalThis.fetch
+
     beforeEach(() => {
+      originalFetch = globalThis.fetch
       vi.stubGlobal('fetch', vi.fn())
     })
 
     afterEach(() => {
-      vi.unstubAllGlobals()
+      vi.stubGlobal('fetch', originalFetch)
     })
 
     it('loads video from URL and returns blob with filename', async () => {
