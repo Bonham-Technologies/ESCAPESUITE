@@ -840,6 +840,20 @@ covered six of those 17 with behaviour tests (the export worker's four easing ar
 sort comparator, and `analytics.exportFailed`) and the figure is 99.35. **No floor crossed**; artist's
 floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-102 (a project is validated before the
+editor is reset or a host payload applied): 99.49 / **98.84** / **94.15** / 99.35 against the
+99.49 / 98.83 / 94.11 / 99.35 the commit this branch was rebased onto measures — statements up a
+hundredth, branches up four, lines and functions unmoved. Measured in one sitting, the base gives
+4,225 / 4,489 branches and this branch 4,251 / 4,515: twenty-six new branches, twenty-six covered, the
+same 264 uncovered as before (statements 7,734 / 7,825 → 7,766 / 7,857, lines 6,868 / 6,903 →
+6,899 / 6,934, functions 1,689 / 1,700 → 1,691 / 1,702, every denominator growing by exactly what the
+numerator did). The new branches are `parseProject`'s shape checks in `store/projectMigration.ts` — no
+timeline, `tracks` present but not a list, no `clips` list, a clip without a string id, a duplicate id, a
+`trackId` naming no track after migration — plus the parse-before-reset gate in `useProjectActions` and
+the `LOAD_PROJECT` refusal in `useHostIntegration`, each reached from both sides. Two of the rejection
+arms were untested when the branch was first measured on its rebased tree; the round that covered them
+is why the count is twenty-six of twenty-six. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -847,7 +861,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
-| `@escapesuite/artist` | 99.49 | 98.83 | 94.11 | 99.35 |
+| `@escapesuite/artist` | 99.49 | 98.84 | 94.15 | 99.35 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
