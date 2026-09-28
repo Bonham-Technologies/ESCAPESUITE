@@ -945,6 +945,21 @@ release, each reached from both sides by the cancel-then-restart cases in both s
 superseded-setup case, the expiry, late-arrival and late-rejection cases, and the fresh start after a
 failed one. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-110 (a trim rebases the clip's animation
+from the gesture's origin, through an explicit `trimClip`): 99.52 / **98.87** / **94.56** / **99.40**
+against the 99.52 / 98.86 / 94.53 / 99.39 the commit this branch was rebased onto measures — statements,
+branches and functions each up a hundredth or three, lines unmoved. Measured in one sitting, the base
+gives 4,134 / 4,373 branches and this branch 4,155 / 4,394: twenty-one new branches, twenty-one covered,
+the same 239 uncovered as before (statements 7,513 / 7,599 → 7,550 / 7,636, lines 6,664 / 6,696 →
+6,696 / 6,728, functions 1,648 / 1,658 → 1,657 / 1,667, every denominator growing by exactly what the
+numerator did). The new branches are `cutEnd` / `cutStart` — the two halves of what used to be
+`splitAnimation`'s body, now shared with `trimAnimation` — the preset clamp that skips a `'none'` side,
+and in `store/clipSlice.ts` the `trimClip` action's edge choice and lock guard. The first version of
+the store wiring carried three more: two defensive operands that no caller could reach (a duration
+guard and a `??` fallback beside the explicit `edge`), which the review found and round 2 deleted
+rather than tested — `clipSlice.ts` is back to the same two uncovered arms it had before the ticket.
+**No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -952,7 +967,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.65 | 100.00 |
-| `@escapesuite/artist` | 99.52 | 98.86 | 94.53 | 99.39 |
+| `@escapesuite/artist` | 99.52 | 98.87 | 94.56 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
