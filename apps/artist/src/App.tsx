@@ -126,6 +126,7 @@ function App() {
     handleDeclineSession,
   } = useSessionRestore({
     suppressRestore: urlParams.suppressRestore,
+    sourceVideos,
     setProject,
     addSourceVideo,
     setCurrentTime,

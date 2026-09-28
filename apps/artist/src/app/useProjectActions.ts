@@ -17,7 +17,7 @@
 // dependency both of them carried inline.
 import { useCallback, useState } from 'react';
 import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
-import { clearSessionState } from '../core/storage';
+import { clearSessionState, revokeSourceThumbnails } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
 import type { Project, SourceVideo } from '../store/types';
@@ -103,11 +103,19 @@ export function useProjectActions({
       // Validate (and migrate) before touching anything: ensureTimelineHasTracks
       // assumes a shape a malformed .veditor does not have, and used to throw
       // *after* resetProject() had already emptied the editor (ESCSUITE-102).
+      // Also why the outgoing library's thumbnails are not revoked until past
+      // this point (ESCSUITE-113): a load that fails here must leave the
+      // current project exactly as it was, not with its pictures already gone.
       const parsed = parseProject(loadedProject);
       if (!parsed.ok) {
         showNotification(`Failed to load project: ${parsed.reason}`, 'error');
         return;
       }
+
+      // The outgoing library is superseded from here on — freed before the
+      // reset it is otherwise no different from, since nothing else would
+      // ever revoke it (ESCSUITE-113).
+      revokeSourceThumbnails(sourceVideos);
 
       // Reset current state and load new project
       resetProject();
@@ -121,7 +129,7 @@ export function useProjectActions({
     } finally {
       setIsLoading(false);
     }
-  }, [resetProject, setProject, addSourceVideo, showNotification]);
+  }, [sourceVideos, resetProject, setProject, addSourceVideo, showNotification]);
 
   // Given a project file: ask before replacing work in progress, load it
   // straight away when there is none. Shared by Ctrl+O / the File menu (which

@@ -25,7 +25,7 @@ export {
 // Re-export SourceVideo type for convenience
 export type { SourceVideo } from '@escapesuite/shared/types'
 
-import { getDB, getStorageEstimate, getThumbnail, createBlobUrl, type VideoEditorDB } from '@escapesuite/shared/storage'
+import { getDB, getStorageEstimate, getThumbnail, createBlobUrl, revokeBlobUrl, type VideoEditorDB } from '@escapesuite/shared/storage'
 import type { IDBPDatabase } from 'idb'
 import type { SourceVideo } from '@escapesuite/shared/types'
 
@@ -50,6 +50,27 @@ export interface SessionState {
 export async function resolveThumbnailUrl(id: string): Promise<string | undefined> {
   const thumbnail = await getThumbnail(id)
   return thumbnail ? createBlobUrl(thumbnail) : undefined
+}
+
+/**
+ * The other half of `resolveThumbnailUrl`: revoke every source's live
+ * `thumbnailUrl`, freeing the `URL.createObjectURL` handle it minted. Nothing
+ * does this on its own — a blob URL lives for the life of the document, not
+ * for the life of the record it points at — so every path that drops a
+ * source's `thumbnailUrl` on the floor without freeing it first leaked one:
+ * `removeSourceVideo`, `resetProject`'s teardown, the media library's Clear
+ * All / Clear Unused, and `loadProject` / `handleRestoreSession` over the
+ * OUTGOING sources, before a fresh URL is minted for each incoming one
+ * (ESCSUITE-113). A source with no thumbnail, or a `thumbnailUrl` that is not
+ * a `blob:` handle (there is no such source today; the guard is defensive
+ * against a future non-blob source), is left alone.
+ */
+export function revokeSourceThumbnails(sources: SourceVideo[]): void {
+  for (const source of sources) {
+    if (source.thumbnailUrl?.startsWith('blob:')) {
+      revokeBlobUrl(source.thumbnailUrl)
+    }
+  }
 }
 
 // Project operations

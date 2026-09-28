@@ -9,7 +9,7 @@
 // object: it is the only field this concern reads, and the dependency the
 // effect carried inline was `urlParams.suppressRestore`.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSessionState, clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
+import { getSessionState, clearSessionState, resolveThumbnailUrl, revokeSourceThumbnails, type SessionState } from '../core/storage';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -17,6 +17,14 @@ import type { ShowNotification } from './useNotification';
 export interface SessionRestoreDeps {
   /** `?suppressRestore=1`: the host drives its own state, so do not offer one. */
   suppressRestore: boolean;
+  /**
+   * The library as it stands right now — normally empty, since the handoff
+   * (`useHostIntegration`) holds its take back until this question is
+   * settled. Revoked in full at the top of `handleRestoreSession`, before any
+   * restored source's thumbnail is minted (ESCSUITE-113): whatever is here is
+   * about to be superseded either way, and nothing else would ever free it.
+   */
+  sourceVideos: SourceVideo[];
   setProject: (project: Project) => void;
   addSourceVideo: (video: SourceVideo) => void;
   setCurrentTime: (time: number) => void;
@@ -43,6 +51,7 @@ export interface SessionRestore {
 
 export function useSessionRestore({
   suppressRestore,
+  sourceVideos,
   setProject,
   addSourceVideo,
   setCurrentTime,
@@ -86,9 +95,17 @@ export function useSessionRestore({
     const attempt = {};
     restoreAttemptRef.current = attempt;
 
-    let sourceVideos: SourceVideo[];
+    // Whatever the library holds right now is about to be superseded either
+    // way — restored over, or left in place with the prompt closing under
+    // it — and nothing else will ever free its thumbnailUrls (ESCSUITE-113).
+    // In practice this is always empty: the handoff holds its take back
+    // until sessionRestored settles. Revoked before the mint below, not
+    // after, on the offchance a future caller does have something here.
+    revokeSourceThumbnails(sourceVideos);
+
+    let restoredSourceVideos: SourceVideo[];
     try {
-      sourceVideos = await Promise.all(
+      restoredSourceVideos = await Promise.all(
         session.sourceVideos.map(async (video) => ({
           ...video,
           thumbnailUrl: await resolveThumbnailUrl(video.id),
@@ -118,7 +135,7 @@ export function useSessionRestore({
     if (restoreAttemptRef.current !== attempt) return;
 
     setProject(session.project);
-    sourceVideos.forEach(addSourceVideo);
+    restoredSourceVideos.forEach(addSourceVideo);
     setCurrentTime(session.currentTime);
     setSelectedClipId(session.selectedClipId);
     setZoom(session.zoom);
@@ -127,7 +144,7 @@ export function useSessionRestore({
     setPendingSession(null);
     setSessionRestored(true);
     showNotification('Session restored', 'success');
-  }, [setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification]);
+  }, [sourceVideos, setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification]);
 
   const handleDeclineSession = useCallback(() => {
     // Cancel a restore in flight — see restoreAttemptRef's comment above.
