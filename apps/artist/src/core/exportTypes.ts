@@ -179,8 +179,8 @@ export function getBaseDimensions(
 
 /**
  * Get resolution dimensions.
- * When resolution is 'project', uses projectResolution if provided.
- * When resolution is 'original', uses the source video dimensions.
+ * When resolution is 'project', uses projectResolution if provided, falling
+ * back to the source video's own dimensions otherwise.
  *
  * A preset (1080p, 720p, 480p) is a **height**, and the box it fills is the
  * **project's** shape: width = round-to-even(height x project aspect). It used
@@ -188,6 +188,20 @@ export function getBaseDimensions(
  * 16:9 project whose bottom clip happened to be 4:3 exported 960x720 for "720p"
  * (ESCSUITE-94). Only a caller with no project resolution at all falls back to
  * the source aspect, which is the same fallback 'project' itself takes.
+ *
+ * There used to be a fourth option, 'original', which took the source video's
+ * dimensions regardless of the project's own shape — the one case that could
+ * still letterbox after ESCSUITE-94, and one no UI ever offered (only a
+ * hand-built headless job spec could reach it). ESCSUITE-111 dropped it rather
+ * than fix it: every reachable resolution now follows the project's aspect.
+ *
+ * `resolution` is exactly `'project' | '1080p' | '720p' | '480p'` now, so a
+ * preset name outside that list can only reach this function by bypassing the
+ * type system — there is no longer a typed caller (the export dialog, both
+ * exporters, or a validated headless job spec) that can construct one. That
+ * used to fall back silently to `originalHeight`, which produced a
+ * plausible-looking but meaningless size; it now throws instead (review round
+ * 1, ESCSUITE-111).
  */
 export function getResolution(
   resolution: ExportOptions['resolution'],
@@ -202,21 +216,24 @@ export function getResolution(
     };
   }
 
-  if (resolution === 'original' || resolution === 'project') {
-    // Fall back to original if 'project' but no projectResolution provided
+  if (resolution === 'project') {
+    // No projectResolution provided: fall back to the source's own dimensions.
     return {
       width: originalWidth % 2 === 0 ? originalWidth : originalWidth + 1,
       height: originalHeight % 2 === 0 ? originalHeight : originalHeight + 1
     };
   }
 
-  const targetHeights: Record<string, number> = {
+  const targetHeights: Partial<Record<'1080p' | '720p' | '480p', number>> = {
     '1080p': 1080,
     '720p': 720,
     '480p': 480,
   };
 
-  const targetHeight = targetHeights[resolution] || originalHeight;
+  const targetHeight = targetHeights[resolution];
+  if (targetHeight === undefined) {
+    throw new Error(`getResolution: unknown resolution "${String(resolution)}"`);
+  }
   const aspectSource =
     projectResolution && projectResolution.width > 0 && projectResolution.height > 0
       ? projectResolution

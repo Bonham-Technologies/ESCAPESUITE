@@ -539,24 +539,48 @@ describe('exportToWebM output raster', () => {
     expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 3840, 2160])
   })
 
-  it('letterboxes deliberately when the output aspect really differs', async () => {
-    // "Original" takes the bottom clip's source size, which need not be the
-    // project's shape: a 4:3 output of a 16:9 project. The project rect is then
-    // fitted inside the raster — uniform scale, centred — and the bars are the
-    // black the whole raster was cleared to.
-    media.script({ video: { videoWidth: 640, videoHeight: 480 } })
+  // The old "letterboxes deliberately when the output aspect really differs"
+  // case lived here, driven through options.resolution: 'original' — the one
+  // resolution that took the bottom clip's own source size rather than
+  // following the project's aspect. ESCSUITE-111 dropped 'original': every
+  // resolution left ties its output aspect to the project's, via the same
+  // `projectResolution` parameter this file's `run()` passes to both the
+  // canvas' project space and `getResolution`'s output size, so the two agree
+  // to no more than rounding now — about one output pixel of bar, never a real
+  // letterbox. The letterbox mechanism itself (`openOutputFrame` /
+  // `setOutputTransform`) is unchanged and still directly covered, hand-built
+  // sizes included, by `outputTransform.test.ts`.
+
+  it('leaves a sub-pixel bar when a preset\'s round-to-even width just misses the project aspect', async () => {
+    // 480p of a 1280x720 (16:9) project is 854x480 (getResolution rounds 853.33
+    // up to the nearest even number), and 854/1280 (0.66719) is not quite
+    // 480/720 (0.66667) — the gap `projectToOutputScale`'s own doc comment
+    // names as "a third of an output pixel of pillar bar on each side". This is
+    // `getResolution`'s round-to-even, not a resolution that ignores the
+    // project's aspect (there is no longer one of those, ESCSUITE-111) — it is
+    // the one non-zero-offset case still reachable through the exporter's
+    // public options.
+    media.script({ video: { videoWidth: 1280, videoHeight: 720 } })
 
     await run({
-      sources: [makeSourceVideo({ width: 640, height: 480 })],
-      options: { resolution: 'original' },
+      sources: [makeSourceVideo({ width: 1280, height: 720 })],
+      options: { resolution: '480p' },
       projectResolution: { width: 1280, height: 720 },
     })
 
-    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ width: 640, height: 480 })
-    // min(640/1280, 480/720) = 0.5, so 60 output pixels of bar above and below.
-    expect(ctx().argsFor('setTransform')[0]).toEqual([0.5, 0, 0, 0.5, 0, 60])
-    // The clear covers the whole raster, bars included, in project pixels.
-    expect(ctx().argsFor('fillRect')[0]).toEqual([0, -120, 1280, 960])
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ width: 854, height: 480 });
+    // The x offset is 1/3 of an output pixel arrived at through division, not
+    // the literal — close-enough rather than exact avoids pinning a specific
+    // float rounding artifact that isn't the point of this test.
+    const transform = ctx().argsFor('setTransform')[0];
+    expect(transform.slice(0, 4)).toEqual([2 / 3, 0, 0, 2 / 3]);
+    expect(transform[4]).toBeCloseTo(1 / 3, 9);
+    expect(transform[5]).toBe(0);
+    // The clear is the whole raster in project coordinates: 1281x720 (854 /
+    // (2/3)), centred half a project-pixel either side of the 1280-wide frame.
+    const fillRect = ctx().argsFor('fillRect')[0];
+    expect(fillRect[0]).toBeCloseTo(-0.5, 9);
+    expect(fillRect.slice(1)).toEqual([0, 1281, 720]);
   })
 
   it('exports at 1:1 with no transform offsets for the project resolution', async () => {

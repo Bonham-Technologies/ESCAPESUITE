@@ -1793,18 +1793,31 @@ never stretched**: what a rounding disagreement can leave is a sub-pixel bar, ne
 degenerate project (a zero resolution, which the store never writes but a hand-built headless
 request could) scales by 1 rather than dividing by zero.
 
-**The letterbox is deliberate and now rare.** Where the output aspect differs from the
-project's, the project rect is fitted inside the raster, centred, and the leftover is black
-bar. The clear is the *whole raster expressed in project coordinates* rather than the project
-rect, so one fill paints the picture's ground and its bars together. A resolution preset no
-longer produces that case beyond sub-pixel rounding, because `getResolution` derives a preset's
-width from the **project's** aspect: preset height is fixed (1080/720/480), width is
-round-to-even(height x project aspect), and `'project'` stays exact. It used to take the aspect
-from `getBaseDimensions` — the bottom clip's source — so a 16:9 project whose bottom clip was
-4:3 exported 960x720 for "720p". Only a caller with no project resolution at all falls back to
-the source aspect, the same fallback `'project'` itself takes. What is left is `'original'`,
-whose output *is* the bottom clip's source size and can legitimately be a different shape from
-the project — that export is centred with bars rather than stretched or cropped.
+**The letterbox mechanism stays, but nothing reachable produces it any more.** Where the output
+aspect differs from the project's, the project rect is fitted inside the raster, centred, and the
+leftover is black bar. The clear is the *whole raster expressed in project coordinates* rather
+than the project rect, so one fill paints the picture's ground and its bars together. A
+resolution preset no longer produces that case beyond sub-pixel rounding, because `getResolution`
+derives a preset's width from the **project's** aspect: preset height is fixed (1080/720/480),
+width is round-to-even(height x project aspect), and `'project'` stays exact. It used to take the
+aspect from `getBaseDimensions` — the bottom clip's source — so a 16:9 project whose bottom clip
+was 4:3 exported 960x720 for "720p". Only a caller with no project resolution at all falls back
+to the source aspect, the same fallback `'project'` itself takes — and that fallback is used by
+both the output size and the project's own drawing space together, so the two can never disagree.
+There used to be a fourth option, `'original'`, whose output *was* the bottom clip's source size
+regardless of the project's own shape — the one case that could produce a real, deliberate
+letterbox, and one the export dialog never offered (only a hand-built headless job spec could
+reach it). ESCSUITE-111 dropped it rather than fix it: every resolution left in
+`ExportOptions['resolution']` ties its output aspect to the project's, to no more than
+rounding — about one output pixel of bar, never a real letterbox — and `core/outputTransform.test.ts`
+still exercises the mechanism itself directly with hand-built, genuinely mismatched sizes. That
+one-pixel bar is `getResolution`'s own round-to-even step, not a fallback: 480p of a 1280x720
+project is 854x480 (853.33 rounded up to the nearest even width), and 854/1280 (0.66719) is not
+quite 480/720 (0.66667), so `projectToOutputScale`'s `Math.min` leaves a third of an output pixel
+of bar on each side even with a project resolution given throughout — pinned at the exporter
+level by `exportWebM.test.ts` / `exportMP4.test.ts`'s "leaves a sub-pixel bar..." case. A job spec
+that asks for `resolution: 'original'` is now a validation error (`services/headless-artist`'s
+`parseJobSpec`), not a silently-accepted value.
 
 `ctx.filter` is the one length the transform does not reach, so both exporters pass
 `MediaDrawOptions.filterScale` now (see the Preview section, where it was born). That needed
@@ -1824,6 +1837,14 @@ that set it per clip would slip under a per-frame call ceiling and would have to
 what it multiplied), and the per-frame call ceiling itself re-measured 24 → 25 for that one
 call, with every other figure — `drawImage`, save/restore pairs, animation lookups,
 `getContext`, `VideoFrame`s created and closed — unchanged.
+
+**The dropdown says what it does (ESCSUITE-111).** Every option in `ExportDialog`'s Resolution
+`<select>` — "Project", "1080p", "720p" and "480p" — prints its actual output dimensions
+(`resolutionOptionLabel`, one `getResolution` call per option, against the current project's
+resolution), not just its name: "1080p — 1920×1080". A bare "1080p" was surprising on a portrait
+project once ESCSUITE-94 made a preset's width follow the project's aspect — it would export
+608×1080, narrower than 1920, and the label gave no hint. The dimensions are recomputed on every
+render, so switching projects or resizing the canvas updates every option's label immediately.
 
 ### Export Performance Optimizations (`src/core/exporter.ts`)
 The export pipeline includes several optimizations to improve performance:

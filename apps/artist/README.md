@@ -54,7 +54,7 @@ TODO: Add screenshot or demo GIF showing the editor interface
 - **WebM**: VP9 video + Opus audio (with audio mixing)
 - **MP4**: H.264 video + AAC audio (Chrome/Edge, WebCodecs required)
 - **Quality Presets**: Low, Medium, High bitrate options
-- **Resolution Options**: Original, 1080p, 720p, 480p
+- **Resolution Options**: Project, 1080p, 720p, 480p
 
 ### Project Management
 - **Save/Load Projects**: Self-contained project files with embedded media

@@ -3,7 +3,7 @@ import type { JobSpec } from './types'
 const JOB_ID_RE = /^[A-Za-z0-9._-]{1,128}$/
 const FORMATS = ['mp4', 'webm']
 const QUALITIES = ['low', 'medium', 'high']
-const RESOLUTIONS = ['project', 'original', '1080p', '720p', '480p']
+const RESOLUTIONS = ['project', '1080p', '720p', '480p']
 const SINKS = ['volume', 's3', 'webhook', 'command']
 
 /** Every key `parseJobSpec` reads; anything else is a typo worth warning about. */
@@ -63,7 +63,7 @@ function parseOptions(value: unknown): JobSpec['options'] {
   if (value.resolution !== undefined) {
     if (typeof value.resolution !== 'string' || !RESOLUTIONS.includes(value.resolution)) {
       throw new Error(
-        'options.resolution must be one of "project", "original", "1080p", "720p", or "480p"',
+        'options.resolution must be one of "project", "1080p", "720p", or "480p"',
       )
     }
     options.resolution = value.resolution as NonNullable<JobSpec['options']['resolution']>

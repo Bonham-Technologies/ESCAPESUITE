@@ -2,12 +2,29 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
 import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError, ExportError } from '../../core/exporter';
+import { getResolution } from '../../core/exportTypes';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import type { ExportOptions, ExportProgress } from '../../store/types';
 import { formatTime } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
+
+/**
+ * A resolution dropdown option's label, with its actual output dimensions
+ * spelled out. Since ESCSUITE-94 a preset's width follows the *project's*
+ * aspect, so a bare "1080p" is surprising on a portrait project (it exports
+ * narrower than 1920) — printing the dimensions makes the rule self-evident
+ * (ESCSUITE-111).
+ */
+function resolutionOptionLabel(
+  label: string,
+  preset: ExportOptions['resolution'],
+  projectResolution: { width: number; height: number }
+): string {
+  const { width, height } = getResolution(preset, projectResolution.width, projectResolution.height, projectResolution);
+  return `${label} — ${width}×${height}`;
+}
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -433,10 +450,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                         value={advancedOptions.resolution}
                         onChange={(e) => setAdvancedOptions({ ...advancedOptions, resolution: e.target.value as ExportOptions['resolution'] })}
                       >
-                        <option value="project">Project ({projectResolution.width}x{projectResolution.height})</option>
-                        <option value="1080p">1080p</option>
-                        <option value="720p">720p</option>
-                        <option value="480p">480p</option>
+                        <option value="project">{resolutionOptionLabel('Project', 'project', projectResolution)}</option>
+                        <option value="1080p">{resolutionOptionLabel('1080p', '1080p', projectResolution)}</option>
+                        <option value="720p">{resolutionOptionLabel('720p', '720p', projectResolution)}</option>
+                        <option value="480p">{resolutionOptionLabel('480p', '480p', projectResolution)}</option>
                       </select>
                     </div>
 

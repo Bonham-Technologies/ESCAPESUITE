@@ -283,9 +283,11 @@ describe('getResolution', () => {
     expect(getResolution('project', 640, 360)).toEqual({ width: 640, height: 360 })
   })
 
-  it('returns the source size for "original", rounded up to even', () => {
-    expect(getResolution('original', 1920, 1080)).toEqual({ width: 1920, height: 1080 })
-    expect(getResolution('original', 641, 361)).toEqual({ width: 642, height: 362 })
+  it('rounds an odd source size up to even when "project" has no project resolution', () => {
+    // The only path left that sizes from the source itself (ESCSUITE-111 dropped
+    // 'original'); the encoder still needs even dimensions, so both odd sides bump.
+    expect(getResolution('project', 1281, 721)).toEqual({ width: 1282, height: 722 })
+    expect(getResolution('project', 1280, 721)).toEqual({ width: 1280, height: 722 })
   })
 
   it('scales presets to the source aspect ratio', () => {
@@ -299,8 +301,13 @@ describe('getResolution', () => {
     expect(getResolution('720p', 999, 1000)).toEqual({ width: 720, height: 720 })
   })
 
-  it('falls back to the source height for an unknown resolution name', () => {
-    expect(getResolution('4k' as never, 1000, 500)).toEqual({ width: 1000, height: 500 })
+  // Review round 1 (ESCSUITE-111): 'targetHeights[resolution] || originalHeight'
+  // silently produced a plausible-looking size for a string no typed caller can
+  // pass any more (ExportOptions['resolution'] is now the exact four literals).
+  // The only way to reach this arm is bypassing the type system, so it throws
+  // rather than guessing.
+  it('throws for an unknown resolution name instead of silently falling back', () => {
+    expect(() => getResolution('4k' as never, 1000, 500)).toThrow(/unknown resolution "4k"/)
   })
 
   // ESCSUITE-94: a preset is a *height*, and the box it fills is the project's
