@@ -135,6 +135,16 @@ describe('parseJobSpec', () => {
     )
   })
 
+  // ESCSUITE-111: 'original' letterboxed the bottom clip's own source size
+  // rather than following the project's aspect, the one thing ESCSUITE-94 made
+  // every other resolution option do — and no UI ever offered it, only a
+  // hand-built job spec could reach it. Dropped rather than fixed.
+  it('rejects "original" now that it has been dropped from options.resolution', () => {
+    expect(() =>
+      parseJobSpec(validSpec({ options: { format: 'mp4', resolution: 'original' } })),
+    ).toThrow(/options\.resolution/)
+  })
+
   it('rejects a timeRange where start is not less than end', () => {
     expect(() =>
       parseJobSpec(validSpec({ options: { format: 'mp4', timeRange: { start: 5, end: 5 } } })),
