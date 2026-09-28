@@ -163,12 +163,13 @@ describe('extractAndMixAudio', () => {
     expect(offline.decodeCalls).toHaveLength(0)
   })
 
-  it('mixes a clip whose track is missing at full volume', async () => {
+  it('skips a clip whose track is missing entirely, without decoding its source', async () => {
     const clip = makeClip({ trackId: 'gone', duration: 0.005, endTime: 0.005 })
 
-    const mixed = (await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn()))!
+    const mixed = await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn())
 
-    expect(mixed[at(10, 0)]).toBeCloseTo(stereo.getChannelData(0)[10], 6)
+    expect(mixed).toBeNull()
+    expect(offline.decodeCalls).toHaveLength(0)
   })
 
   it('copies a mono source into both channels', async () => {

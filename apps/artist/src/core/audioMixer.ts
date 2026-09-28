@@ -36,11 +36,11 @@ export async function extractAndMixAudio(
     const clip = clips[i];
     const track = tracks.find(t => t.id === clip.trackId);
 
-    // Skip muted tracks
-    if (track?.muted) continue;
+    // Skip a clip whose track has been deleted, and skip muted tracks
+    if (!track || track.muted) continue;
 
     // Get track volume (default to 1 if not set)
-    const trackVolume = track?.volume ?? 1;
+    const trackVolume = track.volume ?? 1;
 
     try {
       const blob = await getVideoBlob(clip.sourceVideoId);
