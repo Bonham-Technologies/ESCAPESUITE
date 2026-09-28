@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { act, screen, fireEvent } from '@testing-library/react';
+import { act, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRecorderStore } from './store/recorderStore';
 import {
@@ -21,7 +21,6 @@ import {
   renderApp,
   resetRecorderStore,
   installBrowserStubs,
-  flush,
   type BrowserStubs,
 } from './test/appHarness';
 import { installVideoElementDouble, uninstallVideoElementDouble } from './test/doubles/video';
@@ -235,10 +234,11 @@ describe('App recording hand-off and deletion', () => {
     await renderApp();
 
     await user().click(screen.getByRole('button', { name: 'Delete Drop Me' }));
-    await flush();
+    // deleteVideo is a real fake-indexeddb transaction; wait for its outcome
+    // rather than a fixed number of turns (ESCSUITE-114).
+    await waitFor(() => expect(items()).toHaveLength(1));
 
     expect(useRecorderStore.getState().recordings.map(r => r.id)).toEqual(['keep']);
-    expect(items()).toHaveLength(1);
     expect((await getRecordingsMetadata()).map(m => m.id)).toEqual(['keep']);
   });
 
@@ -247,9 +247,7 @@ describe('App recording hand-off and deletion', () => {
     await renderApp();
 
     await user().click(screen.getByRole('button', { name: 'Delete Only Take' }));
-    await flush();
-
-    expect(screen.getByText('No recordings yet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('No recordings yet')).toBeTruthy());
   });
 });
 
@@ -261,7 +259,10 @@ describe('App MP4 downloads', () => {
     await user().click(
       screen.getByRole('button', { name: 'Download Standup Demo: 9/9 as MP4' })
     );
-    await flush();
+    // The conversion reads the stored blob back through a real fake-indexeddb
+    // transaction before convertToMP4 even runs; wait for its outcome rather
+    // than a fixed number of turns (ESCSUITE-114).
+    await waitFor(() => expect(browser.downloads).toHaveLength(1));
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1);
     expect(browser.downloads).toEqual([
@@ -276,9 +277,10 @@ describe('App MP4 downloads', () => {
     await renderApp();
 
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo as MP4' }));
-    await flush();
+    await waitFor(() =>
+      expect(screen.getByText('Conversion failed: No H.264 encoder')).toBeTruthy()
+    );
 
-    expect(screen.getByText('Conversion failed: No H.264 encoder')).toBeTruthy();
     expect(browser.downloads).toEqual([]);
   });
 
@@ -318,7 +320,7 @@ describe('App MP4 downloads', () => {
     ).toBeTruthy();
 
     await user().click(mp4);
-    await flush();
+    await waitFor(() => expect(browser.downloads).toHaveLength(1));
 
     expect(browser.downloads).toEqual([
       { href: 'blob:mock-url', download: 'standup_demo.mp4' },

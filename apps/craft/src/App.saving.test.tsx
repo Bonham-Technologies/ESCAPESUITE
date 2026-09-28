@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { act, screen } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRecorderStore } from './store/recorderStore';
 import { getVideoBlob, getThumbnail, getRecordingsMetadata } from './core/storage';
@@ -98,7 +98,12 @@ async function recordATake(
   preview?.setMetadata({ videoWidth: options.previewWidth ?? 0, videoHeight: 720 });
 
   await user().click(recordButton());
-  await flush();
+  // The save chain — fixWebMMetadata -> extractVideoMetadata ->
+  // generateThumbnail -> storeVideo -> storeThumbnail, two real
+  // fake-indexeddb transactions among them — has no fixed depth a round
+  // count can promise to drain. Wait for the state it lands in instead,
+  // which is 'idle' whether the save succeeded or failed (ESCSUITE-114).
+  await waitFor(() => expect(useRecorderStore.getState().state).toBe('idle'));
 
   return { screenStream, mic, recorder };
 }
@@ -189,7 +194,7 @@ describe('App saving a recording', () => {
     recorder.duration = 0; // ...then the recorder forgets it, as a torn-down one does
 
     await user().click(recordButton());
-    await flush();
+    await waitFor(() => expect(useRecorderStore.getState().state).toBe('idle'));
 
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Completed', { duration: 42 });
   });
@@ -382,7 +387,7 @@ describe('App picture-in-picture saving', () => {
     recorderFactory.last().duration = 5;
 
     await user().click(recordButton());
-    await flush();
+    await waitFor(() => expect(useRecorderStore.getState().state).toBe('idle'));
 
     expect(thumbnailModule.generateThumbnail).not.toHaveBeenCalled();
     const thumbCanvas = getLastCanvasContext()!;

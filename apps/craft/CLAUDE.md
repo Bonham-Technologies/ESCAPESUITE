@@ -1615,6 +1615,21 @@ the outcome, not on the double.
   `installRafDouble()` family drives the PiP compositor's animation frames by hand. It also
   re-exports `installBrowserStubs()` from `doubles/browser.ts`, because every App suite reaches
   for it through this module.
+  `flush(rounds = 3)` runs a **fixed** number of real `setTimeout(0)` turns — right for settling
+  a render pin (`App.rerender.test.tsx`, `App.mp4rerender.test.tsx` count exactly how many turns
+  a given change costs, which is the one place a fixed count is the thing under test) and wrong
+  for anything whose depth isn't fixed. The save chain is the sharpest example:
+  `fixWebMMetadata` → `extractVideoMetadata` → `generateThumbnail` → `storeVideo` →
+  `storeThumbnail` runs through two real fake-indexeddb transactions, and under load three
+  rounds is not a promise the chain drains in — ESCSUITE-114 saw it fail 18 assertions at once
+  in `App.saving.test.tsx`, green in isolation and in the runs either side of it. A call
+  waiting on an *outcome* — a saved row, a deleted one, a download, a notice — uses
+  `@testing-library/react`'s `waitFor(() => expect(...))` instead, polling the real DOM
+  (jsdom's `MutationObserver` runs on real microtasks, not the faked `setInterval` these suites
+  fake for the countdown and duration tickers) until the assertion holds or its own timeout
+  passes. `App.saving.test.tsx` and the delete/MP4 cases in `App.library.test.tsx` are the ones
+  that do; the rest of the suite's `flush()` calls settle a mocked capture promise or a
+  keyboard-shortcut dispatch, neither of which has an unbounded chain behind it.
 - **`*.perf.test.ts` files are ceilings, not benchmarks.** `core/compositor.perf.test.ts`,
   `core/converter.perf.test.ts`, `core/webcodecsRecorder.perf.test.ts` and
   `core/recorder.perf.test.ts` count what a frame, a take or a second of monitoring costs —
