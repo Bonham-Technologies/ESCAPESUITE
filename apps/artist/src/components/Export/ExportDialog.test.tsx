@@ -155,9 +155,9 @@ describe('ExportDialog', () => {
       expect(screen.getByText('Low (faster export)')).toBeInTheDocument()
       expect(screen.getByText('Medium')).toBeInTheDocument()
       expect(screen.getByText('High (slower export)')).toBeInTheDocument()
-      expect(screen.getByText('1080p')).toBeInTheDocument()
-      expect(screen.getByText('720p')).toBeInTheDocument()
-      expect(screen.getByText('480p')).toBeInTheDocument()
+      expect(screen.getByText('1080p — 1920×1080')).toBeInTheDocument()
+      expect(screen.getByText('720p — 1280×720')).toBeInTheDocument()
+      expect(screen.getByText('480p — 854×480')).toBeInTheDocument()
     })
 
     it('offers the project resolution from the store', () => {
@@ -166,7 +166,23 @@ describe('ExportDialog', () => {
 
       fireEvent.click(advancedToggle())
 
-      expect(screen.getByText('Project (1280x720)')).toBeInTheDocument()
+      expect(screen.getByText('Project — 1280×720')).toBeInTheDocument()
+    })
+
+    it('prints every preset\'s dimensions against the project\'s own aspect, ESCSUITE-111', () => {
+      // A preset's width follows the *project's* aspect (ESCSUITE-94), so a
+      // portrait project makes "1080p" narrower than 1920 — a bare "1080p"
+      // label would be surprising. Printing the dimensions makes the rule
+      // self-evident right in the dropdown.
+      store().setProjectResolution(1080, 1920)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(advancedToggle())
+
+      expect(screen.getByText('Project — 1080×1920')).toBeInTheDocument()
+      expect(screen.getByText('1080p — 608×1080')).toBeInTheDocument()
+      expect(screen.getByText('720p — 406×720')).toBeInTheDocument()
+      expect(screen.getByText('480p — 270×480')).toBeInTheDocument()
     })
 
     it('mentions background-tab encoding only where MP4 is available', () => {
@@ -368,7 +384,7 @@ describe('ExportDialog', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       fireEvent.click(advancedToggle())
       fireEvent.change(screen.getByDisplayValue('Medium'), { target: { value: 'high' } })
-      fireEvent.change(screen.getByDisplayValue('Project (1920x1080)'), { target: { value: '720p' } })
+      fireEvent.change(screen.getByDisplayValue('Project — 1920×1080'), { target: { value: '720p' } })
 
       fireEvent.click(advancedExport())
 
@@ -419,7 +435,7 @@ describe('ExportDialog', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
 
       expect(await screen.findByDisplayValue('High (slower export)')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('720p')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('720p — 1280×720')).toBeInTheDocument()
       expect(mockGetSetting).toHaveBeenCalledWith('lastExportSettings')
     })
 
