@@ -43,6 +43,20 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [showStorageWarning, setShowStorageWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * The "remove from the list" timers still armed, one per finished upload.
+   * Cleared on unmount so none can fire on a component that is gone: a timer
+   * that outlived the uploader used to call `setUploads` after its test
+   * file's document had been torn down, and react-dom threw
+   * `window is not defined` from inside it (ESCSUITE-120). Created on first
+   * use rather than passed to `useRef`, which would build a Set on every
+   * render only to throw it away.
+   */
+  const removalTimersRef = useRef<Set<number> | null>(null);
+  useEffect(() => () => {
+    for (const id of removalTimersRef.current ?? []) clearTimeout(id);
+    removalTimersRef.current = null;
+  }, []);
 
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const clips = useEditorStore((state) => state.project.timeline.clips);
@@ -181,10 +195,14 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
         // Refresh storage info
         refreshStorageInfo();
 
-        // Remove from upload list after a delay
-        setTimeout(() => {
+        // Remove from upload list after a delay. The id is kept so the unmount
+        // cleanup above can call it off (ESCSUITE-120).
+        const timers = (removalTimersRef.current ??= new Set());
+        const id = window.setTimeout(() => {
+          timers.delete(id);
           setUploads((prev) => prev.filter((u) => u.fileName !== file.name));
         }, 2000);
+        timers.add(id);
       } catch (error) {
         console.error('Failed to process media:', error);
 
