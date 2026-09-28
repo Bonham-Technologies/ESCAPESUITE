@@ -433,8 +433,13 @@ candidates with their status and the open follow-ups — in
 [docs/performance/2026-09-13-timeline-profile.md](docs/performance/2026-09-13-timeline-profile.md).
 
 **Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
-Seven ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
-`apps/artist/src/core/exportMP4.perf.test.ts`,
+Eight ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
+`apps/artist/src/core/exportMP4.perf.test.ts` and its twin
+`apps/artist/src/core/exportWebM.perf.test.ts` (ESCSUITE-112: the same scene, the same splitter,
+over the pipeline that draws media *elements* — `<video>`/`<img>` — straight onto the canvas
+rather than decoded `VideoFrame`s, plus one measure with no equivalent on the MP4 side: seeks per
+frame against the shared `<video>` element, steady-state and the one-time initialisation seek kept
+separate so the count stays exact),
 `apps/artist/src/components/Timeline/timelineGestures.perf.test.ts` (listeners, rects, snap-point
 and render counts per pointer move), `apps/craft/src/core/compositor.perf.test.ts`,
 `apps/craft/src/core/converter.perf.test.ts`,
