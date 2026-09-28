@@ -870,6 +870,22 @@ toast gated on the return — each reached from both sides by the paste → undo
 seven ghost-pruning cases, the refusal cases and the successful edits that were already there. **No
 floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-97 (a saved project keeps its sources'
+metadata, and an old file's duration probe can no longer return `Infinity`): 99.49 / 98.84 /
+**94.19** / 99.35 against the 99.49 / 98.84 / 94.18 / 99.35 the commit this branch was rebased onto
+measures — branches up a hundredth, the other three unmoved. Measured in one sitting, the base gives
+4,279 / 4,543 branches and this branch 4,287 / 4,551: eight new branches, eight covered, the same 264
+uncovered as before. The other three denominators *shrank* by a little — lines 6,933 / 6,968 →
+6,932 / 6,967, statements 7,808 / 7,899 → 7,807 / 7,898, functions 1,698 / 1,709 → 1,694 / 1,705 —
+because `extractMetadataFromBlob`'s two hand-rolled `<video>` / `<audio>` promise probes became calls
+to the shared `loadMediaDuration`, and the four arrows those promises carried went with them; the
+uncovered counts (35 / 91 / 11) did not move. The eight new branches are the `meta ? … : …` choice in
+`loadProject`, `resolveStoredDuration`'s "usable or recover" arm applied to a saved duration,
+`isUsableDimension` and the dimension fallback, and the identity-preserving spread — each reached
+from both sides by the round-trip case, the old-format file, the `null` / `Infinity` durations, the
+audio-only 0×0 source and the smuggled `thumbnailUrl`. **No floor crossed**; artist's floors stay
+99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -877,7 +893,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
-| `@escapesuite/artist` | 99.49 | 98.84 | 94.18 | 99.35 |
+| `@escapesuite/artist` | 99.49 | 98.84 | 94.19 | 99.35 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

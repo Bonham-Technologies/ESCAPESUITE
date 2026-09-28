@@ -111,7 +111,34 @@ pnpm lint                # Run ESLint
 - `outputTransform.ts`: the one place project space is carried onto an output raster —
   `projectToOutputScale`, `setOutputTransform` and `openOutputFrame`, called by the preview and
   by both exporters. See "Export Resolution" below
-- `projectManager.ts`: Project save/load to JSON files with embedded video references
+- `projectManager.ts`: Project save/load to JSON files with embedded video references.
+  **File format**: each entry in `ProjectFile.videos` carries the video's base64 bytes and,
+  since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
+  `duration`/`width`/`height`/`frameRate` plus whatever of `mediaType`, `source`, `recordedAt`,
+  `waveformData`, `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
+  `hasWebcam` it had (`id`/`name`/`mimeType` are already the entry's own top-level fields, and
+  `size` is always the restored blob's). `saveProject` writes it from the `SourceVideo` it was
+  given; `loadProject` takes every field from it and never touches the blob when it is present.
+  `meta` is optional and the file's `version` stays 1 — purely additive, so a project saved
+  before this ticket, or by an older build, has no `meta` and `loadProject` falls back to
+  `extractMetadataFromBlob` exactly as it always did. That fallback used to read a video or
+  audio element's raw `duration` with no guard, so a saved ESCAPECRAFT take whose WebM has no
+  Duration element came back `Infinity` seconds long on every reopen — the same headerless-WebM
+  problem `loadMediaDuration` (`videoProcessor.ts`) already solved for import and for the
+  CRAFT handoff, just re-introduced by this third hand-rolled probe. `extractMetadataFromBlob`'s
+  video and audio branches now call that same exported `loadMediaDuration`, so an old file's
+  duration is recovered the same way an import's is, and cannot come back infinite.
+  `headless/seedSources.ts` shares that same fallback for a source it wasn't handed full
+  metadata for, so a headless render of a headerless source that used to complete instantly
+  with a silently wrong `Infinity` duration can now take up to the probe's 5s timeout and reject
+  instead — the correct outcome, but a latency and failure-mode change for that one caller.
+  A file with `meta` skips the blob probe for whichever of `duration`/`width`/`height` it holds
+  a usable number for — waveform peaks and take identity are trusted from what was actually
+  recorded or computed, not guessed at from the bytes — but `meta` came out of `JSON.parse`, not
+  the type checker, so `loadProject` still recovers any of those three from the blob if a
+  hand-edited file's value is not a real, non-negative finite number (review round 1); a
+  `thumbnailUrl` inside `meta` is never trusted either way; the only source of one is
+  `resolveThumbnailUrl` over what is actually stored, exactly as ESCSUITE-96 already required.
 - `videoDecodeManager.ts`: Main thread API for WebCodecs video decoding via Web Worker
 - `frameSource.ts`: Abstraction layer for frame sources (WebCodecs or HTMLVideoElement fallback)
 

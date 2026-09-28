@@ -2,6 +2,29 @@
 
 import type { Project, SourceVideo, Clip } from '../store/types';
 import { getVideo, storeVideo, storeThumbnail, getThumbnail, resolveThumbnailUrl } from './storage';
+import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
+
+/**
+ * The `SourceVideo` fields a saved project persists alongside each video's
+ * bytes — everything `extractMetadataFromBlob` cannot recover from the blob
+ * alone (ESCSUITE-97): waveform peaks, take identity, and the flags a
+ * consumer like `TimelineTrack` reads without re-deriving them. `id`/`name`/
+ * `mimeType` are not repeated here — the file already carries them at the top
+ * level of each `videos[i]` entry — and `size`/`thumbnailUrl` are excluded
+ * because they are restored values, never trusted from the file: `size` is
+ * always the restored blob's own `size`, and `thumbnailUrl` is always
+ * rebuilt through `resolveThumbnailUrl` (ESCSUITE-96) or left unset, never
+ * read from a saved string (review round 1: a `meta` object built by hand
+ * could otherwise carry a stale or spoofed `blob:` handle straight through).
+ * `Omit` rather than a hand-copied field list, so a future required
+ * `SourceVideo` field fails to compile at the `meta` literal in `saveProject`
+ * instead of silently never being persisted.
+ *
+ * Every field left is optional so an old save (or a video whose live
+ * metadata never set one) still round-trips: `undefined` values are dropped
+ * by `JSON.stringify` rather than written as `null`.
+ */
+export type SourceVideoMeta = Omit<SourceVideo, 'id' | 'name' | 'mimeType' | 'size' | 'thumbnailUrl'>;
 
 export interface ProjectFile {
   version: number;
@@ -12,6 +35,13 @@ export interface ProjectFile {
     mimeType: string;
     data: string; // Base64 encoded video data
     thumbnail?: string; // Base64 encoded thumbnail
+    /**
+     * The live `SourceVideo`'s own fields, written on save (ESCSUITE-97).
+     * Additive: absent on a file saved before this ticket, or one written by
+     * an older ESCAPEARTIST build, and `loadProject` falls back to
+     * `extractMetadataFromBlob` exactly as it always has when it is missing.
+     */
+    meta?: SourceVideoMeta;
   }[];
 }
 
@@ -84,12 +114,30 @@ export async function saveProject(
         thumbnailBase64 = await blobToBase64(thumbnail);
       }
 
+      const meta: SourceVideoMeta = {
+        duration: video.duration,
+        width: video.width,
+        height: video.height,
+        frameRate: video.frameRate,
+        mediaType: video.mediaType,
+        source: video.source,
+        recordedAt: video.recordedAt,
+        waveformData: video.waveformData,
+        hasAudio: video.hasAudio,
+        takeId: video.takeId,
+        role: video.role,
+        startOffset: video.startOffset,
+        overlayPlacement: video.overlayPlacement,
+        hasWebcam: video.hasWebcam,
+      };
+
       projectFile.videos.push({
         id: video.id,
         name: video.name,
         mimeType: video.mimeType,
         data: base64Data,
         thumbnail: thumbnailBase64,
+        meta,
       });
     }
   }
@@ -111,6 +159,36 @@ export async function saveProject(
   URL.revokeObjectURL(url);
 
   onProgress?.(100, 'Project saved!');
+}
+
+/**
+ * A width or height a saved `meta` can be trusted for: a real, non-negative
+ * finite number. Zero is valid — it is how an audio-only `SourceVideo` has
+ * always recorded "no picture" (`extractAudioMetadata`) — so this only
+ * catches what `JSON.parse` lets through that a live `SourceVideo` never
+ * would: `null`, `NaN`, a negative number, or `Infinity` (review round 1).
+ */
+function isUsableDimension(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * Width/height from a saved `meta`, recovered from the blob when either is
+ * not a usable number — the same "trust it unless it's broken" treatment
+ * `resolveStoredDuration` gives `duration`. There is no dedicated probe for
+ * dimensions alone, so recovery reuses the full blob probe and keeps only
+ * the two fields that needed it.
+ */
+async function resolveMetaDimensions(
+  blob: Blob,
+  meta: SourceVideoMeta,
+  savedData: { id: string; name: string; mimeType: string }
+): Promise<{ width: number; height: number }> {
+  if (isUsableDimension(meta.width) && isUsableDimension(meta.height)) {
+    return { width: meta.width, height: meta.height };
+  }
+  const probed = await extractMetadataFromBlob(blob, savedData);
+  return { width: probed.width, height: probed.height };
 }
 
 /**
@@ -148,8 +226,50 @@ export async function loadProject(
     // Convert base64 back to blob
     const blob = base64ToBlob(videoData.data, videoData.mimeType);
 
-    // Extract metadata from blob
-    const metadata = await extractMetadataFromBlob(blob, videoData);
+    // A file saved since ESCSUITE-97 carries the live SourceVideo's own
+    // fields in `meta` — waveform peaks, take identity, the real frame rate —
+    // so those are trusted in preference to a blob probe. But `meta` came out
+    // of `JSON.parse`, not the type checker: a hand-edited or corrupted file
+    // can still carry a `duration`/`width`/`height` that is not a usable
+    // number (review round 1), so each is validated and, only when it fails,
+    // recovered from the blob rather than stored unquestioned. The common
+    // case — a `meta` written by this same `saveProject` — never touches the
+    // blob at all.
+    //
+    // An older file has no `meta` at all, and falls back to reconstructing
+    // everything from the blob (through `extractMetadataFromBlob`, which
+    // itself now goes through the same duration probe every other importer
+    // uses).
+    let metadata: SourceVideo;
+    if (videoData.meta) {
+      const duration = await resolveStoredDuration(blob, {
+        ...videoData.meta,
+        name: videoData.name,
+      } as SourceVideo);
+      const { width, height } = await resolveMetaDimensions(blob, videoData.meta, videoData);
+      metadata = {
+        ...videoData.meta,
+        id: videoData.id,
+        name: videoData.name,
+        mimeType: videoData.mimeType,
+        size: blob.size,
+        duration,
+        width,
+        height,
+      };
+    } else {
+      metadata = await extractMetadataFromBlob(blob, videoData);
+    }
+
+    // A stored thumbnail (below) is the only legitimate source of a live
+    // `thumbnailUrl` — never a value that arrived in the file itself. `meta`
+    // is typed to exclude `thumbnailUrl`, but nothing stops a hand-edited
+    // file from smuggling one in through the `...videoData.meta` spread
+    // above, and it must not reach IndexedDB via `storeVideo` below
+    // (ESCSUITE-96 is exactly the failure mode a stale `blob:` handle in
+    // storage causes) or survive into the returned `SourceVideo` when the
+    // file has no real thumbnail to resolve over it (review round 1).
+    delete metadata.thumbnailUrl;
 
     // Store video
     await storeVideo(videoData.id, blob, metadata);
@@ -216,64 +336,49 @@ export async function extractMetadataFromBlob(
   }
 
   if (mimeType.startsWith('audio/')) {
-    return new Promise((resolve, reject) => {
-      const audio = document.createElement('audio');
-      audio.preload = 'metadata';
-      const url = URL.createObjectURL(blob);
-      audio.src = url;
+    const audio = document.createElement('audio');
+    audio.preload = 'metadata';
+    const url = URL.createObjectURL(blob);
+    audio.src = url;
 
-      audio.onloadedmetadata = () => {
-        const metadata: SourceVideo = {
-          id: savedData.id,
-          name: savedData.name,
-          duration: audio.duration,
-          width: 0,
-          height: 0,
-          frameRate: 0,
-          mimeType,
-          size: blob.size,
-          mediaType: 'audio',
-        };
-        URL.revokeObjectURL(url);
-        resolve(metadata);
-      };
+    // Routed through the same probe `extractAudioMetadata` uses (ESCSUITE-97):
+    // a headerless ESCAPECRAFT WebM reports `Infinity` on `loadedmetadata`,
+    // and a save/reopen round trip through this fallback must not
+    // reintroduce that after the duration-probe work removed it elsewhere.
+    const duration = await loadMediaDuration(audio, url, savedData.name, 'audio');
 
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error(`Failed to load audio: ${savedData.name}`));
-      };
-    });
+    return {
+      id: savedData.id,
+      name: savedData.name,
+      duration,
+      width: 0,
+      height: 0,
+      frameRate: 0,
+      mimeType,
+      size: blob.size,
+      mediaType: 'audio',
+    };
   }
 
   // Default: treat as video
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.preload = 'metadata';
+  const video = document.createElement('video');
+  video.preload = 'metadata';
 
-    const url = URL.createObjectURL(blob);
-    video.src = url;
+  const url = URL.createObjectURL(blob);
+  video.src = url;
 
-    video.onloadedmetadata = () => {
-      const metadata: SourceVideo = {
-        id: savedData.id,
-        name: savedData.name,
-        duration: video.duration,
-        width: video.videoWidth,
-        height: video.videoHeight,
-        frameRate: 30,
-        mimeType,
-        size: blob.size,
-      };
+  const duration = await loadMediaDuration(video, url, savedData.name, 'video');
 
-      URL.revokeObjectURL(url);
-      resolve(metadata);
-    };
-
-    video.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error(`Failed to load video: ${savedData.name}`));
-    };
-  });
+  return {
+    id: savedData.id,
+    name: savedData.name,
+    duration,
+    width: video.videoWidth,
+    height: video.videoHeight,
+    frameRate: 30,
+    mimeType,
+    size: blob.size,
+  };
 }
 
 /**

@@ -39,8 +39,14 @@ function isUsableDuration(value: number): boolean {
  * failure message. The caller owns the element and creates the object URL;
  * this owns the listeners, the probe's timer, and the single revoke that
  * happens however the promise settles.
+ *
+ * Exported for `projectManager.ts`'s blob-probe fallback (ESCSUITE-97): a
+ * `.veditor` file saved before its `SourceVideo` metadata was persisted has
+ * no choice but to re-derive duration from the blob, and that fallback must
+ * fail the same way an import does rather than re-introduce `Infinity` with
+ * a hand-rolled `element.duration` read.
  */
-function loadMediaDuration(
+export function loadMediaDuration(
   element: HTMLMediaElement,
   objectUrl: string,
   name: string,
