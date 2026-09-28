@@ -14,7 +14,10 @@
 // The recorder's six callbacks are captured once, when createRecorder runs, so
 // they close over the stopAllStreams and saveRecording of the render that
 // started the take. That is deliberate: a late onStop has to release the
-// capture that take was using, not whatever the current render holds.
+// capture that take was using, not whatever the current render holds — but
+// only while that recorder is still the current one. A superseded recorder's
+// callbacks release nothing at all: the `me` guard on each of them (ESCSUITE-118)
+// returns before touching stopAllStreams, saveRecording or anything else.
 //
 // This hook registers one effect — the unmount teardown — and App calls it
 // after useMediaStreams so that the stopAllStreams mirror is already being
@@ -530,8 +533,7 @@ export function useRecordingController({
       // (ESCSUITE-118). `cancelledRef` alone cannot stand in for it — a start
       // resets that flag, so a live take B reads as "not cancelled" to a chunk
       // that was actually A's.
-      let me: AnyRecorder | null = null;
-      recorderRef.current = me = createRecorder({
+      const me: AnyRecorder = createRecorder({
         onStart: () => {
           // A start from a recorder that is no longer current is stale — it was
           // disposed by a cancel, or superseded by a newer take — and must not
@@ -630,6 +632,7 @@ export function useRecordingController({
         // no late meter reading for the guard above to catch.
         onAudioLevels: setAudioLevels,
       }, isPiP, hasVideoSource, separateTracks);
+      recorderRef.current = me;
       recorderTypeRef.current = getRecorderType(isPiP, hasVideoSource, separateTracks);
 
       // This avoids canvas.captureStream() issues with hidden video elements

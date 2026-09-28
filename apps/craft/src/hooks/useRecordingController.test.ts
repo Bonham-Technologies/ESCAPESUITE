@@ -872,6 +872,48 @@ describe('useRecordingController callback identity (ESCSUITE-118)', () => {
     expect(vi.getTimerCount()).toBe(1)
     expect(state()).toBe('recording')
   })
+
+  it('a stale onPause does not pause the live take', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { a } = await cancelThenStartAnother(result)
+    expect(state()).toBe('recording')
+
+    act(() => { a.callbacks.onPause?.() })
+
+    expect(state()).toBe('recording')
+  })
+
+  it('a stale onResume does not resume over the live pause', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { a, b } = await cancelThenStartAnother(result)
+
+    act(() => { result.current.handlePauseRecording() })
+    expect(state()).toBe('paused')
+    expect(b.pause).toHaveBeenCalledTimes(1)
+
+    act(() => { a.callbacks.onResume?.() })
+
+    expect(state()).toBe('paused')
+  })
+
+  // ESCSUITE-118 fix round 1. The identity guard also catches a recorder whose
+  // OWN onError disposed it and nulled the ref — nothing raises cancelledRef on
+  // that path, so the old onStop guard alone would not have stopped this.
+  // MediaRecorder can call onstop with whatever it had recorded after an
+  // onerror (core/recorder.ts), so a take reported as failed used to be saved
+  // anyway. Dropping it is correct: the user was already told the take failed.
+  it("a recorder's own late onStop, after its own onError disposed it, saves nothing", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { recorder } = await startLiveTake()
+
+    act(() => { recorder.failWith(new Error('encoder died')) })
+    expect(state()).toBe('idle')
+
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob, []) })
+
+    expect(harness.saveRecording).not.toHaveBeenCalled()
+    expect(state()).toBe('idle')
+  })
 })
 
 describe('useRecordingController picture-in-picture', () => {

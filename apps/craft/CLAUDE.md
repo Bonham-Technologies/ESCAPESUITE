@@ -789,8 +789,8 @@ with the live take's recorder, streams and countdown untouched.
 solely through the recorder ref it nulled, and to a start still parked on its capture request not
 at all.
 
-**The recorder's own six callbacks carry the same identity.** The attempt token above answers for
-the *start path*; the callbacks `createRecorder` is given — `onStart`, `onPause`, `onResume`,
+**Five of the recorder's six callbacks carry the same identity.** The attempt token above answers
+for the *start path*; the callbacks `createRecorder` is given — `onStart`, `onPause`, `onResume`,
 `onStop`, `onError` — answer for what happens after a take is live, and used to have no identity
 of their own: each acted on whatever `recorderRef`, the tickers and the streams held **when it
 fired**, not on the recorder it was built for. A recorder disposed by a cancel can still flush a
@@ -798,14 +798,31 @@ last chunk or report a dead encoder afterwards (ESCSUITE-66/73 make it rare, not
 by then `recorderRef.current` may be a newer take's recorder — B, live and recording — so A's late
 `onError` disposed B and stopped B's streams, and A's late `onStop` (past `cancelledRef`, which a
 start resets) would have saved A's blob as B's take. Fixed the same way as the start path
-(ESCSUITE-118): `let me: AnyRecorder | null = null; recorderRef.current = me = createRecorder(...)`
-captures the exact instance in the closure, and `onStart`, `onPause`, `onResume`, `onStop` and
-`onError` each open with `if (recorderRef.current !== me) return;` before doing anything else.
-`onStop` keeps its existing `cancelledRef` check *after* that guard — it covers the take that is
-still current but was cancelled before the recorder finished disposing, which the identity check
-alone cannot see. `onAudioLevels` is the one callback left unguarded, because it needs no guard:
-both recorders cancel their rAF level-monitor loop synchronously inside `dispose()`'s `cleanup()`,
-so a disposed recorder is never still mid-loop when this fires.
+(ESCSUITE-118): `const me: AnyRecorder = createRecorder({ ... }, ...); recorderRef.current = me;`
+— the callbacks only ever run once initialization has resumed after `createRecorder` returns, so
+`me` is settled before any of them can read it — captures the exact instance in the closure, and
+`onStart`, `onPause`, `onResume` and `onStop` each open with `if (recorderRef.current !== me)
+return;` before doing anything else. `onError` guards the same way but **logs first**: its
+`console.error('Recording error:', error)` runs before the identity check, deliberately, so the
+console still hears about a late failure from a recorder nobody is listening to any more — a test
+pins the console call happening even when the rest of the callback is skipped. `onStop` keeps its
+existing `cancelledRef` check *after* the identity guard — it covers the take that is still
+current but was cancelled before the recorder finished disposing, which the identity check alone
+cannot see.
+
+The identity guard also catches a narrower case than supersession: a recorder whose *own* `onError`
+disposed it. `disposeRecorder()` nulls `recorderRef.current`, and nothing raises `cancelledRef` on
+that path — so on the MediaRecorder path, where the browser can still call `onstop` with whatever
+chunks it had recorded after an `onerror` (`core/recorder.ts`'s `mediaRecorder.onerror` /
+`onstop`), the take's own late `onStop` used to save that partial blob as if the take had ended
+normally. `recorderRef.current !== me` is true once the ref is `null`, exactly as it is once the
+ref points at a different recorder, so that late `onStop` is dropped too — correctly: the take was
+already reported as failed and returned to `'idle'`, and saving a blob afterwards would resurrect
+a take the user was just told had failed.
+
+`onAudioLevels` is the one callback left unguarded, because it needs no guard: both recorders
+cancel their rAF level-monitor loop synchronously inside `dispose()`'s `cleanup()`, so a disposed
+recorder is never still mid-loop when this fires.
 
 **A capture request the browser never answers gets a deadline.** `getDisplayMedia` and
 `getUserMedia` take no `AbortController`, so a picker or a permission prompt left on screen — or a
