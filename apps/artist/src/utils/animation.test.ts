@@ -932,4 +932,59 @@ describe('trimAnimation (ESCSUITE-110)', () => {
     expect(result.keyframes.opacity).not.toBe(animation.keyframes.opacity)
     expect(result.keyframes.opacity?.[0]).not.toBe(animation.keyframes.opacity?.[0])
   })
+
+  it("does not clamp a 'none' preset's duration (review round 1, NIT 2)", () => {
+    // A 'none' preset's duration does nothing — generateInPresetKeyframes and
+    // generateOutPresetKeyframes both bail out before reading it — so
+    // clamping it would report a number the UI never used, and would lose
+    // whatever the field held if the preset were switched back on later.
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 5, easing: 'ease-out' },
+      out: { type: 'none', duration: 5, easing: 'ease-in' },
+      keyframes: {},
+    }
+
+    const result = trimAnimation(animation, { start: 0, end: 1 })
+
+    expect(result.in.duration).toBe(5)
+    expect(result.out.duration).toBe(5)
+  })
+
+  it('interpolates the start boundary against the ORIGINAL track, not the already end-cropped one (review round 1, NIT 1)', () => {
+    // A single segment [0, 10] spans BOTH cuts: trimming to { start: 3, end: 7 }
+    // crops the tail first (cutEnd, synthesising a point at 7) and then the
+    // front (cutStart, synthesising a point at 0 from what was originally
+    // t=3). For a non-linear easing, interpolating the front boundary against
+    // the tail-cropped track (segment [0,7]) re-eases the [0,3] stretch a
+    // second time over the wrong span and gives a different answer than
+    // interpolating the original, uncropped segment [0,10] once, directly, at
+    // t=3 — which is what the clip's picture actually showed there before the
+    // trim.
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0.5, easing: 'ease-out' },
+      out: { type: 'none', duration: 0.5, easing: 'ease-in' },
+      keyframes: {
+        opacity: [
+          { time: 0, value: 0, easing: 'ease-out' },
+          { time: 10, value: 1, easing: 'linear' },
+        ],
+      },
+    }
+
+    const result = trimAnimation(animation, { start: 3, end: 7 })
+
+    // Correct: interpolating [0,10] directly at t=3 with 'ease-out'
+    // (t*(2-t)): eased(0.3) = 0.3*1.7 = 0.51.
+    // The order-dependent bug this pins would instead read the re-cropped
+    // segment [0,7] at t=3 (eased(3/7) applied to the tail-cropped value at
+    // 7), giving roughly 0.61 — a different, wrong answer.
+    expect(result.keyframes.opacity).toHaveLength(2)
+    expect(result.keyframes.opacity?.[0].time).toBe(0)
+    expect(result.keyframes.opacity?.[0].value).toBeCloseTo(0.51, 5)
+    expect(result.keyframes.opacity?.[0].easing).toBe('ease-out')
+    // The tail boundary (at the new end, now shifted to 4) is unaffected —
+    // it was always computed against the original track.
+    expect(result.keyframes.opacity?.[1].time).toBe(4)
+    expect(result.keyframes.opacity?.[1].value).toBeCloseTo(0.91, 5)
+  })
 })
