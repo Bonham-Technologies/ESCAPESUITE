@@ -789,6 +789,91 @@ describe('useRecordingController cancelling a take', () => {
   })
 })
 
+// ESCSUITE-118. The recorder's callbacks used to act on whatever the refs held
+// when they fired, not on the recorder they were created for: a late onStop or
+// onError from take A, arriving after A was cancelled and disposed and take B
+// is already live, tore down or saved over B instead of being ignored. Each
+// callback now closes over the exact instance it was built for (`me`) and
+// returns early once `recorderRef.current` has moved on — see the `me` comment
+// above the createRecorder call.
+describe('useRecordingController callback identity (ESCSUITE-118)', () => {
+  /** Cancel take A and start take B through to 'recording'. Hands back both recorders. */
+  async function cancelThenStartAnother(result: { current: RecordingController }) {
+    await startTake(result)
+    const a = recorderFactory.last()
+    act(() => { result.current.handleCancelRecording() })
+    expect(a.dispose).toHaveBeenCalledTimes(1)
+
+    await startTake(result)
+    const b = recorderFactory.last()
+    expect(b).not.toBe(a)
+    return { a, b }
+  }
+
+  it("a late onError from a disposed recorder leaves the live take alone", async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { a, b } = await cancelThenStartAnother(result)
+    b.duration = 7
+    const stopAllStreamsCalls = harness.stopAllStreams.mock.calls.length
+
+    act(() => { a.callbacks.onError?.(new Error('late')) })
+
+    // The console still hears about it — that part of onError runs before the
+    // identity guard — but nothing that belongs to B is touched.
+    expect(consoleError).toHaveBeenCalledWith('Recording error:', expect.any(Error))
+    expect(b.dispose).not.toHaveBeenCalled()
+    expect(harness.stopAllStreams).toHaveBeenCalledTimes(stopAllStreamsCalls)
+    expect(state()).toBe('recording')
+
+    act(() => { vi.advanceTimersByTime(100) })
+    expect(useRecorderStore.getState().currentDuration).toBe(7)
+  })
+
+  it('a late onStop from a disposed recorder saves nothing', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { a, b } = await cancelThenStartAnother(result)
+    const stopAllStreamsCalls = harness.stopAllStreams.mock.calls.length
+
+    await act(async () => { a.callbacks.onStop?.(a.stopBlob, []) })
+
+    expect(harness.saveRecording).not.toHaveBeenCalled()
+    expect(state()).toBe('recording')
+    expect(harness.stopAllStreams).toHaveBeenCalledTimes(stopAllStreamsCalls)
+    // B's own recorder is untouched — the late stop was A's alone.
+    expect(b.stop).not.toHaveBeenCalled()
+    expect(b.dispose).not.toHaveBeenCalled()
+  })
+
+  // The existing behaviour, pinned so the identity guard above cannot be
+  // inverted: a recorder's own failure still tears its own take down. See
+  // 'useRecordingController running a take' > 'surfaces a recorder failure and
+  // releases the capture' for the fuller assertion (console, state, streams);
+  // this one also checks dispose, which that test does not.
+  it("a live recorder's own onError still tears it down", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { recorder } = await startLiveTake()
+
+    act(() => { recorder.failWith(new Error('encoder died')) })
+
+    expect(recorder.dispose).toHaveBeenCalledTimes(1)
+    expect(state()).toBe('idle')
+    expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+  })
+
+  it('a stale onStart does not start a second ticker', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { a } = await cancelThenStartAnother(result)
+
+    expect(vi.getTimerCount()).toBe(1)
+
+    act(() => { a.callbacks.onStart?.() })
+
+    expect(vi.getTimerCount()).toBe(1)
+    expect(state()).toBe('recording')
+  })
+})
+
 describe('useRecordingController picture-in-picture', () => {
   let raf: RafDouble
 

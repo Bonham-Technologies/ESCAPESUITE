@@ -789,6 +789,24 @@ with the live take's recorder, streams and countdown untouched.
 solely through the recorder ref it nulled, and to a start still parked on its capture request not
 at all.
 
+**The recorder's own six callbacks carry the same identity.** The attempt token above answers for
+the *start path*; the callbacks `createRecorder` is given — `onStart`, `onPause`, `onResume`,
+`onStop`, `onError` — answer for what happens after a take is live, and used to have no identity
+of their own: each acted on whatever `recorderRef`, the tickers and the streams held **when it
+fired**, not on the recorder it was built for. A recorder disposed by a cancel can still flush a
+last chunk or report a dead encoder afterwards (ESCSUITE-66/73 make it rare, not impossible), and
+by then `recorderRef.current` may be a newer take's recorder — B, live and recording — so A's late
+`onError` disposed B and stopped B's streams, and A's late `onStop` (past `cancelledRef`, which a
+start resets) would have saved A's blob as B's take. Fixed the same way as the start path
+(ESCSUITE-118): `let me: AnyRecorder | null = null; recorderRef.current = me = createRecorder(...)`
+captures the exact instance in the closure, and `onStart`, `onPause`, `onResume`, `onStop` and
+`onError` each open with `if (recorderRef.current !== me) return;` before doing anything else.
+`onStop` keeps its existing `cancelledRef` check *after* that guard — it covers the take that is
+still current but was cancelled before the recorder finished disposing, which the identity check
+alone cannot see. `onAudioLevels` is the one callback left unguarded, because it needs no guard:
+both recorders cancel their rAF level-monitor loop synchronously inside `dispose()`'s `cleanup()`,
+so a disposed recorder is never still mid-loop when this fires.
+
 **A capture request the browser never answers gets a deadline.** `getDisplayMedia` and
 `getUserMedia` take no `AbortController`, so a picker or a permission prompt left on screen — or a
 camera or microphone driver wedged such that `getUserMedia` never settles — used to park

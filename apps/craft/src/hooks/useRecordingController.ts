@@ -519,8 +519,25 @@ export function useRecordingController({
 
       // Initialize recorder (WebCodecs unless the take is composited PiP or
       // audio only — see canUseWebCodecsRecorder)
-      recorderRef.current = createRecorder({
+      //
+      // The six callbacks below act on the refs, not on an argument — so a
+      // callback that fires after this recorder has been disposed, or replaced
+      // by a newer take's, would otherwise run against whatever `recorderRef`,
+      // the tickers and the streams belong to *now*. `me` is the exact instance
+      // this call builds, captured in the closure once and compared against
+      // `recorderRef.current` on every callback: the identity a late onStop or
+      // onError needs and the attempt token above gives the start path
+      // (ESCSUITE-118). `cancelledRef` alone cannot stand in for it — a start
+      // resets that flag, so a live take B reads as "not cancelled" to a chunk
+      // that was actually A's.
+      let me: AnyRecorder | null = null;
+      recorderRef.current = me = createRecorder({
         onStart: () => {
+          // A start from a recorder that is no longer current is stale — it was
+          // disposed by a cancel, or superseded by a newer take — and must not
+          // flip the state back to 'recording' or open a second duration ticker
+          // over the live one (ESCSUITE-118).
+          if (recorderRef.current !== me) return;
           setState('recording');
           analytics.recordingStarted();
           // Start duration timer
@@ -530,9 +547,19 @@ export function useRecordingController({
             }
           }, 100);
         },
-        onPause: () => setState('paused'),
-        onResume: () => setState('recording'),
+        onPause: () => {
+          if (recorderRef.current !== me) return;
+          setState('paused');
+        },
+        onResume: () => {
+          if (recorderRef.current !== me) return;
+          setState('recording');
+        },
         onStop: (blob, companions) => {
+          // A stop from a recorder that is no longer the take's — disposed, or
+          // replaced by a newer take's — is a chunk nobody asked for
+          // (ESCSUITE-118).
+          if (recorderRef.current !== me) return;
           // A stop that lands after the take was cancelled or the screen went
           // away is a chunk nobody asked for: drop it rather than save it.
           if (cancelledRef.current) return;
@@ -585,6 +612,7 @@ export function useRecordingController({
         },
         onError: (error) => {
           console.error('Recording error:', error);
+          if (recorderRef.current !== me) return;
           // The capture can die before start() — the user stops sharing while
           // the countdown is on screen, and the recorder reports it here. A
           // ticker left running would reach zero and start a sourceless take,
@@ -596,6 +624,10 @@ export function useRecordingController({
           setCurrentDuration(0);
           stopAllStreams();
         },
+        // Unguarded on purpose (ESCSUITE-118): both recorders cancel their rAF
+        // level-monitor loop synchronously inside dispose()'s cleanup(), so a
+        // disposed recorder cannot still be mid-loop when this fires — there is
+        // no late meter reading for the guard above to catch.
         onAudioLevels: setAudioLevels,
       }, isPiP, hasVideoSource, separateTracks);
       recorderTypeRef.current = getRecorderType(isPiP, hasVideoSource, separateTracks);
