@@ -17,6 +17,7 @@ import { renderProject, renderProjectToFile } from './renderProject'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, SourceVideoInput } from './types'
 import type { Clip, TextOverlay } from '../store/types'
+import { lastObjectUrl } from '../test/objectUrls'
 
 /** A legacy text overlay as an older ARTIST version stored it, on the timeline's array. */
 const legacyText = (): TextOverlay => ({
@@ -163,6 +164,10 @@ describe('renderProjectToFile', () => {
       clicks.push({ download: this.download, href: this.href, inBody: document.body.contains(this) })
     })
     vi.mocked(seedSources).mockClear()
+    // Both of these clears pin a COUNT across the setup, so they stay even
+    // though every mock handle is now distinct (ESCSUITE-117): the download
+    // case asserts exactly one createObjectURL, and the teardown case asserts
+    // revokeObjectURL was never called at all.
     vi.mocked(URL.createObjectURL).mockClear()
     vi.mocked(URL.revokeObjectURL).mockClear()
   })
@@ -193,7 +198,7 @@ describe('renderProjectToFile', () => {
     fileInput(['source.mp4'])
     const meta = await renderProjectToFile(fileInputBase())
 
-    expect(clicks).toEqual([{ download: 'job-1.mp4', href: 'blob:mock-url', inBody: true }])
+    expect(clicks).toEqual([{ download: 'job-1.mp4', href: lastObjectUrl(), inBody: true }])
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
     expect(meta.format).toBe('mp4')
     expect(meta.byteLength).toBe(3)

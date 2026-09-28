@@ -13,6 +13,7 @@ import {
 import { getThumbnail, getVideo, storeThumbnail, storeVideo } from './storage'
 import type { Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
+import { lastObjectUrl } from '../test/objectUrls'
 import { installFileReaderDouble } from '../test/doubles/fileReader'
 
 let idCounter = 0
@@ -168,7 +169,7 @@ describe('saveProject', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1)
     const anchor = clickSpy.mock.contexts[0] as HTMLAnchorElement
     expect(anchor.download).toBe('Test Project.veditor')
-    expect(anchor.href).toContain('blob:mock-url')
+    expect(anchor.href).toContain(lastObjectUrl())
     // The anchor is removed again once clicked.
     expect(document.body.contains(anchor)).toBe(false)
   })
@@ -295,7 +296,7 @@ describe('loadProject', () => {
 
     const { sourceVideos } = await loadProject(file)
 
-    expect(sourceVideos[0].thumbnailUrl).toBe('blob:mock-url')
+    expect(sourceVideos[0].thumbnailUrl).toBe(lastObjectUrl())
     const thumb = await getThumbnail(videoId)
     expect(thumb).toBeDefined()
     expect(await thumb!.text()).toBe('thumbnail-bytes')
@@ -511,7 +512,7 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
 
     // The real, stored thumbnail resolves to the mocked object URL — not the
     // value smuggled into meta.
-    expect(sourceVideos[0].thumbnailUrl).toBe('blob:mock-url')
+    expect(sourceVideos[0].thumbnailUrl).toBe(lastObjectUrl())
 
     const stored = await getVideo(videoId)
     expect(stored?.metadata.thumbnailUrl).not.toBe('blob:stale')
@@ -573,7 +574,7 @@ describe('extractMetadataFromBlob', () => {
     await expect(
       extractMetadataFromBlob(new Blob(['x'], { type: 'image/png' }), { id: 'i', name: 'bad.png', mimeType: 'image/png' })
     ).rejects.toThrow('Failed to load image: bad.png')
-    expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+    expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
     revoke.mockRestore()
   })
 

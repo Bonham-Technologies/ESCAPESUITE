@@ -245,6 +245,31 @@ describe('storage', () => {
 
       expect(URL.revokeObjectURL).not.toHaveBeenCalled()
     })
+
+    // The one-URL entry point the list version is written in terms of, for a
+    // caller holding a handle that never became a source's (ESCSUITE-117's
+    // `setSourceThumbnail`, whose rebuild lost its race with a real load).
+    describe('revokeThumbnailUrl', () => {
+      it('revokes a blob: URL', async () => {
+        const storage = await getStorageModule()
+
+        storage.revokeThumbnailUrl('blob:one-handle')
+
+        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:one-handle')
+      })
+
+      it.each([
+        ['undefined', undefined],
+        ['a URL that is not a blob: handle', 'https://example.com/thumb.jpg'],
+      ])('does nothing for %s', async (_label, url) => {
+        const storage = await getStorageModule()
+
+        storage.revokeThumbnailUrl(url)
+
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      })
+    })
   })
 
   describe('project operations', () => {

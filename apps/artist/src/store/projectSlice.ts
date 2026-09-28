@@ -10,9 +10,9 @@ import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
 import { lockedSourceVideoIds } from './trackLock';
 import { pruneSelection } from './selectionPrune';
-import { revokeSourceThumbnails } from '../core/storage';
+import { revokeSourceThumbnails, revokeThumbnailUrl } from '../core/storage';
 
-export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo'>;
+export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo' | 'setSourceThumbnail'>;
 
 export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice> = (set) => ({
   project: createEmptyProject(),
@@ -156,6 +156,32 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
       selectedClipIds: pruned.selectedClipIds,
       clipboard: newClipboard,
       history,
+    };
+  }),
+
+  // ESCSUITE-117: the one write here that is NOT an edit. A source restored by
+  // undo comes back with no thumbnailUrl — ESCSUITE-113 scrubbed the revoked
+  // handle out of the history snapshots rather than hand back a URL nothing can
+  // open — so the media library reads the *stored* thumbnail again and returns
+  // the fresh handle through here. Repairing a tile is not something the user
+  // then wants to undo, so no `pushToHistory`.
+  setSourceThumbnail: (id: string, thumbnailUrl: string) => set((state) => {
+    const existing = state.sourceVideos.find((v) => v.id === id);
+    // Gone from the library, or already showing this very handle: nothing to
+    // write, and nothing freed either way. The first case is the caller's to
+    // free — it minted the handle and it is the half that knows the source
+    // left — and in the second the handle IS the live one.
+    if (!existing || existing.thumbnailUrl === thumbnailUrl) return state;
+    if (existing.thumbnailUrl) {
+      // The rebuild raced a real load (an import, a session restore) that put a
+      // live handle here while the read was in flight. The library's is the one
+      // on screen, so the one that lost the race is freed rather than replacing
+      // it — otherwise this leaks it.
+      revokeThumbnailUrl(thumbnailUrl);
+      return state;
+    }
+    return {
+      sourceVideos: state.sourceVideos.map((v) => (v.id === id ? { ...v, thumbnailUrl } : v)),
     };
   }),
 });

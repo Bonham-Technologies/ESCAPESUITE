@@ -69,16 +69,31 @@ export async function resolveThumbnailUrl(id: string): Promise<string | undefine
  * sources (`loadProject` mints their thumbnails before validation ever runs) —
  * a *successful* load's outgoing library is `resetProject`'s to free, not this
  * callback's. The media library's Clear All / Clear Unused reach this only
- * indirectly, through `removeSourceVideo` (ESCSUITE-113). A source with no
+ * indirectly, through `removeSourceVideo` (ESCSUITE-113). A handle that never
+ * reached the library at all — `setSourceThumbnail`'s, when the lazy rebuild it
+ * carries lost a race with a real load and the source already has a live
+ * thumbnail — goes through `revokeThumbnailUrl` directly (ESCSUITE-117). A source with no
  * thumbnail, or a `thumbnailUrl` that is not a `blob:` handle (there is no
  * such source today; the guard is defensive against a future non-blob
  * source), is left alone.
  */
 export function revokeSourceThumbnails(sources: SourceVideo[]): void {
-  for (const source of sources) {
-    if (source.thumbnailUrl?.startsWith('blob:')) {
-      revokeBlobUrl(source.thumbnailUrl)
-    }
+  for (const source of sources) revokeThumbnailUrl(source.thumbnailUrl)
+}
+
+/**
+ * The same revoke for one URL that is not (yet) a source's, so a caller holding
+ * a single handle does not have to invent a `SourceVideo` to get it through the
+ * guard above. The two share this, so there is still exactly one place a
+ * thumbnail handle is freed and one `blob:` check to read.
+ *
+ * `store/projectSlice.ts`'s `setSourceThumbnail` is the caller: a rebuilt
+ * thumbnail that lost its race with a real load never reaches the library, and
+ * is freed here instead (ESCSUITE-117).
+ */
+export function revokeThumbnailUrl(url: string | undefined): void {
+  if (url?.startsWith('blob:')) {
+    revokeBlobUrl(url)
   }
 }
 

@@ -367,6 +367,91 @@ describe('projectStore integration', () => {
 
       expect(useEditorStore.getState().clipboard).toBe(clipboardBefore)
     })
+
+    // ESCSUITE-117: a source restored by undo carries `thumbnailUrl:
+    // undefined` — ESCSUITE-113 scrubbed the dead handle out of the history
+    // snapshots (pinned by resetProject's "undo brings the source back with no
+    // thumbnail rather than a dead one" below) — so the media library rebuilds
+    // it from storage and hands it back through here. A rebuilt thumbnail is
+    // not an edit: it records no undo step.
+    describe('setSourceThumbnail', () => {
+      const thumbless = (overrides: Partial<SourceVideo> = {}): SourceVideo => ({
+        id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+        frameRate: 30, mimeType: 'video/mp4', size: 1000000, ...overrides,
+      })
+
+      it('sets the thumbnail URL on the matching source', () => {
+        useEditorStore.getState().addSourceVideo(thumbless())
+
+        useEditorStore.getState().setSourceThumbnail('video1', 'blob:rebuilt')
+
+        expect(useEditorStore.getState().sourceVideos[0].thumbnailUrl).toBe('blob:rebuilt')
+      })
+
+      it('records no undo step', () => {
+        useEditorStore.getState().addSourceVideo(thumbless())
+        const before = useEditorStore.getState().history.past.length
+
+        useEditorStore.getState().setSourceThumbnail('video1', 'blob:rebuilt')
+
+        expect(useEditorStore.getState().history.past).toHaveLength(before)
+      })
+
+      it('leaves every other source alone', () => {
+        useEditorStore.getState().addSourceVideo(thumbless())
+        useEditorStore.getState().addSourceVideo(thumbless({ id: 'video2', name: 'other.mp4' }))
+
+        useEditorStore.getState().setSourceThumbnail('video2', 'blob:rebuilt')
+
+        const sources = useEditorStore.getState().sourceVideos
+        expect(sources.find((v) => v.id === 'video1')?.thumbnailUrl).toBeUndefined()
+        expect(sources.find((v) => v.id === 'video2')?.thumbnailUrl).toBe('blob:rebuilt')
+      })
+
+      it('is a no-op for an id naming no source, and does not revoke what it was handed', () => {
+        useEditorStore.getState().addSourceVideo(thumbless())
+        const before = useEditorStore.getState()
+        vi.mocked(URL.revokeObjectURL).mockClear()
+
+        useEditorStore.getState().setSourceThumbnail('no-such-video', 'blob:rebuilt')
+
+        // The caller owns a handle for a source that is gone; it revokes that
+        // itself (it knows whether the source left or the read simply lost a
+        // race), so this must not free it underneath.
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+        expect(useEditorStore.getState().sourceVideos).toBe(before.sourceVideos)
+        expect(useEditorStore.getState().history.past).toHaveLength(before.history.past.length)
+      })
+
+      // The rebuild raced a real load — an import, or a session restore — that
+      // put a live handle on the source while the read was in flight. The
+      // library's is the one on screen, so the incoming one is freed rather
+      // than replacing it.
+      it('revokes the incoming URL and changes nothing when the source already has a different live one', () => {
+        useEditorStore.getState().addSourceVideo(thumbless({ thumbnailUrl: 'blob:live' }))
+        const before = useEditorStore.getState()
+        vi.mocked(URL.revokeObjectURL).mockClear()
+
+        useEditorStore.getState().setSourceThumbnail('video1', 'blob:rebuilt')
+
+        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:rebuilt')
+        expect(useEditorStore.getState().sourceVideos).toBe(before.sourceVideos)
+        expect(useEditorStore.getState().sourceVideos[0].thumbnailUrl).toBe('blob:live')
+      })
+
+      it('changes nothing, and revokes nothing, when the source already has that same URL', () => {
+        useEditorStore.getState().addSourceVideo(thumbless({ thumbnailUrl: 'blob:rebuilt' }))
+        const before = useEditorStore.getState()
+        vi.mocked(URL.revokeObjectURL).mockClear()
+
+        useEditorStore.getState().setSourceThumbnail('video1', 'blob:rebuilt')
+
+        // Revoking here would kill the handle the library is showing.
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+        expect(useEditorStore.getState().sourceVideos).toBe(before.sourceVideos)
+      })
+    })
   })
 
   describe('undo/redo', () => {

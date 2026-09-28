@@ -18,6 +18,7 @@ import { getThumbnail, getVideo, storeVideo } from './storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { mediaFile } from '../test/doubles/files'
+import { lastObjectUrl } from '../test/objectUrls'
 import {
   failNextGetContext,
   getLastCanvasContext,
@@ -103,7 +104,7 @@ describe('videoProcessor', () => {
       const file = new File(['junk'], 'broken.mp4', { type: 'video/mp4' })
 
       await expect(extractVideoMetadata(file)).rejects.toThrow('Failed to load video: broken.mp4')
-      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
       expect(revoke).toHaveBeenCalledTimes(1)
       revoke.mockRestore()
     })
@@ -121,7 +122,7 @@ describe('videoProcessor', () => {
 
       expect(metadata.duration).toBe(12.5)
       expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
-      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
       expect(revoke).toHaveBeenCalledTimes(1)
       revoke.mockRestore()
     })
@@ -136,7 +137,7 @@ describe('videoProcessor', () => {
 
       expect(metadata.duration).toBe(8)
       expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
-      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
       revoke.mockRestore()
     })
 
@@ -170,7 +171,7 @@ describe('videoProcessor', () => {
         await vi.advanceTimersByTimeAsync(5000)
 
         await rejection
-        expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+        expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
         expect(revoke).toHaveBeenCalledTimes(1)
         revoke.mockRestore()
       } finally {
@@ -301,7 +302,7 @@ describe('videoProcessor', () => {
 
       await expect(generateThumbnail(new File(['v'], 'clip.mp4', { type: 'video/mp4' })))
         .rejects.toThrow('Failed to get canvas context')
-      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
       revoke.mockRestore()
     })
 
@@ -336,7 +337,7 @@ describe('videoProcessor', () => {
       const metadata = await processVideoFile(file)
 
       expect(metadata.mediaType).toBe('video')
-      expect(metadata.thumbnailUrl).toBe('blob:mock-url')
+      expect(metadata.thumbnailUrl).toBe(lastObjectUrl())
       expect(metadata.hasAudio).toBe(true)
       expect(metadata.waveformData!.length).toBeGreaterThan(0)
 
@@ -503,7 +504,7 @@ describe('videoProcessor', () => {
       const metadata = await processImageFile(mediaFile(['png bytes'], 'pic.png', 'image/png'))
 
       expect(metadata.mediaType).toBe('image')
-      expect(metadata.thumbnailUrl).toBe('blob:mock-url')
+      expect(metadata.thumbnailUrl).toBe(lastObjectUrl())
       expect(await getThumbnail(metadata.id)).toBeDefined()
       expect(await (await getVideo(metadata.id))!.blob.text()).toBe('png bytes')
     })
@@ -557,7 +558,7 @@ describe('videoProcessor', () => {
 
       expect(metadata.duration).toBe(12.5)
       expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
-      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
       expect(revoke).toHaveBeenCalledTimes(1)
       revoke.mockRestore()
     })
@@ -588,7 +589,7 @@ describe('videoProcessor', () => {
         await vi.advanceTimersByTimeAsync(5000)
 
         await rejection
-        expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+        expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
         expect(revoke).toHaveBeenCalledTimes(1)
         revoke.mockRestore()
       } finally {
@@ -617,7 +618,7 @@ describe('videoProcessor', () => {
 
       await expect(extractAudioMetadata(new File(['x'], 'bad.webm', { type: 'audio/webm' })))
         .rejects.toThrow('Failed to load audio: bad.webm')
-      expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+      expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
       expect(revoke).toHaveBeenCalledTimes(1)
       revoke.mockRestore()
     })
@@ -695,7 +696,7 @@ describe('videoProcessor', () => {
       const metadata = await processAudioFile(mediaFile(['mp3 bytes'], 'song.mp3', 'audio/mp3'))
 
       expect(metadata.mediaType).toBe('audio')
-      expect(metadata.thumbnailUrl).toBe('blob:mock-url')
+      expect(metadata.thumbnailUrl).toBe(lastObjectUrl())
       expect(metadata.hasAudio).toBe(true)
       expect(metadata.waveformData!.length).toBeGreaterThan(0)
       expect(await getThumbnail(metadata.id)).toBeDefined()
@@ -745,7 +746,10 @@ describe('videoProcessor', () => {
       )
       const createObjectURL = vi.spyOn(URL, 'createObjectURL')
 
-      await expect(createVideoUrl('created-url-video')).resolves.toBe('blob:mock-url')
+      // lastObjectUrl() has to be read AFTER the call: the handle does not exist
+      // until createVideoUrl mints it.
+      const url = await createVideoUrl('created-url-video')
+      expect(url).toBe(lastObjectUrl())
       expect(await (createObjectURL.mock.calls[0][0] as Blob).text()).toBe('bytes')
       createObjectURL.mockRestore()
     })

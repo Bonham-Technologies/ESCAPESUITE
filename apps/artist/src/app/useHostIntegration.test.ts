@@ -19,6 +19,7 @@ import { getTheme, setTheme } from '@escapesuite/shared/theme'
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore'
 import { addClip, resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { defaultUrlParams, sampleVideo } from '../test/appDoubles'
+import { lastObjectUrl, OBJECT_URL_PATTERN } from '../test/objectUrls'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
 vi.mock('../utils/integration', async () => (await import('../test/appDoubles')).integrationDouble())
@@ -31,8 +32,11 @@ const THEME_MODULE_DEFAULT = 'dark' as const
 
 let deps: HostIntegrationDeps
 
-const mountIntegration = async (urlParams: Partial<ReturnType<typeof defaultUrlParams>> = {}) => {
-  deps = { ...deps, urlParams: { ...defaultUrlParams(), ...urlParams } }
+const mountIntegration = async (
+  urlParams: Partial<ReturnType<typeof defaultUrlParams>> = {},
+  overrides: Partial<HostIntegrationDeps> = {}
+) => {
+  deps = { ...deps, ...overrides, urlParams: { ...defaultUrlParams(), ...urlParams } }
   const view = renderHook(() => useHostIntegration(deps))
   await act(async () => {
     await Promise.resolve()
@@ -255,7 +259,7 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
     await mountIntegration({ loadVideoId: 'rec-1' })
 
     expect(deps.addSourceVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'rec-1', thumbnailUrl: 'blob:mock-url' })
+      expect.objectContaining({ id: 'rec-1', thumbnailUrl: lastObjectUrl() })
     )
     expect(deps.showNotification).toHaveBeenCalledWith('Loaded recording: Recording.webm', 'success')
   })
@@ -462,18 +466,27 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       )
     })
 
-    it('revokes every thumbnail it made when the editor goes away', async () => {
+    // ESCSUITE-117: the handoff used to keep its own list of the thumbnails it
+    // made and revoke them in the effect's cleanup. Every one of them had
+    // already been handed to `addSourceVideo`, so the cleanup was freeing
+    // handles the media library was showing. Since ESCSUITE-113 the store owns
+    // every `SourceVideo.thumbnailUrl` — `removeSourceVideo`, `resetProject`
+    // and `addSourceVideo`'s replace-in-place branch free them — so the handoff
+    // keeps no owner of its own.
+    it('leaves the thumbnails it made to the library when the editor goes away', async () => {
       seedTake()
       vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
 
       const { unmount } = await mountIntegration({ loadVideoId: 'take-1' })
-      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      const handed = vi.mocked(deps.addSourceVideo).mock.calls.map(([v]) => v.thumbnailUrl)
+      expect(handed).toEqual([
+        expect.stringMatching(OBJECT_URL_PATTERN),
+        expect.stringMatching(OBJECT_URL_PATTERN),
+      ])
 
       unmount()
 
-      // One per part: the URLs live as long as the library entries, so the
-      // cleanup is the only place they can be handed back.
-      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
     })
 
     // StrictMode mounts the effect, tears it down and mounts it again, so two
@@ -495,7 +508,7 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       expect(deps.showNotification).toHaveBeenCalledTimes(1)
     })
 
-    it('places nothing and revokes its thumbnails when the editor leaves mid-import', async () => {
+    it('places nothing, and leaves its thumbnails to the library, when the editor leaves mid-import', async () => {
       vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
       vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
       let releaseCompanion: () => void = () => {}
@@ -523,10 +536,104 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       // a project the user has moved on from, and says nothing about it either.
       expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
       expect(deps.showNotification).not.toHaveBeenCalled()
-      // Nor does it leak: the cleanup ran before the URLs existed, so the
-      // import's own caller is the only thing that can hand them back.
+      // The parts ARE in the library by then — `importTake` added them before
+      // this run learned it had been replaced — so their thumbnails are the
+      // library's to free, not this run's (ESCSUITE-117). Revoking them here is
+      // what left the tiles dead under StrictMode's double mount.
       expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
-      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+      const handed = vi.mocked(deps.addSourceVideo).mock.calls.map(([v]) => v.thumbnailUrl)
+      expect(handed).toHaveLength(2)
+      for (const url of handed) expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(url)
+    })
+
+    // The development case the revoke actually broke: StrictMode mounts the
+    // effect, cleans it up and mounts it again. The first run fills the library,
+    // the second finds the take already there and mints nothing — so once the
+    // first run's cleanup had revoked its URLs, nothing was left pointing at a
+    // live handle and every tile of the take went blank.
+    it('leaves the library\'s thumbnails live across a remount that imports nothing', async () => {
+      seedTake()
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+      // The REAL store's addSourceVideo, not the vi.fn() the cases above use:
+      // the second run's "already in the library?" answer is what this is about.
+      const intoStore = (video: Parameters<typeof deps.addSourceVideo>[0]) =>
+        store().addSourceVideo(video)
+
+      const first = await mountIntegration({ loadVideoId: 'take-1' }, { addSourceVideo: intoStore })
+      const live = store().sourceVideos.filter((v) => v.id.startsWith('take-1')).map((v) => v.thumbnailUrl)
+      expect(live).toEqual([
+        expect.stringMatching(OBJECT_URL_PATTERN),
+        expect.stringMatching(OBJECT_URL_PATTERN),
+      ])
+
+      first.unmount()
+      await mountIntegration({ loadVideoId: 'take-1' }, { addSourceVideo: intoStore })
+
+      // The second run imported nothing, so these are still the only handles
+      // the library has — and they still work.
+      expect(store().sourceVideos.filter((v) => v.id.startsWith('take-1')).map((v) => v.thumbnailUrl))
+        .toEqual(live)
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    })
+
+    // The case above unmounts only once the first import has landed, so the two
+    // runs never overlap. This is the overlapping one — the shape StrictMode
+    // actually produces: the first run is still awaiting storage when the second
+    // starts, so the library guard cannot separate them and BOTH imports write.
+    // The invariant is not "nothing is revoked" (the loser's handles are freed,
+    // correctly, by `addSourceVideo`'s replace-in-place) but that every handle
+    // the library is left holding still works — and the take is placed once.
+    it('leaves the library\'s thumbnails live when two imports are in flight at once', async () => {
+      vi.mocked(getAllVideoMetadata).mockResolvedValue([primary, webcam])
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+      let releaseCompanion: () => void = () => {}
+      const companionArrives = new Promise<void>((resolve) => { releaseCompanion = resolve })
+      vi.mocked(getVideo).mockImplementation((id) =>
+        (id === 'take-1'
+          ? Promise.resolve({ blob: new Blob(['bytes'], { type: 'video/webm' }), metadata: primary })
+          : // Both runs park here, so neither has written when the other starts.
+            companionArrives.then(() => ({
+              blob: new Blob(['bytes'], { type: 'video/webm' }),
+              metadata: webcam,
+            }))) as never
+      )
+      const intoStore = (video: Parameters<typeof deps.addSourceVideo>[0]) =>
+        store().addSourceVideo(video)
+
+      const first = await mountIntegration({ loadVideoId: 'take-1' }, { addSourceVideo: intoStore })
+      expect(store().sourceVideos.filter((v) => v.id.startsWith('take-1'))).toHaveLength(0)
+      first.unmount()
+      await mountIntegration({ loadVideoId: 'take-1' }, { addSourceVideo: intoStore })
+      await act(async () => {
+        releaseCompanion()
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const live = store().sourceVideos
+        .filter((v) => v.id.startsWith('take-1'))
+        .map((v) => v.thumbnailUrl)
+      expect(live).toEqual([
+        expect.stringMatching(OBJECT_URL_PATTERN),
+        expect.stringMatching(OBJECT_URL_PATTERN),
+      ])
+      // Both runs really did import: four handles minted, not two. (A run that
+      // stood down early, or a library guard that separated them, would mint 2.)
+      const handles = vi.mocked(URL.createObjectURL).mock.results.map((r) => r.value as string)
+      expect(handles).toHaveLength(4)
+      const revoked = vi.mocked(URL.revokeObjectURL).mock.calls.map(([url]) => url)
+      // Every handle minted is exactly one of the two: kept by the library and
+      // live, or replaced and freed. No leak, and nothing on screen pointing at
+      // a dead handle. (Counted per URL rather than as a total, because the
+      // beforeEach's own resetStoreForTest revokes the previous test's library.)
+      for (const url of handles) {
+        expect(live.includes(url)).toBe(!revoked.includes(url))
+      }
+      // Placed by whoever is still mounted, and only once.
+      expect(useEditorStore.getState().project.timeline.clips.map((c) => c.sourceVideoId))
+        .toEqual(['take-1', 'take-1-webcam'])
+      expect(deps.showNotification).toHaveBeenCalledTimes(1)
     })
 
     // "Resume Previous Session?" replaces the project and then clears the
@@ -657,11 +764,63 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
         expect(clips.map((c) => c.id)).toEqual(['restored-screen'])
         expect(deps.showNotification).not.toHaveBeenCalled()
         expect(useEditorStore.getState().history.past).toHaveLength(0)
-        // The thumbnails the dropped take made are handed back at the drop, not
-        // left for the unmount: the restore re-added its own library entries
-        // over the import's, so nothing is pointing at these URLs any more.
+        // The dropped take's thumbnails are NOT revoked here (ESCSUITE-117):
+        // they were handed to `addSourceVideo` and are the library's. What frees
+        // them is the restore re-adding its own entries under the same ids —
+        // `addSourceVideo`'s replace-in-place branch, pinned against the real
+        // store by `useSessionRestore.test.ts`'s "revokes only the id it
+        // actually replaces".
         expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
-        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      })
+
+      // The one firing of the old drop-time revoke that did real damage
+      // (ESCSUITE-117 review round 1): a restore that brings back the screen
+      // part but NOT the webcam. The take is dropped whole, and the webcam is
+      // still in the library carrying the handle the import gave it — so
+      // revoking "the dropped take's URLs" blanked a tile nothing had replaced.
+      it('leaves a companion the restore did not re-add with its thumbnail intact', async () => {
+        seedTake()
+        vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)
+        deps = {
+          ...deps,
+          // The real library, so it actually holds the import's handles.
+          addSourceVideo: (video) => store().addSourceVideo(video),
+        }
+
+        const view = await mountBehindPrompt()
+        const webcamUrl = store().sourceVideos.find((v) => v.id === 'take-1-webcam')!.thumbnailUrl
+        expect(webcamUrl).toEqual(expect.stringMatching(OBJECT_URL_PATTERN))
+
+        // What "Restore" does here: the screen part comes back (with a handle of
+        // its own, resolved from storage) and its clip with it. The webcam part
+        // is not in this session at all.
+        act(() => {
+          store().addSourceVideo({ ...primary, thumbnailUrl: 'blob:from-the-session' })
+          store().addClipToTimeline(
+            {
+              id: 'restored-screen',
+              sourceVideoId: 'take-1',
+              name: 'Screen recording',
+              startTime: 0,
+              endTime: 6,
+              duration: 6,
+            },
+            undefined,
+            0
+          )
+          useEditorStore.getState().clearHistory()
+        })
+
+        await closePrompt(view)
+
+        // Dropped whole, as it must be — a clip already plays the screen part.
+        expect(useEditorStore.getState().project.timeline.clips.map((c) => c.id))
+          .toEqual(['restored-screen'])
+        // And the companion nothing replaced still has a handle that opens.
+        expect(store().sourceVideos.find((v) => v.id === 'take-1-webcam')!.thumbnailUrl)
+          .toBe(webcamUrl)
+        expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(webcamUrl)
       })
 
       // The mirror, so the check above is about the take being there and not

@@ -7,6 +7,7 @@ import { renderApp } from './test/renderApp'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
 import { defaultUrlParams, sampleVideo } from './test/appDoubles'
+import { OBJECT_URL_PATTERN } from './test/objectUrls'
 import { initIntegration, loadVideoFromUrl, parseUrlParams, sendMessage } from './utils/integration'
 import { processVideoFile } from './core/videoProcessor'
 import { getAllVideoMetadata, getThumbnail, getVideo } from './core/storage'
@@ -213,13 +214,19 @@ describe('App URL parameters', () => {
     resetStoreForTest()
     // A prior test in this describe can leave a source in the (module-
     // singleton) store with a live thumbnailUrl if it never unmounted —
-    // resetStoreForTest()'s own resetProject() call just freed that handle
-    // (ESCSUITE-113), which is real cleanup, not something this test did.
-    // Every mock URL is the same literal string ('blob:mock-url'), so left
-    // uncleared that revoke reads as if THIS test's own handoff thumbnail had
-    // already been revoked before it was even minted.
-    vi.mocked(URL.revokeObjectURL).mockClear()
+    // resetStoreForTest()'s own resetProject() call frees that handle
+    // (ESCSUITE-113), which is real cleanup, not something this test did. It
+    // needs no clearing now that every mock handle is distinct (ESCSUITE-117):
+    // a revoke of a previous test's URL can no longer read as a revoke of this
+    // test's own handoff thumbnail.
     store().clearHistory()
+    // Nothing stored to rebuild from, by default. Since ESCSUITE-117 the media
+    // library reads the stored thumbnail of every source that has none, so the
+    // id-aware implementation the two thumbnail cases below install must not
+    // survive into the next test (vi.clearAllMocks clears calls, not
+    // implementations).
+    vi.mocked(getThumbnail).mockReset()
+    vi.mocked(getThumbnail).mockResolvedValue(undefined)
     installCanvasDouble()
     urlParams()
   })
@@ -258,7 +265,13 @@ describe('App URL parameters', () => {
         blob: new Blob(),
         metadata: { ...sampleVideo, id: 'recording1', name: 'Screen recording' },
       })
-      vi.mocked(getThumbnail).mockResolvedValueOnce(new Blob(['thumb'], { type: 'image/jpeg' }))
+      // Keyed by id, not `...Once`: since ESCSUITE-117 the media library reads
+      // the stored thumbnail of every source that has none — the seeded
+      // 'video1' included — so a one-shot value would be consumed by whichever
+      // read happened to run first.
+      vi.mocked(getThumbnail).mockImplementation(async (id: string) =>
+        id === 'recording1' ? new Blob(['thumb'], { type: 'image/jpeg' }) : undefined
+      )
       urlParams({ loadVideoId: 'recording1' })
 
       await renderApp()
@@ -268,16 +281,28 @@ describe('App URL parameters', () => {
       )
       expect(store().sourceVideos.find((v) => v.id === 'recording1')).toMatchObject({
         id: 'recording1',
-        thumbnailUrl: 'blob:mock-url',
+        thumbnailUrl: expect.stringMatching(OBJECT_URL_PATTERN),
       })
     })
 
-    it('revokes the thumbnail it created when the editor goes away', async () => {
+    // ESCSUITE-117: the handoff used to revoke the thumbnails it made in its
+    // effect's cleanup — handles it had already given to `addSourceVideo`, so
+    // the media library was left showing dead URLs after StrictMode's second
+    // mount found the take already imported. The store owns them now
+    // (ESCSUITE-113): `removeSourceVideo`, `resetProject` and
+    // `addSourceVideo`'s replace-in-place branch are what free a thumbnail.
+    it('leaves the thumbnail it created to the library when the editor goes away', async () => {
       vi.mocked(getVideo).mockResolvedValueOnce({
         blob: new Blob(),
         metadata: { ...sampleVideo, id: 'recording1', name: 'Screen recording' },
       })
-      vi.mocked(getThumbnail).mockResolvedValueOnce(new Blob(['thumb'], { type: 'image/jpeg' }))
+      // Keyed by id, not `...Once`: since ESCSUITE-117 the media library reads
+      // the stored thumbnail of every source that has none — the seeded
+      // 'video1' included — so a one-shot value would be consumed by whichever
+      // read happened to run first.
+      vi.mocked(getThumbnail).mockImplementation(async (id: string) =>
+        id === 'recording1' ? new Blob(['thumb'], { type: 'image/jpeg' }) : undefined
+      )
       urlParams({ loadVideoId: 'recording1' })
 
       const { unmount } = await renderApp()
@@ -285,14 +310,11 @@ describe('App URL parameters', () => {
         expect(store().sourceVideos.some((v) => v.id === 'recording1')).toBe(true)
       )
       const thumbnailUrl = store().sourceVideos.find((v) => v.id === 'recording1')!.thumbnailUrl
-      expect(URL.createObjectURL).toHaveBeenCalled()
-      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(thumbnailUrl)
+      expect(thumbnailUrl).toEqual(expect.stringMatching(OBJECT_URL_PATTERN))
 
       unmount()
 
-      // The blob URL lives as long as the media library entry, so it is the
-      // effect's cleanup that hands it back — not the branch that made it.
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith(thumbnailUrl)
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(thumbnailUrl)
     })
 
     it('adds a recording that has no thumbnail', async () => {

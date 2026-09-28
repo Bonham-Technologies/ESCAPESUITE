@@ -42,7 +42,17 @@ import type { SourceVideo, TakeClipPart } from '../store/types';
 export interface ImportedTake {
   /** Every part that can be placed, primary first. */
   clipParts: TakeClipPart[];
-  /** The blob URLs made for the parts' thumbnails. The caller owns revoking them. */
+  /**
+   * The blob URLs made for the parts' thumbnails, in part order.
+   *
+   * NOT the caller's to revoke: every one of them went to `addSourceVideo` with
+   * its part, and since ESCSUITE-113 the store owns freeing a
+   * `SourceVideo.thumbnailUrl` — `removeSourceVideo`, `resetProject` and
+   * `addSourceVideo`'s replace-in-place branch. The handoff revoking them on its
+   * effect's cleanup is exactly what blanked the take's tiles under StrictMode
+   * (ESCSUITE-117). They are reported because an import that throws part-way
+   * frees what it had minted, and because a test can then name them.
+   */
   thumbnailUrls: string[];
   /** Parts the take names whose blob is no longer in storage. */
   missingParts: number;
@@ -280,11 +290,11 @@ export async function importTake(
       });
     }
   } catch (error) {
-    // The URLs escape only on the success path, so a throw is the last moment
-    // anything can see them: the caller revokes what it was returned, and a
-    // rejected import returns nothing. (The hook this was lifted out of kept
-    // its one URL in an effect-scoped variable its cleanup always saw; this is
-    // what replaces that.)
+    // A rejected import returns nothing at all, so this frees what THIS
+    // function minted — not the caller's handles, which by definition it was
+    // never given. Every realistic throw is in the first loop, before any
+    // addSourceVideo; a throw from the second would also free a handle the
+    // library already holds, which is the design call ESCSUITE-117 left open.
     for (const url of thumbnailUrls) URL.revokeObjectURL(url);
     throw error;
   }

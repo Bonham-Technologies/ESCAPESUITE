@@ -336,9 +336,15 @@ describe('PreviewPlayer media loading', () => {
     expect(doubles.media.images[0]).toBe(firstImage)
 
     // Dropping the newcomer revokes only its URL, and leaves the first alone.
+    // Every mock handle is distinct (ESCSUITE-117), so "only its URL" is a
+    // claim the test can actually make.
+    const firstUrl = firstImage.src
+    const secondUrl = doubles.media.images[1].src
+    expect(secondUrl).not.toBe(firstUrl)
     store().removeClipFromTimeline('pic2')
     await settle(60)
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(secondUrl)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(firstUrl)
     expect(doubles.media.images).toHaveLength(2)
   })
 
@@ -390,12 +396,13 @@ describe('PreviewPlayer media loading', () => {
     addClip('clip1', 0, 2)
     await renderPreview()
     const element = doubles.media.videos[0]
+    const loadedUrl = element.src
 
     store().removeClipFromTimeline('clip1')
     await settle(60)
 
     expect(element.src).toBe('')
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(loadedUrl)
   })
 })
 

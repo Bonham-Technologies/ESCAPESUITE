@@ -286,7 +286,6 @@ describe('opening a project', () => {
       sourceVideos: [],
     })
     store().addSourceVideo({ ...sampleVideo, id: 'outgoing', thumbnailUrl: 'blob:outgoing' })
-    vi.mocked(URL.revokeObjectURL).mockClear()
     const { result } = mountActions({
       clipCount: 0,
       resetProject: () => store().resetProject(),

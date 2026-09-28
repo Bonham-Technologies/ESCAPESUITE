@@ -582,6 +582,21 @@ export interface EditorState {
   // Actions - Source videos
   addSourceVideo: (video: SourceVideo) => void;
   removeSourceVideo: (id: string) => void;
+  /**
+   * Put a rebuilt thumbnail handle on a source that has none — NOT undoable
+   * (ESCSUITE-117).
+   *
+   * A source restored by undo comes back with `thumbnailUrl: undefined`, because
+   * ESCSUITE-113 scrubs the revoked handle out of the history snapshots. The
+   * media library reads the *stored* thumbnail again and hands the fresh handle
+   * back through here. That is a repair, not an edit: it records no undo step.
+   *
+   * Refuses — and revokes the URL it was handed — when the source already has a
+   * different live handle: the rebuild lost a race with a real load, and the
+   * library's own handle is the one on screen. An id naming no source, or the
+   * same URL again, changes nothing (and, having minted nothing, frees nothing).
+   */
+  setSourceThumbnail: (id: string, thumbnailUrl: string) => void;
 
   // Actions - Tracks
   addTrack: (name?: string) => Track;
