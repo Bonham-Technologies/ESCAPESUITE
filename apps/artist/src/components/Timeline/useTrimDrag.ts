@@ -39,7 +39,7 @@
 //
 // **One listener pair per gesture, and one measurement.** The per-move store
 // write used to be what re-bound the listeners: `clips` is a fresh array after
-// every `updateClip`, and it was in the effect's deps. The listeners now go
+// every `trimClip` write, and it was in the effect's deps. The listeners now go
 // through `useDocumentListener`, whose `enabled` flag is `trimState !== null` —
 // a boolean that flips twice a gesture — while the handler it holds in a ref
 // is still rebuilt on every render, so the moves and the release read exactly
@@ -50,7 +50,7 @@ import { useCallback, useRef, useState, type RefObject } from 'react';
 import { useDocumentListener } from '../../hooks/useDocumentListener';
 import { useGestureHistory } from '../../hooks/useGestureHistory';
 import type { Clip, SourceVideo, ToolType, Track } from '../../store/types';
-import { computeTrimUpdate, pointerTime } from './timelineGeometry';
+import { computeTrimUpdate, pointerTime, type TrimOrigin } from './timelineGeometry';
 import type { TrimState } from './types';
 import { useTrackAreaCache } from './useTrackAreaCache';
 
@@ -70,11 +70,19 @@ export interface TrimDragDeps {
   activeTool: ToolType;
   setSelectedClipId: (id: string | null) => void;
   /**
-   * The store's `updateClip`. The trailing `skipHistory` is ESCSUITE-77's: the
-   * gesture's first write leaves it `false` and the rest of the drag passes
-   * `true`, so the whole trim is one undo entry.
+   * The store's `trimClip` (ESCSUITE-110 review round 1 split this out of the
+   * generic `updateClip`, which a trim used to go through). The trailing
+   * `skipHistory` is ESCSUITE-77's: the gesture's first write leaves it
+   * `false` and the rest of the drag passes `true`, so the whole trim is one
+   * undo entry.
    */
-  updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => boolean;
+  trimClip: (
+    clipId: string,
+    edge: 'start' | 'end',
+    updates: Partial<Clip>,
+    origin: TrimOrigin,
+    skipHistory?: boolean
+  ) => boolean;
   /**
    * The store's `shiftClipsAfter`, for the ripple tool. Takes the same trailing
    * `skipHistory`: the release's shift belongs to the trim that preceded it, so
@@ -99,7 +107,7 @@ export function useTrimDrag({
   tracks,
   activeTool,
   setSelectedClipId,
-  updateClip,
+  trimClip,
   shiftClipsAfter,
 }: TrimDragDeps): TrimDrag {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
@@ -144,7 +152,7 @@ export function useTrimDrag({
     });
 
     if (update) {
-      gestureHistory.commit((skipHistory) => updateClip(trim.clipId, update, skipHistory));
+      gestureHistory.commit((skipHistory) => trimClip(trim.clipId, trim.edge, update, trim.origin, skipHistory));
     }
   };
 
@@ -208,6 +216,12 @@ export function useTrimDrag({
           startTime: clip.startTime,
           endTime: clip.endTime,
           timelinePosition: clip.timelinePosition,
+          // The gesture's own starting animation (ESCSUITE-110 review round
+          // 1) — `trimClip` rebases from this on every move, never from the
+          // clip's current one, so the gesture is idempotent. Never mutated
+          // in place by anything else in the app, so capturing the reference
+          // needs no clone.
+          animation: clip.animation,
         },
       };
       trimRef.current = initial;

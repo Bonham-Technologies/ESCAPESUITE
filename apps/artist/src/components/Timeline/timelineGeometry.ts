@@ -8,7 +8,15 @@
 // module as free of the store as this one is.
 import { findNearestSnapPoint } from '../../store/timelineSnapping';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
-import type { Clip, SourceVideo } from '../../store/types';
+import type { Clip, SourceVideo, TrimOrigin } from '../../store/types';
+
+/**
+ * What a clip looked like when the trim started. Declared once, in
+ * `store/types.ts` (`trimClip` is a store action and needs the same shape) —
+ * this is a re-export, not a second declaration, since a component may
+ * import from the store but the reverse is not allowed.
+ */
+export type { TrimOrigin };
 
 /** How many pixels one second of timeline occupies at zoom 1. */
 export const PIXELS_PER_SECOND_BASE = 50;
@@ -147,13 +155,6 @@ export function isExtendableClip(
 export interface TimeRange {
   start: number;
   end: number;
-}
-
-/** What a clip looked like when the trim started. */
-export interface TrimOrigin {
-  startTime: number;
-  endTime: number;
-  timelinePosition: number;
 }
 
 export interface TrimUpdateParams {

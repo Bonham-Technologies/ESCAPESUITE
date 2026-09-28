@@ -6,6 +6,13 @@
 // rather than pre-picked fields; everything else here takes plain values instead.
 import type { Clip, ClipAnimation, SourceVideo } from '../../store/types';
 
+// `maxPresetDuration` lives in `utils/animation.ts` now (ESCSUITE-110): both
+// `trimAnimation` and this panel's own sliders need the same bound, and a
+// util importing from a component directory would run the dependency the
+// wrong way. Re-exported here so every existing import of it from this
+// module keeps working unchanged.
+export { maxPresetDuration } from '../../utils/animation';
+
 /** The type flags ClipEditor branches its sections on, plus the label its header shows. */
 export interface ClipDescription {
   isTextOverlay: boolean;
@@ -60,11 +67,6 @@ export function overlayPositionValue(clip: Clip, axis: 'x' | 'y', isOverlay: boo
   if (isOverlay && clip.textData) return clip.textData[axis];
   if (isOverlay && clip.shapeData) return clip.shapeData[axis];
   return clip.transform[axis];
-}
-
-/** The upper bound offered for an animation/transition duration slider. */
-export function maxPresetDuration(clipDuration: number): number {
-  return Math.min(2, clipDuration / 2);
 }
 
 /** The uniform scale that fits a source video's frame inside the project canvas. */
