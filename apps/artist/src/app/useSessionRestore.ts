@@ -9,7 +9,7 @@
 // object: it is the only field this concern reads, and the dependency the
 // effect carried inline was `urlParams.suppressRestore`.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSessionState, clearSessionState, resolveThumbnailUrl, revokeSourceThumbnails, type SessionState } from '../core/storage';
+import { getSessionState, clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -17,14 +17,6 @@ import type { ShowNotification } from './useNotification';
 export interface SessionRestoreDeps {
   /** `?suppressRestore=1`: the host drives its own state, so do not offer one. */
   suppressRestore: boolean;
-  /**
-   * The library as it stands right now — normally empty, since the handoff
-   * (`useHostIntegration`) holds its take back until this question is
-   * settled. Revoked in full at the top of `handleRestoreSession`, before any
-   * restored source's thumbnail is minted (ESCSUITE-113): whatever is here is
-   * about to be superseded either way, and nothing else would ever free it.
-   */
-  sourceVideos: SourceVideo[];
   setProject: (project: Project) => void;
   addSourceVideo: (video: SourceVideo) => void;
   setCurrentTime: (time: number) => void;
@@ -51,7 +43,6 @@ export interface SessionRestore {
 
 export function useSessionRestore({
   suppressRestore,
-  sourceVideos,
   setProject,
   addSourceVideo,
   setCurrentTime,
@@ -90,18 +81,19 @@ export function useSessionRestore({
   // `Promise.all` runs them together and the store is written once, with
   // every card already showing the right picture rather than a broken one
   // that fixes itself a beat later.
+  //
+  // This does not revoke anything on its own: the library is not
+  // reliably empty here — the CRAFT handoff adds a take's parts to it as
+  // soon as it arrives, well before the placement that waits on this
+  // question settling — so a blanket revoke of "whatever is here" would
+  // kill the handoff's still-live thumbnails too. `addSourceVideo`
+  // (`store/projectSlice.ts`) is the one place that owns freeing a
+  // replaced source's *old* thumbnailUrl, exactly when a restored source
+  // happens to share an id the handoff already added (ESCSUITE-113).
   const handleRestoreSession = useCallback(async (session: SessionState) => {
     if (restoreAttemptRef.current) return; // already restoring — see the ref's own comment
     const attempt = {};
     restoreAttemptRef.current = attempt;
-
-    // Whatever the library holds right now is about to be superseded either
-    // way — restored over, or left in place with the prompt closing under
-    // it — and nothing else will ever free its thumbnailUrls (ESCSUITE-113).
-    // In practice this is always empty: the handoff holds its take back
-    // until sessionRestored settles. Revoked before the mint below, not
-    // after, on the offchance a future caller does have something here.
-    revokeSourceThumbnails(sourceVideos);
 
     let restoredSourceVideos: SourceVideo[];
     try {
@@ -144,7 +136,7 @@ export function useSessionRestore({
     setPendingSession(null);
     setSessionRestored(true);
     showNotification('Session restored', 'success');
-  }, [sourceVideos, setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification]);
+  }, [setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification]);
 
   const handleDeclineSession = useCallback(() => {
     // Cancel a restore in flight — see restoreAttemptRef's comment above.

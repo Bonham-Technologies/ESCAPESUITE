@@ -71,13 +71,30 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
   // A re-add carrying identical metadata changes nothing, so it records nothing:
   // an undo step that restores an identical library reads to the user as an undo
   // that did nothing.
+  // ESCSUITE-113: a replace-in-place is the one way a source's thumbnailUrl
+  // changes without the source itself ever leaving the library — nothing
+  // else would free the URL it is replacing, so this is the one place that
+  // owns it. Only when the URL actually changes: a re-add carrying the same
+  // live handle (the identical string — sameSourceVideo already sent an
+  // *unchanged* re-add home above) must not revoke out from under whatever
+  // still shows it, and a session restore landing on a library the CRAFT
+  // handoff already filled must free only the session's own stale URL, never
+  // the handoff's still-live one.
   addSourceVideo: (video: SourceVideo) => set((state) => {
     const existing = state.sourceVideos.findIndex((v) => v.id === video.id)
     if (existing !== -1 && sameSourceVideo(state.sourceVideos[existing], video)) return state
+    const previous = existing !== -1 ? state.sourceVideos[existing] : undefined
     const sourceVideos = existing === -1
       ? [...state.sourceVideos, video]
       : state.sourceVideos.map((v, i) => (i === existing ? video : v))
-    return { sourceVideos, history: pushToHistory(state) }
+    const staleThumbnailUrl = previous?.thumbnailUrl && previous.thumbnailUrl !== video.thumbnailUrl
+      ? previous.thumbnailUrl
+      : undefined
+    if (staleThumbnailUrl) revokeSourceThumbnails([previous!])
+    const history = staleThumbnailUrl
+      ? scrubDeadThumbnails(pushToHistory(state), [staleThumbnailUrl])
+      : pushToHistory(state)
+    return { sourceVideos, history }
   }),
 
   removeSourceVideo: (id: string) => set((state) => {
