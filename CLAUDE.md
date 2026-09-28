@@ -854,6 +854,22 @@ the `LOAD_PROJECT` refusal in `useHostIntegration`, each reached from both sides
 arms were untested when the branch was first measured on its rebased tree; the round that covered them
 is why the count is twenty-six of twenty-six. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-101 (the selection is pruned when a clip
+leaves the timeline, and a no-op edit refuses instead of pushing an undo entry): 99.49 / 98.84 /
+**94.18** / 99.35 against the 99.49 / 98.84 / 94.15 / 99.35 the commit this branch was rebased onto
+measures — branches up three hundredths, the other three unmoved. Measured in one sitting, the base
+gives 4,251 / 4,515 branches and this branch 4,279 / 4,543: twenty-eight new branches, twenty-eight
+covered, the same 264 uncovered as before (statements 7,766 / 7,857 → 7,808 / 7,899, lines
+6,899 / 6,934 → 6,933 / 6,968, functions 1,691 / 1,702 → 1,698 / 1,709, every denominator growing by
+exactly what the numerator did). The new branches are `store/selectionPrune.ts`'s empty-selection
+early return and its "did anything drop" check, the ghost-before-lock ordering in
+`deleteSelectedClips`, the three refusals in `removeClipKeyframe` (unknown clip, a clip with no
+`animation` at all, no keyframe within `KEYFRAME_TIME_EPSILON`), the "would anything change" probes in
+mute / unmute, `splitClip` carrying the first half into a multi-selection, and the keyboard Delete's
+toast gated on the return — each reached from both sides by the paste → undo → Delete sequence, the
+seven ghost-pruning cases, the refusal cases and the successful edits that were already there. **No
+floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -861,7 +877,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
-| `@escapesuite/artist` | 99.49 | 98.84 | 94.15 | 99.35 |
+| `@escapesuite/artist` | 99.49 | 98.84 | 94.18 | 99.35 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
