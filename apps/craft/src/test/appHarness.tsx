@@ -5,7 +5,8 @@
 // window.open) live in `doubles/browser.ts` with the rest of the browser
 // doubles, and are re-exported here because every App suite reaches for them
 // through this module.
-import { act, render, type RenderResult } from '@testing-library/react'
+import { act, render, waitFor, type RenderResult } from '@testing-library/react'
+import { expect } from 'vitest'
 import App from '../App'
 import { useRecorderStore } from '../store/recorderStore'
 import { defaultConfig, type RecordingConfig } from '../store/types'
@@ -82,6 +83,28 @@ export function resetRecorderStore(config: Partial<RecordingConfig> = {}): void 
 export async function renderApp(): Promise<RenderResult> {
   const result = render(<App />)
   await flush()
+  return result
+}
+
+/**
+ * `renderApp()`, for a test that seeded IndexedDB and needs the library
+ * loaded before it acts.
+ *
+ * `renderApp()`'s own `flush()` is a fixed three rounds, and mounting `App`
+ * kicks off `useCapabilityBootstrap`'s `loadRecordings()` — one real
+ * fake-indexeddb transaction for `getRecordingsMetadata()`, then one more
+ * per recording for its `getThumbnail()` — which is exactly the "no fixed
+ * depth" risk `flush()` cannot promise to drain (ESCSUITE-114; the reviewer
+ * measured it: at `flush(1)`, four `App.library.test.tsx` tests that seed a
+ * couple of recordings and read the list straight after `renderApp()`
+ * failed). `renderApp()` itself is left alone — every render pin depends on
+ * its `flush()` being exactly three rounds — so a test that seeds recordings
+ * calls this instead, which additionally waits for the store to actually
+ * hold as many rows as it seeded before handing the render back.
+ */
+export async function renderAppWithLibrary(expectedCount: number): Promise<RenderResult> {
+  const result = await renderApp()
+  await waitFor(() => expect(useRecorderStore.getState().recordings).toHaveLength(expectedCount))
   return result
 }
 

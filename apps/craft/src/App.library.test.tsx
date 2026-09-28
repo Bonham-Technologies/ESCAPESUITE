@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { act, screen, fireEvent } from '@testing-library/react';
+import { act, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRecorderStore } from './store/recorderStore';
 import {
@@ -18,10 +18,9 @@ import {
   resetAppDoubles,
 } from './test/appDoubles';
 import {
-  renderApp,
+  renderAppWithLibrary,
   resetRecorderStore,
   installBrowserStubs,
-  flush,
   type BrowserStubs,
 } from './test/appHarness';
 import { installVideoElementDouble, uninstallVideoElementDouble } from './test/doubles/video';
@@ -94,7 +93,7 @@ describe('App recordings list', () => {
     await seedRecording({ id: 'older', name: 'Older Take', recordedAt: 1_000, duration: 65, size: 2 * 1024 * 1024 });
     await seedRecording({ id: 'newer', name: 'Newer Take', recordedAt: 2_000, duration: 9, size: 10 * 1024 * 1024 });
 
-    await renderApp();
+    await renderAppWithLibrary(2);
 
     const listed = items();
     expect(listed).toHaveLength(2);
@@ -110,7 +109,7 @@ describe('App recordings list', () => {
     await seedRecording({ id: 'with-thumb', name: 'With Thumb', recordedAt: 2_000 });
     await seedRecording({ id: 'no-thumb', name: 'No Thumb', recordedAt: 1_000 }, { withThumbnail: false });
 
-    await renderApp();
+    await renderAppWithLibrary(2);
 
     const [first, second] = items();
     expect(first.querySelector('img')).toHaveAttribute('src', 'blob:mock-url');
@@ -122,7 +121,7 @@ describe('App recordings list', () => {
 describe('App recording playback', () => {
   it('opens the player for the chosen recording and closes it again', async () => {
     await seedRecording({ id: 'take-1', name: 'Standup Demo', duration: 42 });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     await user().click(screen.getByRole('button', { name: 'Play Standup Demo' }));
 
@@ -145,7 +144,7 @@ describe('App recording playback', () => {
 
   it('closes the player from the backdrop but not from the panel', async () => {
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
-    await renderApp();
+    await renderAppWithLibrary(1);
     await user().click(screen.getByRole('button', { name: 'Play Standup Demo' }));
 
     await user().click(screen.getByText('Standup Demo', { selector: '[class*="playbackTitle"]' }));
@@ -158,7 +157,7 @@ describe('App recording playback', () => {
   it('revokes the previous object URL when a second recording is played', async () => {
     await seedRecording({ id: 'a', name: 'First', recordedAt: 2_000 });
     await seedRecording({ id: 'b', name: 'Second', recordedAt: 1_000 });
-    await renderApp();
+    await renderAppWithLibrary(2);
 
     await user().click(screen.getByRole('button', { name: 'Play First' }));
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
@@ -170,7 +169,7 @@ describe('App recording playback', () => {
 
   it('does nothing when the stored blob has gone missing', async () => {
     await seedRecording({ id: 'ghost', name: 'Ghost Take' });
-    await renderApp();
+    await renderAppWithLibrary(1);
     await deleteVideo('ghost'); // storage pruned behind the app's back
 
     await user().click(screen.getByRole('button', { name: 'Play Ghost Take' }));
@@ -181,7 +180,7 @@ describe('App recording playback', () => {
   it('logs a playback failure reported by the player', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
-    await renderApp();
+    await renderAppWithLibrary(1);
     await user().click(screen.getByRole('button', { name: 'Play Standup Demo' }));
 
     const video = (await screen.findByRole('dialog')).querySelector('video') as HTMLVideoElement;
@@ -196,7 +195,7 @@ describe('App recording playback', () => {
 describe('App recording downloads', () => {
   it('downloads the stored WebM under a filesystem-safe name', async () => {
     await seedRecording({ id: 'take-1', name: 'Standup Demo: 9/9' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo: 9/9' }));
 
@@ -208,7 +207,7 @@ describe('App recording downloads', () => {
 
   it('does nothing when the stored blob has gone missing', async () => {
     await seedRecording({ id: 'ghost', name: 'Ghost Take' });
-    await renderApp();
+    await renderAppWithLibrary(1);
     await deleteVideo('ghost');
 
     await user().click(screen.getByRole('button', { name: 'Download Ghost Take' }));
@@ -221,7 +220,7 @@ describe('App recording downloads', () => {
 describe('App recording hand-off and deletion', () => {
   it('hands the chosen recording to the editor', async () => {
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     await user().click(screen.getByRole('button', { name: 'Open Standup Demo in Editor' }));
 
@@ -232,36 +231,38 @@ describe('App recording hand-off and deletion', () => {
   it('deletes the recording from storage and from the list', async () => {
     await seedRecording({ id: 'keep', name: 'Keep Me', recordedAt: 2_000 });
     await seedRecording({ id: 'drop', name: 'Drop Me', recordedAt: 1_000 });
-    await renderApp();
+    await renderAppWithLibrary(2);
 
     await user().click(screen.getByRole('button', { name: 'Delete Drop Me' }));
-    await flush();
+    // deleteVideo is a real fake-indexeddb transaction; wait for its outcome
+    // rather than a fixed number of turns (ESCSUITE-114).
+    await waitFor(() => expect(items()).toHaveLength(1));
 
     expect(useRecorderStore.getState().recordings.map(r => r.id)).toEqual(['keep']);
-    expect(items()).toHaveLength(1);
     expect((await getRecordingsMetadata()).map(m => m.id)).toEqual(['keep']);
   });
 
   it('shows the empty state again once the last recording is deleted', async () => {
     await seedRecording({ id: 'only', name: 'Only Take' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     await user().click(screen.getByRole('button', { name: 'Delete Only Take' }));
-    await flush();
-
-    expect(screen.getByText('No recordings yet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('No recordings yet')).toBeTruthy());
   });
 });
 
 describe('App MP4 downloads', () => {
   it('converts the stored recording and downloads it as MP4', async () => {
     await seedRecording({ id: 'take-1', name: 'Standup Demo: 9/9' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     await user().click(
       screen.getByRole('button', { name: 'Download Standup Demo: 9/9 as MP4' })
     );
-    await flush();
+    // The conversion reads the stored blob back through a real fake-indexeddb
+    // transaction before convertToMP4 even runs; wait for its outcome rather
+    // than a fixed number of turns (ESCSUITE-114).
+    await waitFor(() => expect(browser.downloads).toHaveLength(1));
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1);
     expect(browser.downloads).toEqual([
@@ -273,12 +274,13 @@ describe('App MP4 downloads', () => {
   it('reports a failed conversion through the header live region', async () => {
     converterModule.convertToMP4.mockRejectedValue(new Error('No H.264 encoder'));
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo as MP4' }));
-    await flush();
+    await waitFor(() =>
+      expect(screen.getByText('Conversion failed: No H.264 encoder')).toBeTruthy()
+    );
 
-    expect(screen.getByText('Conversion failed: No H.264 encoder')).toBeTruthy();
     expect(browser.downloads).toEqual([]);
   });
 
@@ -287,7 +289,7 @@ describe('App MP4 downloads', () => {
     // enabled and then taken away.
     converterModule.probeMP4Support.mockReturnValue(new Promise(() => {}));
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
     expect(mp4).toBeDisabled();
@@ -309,7 +311,7 @@ describe('App MP4 downloads', () => {
       audioReason: 'MP4 will have no audio in this browser (no AAC encoder)',
     });
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
     expect(mp4).toBeEnabled();
@@ -318,7 +320,7 @@ describe('App MP4 downloads', () => {
     ).toBeTruthy();
 
     await user().click(mp4);
-    await flush();
+    await waitFor(() => expect(browser.downloads).toHaveLength(1));
 
     expect(browser.downloads).toEqual([
       { href: 'blob:mock-url', download: 'standup_demo.mp4' },
@@ -335,7 +337,7 @@ describe('App MP4 downloads', () => {
       reason: 'This browser cannot encode H.264 video, which an MP4 needs.',
     });
     await seedRecording({ id: 'take-1', name: 'Standup Demo' });
-    await renderApp();
+    await renderAppWithLibrary(1);
 
     const mp4 = screen.getByRole('button', { name: 'Download Standup Demo as MP4' });
     expect(mp4).toBeDisabled();

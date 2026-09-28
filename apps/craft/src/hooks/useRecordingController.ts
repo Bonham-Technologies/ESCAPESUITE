@@ -231,6 +231,20 @@ export function useRecordingController({
     }
   }, []);
 
+  /**
+   * Every path that ends a take — a stop, a cancel from either the countdown
+   * or a live take, and the unmount teardown — shares this one write
+   * (ESCSUITE-114). `dispose()` cancels the monitor's rAF loop without
+   * emitting, so a cancel or Escape that reaches it only through
+   * `disposeRecorder()` would otherwise leave the store holding whatever
+   * level the take last read, for a countdown that starts right back up:
+   * `showMeters` is already true in `'countdown'`, and the take's own
+   * monitor has not run yet.
+   */
+  const zeroAudioLevels = useCallback(() => {
+    setAudioLevels({ microphone: 0, system: 0 });
+  }, [setAudioLevels]);
+
   useEffect(() => () => {
     cancelledRef.current = true;
     // Whatever start is still in flight belongs to a screen that has gone: it
@@ -240,6 +254,7 @@ export function useRecordingController({
     clearCountdownTicker();
     disposeRecorder();
     stopAllStreamsRef.current();
+    zeroAudioLevels();
 
     // The store is a module singleton: it outlives this component. Left as it
     // was, the next mount would come up mid-take — 'recording' with a duration
@@ -248,7 +263,7 @@ export function useRecordingController({
     recorder.setState('idle');
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
-  }, [clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef]);
+  }, [clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
@@ -260,9 +275,10 @@ export function useRecordingController({
     attemptRef.current = null;
     clearCountdownTicker();
     disposeRecorder();
+    zeroAudioLevels();
     setState('idle');
     stopAllStreams();
-  }, [clearCountdownTicker, disposeRecorder, setState, stopAllStreams]);
+  }, [clearCountdownTicker, disposeRecorder, setState, stopAllStreams, zeroAudioLevels]);
 
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
@@ -272,11 +288,12 @@ export function useRecordingController({
     attemptRef.current = null;
     clearDurationTicker();
     disposeRecorder();
+    zeroAudioLevels();
 
     setState('idle');
     setCurrentDuration(0);
     stopAllStreams();
-  }, [clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams]);
+  }, [clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams, zeroAudioLevels]);
 
   // Pause recording
   const handlePauseRecording = useCallback(() => {
@@ -566,7 +583,23 @@ export function useRecordingController({
           // teardown) calls disposeRecorder() on the same line, which nulls
           // recorderRef.current — so this guard is the one that catches it, and
           // a separate `if (cancelledRef.current) return;` here would never run.
+          // The cancel that disposed it zeroed the levels itself (`zeroAudioLevels`,
+          // called from handleCancelRecording / cancelCountdown / the unmount
+          // teardown), so a dropped stop has nothing left to write (ESCSUITE-114).
           if (recorderRef.current !== me) return;
+          // The take is over the instant this fires — whether it was asked
+          // for or the recorder found out on its own (the capture ended) —
+          // and neither recorder's monitor ever emits a zero of its own
+          // (ESCSUITE-114): a take with nothing to measure sends one
+          // hard-coded reading at start and then stops, and a take that IS
+          // measuring something just keeps emitting whatever it last read.
+          // Left alone, the store would carry that reading forever, and the
+          // next take's meter — closed only while there is no live take —
+          // would open on it before its own monitor had said anything. One
+          // call here, the single place both recorders' stop reaches, covers
+          // every path that ends a take with a save rather than one
+          // recorder's own stop().
+          zeroAudioLevels();
           // Four of the ways a part can be lost happen inside the recorder —
           // it was never set up, it encoded nothing, it gave up, its finalize
           // threw — and all four arrive here as a list that is simply shorter,
@@ -748,6 +781,7 @@ export function useRecordingController({
     setStreams,
     setCurrentDuration,
     setAudioLevels,
+    zeroAudioLevels,
     startCountdown,
     startRecording,
     stopAllStreams,

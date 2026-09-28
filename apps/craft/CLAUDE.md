@@ -1005,10 +1005,28 @@ Two more rules the WebCodecs recorder follows and `Recorder` does not yet:
 - A take with **no** microphone and no system audio starts no monitor at all — there is no
   analyser to read, so the loop would only write a hard-coded `{ microphone: 0, system: 0 }`
   into the store for a meter that cannot move. It does send that value **once**, before
-  returning: nothing resets `audioLevels` between takes, and `SourceToggles` draws a meter
-  whenever the *toggle* is on rather than whenever an analyser exists, so a take that asked
-  for system audio and was not given it would otherwise show the previous take's bar frozen
-  at its last value. One store write per take, not per frame.
+  returning. This one-shot predates ESCSUITE-114's fix below and is now belt-and-braces rather
+  than load-bearing — the store already reads zero at the start of every take regardless — but
+  it costs one store write per take, not per frame, so it stays rather than adding a branch to
+  skip it.
+
+Neither recorder's monitor ever emits a zero on its own once it has something real to measure —
+it just keeps sending whatever it last read, for as long as the take runs. And `dispose()`,
+which both cancel paths and the unmount teardown call instead of `stop()`, cancels the monitor's
+`requestAnimationFrame` loop without emitting at all — so a cancel produced no zero of any kind
+before ESCSUITE-114. `useRecordingController` now shares one `zeroAudioLevels()` helper, called
+from every path that ends a take: the stop path (`onStop`, past the `cancelledRef.current` guard
+— a stop that lands for a take already thrown away has nothing left to zero, since the cancel
+that raised the flag already did), `handleCancelRecording`, `cancelCountdown`, and the unmount
+teardown (which already reset `state` / `currentDuration` / `countdownValue` for the same
+module-singleton-store reason and had omitted `audioLevels`). Whichever way a take ends, the
+next one's meter — closed by `showMeters` for every state but `'countdown'` / `'recording'` /
+`'paused'`, ESCSUITE-104 — never opens on a level the take before it left behind; `'countdown'`
+is the state that matters here, since the recorder (and its monitor) is already initialize()d by
+the time a countdown starts, before the meter has a reading of its own to show.
+`useRecordingController.test.ts`'s "audio levels" cases pin it: non-zero while a take is live,
+zero after a stop asked for and one the recorder fired on its own, zero after each of the two
+cancel paths, and zero already sitting there the moment the next take reaches `'countdown'`.
 
 **A level push now costs the Sources panel and nothing else.** `App` selects each field it
 reads and does not read `audioLevels` at all; `SourceTogglesPanel` owns the subscription and
@@ -1604,6 +1622,39 @@ the outcome, not on the double.
   `installRafDouble()` family drives the PiP compositor's animation frames by hand. It also
   re-exports `installBrowserStubs()` from `doubles/browser.ts`, because every App suite reaches
   for it through this module.
+  `flush(rounds = 3)` runs a **fixed** number of real `setTimeout(0)` turns — right for settling
+  a render pin (`App.rerender.test.tsx`, `App.mp4rerender.test.tsx` count exactly how many turns
+  a given change costs, which is the one place a fixed count is the thing under test, and both
+  files stay byte-for-byte on `flush()`'s fixed shape) and wrong for anything whose depth isn't
+  fixed. The save chain is the sharpest example: `fixWebMMetadata` → `extractVideoMetadata` →
+  `generateThumbnail` → `storeVideo` → `storeThumbnail` runs through two real fake-indexeddb
+  transactions, and under load three rounds is not a promise the chain drains in —
+  ESCSUITE-114 saw it fail 18 assertions at once in `App.saving.test.tsx`, green in isolation
+  and in the runs either side of it. `renderApp()`'s own `flush()` carries the same risk on
+  every mount, not just a save: `App` mounting kicks off `useCapabilityBootstrap`'s
+  `loadRecordings()`, which is `getRecordingsMetadata()` plus one `getThumbnail()` per stored
+  recording — real fake-indexeddb transactions again, one more of them for every recording a
+  test has seeded. A call waiting on an *outcome* — a saved row, a deleted one, a download, a
+  notice, the library itself — uses `@testing-library/react`'s `waitFor(() => expect(...))`
+  instead, polling the real DOM until the assertion holds or its own timeout passes.
+  `App.saving.test.tsx`, the delete/MP4 cases in `App.library.test.tsx`, and
+  **`renderAppWithLibrary(expectedCount)`** — `renderApp()` plus a `waitFor` on the store
+  holding that many `recordings`, used by every test in `App.library.test.tsx` that seeds
+  IndexedDB before rendering, since `renderApp()` itself is left exactly as it is — are the
+  ones that do; a `flush()` call elsewhere in the suite that isn't behind one of those settles a
+  mocked capture promise or a keyboard-shortcut dispatch, neither of which has an unbounded
+  chain behind it.
+
+  **Why `waitFor` is safe here even though `setInterval` is faked:** every suite that fakes
+  timers does it narrowly — `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })`,
+  for the countdown and duration tickers only — and leaves `setTimeout` **real**. `waitFor`'s
+  50 ms poll interval is dead weight under that (jsdom's `MutationObserver`, which runs on real
+  microtasks regardless of any faked timer, is what actually re-checks the assertion after every
+  DOM mutation), but its 1000 ms give-up timer is a real `setTimeout` and does fire — a
+  deliberately wrong expectation was confirmed to fail in ~3 test-seconds with the assertion's
+  own line, not hang. This is load-bearing: widen that `toFake` list to include `setTimeout` in
+  a suite that also uses `waitFor`, and every converted call hangs to `testTimeout` instead of
+  failing with a useful message.
 - **`*.perf.test.ts` files are ceilings, not benchmarks.** `core/compositor.perf.test.ts`,
   `core/converter.perf.test.ts`, `core/webcodecsRecorder.perf.test.ts` and
   `core/recorder.perf.test.ts` count what a frame, a take or a second of monitoring costs —
