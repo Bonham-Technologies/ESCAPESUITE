@@ -673,13 +673,18 @@ describe('VideoLibrary', () => {
         URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
       )
 
-    /** A read the test lands itself, so it can change the library first. */
-    function parkedRead() {
-      let land: (url: string | undefined) => void = () => {}
+    /**
+     * Reads the test lands itself, one per source id, so it can change the
+     * library — or unmount the editor — while they are still in flight.
+     */
+    function parkedReads() {
+      const pending = new Map<string, (url: string | undefined) => void>()
       mockResolveThumbnailUrl.mockImplementation(
-        () => new Promise<string | undefined>((resolve) => { land = resolve })
+        (id: string) => new Promise<string | undefined>((resolve) => { pending.set(id, resolve) })
       )
-      return async (url: string | undefined) => {
+      return async (id: string, url: string | undefined) => {
+        const land = pending.get(id)
+        if (!land) throw new Error(`no read is parked for ${id}`)
         await act(async () => { land(url) })
       }
     }
@@ -730,7 +735,7 @@ describe('VideoLibrary', () => {
     })
 
     it('frees the handle it minted when the source left the library before the read landed', async () => {
-      const land = parkedRead()
+      const land = parkedReads()
       store().addSourceVideo(videoMeta)
       const setSourceThumbnail = vi.spyOn(useEditorStore.getState(), 'setSourceThumbnail')
       render(<VideoLibrary />)
@@ -738,7 +743,7 @@ describe('VideoLibrary', () => {
 
       act(() => { store().removeSourceVideo('video1') })
       const orphaned = URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
-      await land(orphaned)
+      await land('video1', orphaned)
 
       expect(URL.revokeObjectURL).toHaveBeenCalledWith(orphaned)
       expect(setSourceThumbnail).not.toHaveBeenCalled()
@@ -747,21 +752,21 @@ describe('VideoLibrary', () => {
     })
 
     it('frees the handle it minted when the editor went away before the read landed', async () => {
-      const land = parkedRead()
+      const land = parkedReads()
       store().addSourceVideo(videoMeta)
       const { unmount } = render(<VideoLibrary />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
       unmount()
       const orphaned = URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
-      await land(orphaned)
+      await land('video1', orphaned)
 
       expect(URL.revokeObjectURL).toHaveBeenCalledWith(orphaned)
       expect(store().sourceVideos[0].thumbnailUrl).toBeUndefined()
     })
 
     it('reads a source once, however many times it re-renders while the read is parked', async () => {
-      const land = parkedRead()
+      const land = parkedReads()
       store().addSourceVideo(videoMeta)
       const { rerender } = render(<VideoLibrary />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
@@ -772,7 +777,71 @@ describe('VideoLibrary', () => {
       rerender(<VideoLibrary />)
 
       expect(mockResolveThumbnailUrl.mock.calls.filter(([id]) => id === 'video1')).toHaveLength(1)
-      await land(undefined)
+      await land('video1', undefined)
+    })
+
+    // A landing rebuild writes the store, which hands this component a NEW
+    // sourceVideos array and re-runs the effect. An effect-scoped "am I still
+    // mounted?" flag, flipped by the previous run's cleanup, therefore told every
+    // read still parked that the editor had gone — so each freed the handle it
+    // had just minted instead of setting it, and its id was already in the
+    // already-read set, so the re-run did not try again. One tile repaired per
+    // burst, and undo across a project load restores every source of the project
+    // at once (review round 1).
+    it('repairs every thumbnail-less source, not only the first to land', async () => {
+      const land = parkedReads()
+      store().addSourceVideo(videoMeta)
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'second.mp4' })
+      render(<VideoLibrary />)
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledTimes(2))
+
+      await land('video1', 'blob:rebuilt-1')
+      await land('video2', 'blob:rebuilt-2')
+
+      expect(store().sourceVideos.map((v) => v.thumbnailUrl)).toEqual([
+        'blob:rebuilt-1',
+        'blob:rebuilt-2',
+      ])
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:rebuilt-1')
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:rebuilt-2')
+    })
+
+    // The same fault, reached by any other store write: a source arriving while
+    // the read is parked re-runs the effect just as a landing rebuild does.
+    it('keeps the handle it minted when an unrelated source joins the library mid-read', async () => {
+      const land = parkedReads()
+      store().addSourceVideo(videoMeta)
+      render(<VideoLibrary />)
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
+
+      act(() => {
+        store().addSourceVideo({ ...imageMeta, thumbnailUrl: 'blob:unrelated' })
+      })
+      await land('video1', 'blob:rebuilt')
+
+      expect(store().sourceVideos.find((v) => v.id === 'video1')?.thumbnailUrl).toBe('blob:rebuilt')
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:rebuilt')
+      // The newcomer already had one, so it was never read for.
+      expect(mockResolveThumbnailUrl).toHaveBeenCalledTimes(1)
+    })
+
+    // The third arm of the guard, distinct from "unmounted" and "gone from the
+    // library": the source is still here and now has a handle of its own, put
+    // there by a real load — an import, a session restore — while the read was
+    // parked. That one is on screen, so the rebuild's is freed (review round 1).
+    it('frees the handle it minted when a real load won the race', async () => {
+      const land = parkedReads()
+      store().addSourceVideo(videoMeta)
+      render(<VideoLibrary />)
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
+
+      act(() => {
+        store().addSourceVideo({ ...videoMeta, thumbnailUrl: 'blob:from-a-real-load' })
+      })
+      await land('video1', 'blob:rebuilt')
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:rebuilt')
+      expect(store().sourceVideos[0].thumbnailUrl).toBe('blob:from-a-real-load')
     })
 
     it('says so and stops when the read itself fails', async () => {

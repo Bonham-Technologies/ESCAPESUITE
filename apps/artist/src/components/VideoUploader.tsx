@@ -379,8 +379,32 @@ export function VideoLibrary() {
    * emptied: one read per source per mount is enough — a source whose
    * thumbnail is not in storage will not grow one while the editor is open,
    * and one that IS rebuilt is no longer thumbnail-less.
+   *
+   * Created on first use rather than passed to `useRef`, which would build a
+   * Set on every render and throw all but the first away.
    */
-  const thumbnailReadsRef = useRef<Set<string>>(new Set());
+  const thumbnailReadsRef = useRef<Set<string> | null>(null);
+
+  /**
+   * False from the moment this component unmounts — for the whole component's
+   * life, not one effect run's.
+   *
+   * It has to outlive the effect below. A rebuild that lands writes the store,
+   * which hands this component a new `sourceVideos` array and re-runs that
+   * effect; an effect-scoped flag flipped by the previous run's cleanup would
+   * therefore tell every read still parked that the editor had gone, and each
+   * would free the handle it had just minted instead of setting it — while the
+   * re-run skipped those ids, having already read them. One tile repaired per
+   * burst, where undo across a project load restores every source of the
+   * project at once (review round 1).
+   */
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    // Set on the way in as well as cleared on the way out, because StrictMode's
+    // double mount runs the cleanup and then mounts the same instance again.
+    mountedRef.current = true;
+    return () => { mountedRef.current = false };
+  }, []);
 
   /**
    * Rebuild a thumbnail the history scrubbed (ESCSUITE-117).
@@ -395,14 +419,16 @@ export function VideoLibrary() {
    *
    * The handle belongs to the library from the moment the store takes it. Until
    * then this owns it, and frees it if the tile it was for is gone — the source
-   * removed, the editor unmounted, or a real load having won the race.
+   * removed, the editor unmounted (`mountedRef`, which is the component's
+   * lifetime and deliberately not this effect's), or a real load having won the
+   * race.
    */
   useEffect(() => {
-    let mounted = true;
+    const alreadyRead = (thumbnailReadsRef.current ??= new Set<string>());
     for (const source of sourceVideos) {
-      if (source.thumbnailUrl || thumbnailReadsRef.current.has(source.id)) continue;
+      if (source.thumbnailUrl || alreadyRead.has(source.id)) continue;
       const id = source.id;
-      thumbnailReadsRef.current.add(id);
+      alreadyRead.add(id);
       void (async () => {
         let url: string | undefined;
         try {
@@ -413,14 +439,13 @@ export function VideoLibrary() {
         }
         if (!url) return;
         const current = useEditorStore.getState().sourceVideos.find((v) => v.id === id);
-        if (!mounted || !current || current.thumbnailUrl) {
+        if (!mountedRef.current || !current || current.thumbnailUrl) {
           URL.revokeObjectURL(url);
           return;
         }
         setSourceThumbnail(id, url);
       })();
     }
-    return () => { mounted = false; };
   }, [sourceVideos, setSourceThumbnail]);
 
   const handleAddToTimeline = useCallback(
