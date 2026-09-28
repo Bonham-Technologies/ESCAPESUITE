@@ -40,7 +40,7 @@ import {
   cleanupIterationFrames,
   disposeFrameManager,
 } from './frameManager';
-import { extractAndMixAudioWithWorker } from './audioMixer';
+import { extractAndMixAudio } from './audioMixer';
 
 /**
  * Structured log entry for export diagnostics
@@ -133,12 +133,12 @@ export async function exportToMP4(
   const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
-  // Extract and mix audio first (uses Web Worker if available, falls back to main thread)
+  // Extract and mix audio first, on the main thread
   // Note: we extract the full timeline audio, then slice it later
   onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
   log('audio', 'Starting audio extraction');
-  const fullAudioData: Float32Array | null = await extractAndMixAudioWithWorker(clips, exportTracks, fullDuration, (p) => {
+  const fullAudioData: Float32Array | null = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
     onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
   });
   log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');

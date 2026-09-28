@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToMP4, ExportError } from './exportMP4'
 import { ExportAbortedError } from './exportTypes'
-import { extractAndMixAudioWithWorker } from './audioMixer'
+import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import {
   fromEncodedChunk,
@@ -46,10 +46,10 @@ vi.mock('mediabunny', async () => {
 })
 
 vi.mock('./audioMixer', () => ({
-  extractAndMixAudioWithWorker: vi.fn(async () => null),
+  extractAndMixAudio: vi.fn(async () => null),
 }))
 
-const mixAudio = vi.mocked(extractAndMixAudioWithWorker)
+const mixAudio = vi.mocked(extractAndMixAudio)
 
 /** 6 frames at 30fps — enough for a keyframe, progress ticks and an abort. */
 const CLIP_DURATION = 0.2

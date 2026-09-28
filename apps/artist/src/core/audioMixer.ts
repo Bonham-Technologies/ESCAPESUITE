@@ -1,12 +1,18 @@
-// Audio extraction and mixing for the export pipeline
-// Supports Web Worker offloading with main thread fallback
+// Audio extraction and mixing for the export pipeline.
+//
+// This used to have a Web Worker fast path (`extractAndMixAudioWithWorker`,
+// `workers/exportWorker.ts`, `utils/workerSupport.ts`). ESCSUITE-99 deleted it:
+// the worker's own audio mixer multiplied by `trackVolume` alone and never
+// applied volume keyframes, and its support probe tests for
+// `OfflineAudioContext` *inside* the worker — which real Chromium does not
+// expose to a DedicatedWorker — so `getWorkerSupport()` always resolved
+// `false` and the worker path never ran in production. This is now the only
+// mixer; it runs on the main thread and applies `getAnimatedVolume` per
+// sample, same as the preview.
 
 import type { Clip, Track } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getAnimatedVolume } from '../utils/animation';
-import { getWorkerSupport } from '../utils/workerSupport';
-import type { WorkerRequest, WorkerResponse, AudioClipMeta } from '../workers/exportWorker';
-import ExportWorker from '../workers/exportWorker?worker';
 
 /**
  * Extract audio from video files and mix for export
@@ -36,11 +42,11 @@ export async function extractAndMixAudio(
     const clip = clips[i];
     const track = tracks.find(t => t.id === clip.trackId);
 
-    // Skip muted tracks
-    if (track?.muted) continue;
+    // Skip a clip whose track has been deleted, and skip muted tracks
+    if (!track || track.muted) continue;
 
     // Get track volume (default to 1 if not set)
-    const trackVolume = track?.volume ?? 1;
+    const trackVolume = track.volume ?? 1;
 
     try {
       const blob = await getVideoBlob(clip.sourceVideoId);
@@ -143,133 +149,4 @@ export async function extractAndMixAudio(
   }
 
   return outputBuffer;
-}
-
-/**
- * Extract and mix audio using Web Worker
- * Falls back to main thread if worker is unavailable
- */
-export async function extractAndMixAudioWithWorker(
-  clips: Clip[],
-  tracks: Track[],
-  totalDuration: number,
-  onProgress: (percent: number) => void
-): Promise<Float32Array | null> {
-  // Check worker support
-  const canUseWorker = await getWorkerSupport();
-
-  if (!canUseWorker) {
-    // Fall back to main thread extraction
-    return extractAndMixAudio(clips, tracks, totalDuration, onProgress);
-  }
-
-  try {
-    // Create worker using Vite's bundled worker
-    const worker = new ExportWorker();
-
-    // Collect audio blobs and metadata
-    const audioBlobs: ArrayBuffer[] = [];
-    const clipMeta: AudioClipMeta[] = [];
-    const sourceIndexMap = new Map<string, number>();
-
-    for (const clip of clips) {
-      if (!clip.sourceVideoId) continue;
-
-      const track = tracks.find((t) => t.id === clip.trackId);
-      if (!track) continue;
-
-      // Get blob if not already loaded
-      if (!sourceIndexMap.has(clip.sourceVideoId)) {
-        const blob = await getVideoBlob(clip.sourceVideoId);
-        if (blob) {
-          const arrayBuffer = await blob.arrayBuffer();
-          sourceIndexMap.set(clip.sourceVideoId, audioBlobs.length);
-          audioBlobs.push(arrayBuffer);
-        }
-      }
-
-      const sourceIndex = sourceIndexMap.get(clip.sourceVideoId);
-      if (sourceIndex === undefined) continue;
-
-      clipMeta.push({
-        sourceIndex,
-        clipId: clip.id,
-        trackId: clip.trackId,
-        trackVolume: track.volume ?? 1,
-        trackMuted: track.muted,
-        sourceStartTime: clip.startTime,
-        clipDuration: clip.duration,
-        timelinePosition: clip.timelinePosition,
-      });
-    }
-
-    // Initialize worker
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 5000);
-
-      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-        if (e.data.type === 'INIT_COMPLETE') {
-          clearTimeout(timeout);
-          resolve();
-        } else if (e.data.type === 'ERROR') {
-          clearTimeout(timeout);
-          reject(new Error(e.data.error));
-        }
-      };
-
-      worker.onerror = (e) => {
-        clearTimeout(timeout);
-        reject(new Error(`Worker error: ${e.message}`));
-      };
-
-      worker.postMessage({
-        type: 'INIT',
-        clips,
-        tracks,
-        totalDuration,
-      } as WorkerRequest);
-    });
-
-    // Request audio extraction
-    const audioResult = await new Promise<Float32Array | null>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Audio extraction timeout')), 60000);
-
-      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-        if (e.data.type === 'AUDIO_READY') {
-          clearTimeout(timeout);
-          resolve(e.data.hasAudio ? e.data.audioBuffer : null);
-        } else if (e.data.type === 'AUDIO_PROGRESS') {
-          onProgress(e.data.progress);
-        } else if (e.data.type === 'ERROR') {
-          clearTimeout(timeout);
-          reject(new Error(e.data.error));
-        }
-      };
-
-      worker.onerror = (e) => {
-        clearTimeout(timeout);
-        reject(new Error(`Worker error: ${e.message}`));
-      };
-
-      // Transfer audio blobs to worker
-      worker.postMessage(
-        {
-          type: 'EXTRACT_AUDIO',
-          audioBlobs,
-          clipMeta,
-        } as WorkerRequest,
-        { transfer: audioBlobs }
-      );
-    });
-
-    // Terminate worker
-    worker.postMessage({ type: 'TERMINATE' } as WorkerRequest);
-    worker.terminate();
-
-    return audioResult;
-  } catch (error) {
-    console.warn('Worker audio extraction failed, falling back to main thread:', error);
-    // Fall back to main thread extraction
-    return extractAndMixAudio(clips, tracks, totalDuration, onProgress);
-  }
 }

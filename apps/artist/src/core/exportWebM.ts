@@ -34,7 +34,7 @@ import {
   drawTextOverlayToCanvasAnimated,
   drawShapeOverlayToCanvasAnimated,
 } from './canvasRenderer';
-import { extractAndMixAudioWithWorker } from './audioMixer';
+import { extractAndMixAudio } from './audioMixer';
 
 /**
  * Export timeline to WebM using WebCodecs + webm-muxer
@@ -93,11 +93,11 @@ export async function exportToWebM(
   const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
-  // Extract and mix audio first (uses Web Worker if available, falls back to main thread)
+  // Extract and mix audio first, on the main thread
   // Note: we extract the full timeline audio, then slice it later
   onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
-  const fullAudioData = await extractAndMixAudioWithWorker(clips, exportTracks, fullDuration, (p) => {
+  const fullAudioData = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
     onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
   });
 
