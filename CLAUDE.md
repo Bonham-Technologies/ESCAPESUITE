@@ -988,13 +988,30 @@ paragraph recorded 94.56 on its own rebased tree — two branches of Istanbul dr
 of 4,392, the same kind ESCSUITE-91's row noted — and the comparison here is between two runs in one
 sitting. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-28 for ESCSUITE-118 (the recorder's callbacks carry
+the identity of the take they were built for): 100.00 / 99.51 / **97.67** / 100.00 against the
+100.00 / 99.51 / 97.65 / 100.00 the commit this branch was rebased onto measures — branches up two
+hundredths, the other three unmoved. Measured in one sitting, the base gives 1,293 / 1,324 branches
+and this branch 1,301 / 1,332, statements 2,459 / 2,471 → 2,468 / 2,480, lines 2,313 → 2,318: eight
+new branches and nine new statements, every one covered, the same 31 branches and 12 statements
+uncovered as before. The eight are the `recorderRef.current !== me` guards on `onStart`, `onPause`,
+`onResume`, `onStop` and `onError` in `useRecordingController.ts`, each reached from both sides by
+the seven new cases (a late `onError` / `onStop` / `onStart` / `onPause` / `onResume` from a
+disposed recorder against the live take's own callbacks, and a recorder's own `onStop` after its
+own `onError` disposed it). The first measurement of the branch came back at 1,302 / 1,334 — one
+*more* uncovered arm than the base — because `onStop`'s old `if (cancelledRef.current) return;` had
+become unreachable behind the new guard: every path that raises `cancelledRef` disposes the
+recorder on the same line, so the identity check always returned first. Round 2 deleted it rather
+than tested it, the way ESCSUITE-110 treated its unreachable operands, and the denominator settled
+two lower. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.51 | 97.65 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.51 | 97.67 | 100.00 |
 | `@escapesuite/artist` | 99.52 | 98.88 | 94.58 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
