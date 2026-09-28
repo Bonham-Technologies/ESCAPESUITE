@@ -2,11 +2,14 @@
 // interval tickers, and the teardown that runs when the screen goes away.
 //
 // Four kinds of ref are created here and nowhere else — the recorder, the
-// cancelled flag, the starting flag and the two interval handles — because each
+// cancelled flag, the attempt token and the two interval handles — because each
 // is written by one path and read by three. The cancelled flag in particular is
-// reset by handleStartRecording, raised by handleCancelRecording and by the
-// unmount teardown, and read by the recorder's onStop: a second copy of it
-// would let a late chunk from a thrown-away take be saved.
+// reset by handleStartRecording, raised by handleCancelRecording, by
+// cancelCountdown and by the unmount teardown, and read by the recorder's
+// onStop: a second copy of it would let a late chunk from a thrown-away take be
+// saved. The attempt token says which start owns the app, so a start that
+// resumes after the user moved on releases what it was handed instead of
+// building on it (ESCSUITE-109).
 //
 // The recorder's six callbacks are captured once, when createRecorder runs, so
 // they close over the stopAllStreams and saveRecording of the render that
@@ -26,6 +29,7 @@ import {
 import { hasSystemAudio, stopStream } from '../core/permissions';
 import {
   CAPTURE_REFUSED,
+  CAPTURE_UNANSWERED,
   NO_SYSTEM_AUDIO,
   SAVE_FAILED,
   START_FAILED,
@@ -69,6 +73,26 @@ export interface RecordingControllerDeps {
    * see the comment on the acquisition below.
    */
   refreshStorageSpace: () => Promise<void>;
+}
+
+/**
+ * How long ESCAPECRAFT waits for the browser to answer a capture request before
+ * it gives the user the app back (ESCSUITE-109).
+ *
+ * Generous on purpose, and deliberately not tunable: the share picker is a
+ * dialog a user may legitimately leave sitting while they find the window they
+ * meant to share, or while they read the camera prompt. A minute is long enough
+ * that no real answer is ever cut off, and short enough that a request nobody
+ * is going to answer — a wedged camera driver, a prompt on a screen the user
+ * has walked away from — is not a dead end with no way out but a reload.
+ */
+export const CAPTURE_TIMEOUT_MS = 60_000;
+
+/** Give back every capture one request handed over. */
+function releaseAcquired({ screen, webcam, mic }: AcquiredStreams): void {
+  stopStream(screen);
+  stopStream(webcam);
+  stopStream(mic);
 }
 
 /**
@@ -123,14 +147,28 @@ export function useRecordingController({
   // been cancelled or the screen has gone away. The blob is then nobody's: it
   // belongs to a recording the user threw away, and must not be saved.
   const cancelledRef = useRef(false);
-  // Whether a start is already on its way (ESCSUITE-93). `state` is the
-  // *rendered* truth and is one render behind the click, so two fast clicks —
-  // or two R presses — both saw 'idle' and both ran: two pickers, two
-  // compositors, and a second `recorderRef.current =` that orphaned the first
-  // recorder with its AudioContext, its rAF level monitor and its muxer, and
-  // nothing left that could ever dispose them. This ref is the synchronous
-  // truth, raised at entry and dropped in the `finally` of the same attempt.
-  const startingRef = useRef(false);
+  // Which start owns the app: the token of the attempt in flight, or null when
+  // there is none. `state` is the *rendered* truth and is one render behind the
+  // click, so two fast clicks — or two R presses — both saw 'idle' and both ran:
+  // two pickers, two compositors, and a second `recorderRef.current =` that
+  // orphaned the first recorder with its AudioContext, its rAF level monitor and
+  // its muxer, and nothing left that could ever dispose them. A non-null token
+  // is the synchronous truth that answers that (ESCSUITE-93).
+  //
+  // It is a token rather than the boolean it replaces because the boolean could
+  // only be dropped when the attempt *settled* (ESCSUITE-109): a take cancelled
+  // while the picker was still on screen left Record inert until that picker was
+  // answered — for a picker nobody ever answers, for the rest of the session,
+  // with nothing said about it. Both cancels and the unmount teardown drop the
+  // token instead, which does both halves at once: Record is free at cancel
+  // time, and the attempt that resumes afterwards finds a token that is no
+  // longer its own and releases what it was handed rather than building on it.
+  //
+  // Identity is all the token has to carry, so it is an empty object rather than
+  // a counter: a counter can say which attempt is newest, but not whether any
+  // attempt is in flight, which is the question the one-start-at-a-time gate
+  // asks.
+  const attemptRef = useRef<object | null>(null);
 
   // Capture thumbnail from preview (video element or compositor canvas)
   const capturePreviewThumbnail = useCallback((): Promise<Blob | null> => {
@@ -192,6 +230,9 @@ export function useRecordingController({
 
   useEffect(() => () => {
     cancelledRef.current = true;
+    // Whatever start is still in flight belongs to a screen that has gone: it
+    // resumes into a component nobody can see, and must build nothing.
+    attemptRef.current = null;
     clearDurationTicker();
     clearCountdownTicker();
     disposeRecorder();
@@ -208,6 +249,12 @@ export function useRecordingController({
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
+    // The same shape as handleCancelRecording: a cancel is a cancel, whichever
+    // control raised it (ESCSUITE-109). Before this, this one was visible to the
+    // post-initialize guard only through the recorder ref it nulled, and to a
+    // start still parked on its capture request not at all.
+    cancelledRef.current = true;
+    attemptRef.current = null;
     clearCountdownTicker();
     disposeRecorder();
     setState('idle');
@@ -217,6 +264,9 @@ export function useRecordingController({
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
     cancelledRef.current = true;
+    // Frees Record now, not when the capture request this take may still be
+    // parked on finally settles (ESCSUITE-109).
+    attemptRef.current = null;
     clearDurationTicker();
     disposeRecorder();
 
@@ -278,9 +328,12 @@ export function useRecordingController({
   const handleStartRecording = useCallback(async () => {
     // One start at a time. The rendered `state` cannot say this — it is written
     // below and read a render later — so a second click inside the same tick is
-    // dropped here (ESCSUITE-93).
-    if (startingRef.current) return;
-    startingRef.current = true;
+    // dropped here (ESCSUITE-93). A cancel drops the token, so the click *after*
+    // a cancel is not dropped even while the abandoned request is still out
+    // there (ESCSUITE-109).
+    if (attemptRef.current !== null) return;
+    const myAttempt: object = {};
+    attemptRef.current = myAttempt;
     try {
       cancelledRef.current = false;
       // Starting a take is the "next successful action" that clears whatever
@@ -302,7 +355,54 @@ export function useRecordingController({
       // each save, after each delete — and read back through
       // `recordBlockedReason`, so a take with nowhere to go is refused by a
       // disabled button before the click ever happens.
-      const { screen, webcam, mic } = await acquireStreams();
+      const request = acquireStreams();
+
+      // A request the browser never answers — a picker or a permission prompt
+      // left on screen, a camera or microphone driver wedged so that
+      // `getUserMedia` never settles — used to park this function, and the UI in
+      // 'preparing', for the life of the tab (ESCSUITE-109). Neither
+      // `getDisplayMedia` nor `getUserMedia` takes an `AbortController`, so the
+      // request cannot be called off: the token is the abort. The clock stops
+      // waiting, the app goes back to idle saying why, and the capture the
+      // browser hands over afterwards is released the moment it arrives.
+      //
+      // The clock is armed *after* the request is issued, and nothing is awaited
+      // in between, so it costs the click's user activation nothing.
+      let giveUp = 0;
+      const deadline = new Promise<null>(resolve => {
+        giveUp = window.setTimeout(() => resolve(null), CAPTURE_TIMEOUT_MS);
+      });
+      const acquired = await Promise.race([request, deadline]).finally(() => {
+        // However the race ended, including by the request throwing: a
+        // 60-second timer left armed behind every take is a leak.
+        clearTimeout(giveUp);
+      });
+
+      // Whether this attempt still owns the app. Two ways it may not, and they
+      // look nothing alike: the take was thrown away underneath the request (the
+      // cancelled flag, raised by both cancels and by the unmount teardown), or a
+      // *newer* take has been started since — which the flag cannot say, because
+      // a start resets it (ESCSUITE-109).
+      const abandoned = myAttempt !== attemptRef.current || cancelledRef.current;
+
+      if (acquired === null) {
+        // The clock won. The request is still out there, so whatever it hands
+        // over is released on arrival — the same release the guard below does,
+        // moved onto a promise nobody is awaiting any more. A request that
+        // *rejects* after we stopped waiting has nothing to release and nothing
+        // to say: the user was told when the clock ran out.
+        void request.then(releaseAcquired, () => {});
+        // Nothing is said for an attempt the user had already thrown away: the
+        // notice lives in the module-singleton store and would be read out on the
+        // next mount, about a take nobody was waiting for.
+        if (!abandoned) {
+          setNotice(CAPTURE_UNANSWERED);
+          setState('idle');
+        }
+        return;
+      }
+
+      const { screen, webcam, mic } = acquired;
 
       // The take can be thrown away while that request is outstanding — the
       // picker is on screen, or the camera prompt is — and a cancel there can
@@ -314,10 +414,8 @@ export function useRecordingController({
       // recorder. This is the earliest exit that leaves nothing live, which is
       // why it is the one that does the releasing — every guard below it has a
       // recorder to dispose as well.
-      if (cancelledRef.current) {
-        stopStream(screen);
-        stopStream(webcam);
-        stopStream(mic);
+      if (abandoned) {
+        releaseAcquired(acquired);
         return;
       }
 
@@ -546,7 +644,12 @@ export function useRecordingController({
       // and `stopAllStreams()` is idempotent. A bare return is nevertheless a
       // promise that every *future* way of arriving here will have cleaned up
       // first, and that is the promise this ticket's own window broke.
-      if (cancelledRef.current || !recorderRef.current) {
+      //
+      // It asks the attempt token as well (ESCSUITE-109): a take cancelled while
+      // this await was parked frees Record at once, so the next take can already
+      // be preparing by the time this one resumes — and this one must not tear
+      // that one down.
+      if (myAttempt !== attemptRef.current || cancelledRef.current || !recorderRef.current) {
         disposeRecorder();
         stopAllStreams();
         return;
@@ -560,13 +663,17 @@ export function useRecordingController({
       }
     } catch (error) {
       console.error('Failed to start recording:', error);
-      // A start that died here used to leave the app back at idle with
-      // nothing said — the same silence this work exists to delete. Unless the
-      // user is already gone: the notice lives in the module-singleton store,
-      // so one written for a take that was thrown away mid-start would be read
-      // out on the next mount, about a recording nobody ever saw
-      // (ESCSUITE-73). The console still carries it.
-      if (!cancelledRef.current) setNotice(startFailureNotice(error));
+      // This attempt is no longer the one that owns the app, and it has nothing
+      // of its own left: only a cancel or the unmount teardown drops the token
+      // mid-flight, and both release the capture and dispose the recorder on
+      // their way past. So there is nothing to tear down here — and tearing down
+      // anyway would tear down whatever take has started since (ESCSUITE-109).
+      // It also says nothing, which is the other half of this guard: the notice
+      // lives in the module-singleton store, so one written for a take that was
+      // thrown away mid-start would be read out on the next mount, about a
+      // recording nobody ever saw (ESCSUITE-73). The console still carries it.
+      if (myAttempt !== attemptRef.current) return;
+      setNotice(startFailureNotice(error));
       // initialize() can throw after the recorder has already built its audio
       // graph — an all-sources-off take reaches MediaRecorder, which creates
       // the AudioContext before discovering it has no tracks — so a failed
@@ -576,7 +683,10 @@ export function useRecordingController({
       stopAllStreams();
     } finally {
       // Per attempt, not a latch: the next click has to be able to start a take.
-      startingRef.current = false;
+      // Only *this* attempt's token is dropped — a cancel may already have
+      // dropped it and let a newer take take the ref, and that take is still
+      // being started (ESCSUITE-109).
+      if (attemptRef.current === myAttempt) attemptRef.current = null;
     }
   }, [
     acquireStreams,

@@ -17,6 +17,19 @@ export const CAPTURE_REFUSED =
 
 export const START_FAILED = 'The recording could not be started.'
 
+/**
+ * Said when a capture request was never answered: a share picker or a
+ * permission prompt left on screen, or a camera or microphone driver wedged so
+ * that `getUserMedia` never settles. `getDisplayMedia` and `getUserMedia` take
+ * no `AbortController`, so nothing comes back — `handleStartRecording` parks in
+ * `'preparing'` — and the only honest thing to do is stop waiting after a
+ * generous while and say why the app went back to idle (ESCSUITE-109). The
+ * request is still out there; whatever it hands over afterwards is released
+ * rather than recorded, so "try again" is a real instruction and not a hope.
+ */
+export const CAPTURE_UNANSWERED =
+  'The browser did not answer the capture request — try again.'
+
 export const LIBRARY_UNREADABLE =
   'Your saved recordings could not be loaded — storage may be blocked in this browser.'
 
