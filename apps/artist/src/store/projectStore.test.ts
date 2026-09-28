@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useEditorStore } from './projectStore'
 import type { SourceVideo } from './types'
-import { addClip, resetStoreForTest, store } from '../test/fixtures/projectStore'
+import { addClip, resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 
 describe('projectStore integration', () => {
   beforeEach(() => {
@@ -149,6 +149,87 @@ describe('projectStore integration', () => {
 
       useEditorStore.getState().removeSourceVideo('video1')
       expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
+    })
+
+    // ESCSUITE-113: the removed source's thumbnailUrl is a live
+    // URL.createObjectURL handle, and nothing else was ever going to free it.
+    describe('revoking the removed source\'s thumbnail', () => {
+      beforeEach(() => {
+        vi.mocked(URL.revokeObjectURL).mockClear()
+      })
+
+      it('revokes it exactly once', () => {
+        useEditorStore.getState().addSourceVideo({
+          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:thumb-1',
+        })
+
+        useEditorStore.getState().removeSourceVideo('video1')
+
+        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
+      })
+
+      it('does nothing when the removed source has no thumbnail', () => {
+        useEditorStore.getState().addSourceVideo({
+          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+          frameRate: 30, mimeType: 'video/mp4', size: 1000000,
+        })
+
+        useEditorStore.getState().removeSourceVideo('video1')
+
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      })
+
+      it('does not touch a non-blob thumbnail URL', () => {
+        useEditorStore.getState().addSourceVideo({
+          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+          frameRate: 30, mimeType: 'video/mp4', size: 1000000,
+          thumbnailUrl: 'https://example.com/thumb.jpg',
+        })
+
+        useEditorStore.getState().removeSourceVideo('video1')
+
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      })
+
+      it('leaves a kept source\'s thumbnail alone', () => {
+        useEditorStore.getState().addSourceVideo({
+          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:removed',
+        })
+        useEditorStore.getState().addSourceVideo({
+          id: 'video2', name: 'kept.mp4', duration: 10, width: 1920, height: 1080,
+          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:kept',
+        })
+
+        useEditorStore.getState().removeSourceVideo('video1')
+
+        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:removed')
+      })
+
+      // Undo/redo never revoke on their own — a source coming back via redo
+      // still needs its URL to work — but a removal's own revoke must not
+      // leave a *later* undo handing that source back a handle nothing can
+      // open (ESCSUITE-113): the history snapshot removeSourceVideo just
+      // pushed is scrubbed of that same dead URL.
+      it('does not revoke again on undo, and undo brings the source back with no thumbnail rather than a dead one', () => {
+        useEditorStore.getState().addSourceVideo({
+          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:thumb-1',
+        })
+        useEditorStore.getState().removeSourceVideo('video1')
+        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+        vi.mocked(URL.revokeObjectURL).mockClear()
+
+        useEditorStore.getState().undo()
+
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+        const restored = useEditorStore.getState().sourceVideos.find((v) => v.id === 'video1')
+        expect(restored).toBeDefined()
+        expect(restored?.thumbnailUrl).toBeUndefined()
+      })
     })
 
     // ESCSUITE-100: a clipboard entry that used to point at this source can
@@ -1020,6 +1101,37 @@ describe('projectStore remaining behaviours', () => {
       expect(store().currentTime).toBe(0)
       expect(store().selectedClipId).toBeNull()
       expect(store().project.timeline.clips).toEqual([])
+    })
+
+    // ESCSUITE-113: every source leaving the library on a reset may hold a
+    // live URL.createObjectURL handle, and nothing else was ever going to
+    // free it.
+    it('revokes every current source\'s thumbnail URL', () => {
+      store().addSourceVideo({ ...video, thumbnailUrl: 'blob:thumb-1' })
+      store().addSourceVideo({ ...video, id: 'video2', thumbnailUrl: 'blob:thumb-2' })
+      vi.mocked(URL.revokeObjectURL).mockClear()
+
+      store().resetProject()
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-2')
+    })
+
+    it('does not revoke again on undo, and undo brings the source back with no thumbnail rather than a dead one', () => {
+      store().addSourceVideo({ ...video, thumbnailUrl: 'blob:thumb-1' })
+      vi.mocked(URL.revokeObjectURL).mockClear()
+
+      store().resetProject()
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+      vi.mocked(URL.revokeObjectURL).mockClear()
+
+      store().undo()
+
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      const restored = store().sourceVideos.find((v) => v.id === video.id)
+      expect(restored).toBeDefined()
+      expect(restored?.thumbnailUrl).toBeUndefined()
     })
   })
 

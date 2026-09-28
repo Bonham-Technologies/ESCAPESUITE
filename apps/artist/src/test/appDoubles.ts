@@ -51,6 +51,13 @@ export function storageDouble() {
       const thumbnail = await getThumbnail(id)
       return thumbnail ? URL.createObjectURL(thumbnail) : undefined
     }),
+    // The mirror image, for the outgoing set a load/restore revokes before
+    // minting the incoming one (ESCSUITE-113).
+    revokeSourceThumbnails: vi.fn((sources: SourceVideo[]) => {
+      for (const source of sources) {
+        if (source.thumbnailUrl?.startsWith('blob:')) URL.revokeObjectURL(source.thumbnailUrl)
+      }
+    }),
     getSetting: vi.fn(() => Promise.resolve(null)),
     setSetting: vi.fn(() => Promise.resolve()),
   }

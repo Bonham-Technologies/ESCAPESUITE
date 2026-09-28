@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
 import { loadProject, saveProject, showOpenProjectDialog } from '../core/projectManager'
-import { clearSessionState } from '../core/storage'
+import { clearSessionState, revokeSourceThumbnails } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
@@ -30,6 +30,10 @@ const mountActions = (overrides: Partial<ProjectActionsDeps> = {}) => {
 
 beforeEach(() => {
   resetStoreForTest()
+  // resetStoreForTest() drives the REAL store's resetProject(), which calls
+  // the same (mocked) revokeSourceThumbnails this file asserts on — clear
+  // that setup call so a test's own assertion only sees what it did itself.
+  vi.mocked(revokeSourceThumbnails).mockClear()
   // Put the doubles back to their quiet defaults: vi.clearAllMocks() forgets
   // the calls but keeps whatever implementation the last test installed.
   vi.mocked(saveProject).mockResolvedValue(undefined)
@@ -195,6 +199,31 @@ describe('opening a project', () => {
       'error'
     )
     expect(result.current.isLoading).toBe(false)
+    // ESCSUITE-113: a load that is rejected must leave the current library's
+    // thumbnails exactly as they were, not already revoked out from under it.
+    expect(revokeSourceThumbnails).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-113: the outgoing library is superseded either way once the file
+  // has been read and validated — nothing else would ever free its
+  // thumbnailUrls.
+  it('revokes the outgoing library\'s thumbnails once the file is confirmed valid', async () => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Opened' },
+      sourceVideos: [],
+    })
+    const outgoing = { ...sampleVideo, id: 'outgoing', thumbnailUrl: 'blob:outgoing' }
+    const { result } = mountActions({ clipCount: 0, sourceVideos: [outgoing] })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(revokeSourceThumbnails).toHaveBeenCalledWith([outgoing])
+    const revokeOrder = vi.mocked(revokeSourceThumbnails).mock.invocationCallOrder[0]
+    const resetOrder = vi.mocked(deps.resetProject).mock.invocationCallOrder[0]
+    expect(revokeOrder).toBeLessThan(resetOrder)
   })
 
   it('leaves the REAL store untouched by a bad file — same project reference, no history entry (ESCSUITE-102 review)', async () => {

@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useSessionRestore, type SessionRestoreDeps } from './useSessionRestore'
-import { clearSessionState, getSessionState, getThumbnail, type SessionState } from '../core/storage'
+import { clearSessionState, getSessionState, getThumbnail, revokeSourceThumbnails, type SessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
@@ -36,10 +36,15 @@ const mountRestore = (overrides: Partial<SessionRestoreDeps> = {}) => {
 
 beforeEach(() => {
   resetStoreForTest()
+  // resetStoreForTest() drives the REAL store's resetProject(), which calls
+  // the same (mocked) revokeSourceThumbnails this file asserts on — clear
+  // that setup call so a test's own assertion only sees what it did itself.
+  vi.mocked(revokeSourceThumbnails).mockClear()
   vi.mocked(getSessionState).mockResolvedValue(undefined)
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
   deps = {
     suppressRestore: false,
+    sourceVideos: [],
     setProject: vi.fn(),
     addSourceVideo: vi.fn(),
     setCurrentTime: vi.fn(),
@@ -195,6 +200,27 @@ describe('answering the prompt', () => {
       0,
       expect.anything()
     )
+  })
+
+  // ESCSUITE-113: whatever the library holds when the restore lands is about
+  // to be superseded either way, and nothing else would ever free its
+  // thumbnailUrls. In practice this is always empty — the handoff holds its
+  // take back until sessionRestored settles — but the revoke does not assume
+  // that.
+  it('revokes the outgoing library\'s thumbnails before minting the restored ones', async () => {
+    const outgoing = { ...sampleVideo, id: 'outgoing', thumbnailUrl: 'blob:outgoing' }
+    deps.sourceVideos = [outgoing]
+    const session = savedSession()
+    const { result } = await mountWithPendingSession(session)
+
+    await act(async () => {
+      await result.current.handleRestoreSession(session)
+    })
+
+    expect(revokeSourceThumbnails).toHaveBeenCalledWith([outgoing])
+    const revokeOrder = vi.mocked(revokeSourceThumbnails).mock.invocationCallOrder[0]
+    const mintOrder = vi.mocked(getThumbnail).mock.invocationCallOrder[0]
+    expect(revokeOrder).toBeLessThan(mintOrder)
   })
 
   it('restores with no thumbnail — not the dead handle — when nothing is stored for it', async () => {

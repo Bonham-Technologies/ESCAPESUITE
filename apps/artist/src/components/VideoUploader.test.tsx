@@ -402,6 +402,23 @@ describe('VideoUploader', () => {
       expect(await getAllVideoMetadata()).toHaveLength(0)
     })
 
+    // ESCSUITE-113: every source Clear All drops holds a live
+    // URL.createObjectURL handle, and nothing else was ever going to free it.
+    it('revokes every cleared source\'s thumbnail URL', async () => {
+      // This file's own afterEach unstubs the globals setup.ts mocks
+      // (including URL), so a spy of this test's own is what survives to
+      // assert on — see that afterEach's comment.
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo({ ...videoMeta, thumbnailUrl: 'blob:thumb-1' })
+      render(<VideoUploader onProjectFile={onProjectFile} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
+    })
+
     it('keeps everything when the confirmation is declined', async () => {
       vi.mocked(globalThis.confirm).mockReturnValue(false)
       await storeVideo('kept', new Blob(['bytes']), { ...videoMeta, id: 'kept' })
@@ -456,6 +473,22 @@ describe('VideoUploader', () => {
 
       await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
       expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('unused')
+    })
+
+    it('revokes the thumbnail URL of the unused media it clears', async () => {
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
+      await storeVideo('unused', new Blob(['bytes']), { ...videoMeta, id: 'unused' })
+      store().addSourceVideo(videoMeta)
+      store().addSourceVideo({
+        ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048, thumbnailUrl: 'blob:unused-thumb',
+      })
+      addClip('clip1', 0, 2) // references video1
+      render(<VideoUploader onProjectFile={onProjectFile} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
+
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:unused-thumb')
     })
 
     it('hides the clear-unused button when every source is in use', async () => {

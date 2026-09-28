@@ -31,6 +31,10 @@ const { mockGetSetting, mockSetSetting } = vi.hoisted(() => ({
 vi.mock('../../core/storage', () => ({
   getSetting: mockGetSetting,
   setSetting: mockSetSetting,
+  // resetStoreForTest() below drives the real store's resetProject(), which
+  // calls this to free a torn-down source's thumbnailUrl (ESCSUITE-113) —
+  // nothing here exercises it directly, so a quiet no-op is enough.
+  revokeSourceThumbnails: vi.fn(),
 }))
 
 const { mockSendMessage } = vi.hoisted(() => ({ mockSendMessage: vi.fn() }))
