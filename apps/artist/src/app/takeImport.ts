@@ -290,11 +290,11 @@ export async function importTake(
       });
     }
   } catch (error) {
-    // A throw is the last moment anything can see these: the URLs are reported
-    // only on the success path, and a rejected import returns nothing at all.
-    // So this frees what THIS function minted, before anything else could have
-    // taken ownership of it — not the caller's handles, which by definition it
-    // was never given.
+    // A rejected import returns nothing at all, so this frees what THIS
+    // function minted — not the caller's handles, which by definition it was
+    // never given. Every realistic throw is in the first loop, before any
+    // addSourceVideo; a throw from the second would also free a handle the
+    // library already holds, which is the design call ESCSUITE-117 left open.
     for (const url of thumbnailUrls) URL.revokeObjectURL(url);
     throw error;
   }
