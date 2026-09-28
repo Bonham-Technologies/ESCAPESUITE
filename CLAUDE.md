@@ -1098,6 +1098,21 @@ each file ends with a pin that the setup `URL` stubs are still mock functions �
 before the fix. No source file is touched, so no numerator or denominator moves. **No floor
 crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-120 (the uploader clears its "remove
+from the list" timers on unmount): 99.52 / 98.88 / **94.64** / 99.40 against the
+99.52 / 98.88 / 94.61 / 99.40 the commit this branch was rebased onto measures — branches up three
+hundredths, the other three unmoved. Measured in one sitting, the base gives 4,201 / 4,440 branches
+and this branch 4,204 / 4,442: two new branches, both covered, and one *fewer* uncovered than
+before (239 → 238), because the new test uploads two files at once and so reaches, for the first
+time, the "some other file's row is left alone" arm of the completion `map` in
+`components/VideoUploader.tsx` that every earlier upload case — one file each — had passed over
+(statements 7,631 / 7,717 → 7,640 / 7,726, lines 6,765 / 6,797 → 6,772 / 6,804, functions
+1,679 / 1,689 → 1,680 / 1,690, the same 32 / 86 / 10 uncovered). The two new decisions are the
+unmount cleanup's `removalTimersRef.current ?? []` — reached with timers armed by the new case and
+with none by every render RTL's auto-cleanup unmounts without an upload — and the lazily created
+Set's `??=`, reached on the first upload and again on the second. **No floor crossed**; artist's
+floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1105,7 +1120,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.67 | 100.00 |
-| `@escapesuite/artist` | 99.52 | 98.88 | 94.61 | 99.40 |
+| `@escapesuite/artist` | 99.52 | 98.88 | 94.64 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
