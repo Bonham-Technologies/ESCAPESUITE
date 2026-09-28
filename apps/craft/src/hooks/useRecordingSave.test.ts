@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { act, renderHook } from '@testing-library/react'
 import { useRecordingSave, type RecordingSaveDeps, type CapturedTake } from './useRecordingSave'
-import { getRecordingsMetadata, getThumbnail } from '../core/storage'
+import { getRecordingsMetadata, getThumbnail, storeVideo, storeThumbnail } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { converterModule, thumbnailModule, resetAppDoubles } from '../test/appDoubles'
 import { useRecorderStore } from '../store/recorderStore'
@@ -20,6 +20,18 @@ import { SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
 
 vi.mock('../core/thumbnailGenerator', async () => (await import('../test/appDoubles')).thumbnailModule)
 vi.mock('../core/converter', async () => (await import('../test/appDoubles')).converterModule)
+// storeVideo/storeThumbnail are real (fake-indexeddb) in every other test —
+// wrapping rather than replacing them lets a test simulate one write failing
+// (a quota error, say) while every other test still exercises the real
+// storage layer.
+vi.mock('../core/storage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../core/storage')>()
+  return {
+    ...actual,
+    storeVideo: vi.fn(actual.storeVideo),
+    storeThumbnail: vi.fn(actual.storeThumbnail),
+  }
+})
 
 const RAW = new Blob(['recorded-bytes'], { type: 'video/webm' })
 
@@ -190,6 +202,36 @@ describe('useRecordingSave thumbnails', () => {
     expect(getLastCanvasContext()!.calls.map(call => call.method)).toEqual(['fillRect', 'fillText'])
     const [meta] = await getRecordingsMetadata()
     await expect(getThumbnail(meta.id)).resolves.toBeDefined()
+  })
+
+  // ESCSUITE-107. storeVideo has already committed the take by the time
+  // storeThumbnail runs; a thumbnail is cosmetic, so a quota error writing it
+  // (thumbnails go in after the multi-MB blob, so this is the likely order
+  // under pressure) must not roll the save back into SAVE_FAILED over a take
+  // that is in fact stored — that left it invisible until reload, present to
+  // ARTIST immediately, and its companions never written.
+  it('does not fail the save when the thumbnail write fails, and lists the take without one', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(storeThumbnail).mockRejectedValueOnce(new Error('quota exceeded'))
+    const { result } = mountSave()
+
+    await expect(result.current(RAW, 4)).resolves.toBeUndefined()
+
+    // SAVE_FAILED is the controller's notice for a promise that rejects
+    // (useRecordingController.ts) — this hook resolving is what keeps the
+    // controller from ever reaching for it.
+    expect(states).toEqual(['saving'])
+    expect(notices).toEqual([])
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Recording thumbnail could not be saved:',
+      expect.any(Error)
+    )
+    expect(added).toHaveLength(1)
+    expect('thumbnailUrl' in added[0]).toBe(false)
+
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(1)
+    await expect(getThumbnail(stored[0].id)).resolves.toBeUndefined()
   })
 })
 
@@ -362,6 +404,21 @@ describe('useRecordingSave list entry', () => {
 
     expect(added).toEqual([])
     expect(await getRecordingsMetadata()).toEqual([])
+  })
+
+  // ESCSUITE-107's other side: unlike the thumbnail, storeVideo failing is
+  // the take failing — there is nothing to fall back to, so this stays a
+  // rejection and nothing is added. Pins the existing behaviour, which the
+  // thumbnail fix above must not have disturbed.
+  it('still rejects and lists nothing when storeVideo itself fails', async () => {
+    vi.mocked(storeVideo).mockRejectedValueOnce(new Error('quota exceeded'))
+    const { result } = mountSave()
+
+    await expect(result.current(RAW, 4)).rejects.toThrow('quota exceeded')
+
+    expect(added).toEqual([])
+    expect(await getRecordingsMetadata()).toEqual([])
+    expect(vi.mocked(storeThumbnail)).not.toHaveBeenCalled()
   })
 })
 
@@ -550,6 +607,31 @@ describe('useRecordingSave for a separate-tracks take', () => {
     expect(consoleWarn).toHaveBeenCalledTimes(1)
     expect(consoleWarn).toHaveBeenCalledWith('Webcam track could not be saved:', expect.any(Error))
     expect(notices).toEqual([SEPARATE_TRACK_NOT_SAVED])
+  })
+
+  // ESCSUITE-107. The primary's thumbnail write happens before the companion
+  // loop — a failure there must not stop the companions from being written
+  // any more than it stops the primary itself.
+  it('still writes the companion when the primary thumbnail write fails', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(storeThumbnail).mockRejectedValueOnce(new Error('quota exceeded'))
+    const { result } = mountSave()
+
+    await result.current(RAW, 6, [companionPart])
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Recording thumbnail could not be saved:',
+      expect.any(Error)
+    )
+    expect(notices).toEqual([])
+    const stored = await getRecordingsMetadata()
+    expect(stored.map(m => m.role).sort()).toEqual(['screen', 'webcam'])
+    expect(added.map(entry => entry.role)).toEqual(['webcam', 'screen'])
+    const primaryEntry = added.find(entry => entry.role === 'screen')!
+    expect('thumbnailUrl' in primaryEntry).toBe(false)
+    const webcamEntry = added.find(entry => entry.role === 'webcam')!
+    expect('thumbnailUrl' in webcamEntry).toBe(true)
   })
 
   it('stores four parts under one takeId, the audio parts as audio', async () => {

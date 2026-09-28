@@ -221,14 +221,29 @@ export function useRecordingSave({
     });
 
     await storeVideo(id, blob, sourceVideo);
-    await storeThumbnail(id, thumbnail);
+
+    // A thumbnail is cosmetic: by the time it is written, storeVideo above has
+    // already committed the take's blob and metadata. Thumbnails are written
+    // after the multi-MB blob, so a quota error is most likely to land here —
+    // and rejecting the whole save over it left a take that was in fact
+    // stored reported as "not saved": invisible until reload, present to
+    // ARTIST immediately, and (for a separate-tracks take) its companions
+    // never written at all (ESCSUITE-107). Warn once and carry on with no
+    // thumbnail, the same posture the companions' own loop takes below.
+    let primaryThumbnailUrl: string | undefined;
+    try {
+      await storeThumbnail(id, thumbnail);
+      primaryThumbnailUrl = createBlobUrl(thumbnail);
+    } catch (error) {
+      console.warn('Recording thumbnail could not be saved:', error);
+    }
 
     // A companion may never cost the take another part: the primary's own
-    // storeVideo/storeThumbnail already ran above, and each companion is
-    // written inside its own try/catch, so a bad decode or a storage write
-    // that throws costs exactly the part it happened to and nothing else. One
-    // notice covers however many were lost — there is one channel, and which
-    // one it was is what the console is for.
+    // storeVideo already ran above, and each companion is written inside its
+    // own try/catch, so a bad decode or a storage write that throws costs
+    // exactly the part it happened to and nothing else. One notice covers
+    // however many were lost — there is one channel, and which one it was is
+    // what the console is for.
     let lostAPart = false;
 
     // Reverse role order, because `addRecording` prepends: adding system,
@@ -316,7 +331,7 @@ export function useRecordingSave({
       sourceVideo,
       now,
       size: blob.size,
-      thumbnailUrl: createBlobUrl(thumbnail),
+      thumbnailUrl: primaryThumbnailUrl,
       hasWebcam: captured.webcamEnabled,
       hasAudio,
     }));

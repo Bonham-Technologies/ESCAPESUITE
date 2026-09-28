@@ -814,6 +814,16 @@ plain restore that was already there. Two review rounds put the last five there:
 async restore racing "Start Fresh", the second found a rejected read stranding the prompt with the guard
 set. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-27 for ESCSUITE-107 (a thumbnail write that fails no
+longer fails the whole save): 100.00 / 99.50 / 97.64 / 100.00, byte-identical to the
+100.00 / 99.50 / 97.64 / 100.00 the commit this branch was rebased onto measures. Measured in one
+sitting, statements 2,430 / 2,442 → 2,433 / 2,445 and lines 2,287 → 2,290, all covered; branches
+unchanged at 1,283 / 1,314 — the fix is a try/catch around the primary's `storeThumbnail`, which
+Istanbul counts as statements rather than a decision, and the two new cases (a plain take and a
+separate-tracks take whose thumbnail write rejects) reach the catch arm while the rest of the suite
+keeps the success arm. The same 31 branches and 12 statements are uncovered as before. **No floor
+crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
