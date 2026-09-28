@@ -1005,21 +1005,28 @@ Two more rules the WebCodecs recorder follows and `Recorder` does not yet:
 - A take with **no** microphone and no system audio starts no monitor at all — there is no
   analyser to read, so the loop would only write a hard-coded `{ microphone: 0, system: 0 }`
   into the store for a meter that cannot move. It does send that value **once**, before
-  returning: `SourceToggles` draws a meter whenever the *toggle* is on rather than whenever an
-  analyser exists, so a take that asked for system audio and was not given it would otherwise
-  have nothing update its bar for the length of the take. One store write per take, not per
-  frame.
+  returning. This one-shot predates ESCSUITE-114's fix below and is now belt-and-braces rather
+  than load-bearing — the store already reads zero at the start of every take regardless — but
+  it costs one store write per take, not per frame, so it stays rather than adding a branch to
+  skip it.
 
 Neither recorder's monitor ever emits a zero on its own once it has something real to measure —
-it just keeps sending whatever it last read, for as long as the take runs. ESCSUITE-114:
-`useRecordingController`'s `onStop` — the one place both recorders' stop reaches, covering a
-stop asked for through `handleStopRecording` and one the recorder fires on its own when the
-capture ends — writes `{ microphone: 0, system: 0 }` to the store the instant a take ends, so
-the next take's meter (closed by `showMeters` for every state but `'countdown'` / `'recording'`
-/ `'paused'`, ESCSUITE-104) never opens on a level the take before it left behind.
+it just keeps sending whatever it last read, for as long as the take runs. And `dispose()`,
+which both cancel paths and the unmount teardown call instead of `stop()`, cancels the monitor's
+`requestAnimationFrame` loop without emitting at all — so a cancel produced no zero of any kind
+before ESCSUITE-114. `useRecordingController` now shares one `zeroAudioLevels()` helper, called
+from every path that ends a take: the stop path (`onStop`, past the `cancelledRef.current` guard
+— a stop that lands for a take already thrown away has nothing left to zero, since the cancel
+that raised the flag already did), `handleCancelRecording`, `cancelCountdown`, and the unmount
+teardown (which already reset `state` / `currentDuration` / `countdownValue` for the same
+module-singleton-store reason and had omitted `audioLevels`). Whichever way a take ends, the
+next one's meter — closed by `showMeters` for every state but `'countdown'` / `'recording'` /
+`'paused'`, ESCSUITE-104 — never opens on a level the take before it left behind; `'countdown'`
+is the state that matters here, since the recorder (and its monitor) is already initialize()d by
+the time a countdown starts, before the meter has a reading of its own to show.
 `useRecordingController.test.ts`'s "audio levels" cases pin it: non-zero while a take is live,
-zero after both kinds of stop, and zero already sitting there the moment the next take reaches
-`'preparing'`, before its own monitor has said anything.
+zero after a stop asked for and one the recorder fired on its own, zero after each of the two
+cancel paths, and zero already sitting there the moment the next take reaches `'countdown'`.
 
 **A level push now costs the Sources panel and nothing else.** `App` selects each field it
 reads and does not read `audioLevels` at all; `SourceTogglesPanel` owns the subscription and

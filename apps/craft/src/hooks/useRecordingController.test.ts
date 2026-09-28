@@ -795,25 +795,51 @@ describe('useRecordingController audio levels', () => {
     expect(levels()).toEqual({ microphone: 0, system: 0 })
   })
 
-  it('leaves nothing stale for the next take to show the moment its meter opens', async () => {
+  it('leaves nothing stale for the next take to show the moment its countdown opens', async () => {
     const { result, recorder } = await startLiveTake()
     act(() => { recorder.emitAudioLevels({ microphone: 0.9, system: 0.7 }) })
     await act(async () => { await result.current.handleStopRecording() })
     expect(levels()).toEqual({ microphone: 0, system: 0 })
 
-    // Start the next take and park it in 'preparing', before its own monitor
-    // has had the chance to emit anything of its own.
-    let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
-    harness.acquireStreams.mockImplementation(() => gate.then(() => harness.streams))
-    let start!: Promise<void>
-    await act(async () => { start = result.current.handleStartRecording() })
+    // Start the next take with a countdown this time. `'preparing'` is not
+    // the state that would show a stale bar — `showMeters` (App.tsx) is false
+    // there — `'countdown'` is: the recorder is already initialize()d, its
+    // monitor already running, and the meter already visible, all before the
+    // countdown's own first reading arrives.
+    harness.deps.config.countdownSeconds = 3
+    await startTake(result)
 
-    expect(state()).toBe('preparing')
+    expect(state()).toBe('countdown')
     expect(levels()).toEqual({ microphone: 0, system: 0 })
+  })
 
-    release()
-    await act(async () => { await start })
+  // `dispose()` — what both cancel paths and the unmount teardown call
+  // instead of `stop()` — cancels the monitor's rAF loop without emitting,
+  // so `onStop` never fires for a cancelled take and a write placed only
+  // there would never run. Cancel raises `cancelledRef` and disposes the
+  // recorder synchronously, so there is no `onStop` to observe here either;
+  // each of these mirrors the *other* two paths' own "throws the take away,
+  // disposes the recorder" tests, adding only the levels assertion.
+  it('zeroes the levels when a live take is cancelled', async () => {
+    const { result, recorder } = await startLiveTake()
+    act(() => { recorder.emitAudioLevels({ microphone: 0.5, system: 0.4 }) })
+    expect(levels()).toEqual({ microphone: 0.5, system: 0.4 })
+
+    act(() => { result.current.handleCancelRecording() })
+
+    expect(levels()).toEqual({ microphone: 0, system: 0 })
+  })
+
+  it('zeroes the levels when a countdown is cancelled', async () => {
+    const { result } = mountController({ countdownSeconds: 3 })
+    await startTake(result)
+    const recorder = recorderFactory.last()
+    act(() => { recorder.emitAudioLevels({ microphone: 0.5, system: 0.4 }) })
+    expect(levels()).toEqual({ microphone: 0.5, system: 0.4 })
+
+    act(() => { result.current.cancelCountdown() })
+
+    expect(levels()).toEqual({ microphone: 0, system: 0 })
   })
 })
 
