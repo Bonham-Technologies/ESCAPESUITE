@@ -68,6 +68,8 @@ vi.mock('./audioMixer', () => ({
 const RANGE = { start: 7, end: 8 }
 const FRAMES = 30
 /** Media clips live over that second: the blurred V1 clip and the screen-blended V2 clip. */
+// The plain and masked scenes have the same number of active media clips at the effects
+// frame, which is the only reason one constant serves both; it is not a general truth.
 const ACTIVE_MEDIA_CLIPS = MASKED_MEDIA_CLIPS_AT_EFFECTS_FRAME
 /** Clips live over that second: the two media clips and the two overlays. */
 const ACTIVE_CLIPS = 4
