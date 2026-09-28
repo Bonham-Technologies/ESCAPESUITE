@@ -180,12 +180,13 @@ describe('renderProjectToFile', () => {
   it('renders with the completed sourceVideos from seedSources, not the caller\'s partial list', async () => {
     fileInput(['source.mp4'])
     const input = fileInputBase()
-    input.options = { format: 'mp4', quality: 'high', resolution: 'original' }
-    const meta = await renderProjectToFile(input)
+    input.options = { format: 'mp4', quality: 'high' }
+    await renderProjectToFile(input)
 
-    // Only the seeded (probed) list carries width/height, which sizing depends on.
+    // The caller's own sourceVideos entry carries no width/height (see
+    // fileInputBase below) — only the seeded (probed) list does, so this is
+    // only 1920 if the exporter received seedSources' completed list.
     expect(((exportToMP4.mock.calls[0] as unknown[])[1] as { width: number }[])[0].width).toBe(1920)
-    expect(meta).toMatchObject({ width: 1920, height: 1080 })
   })
 
   it('downloads the result as outputName plus the format extension, clicked from the document', async () => {

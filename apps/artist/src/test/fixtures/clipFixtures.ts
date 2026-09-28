@@ -97,7 +97,7 @@ export function makeExportOptions(overrides: Partial<ExportOptions> = {}): Expor
   return {
     format: 'mp4',
     quality: 'medium',
-    resolution: 'original',
+    resolution: 'project',
     ...overrides,
   }
 }

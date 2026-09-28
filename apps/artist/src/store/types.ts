@@ -716,7 +716,7 @@ export interface EditorState {
 export interface ExportOptions {
   format: 'webm' | 'mp4';
   quality: 'low' | 'medium' | 'high';
-  resolution: 'project' | 'original' | '1080p' | '720p' | '480p';
+  resolution: 'project' | '1080p' | '720p' | '480p';
   timeRange?: { start: number; end: number };
 }
 

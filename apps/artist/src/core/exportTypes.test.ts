@@ -283,11 +283,6 @@ describe('getResolution', () => {
     expect(getResolution('project', 640, 360)).toEqual({ width: 640, height: 360 })
   })
 
-  it('returns the source size for "original", rounded up to even', () => {
-    expect(getResolution('original', 1920, 1080)).toEqual({ width: 1920, height: 1080 })
-    expect(getResolution('original', 641, 361)).toEqual({ width: 642, height: 362 })
-  })
-
   it('scales presets to the source aspect ratio', () => {
     expect(getResolution('1080p', 1920, 1080)).toEqual({ width: 1920, height: 1080 })
     expect(getResolution('720p', 1920, 1080)).toEqual({ width: 1280, height: 720 })

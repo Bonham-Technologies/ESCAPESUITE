@@ -115,7 +115,7 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 | `input.manifest.path` | — | A manifest JSON file (see [Inputs](#inputs)). |
 | `options.format` | yes | `mp4` (H.264 + AAC) or `webm` (VP9 + Opus). |
 | `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. |
-| `options.resolution` | no | `project` (default) uses the project's own resolution; `original` uses the bottom-most media clip's native size; `1080p`, `720p` and `480p` scale to that height, keeping the source aspect ratio. Odd dimensions are rounded up to even. |
+| `options.resolution` | no | `project` (default) uses the project's own resolution; `1080p`, `720p` and `480p` scale to that height, keeping the *project's* aspect ratio (falling back to the bottom-most media clip's native aspect only when the project has no resolution of its own). Odd dimensions are rounded up to even. |
 | `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both numbers, `start` strictly less than `end`. Omit to render the whole timeline. |
 | `output.sink` | yes | `volume`, `command`, `webhook` or `s3`. |
 | `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)). |

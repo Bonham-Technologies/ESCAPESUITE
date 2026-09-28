@@ -621,18 +621,16 @@ describe('exportToMP4 output raster', () => {
     expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 3840, 2160])
   })
 
-  it('letterboxes deliberately when the output aspect really differs', async () => {
-    media.script({ video: { videoWidth: 640, videoHeight: 480 } })
-
-    await run({
-      sources: [makeSourceVideo({ width: 640, height: 480 })],
-      options: { resolution: 'original' },
-      projectResolution: { width: 1280, height: 720 },
-    })
-
-    expect(ctx().argsFor('setTransform')[0]).toEqual([0.5, 0, 0, 0.5, 0, 60])
-    expect(ctx().argsFor('fillRect')[0]).toEqual([0, -120, 1280, 960])
-  })
+  // The old "letterboxes deliberately when the output aspect really differs"
+  // case lived here, driven through options.resolution: 'original' — the one
+  // resolution that took the bottom clip's own source size rather than
+  // following the project's aspect. ESCSUITE-111 dropped 'original': every
+  // resolution left ties its output aspect to the project's, via the same
+  // `projectResolution` parameter this file's `run()` passes to both the
+  // canvas' project space and `getResolution`'s output size, so the two can no
+  // longer disagree through the public API. The letterbox mechanism itself
+  // (`openOutputFrame` / `setOutputTransform`) is unchanged and still directly
+  // covered, hand-built sizes included, by `outputTransform.test.ts`.
 
   it('asks for a dissolve blur in output pixels, not in project pixels', async () => {
     // The frame-based transition path used to say, in a comment, that "an

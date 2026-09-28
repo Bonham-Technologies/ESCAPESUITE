@@ -179,8 +179,8 @@ export function getBaseDimensions(
 
 /**
  * Get resolution dimensions.
- * When resolution is 'project', uses projectResolution if provided.
- * When resolution is 'original', uses the source video dimensions.
+ * When resolution is 'project', uses projectResolution if provided, falling
+ * back to the source video's own dimensions otherwise.
  *
  * A preset (1080p, 720p, 480p) is a **height**, and the box it fills is the
  * **project's** shape: width = round-to-even(height x project aspect). It used
@@ -188,6 +188,12 @@ export function getBaseDimensions(
  * 16:9 project whose bottom clip happened to be 4:3 exported 960x720 for "720p"
  * (ESCSUITE-94). Only a caller with no project resolution at all falls back to
  * the source aspect, which is the same fallback 'project' itself takes.
+ *
+ * There used to be a fourth option, 'original', which took the source video's
+ * dimensions regardless of the project's own shape — the one case that could
+ * still letterbox after ESCSUITE-94, and one no UI ever offered (only a
+ * hand-built headless job spec could reach it). ESCSUITE-111 dropped it rather
+ * than fix it: every reachable resolution now follows the project's aspect.
  */
 export function getResolution(
   resolution: ExportOptions['resolution'],
@@ -202,8 +208,8 @@ export function getResolution(
     };
   }
 
-  if (resolution === 'original' || resolution === 'project') {
-    // Fall back to original if 'project' but no projectResolution provided
+  if (resolution === 'project') {
+    // No projectResolution provided: fall back to the source's own dimensions.
     return {
       width: originalWidth % 2 === 0 ? originalWidth : originalWidth + 1,
       height: originalHeight % 2 === 0 ? originalHeight : originalHeight + 1
