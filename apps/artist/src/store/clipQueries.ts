@@ -1,5 +1,5 @@
 // Read-only queries over a timeline's clips. They take the clips and tracks as
-// arguments and never touch the store, so they are safe to call from a worker.
+// arguments and never touch the store, so the preview and the exporters can share them without pulling the store into their graph.
 
 import type { Clip, Track } from './types';
 
