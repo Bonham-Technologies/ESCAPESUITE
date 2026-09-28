@@ -25,10 +25,15 @@ vi.stubGlobal('localStorage', {
 })
 
 // Mock URL.createObjectURL and revokeObjectURL
-// Keep URL constructor functional but mock the static methods
+// Keep URL constructor functional but mock the static methods.
+// Every call mints a DISTINCT handle: a stub that returned one literal for
+// every call made a revoke of a previous test's leaked URL indistinguishable
+// from a revoke of the current test's, so tests could not tell "freed the
+// handle it was given" from "freed some handle".
 const OriginalURL = globalThis.URL
+let objectUrlSerial = 0
 vi.stubGlobal('URL', class extends OriginalURL {
-  static createObjectURL = vi.fn(() => 'blob:mock-url')
+  static createObjectURL = vi.fn(() => `blob:mock-url-${++objectUrlSerial}`)
   static revokeObjectURL = vi.fn()
 })
 

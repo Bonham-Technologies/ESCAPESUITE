@@ -14,6 +14,7 @@ import { clearSessionState, getSessionState, getThumbnail, revokeSourceThumbnail
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
+import { lastObjectUrl } from '../test/objectUrls'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
 
@@ -195,7 +196,7 @@ describe('answering the prompt', () => {
 
     expect(getThumbnail).toHaveBeenCalledWith(staleVideo.id)
     expect(deps.addSourceVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ id: staleVideo.id, thumbnailUrl: 'blob:mock-url' }),
+      expect.objectContaining({ id: staleVideo.id, thumbnailUrl: lastObjectUrl() }),
       0,
       expect.anything()
     )
@@ -231,7 +232,7 @@ describe('answering the prompt', () => {
     expect(revokeSourceThumbnails).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'shared', thumbnailUrl: 'blob:handoff-shared' }),
     ])
-    expect(store().sourceVideos.find((v) => v.id === 'shared')?.thumbnailUrl).toBe('blob:mock-url')
+    expect(store().sourceVideos.find((v) => v.id === 'shared')?.thumbnailUrl).toBe(lastObjectUrl())
   })
 
   it('restores with no thumbnail — not the dead handle — when nothing is stored for it', async () => {

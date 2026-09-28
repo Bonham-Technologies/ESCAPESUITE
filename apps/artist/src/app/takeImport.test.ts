@@ -9,6 +9,7 @@ import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage'
 import { resolveStoredDuration } from '../core/videoProcessor'
 import { extractWaveformData } from '../utils/waveform'
 import { sampleVideo } from '../test/appDoubles'
+import { OBJECT_URL_PATTERN } from '../test/objectUrls'
 import {
   createAudioBufferDouble,
   installAudioContextDouble,
@@ -223,10 +224,13 @@ describe('importTake', () => {
 
     const take = await importTake(primary, addSourceVideo)
 
-    expect(added.every((v) => v.thumbnailUrl === 'blob:mock-url')).toBe(true)
-    // The URLs live as long as the library entries, so they cannot be revoked
-    // where they are made — the effect's cleanup hands them back.
-    expect(take.thumbnailUrls).toHaveLength(2)
+    // Each part gets a handle of its own, and the library entries carry exactly
+    // the ones the take reports.
+    expect(take.thumbnailUrls).toEqual([
+      expect.stringMatching(OBJECT_URL_PATTERN),
+      expect.stringMatching(OBJECT_URL_PATTERN),
+    ])
+    expect(added.map((v) => v.thumbnailUrl)).toEqual(take.thumbnailUrls)
   })
 
   it('skips a part whose blob is gone, and still brings in the rest', async () => {

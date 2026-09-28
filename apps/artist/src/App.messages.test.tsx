@@ -7,6 +7,7 @@ import { renderApp } from './test/renderApp'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
 import { defaultUrlParams, sampleVideo } from './test/appDoubles'
+import { OBJECT_URL_PATTERN } from './test/objectUrls'
 import { initIntegration, loadVideoFromUrl, parseUrlParams, sendMessage } from './utils/integration'
 import { processVideoFile } from './core/videoProcessor'
 import { getAllVideoMetadata, getThumbnail, getVideo } from './core/storage'
@@ -213,12 +214,11 @@ describe('App URL parameters', () => {
     resetStoreForTest()
     // A prior test in this describe can leave a source in the (module-
     // singleton) store with a live thumbnailUrl if it never unmounted —
-    // resetStoreForTest()'s own resetProject() call just freed that handle
-    // (ESCSUITE-113), which is real cleanup, not something this test did.
-    // Every mock URL is the same literal string ('blob:mock-url'), so left
-    // uncleared that revoke reads as if THIS test's own handoff thumbnail had
-    // already been revoked before it was even minted.
-    vi.mocked(URL.revokeObjectURL).mockClear()
+    // resetStoreForTest()'s own resetProject() call frees that handle
+    // (ESCSUITE-113), which is real cleanup, not something this test did. It
+    // needs no clearing now that every mock handle is distinct (ESCSUITE-117):
+    // a revoke of a previous test's URL can no longer read as a revoke of this
+    // test's own handoff thumbnail.
     store().clearHistory()
     installCanvasDouble()
     urlParams()
@@ -268,7 +268,7 @@ describe('App URL parameters', () => {
       )
       expect(store().sourceVideos.find((v) => v.id === 'recording1')).toMatchObject({
         id: 'recording1',
-        thumbnailUrl: 'blob:mock-url',
+        thumbnailUrl: expect.stringMatching(OBJECT_URL_PATTERN),
       })
     })
 

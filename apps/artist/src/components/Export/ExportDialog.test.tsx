@@ -6,6 +6,7 @@ import { useEditorStore } from '../../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
 import type { ExportProgress } from '../../store/types'
 import styles from './ExportDialog.module.css'
+import { lastObjectUrl } from '../../test/objectUrls'
 
 // The exporter itself is driven by its own suite; here it is a scripted
 // collaborator. The real error classes come through importOriginal so the
@@ -453,7 +454,7 @@ describe('ExportDialog', () => {
       await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
       expect(clickedLinks).toHaveLength(1)
       expect(clickedLinks[0].download).toBe('Test Project.webm')
-      expect(clickedLinks[0].href).toBe('blob:mock-url')
+      expect(clickedLinks[0].href).toBe(lastObjectUrl())
       expect(URL.createObjectURL).toHaveBeenCalledWith(exported)
       expect(URL.revokeObjectURL).toHaveBeenCalled()
       expect(document.querySelector('a[download]')).toBeNull()

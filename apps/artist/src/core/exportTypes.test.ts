@@ -17,6 +17,7 @@ import {
 } from './exportTypes'
 import type { Clip, Track, SourceVideo, TransitionType } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
+import { lastObjectUrl } from '../test/objectUrls'
 import { installWebCodecsDoubles, removeWebCodecsGlobals, VideoFrameDouble } from '../test/doubles/webcodecs'
 
 const track = (id: string, index: number, visible = true): Track =>
@@ -355,14 +356,14 @@ describe('loadVideoElement / loadImageElement', () => {
     expect(video.playsInline).toBe(true)
     expect(video.preload).toBe('auto')
     expect(video.crossOrigin).toBe('anonymous')
-    expect(media.srcAssignments).toEqual(['blob:mock-url'])
+    expect(media.srcAssignments).toEqual([lastObjectUrl()])
   })
 
   it('rejects and revokes the object URL when the video fails to load', async () => {
     media.script({ video: { fail: true } })
     const revoke = vi.spyOn(URL, 'revokeObjectURL')
     await expect(loadVideoElement(new Blob(['v'], { type: 'video/mp4' }))).rejects.toThrow('Failed to load video')
-    expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+    expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
     revoke.mockRestore()
   })
 
@@ -377,7 +378,7 @@ describe('loadVideoElement / loadImageElement', () => {
     media.script({ image: { fail: true } })
     const revoke = vi.spyOn(URL, 'revokeObjectURL')
     await expect(loadImageElement(new Blob(['i'], { type: 'image/png' }))).rejects.toThrow('Failed to load image')
-    expect(revoke).toHaveBeenCalledWith('blob:mock-url')
+    expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
     revoke.mockRestore()
   })
 })

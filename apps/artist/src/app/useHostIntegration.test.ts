@@ -19,6 +19,7 @@ import { getTheme, setTheme } from '@escapesuite/shared/theme'
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore'
 import { addClip, resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { defaultUrlParams, sampleVideo } from '../test/appDoubles'
+import { lastObjectUrl } from '../test/objectUrls'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
 vi.mock('../utils/integration', async () => (await import('../test/appDoubles')).integrationDouble())
@@ -255,7 +256,7 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
     await mountIntegration({ loadVideoId: 'rec-1' })
 
     expect(deps.addSourceVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'rec-1', thumbnailUrl: 'blob:mock-url' })
+      expect.objectContaining({ id: 'rec-1', thumbnailUrl: lastObjectUrl() })
     )
     expect(deps.showNotification).toHaveBeenCalledWith('Loaded recording: Recording.webm', 'success')
   })

@@ -16,6 +16,7 @@ import {
   settle,
   type PreviewDoubles,
 } from '../../test/renderPreview'
+import { lastObjectUrl } from '../../test/objectUrls'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
 
@@ -26,10 +27,12 @@ beforeEach(() => {
   doubles = installPreviewDoubles()
   resetStoreForTest()
 
-  // src/test/setup.ts hands every source the same 'blob:mock-url'; these tests
-  // are about which URL belongs to which source, so give each one its own.
-  let next = 0
-  vi.mocked(URL.createObjectURL).mockImplementation(() => `blob:url-${next++}`)
+  // These tests are about which URL belongs to which source; src/test/setup.ts
+  // mints a distinct handle per call (ESCSUITE-117), so they read the handles
+  // back from the mock rather than installing a per-source stub of their own.
+  // The clear stays: resetStoreForTest() above drives the real resetProject(),
+  // which revokes a previous test's library, and one case below asserts
+  // revokeObjectURL was not called at all.
   vi.mocked(URL.revokeObjectURL).mockClear()
 })
 
@@ -64,7 +67,7 @@ describe('usePreviewMedia element creation', () => {
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
     expect(doubles.media.videos).toHaveLength(1)
     expect(result.current.videoElementsRef.current.get(video.id)).toBe(doubles.media.videos[0])
-    expect(doubles.media.srcAssignments).toEqual(['blob:url-0'])
+    expect(doubles.media.srcAssignments).toEqual([lastObjectUrl()])
   })
 
   it('creates an <img> for an image source and an <audio> for an audio one', async () => {
@@ -116,11 +119,12 @@ describe('usePreviewMedia release', () => {
 
     const { result } = await mountMedia()
     const element = doubles.media.videos[0]
+    const loadedUrl = element.src
 
     store().removeClipFromTimeline(clip.id)
     await settle()
 
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:url-0')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(loadedUrl)
     expect(result.current.videoElementsRef.current.size).toBe(0)
     expect(element.pause).toHaveBeenCalled()
     expect(element.src).toBe('')
