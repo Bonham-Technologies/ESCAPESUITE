@@ -416,12 +416,15 @@ describe('integration', () => {
   })
 
   describe('loadVideoFromUrl', () => {
+    let originalFetch: typeof globalThis.fetch
+
     beforeEach(() => {
+      originalFetch = globalThis.fetch
       vi.stubGlobal('fetch', vi.fn())
     })
 
     afterEach(() => {
-      vi.unstubAllGlobals()
+      vi.stubGlobal('fetch', originalFetch)
     })
 
     it('loads video from URL and returns blob with filename', async () => {
@@ -637,6 +640,13 @@ describe('integration', () => {
 
       expect(projectParam).toBeTruthy()
       expect(decodeProjectData(projectParam!)).toEqual(project)
+    })
+  })
+
+  describe('keeps the suite\'s global stubs (ESCSUITE-119)', () => {
+    it('leaves src/test/setup.ts\'s URL stub in place for the tests after it', () => {
+      expect(vi.isMockFunction(URL.createObjectURL)).toBe(true)
+      expect(vi.isMockFunction(URL.revokeObjectURL)).toBe(true)
     })
   })
 })
