@@ -1025,6 +1025,22 @@ write-only `refuses` helper rather than `reportsRefusal` — moved no figure: th
 either way, which is exactly why the contract needed the stronger assertion. **No floor crossed**;
 artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-28 for ESCSUITE-114 (the audio levels zero at the end
+of every take — stop, cancel, a cancelled countdown, unmount — and the App suites wait for the save's
+outcome instead of a fixed round count): 100.00 / 99.51 / 97.67 / 100.00, byte-identical to the
+100.00 / 99.51 / 97.67 / 100.00 the commit this branch was rebased onto measures. Measured in one
+sitting, lines 2,318 → 2,324, statements 2,468 / 2,480 → 2,474 / 2,486 and functions 449 → 450, every
+new unit covered; branches unchanged at 1,301 / 1,332 — the change adds no decision at all.
+`zeroAudioLevels()` is one unconditional store write shared by the stop path and the three cancel
+paths, and the harness's `renderAppWithLibrary(expectedCount)` and the `waitFor` conversions are
+test code. The same 31 branches and 12 statements are uncovered as before. The review's two MAJORs
+were behavioural, not coverage: a cancel never called `stop()`, so the meters opened the next
+countdown on the previous take's last reading (now pinned at `'countdown'`, where `showMeters` is
+true, rather than at `'preparing'`, where it is not), and the harness's own `renderApp()` flush
+waits on a real fake-indexeddb `loadRecordings` with one turn of headroom — left byte-identical
+because the re-render pin files depend on it, with the library suite waiting on the loaded row
+count instead. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
