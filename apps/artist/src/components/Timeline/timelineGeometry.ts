@@ -8,7 +8,15 @@
 // module as free of the store as this one is.
 import { findNearestSnapPoint } from '../../store/timelineSnapping';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
-import type { Clip, ClipAnimation, SourceVideo } from '../../store/types';
+import type { Clip, SourceVideo, TrimOrigin } from '../../store/types';
+
+/**
+ * What a clip looked like when the trim started. Declared once, in
+ * `store/types.ts` (`trimClip` is a store action and needs the same shape) —
+ * this is a re-export, not a second declaration, since a component may
+ * import from the store but the reverse is not allowed.
+ */
+export type { TrimOrigin };
 
 /** How many pixels one second of timeline occupies at zoom 1. */
 export const PIXELS_PER_SECOND_BASE = 50;
@@ -147,22 +155,6 @@ export function isExtendableClip(
 export interface TimeRange {
   start: number;
   end: number;
-}
-
-/**
- * What a clip looked like when the trim started. `computeTrimUpdate` below
- * only reads the three geometry fields; `animation` (ESCSUITE-110 review
- * round 1) rides along for `useTrimDrag`'s own use — rebasing the clip's
- * animation from the GESTURE's start on every move, rather than from
- * whatever the previous move in the same gesture already left it as, is
- * what makes an overshoot-and-return gesture idempotent. `undefined` for a
- * clip with no animation, same as `Clip.animation` itself.
- */
-export interface TrimOrigin {
-  startTime: number;
-  endTime: number;
-  timelinePosition: number;
-  animation?: ClipAnimation;
 }
 
 export interface TrimUpdateParams {

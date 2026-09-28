@@ -508,6 +508,31 @@ export interface Marker {
   color: string;       // Marker color (hex)
 }
 
+/**
+ * A clip's trim/position and animation as they stood when a timeline trim
+ * gesture began — what `trimClip` (below) rebases every move of the gesture
+ * from, rather than the clip's current, possibly-already-cropped state
+ * (ESCSUITE-110 review round 1: rebasing from the live clip compounded a
+ * crop on every mousemove and made an overshoot-and-return irrecoverable).
+ * `animation` is `undefined` for a clip with no animation, same as
+ * `Clip.animation` itself; `computeTrimUpdate`
+ * (`components/Timeline/timelineGeometry.ts`) reads only the three geometry
+ * fields and never `animation`.
+ *
+ * Declared once, here, since `trimClip` is a store action and `useTrimDrag`
+ * (which builds one on every mousedown) already imports from the store;
+ * `components/Timeline/timelineGeometry.ts`'s own `TrimOrigin` is a re-export
+ * of this one rather than a second declaration of the same shape — a
+ * component importing from the store is the allowed direction, not the
+ * reverse.
+ */
+export interface TrimOrigin {
+  startTime: number;
+  endTime: number;
+  timelinePosition: number;
+  animation?: ClipAnimation;
+}
+
 // Store state types
 export interface EditorState {
   // Project
@@ -635,7 +660,7 @@ export interface EditorState {
     clipId: string,
     edge: 'start' | 'end',
     updates: Partial<Clip>,
-    origin: { startTime: number; endTime: number; timelinePosition: number; animation?: ClipAnimation },
+    origin: TrimOrigin,
     skipHistory?: boolean
   ) => boolean;
   splitClip: (clipId: string, splitTime: number) => void;

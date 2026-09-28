@@ -589,6 +589,25 @@ Clips support animated properties via keyframes:
   at all, for its one other caller (`useClipEditorActions.ts`'s mask/stroke handlers, which never
   touch `startTime`/`endTime`) to trip over.
 
+  **Review round 2 finished the job.** `edge` was already explicit for the animation rebase, but
+  `trimClip` still guarded its duration recompute on `updates.startTime !== undefined ||
+  updates.endTime !== undefined || updates.duration !== undefined` — a second sniff, and, since
+  this action has exactly one caller and that caller always sends `startTime` and/or `endTime`, a
+  branch no real call could ever take the "false" side of: untestable dead code, and coverage
+  said so (the base's `clipSlice.ts` measured 2 uncovered branches; round 1's measured 5). Duration
+  is now recomputed unconditionally, with no guard at all, and the front cut for a start-edge trim
+  reads `(updates.timelinePosition as number) - origin.timelinePosition` — asserted rather than
+  defaulted with `??`, since `computeTrimUpdate` always supplies `timelinePosition` on a start-edge
+  update and a caller that broke that contract should get a loud `NaN` rather than a silently-wrong
+  `start`. `TrimOrigin` itself moved from `components/Timeline/timelineGeometry.ts` to
+  `store/types.ts` — a store action's parameter type belongs in the store, and a second,
+  independently-typed copy of the same shape (what round 1 had — `trimClip`'s literal object type
+  happened to match `timelineGeometry.ts`'s `TrimOrigin` structurally, but nothing enforced that)
+  is exactly the kind of drift that turns into a real bug the day one changes and the other does
+  not. `timelineGeometry.ts`'s own `TrimOrigin` is now `export type { TrimOrigin } from
+  '../../store/types'` — a re-export, not a second declaration — since a component may import from
+  the store but the reverse is not allowed.
+
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
 - **ClipPreview.tsx**: Playback scrubber controls (uses main PreviewPlayer for rendering)

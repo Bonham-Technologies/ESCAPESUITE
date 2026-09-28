@@ -6,7 +6,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { StateCreator } from 'zustand';
-import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart } from './types';
+import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart, TrimOrigin } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATION } from './types';
 import { cloneClip } from '../utils/deepClone';
 import { splitAnimation, trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
@@ -391,30 +391,35 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   //    Moving back to exactly where the gesture started reproduces the
   //    original animation exactly, however many moves came between.
   // 2. EXPLICITNESS. Which edge moved is `edge`, passed straight through from
-  //    `TrimState.edge` — the value `useTrimDrag` already tracks — rather than
-  //    inferred from which of `updates`' fields happen to be set. The
-  //    prior version sniffed `updates.startTime` vs `updates.timelinePosition`
-  //    to tell a source clip's own trim point from an extendable
-  //    overlay/image clip's (which has no source to trim, so its front trim
-  //    moves `timelinePosition` instead) — correct, but a caller could not see
-  //    that from the type, and the `timelinePosition` arm went untested.
+  //    `TrimState.edge` — the value `useTrimDrag` already tracks. Review round
+  //    2 finished this: `edge` is now the ONLY thing this function branches on
+  //    to place the front cut — never which of `updates`' fields happen to be
+  //    set. Round 1 still guarded the duration recompute below on
+  //    `updates.startTime !== undefined || updates.endTime !== undefined ||
+  //    updates.duration !== undefined`, a second, unnecessary sniff: this
+  //    action has exactly one caller, and it always sends `startTime` and/or
+  //    `endTime`, so the guard's "false" side could never be exercised by a
+  //    real call — an untestable branch. Duration is now recomputed from the
+  //    merged `startTime`/`endTime` unconditionally, with no guard at all.
   //
-  // The arithmetic: `origin.timelinePosition` is where the clip's front sat
-  // before the gesture; `updates.timelinePosition` is where it sits now
-  // (`computeTrimUpdate` sends this for a start-edge trim on EITHER clip kind
-  // — a source clip's start-trim moves both `startTime` and `timelinePosition`
-  // together, an extendable clip's moves only `timelinePosition` — so reading
-  // it needs no branch on clip kind, only on `edge`). Their difference is how
-  // much the front was cut, in the clip's own original local-time coordinates
-  // (the same units `Keyframe.time` and `trimAnimation`'s `start`/`end` use):
-  // 0 for an end-edge trim, where the front never moves. `end` is simply
-  // `start` plus the new duration, since nothing before `start` or after `end`
-  // survives the trim either way — see `trimAnimation`'s own doc comment.
+  // `start`, the front cut in the clip's own original local-time coordinates
+  // (the same units `Keyframe.time` and `trimAnimation`'s `start`/`end` use),
+  // is 0 for an end-edge trim, where the front never moves. For a start-edge
+  // trim it is `updates.timelinePosition - origin.timelinePosition` —
+  // `computeTrimUpdate` always supplies `timelinePosition` on a start-edge
+  // update, for EITHER clip kind: a source clip's start-trim moves it
+  // together with `startTime`, an extendable clip's (no source to trim) moves
+  // it alone. `Partial<Clip>` cannot say that in the type, so it is asserted
+  // here rather than defaulted with `??` — a caller that broke the contract
+  // should get `NaN` propagated loudly, not a silently-wrong `start`. `end` is
+  // simply `start` plus the new duration, since nothing before `start` or
+  // after `end` survives the trim either way — see `trimAnimation`'s own doc
+  // comment.
   trimClip: (
     clipId: string,
     edge: 'start' | 'end',
     updates: Partial<Clip>,
-    origin: { startTime: number; endTime: number; timelinePosition: number; animation?: ClipAnimation },
+    origin: TrimOrigin,
     skipHistory?: boolean
   ) => {
     const { clips, tracks } = get().project.timeline;
@@ -425,16 +430,13 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         if (clip.id !== clipId) return clip;
 
         const updated = { ...clip, ...updates };
-        if (updates.startTime !== undefined || updates.endTime !== undefined || updates.duration !== undefined) {
-          updated.duration = updated.endTime - updated.startTime;
-        }
+        updated.duration = updated.endTime - updated.startTime;
 
         if (origin.animation) {
           const originDuration = origin.endTime - origin.startTime;
+          const start = edge === 'end' ? 0 : (updates.timelinePosition as number) - origin.timelinePosition;
+
           if (updated.duration < originDuration - KEYFRAME_TIME_EPSILON) {
-            const frontCut =
-              edge === 'start' ? (updates.timelinePosition ?? origin.timelinePosition) - origin.timelinePosition : 0;
-            const start = frontCut > KEYFRAME_TIME_EPSILON ? frontCut : 0;
             updated.animation = trimAnimation(origin.animation, { start, end: start + updated.duration });
           } else {
             // Not shorter than the gesture's own start (lengthening, or back
