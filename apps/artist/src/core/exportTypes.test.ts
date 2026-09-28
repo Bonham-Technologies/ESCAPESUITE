@@ -294,8 +294,13 @@ describe('getResolution', () => {
     expect(getResolution('720p', 999, 1000)).toEqual({ width: 720, height: 720 })
   })
 
-  it('falls back to the source height for an unknown resolution name', () => {
-    expect(getResolution('4k' as never, 1000, 500)).toEqual({ width: 1000, height: 500 })
+  // Review round 1 (ESCSUITE-111): 'targetHeights[resolution] || originalHeight'
+  // silently produced a plausible-looking size for a string no typed caller can
+  // pass any more (ExportOptions['resolution'] is now the exact four literals).
+  // The only way to reach this arm is bypassing the type system, so it throws
+  // rather than guessing.
+  it('throws for an unknown resolution name instead of silently falling back', () => {
+    expect(() => getResolution('4k' as never, 1000, 500)).toThrow(/unknown resolution "4k"/)
   })
 
   // ESCSUITE-94: a preset is a *height*, and the box it fills is the project's

@@ -194,6 +194,14 @@ export function getBaseDimensions(
  * still letterbox after ESCSUITE-94, and one no UI ever offered (only a
  * hand-built headless job spec could reach it). ESCSUITE-111 dropped it rather
  * than fix it: every reachable resolution now follows the project's aspect.
+ *
+ * `resolution` is exactly `'project' | '1080p' | '720p' | '480p'` now, so a
+ * preset name outside that list can only reach this function by bypassing the
+ * type system — there is no longer a typed caller (the export dialog, both
+ * exporters, or a validated headless job spec) that can construct one. That
+ * used to fall back silently to `originalHeight`, which produced a
+ * plausible-looking but meaningless size; it now throws instead (review round
+ * 1, ESCSUITE-111).
  */
 export function getResolution(
   resolution: ExportOptions['resolution'],
@@ -216,13 +224,16 @@ export function getResolution(
     };
   }
 
-  const targetHeights: Record<string, number> = {
+  const targetHeights: Partial<Record<'1080p' | '720p' | '480p', number>> = {
     '1080p': 1080,
     '720p': 720,
     '480p': 480,
   };
 
-  const targetHeight = targetHeights[resolution] || originalHeight;
+  const targetHeight = targetHeights[resolution];
+  if (targetHeight === undefined) {
+    throw new Error(`getResolution: unknown resolution "${String(resolution)}"`);
+  }
   const aspectSource =
     projectResolution && projectResolution.width > 0 && projectResolution.height > 0
       ? projectResolution
