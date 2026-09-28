@@ -560,11 +560,13 @@ export function useRecordingController({
         onStop: (blob, companions) => {
           // A stop from a recorder that is no longer the take's — disposed, or
           // replaced by a newer take's — is a chunk nobody asked for
-          // (ESCSUITE-118).
+          // (ESCSUITE-118). This also covers a stop landing after the take was
+          // cancelled or the screen went away: every path that raises
+          // cancelledRef (cancelCountdown, handleCancelRecording, the unmount
+          // teardown) calls disposeRecorder() on the same line, which nulls
+          // recorderRef.current — so this guard is the one that catches it, and
+          // a separate `if (cancelledRef.current) return;` here would never run.
           if (recorderRef.current !== me) return;
-          // A stop that lands after the take was cancelled or the screen went
-          // away is a chunk nobody asked for: drop it rather than save it.
-          if (cancelledRef.current) return;
           // Four of the ways a part can be lost happen inside the recorder —
           // it was never set up, it encoded nothing, it gave up, its finalize
           // threw — and all four arrive here as a list that is simply shorter,

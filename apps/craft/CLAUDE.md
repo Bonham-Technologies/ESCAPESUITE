@@ -805,10 +805,13 @@ start resets) would have saved A's blob as B's take. Fixed the same way as the s
 return;` before doing anything else. `onError` guards the same way but **logs first**: its
 `console.error('Recording error:', error)` runs before the identity check, deliberately, so the
 console still hears about a late failure from a recorder nobody is listening to any more — a test
-pins the console call happening even when the rest of the callback is skipped. `onStop` keeps its
-existing `cancelledRef` check *after* the identity guard — it covers the take that is still
-current but was cancelled before the recorder finished disposing, which the identity check alone
-cannot see.
+pins the console call happening even when the rest of the callback is skipped. `onStop` had a
+second guard here too, `if (cancelledRef.current) return;`, for a stop landing after the take was
+cancelled or the screen went away — but it turned out to be unreachable, and was deleted
+(ESCSUITE-118 fix round 2): every path that raises `cancelledRef` (`cancelCountdown`,
+`handleCancelRecording`, the unmount teardown) calls `disposeRecorder()` on the same line, which
+nulls `recorderRef.current`, so the identity guard two lines above always returns first. The
+identity guard is what actually drops a cancelled take's late stop now, and its comment says so.
 
 The identity guard also catches a narrower case than supersession: a recorder whose *own* `onError`
 disposed it. `disposeRecorder()` nulls `recorderRef.current`, and nothing raises `cancelledRef` on
