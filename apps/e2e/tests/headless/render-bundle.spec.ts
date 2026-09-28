@@ -188,15 +188,24 @@ test('headless bundle probes an identity-only source for the dimensions sizing d
   project.sourceVideos = [{ id: 'src-0', name: 'source.mp4', mimeType: 'video/mp4' }]
   await page.setInputFiles('#__sources', [resolve(FIX, 'source.mp4')])
 
-  const [, meta] = await Promise.all([
+  // This project's own resolution (64x48) happens to equal source.mp4's real
+  // pixel size (also 64x48), so the render's OUTPUT size can no longer tell us
+  // whether the bytes were actually probed — every resolution option left
+  // (ESCSUITE-111 dropped 'original', which used to size the output from the
+  // source specifically to prove this) sizes from the project when one is
+  // given. Read the probe's own result back from the shared IndexedDB
+  // `videos` store instead: seedSources() completes an identity-only source
+  // by decoding its bytes and stores that completed metadata under the
+  // source's id, so a correct width/height/duration there (rather than
+  // undefined, or whatever a failed probe would leave behind) is direct
+  // evidence the probe ran and read the real file.
+  await Promise.all([
     page.waitForEvent('download'),
     page.evaluate(async ({ project }) => {
       const input = {
         project: project.project, sourceVideos: project.sourceVideos,
         sourceFiles: { 'src-0': 'source.mp4' },
-        // 'original' sizes the output from the SOURCE, so this only works if the
-        // bytes were probed for width/height.
-        options: { format: 'mp4', quality: 'high', resolution: 'original' },
+        options: { format: 'mp4', quality: 'high' },
         outputName: 'job-3',
       }
       // @ts-expect-error injected global
@@ -204,5 +213,20 @@ test('headless bundle probes an identity-only source for the dimensions sizing d
     }, { project }),
   ])
 
-  expect(meta).toMatchObject({ width: 64, height: 48 })
+  const probed = await page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('video-editor-db', 1)
+    request.onerror = () => reject(new Error('Failed to open video-editor-db'))
+    request.onsuccess = () => {
+      const db = request.result
+      const getRequest = db.transaction('videos', 'readonly').objectStore('videos').get('src-0')
+      getRequest.onsuccess = () => resolve(getRequest.result?.metadata ?? null)
+      getRequest.onerror = () => reject(new Error('Failed to read the "src-0" video record'))
+    }
+  }))
+
+  expect(probed).toMatchObject({ width: 64, height: 48 })
+  // A failed or skipped probe would leave duration undefined/0, never a
+  // positive number — width/height alone can't rule that out here since the
+  // fixture's real pixel size happens to equal the project's own resolution.
+  expect((probed as { duration: number }).duration).toBeGreaterThan(0)
 })
