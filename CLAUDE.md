@@ -908,6 +908,16 @@ were the covered ones. The one new decision, the missing-track skip in the main-
 reached from both sides by the inverted pin and the mixes that were already there. **No floor
 crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-112 (a per-frame ceiling file for the
+WebM exporter, the twin of `exportMP4.perf.test.ts`): 99.52 / 98.86 / 94.53 / 99.39, byte-identical to
+the commit this branch was rebased onto on every metric and every count — lines 6,664 / 6,696,
+statements 7,513 / 7,599, functions 1,648 / 1,658, branches 4,134 / 4,373. The change is a test file
+and a documentation clause and touches no source, and the WebM frame loop it exercises was already
+covered by the behaviour tests, so nothing moved. What the file adds is not coverage but conservation:
+one `setTransform`, balanced save/restore, one `getContext`, one `encode` and one `VideoFrame`
+created-and-closed per frame, and a seek count that is exactly one init seek per element plus two
+per frame. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
