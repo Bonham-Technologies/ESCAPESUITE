@@ -918,6 +918,19 @@ one `setTransform`, balanced save/restore, one `getContext`, one `encode` and on
 created-and-closed per frame, and a seek count that is exactly one init seek per element plus two
 per frame. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-111 (the export presets print their own
+dimensions, and the unreachable `'original'` resolution is gone): 99.52 / 98.86 / 94.53 / 99.39,
+the same four figures as the commit this branch was rebased onto, with the same 32 / 86 / 10 / 239
+uncovered. The branch denominator moved 4,373 → 4,371 and the numerator with it: `getResolution` lost
+the `|| originalHeight` fall-through that let an unknown value produce a plausible size (it throws now,
+and the throw has a test through `as never`), and the label helper is branch-free. One arm did go
+uncovered on the way and is why the count is exact: the `'project'` fallback's odd-dimension rounding
+had been exercised only through the deleted `'original'` tests, so a case was added that hands it an
+odd source (1281×721 → 1282×722). The sub-pixel bar a preset's round-to-even width can still leave is
+now pinned at the exporter level too (480p of 1280×720 → `setTransform` `[2/3, 0, 0, 2/3, 1/3, 0]` in
+both exporters), replacing the two deleted `'original'` letterbox tests. **No floor crossed**; artist's
+floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
