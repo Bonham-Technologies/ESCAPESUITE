@@ -1,7 +1,47 @@
 // Project save/load functionality
 
-import type { Project, SourceVideo, Clip } from '../store/types';
+import type {
+  Project,
+  SourceVideo,
+  Clip,
+  MediaType,
+  MediaSource,
+  WaveformPeak,
+  RecordingRole,
+  OverlayPlacement,
+} from '../store/types';
 import { getVideo, storeVideo, storeThumbnail, getThumbnail, resolveThumbnailUrl } from './storage';
+import { loadMediaDuration } from './videoProcessor';
+
+/**
+ * The `SourceVideo` fields a saved project persists alongside each video's
+ * bytes — everything `extractMetadataFromBlob` cannot recover from the blob
+ * alone (ESCSUITE-97): waveform peaks, take identity, and the flags a
+ * consumer like `TimelineTrack` reads without re-deriving them. `id`, `name`,
+ * `mimeType` and `size` are not repeated here — the file already carries the
+ * first three at the top level of each `videos[i]` entry, and `size` is the
+ * restored blob's own `size`, always exact.
+ *
+ * Optional so an old save (or a video whose live metadata never set a field)
+ * still round-trips: `undefined` values are dropped by `JSON.stringify`
+ * rather than written as `null`.
+ */
+export interface SourceVideoMeta {
+  duration: number;
+  width: number;
+  height: number;
+  frameRate: number;
+  mediaType?: MediaType;
+  source?: MediaSource;
+  recordedAt?: number;
+  waveformData?: WaveformPeak[];
+  hasAudio?: boolean;
+  takeId?: string;
+  role?: RecordingRole;
+  startOffset?: number;
+  overlayPlacement?: OverlayPlacement;
+  hasWebcam?: boolean;
+}
 
 export interface ProjectFile {
   version: number;
@@ -12,6 +52,13 @@ export interface ProjectFile {
     mimeType: string;
     data: string; // Base64 encoded video data
     thumbnail?: string; // Base64 encoded thumbnail
+    /**
+     * The live `SourceVideo`'s own fields, written on save (ESCSUITE-97).
+     * Additive: absent on a file saved before this ticket, or one written by
+     * an older ESCAPEARTIST build, and `loadProject` falls back to
+     * `extractMetadataFromBlob` exactly as it always has when it is missing.
+     */
+    meta?: SourceVideoMeta;
   }[];
 }
 
@@ -84,12 +131,30 @@ export async function saveProject(
         thumbnailBase64 = await blobToBase64(thumbnail);
       }
 
+      const meta: SourceVideoMeta = {
+        duration: video.duration,
+        width: video.width,
+        height: video.height,
+        frameRate: video.frameRate,
+        mediaType: video.mediaType,
+        source: video.source,
+        recordedAt: video.recordedAt,
+        waveformData: video.waveformData,
+        hasAudio: video.hasAudio,
+        takeId: video.takeId,
+        role: video.role,
+        startOffset: video.startOffset,
+        overlayPlacement: video.overlayPlacement,
+        hasWebcam: video.hasWebcam,
+      };
+
       projectFile.videos.push({
         id: video.id,
         name: video.name,
         mimeType: video.mimeType,
         data: base64Data,
         thumbnail: thumbnailBase64,
+        meta,
       });
     }
   }
@@ -148,8 +213,21 @@ export async function loadProject(
     // Convert base64 back to blob
     const blob = base64ToBlob(videoData.data, videoData.mimeType);
 
-    // Extract metadata from blob
-    const metadata = await extractMetadataFromBlob(blob, videoData);
+    // A file saved since ESCSUITE-97 carries the live SourceVideo's own
+    // fields in `meta` — waveform peaks, take identity, the real frame rate —
+    // so those are trusted outright and the blob is never re-probed. An older
+    // file has no `meta`, and falls back to reconstructing what it can from
+    // the blob (through `extractMetadataFromBlob`, which itself now goes
+    // through the same duration probe every other importer uses).
+    const metadata: SourceVideo = videoData.meta
+      ? {
+          id: videoData.id,
+          name: videoData.name,
+          mimeType: videoData.mimeType,
+          size: blob.size,
+          ...videoData.meta,
+        }
+      : await extractMetadataFromBlob(blob, videoData);
 
     // Store video
     await storeVideo(videoData.id, blob, metadata);
@@ -216,64 +294,49 @@ export async function extractMetadataFromBlob(
   }
 
   if (mimeType.startsWith('audio/')) {
-    return new Promise((resolve, reject) => {
-      const audio = document.createElement('audio');
-      audio.preload = 'metadata';
-      const url = URL.createObjectURL(blob);
-      audio.src = url;
+    const audio = document.createElement('audio');
+    audio.preload = 'metadata';
+    const url = URL.createObjectURL(blob);
+    audio.src = url;
 
-      audio.onloadedmetadata = () => {
-        const metadata: SourceVideo = {
-          id: savedData.id,
-          name: savedData.name,
-          duration: audio.duration,
-          width: 0,
-          height: 0,
-          frameRate: 0,
-          mimeType,
-          size: blob.size,
-          mediaType: 'audio',
-        };
-        URL.revokeObjectURL(url);
-        resolve(metadata);
-      };
+    // Routed through the same probe `extractAudioMetadata` uses (ESCSUITE-97):
+    // a headerless ESCAPECRAFT WebM reports `Infinity` on `loadedmetadata`,
+    // and a save/reopen round trip through this fallback must not
+    // reintroduce that after the duration-probe work removed it elsewhere.
+    const duration = await loadMediaDuration(audio, url, savedData.name, 'audio');
 
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error(`Failed to load audio: ${savedData.name}`));
-      };
-    });
+    return {
+      id: savedData.id,
+      name: savedData.name,
+      duration,
+      width: 0,
+      height: 0,
+      frameRate: 0,
+      mimeType,
+      size: blob.size,
+      mediaType: 'audio',
+    };
   }
 
   // Default: treat as video
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.preload = 'metadata';
+  const video = document.createElement('video');
+  video.preload = 'metadata';
 
-    const url = URL.createObjectURL(blob);
-    video.src = url;
+  const url = URL.createObjectURL(blob);
+  video.src = url;
 
-    video.onloadedmetadata = () => {
-      const metadata: SourceVideo = {
-        id: savedData.id,
-        name: savedData.name,
-        duration: video.duration,
-        width: video.videoWidth,
-        height: video.videoHeight,
-        frameRate: 30,
-        mimeType,
-        size: blob.size,
-      };
+  const duration = await loadMediaDuration(video, url, savedData.name, 'video');
 
-      URL.revokeObjectURL(url);
-      resolve(metadata);
-    };
-
-    video.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error(`Failed to load video: ${savedData.name}`));
-    };
-  });
+  return {
+    id: savedData.id,
+    name: savedData.name,
+    duration,
+    width: video.videoWidth,
+    height: video.videoHeight,
+    frameRate: 30,
+    mimeType,
+    size: blob.size,
+  };
 }
 
 /**
