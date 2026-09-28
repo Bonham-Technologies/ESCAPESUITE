@@ -1005,6 +1005,26 @@ recorder on the same line, so the identity check always returned first. Round 2 
 than tested it, the way ESCSUITE-110 treated its unreachable operands, and the denominator settled
 two lower. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-115 (`removeClipFromTimeline` refuses an
+id that names no clip, and `setProject` prunes the selection against the incoming timeline):
+99.52 / 98.88 / **94.59** / 99.40 against the 99.52 / 98.88 / 94.58 / 99.40 the commit this branch was
+rebased onto measures — branches up a hundredth, the other three unmoved. Measured in one sitting, the
+base gives 4,178 / 4,417 branches and this branch 4,182 / 4,421: four new branches, four covered, the
+same 239 uncovered as before (statements 7,593 / 7,679 → 7,600 / 7,686, lines 6,733 / 6,765 →
+6,739 / 6,771, functions 1,667 / 1,677 → 1,668 / 1,678, every denominator growing by exactly what the
+numerator did; the uncovered counts — 32 lines, 86 statements, 239 branches, 10 functions — are
+identical on both trees). The four are `removeClipFromTimeline`'s unknown-id refusal in
+`store/clipSlice.ts` (the guard `rippleDeleteClip` already had, now with the ESCSUITE-87 boolean it
+was missing) and the keyboard Delete's `else if (removeClipFromTimeline(...))` in
+`hooks/useAppKeyboardShortcuts.ts`, each reached from both sides by the unknown-id and known-id
+cases and the stale-selection Delete against the one that lands. `setProject` gained no branch of its
+own: it hands the incoming clip ids to ESCSUITE-101's `pruneSelection`, whose arms were already
+covered, and the three new `setProject` cases (selection fully present, partly present, empty) reach
+them again. The review's one MAJOR — the locked-track refusal's `false` asserted through the
+write-only `refuses` helper rather than `reportsRefusal` — moved no figure: that arm was executed
+either way, which is exactly why the contract needed the stronger assertion. **No floor crossed**;
+artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1012,7 +1032,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.67 | 100.00 |
-| `@escapesuite/artist` | 99.52 | 98.88 | 94.58 | 99.40 |
+| `@escapesuite/artist` | 99.52 | 98.88 | 94.59 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

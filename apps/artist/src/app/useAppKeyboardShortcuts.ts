@@ -37,7 +37,7 @@ export interface AppKeyboardShortcutsDeps {
   undo: () => void;
   redo: () => void;
   selectedClipId: string | null;
-  removeClipFromTimeline: (clipId: string) => void;
+  removeClipFromTimeline: (clipId: string) => boolean;
   rippleDeleteClip: (clipId: string) => void;
   activeTool: ToolType;
   duplicateClip: (clipId: string) => void;
@@ -205,8 +205,10 @@ export function useAppKeyboardShortcuts({
           if (activeTool === 'ripple') {
             rippleDeleteClip(selectedClipId);
             showNotification('Clip deleted (ripple)', 'info');
-          } else {
-            removeClipFromTimeline(selectedClipId);
+          } else if (removeClipFromTimeline(selectedClipId)) {
+            // ESCSUITE-115: an id that names no clip (a stale selection, the
+            // same way deleteSelectedClips's above can be) refuses silently —
+            // nothing to announce; the toast is for a clip that actually went.
             showNotification('Clip deleted', 'info');
           }
           return;

@@ -212,28 +212,38 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  removeClipFromTimeline: (clipId: string) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.filter((c) => c.id !== clipId);
-    // ESCSUITE-101: pruneSelection generalises the old `selectedClipId ===
-    // clipId ? null : ...` ternary to the whole selection — dropping clipId
-    // from selectedClipIds too, which nothing here used to do.
-    const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-          duration: calculateTimelineDuration(newClips),
+  removeClipFromTimeline: (clipId: string) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    // ESCSUITE-115: an id that names no clip is nothing to do — the same
+    // refusal `rippleDeleteClip` already gives (`if (!clipToDelete) return
+    // state`), generalised here to report it too (ESCSUITE-87).
+    if (!clips.some((c) => c.id === clipId)) return false;
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.filter((c) => c.id !== clipId);
+      // ESCSUITE-101: pruneSelection generalises the old `selectedClipId ===
+      // clipId ? null : ...` ternary to the whole selection — dropping clipId
+      // from selectedClipIds too, which nothing here used to do.
+      const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+            duration: calculateTimelineDuration(newClips),
+          },
         },
-      },
-      selectedClipId: pruned.selectedClipId,
-      selectedClipIds: pruned.selectedClipIds,
-      history: pushToHistory(state),
-    };
-  }),
+        selectedClipId: pruned.selectedClipId,
+        selectedClipIds: pruned.selectedClipIds,
+        history: pushToHistory(state),
+      };
+    });
+
+    return true;
+  },
 
   // Ripple delete: remove clip and shift all subsequent clips on the same track
   rippleDeleteClip: (clipId: string) => set((state) => {

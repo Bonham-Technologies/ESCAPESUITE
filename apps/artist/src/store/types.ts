@@ -601,7 +601,6 @@ export interface EditorState {
    * rather than lands on top. An empty list places nothing and records nothing.
    */
   placeTakeOnTimeline: (parts: TakeClipPart[]) => void;
-  removeClipFromTimeline: (clipId: string) => void;
   rippleDeleteClip: (clipId: string) => void;
   /**
    * **A refused write says so** (ESCSUITE-87).
@@ -623,11 +622,14 @@ export interface EditorState {
    * selection names no clip actually on the timeline, or when every one that
    * does sits on a locked track; `muteSelectedClips`/`unmuteSelectedClips`
    * refuse when every relevant track already has the mute state being asked
-   * for; and `removeClipKeyframe` — already in this list for the lock —
-   * refuses for three more reasons that have nothing to do with the lock: an
-   * unknown clip, a property the clip has no keyframes on, or no keyframe
-   * within `KEYFRAME_TIME_EPSILON` of the given time. All of them still mean
-   * exactly what `false` means above: no state changed, no undo entry pushed.
+   * for; `removeClipKeyframe` — already in this list for the lock — refuses
+   * for three more reasons that have nothing to do with the lock: an unknown
+   * clip, a property the clip has no keyframes on, or no keyframe within
+   * `KEYFRAME_TIME_EPSILON` of the given time; and `removeClipFromTimeline`
+   * (ESCSUITE-115) refuses for an id that names no clip, the same "nothing to
+   * do" `rippleDeleteClip` already recognised (`if (!clipToDelete) return
+   * state`) without a way to say so. All of them still mean exactly what
+   * `false` means above: no state changed, no undo entry pushed.
    *
    * A caller that passes `skipHistory: true` to a *later* write of the same
    * gesture MUST look at it. `skipHistory` says "an earlier write of this
@@ -637,6 +639,7 @@ export interface EditorState {
    * `hooks/useGestureHistory.ts` is the one mechanism that gets this right; the
    * gesture hooks go through its `commit`.
    */
+  removeClipFromTimeline: (clipId: string) => boolean;
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => boolean;
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => boolean;
   /**

@@ -1142,6 +1142,29 @@ describe('projectStore helper functions', () => {
 describe('projectStore remaining behaviours', () => {
   beforeEach(resetStoreForTest)
 
+  describe('setProject', () => {
+    // ESCSUITE-115: setProject replaces the whole project — a different clip
+    // list — without ever reconciling the selection against it. Project
+    // load, LOAD_PROJECT from a host and session restore all go through
+    // this action, so a selection from the previous project could outlive
+    // it as a ghost the same way ESCSUITE-101 found for every other way a
+    // clip leaves the timeline.
+    it('prunes the selection against the incoming project', () => {
+      addClip('clip1', 0, 2)
+      store().toggleClipSelection('clip1')
+      expect(store().selectedClipId).toBe('clip1')
+
+      const nextProject = {
+        ...store().project,
+        timeline: { ...store().project.timeline, clips: [], duration: 0 },
+      }
+      store().setProject(nextProject)
+
+      expect(store().selectedClipId).toBeNull()
+      expect(store().selectedClipIds.size).toBe(0)
+    })
+  })
+
   describe('resetProject', () => {
     it('clears markers so they do not survive onto the next project', () => {
       store().addMarker(3, 'Old cue')
