@@ -824,6 +824,22 @@ separate-tracks take whose thumbnail write rejects) reach the catch arm while th
 keeps the success arm. The same 31 branches and 12 statements are uncovered as before. **No floor
 crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-108 (the never-populated preview frame
+cache and the uncalled export scheduler deleted): **99.49** / **98.83** / 94.11 / **99.35** against the
+99.42 / 98.77 / 94.13 / 99.02 the commit this branch was rebased onto measures. This is the one
+paragraph this week where every denominator *shrank*: lines 7,049 / 7,090 → 6,868 / 6,903, statements
+7,928 / 8,026 → 7,734 / 7,825, functions 1,728 / 1,745 → 1,689 / 1,700 and branches 4,301 / 4,569 →
+4,225 / 4,489 — the two deleted modules were fully covered, so removing them took covered units out of
+the numerator as fast as the denominator, and the *uncovered* counts fell too (lines 41 → 35, statements
+98 → 91, functions 17 → 11, branches 268 → 264) because the cache-hit path and the Clear-Cache button
+carried defensive arms nothing reached. Branches read two hundredths lower than the base for that reason
+alone — nothing new is uncovered — and the functions figure is the story: the first measurement of the
+bare deletion came back at 1,672 / 1,689 = **98.99**, a hundredth under the 99 floor, because 45 fully
+covered functions had gone and the same 17 stayed uncovered. Floors never go down, so the fix round
+covered six of those 17 with behaviour tests (the export worker's four easing arrows and its transition
+sort comparator, and `analytics.exportFailed`) and the figure is 99.35. **No floor crossed**; artist's
+floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -831,7 +847,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
-| `@escapesuite/artist` | 99.42 | 98.77 | 94.13 | 99.02 |
+| `@escapesuite/artist` | 99.49 | 98.83 | 94.11 | 99.35 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
