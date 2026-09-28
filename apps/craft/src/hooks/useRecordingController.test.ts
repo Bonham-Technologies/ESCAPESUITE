@@ -449,6 +449,28 @@ describe('useRecordingController starting a take', () => {
     expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
     expect(recorderFactory.createRecorder).not.toHaveBeenCalled()
   })
+
+  it('takes a fresh start after one that failed', async () => {
+    // A failure is not a latch either. The attempt's gate is dropped in the
+    // `finally`, which the failing path runs through as well, so the click that
+    // answers the notice is a take and not a no-op.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 3 })
+    harness.acquireStreams.mockRejectedValueOnce(new Error('Camera in use'))
+
+    await startTake(result)
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).not.toBeNull()
+    expect(recorderFactory.recorders).toHaveLength(0)
+
+    await startTake(result)
+
+    expect(recorderFactory.recorders).toHaveLength(1)
+    expect(state()).toBe('countdown')
+    // ...and the next take clears what the last one had to report.
+    expect(useRecorderStore.getState().notice).toBeNull()
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error))
+  })
 })
 
 describe('useRecordingController countdown', () => {
@@ -1483,6 +1505,79 @@ describe('useRecordingController teardown', () => {
       expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error))
       expect(useRecorderStore.getState().notice).toBeNull()
       expect(state()).toBe('idle')
+    })
+
+    // ESCSUITE-109, fix round 1: the same supersession one `await` later. A
+    // cancel frees Record while `initialize()` is still parked, so the next take
+    // can have acquired its capture and built *its* recorder by the time the
+    // older setup resumes — and `recorderRef`, the store's streams and
+    // `stopAllStreams` all belong to that newer take by then. The ESCSUITE-73
+    // guard tears down what it finds, which was right while the only way to
+    // reach it was a take that had already been torn down, and is the newer
+    // take's recorder and capture now. A superseded attempt must touch nothing:
+    // its own everything was released by the cancel that superseded it.
+    describe('when a newer take is already being set up', () => {
+      /** A capture of its own per request, so the store can be read back. */
+      function acquirePerAttempt(): AcquiredDoubles[] {
+        const acquired: AcquiredDoubles[] = []
+        harness.acquireStreams.mockImplementation(async () => {
+          const streams: AcquiredDoubles = { screen: screenStream(), webcam: null, mic: null }
+          acquired.push(streams)
+          return streams
+        })
+        return acquired
+      }
+
+      it('touches nothing of it when the older setup resumes', async () => {
+        const releaseFirst = parkedInitialize()
+        const { result } = mountController({ countdownSeconds: 3 })
+        const acquired = acquirePerAttempt()
+
+        let first!: Promise<void>
+        await act(async () => { first = result.current.handleStartRecording() })
+        // Parked inside the first initialize(), with its recorder built.
+        expect(recorderFactory.recorders).toHaveLength(1)
+
+        // Escape in 'preparing' disposes that recorder and frees Record.
+        act(() => { result.current.handleCancelRecording() })
+        expect(recorderFactory.last().dispose).toHaveBeenCalledTimes(1)
+        expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+
+        // The next take gets all the way to its own parked initialize().
+        const releaseSecond = parkedInitialize()
+        let second!: Promise<void>
+        await act(async () => { second = result.current.handleStartRecording() })
+        expect(recorderFactory.recorders).toHaveLength(2)
+        const newer = recorderFactory.last()
+        expect(useRecorderStore.getState().screenStream).toBe(acquired[1].screen)
+
+        // Now the abandoned setup resumes.
+        releaseFirst()
+        await act(async () => { await first })
+
+        // It disposed the newer take's recorder and released its capture — the
+        // sharing bar going out mid-take — and then the newer take's own resume
+        // found a null recorder ref and returned without a state, leaving the UI
+        // stuck in 'preparing': no Record button, no Cancel button, nothing but a
+        // reload.
+        expect(newer.dispose).not.toHaveBeenCalled()
+        expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+        expect(useRecorderStore.getState().screenStream).toBe(acquired[1].screen)
+        for (const track of acquired[1].screen?.getTracks() ?? []) {
+          expect(track.stop).not.toHaveBeenCalled()
+        }
+        expect(state()).toBe('preparing')
+
+        // ...and the newer take goes on to run, exactly as if the older one had
+        // never resumed at all.
+        releaseSecond()
+        await act(async () => { await second })
+
+        expect(state()).toBe('countdown')
+        act(() => { vi.advanceTimersByTime(3000) })
+        expect(newer.start).toHaveBeenCalledTimes(1)
+        expect(recorderFactory.recorders).toHaveLength(2)
+      })
     })
 
     // ESCSUITE-93. The window *before* `recorderRef.current` is assigned — and
