@@ -1005,10 +1005,21 @@ Two more rules the WebCodecs recorder follows and `Recorder` does not yet:
 - A take with **no** microphone and no system audio starts no monitor at all — there is no
   analyser to read, so the loop would only write a hard-coded `{ microphone: 0, system: 0 }`
   into the store for a meter that cannot move. It does send that value **once**, before
-  returning: nothing resets `audioLevels` between takes, and `SourceToggles` draws a meter
-  whenever the *toggle* is on rather than whenever an analyser exists, so a take that asked
-  for system audio and was not given it would otherwise show the previous take's bar frozen
-  at its last value. One store write per take, not per frame.
+  returning: `SourceToggles` draws a meter whenever the *toggle* is on rather than whenever an
+  analyser exists, so a take that asked for system audio and was not given it would otherwise
+  have nothing update its bar for the length of the take. One store write per take, not per
+  frame.
+
+Neither recorder's monitor ever emits a zero on its own once it has something real to measure —
+it just keeps sending whatever it last read, for as long as the take runs. ESCSUITE-114:
+`useRecordingController`'s `onStop` — the one place both recorders' stop reaches, covering a
+stop asked for through `handleStopRecording` and one the recorder fires on its own when the
+capture ends — writes `{ microphone: 0, system: 0 }` to the store the instant a take ends, so
+the next take's meter (closed by `showMeters` for every state but `'countdown'` / `'recording'`
+/ `'paused'`, ESCSUITE-104) never opens on a level the take before it left behind.
+`useRecordingController.test.ts`'s "audio levels" cases pin it: non-zero while a take is live,
+zero after both kinds of stop, and zero already sitting there the moment the next take reaches
+`'preparing'`, before its own monitor has said anything.
 
 **A level push now costs the Sources panel and nothing else.** `App` selects each field it
 reads and does not read `audioLevels` at all; `SourceTogglesPanel` owns the subscription and

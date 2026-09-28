@@ -567,6 +567,19 @@ export function useRecordingController({
           // recorderRef.current — so this guard is the one that catches it, and
           // a separate `if (cancelledRef.current) return;` here would never run.
           if (recorderRef.current !== me) return;
+          // The take is over the instant this fires — whether it was asked
+          // for or the recorder found out on its own (the capture ended) —
+          // and neither recorder's monitor ever emits a zero of its own
+          // (ESCSUITE-114): a take with nothing to measure sends one
+          // hard-coded reading at start and then stops, and a take that IS
+          // measuring something just keeps emitting whatever it last read.
+          // Left alone, the store would carry that reading forever, and the
+          // next take's meter — closed only while there is no live take —
+          // would open on it before its own monitor had said anything. One
+          // write here, the single place both recorders' stop reaches,
+          // covers every path that ends a take rather than one recorder's
+          // own stop().
+          setAudioLevels({ microphone: 0, system: 0 });
           // Four of the ways a part can be lost happen inside the recorder —
           // it was never set up, it encoded nothing, it gave up, its finalize
           // threw — and all four arrive here as a list that is simply shorter,

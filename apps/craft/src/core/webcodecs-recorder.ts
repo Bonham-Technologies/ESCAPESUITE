@@ -1693,11 +1693,14 @@ export class WebCodecsRecorder {
     // A take with no microphone and no system audio has nothing to measure, so
     // there is no loop to run: pushing a hard-coded { 0, 0 } into the store on
     // every animation frame is a re-render of the whole app for a meter that
-    // cannot move. Send that value exactly once, though — the store keeps the
-    // previous take's levels (nothing resets them between takes) and
-    // SourceToggles draws a meter whenever the *toggle* is on, so a take that
-    // asked for system audio and was not given it would otherwise show the
-    // last take's bar, frozen at whatever it was.
+    // cannot move. Send that value exactly once, though: SourceToggles draws a
+    // meter whenever the *toggle* is on, and a toggle can be on with nothing
+    // behind it — system audio asked for and refused, a microphone the
+    // capability probe never found (ESCSUITE-70) — so without this the meter
+    // would have nothing to read until this take ends, at which point
+    // `useRecordingController`'s `onStop` is what actually zeroes the store
+    // (ESCSUITE-114; this recorder's own monitor never emits a zero on its
+    // own once it has something real to measure).
     if (!this.micMeter && !this.systemMeter) {
       this.callbacks.onAudioLevels?.({ microphone: 0, system: 0 });
       return;
