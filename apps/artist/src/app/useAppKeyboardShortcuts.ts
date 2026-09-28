@@ -205,10 +205,10 @@ export function useAppKeyboardShortcuts({
           if (activeTool === 'ripple') {
             rippleDeleteClip(selectedClipId);
             showNotification('Clip deleted (ripple)', 'info');
-          // ESCSUITE-115: an id that names no clip (a stale selection, the
-          // same way deleteSelectedClips's above can be) refuses silently —
-          // nothing to announce.
           } else if (removeClipFromTimeline(selectedClipId)) {
+            // ESCSUITE-115: an id that names no clip (a stale selection, the
+            // same way deleteSelectedClips's above can be) refuses silently —
+            // nothing to announce; the toast is for a clip that actually went.
             showNotification('Clip deleted', 'info');
           }
           return;

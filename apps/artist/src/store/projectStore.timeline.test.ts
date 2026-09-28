@@ -1038,7 +1038,7 @@ describe('projectStore remaining behaviours', () => {
         { id: 'new1', sourceVideoId: video.id, name: 'new1', startTime: 0, endTime: 2, duration: 2 },
         held
       )))
-    it('refuses to remove a clip on it', () => refuses(() => store().removeClipFromTimeline('h1')))
+    it('refuses to remove a clip on it', () => reportsRefusal(() => store().removeClipFromTimeline('h1')))
     it('refuses to ripple-delete a clip on it', () => refuses(() => store().rippleDeleteClip('h1')))
     it('refuses to update a clip on it', () => reportsRefusal(() => store().updateClip('h1', { endTime: 1 })))
     it('refuses to trim a clip on it', () => reportsRefusal(() =>
