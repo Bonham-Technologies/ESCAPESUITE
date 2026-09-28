@@ -39,9 +39,11 @@ export interface PixelSize {
  * not 480/720 (0.66667), so `Math.min` picks the height's ratio and the frame
  * carries a **third of an output pixel** of pillar bar on each side. That is the
  * point of taking the minimum: what a rounding disagreement can leave is a
- * sub-pixel *bar*, never a crop. Where the two ratios genuinely differ (an
- * "Original" export whose bottom clip is not the project's shape) the leftover
- * is a real black bar, which is the deliberate letterbox; see
+ * sub-pixel *bar*, never a crop. Where the two ratios genuinely differ — no
+ * resolution in `ExportOptions['resolution']` produces that any more
+ * (ESCSUITE-111 dropped `'original'`, the one that could), only a hand-built
+ * `project`/`output` pair such as `outputTransform.test.ts` passes — the
+ * leftover is a real black bar, which is the deliberate letterbox; see
  * {@link openOutputFrame}.
  *
  * A degenerate project (a resolution of zero, which the store never writes but

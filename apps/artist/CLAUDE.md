@@ -1805,14 +1805,19 @@ was 4:3 exported 960x720 for "720p". Only a caller with no project resolution at
 to the source aspect, the same fallback `'project'` itself takes — and that fallback is used by
 both the output size and the project's own drawing space together, so the two can never disagree.
 There used to be a fourth option, `'original'`, whose output *was* the bottom clip's source size
-regardless of the project's own shape — the one case that could still letterbox on purpose after
-this ticket, and one the export dialog never offered (only a hand-built headless job spec could
+regardless of the project's own shape — the one case that could produce a real, deliberate
+letterbox, and one the export dialog never offered (only a hand-built headless job spec could
 reach it). ESCSUITE-111 dropped it rather than fix it: every resolution left in
-`ExportOptions['resolution']` ties its output aspect to the project's, so the letterbox path is
-now unreachable through any public option — it survives only as the fallback's own sub-pixel
-rounding, and `core/outputTransform.test.ts` still exercises it directly with hand-built sizes.
-A job spec that asks for `resolution: 'original'` is now a validation error
-(`services/headless-artist`'s `parseJobSpec`), not a silently-accepted value.
+`ExportOptions['resolution']` ties its output aspect to the project's, to no more than
+rounding — about one output pixel of bar, never a real letterbox — and `core/outputTransform.test.ts`
+still exercises the mechanism itself directly with hand-built, genuinely mismatched sizes. That
+one-pixel bar is `getResolution`'s own round-to-even step, not a fallback: 480p of a 1280x720
+project is 854x480 (853.33 rounded up to the nearest even width), and 854/1280 (0.66719) is not
+quite 480/720 (0.66667), so `projectToOutputScale`'s `Math.min` leaves a third of an output pixel
+of bar on each side even with a project resolution given throughout — pinned at the exporter
+level by `exportWebM.test.ts` / `exportMP4.test.ts`'s "leaves a sub-pixel bar..." case. A job spec
+that asks for `resolution: 'original'` is now a validation error (`services/headless-artist`'s
+`parseJobSpec`), not a silently-accepted value.
 
 `ctx.filter` is the one length the transform does not reach, so both exporters pass
 `MediaDrawOptions.filterScale` now (see the Preview section, where it was born). That needed
