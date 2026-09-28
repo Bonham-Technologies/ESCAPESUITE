@@ -127,10 +127,16 @@ export function useProjectActions({
       // would be freed twice.
       resetProject();
       setProject(parsed.project);
-      loadedVideos.forEach(addSourceVideo);
-      // Every incoming source has now been handed to the store — a later
-      // throw (e.g. from a subscriber) is not this function's thumbnail to
-      // unwind any more.
+      // A plain `forEach` would leave `mintedButNotYetOwned` covering every
+      // source until the whole loop finished — if `addSourceVideo` threw
+      // partway through, the catch below would revoke sources that had
+      // already been handed to the store and were already on screen. Shrinking
+      // it after each one keeps the catch's cleanup limited to sources that
+      // genuinely never made it in.
+      for (let i = 0; i < loadedVideos.length; i++) {
+        addSourceVideo(loadedVideos[i]);
+        mintedButNotYetOwned = loadedVideos.slice(i + 1);
+      }
       mintedButNotYetOwned = undefined;
 
       showNotification('Project loaded successfully', 'success');

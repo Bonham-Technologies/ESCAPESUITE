@@ -87,13 +87,11 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     const sourceVideos = existing === -1
       ? [...state.sourceVideos, video]
       : state.sourceVideos.map((v, i) => (i === existing ? video : v))
-    const staleThumbnailUrl = previous?.thumbnailUrl && previous.thumbnailUrl !== video.thumbnailUrl
-      ? previous.thumbnailUrl
-      : undefined
-    if (staleThumbnailUrl) revokeSourceThumbnails([previous!])
-    const history = staleThumbnailUrl
-      ? scrubDeadThumbnails(pushToHistory(state), [staleThumbnailUrl])
-      : pushToHistory(state)
+    let history = pushToHistory(state)
+    if (previous && previous.thumbnailUrl && previous.thumbnailUrl !== video.thumbnailUrl) {
+      revokeSourceThumbnails([previous])
+      history = scrubDeadThumbnails(history, [previous.thumbnailUrl])
+    }
     return { sourceVideos, history }
   }),
 
@@ -105,11 +103,15 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     // deletes the blobs before the store hears about it.
     const { clips, tracks } = state.project.timeline;
     if (lockedSourceVideoIds(clips, tracks).has(id)) return state; // ESCSUITE-84
+    const removed = state.sourceVideos.find((v) => v.id === id);
+    // An id naming no source is a no-op, not an edit: nothing to write,
+    // nothing to revoke, and no undo step recording a "removal" that changed
+    // nothing (ESCSUITE-113 review).
+    if (!removed) return state;
     // ESCSUITE-113: the source leaving the library may hold a live
     // thumbnailUrl (a `URL.createObjectURL` handle) — the one place this
     // action owns freeing, and nothing else ever will.
-    const removed = state.sourceVideos.find((v) => v.id === id);
-    revokeSourceThumbnails(removed ? [removed] : []);
+    revokeSourceThumbnails([removed]);
     const kept = clips.filter((c) => c.sourceVideoId !== id);
     // ESCSUITE-100: a clipboard entry that used to point at this source can
     // never be pasted back — the same belt-and-braces pruning `removeTrack`
@@ -123,7 +125,7 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     const pruned = pruneSelection(kept, state.selectedClipId, state.selectedClipIds);
     // The revoked thumbnailUrl above is also scrubbed out of history (this
     // push and everything already in it) — see `scrubDeadThumbnails`.
-    const history = removed?.thumbnailUrl
+    const history = removed.thumbnailUrl
       ? scrubDeadThumbnails(pushToHistory(state), [removed.thumbnailUrl])
       : pushToHistory(state);
     return {

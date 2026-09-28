@@ -122,11 +122,10 @@ describe('opening a project', () => {
 
     expect(deps.resetProject).toHaveBeenCalled()
     expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'Opened' }))
-    expect(deps.addSourceVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ id: sampleVideo.id }),
-      0,
-      expect.any(Array)
-    )
+    // ESCSUITE-113 (review round 2): addSourceVideo is now called from an
+    // explicit loop rather than `loadedVideos.forEach`, so it is called with
+    // just the source — not forEach's incidental (element, index, array).
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(expect.objectContaining({ id: sampleVideo.id }))
     expect(deps.showNotification).toHaveBeenCalledWith('Project loaded successfully', 'success')
     expect(result.current.showProjectLoadDialog).toBe(false)
     expect(result.current.isLoading).toBe(false)

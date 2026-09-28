@@ -130,6 +130,51 @@ describe('projectStore integration', () => {
         expect(after.sourceVideos).toHaveLength(1)
         expect(after.sourceVideos[0]).toMatchObject(change)
       })
+
+      // ESCSUITE-113 (review round 2): a replace-in-place is the one way a
+      // source's thumbnailUrl changes without the source itself ever leaving
+      // the library — addSourceVideo owns freeing the URL it replaces, but
+      // only when it actually changes.
+      describe('revoking the replaced thumbnail', () => {
+        beforeEach(() => {
+          vi.mocked(URL.revokeObjectURL).mockClear()
+        })
+
+        it('does not revoke when a changed re-add keeps the same thumbnail URL', () => {
+          useEditorStore.getState().addSourceVideo(sameVideo())
+
+          useEditorStore.getState().addSourceVideo({ ...sameVideo(), name: 'renamed.mp4' })
+
+          expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+        })
+
+        it('revokes the previous thumbnail URL exactly once when a re-add carries a new one', () => {
+          useEditorStore.getState().addSourceVideo(sameVideo())
+
+          useEditorStore.getState().addSourceVideo({ ...sameVideo(), thumbnailUrl: 'blob:newer' })
+
+          expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+          expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb')
+        })
+
+        // Undo/redo never revoke on their own, but the history entry this
+        // replace pushed captured the source with its old (now-dead)
+        // 'blob:thumb' — scrubDeadThumbnails is what stops undo from handing
+        // it back.
+        it('does not revoke again on undo, and undo brings the source back with no thumbnail rather than the dead handle', () => {
+          useEditorStore.getState().addSourceVideo(sameVideo())
+          useEditorStore.getState().addSourceVideo({ ...sameVideo(), thumbnailUrl: 'blob:newer' })
+          expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+          vi.mocked(URL.revokeObjectURL).mockClear()
+
+          useEditorStore.getState().undo()
+
+          expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+          const restored = useEditorStore.getState().sourceVideos.find((v) => v.id === 'video1')
+          expect(restored).toBeDefined()
+          expect(restored?.thumbnailUrl).toBeUndefined()
+        })
+      })
     })
 
     it('removes a source video', () => {
@@ -229,6 +274,23 @@ describe('projectStore integration', () => {
         const restored = useEditorStore.getState().sourceVideos.find((v) => v.id === 'video1')
         expect(restored).toBeDefined()
         expect(restored?.thumbnailUrl).toBeUndefined()
+      })
+
+      // An id naming no source is a no-op, not an edit (ESCSUITE-113 review
+      // round 2): nothing to revoke, and nothing else changes either.
+      it('does nothing for an id naming no source', () => {
+        useEditorStore.getState().addSourceVideo({
+          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
+          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:thumb-1',
+        })
+        const before = useEditorStore.getState()
+
+        useEditorStore.getState().removeSourceVideo('no-such-id')
+
+        const after = useEditorStore.getState()
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+        expect(after.sourceVideos).toBe(before.sourceVideos)
+        expect(after.history.past).toHaveLength(before.history.past.length)
       })
     })
 
