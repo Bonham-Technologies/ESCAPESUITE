@@ -960,6 +960,34 @@ guard and a `??` fallback beside the explicit `edge`), which the review found an
 rather than tested — `clipSlice.ts` is back to the same two uncovered arms it had before the ticket.
 **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-113 (a source's `blob:` thumbnail
+handle is freed by whoever drops it — the store on remove, reset and replace-in-place, the load path
+for a refused file — and scrubbed out of the undo history so an undo cannot restore a dead URL):
+99.52 / **98.88** / **94.58** / 99.40 against the 99.52 / 98.87 / 94.55 / 99.40 the commit this branch
+was rebased onto measures — statements up a hundredth, branches up three, lines and functions unmoved.
+Measured in one sitting, the base gives 4,153 / 4,392 branches and this branch 4,178 / 4,417:
+twenty-five new branches, twenty-five covered, the same 239 uncovered as before (statements
+7,554 / 7,640 → 7,593 / 7,679, lines 6,700 / 6,732 → 6,733 / 6,765, functions 1,658 / 1,668 →
+1,667 / 1,677, every denominator growing by exactly what the numerator did; the uncovered counts —
+32 lines, 86 statements, 239 branches, 10 functions — are identical on both trees). The new
+branches are `revokeSourceThumbnails`'s `blob:` guard in `core/storage.ts`; in
+`store/projectSlice.ts` the `previous` lookup and the three-operand "held, has a handle, and the
+handle differs" condition on `addSourceVideo`'s replace-in-place arm, `removeSourceVideo`'s
+unknown-id refusal (an id naming no source is a no-op, not an undo step) and its scrub-or-not
+ternary; in `store/storeHistory.ts` `scrubDeadThumbnails`'s empty-list early return, its
+per-snapshot "carries a dead URL" probe and the per-source replacement; and in
+`app/useProjectActions.ts` the refused-load revoke, the catch's `mintedButNotYetOwned` guard and
+the indexed loop that shrinks it after each source the store takes in — each reached from both
+sides by the same-URL re-add, the changed-URL replace, the undo-after-replace, the unknown id, the
+refused parse, the throw-before-add and the throw-partway-through-three-sources cases against the
+plain adds and removes that were already there. Three review rounds put the last of those there: the
+first moved ownership of a restore's stale handles from an up-front sweep (which killed the CRAFT
+handoff's still-live tiles) into `addSourceVideo`'s replace arm; the second closed the unknown-id
+gap; the third pinned the partial-throw slice. The base row reads 94.55 where ESCSUITE-110's
+paragraph recorded 94.56 on its own rebased tree — two branches of Istanbul drift on a denominator
+of 4,392, the same kind ESCSUITE-91's row noted — and the comparison here is between two runs in one
+sitting. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -967,7 +995,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.65 | 100.00 |
-| `@escapesuite/artist` | 99.52 | 98.87 | 94.56 | 99.40 |
+| `@escapesuite/artist` | 99.52 | 98.88 | 94.58 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
