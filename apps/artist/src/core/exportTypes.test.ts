@@ -283,6 +283,13 @@ describe('getResolution', () => {
     expect(getResolution('project', 640, 360)).toEqual({ width: 640, height: 360 })
   })
 
+  it('rounds an odd source size up to even when "project" has no project resolution', () => {
+    // The only path left that sizes from the source itself (ESCSUITE-111 dropped
+    // 'original'); the encoder still needs even dimensions, so both odd sides bump.
+    expect(getResolution('project', 1281, 721)).toEqual({ width: 1282, height: 722 })
+    expect(getResolution('project', 1280, 721)).toEqual({ width: 1280, height: 722 })
+  })
+
   it('scales presets to the source aspect ratio', () => {
     expect(getResolution('1080p', 1920, 1080)).toEqual({ width: 1920, height: 1080 })
     expect(getResolution('720p', 1920, 1080)).toEqual({ width: 1280, height: 720 })
