@@ -315,6 +315,117 @@ describe('loadProject', () => {
   })
 })
 
+describe('project file metadata round trip (ESCSUITE-97)', () => {
+  let clickSpy: ReturnType<typeof vi.spyOn>
+  let createObjectURL: ReturnType<typeof vi.spyOn>
+  let fileReader: ReturnType<typeof installFileReaderDouble>
+  let media: MediaDoubles
+
+  beforeEach(() => {
+    clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    createObjectURL = vi.spyOn(URL, 'createObjectURL')
+    fileReader = installFileReaderDouble()
+    media = installMediaElementDoubles()
+  })
+
+  afterEach(() => {
+    fileReader.uninstall()
+    clickSpy.mockRestore()
+    createObjectURL.mockRestore()
+    media.uninstall()
+  })
+
+  /** The .veditor payload handed to URL.createObjectURL for download. */
+  async function capturedProjectFile(): Promise<ProjectFile> {
+    const blob = createObjectURL.mock.calls.at(-1)![0] as Blob
+    return JSON.parse(await blob.text()) as ProjectFile
+  }
+
+  it('carries waveformData, take identity and the flags TimelineTrack reads through a save, and resolves a headerless take instead of reintroducing Infinity', async () => {
+    const videoId = uniqueId('take')
+    const take: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24, // not the extractMetadataFromBlob default of 30
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [
+        { min: -0.5, max: 0.5 },
+        { min: -0.2, max: 0.3 },
+      ],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: { position: 'bottom-right', size: 0.25, shape: 'circle' },
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), take)
+
+    await saveProject(createTestProject(videoId), [take])
+    const saved = await capturedProjectFile()
+
+    expect(saved.videos[0].meta).toEqual({
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: take.waveformData,
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: take.overlayPlacement,
+      hasWebcam: true,
+    })
+
+    // The blob probe would report Infinity if the load path fell back to it —
+    // scripted here so the assertion below is proof the meta path was used,
+    // not a coincidence of a probe that happened to work.
+    media.script({ video: { duration: Infinity, durationAfterSeek: 12, durationStaysUnknown: true } })
+
+    const reopened = new File([JSON.stringify(saved)], 'take.veditor', { type: 'application/json' })
+    const { sourceVideos } = await loadProject(reopened)
+
+    expect(sourceVideos).toHaveLength(1)
+    expect(sourceVideos[0]).toEqual(take)
+    expect(media.videos).toHaveLength(0) // never probed the blob
+  })
+
+  it('still loads an old-format file with no meta, resolving a headerless take through the shared probe instead of Infinity', async () => {
+    media.script({ video: { duration: Infinity, durationAfterSeek: 9, durationStaysUnknown: true } })
+
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject('legacy'),
+          videos: [
+            { id: 'legacy', name: 'legacy.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0].duration).toBe(9)
+    expect(Number.isFinite(sourceVideos[0].duration)).toBe(true)
+    expect(sourceVideos[0].frameRate).toBe(30) // the hard-coded fallback, unchanged for an old file
+  })
+})
+
 describe('extractMetadataFromBlob', () => {
   let media: MediaDoubles
 
