@@ -275,6 +275,33 @@ describe('VideoUploader', () => {
       expect(screen.queryByText('Complete')).not.toBeInTheDocument()
     })
 
+    // ESCSUITE-120: the 2 s "remove from the list" timer used to outlive the
+    // component. A test that finished inside two seconds left it armed, and
+    // when the file's jsdom was torn down before it fired, react-dom threw
+    // `window is not defined` from inside the callback — an unhandled error
+    // that failed CI with every assertion green.
+    it('arms no timer past its own unmount (ESCSUITE-120)', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+      const { unmount } = render(<VideoUploader onProjectFile={onProjectFile} />)
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file('a.mp4', 'video/mp4'), file('b.mp4', 'video/mp4')] } })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(screen.getAllByText('Complete')).toHaveLength(2)
+      expect(vi.getTimerCount()).toBe(2)
+
+      unmount()
+
+      expect(vi.getTimerCount()).toBe(0)
+      // And nothing runs on the gone component either way.
+      act(() => {
+        vi.advanceTimersByTime(2000)
+      })
+    })
+
     it('rejects files that are not media at all', async () => {
       render(<VideoUploader onProjectFile={onProjectFile} />)
 
