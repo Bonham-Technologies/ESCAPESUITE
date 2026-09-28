@@ -886,6 +886,23 @@ from both sides by the round-trip case, the old-format file, the `null` / `Infin
 audio-only 0×0 source and the smuggled `thumbnailUrl`. **No floor crossed**; artist's floors stay
 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-27 for ESCSUITE-99 (the dead export-worker audio mixer
+and its support probe deleted; a clip whose track is gone is skipped when mixing): **99.52** / **98.86**
+/ **94.53** / **99.39** against the 99.49 / 98.84 / 94.19 / 99.35 the commit this branch was rebased
+onto measures — every figure up, and for the second time this week because every denominator shrank:
+lines 6,932 / 6,967 → 6,664 / 6,696, statements 7,807 / 7,898 → 7,513 / 7,599, functions
+1,694 / 1,705 → 1,648 / 1,658 and branches 4,287 / 4,551 → 4,134 / 4,373. Unlike ESCSUITE-108's
+deletion, this one took *uncovered* units out too — lines 35 → 32, statements 91 → 86, functions
+11 → 10, branches 264 → 239 — because `workers/exportWorker.ts` and the worker arm of
+`core/audioMixer.ts` carried defensive branches that only a real worker could reach, and a real
+worker never opened (`OfflineAudioContext` is `[Exposed=Window]`; the probe tested for it inside a
+DedicatedWorker and always answered false, verified in Chromium before the ruling). Five of the six
+functions ESCSUITE-108's round covered to hold the functions floor lived in that worker and are gone
+with it; the floor holds with room because the 45-then-50 functions removed across the two deletions
+were the covered ones. The one new decision, the missing-track skip in the main-thread mixer, is
+reached from both sides by the inverted pin and the mixes that were already there. **No floor
+crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -893,7 +910,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.50 | 97.64 | 100.00 |
-| `@escapesuite/artist` | 99.49 | 98.84 | 94.19 | 99.35 |
+| `@escapesuite/artist` | 99.52 | 98.86 | 94.53 | 99.39 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
