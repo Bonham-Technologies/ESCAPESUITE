@@ -1041,6 +1041,33 @@ waits on a real fake-indexeddb `loadRecordings` with one turn of headroom — le
 because the re-render pin files depend on it, with the library suite waiting on the loaded row
 count instead. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-117 (a source restored by undo gets
+its thumbnail back through a non-undoable `setSourceThumbnail` and the media library's lazy rebuild;
+every mock object URL a distinct handle; the `?loadVideo=` handoff keeping no thumbnail owner of its
+own): 99.52 / 98.88 / **94.61** / 99.40 against the 99.52 / 98.88 / 94.59 / 99.40 the commit this
+branch was rebased onto measures — branches up two hundredths, the other three unmoved. Measured in
+one sitting, the base gives 4,182 / 4,421 branches and this branch 4,201 / 4,440: nineteen new
+branches, nineteen covered, the same 239 uncovered as before (statements 7,600 / 7,686 →
+7,631 / 7,717, lines 6,739 / 6,771 → 6,765 / 6,797, functions 1,668 / 1,678 → 1,679 / 1,689, every
+denominator growing by exactly what the numerator did; the uncovered counts — 32 lines, 86
+statements, 239 branches, 10 functions — are identical on both trees, file by file). The nineteen
+are `setSourceThumbnail`'s four refusals in `store/projectSlice.ts` (unknown id, same URL, a
+different live `blob:` handle already on the source — which revokes the incoming one — and the
+write itself), `revokeThumbnailUrl`'s `blob:` guard in `core/storage.ts` that
+`revokeSourceThumbnails` is now written in terms of, and in `components/VideoUploader.tsx` the
+rebuild effect's in-flight `??=`, its per-source "has no thumbnail" filter and the three arms of the
+guard a landed read passes — the source has left the library, the editor has unmounted, a real load
+got there first — each reached from both sides by the store's five `setSourceThumbnail` cases and
+the library's eleven (stored → set, nothing stored, removed before the read landed, unmounted
+before it landed, a real load winning the race, two renders → one read, a rejected read, every
+thumbnail-less source repaired in one burst, an unrelated source joining mid-read). The review's
+HIGH — a per-run `mounted` flag that a successful rebuild's own store write flipped, so one tile per
+burst was repaired — moved no figure: both arms of that flag were executed either way, which is
+why its two probe tests are behaviour pins and not coverage. The handoff's part removed a covered
+owner (the cleanup revoke and the drop-time revoke) and its tests were rewritten rather than
+deleted, so nothing there is less covered than before. **No floor crossed**; artist's floors stay
+99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1048,7 +1075,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.67 | 100.00 |
-| `@escapesuite/artist` | 99.52 | 98.88 | 94.59 | 99.40 |
+| `@escapesuite/artist` | 99.52 | 98.88 | 94.61 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
