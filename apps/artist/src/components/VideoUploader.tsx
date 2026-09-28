@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processVideoFile, processImageFile, processAudioFile } from '../core/videoProcessor';
-import { getStorageEstimate, clearAllVideos, deleteVideo } from '../core/storage';
+import { getStorageEstimate, clearAllVideos, deleteVideo, resolveThumbnailUrl } from '../core/storage';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
@@ -367,10 +367,61 @@ export function VideoLibrary() {
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addClipToTimeline = useEditorStore((state) => state.addClipToTimeline);
   const removeSourceVideo = useEditorStore((state) => state.removeSourceVideo);
+  const setSourceThumbnail = useEditorStore((state) => state.setSourceThumbnail);
 
   // The media the store will refuse to remove, because a clip on a locked
   // track uses it (ESCSUITE-84) — the row says so rather than doing nothing.
   const lockedMedia = useMemo(() => lockedSourceVideoIds(clips, tracks), [clips, tracks]);
+
+  /**
+   * Ids this mount has already asked storage about, so a re-render (a second
+   * source arriving, a clip added) does not issue the read again. Never
+   * emptied: one read per source per mount is enough — a source whose
+   * thumbnail is not in storage will not grow one while the editor is open,
+   * and one that IS rebuilt is no longer thumbnail-less.
+   */
+  const thumbnailReadsRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Rebuild a thumbnail the history scrubbed (ESCSUITE-117).
+   *
+   * A `thumbnailUrl` is an object URL, so ESCSUITE-113 revokes it when a source
+   * leaves the library and scrubs the dead handle out of the history snapshots.
+   * A source restored by undo — undo across the `resetProject` a project load
+   * does is the realistic case — therefore comes back with no thumbnail, and
+   * showed the placeholder tile until it was next genuinely loaded. The stored
+   * thumbnail is still there, so read it again and hand the fresh handle to the
+   * store. That also covers the older "restored with no thumbnail" case.
+   *
+   * The handle belongs to the library from the moment the store takes it. Until
+   * then this owns it, and frees it if the tile it was for is gone — the source
+   * removed, the editor unmounted, or a real load having won the race.
+   */
+  useEffect(() => {
+    let mounted = true;
+    for (const source of sourceVideos) {
+      if (source.thumbnailUrl || thumbnailReadsRef.current.has(source.id)) continue;
+      const id = source.id;
+      thumbnailReadsRef.current.add(id);
+      void (async () => {
+        let url: string | undefined;
+        try {
+          url = await resolveThumbnailUrl(id);
+        } catch (e) {
+          console.error('Failed to rebuild thumbnail:', e);
+          return;
+        }
+        if (!url) return;
+        const current = useEditorStore.getState().sourceVideos.find((v) => v.id === id);
+        if (!mounted || !current || current.thumbnailUrl) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setSourceThumbnail(id, url);
+      })();
+    }
+    return () => { mounted = false; };
+  }, [sourceVideos, setSourceThumbnail]);
 
   const handleAddToTimeline = useCallback(
     (media: typeof sourceVideos[0]) => {

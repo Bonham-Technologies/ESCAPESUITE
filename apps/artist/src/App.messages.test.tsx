@@ -220,6 +220,13 @@ describe('App URL parameters', () => {
     // a revoke of a previous test's URL can no longer read as a revoke of this
     // test's own handoff thumbnail.
     store().clearHistory()
+    // Nothing stored to rebuild from, by default. Since ESCSUITE-117 the media
+    // library reads the stored thumbnail of every source that has none, so the
+    // id-aware implementation the two thumbnail cases below install must not
+    // survive into the next test (vi.clearAllMocks clears calls, not
+    // implementations).
+    vi.mocked(getThumbnail).mockReset()
+    vi.mocked(getThumbnail).mockResolvedValue(undefined)
     installCanvasDouble()
     urlParams()
   })
@@ -258,7 +265,13 @@ describe('App URL parameters', () => {
         blob: new Blob(),
         metadata: { ...sampleVideo, id: 'recording1', name: 'Screen recording' },
       })
-      vi.mocked(getThumbnail).mockResolvedValueOnce(new Blob(['thumb'], { type: 'image/jpeg' }))
+      // Keyed by id, not `...Once`: since ESCSUITE-117 the media library reads
+      // the stored thumbnail of every source that has none — the seeded
+      // 'video1' included — so a one-shot value would be consumed by whichever
+      // read happened to run first.
+      vi.mocked(getThumbnail).mockImplementation(async (id: string) =>
+        id === 'recording1' ? new Blob(['thumb'], { type: 'image/jpeg' }) : undefined
+      )
       urlParams({ loadVideoId: 'recording1' })
 
       await renderApp()
@@ -277,7 +290,13 @@ describe('App URL parameters', () => {
         blob: new Blob(),
         metadata: { ...sampleVideo, id: 'recording1', name: 'Screen recording' },
       })
-      vi.mocked(getThumbnail).mockResolvedValueOnce(new Blob(['thumb'], { type: 'image/jpeg' }))
+      // Keyed by id, not `...Once`: since ESCSUITE-117 the media library reads
+      // the stored thumbnail of every source that has none — the seeded
+      // 'video1' included — so a one-shot value would be consumed by whichever
+      // read happened to run first.
+      vi.mocked(getThumbnail).mockImplementation(async (id: string) =>
+        id === 'recording1' ? new Blob(['thumb'], { type: 'image/jpeg' }) : undefined
+      )
       urlParams({ loadVideoId: 'recording1' })
 
       const { unmount } = await renderApp()

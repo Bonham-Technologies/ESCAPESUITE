@@ -7,19 +7,31 @@ import { storeVideo, getAllVideoMetadata } from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { SourceVideo } from '../store/types'
 import styles from './VideoUploader.module.css'
+import { lastObjectUrl } from '../test/objectUrls'
 
 // The metadata extractors need real media decoding, so they stay collaborators;
 // storage runs for real against fake-indexeddb.
-const { mockProcessVideoFile, mockProcessImageFile, mockProcessAudioFile } = vi.hoisted(() => ({
+const { mockProcessVideoFile, mockProcessImageFile, mockProcessAudioFile, mockResolveThumbnailUrl } = vi.hoisted(() => ({
   mockProcessVideoFile: vi.fn(),
   mockProcessImageFile: vi.fn(),
   mockProcessAudioFile: vi.fn(),
+  mockResolveThumbnailUrl: vi.fn<(id: string) => Promise<string | undefined>>(),
 }))
 
 vi.mock('../core/videoProcessor', () => ({
   processVideoFile: mockProcessVideoFile,
   processImageFile: mockProcessImageFile,
   processAudioFile: mockProcessAudioFile,
+}))
+
+// Only the thumbnail read is a collaborator: the library's lazy rebuild
+// (ESCSUITE-117) has to be driveable one landing at a time, including one that
+// lands after the source has gone. Everything else in storage stays real, on
+// the fake-indexeddb this file already round-trips through — including
+// `revokeSourceThumbnails`, which is what the store calls.
+vi.mock('../core/storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../core/storage')>()),
+  resolveThumbnailUrl: mockResolveThumbnailUrl,
 }))
 
 const MB = 1024 * 1024
@@ -101,7 +113,12 @@ describe('VideoUploader', () => {
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
+    // Deliberately NOT vi.unstubAllGlobals(): that restores jsdom's own URL and
+    // Blob over the stubs src/test/setup.ts installs, for the whole rest of the
+    // file — so every describe after this one ran against jsdom's real
+    // createObjectURL (which cannot read a Node Blob at all) instead of the
+    // counting stub (ESCSUITE-117). `confirm` and `alert` are re-stubbed by the
+    // beforeEach above, so nothing needs restoring here.
     vi.useRealTimers()
     Reflect.deleteProperty(navigator, 'storage')
   })
@@ -507,11 +524,11 @@ describe('VideoLibrary', () => {
     vi.clearAllMocks()
     resetStoreForTest()
     store().removeSourceVideo('video1')
+    // The quiet case: nothing stored to rebuild from, so the lazy rebuild
+    // (ESCSUITE-117) reads once per thumbnail-less source and sets nothing.
+    mockResolveThumbnailUrl.mockReset()
+    mockResolveThumbnailUrl.mockResolvedValue(undefined)
     vi.stubGlobal('confirm', vi.fn(() => true))
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
   })
 
   it('shows an empty state when nothing has been imported', () => {
@@ -641,5 +658,137 @@ describe('VideoLibrary', () => {
     await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
     expect(useEditorStore.getState().sourceVideos).toHaveLength(1)
     expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
+  })
+
+  // ESCSUITE-117: a source restored by undo has no thumbnailUrl — ESCSUITE-113
+  // scrubbed the revoked handle out of the history snapshots rather than hand
+  // back a dead one (pinned in `store/projectStore.test.ts`'s resetProject
+  // case, "undo brings the source back with no thumbnail rather than a dead
+  // one") — so the tile was blank until that source was next genuinely loaded.
+  // The library rebuilds it from what is stored instead.
+  describe('rebuilding a thumbnail the history scrubbed', () => {
+    /** What the real `resolveThumbnailUrl` does when a thumbnail IS stored. */
+    const storedThumbnail = () =>
+      mockResolveThumbnailUrl.mockImplementation(async () =>
+        URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
+      )
+
+    /** A read the test lands itself, so it can change the library first. */
+    function parkedRead() {
+      let land: (url: string | undefined) => void = () => {}
+      mockResolveThumbnailUrl.mockImplementation(
+        () => new Promise<string | undefined>((resolve) => { land = resolve })
+      )
+      return async (url: string | undefined) => {
+        await act(async () => { land(url) })
+      }
+    }
+
+    it('puts the stored thumbnail on the tile, and records no undo step doing it', async () => {
+      storedThumbnail()
+      store().addSourceVideo(videoMeta)
+      const historyBefore = store().history.past.length
+      // Spied here as well as asserted through the store, because the two cases
+      // below claim this was NOT called — a claim worth nothing unless the spy
+      // is demonstrably the function the component reaches.
+      const setSourceThumbnail = vi.spyOn(useEditorStore.getState(), 'setSourceThumbnail')
+
+      render(<VideoLibrary />)
+
+      const img = (await screen.findByAltText('test.mp4')) as HTMLImageElement
+      expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1')
+      expect(setSourceThumbnail).toHaveBeenCalledWith('video1', lastObjectUrl())
+      expect(img.src).toContain(lastObjectUrl())
+      expect(store().sourceVideos[0].thumbnailUrl).toBe(lastObjectUrl())
+      // A repair, not an edit.
+      expect(store().history.past).toHaveLength(historyBefore)
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(lastObjectUrl())
+      setSourceThumbnail.mockRestore()
+    })
+
+    it('leaves a source whose thumbnail is already live alone', async () => {
+      storedThumbnail()
+      store().addSourceVideo({ ...videoMeta, thumbnailUrl: 'blob:already-live' })
+
+      render(<VideoLibrary />)
+
+      await waitFor(() => expect(screen.getByAltText('test.mp4')).toBeInTheDocument())
+      expect(mockResolveThumbnailUrl).not.toHaveBeenCalled()
+      expect(store().sourceVideos[0].thumbnailUrl).toBe('blob:already-live')
+    })
+
+    it('sets nothing and frees nothing when no thumbnail is stored for it', async () => {
+      store().addSourceVideo(videoMeta)
+      const revokesBefore = vi.mocked(URL.revokeObjectURL).mock.calls.length
+
+      render(<VideoLibrary />)
+
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
+      expect(store().sourceVideos[0].thumbnailUrl).toBeUndefined()
+      expect(screen.queryByAltText('test.mp4')).not.toBeInTheDocument()
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls).toHaveLength(revokesBefore)
+    })
+
+    it('frees the handle it minted when the source left the library before the read landed', async () => {
+      const land = parkedRead()
+      store().addSourceVideo(videoMeta)
+      const setSourceThumbnail = vi.spyOn(useEditorStore.getState(), 'setSourceThumbnail')
+      render(<VideoLibrary />)
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
+
+      act(() => { store().removeSourceVideo('video1') })
+      const orphaned = URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
+      await land(orphaned)
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(orphaned)
+      expect(setSourceThumbnail).not.toHaveBeenCalled()
+      expect(store().sourceVideos).toHaveLength(0)
+      setSourceThumbnail.mockRestore()
+    })
+
+    it('frees the handle it minted when the editor went away before the read landed', async () => {
+      const land = parkedRead()
+      store().addSourceVideo(videoMeta)
+      const { unmount } = render(<VideoLibrary />)
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
+
+      unmount()
+      const orphaned = URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
+      await land(orphaned)
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(orphaned)
+      expect(store().sourceVideos[0].thumbnailUrl).toBeUndefined()
+    })
+
+    it('reads a source once, however many times it re-renders while the read is parked', async () => {
+      const land = parkedRead()
+      store().addSourceVideo(videoMeta)
+      const { rerender } = render(<VideoLibrary />)
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
+
+      act(() => {
+        store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'second.mp4', thumbnailUrl: 'blob:second' })
+      })
+      rerender(<VideoLibrary />)
+
+      expect(mockResolveThumbnailUrl.mock.calls.filter(([id]) => id === 'video1')).toHaveLength(1)
+      await land(undefined)
+    })
+
+    it('says so and stops when the read itself fails', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      mockResolveThumbnailUrl.mockRejectedValue(new Error('db closed'))
+      store().addSourceVideo(videoMeta)
+      const revokesBefore = vi.mocked(URL.revokeObjectURL).mock.calls.length
+
+      render(<VideoLibrary />)
+
+      await waitFor(() =>
+        expect(consoleError).toHaveBeenCalledWith('Failed to rebuild thumbnail:', expect.any(Error))
+      )
+      expect(store().sourceVideos[0].thumbnailUrl).toBeUndefined()
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls).toHaveLength(revokesBefore)
+      consoleError.mockRestore()
+    })
   })
 })

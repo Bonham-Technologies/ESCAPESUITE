@@ -69,7 +69,10 @@ export async function resolveThumbnailUrl(id: string): Promise<string | undefine
  * sources (`loadProject` mints their thumbnails before validation ever runs) —
  * a *successful* load's outgoing library is `resetProject`'s to free, not this
  * callback's. The media library's Clear All / Clear Unused reach this only
- * indirectly, through `removeSourceVideo` (ESCSUITE-113). A source with no
+ * indirectly, through `removeSourceVideo` (ESCSUITE-113). One caller frees a
+ * handle that never reached the library at all: `setSourceThumbnail`, when the
+ * lazy rebuild it carries lost a race with a real load and the source already
+ * has a live thumbnail (ESCSUITE-117). A source with no
  * thumbnail, or a `thumbnailUrl` that is not a `blob:` handle (there is no
  * such source today; the guard is defensive against a future non-blob
  * source), is left alone.
