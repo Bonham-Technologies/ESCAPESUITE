@@ -52,7 +52,7 @@ beforeEach(() => {
     undo: vi.fn(),
     redo: vi.fn(),
     selectedClipId: null,
-    removeClipFromTimeline: vi.fn(),
+    removeClipFromTimeline: vi.fn(() => true),
     rippleDeleteClip: vi.fn(),
     activeTool: 'select',
     duplicateClip: vi.fn(),
@@ -225,6 +225,16 @@ describe('deleting', () => {
 
     expect(press('Delete')).toBe(false)
     expect(deps.deleteSelectedClips).toHaveBeenCalled()
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-115: the single-clip path refuses the same way — an id that
+  // names no clip toasts nothing.
+  it('Delete on a single ghost selection claims the key but toasts nothing', () => {
+    mountShortcuts({ selectedClipId: 'clip-1', removeClipFromTimeline: vi.fn(() => false) })
+
+    expect(press('Delete')).toBe(false)
+    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1')
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 })

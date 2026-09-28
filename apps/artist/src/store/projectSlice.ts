@@ -19,10 +19,23 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
   sourceVideos: [],
 
   // Project actions
-  setProject: (project: Project) => set((state) => ({
-    project: ensureTimelineHasTracks(project),
-    history: pushToHistory(state),
-  })),
+  //
+  // ESCSUITE-115: this replaces the whole project — a different clip list —
+  // so a selection carried over from the one before it can outlive its own
+  // clips as a ghost. Project load, LOAD_PROJECT from a host and session
+  // restore all go through here; `pruneSelection` (ESCSUITE-101) is
+  // reference-stable, so a caller with nothing selected (the common case:
+  // `resetProject()` runs first in most callers) writes the same Set back.
+  setProject: (project: Project) => set((state) => {
+    const withTracks = ensureTimelineHasTracks(project);
+    const pruned = pruneSelection(withTracks.timeline.clips, state.selectedClipId, state.selectedClipIds);
+    return {
+      project: withTracks,
+      selectedClipId: pruned.selectedClipId,
+      selectedClipIds: pruned.selectedClipIds,
+      history: pushToHistory(state),
+    };
+  }),
 
   // ESCSUITE-113: every source video leaving the library on a reset held a
   // live `URL.createObjectURL` handle (thumbnailUrl) that nothing else was

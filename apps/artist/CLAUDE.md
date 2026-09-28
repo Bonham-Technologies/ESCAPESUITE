@@ -1383,7 +1383,13 @@ every relevant track already has the mute state being asked for; and `removeClip
 already on the list above for the lock — also refuses for three reasons that have nothing to do
 with it: an unknown clip, a property the clip has no keyframes on, or no keyframe within
 `KEYFRAME_TIME_EPSILON` of the given time. All of them still mean exactly what `false` means
-above.
+above. ESCSUITE-115 gave `removeClipFromTimeline` the same treatment: it used to filter the
+clips, bump `modified` and push an undo entry for an id naming no clip, unable to say so because
+it returned `void`; it now reads through `get()` the same as the guards above, refuses (`false`,
+nothing written) for an unknown id — the "nothing to do" `rippleDeleteClip` already recognised
+(`if (!clipToDelete) return state`) without a way to report it — and only then runs its `set`.
+`useAppKeyboardShortcuts`'s Delete key follows the return the same way it already follows
+`deleteSelectedClips`'s: a refusal toasts nothing, because there is nothing to announce.
 
 `hooks/useGestureHistory.ts` is the one mechanism that does. `createGestureHistory()` (and the
 `useGestureHistory()` that holds one per component) is `begin` / `resume` / `end` / `commit`,
@@ -1521,10 +1527,14 @@ generalise their old `selectedClipId === clipId ? null : …` ternary to the who
 dropping `clipId` from `selectedClipIds` too, which neither used to do; `splitClip` prunes the
 original (now-retired) id from `selectedClipIds` while still explicitly selecting the first half,
 its existing contract; `removeTrack` and the project slice's `removeSourceVideo` prune the
-selection beside the clipboard pruning ESCSUITE-100 already added, same shape, same `set`; and
+selection beside the clipboard pruning ESCSUITE-100 already added, same shape, same `set`;
 `undo`/`redo` prune against the clips *being landed on* (`previous`/`next`, not the state being
 left), because an undo or a redo can restore a clip list that no longer holds an id the selection
-names. `pruneSelection` returns the SAME `selectedClipIds` Set (and the same `selectedClipId`
+names; and `setProject` (ESCSUITE-115) prunes against the *incoming* project's clips — it replaces
+the whole project, a different clip list wholesale, and project load, `LOAD_PROJECT` from a host
+and session restore all go through it, so a selection from the project being replaced used to
+outlive it as a ghost. `pruneSelection` returns the SAME `selectedClipIds` Set (and the same
+`selectedClipId`
 value) when nothing needed dropping, so a caller spreading its result into a `set()` update
 triggers no re-render over an unchanged selection — the property `trackLock.ts`'s five questions
 have and this one needed too, since every one of these actions already writes on every call.
