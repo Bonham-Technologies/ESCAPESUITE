@@ -9,7 +9,7 @@ import type { StateCreator } from 'zustand';
 import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATION } from './types';
 import { cloneClip } from '../utils/deepClone';
-import { splitAnimation } from '../utils/animation';
+import { splitAnimation, trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { clipOnLockedTrack, isTrackLocked } from './trackLock';
@@ -346,6 +346,32 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         // Recalculate duration if start/end times changed
         if (updates.startTime !== undefined || updates.endTime !== undefined) {
           updated.duration = updated.endTime - updated.startTime;
+
+          // ESCSUITE-110: a trim that SHORTENS the clip rebases its
+          // animation onto the new, shorter duration — a keyframe past the
+          // new end becomes dead weight (never played, still listed in the
+          // panel) and a preset longer than the clip can make
+          // `generateOutPresetKeyframes` compute a negative `startTime`.
+          // Trimming outward changes nothing: it is exactly the case this
+          // `if` does not enter. `trimAnimation` wants the kept interval in
+          // the clip's ORIGINAL (pre-trim) local-time coordinates — `start`
+          // is how much was cut from the front, which `useTrimDrag`'s start
+          // edge reports as either a moved `startTime` (a video/audio clip's
+          // trim point in its source) or, for an extendable overlay/image
+          // clip with no source to trim, a moved `timelinePosition` instead;
+          // `end` is simply `start` plus the clip's new duration, since
+          // nothing before `start` or after `end` survives the trim either
+          // way.
+          if (clip.animation && updated.duration < clip.duration - KEYFRAME_TIME_EPSILON) {
+            const frontCut =
+              updates.startTime !== undefined
+                ? updated.startTime - clip.startTime
+                : updates.timelinePosition !== undefined
+                  ? updated.timelinePosition - clip.timelinePosition
+                  : 0;
+            const start = frontCut > KEYFRAME_TIME_EPSILON ? frontCut : 0;
+            updated.animation = trimAnimation(clip.animation, { start, end: start + updated.duration });
+          }
         }
         return updated;
       });

@@ -513,12 +513,14 @@ Clips support animated properties via keyframes:
   half and the out-preset with the second (fade in at the start, fade out at the end, exactly that
   literally), and the half that loses a preset resets that side to `DEFAULT_ANIMATION`'s "none"
   shape — but a **kept** preset's `duration` is left exactly as authored, even past its own half's
-  new, shorter length. That was a deliberate call, not an oversight: nothing else in the app
-  clamps a preset to the clip it sits on (trimming a clip leaves a 2s fade on a 1s result alone),
-  the inspector's own slider bound (`maxPresetDuration()` in `clipEditorModel.ts`) is a UI limit on
-  new input, not an invariant every writer must also enforce, and an unclamped 3s fade-in on a 2s
-  first half still renders bit-identically to what the parent clip showed over those same two
-  seconds — clamping the duration would have changed the picture instead of preserving it. `split`
+  new, shorter length. That was a deliberate call, not an oversight: the inspector's own slider
+  bound (`maxPresetDuration()`, moved to `utils/animation.ts` by ESCSUITE-110 below — still
+  re-exported from `clipEditorModel.ts` for every existing import) is a UI limit on new input, not
+  an invariant every writer must also enforce, and an unclamped 3s fade-in on a 2s first half still
+  renders bit-identically to what the parent clip showed over those same two seconds — clamping the
+  duration would have changed the picture instead of preserving it. A **trim**, below, makes the
+  opposite call, because it has no "what the parent showed" to fall back on: the trimmed-off
+  content is simply gone. `split`
   builds each half with `cloneClip` (the same `structuredClone` helper `duplicateClip` uses)
   rather than `{ ...clip }`, so `transform`, `effects`, `transition`, `mask` and `stroke` are all
   deep-copied too, closing the latent aliasing where every field above shared one object between
@@ -530,6 +532,34 @@ Clips support animated properties via keyframes:
   easing other than `linear`, the curve between a synthesised boundary keyframe and its neighbour
   differs slightly from the parent's curve over that same stretch, even though both halves meet at
   the same value at the cut.
+- **Trimming a clip rebases its animation too (ESCSUITE-110)**. Shortening a clip from either
+  timeline handle (`useTrimDrag`'s commit, which is the store's `updateClip` — the only action
+  that moves a clip's `startTime`/`endTime`; there is no separate inspector trim input) used to
+  touch neither the clip's keyframes nor its preset durations: a keyframe past the new end sat
+  there as dead weight (still listed in the keyframe panel, never played), and a preset longer than
+  the trimmed clip could leave `generateOutPresetKeyframes` computing a negative `startTime` — a 2s
+  fade-out on a clip trimmed to 1s opened the clip already part-faded, with the keyframe panel
+  plotting that keyframe off the left edge. `utils/animation.ts`'s `trimAnimation(animation, {
+  start, end })` fixes both, sharing its keyframe arithmetic with `splitAnimation` rather than
+  keeping a second copy of it: `cutEnd`/`cutStart`, the two halves of `splitAnimation`'s old inline
+  loop, are now standalone functions both call. `start` and `end` are the surviving interval in the
+  clip's ORIGINAL (pre-trim) local-time coordinates, so `end - start` is always the trimmed clip's
+  new duration; trimming from the end is `cutEnd(sorted, end)` alone (`start` is 0), trimming from
+  the start is that result's `cutStart(_, start)` (dropping and shifting the front), and a
+  combined trim of both edges — not something the UI's single-handle drag produces, but the
+  function itself does not assume otherwise — composes the two in one pass. Unlike a split, a trim
+  makes only one clip, so there is no ownership question for the presets: both `in` and `out` stay
+  on the one clip that remains, each with its `duration` clamped to `maxPresetDuration(end -
+  start)` — the same bound the inspector's own sliders enforce, and, since this ticket, exported
+  from `utils/animation.ts` rather than `clipEditorModel.ts` (still re-exported from there for
+  every existing import) so `trimAnimation` does not need a util importing from a component
+  directory. That clamp is the one place a trim's behaviour deliberately parts ways with a split's:
+  `splitAnimation` leaves a kept preset's duration untouched even past its own half's new length,
+  because an unclamped preset there still renders bit-identically to what the parent clip showed —
+  a trim has no such fallback, since the trimmed-off content is simply gone, so the clamp is the
+  only way to keep the picture sane. Lengthening a clip (dragging a handle outward) changes nothing
+  about its animation at all — `updateClip` only calls `trimAnimation` when the new duration is
+  strictly shorter than the old one, by construction rather than by any special-case check.
 
 ### Keyframe Panel (`src/components/KeyframePanel/`)
 - **KeyframePanel.tsx**: Main editor with property list, graph view, and keyframe timeline
