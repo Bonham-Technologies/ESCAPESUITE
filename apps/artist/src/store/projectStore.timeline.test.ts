@@ -836,6 +836,137 @@ describe('projectStore remaining behaviours', () => {
     })
   })
 
+  // ESCSUITE-101. Every action here removes a clip from the timeline some way
+  // other than the id the caller happened to pass it — a track or a source
+  // video taking its clips with it, a split retiring the clip it split, undo
+  // and redo landing on an older or newer clip list — and none of them used
+  // to reconcile the selection against what was actually left. `pruneSelection`
+  // is the one place that question gets asked now; each case here selects the
+  // clip (or clips) that is about to leave, along with one that survives, and
+  // asserts the Set holds only the survivor.
+  describe('selection pruning when a clip leaves the timeline (ESCSUITE-101)', () => {
+    it('removeClipFromTimeline drops the removed clip from selectedClipIds and nulls selectedClipId', () => {
+      const first = addClip('clip1', 0, 2)
+      addClip('clip2', 4, 2, first.trackId)
+      store().toggleClipSelection('clip2')
+      store().toggleClipSelection('clip1') // selectedClipId is now clip1
+
+      store().removeClipFromTimeline('clip1')
+
+      expect(store().selectedClipId).toBeNull()
+      expect([...store().selectedClipIds]).toEqual(['clip2'])
+    })
+
+    it('rippleDeleteClip drops the removed clip from selectedClipIds and nulls selectedClipId', () => {
+      const first = addClip('clip1', 0, 2)
+      addClip('clip2', 4, 2, first.trackId)
+      store().toggleClipSelection('clip2')
+      store().toggleClipSelection('clip1')
+
+      store().rippleDeleteClip('clip1')
+
+      expect(store().selectedClipId).toBeNull()
+      expect([...store().selectedClipIds]).toEqual(['clip2'])
+    })
+
+    it('splitClip drops the original (now-retired) clip id from selectedClipIds, swapping in the first half when it was selected', () => {
+      const first = addClip('clip1', 0, 4)
+      addClip('clip2', 8, 2, first.trackId)
+      store().toggleClipSelection('clip2')
+      store().toggleClipSelection('clip1') // multi-selection holds the clip about to split
+
+      store().splitClip('clip1', 2)
+
+      // splitClip's own contract is unchanged: the first half is selected.
+      const selectedId = store().selectedClipId
+      expect(selectedId).not.toBeNull()
+      expect(selectedId).not.toBe('clip1')
+
+      // clip1 no longer exists — split into two new clips — so it cannot
+      // remain in the Set even though splitClip never named it as "removed".
+      // Because it WAS part of the multi-selection, the first half takes its
+      // place there too, so selectedClipId and selectedClipIds agree.
+      expect([...store().selectedClipIds].sort()).toEqual(['clip2', selectedId].sort())
+      expect(store().selectedClipIds.has(selectedId!)).toBe(true)
+    })
+
+    it('splitClip leaves an UNSELECTED multi-selection untouched by the first half', () => {
+      const first = addClip('clip1', 0, 4)
+      addClip('clip2', 8, 2, first.trackId)
+      store().toggleClipSelection('clip2') // clip1 is not part of the multi-selection
+
+      store().splitClip('clip1', 2)
+
+      // The first half becomes the sole selection (splitClip's own contract),
+      // but the multi-selection Set never held clip1, so it is untouched —
+      // the first half is NOT added to a selection it was never part of.
+      expect([...store().selectedClipIds]).toEqual(['clip2'])
+    })
+
+    it('removeTrack drops the ids of the clips it takes with it', () => {
+      const removedTrack = store().addTrack('Removed')
+      addClip('clip1', 0, 2, removedTrack.id)
+      addClip('clip2', 4, 2)
+      store().toggleClipSelection('clip2')
+      store().toggleClipSelection('clip1')
+
+      store().removeTrack(removedTrack.id)
+
+      expect(store().selectedClipId).toBeNull()
+      expect([...store().selectedClipIds]).toEqual(['clip2'])
+    })
+
+    it('removeSourceVideo drops the ids of the clips it takes with it', () => {
+      const other: SourceVideo = { ...video, id: 'video2' }
+      store().addSourceVideo(other)
+      addClip('clip1', 0, 2)
+      store().addClipToTimeline(
+        { id: 'clip2', sourceVideoId: 'video2', name: 'clip2', startTime: 0, endTime: 2, duration: 2 },
+        undefined,
+        4
+      )
+      store().toggleClipSelection('clip1')
+      store().toggleClipSelection('clip2')
+
+      store().removeSourceVideo('video2')
+
+      expect(store().selectedClipId).toBeNull()
+      expect([...store().selectedClipIds]).toEqual(['clip1'])
+    })
+
+    it('undo drops a ghost that only the earlier, restored state lacks', () => {
+      addClip('clip1', 0, 2)
+      addClip('clip2', 4, 2) // pushes a snapshot holding only clip1
+      store().toggleClipSelection('clip1')
+      store().toggleClipSelection('clip2') // selectedClipId is now clip2
+
+      store().undo() // restores the snapshot with only clip1; clip2 is now a ghost
+
+      expect(store().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
+      expect(store().selectedClipId).toBeNull()
+      expect([...store().selectedClipIds]).toEqual(['clip1'])
+    })
+
+    it('redo drops a ghost that the redo itself removes', () => {
+      addClip('clip1', 0, 2)
+      addClip('clip2', 4, 2)
+      store().toggleClipSelection('clip2')
+      store().removeClipFromTimeline('clip2') // clip2 gone; selection already pruned to nothing
+
+      store().undo() // clip2 restored
+      expect(store().project.timeline.clips.map((c) => c.id)).toEqual(['clip1', 'clip2'])
+
+      store().toggleClipSelection('clip1')
+      store().toggleClipSelection('clip2') // selectedClipIds = {clip1, clip2}, selectedClipId = clip2
+
+      store().redo() // re-applies the delete: clip2 is gone again
+
+      expect(store().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
+      expect(store().selectedClipId).toBeNull()
+      expect([...store().selectedClipIds]).toEqual(['clip1'])
+    })
+  })
+
   // ESCSUITE-87. The refusals above are only half the contract: an action that
   // *did* write says so too, or a caller could not tell "refused" from "wrote"
   // and a gesture would hand `skipHistory` to a second write for an undo entry

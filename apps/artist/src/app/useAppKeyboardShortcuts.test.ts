@@ -77,7 +77,7 @@ beforeEach(() => {
     setShowExport: vi.fn(),
     splitClip: vi.fn(),
     selectedClipIds: new Set<string>(),
-    deleteSelectedClips: vi.fn(),
+    deleteSelectedClips: vi.fn(() => true),
     copySelectedClips: vi.fn(),
     pasteClips: vi.fn(() => true),
     clipboard: null,
@@ -214,6 +214,18 @@ describe('deleting', () => {
     expect(press('Delete')).toBe(true)
     expect(deps.deleteSelectedClips).not.toHaveBeenCalled()
     expect(deps.removeClipFromTimeline).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-101: a selection that names only ghosts (ids the store already
+  // pruned some other way, or a genuinely stale multi-selection) refuses
+  // silently — no toast, the same way a locked-track veto elsewhere in this
+  // file says nothing when there is nothing worth announcing.
+  it('Delete on a selection of ghosts claims the key but toasts nothing', () => {
+    mountShortcuts({ selectedClipIds: new Set(['a', 'b']), deleteSelectedClips: vi.fn(() => false) })
+
+    expect(press('Delete')).toBe(false)
+    expect(deps.deleteSelectedClips).toHaveBeenCalled()
+    expect(deps.showNotification).not.toHaveBeenCalled()
   })
 })
 

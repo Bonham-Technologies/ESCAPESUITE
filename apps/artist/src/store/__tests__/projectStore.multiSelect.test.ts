@@ -574,12 +574,13 @@ describe('Multi-Select Store', () => {
       setupStore(clips, tracks)
 
       useEditorStore.getState().toggleClipSelection('clip-1')
-      useEditorStore.getState().muteSelectedClips()
+      const result = useEditorStore.getState().muteSelectedClips()
 
       const state = useEditorStore.getState()
       const track1 = state.project.timeline.tracks.find(t => t.id === 'track-1')!
       const track2 = state.project.timeline.tracks.find(t => t.id === 'track-2')!
 
+      expect(result).toBe(true)
       expect(track1.muted).toBe(true)
       expect(track2.muted).toBe(false)
     })
@@ -600,9 +601,51 @@ describe('Multi-Select Store', () => {
       const clips = [createTestClip({ id: 'clip-1' })]
       setupStore(clips, tracks)
 
-      useEditorStore.getState().muteSelectedClips()
+      const result = useEditorStore.getState().muteSelectedClips()
 
+      expect(result).toBe(false)
       expect(useEditorStore.getState().history.past.length).toBe(0)
+    })
+
+    it('pushes nothing when the selected clip is already on a muted track (ESCSUITE-101)', () => {
+      const tracks = [createTestTrack({ muted: true })]
+      const clips = [createTestClip({ id: 'clip-1' })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      const tracksBefore = useEditorStore.getState().project.timeline.tracks
+
+      const result = useEditorStore.getState().muteSelectedClips()
+
+      expect(result).toBe(false)
+      expect(useEditorStore.getState().project.timeline.tracks).toBe(tracksBefore)
+      expect(useEditorStore.getState().history.past.length).toBe(0)
+    })
+
+    it('mutes only the tracks that need it when the selection spans a muted and an unmuted track', () => {
+      const tracks = [
+        createTestTrack({ id: 'track-1', index: 0, muted: true }),
+        createTestTrack({ id: 'track-2', name: 'Track 2', index: 1, muted: false }),
+      ]
+      const clips = [
+        createTestClip({ id: 'clip-1', trackId: 'track-1' }),
+        createTestClip({ id: 'clip-2', trackId: 'track-2', timelinePosition: 0 }),
+      ]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      useEditorStore.getState().toggleClipSelection('clip-2')
+      const track1Before = useEditorStore.getState().project.timeline.tracks.find(t => t.id === 'track-1')
+
+      const result = useEditorStore.getState().muteSelectedClips()
+
+      const state = useEditorStore.getState()
+      expect(result).toBe(true)
+      expect(state.history.past.length).toBe(1)
+      // The already-muted track is left as the same object — only the track
+      // that actually changed was rewritten.
+      expect(state.project.timeline.tracks.find(t => t.id === 'track-1')).toBe(track1Before)
+      expect(state.project.timeline.tracks.find(t => t.id === 'track-2')!.muted).toBe(true)
     })
   })
 
@@ -619,12 +662,13 @@ describe('Multi-Select Store', () => {
       setupStore(clips, tracks)
 
       useEditorStore.getState().toggleClipSelection('clip-1')
-      useEditorStore.getState().unmuteSelectedClips()
+      const result = useEditorStore.getState().unmuteSelectedClips()
 
       const state = useEditorStore.getState()
       const track1 = state.project.timeline.tracks.find(t => t.id === 'track-1')!
       const track2 = state.project.timeline.tracks.find(t => t.id === 'track-2')!
 
+      expect(result).toBe(true)
       expect(track1.muted).toBe(false)
       expect(track2.muted).toBe(true) // clip-2 not selected
     })
@@ -638,6 +682,32 @@ describe('Multi-Select Store', () => {
       useEditorStore.getState().unmuteSelectedClips()
 
       expect(useEditorStore.getState().history.past.length).toBe(1)
+    })
+
+    it('pushes nothing when the selected clip is already on an unmuted track (ESCSUITE-101)', () => {
+      const tracks = [createTestTrack({ muted: false })]
+      const clips = [createTestClip({ id: 'clip-1' })]
+      setupStore(clips, tracks)
+
+      useEditorStore.getState().toggleClipSelection('clip-1')
+      const tracksBefore = useEditorStore.getState().project.timeline.tracks
+
+      const result = useEditorStore.getState().unmuteSelectedClips()
+
+      expect(result).toBe(false)
+      expect(useEditorStore.getState().project.timeline.tracks).toBe(tracksBefore)
+      expect(useEditorStore.getState().history.past.length).toBe(0)
+    })
+
+    it('does nothing when no clips selected', () => {
+      const tracks = [createTestTrack({ muted: true })]
+      const clips = [createTestClip({ id: 'clip-1' })]
+      setupStore(clips, tracks)
+
+      const result = useEditorStore.getState().unmuteSelectedClips()
+
+      expect(result).toBe(false)
+      expect(useEditorStore.getState().history.past.length).toBe(0)
     })
   })
 

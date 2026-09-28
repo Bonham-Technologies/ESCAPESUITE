@@ -383,8 +383,10 @@ function generateOutPresetKeyframes(
 
 // Two keyframe times within this many seconds of each other are treated as
 // "the same time" — the tolerance `mergeKeyframes` and `splitAnimation` both
-// use to decide whether a keyframe sits exactly at a given instant.
-const KEYFRAME_TIME_EPSILON = 0.001;
+// use to decide whether a keyframe sits exactly at a given instant. Exported
+// since ESCSUITE-101, so `keyframeSlice.ts`'s `removeClipKeyframe` can ask the
+// same question before refusing a delete that would touch nothing.
+export const KEYFRAME_TIME_EPSILON = 0.001;
 
 /**
  * Merge keyframe arrays, with later keyframes taking precedence at same time

@@ -78,7 +78,7 @@ export interface AppKeyboardShortcutsDeps {
   setShowExport: (open: boolean) => void;
   splitClip: (clipId: string, splitTime: number) => void;
   selectedClipIds: Set<string>;
-  deleteSelectedClips: () => void;
+  deleteSelectedClips: () => boolean;
   copySelectedClips: () => void;
   pasteClips: () => boolean;
   clipboard: Clip[] | null;
@@ -188,8 +188,13 @@ export function useAppKeyboardShortcuts({
             showNotification('Track is locked', 'info');
             return;
           }
-          deleteSelectedClips();
-          showNotification(clipCountMessage(selectedClipIds.size, 'deleted'), 'info');
+          // ESCSUITE-101: a selection that named only clips already gone
+          // (an id left stale by something other than this Delete) refuses
+          // silently — there is nothing to announce, the same way a pointer
+          // veto is silent elsewhere in this file.
+          if (deleteSelectedClips()) {
+            showNotification(clipCountMessage(selectedClipIds.size, 'deleted'), 'info');
+          }
           return;
         } else if (selectedClipId) {
           e.preventDefault();

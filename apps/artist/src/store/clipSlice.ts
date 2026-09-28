@@ -13,6 +13,7 @@ import { splitAnimation } from '../utils/animation';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { clipOnLockedTrack, isTrackLocked } from './trackLock';
+import { pruneSelection } from './selectionPrune';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
@@ -214,6 +215,10 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   removeClipFromTimeline: (clipId: string) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const newClips = state.project.timeline.clips.filter((c) => c.id !== clipId);
+    // ESCSUITE-101: pruneSelection generalises the old `selectedClipId ===
+    // clipId ? null : ...` ternary to the whole selection — dropping clipId
+    // from selectedClipIds too, which nothing here used to do.
+    const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
     return {
       project: {
         ...state.project,
@@ -224,7 +229,8 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           duration: calculateTimelineDuration(newClips),
         },
       },
-      selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+      selectedClipId: pruned.selectedClipId,
+      selectedClipIds: pruned.selectedClipIds,
       history: pushToHistory(state),
     };
   }),
@@ -252,6 +258,10 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         return clip;
       });
 
+    // ESCSUITE-101: see removeClipFromTimeline above — the same generalisation
+    // of the old single-id ternary, now dropping clipId from selectedClipIds
+    // as well.
+    const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
     return {
       project: {
         ...state.project,
@@ -262,7 +272,8 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           duration: calculateTimelineDuration(newClips),
         },
       },
-      selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+      selectedClipId: pruned.selectedClipId,
+      selectedClipIds: pruned.selectedClipIds,
       history: pushToHistory(state),
     };
   }),
@@ -413,6 +424,16 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
       .filter(c => c.id !== clipId)
       .concat([firstClip, secondClip]);
 
+    // ESCSUITE-101: the original clip is gone — replaced by the two halves —
+    // so it has to leave selectedClipIds too if a multi-selection held it;
+    // pruneSelection does that. selectedClipId is still explicitly the first
+    // half, exactly as before. But if the original was one of a multi-selection,
+    // dropping it and leaving selectedClipId pointing at a clip the Set does
+    // NOT contain would disagree with itself — so a selection that held the
+    // original swaps it for the first half, keeping the two in step.
+    const wasSelected = state.selectedClipIds.has(clipId);
+    const prunedIds = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds).selectedClipIds;
+    const selectedClipIds = wasSelected ? new Set([...prunedIds, firstClip.id]) : prunedIds;
     return {
       project: {
         ...state.project,
@@ -424,6 +445,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         },
       },
       selectedClipId: firstClip.id,
+      selectedClipIds,
       history: pushToHistory(state),
     };
   }),

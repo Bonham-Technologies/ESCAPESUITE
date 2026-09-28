@@ -8,6 +8,7 @@ import type { EditorState, Track } from './types';
 import { pushToHistory } from './storeHistory';
 import { calculateTimelineDuration } from './projectFactory';
 import { isTrackLocked } from './trackLock';
+import { pruneSelection } from './selectionPrune';
 
 export type TrackSlice = Pick<EditorState, 'addTrack' | 'removeTrack' | 'updateTrack' | 'reorderTracks'>;
 
@@ -57,6 +58,10 @@ export const createTrackSlice: StateCreator<EditorState, [], [], TrackSlice> = (
     const newClipboard = state.clipboard && state.clipboard.some((c) => c.trackId === trackId)
       ? state.clipboard.filter((c) => c.trackId !== trackId)
       : state.clipboard;
+    // ESCSUITE-101: the same pruning the clipboard already gets above, for the
+    // selection — a clip on the removed track leaves it too, and nothing here
+    // used to reconcile that.
+    const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
 
     return {
       project: {
@@ -70,6 +75,8 @@ export const createTrackSlice: StateCreator<EditorState, [], [], TrackSlice> = (
         },
       },
       selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
+      selectedClipId: pruned.selectedClipId,
+      selectedClipIds: pruned.selectedClipIds,
       clipboard: newClipboard,
       history: pushToHistory(state),
     };

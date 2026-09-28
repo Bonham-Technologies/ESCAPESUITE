@@ -301,6 +301,38 @@ describe('projectStore integration', () => {
     })
   })
 
+  // ESCSUITE-101: paste selects the new clip; undo removes it from the
+  // timeline without telling the selection; Delete then found a selection
+  // that still named it, deleted nothing, and pushed an undo entry anyway —
+  // which cleared the redo stack `undo` had just built and left the past
+  // one entry longer for no real edit. The fix is `pruneSelection` running
+  // inside `undo` (so the ghost id is already gone by the time Delete asks)
+  // and `deleteSelectedClips` itself refusing a selection of nothing but
+  // ghosts, belt-and-braces, the same shape as `pasteClips`'s own guards.
+  describe('paste, undo, then Delete (ESCSUITE-101)', () => {
+    it('keeps canRedo() true and pushes no history entry when Delete finds only ghosts', () => {
+      resetStoreForTest()
+      addClip('clip1', 0, 2)
+      store().toggleClipSelection('clip1')
+      store().copySelectedClips()
+
+      store().pasteClips()
+      const pastedId = [...store().selectedClipIds][0]
+      expect(store().project.timeline.clips.some((c) => c.id === pastedId)).toBe(true)
+
+      store().undo()
+      expect(store().project.timeline.clips.some((c) => c.id === pastedId)).toBe(false)
+      expect(store().canRedo()).toBe(true)
+
+      const pastLength = store().history.past.length
+
+      store().deleteSelectedClips()
+
+      expect(store().canRedo()).toBe(true)
+      expect(store().history.past.length).toBe(pastLength)
+    })
+  })
+
   describe('playback controls', () => {
     it('sets current time', () => {
       useEditorStore.getState().setCurrentTime(5.5)

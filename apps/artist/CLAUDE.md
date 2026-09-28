@@ -49,6 +49,7 @@ pnpm lint                # Run ESLint
 | `projectMigration.ts` | `ensureTimelineHasTracks` — normalising a loaded project onto the current timeline shape: missing resolution, missing tracks, missing overlay arrays, clips without a `trackId`, and the `convertLegacyOverlays` call on **both** return paths. Runs on every `setProject`. `parseProject(input: unknown)` (ESCSUITE-102) wraps it for the two callers that receive an unvalidated project — a dropped/opened `.veditor` file and the host's `LOAD_PROJECT` — checking the shape (`timeline` an object, `clips` an array, clip ids unique, every clip's `trackId` a string naming a track that exists once migration has run) *before* running the migration, and returning `{ ok: true, project }` or `{ ok: false, reason }` instead of throwing partway through. An absent `tracks` is not itself a failure — that is what the migration branch is for |
 | `clipQueries.ts` | `getClipsAtTime`, `getClipAtTime`, `getClipPosition` — reads over a clips array they are handed, never over the store. Re-exported by `projectStore.ts` |
 | `trackLock.ts` | Five questions over the clips and tracks a caller hands it — `lockedTrackIds`, `isTrackLocked`, `clipOnLockedTrack`, `anyClipOnLockedTrack` and `lockedSourceVideoIds` (the media a locked row's clips use, which `removeSourceVideo` and the media library's two buttons both ask about) — that every locked-track guard is built from (ESCSUITE-84, see Timeline) |
+| `selectionPrune.ts` | One question, `pruneSelection(clips, selectedClipId, selectedClipIds)` — the selection with every id that names no clip in `clips` dropped, `selectedClipId` nulled if it was one of them, and the SAME `selectedClipIds` Set (reference-stable) when nothing needed pruning. Asked by every action that can remove a clip from the timeline some way other than the id it was passed, and by `undo`/`redo` against the clips they land on (ESCSUITE-101, see Timeline) |
 
 **Slices** — each one `export const createXSlice: StateCreator<EditorState, [], [], XSlice>`, composed in this order:
 
@@ -1253,6 +1254,16 @@ through — stay inside their updaters as `return state`. The shared doc comment
 in `store/types.ts` is the contract: **`false` means no state changed and no undo entry was
 pushed, and a caller passing `skipHistory` to a later write must look at it.**
 
+A third reason a write answers `false` joined the lock with ESCSUITE-101: **nothing to do**.
+`pasteClips` started this (below) refusing when a clone's track is no longer on the timeline;
+`deleteSelectedClips` refuses when its selection names no clip on the timeline, or when any one
+that does exist sits on a locked track; `muteSelectedClips`/`unmuteSelectedClips` refuse when
+every relevant track already has the mute state being asked for; and `removeClipKeyframe` —
+already on the list above for the lock — also refuses for three reasons that have nothing to do
+with it: an unknown clip, a property the clip has no keyframes on, or no keyframe within
+`KEYFRAME_TIME_EPSILON` of the given time. All of them still mean exactly what `false` means
+above.
+
 `hooks/useGestureHistory.ts` is the one mechanism that does. `createGestureHistory()` (and the
 `useGestureHistory()` that holds one per component) is `begin` / `resume` / `end` / `commit`,
 two booleans in a closure and no state or subscription of any kind: `commit(write)` runs one
@@ -1380,6 +1391,45 @@ boolean contract, one more action added to the list — and `useAppKeyboardShort
 branch toasts "Nothing to paste here" on that `false`; its own pre-check still catches a *locked*
 target and toasts "Track is locked" before the call, so this is what catches the case the
 pre-check can't see, a target that isn't on the timeline at all.
+
+**A clip that leaves the timeline leaves the selection too, and a no-op write says so
+(ESCSUITE-101).** `store/selectionPrune.ts`'s one pure question, `pruneSelection(clips,
+selectedClipId, selectedClipIds)`, is asked wherever a clip can leave the timeline some way
+other than the id a caller happened to pass it: `removeClipFromTimeline` and `rippleDeleteClip`
+generalise their old `selectedClipId === clipId ? null : …` ternary to the whole selection —
+dropping `clipId` from `selectedClipIds` too, which neither used to do; `splitClip` prunes the
+original (now-retired) id from `selectedClipIds` while still explicitly selecting the first half,
+its existing contract; `removeTrack` and the project slice's `removeSourceVideo` prune the
+selection beside the clipboard pruning ESCSUITE-100 already added, same shape, same `set`; and
+`undo`/`redo` prune against the clips *being landed on* (`previous`/`next`, not the state being
+left), because an undo or a redo can restore a clip list that no longer holds an id the selection
+names. `pruneSelection` returns the SAME `selectedClipIds` Set (and the same `selectedClipId`
+value) when nothing needed dropping, so a caller spreading its result into a `set()` update
+triggers no re-render over an unchanged selection — the property `trackLock.ts`'s five questions
+have and this one needed too, since every one of these actions already writes on every call.
+
+The bug this closes: paste selects the clip it just placed; Ctrl+Z removes it from the timeline
+but used to leave the selection alone; Delete then found a selection naming a clip that was
+already gone, deleted nothing, and — because `deleteSelectedClips` and the others in this
+paragraph never asked whether there was anything to delete — pushed an undo entry anyway. That
+entry cleared the redo stack the Ctrl+Z had just built and left `history.past` one entry longer
+for an edit that never happened, so the next Ctrl+Z appeared to do nothing. Three actions close
+the other half of ESCSUITE-87's contract for the same reason: `deleteSelectedClips` now answers
+`false` and writes nothing when the ids it finds among `selectedClipIds` all name no clip on the
+timeline (belt-and-braces, the same shape as `pasteClips`'s "track no longer on the timeline"
+check — pruning running everywhere else means a ghost should rarely reach here at all) or when
+any one of the ids that DO still exist sits on a locked track (`anyClipOnLockedTrack`,
+all-or-nothing, ESCSUITE-84, unchanged); `removeClipKeyframe`
+answers `false` for an unknown clip id, a property the clip has no keyframes on, or a time with
+no keyframe within `KEYFRAME_TIME_EPSILON` (exported from `utils/animation.ts` for exactly this
+question) — the three ways it used to push an undo entry that removed nothing; and
+`muteSelectedClips`/`unmuteSelectedClips` answer `false` and write nothing when every track a
+selected clip sits on already has the mute state being asked for (Mute on an already-muted
+track was an entry that undid nothing), writing only the tracks that actually change — and
+leaving the rest as the same object, not a same-value copy — when some but not all of them do.
+`useAppKeyboardShortcuts`'s Delete branch reads `deleteSelectedClips`'s answer and only toasts
+"N clip(s) deleted" on `true`: a selection of ghosts refuses silently, like every other refusal
+the lock produces, rather than announcing a deletion that did not happen.
 
 ### App (`src/App.tsx`)
 `App.tsx` is wiring only — the seven `useState` calls the JSX and the hooks need, the store selectors, nine
