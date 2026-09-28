@@ -1085,6 +1085,19 @@ the cancelled-while-parked case pins that the partial release sits ahead of the 
 gate rather than adding a branch to it. The review's one substantive finding — the post-deadline
 window — is the `expired` arm. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-119 (three test files unstub only
+what they stubbed, so `src/test/setup.ts`'s `URL` / `Blob` / `AudioContext` stubs survive to the last
+test in each): 99.52 / 98.88 / 94.61 / 99.40, byte-identical to the 99.52 / 98.88 / 94.61 / 99.40 the
+commit this branch was rebased onto measures — lines 6,765 / 6,797, statements 7,631 / 7,717,
+branches 4,201 / 4,440 and functions 1,679 / 1,689 on both trees, the same 32 / 86 / 239 / 10
+uncovered. The change is test code alone: `core/videoDecodeManager.test.ts`,
+`utils/integration.test.ts` and `utils/throttle.test.ts` each capture the global they stub
+(`Worker` / `VideoDecoder`, `fetch`, the rAF pair) and restore that one instead of calling
+`vi.unstubAllGlobals()`, which had been dropping the setup file's stubs for every test after it, and
+each file ends with a pin that the setup `URL` stubs are still mock functions — red in all three
+before the fix. No source file is touched, so no numerator or denominator moves. **No floor
+crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
