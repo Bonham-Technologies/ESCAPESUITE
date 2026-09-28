@@ -89,6 +89,30 @@ describe('projectStore integration', () => {
       expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
     })
 
+    // ESCSUITE-115: an id that names no clip is nothing to do, the same
+    // refusal `rippleDeleteClip` already gives (`if (!clipToDelete) return
+    // state`) — this action just never reported it.
+    it('returns false and writes nothing for an unknown clip id', () => {
+      useEditorStore.getState().addClipToTimeline({
+        id: 'clip1',
+        name: 'Test Clip',
+        sourceVideoId: 'video1',
+        startTime: 0,
+        endTime: 5,
+        duration: 5,
+        animation: undefined,
+      }, useEditorStore.getState().project.timeline.tracks[0].id, 0)
+
+      const before = useEditorStore.getState().project.timeline.clips
+      const entries = useEditorStore.getState().history.past.length
+
+      const result = useEditorStore.getState().removeClipFromTimeline('nope')
+
+      expect(result).toBe(false)
+      expect(useEditorStore.getState().project.timeline.clips).toBe(before)
+      expect(useEditorStore.getState().history.past.length).toBe(entries)
+    })
+
     it('calculates timeline duration based on clips', () => {
       const state = useEditorStore.getState()
       const trackId = state.project.timeline.tracks[0].id
