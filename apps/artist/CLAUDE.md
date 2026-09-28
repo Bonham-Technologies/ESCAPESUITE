@@ -108,6 +108,20 @@ pnpm lint                # Run ESLint
 - `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
   - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
+- `audioMixer.ts`: `extractAndMixAudio` is the export pipeline's one audio mixer — both
+  `exportWebM.ts` and `exportMP4.ts` call it directly, on the main thread. It decodes each
+  clip's source with `OfflineAudioContext`, applies `getAnimatedVolume` per sample (so a
+  clip's volume keyframes always reach the export, the same as the preview), sums the result
+  into one stereo interleaved timeline buffer and normalises the peak back under 1. A clip
+  whose track has been deleted is **skipped**, the same as a muted track (ESCSUITE-99;
+  previously it was mixed in at full volume). There used to also be
+  `extractAndMixAudioWithWorker`, a Web Worker fast path (`workers/exportWorker.ts`,
+  `utils/workerSupport.ts`) with a main-thread fallback — deleted by ESCSUITE-99, because its
+  own mixer multiplied by track volume alone (dropping volume keyframes) and its support probe
+  tested for `OfflineAudioContext` *inside* the worker, which real Chromium never exposes to a
+  `DedicatedWorker`, so `getWorkerSupport()` always resolved `false` and the worker path never
+  ran in production. Every export already went through the main-thread mixer; deleting the dead
+  path just stops paying for the Worker spin-up and probe on every export.
 - `outputTransform.ts`: the one place project space is carried onto an output raster —
   `projectToOutputScale`, `setOutputTransform` and `openOutputFrame`, called by the preview and
   by both exporters. See "Export Resolution" below
@@ -1799,9 +1813,7 @@ comment on the latter saying "an export's canvas is always its own project" was 
 premise this ticket falsified.
 
 **Nothing else composites.** `workers/decodeWorker.ts` decodes and holds frames; it has no
-canvas at all. `workers/exportWorker.ts` computes frame metadata and mixes audio and says so at
-the top of the file ("Main thread still handles … Canvas rendering"), and only its audio half is
-wired up (`core/audioMixer.ts`). The compositing is in
+canvas at all. The compositing is in
 `exportWebM.ts` and `exportMP4.ts` and nowhere else, which is why two call sites were the whole
 fix. The headless kit drives these same exporters through `window.__renderProject`, so it gets
 the fix for free — including the manifest, which `headless/renderProject.ts` sizes with the same
@@ -1892,8 +1904,7 @@ outcome, not on the double.
   elements the code creates, which jsdom never loads or fires events for), `audio.ts`
   (`AudioContext`/`OfflineAudioContext` and real sample data to decode), `webcodecs.ts`
   (`VideoFrame`, the encoder/decoder capability probes, and working encoders for the export
-  pipeline), `mediabunny.ts` (the muxer, recorded rather than run), `worker.ts` (the Web
-  Worker constructor the export-support probe builds), `resizeObserver.ts`, `fileReader.ts`,
+  pipeline), `mediabunny.ts` (the muxer, recorded rather than run), `resizeObserver.ts`, `fileReader.ts`,
   `files.ts` (a `File` on Node's `Blob`, which survives fake-indexeddb's structured clone),
   `globals.ts` (take a global away, the way a browser without that API looks) and `layout.ts`
   (`setRect`/`setRects` — jsdom performs no layout, so every `getBoundingClientRect()` is

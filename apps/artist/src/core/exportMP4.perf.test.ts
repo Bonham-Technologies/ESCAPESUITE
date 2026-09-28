@@ -55,7 +55,7 @@ vi.mock('mediabunny', async () => {
 })
 
 vi.mock('./audioMixer', () => ({
-  extractAndMixAudioWithWorker: vi.fn(async () => null),
+  extractAndMixAudio: vi.fn(async () => null),
 }))
 
 /** The scene's heaviest second, at the exporter's fixed 30 fps. */

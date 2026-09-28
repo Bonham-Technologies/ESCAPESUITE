@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToWebM } from './exportWebM'
 import { ExportAbortedError } from './exportTypes'
-import { extractAndMixAudioWithWorker } from './audioMixer'
+import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import {
   getMediabunnyState,
@@ -44,10 +44,10 @@ vi.mock('mediabunny', async () => {
 })
 
 vi.mock('./audioMixer', () => ({
-  extractAndMixAudioWithWorker: vi.fn(async () => null),
+  extractAndMixAudio: vi.fn(async () => null),
 }))
 
-const mixAudio = vi.mocked(extractAndMixAudioWithWorker)
+const mixAudio = vi.mocked(extractAndMixAudio)
 
 /** 6 frames at 30fps. */
 const CLIP_DURATION = 0.2
