@@ -398,6 +398,29 @@ describe('parseProject (ESCSUITE-102)', () => {
     }
   })
 
+  it('rejects a timeline whose tracks is present but not a list (ESCSUITE-102 review round 2)', () => {
+    const result = parseProject({
+      id: 'p', name: 'Bad', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: { tracks: { not: 'an array' }, clips: [] },
+    })
+
+    expect(result).toEqual({ ok: false, reason: 'Timeline tracks is not a list' })
+  })
+
+  it.each([
+    ['a clip with no id at all', {}],
+    ['a clip whose id is not a string', { id: 42 }],
+  ])('rejects %s (ESCSUITE-102 review round 2)', (_label, badClip) => {
+    const result = parseProject({
+      id: 'p', name: 'Bad', created: 1, modified: 1,
+      resolution: { width: 1920, height: 1080 },
+      timeline: { tracks: [], clips: [badClip] },
+    })
+
+    expect(result).toEqual({ ok: false, reason: 'A clip is missing an id' })
+  })
+
   it('migrates a project with no tracks at all, rather than rejecting it', () => {
     // ensureTimelineHasTracks's own migration branch handles an absent/empty
     // `tracks` array — parseProject must let that through, not reject it.
