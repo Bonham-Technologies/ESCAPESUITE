@@ -131,10 +131,10 @@ selector contract above.
 in `recorderStore` is the whole notification surface: `AppHeader` renders it inside the
 header's existing `aria-live="polite" aria-atomic="true"` region, and
 `handleStartRecording` clears it when the next take begins. Every string lives in
-`src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`, `CAPTURE_UNANSWERED`,
-`START_FAILED`,
-`LIBRARY_UNREADABLE`, `DETECTION_FAILED`, `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`,
-`UPLOAD_UNAVAILABLE`, `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED` and
+`src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`,
+`CAPTURE_UNANSWERED`, `START_FAILED`, `LIBRARY_UNREADABLE`, `DETECTION_FAILED`,
+`NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
+`SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED` and
 `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
@@ -701,22 +701,39 @@ guard. That move is **structural**, not a repair of anything the loop did: monit
 unreachable after a dispose, so neither the rAF loop nor that one stray sample can belong to a
 take that is gone.
 
-The controller closes the same window from its own side, and has to ask **three** questions,
-because the ways a take is thrown away mid-setup look nothing alike:
-`handleStartRecording` returns without starting a countdown when its **attempt token** is no
-longer the current one (either cancel, or the unmount teardown — ESCSUITE-109), when
-`cancelledRef` is raised (the unmount teardown) **or** when `recorderRef.current` is null (any
-`disposeRecorder()`, including the `onError` path, which cancels nothing and so raises no flag). Without the second, a capture
-stopped during setup left `'countdown'` in the store and an interval ticking against a null
-recorder — a 3-2-1 over nothing, with a next mount coming up inside it. The start notice is
-withheld under the same pair, so a browser that *does* reject out of a half-torn-down setup (an
-AudioContext closed under a pending `resume()`) still says nothing to a user who has left. That
-guard **tears the take down** rather than returning bare (ESCSUITE-93): `disposeRecorder()` and
-`stopAllStreams()`, both of which are no-ops on every path that reaches it today — the unmount
-teardown, the recorder's own `onError`, and `handleCancelRecording` from Escape in `'preparing'`
-while `initialize()` is parked — because each has already done them. A bare return is nevertheless
-a promise that every *future* way of arriving there will have cleaned up first, and the window
-below is the one that broke it.
+The controller closes the same window from its own side, with **two** guards after
+`initialize()`, because being superseded and being torn down are different facts and want
+different answers (ESCSUITE-109):
+
+1. **Superseded — touch nothing.** `if (attemptRef.current !== null && attemptRef.current !==
+   myAttempt) return;`. A cancel frees Record while this await is parked, so by the time it
+   resumes the next take may have acquired its capture and built *its* recorder — and
+   `recorderRef`, the store's streams and `stopAllStreams` all belong to that take by then.
+   Whatever this attempt owned was released by the cancel that superseded it, so it has nothing
+   left to do and no right to do anything.
+2. **Torn down — tear down.** `if (!recorderRef.current) { disposeRecorder(); stopAllStreams();
+   return; }`. Any `disposeRecorder()` nulls that ref: the unmount teardown, both cancels, and
+   the recorder's own `onError`, which cancels nothing and so raises no flag — the case
+   `cancelledRef` alone cannot see. Without it, a capture stopped during setup left `'countdown'`
+   in the store and an interval ticking against a null recorder: a 3-2-1 over nothing, with a
+   next mount coming up inside it. `cancelledRef` is deliberately *not* asked here — every path
+   that raises it disposes the recorder on the same line, so the ref answers for it, and asking
+   both would be a decision that can never go the other way.
+
+Getting that split wrong is not a cosmetic bug and has its own test ("when a newer take is
+already being set up"): one guard that tore down on both facts disposed the newer take's recorder
+and put its sharing bar out mid-take, and then the newer take's own resume found a null recorder
+ref and returned **without setting a state** — leaving the UI in `'preparing'`, where the record
+button is disabled and Cancel does not render, with a reload as the only way out.
+
+The start notice is withheld on both of them — the `catch` returns as soon as the token is not its
+own — so a browser that *does* reject out of a half-torn-down setup (an AudioContext closed under
+a pending `resume()`) still says nothing to a user who has left. Guard 2 **tears the take down**
+rather than returning bare (ESCSUITE-93): both calls are no-ops on every path that reaches it
+today — the unmount teardown, the recorder's own `onError`, and `handleCancelRecording` from
+Escape in `'preparing'` while `initialize()` is parked — because each has already done them. A
+bare return is nevertheless a promise that every *future* way of arriving there will have cleaned
+up first, and the window below is the one that broke it.
 
 **There is an earlier window still, and a cancel cannot clean up after it** (ESCSUITE-93).
 `handleStartRecording` parks on `await acquireStreams()` — the screen-share picker is on screen,
@@ -756,7 +773,8 @@ ever answers, dead for the rest of the session with nothing said about it. So
 `handleCancelRecording`, `cancelCountdown` and the unmount teardown all **drop the token**, which
 does both halves at once: Record is free at cancel time, and the attempt that resumes afterwards
 finds a token that is no longer its own. **Every post-`await` guard in the start path asks it** —
-the one after `acquireStreams()` and the one after `initialize()` — so an abandoned attempt
+the one after `acquireStreams()` and the pair after `initialize()` (see "two guards" below) — so
+an abandoned attempt
 releases what it was handed and builds nothing, rather than walking on into a take that is now
 live; and the `catch` asks it first of all, because tearing down there would tear down *that*
 take. A stale attempt has nothing of its own to release beyond what the request handed it: only a

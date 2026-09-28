@@ -637,19 +637,32 @@ export function useRecordingController({
       // nothing, and a next mount that comes up inside it.
       //
       // It tears down rather than bare-returning (ESCSUITE-93). Every path that
-      // reaches it today has already disposed the recorder and released the
-      // capture — the unmount teardown, the recorder's own `onError`, and
-      // `handleCancelRecording` from Escape in 'preparing' while `initialize()`
-      // is parked — so both calls are no-ops: `disposeRecorder()` nulls the ref
-      // and `stopAllStreams()` is idempotent. A bare return is nevertheless a
-      // promise that every *future* way of arriving here will have cleaned up
-      // first, and that is the promise this ticket's own window broke.
+      // reaches it *with nobody else set up* has already disposed the recorder
+      // and released the capture — the unmount teardown, the recorder's own
+      // `onError`, and `handleCancelRecording` from Escape in 'preparing' while
+      // `initialize()` is parked — so both calls are no-ops: `disposeRecorder()`
+      // nulls the ref and `stopAllStreams()` is idempotent. A bare return is
+      // nevertheless a promise that every *future* way of arriving here will have
+      // cleaned up first, and that is the promise this ticket's own window broke.
       //
-      // It asks the attempt token as well (ESCSUITE-109): a take cancelled while
-      // this await was parked frees Record at once, so the next take can already
-      // be preparing by the time this one resumes — and this one must not tear
-      // that one down.
-      if (myAttempt !== attemptRef.current || cancelledRef.current || !recorderRef.current) {
+      // Superseded is not the same as torn down, and this is the one guard where
+      // the difference bites (ESCSUITE-109). A cancel frees Record while this
+      // await is parked, so by the time it resumes the next take may have
+      // acquired its capture and built *its* recorder — and `recorderRef`, the
+      // store's streams and `stopAllStreams` all belong to that take now. Tearing
+      // down here would dispose the newer take's recorder and put its sharing bar
+      // out mid-take, and the newer take's own resume would then find a null
+      // recorder ref and return without a state, leaving the UI in 'preparing'
+      // with no Record button, no Cancel button and no way out but a reload. So a
+      // superseded attempt returns having touched nothing: whatever it owned was
+      // released by the cancel that superseded it.
+      if (attemptRef.current !== null && attemptRef.current !== myAttempt) return;
+
+      // What is left is this attempt's own, or nobody's. `cancelledRef` is not
+      // asked: every path that raises it disposes the recorder on the same line,
+      // so the ref answers for it — and asking both would be a decision that can
+      // never go the other way.
+      if (!recorderRef.current) {
         disposeRecorder();
         stopAllStreams();
         return;
