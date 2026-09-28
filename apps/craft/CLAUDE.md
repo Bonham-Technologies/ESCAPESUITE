@@ -834,15 +834,26 @@ camera or microphone driver wedged such that `getUserMedia` never settles — us
 Record inert behind it (ESCSUITE-109). So the request is raced against
 `CAPTURE_TIMEOUT_MS` (60 s, a constant in `useRecordingController.ts`, generous because the share
 picker is a dialog a user may legitimately leave sitting). On expiry the app raises
-`CAPTURE_UNANSWERED` through the one notice channel, returns to `'idle'` and frees Record; the
-request is still out there, so whatever it hands over afterwards is **released on arrival** —
-`releaseAcquired`, the same three `stopStream()` calls the cancelled path makes, moved onto a
-promise nobody is awaiting any more — and a request that *rejects* after the clock ran out says
-nothing, because the user was already told. The token is the abort: nothing is plumbed into the
-browser APIs, which would not take it. The clock is armed *after* the request is issued and with
-nothing awaited in between, so it costs the click's user activation nothing, and it is cleared
-however the race ends, including by the request throwing — a 60-second timer left armed behind
-every take is a leak, which
+`CAPTURE_UNANSWERED` through the one notice channel, returns to `'idle'` and frees Record. The
+request is still out there, so `acquireStreams` is not a black box for the deadline branch:
+`useMediaStreams` takes an optional `onPartial` reporter, called after each stage lands
+(screen, then webcam, then microphone) with the streams acquired so far — nulls for stages not
+yet reached — and `handleStartRecording` keeps the latest report in a local, closed over by
+nothing but this one attempt. Answered-and-parked used to mean live: the picker settled, the
+camera prompt never did, and the browser's "sharing your screen" bar stayed up until *that*
+prompt eventually settled too (ESCSUITE-116). Now the deadline branch releases the latest
+partial report immediately — the share bar goes down at the deadline, not whenever the stalled
+prompt gets around to it — and only *then* does whatever the request hands over later get
+released on arrival, same as before: `releaseAcquired`, the same three `stopStream()` calls the
+cancelled path makes, moved onto a promise nobody is awaiting any more. The two releases can name
+the same stream twice — a stage already reported through `onPartial` is handed back again inside
+the final `acquired` once the request does settle — and that is safe on purpose: `stopStream`
+stops tracks, and stopping an already-stopped track is a no-op. A request that *rejects* after the
+clock ran out still says nothing, because the user was already told. The token is the abort:
+nothing is plumbed into the browser APIs, which would not take it. The clock is armed *after* the
+request is issued and with nothing awaited in between, so it costs the click's user activation
+nothing, and it is cleared however the race ends, including by the request throwing — a 60-second
+timer left armed behind every take is a leak, which
 `useRecordingController.test.ts`'s "never starts the clock for a request that answers at once"
 pins by counting the timers a started take leaves running.
 

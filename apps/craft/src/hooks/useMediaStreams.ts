@@ -55,8 +55,15 @@ export interface MediaStreams {
   stopAllStreams: () => void;
   /** The current stopAllStreams, for the unmount teardown to reach. */
   stopAllStreamsRef: RefObject<() => void>;
-  /** Request the enabled, available sources; releases what it got if one fails. */
-  acquireStreams: () => Promise<AcquiredStreams>;
+  /**
+   * Request the enabled, available sources; releases what it got if one
+   * fails. `onPartial`, when given, is called after each stage lands with
+   * the streams acquired so far (nulls for stages not yet reached) — so a
+   * caller racing this against a deadline can stop what the browser has
+   * already handed over instead of waiting for the whole request to settle
+   * (ESCSUITE-116).
+   */
+  acquireStreams: (onPartial?: (partial: AcquiredStreams) => void) => Promise<AcquiredStreams>;
 }
 
 export function useMediaStreams({ config, capabilities, setStreams }: MediaStreamsDeps): MediaStreams {
@@ -126,7 +133,9 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
   }, [stopAllStreams]);
 
   // Acquire streams based on config
-  const acquireStreams = useCallback(async (): Promise<AcquiredStreams> => {
+  const acquireStreams = useCallback(async (
+    onPartial?: (partial: AcquiredStreams) => void
+  ): Promise<AcquiredStreams> => {
     let screen: MediaStream | null = null;
     let webcam: MediaStream | null = null;
     let mic: MediaStream | null = null;
@@ -135,16 +144,19 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
       // Get screen capture if enabled
       if (config.screenEnabled && capabilities.screenCapture) {
         screen = await requestScreenCapture(config.systemAudioEnabled);
+        onPartial?.({ screen, webcam, mic });
       }
 
       // Get webcam if enabled
       if (config.webcamEnabled && capabilities.webcam) {
         webcam = await requestWebcam();
+        onPartial?.({ screen, webcam, mic });
       }
 
       // Get microphone if enabled (separate from webcam)
       if (config.microphoneEnabled && capabilities.microphone) {
         mic = await requestMicrophone();
+        onPartial?.({ screen, webcam, mic });
       }
 
       return { screen, webcam, mic };
