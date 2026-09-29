@@ -84,7 +84,6 @@ export const thumbnailModule = {
     width: 1920,
     height: 1080,
   })),
-  generateStreamThumbnail: vi.fn(),
 }
 
 // --- core/converter ---------------------------------------------------------

@@ -348,7 +348,12 @@ the Help button.
   the take's target frame rate by the deadline gate described under "The PiP frame gate".
   `start()` returns the recorded `captureStream`; `startPreviewOnly()` is the same draw loop
   with no capture, for a separate-tracks take where the canvas is only what the user watches.
-  The overlay it draws is `core/overlayGeometry.ts`'s `drawOverlay()`, not its own method
+  The overlay it draws is `core/overlayGeometry.ts`'s `drawOverlay()`, not its own method.
+  `stop()` (and so `dispose()`) also stops that `captureStream()`'s own tracks (ESCSUITE-137):
+  no caller ever did — `useRecordingController` folds the output stream's video track into
+  `recordingScreen` and `useMediaStreams.stopAllStreams()` only stopped the raw screen/webcam/
+  mic streams before disposing the compositor — so a composited PiP take's canvas capture
+  track, and the (up to 1280-wide) canvas it kept reachable, used to outlive the take entirely
 - `overlayGeometry.ts`: `drawOverlay()` — where the webcam sits in a frame and how it is
   drawn there (the 16:9 derivation, the four corners, the circular centre-crop, both clip
   paths, the border) — plus `overlayGeometryFor()` / `overlayPaddingFor()` and **five** constants:
@@ -385,8 +390,18 @@ the Help button.
   `src` attribute and no `srcObject` the algorithm ends at `NETWORK_EMPTY` with **no `error`
   and no `MediaError`**. (It is not silent: `load()` queues `abort` and `emptied` on the way
   there. Nothing listens for either, and neither can re-enter a cleanup; the property that
-  matters is that no `error` is manufactured.) `generateStreamThumbnail` is exempt: it only ever sets `srcObject = null`, which
-  with no `src` attribute takes that same silent branch
+  matters is that no `error` is manufactured.)
+
+  **Removed (ESCSUITE-138):** `generateStreamThumbnail(stream: MediaStream)`, a live-preview
+  thumbnail path that was present, tested and called by nothing — the save path's thumbnail is
+  `utils/previewThumbnail.ts`'s `drawThumbnail`, reached through
+  `useRecordingController.captureThumbnail`. It also differed from its two siblings in ways
+  that would have mattered had it ever been wired: it settled only from a `srcObject`'s
+  `onloadeddata`/`onerror`, so a stream that never produced a frame left the promise pending
+  forever (no timeout, unlike `extractVideoMetadata`'s 5 s one), and its 100 ms `setTimeout`
+  called `ctx.drawImage` unguarded, where a throw would have stranded the promise rather than
+  rejected it. Deleted with its suite and the `appDoubles.ts` double's entry rather than fixed,
+  on the operator's decision, the same as ESCSUITE-85's `remuxToWebM`.
 - `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
   goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus
   `convertToMP4()`, `convertToM4A()` (the audio alone, AAC in an MP4 container; the two share

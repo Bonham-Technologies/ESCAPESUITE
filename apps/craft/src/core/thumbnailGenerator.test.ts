@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { generateThumbnail, generateStreamThumbnail, extractVideoMetadata } from './thumbnailGenerator'
+import { generateThumbnail, extractVideoMetadata } from './thumbnailGenerator'
 import {
   installVideoElementDouble,
   uninstallVideoElementDouble,
@@ -115,61 +115,6 @@ describe('thumbnailGenerator', () => {
       video.fireLoadedData()
 
       await expect(promise).rejects.toThrow('Failed to create thumbnail blob')
-    })
-  })
-
-  describe('generateStreamThumbnail', () => {
-    function createMockStream(): MediaStream {
-      return { id: 'mock-live-stream' } as unknown as MediaStream
-    }
-
-    it('draws a frame from the live stream after it stabilizes', async () => {
-      vi.useFakeTimers()
-      const stream = createMockStream()
-      const promise = generateStreamThumbnail(stream)
-
-      const video = getLastVideoDouble()!
-      const ctx = getLastCanvasContext()!
-      video.fireLoadedData()
-      await vi.advanceTimersByTimeAsync(100)
-
-      const result = await promise
-
-      expect(result).toBeInstanceOf(Blob)
-      expect(video.element.play).toHaveBeenCalled()
-      expect(ctx.drawImage).toHaveBeenCalledWith(video.element, 0, 0, 320, 180)
-      expect(ctx.toBlobCalls).toEqual([{ type: 'image/jpeg', quality: 0.8 }])
-      expect(video.element.srcObject).toBeNull()
-    })
-
-    it('rejects when no 2D canvas context is available', async () => {
-      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValueOnce(null)
-
-      await expect(generateStreamThumbnail(createMockStream())).rejects.toThrow('Failed to get 2D context')
-    })
-
-    it('rejects when the canvas produces no blob', async () => {
-      vi.useFakeTimers()
-      const promise = generateStreamThumbnail(createMockStream())
-      const rejection = expect(promise).rejects.toThrow('Failed to create thumbnail blob')
-      const video = getLastVideoDouble()!
-      const ctx = getLastCanvasContext()!
-      ctx.toBlobResult = null
-
-      video.fireLoadedData()
-      await vi.advanceTimersByTimeAsync(100)
-
-      await rejection
-    })
-
-    it('rejects and clears srcObject when the stream fails to load', async () => {
-      const promise = generateStreamThumbnail(createMockStream())
-      const video = getLastVideoDouble()!
-
-      video.fireError()
-
-      await expect(promise).rejects.toThrow('Failed to load stream for thumbnail')
-      expect(video.element.srcObject).toBeNull()
     })
   })
 
