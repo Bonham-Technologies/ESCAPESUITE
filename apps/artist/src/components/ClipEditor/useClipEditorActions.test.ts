@@ -742,6 +742,23 @@ describe('useClipEditorActions animation', () => {
       })
     })
 
+    it('leaves a switched-off IN preset\'s duration unclamped too (review of ESCSUITE-125)', () => {
+      const clip = mediaClip(0, 0.4)
+      act(() => {
+        store().updateClipAnimation(clip.id, {
+          in: { type: 'fade', duration: 1.5, easing: 'linear' },
+        })
+      })
+      spies.updateClipAnimation.mockClear()
+      const { result } = mount()
+
+      act(() => result.current.handleAnimationInTypeChange('none'))
+
+      expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+        in: { type: 'none', duration: 1.5, easing: 'linear' },
+      })
+    })
+
     it('leaves a switched-off preset\'s duration unclamped, the exemption trimAnimation also makes', () => {
       const clip = mediaClip(0, 0.4)
       act(() => {
