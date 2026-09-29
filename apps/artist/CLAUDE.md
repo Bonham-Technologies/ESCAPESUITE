@@ -114,7 +114,11 @@ pnpm lint                # Run ESLint
   clip's volume keyframes always reach the export, the same as the preview), sums the result
   into one stereo interleaved timeline buffer and normalises the peak back under 1. A clip
   whose track has been deleted is **skipped**, the same as a muted track (ESCSUITE-99;
-  previously it was mixed in at full volume). There used to also be
+  previously it was mixed in at full volume), and the same as a **hidden** track (ESCSUITE-127:
+  the preview was already silent for one — `store/clipQueries.ts`'s `getClipsAtTime` filters on
+  `track.visible` before `usePreviewRenderLoop` builds its audio routing from that list — but the
+  mixer built its own clip list and only checked `muted`, so an export used to carry a hidden
+  track's audio that no one heard in the editor). There used to also be
   `extractAndMixAudioWithWorker`, a Web Worker fast path (`workers/exportWorker.ts`,
   `utils/workerSupport.ts`) with a main-thread fallback — deleted by ESCSUITE-99, because its
   own mixer multiplied by track volume alone (dropping volume keyframes) and its support probe
@@ -917,6 +921,17 @@ painting the frame twice for one move of the playhead. The desired time is colle
 a `Map` keyed by element (later writes win, and the incoming side of a transition is
 applied after the clips, so the frame on screen is the one that was always drawn), then
 each element is compared and seeked at most once.
+
+**Loop-back seeks nothing itself** (ESCSUITE-129). `loopStart` is a timeline time; a media
+element's own position is `clip.startTime + (loopStart - clip.timelinePosition)`, which is
+only equal to `loopStart` by coincidence, for a clip that starts untrimmed at timeline 0. The
+loop-back branch in `usePreviewRenderLoop.ts`'s `animate()` used to assign `loopStart` straight
+to every `<video>`/`<audio>` element's `currentTime` — wrong for a trimmed clip or one that
+doesn't start at 0, and clamped to the last frame for a source shorter than `loopStart`. It now
+only pauses each element and clears `lastActiveClipIds`, which was already happening right
+after — that forces the very next frame's `clipsChanged` branch, which already computes
+`clip.startTime + clipTime` per clip, to do the seeking, so a loop never touches the wrong
+position even for one frame.
 
 **The preview draws through `core/canvasRenderer.ts`**, the same renderer an export
 uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the difference that is the
