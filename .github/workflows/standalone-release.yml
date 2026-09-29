@@ -89,9 +89,19 @@ jobs:
           # PR builds are previews, so every name carries the PR suffix; a push
           # to main leaves the names as the bare versions the per-package
           # releases in release.yml use.
+          # A pull request from a fork arrives with no number in
+          # `workflow_run.pull_requests` (GitHub leaves it empty for forks), so a
+          # preview built from one is named by its commit instead of with a bare
+          # `-pr` (ESCSUITE-134).
           SUFFIX=""
           if [ "${{ steps.check.outputs.is_pr }}" = "true" ]; then
-            SUFFIX="-pr${{ steps.check.outputs.pr_number }}"
+            PR_NUMBER="${{ steps.check.outputs.pr_number }}"
+            if [ -n "$PR_NUMBER" ]; then
+              SUFFIX="-pr${PR_NUMBER}"
+            else
+              SUFFIX="-${{ github.event.workflow_run.head_sha }}"
+              SUFFIX="${SUFFIX:0:8}"
+            fi
           fi
           echo "version=${BASE_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
           echo "craft_version=${CRAFT_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
@@ -161,7 +171,9 @@ jobs:
   comment-pr:
     name: PR Build Comment
     needs: prepare
-    if: needs.prepare.outputs.is_pr == 'true'
+    # A fork PR has no number to comment on (ESCSUITE-134); its preview build is
+    # still attached to the workflow run as an artifact.
+    if: needs.prepare.outputs.is_pr == 'true' && needs.prepare.outputs.pr_number != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
