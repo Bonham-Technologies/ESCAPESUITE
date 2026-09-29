@@ -267,7 +267,14 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
                       webcamSkipped = true
                     },
                   }
-                : undefined
+                : undefined,
+              // The recorder's own duration (ESCSUITE-135): a fallback for a
+              // stored WebM whose container was never repaired, whose
+              // `video.duration` then reads `Infinity` and cannot bound the
+              // conversion's frame count on its own. Read here rather than
+              // inside the converter because the whole record — metadata
+              // included — is already in hand from the read above.
+              record.metadata.duration
             )
 
       // Abort does not always reject. `convertToMP4` checks the signal while
