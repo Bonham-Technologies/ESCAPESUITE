@@ -141,8 +141,9 @@ export class Compositor {
     // new chain's handle overwrote the old one's, so stop() cancelled only the
     // newer chain and the first kept drawing until the page went away
     // (ESCSUITE-58). Nothing calls start() twice today; this is the contract.
-    // Only the loop is replaced: the previous captureStream() belongs to
-    // whoever was handed it, and a canvas capture track is theirs to stop.
+    // Only the loop is replaced — a second start() still leaves any earlier
+    // captureStream() unstopped, same as before ESCSUITE-137, because nothing
+    // calls start() twice today and so nothing depends on that case.
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -155,6 +156,13 @@ export class Compositor {
 
   /**
    * Stop compositing.
+   *
+   * Also stops the output stream's own tracks (ESCSUITE-137): `start()`
+   * mints a `canvas.captureStream()` and hands it out for recording, but
+   * nothing downstream ever called `.stop()` on it — the raw screen/webcam/
+   * mic streams get released, the compositor is disposed, and the canvas
+   * capture track was left `live` for the life of the page, keeping its
+   * (up to 1280-wide) canvas reachable too. One per composited PiP take.
    */
   stop(): void {
     if (this.animationFrameId !== null) {
@@ -174,6 +182,7 @@ export class Compositor {
       this.webcamVideo = null;
     }
 
+    this.outputStream?.getTracks().forEach((track) => track.stop());
     this.outputStream = null;
   }
 
