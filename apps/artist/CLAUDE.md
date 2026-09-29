@@ -1964,6 +1964,28 @@ fix. The headless kit drives these same exporters through `window.__renderProjec
 the fix for free — including the manifest, which `headless/renderProject.ts` sizes with the same
 `getResolution`.
 
+**The exporters draw media and overlays in one interleaved track-order pass, the same pass
+`drawFrame.ts` draws for the preview** (ESCSUITE-124). Both exporters used to draw every media
+clip first (in track order), then the active transition, then **every** overlay clip afterwards
+— sorted among themselves but unconditionally on top of all media, regardless of the overlay's
+own track index. The preview was never wrong: `drawPreviewFrame` sorts every active clip
+(media and overlay together) by track index and draws that one list top-to-bottom, so an
+overlay on a lower track than a video is exactly as hidden behind it as the video is opaque, and
+a blur shape (`shapeBlursBackground`, which samples "the canvas so far") only ever blurs the
+media actually below it. An export disagreed on both counts: an overlay parked on an empty
+track under a full-height video — reachable with no deliberate effort, since
+`findEmptyTrack` (`store/overlaySlice.ts`) hands a new overlay the first track with *no* clips
+at all, which is often one under existing video — was invisible in the editor and visible, on
+top, in the file; and a blur shape one track below a video blurred that video too, the opposite
+of both exporters' own "blur overlays only affect content below them" comments. The fix is the
+same shape in both: `activeClips` (`getClipsAtTime`'s result, already track-sorted) is looped
+once, branching on `clip.overlayType`, instead of split into a media pass and a hoisted overlay
+pass. The transition itself still draws where it always did in both pipelines — after that one
+loop — which already matched the preview and needed no change; only the interleaving of media
+and overlays within it did. The ruling that decided the direction: the preview is what the user
+arranges the timeline by, so it is the two exporters (and the headless bundle, which shares them
+for free) that had to be made to match the preview, not the reverse.
+
 `exportMP4.perf.test.ts` pins the cost: **exactly one `setTransform` per frame** (a version
 that set it per clip would slip under a per-frame call ceiling and would have to be wrong about
 what it multiplied), and the per-frame call ceiling itself re-measured 24 → 25 for that one

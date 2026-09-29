@@ -1216,6 +1216,23 @@ its centre displaced in y. This paragraph was rewritten once: the branch was fir
 ESCSUITE-123 / 131 and 125 / 126 landed, and the figures above are against the commit it actually
 lands on. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-29 for ESCSUITE-124 (both exporters composite
+overlays interleaved with media in track order, the way the preview does): 99.54 / 98.90 /
+**94.77** / 99.40 against the 99.54 / 98.90 / 94.67 / 99.40 the commit this branch was rebased
+onto measures — branches up a tenth, the other three unmoved. Measured in one sitting, the base
+gives 4,211 / 4,448 branches and this branch 4,212 / 4,444: the denominator *shrank* by four and
+the uncovered count by five (237 → 232), because the separate media-then-overlays loops in
+`core/exportMP4.ts` and `core/exportWebM.ts` became one pass over `getClipsAtTime`'s already
+track-sorted clips, and the second loop's defensive arms — the ones nothing had ever reached — went
+with it; the one new decision, the `media?.frame` optional chain that replaced the old `if (frame)`,
+is reached with a source in the manager by every drawing case and without one by "skips a source
+that is not in storage". Lines 6,783 / 6,814 → 6,780 / 6,811, statements 7,650 / 7,735 →
+7,647 / 7,732 and functions 1,680 / 1,690 → 1,679 / 1,689 all fell by exactly the deleted code,
+with the same 31 / 85 / 10 uncovered. The two red cases — an overlay on a track below a video is
+covered in the export, one above is drawn last — pin the order per exporter; the export perf files
+are byte-unchanged, since every clip is still drawn exactly once. **No floor crossed**; artist's
+floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1223,7 +1240,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.70 | 100.00 |
-| `@escapesuite/artist` | 99.54 | 98.90 | 94.67 | 99.40 |
+| `@escapesuite/artist` | 99.54 | 98.90 | 94.77 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
