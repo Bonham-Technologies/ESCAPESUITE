@@ -88,6 +88,33 @@ export function getActiveTransition(clips: Clip[], tracks: Track[], time: number
   return null;
 }
 
+/**
+ * The clip-relative time to evaluate the incoming clip's *animation* at,
+ * during a transition (ESCSUITE-133).
+ *
+ * The same-track case `getActiveTransition` looks for first places the
+ * incoming clip's `timelinePosition` at or after the outgoing clip's end, so
+ * a plain `currentTime - incomingClip.timelinePosition` is negative for the
+ * whole transition — the renderer was asking for the clip's animated state
+ * (opacity, transform, blur) at a time the *frame* it was handed does not
+ * correspond to: the frame fetch (`exportMP4.ts`'s `inSourceTime`) already
+ * clamps to the incoming clip's first frame in this same case. Shared by
+ * `drawTransition` and `drawTransitionWithFrames` — the two functions the
+ * preview and both exporters draw a transition's incoming side through — so
+ * the clamp can't drift between them.
+ *
+ * This does not, on its own, make a `fade` in-preset visible during the
+ * transition: `interpolateKeyframes` already floors any time at or before a
+ * property's first keyframe to that keyframe's own value, so 0 and any more
+ * negative time read identically for every preset in this codebase (all of
+ * which place their first keyframe at time 0 or later). What it fixes is the
+ * inconsistency the finding names — the animated state and the frame it is
+ * drawn onto now agree on which instant of the clip they are both showing.
+ */
+export function getIncomingClipTime(transition: TransitionInfo, currentTime: number): number {
+  return Math.max(0, currentTime - transition.incomingClip.timelinePosition);
+}
+
 export type ProgressCallback = (progress: ExportProgress) => void;
 
 /**

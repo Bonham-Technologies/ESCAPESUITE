@@ -11,7 +11,7 @@ import type {
   TransitionModifiers,
   AnimatedOverlayValues,
 } from './exportTypes';
-import { blendModeToCanvas, getSourceDimensions } from './exportTypes';
+import { blendModeToCanvas, getSourceDimensions, getIncomingClipTime } from './exportTypes';
 import { drawWithMaskAndStroke } from './clipMask';
 
 /**
@@ -651,7 +651,10 @@ export function drawTransition(
 
   // Calculate clip times for animations
   const outClipTime = currentTime - outgoingClip.timelinePosition;
-  const inClipTime = currentTime - incomingClip.timelinePosition;
+  // Clamped (ESCSUITE-133): a same-track incoming clip's timelinePosition is
+  // at/after the outgoing clip's end, so this is negative for the whole
+  // transition otherwise — see getIncomingClipTime's doc comment.
+  const inClipTime = getIncomingClipTime(transition, currentTime);
 
   // Check if we have media for both clips
   const hasOutgoing = videoElements.has(outgoingClip.sourceVideoId) || imageElements.has(outgoingClip.sourceVideoId);
@@ -739,7 +742,8 @@ export function drawTransitionWithFrames(
 
   // Calculate clip times for animations
   const outClipTime = currentTime - outgoingClip.timelinePosition;
-  const inClipTime = currentTime - incomingClip.timelinePosition;
+  // Clamped (ESCSUITE-133): see getIncomingClipTime's doc comment.
+  const inClipTime = getIncomingClipTime(transition, currentTime);
 
   const hasOutgoing = outgoingFrame !== null;
   const hasIncoming = incomingFrame !== null;

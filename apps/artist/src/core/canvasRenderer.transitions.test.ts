@@ -2,7 +2,7 @@
 // modifiers the transition type dictates, so the assertions here are on the
 // recorded geometry: which source was drawn, with what alpha, clip region or
 // offset, at a given progress.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { drawTransition, drawTransitionWithFrames } from './canvasRenderer'
 import {
   createRecordingContext,
@@ -10,9 +10,10 @@ import {
 } from '../test/doubles/canvas'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { VideoFrameDouble, resetFrameRegistry } from '../test/doubles/webcodecs'
-import { makeClip } from '../test/fixtures/clipFixtures'
+import { makeClip, makeAnimation } from '../test/fixtures/clipFixtures'
 import type { Clip, TransitionType } from '../store/types'
 import type { DrawableMediaSource, MediaDrawOptions, TransitionInfo } from './exportTypes'
+import * as animation from '../utils/animation'
 
 const W = 1920
 const H = 1080
@@ -484,5 +485,82 @@ describe('drawTransitionWithFrames', () => {
     draw('none', 0.25)
 
     expect(drawnAlphas()).toEqual([0.75, 0.25])
+  })
+})
+
+// ESCSUITE-133: the incoming side's animation is evaluated at the same
+// clamped time the frame it is drawn onto already uses, rather than a
+// negative one. Same-track adjacency — clip B starting exactly where clip A
+// ends — is the case `getActiveTransition` looks for first, and the one
+// where an unclamped `currentTime - incomingClip.timelinePosition` is
+// negative for the whole transition (both renderers' `NOW`/`incomingClip`
+// fixtures above are the *other* case: an incoming clip already overlapping,
+// where the raw time is already positive and there is nothing to clamp).
+//
+// This does not turn the alpha non-zero: `interpolateKeyframes` floors any
+// time at or before a property's first keyframe to that keyframe's own
+// value, so clamping to 0 reads identically to the negative time it
+// replaces for a `fade` in-preset (whose first keyframe already sits at
+// time 0, value 0) — verified against this exact fixture before the fix
+// landed, with `getAnimatedValues` spied on rather than asserted through
+// `globalAlpha`. What these two tests pin is the clamp itself: the incoming
+// clip's animation is asked about clip time 0, not -0.5.
+describe('the incoming clip animation time during a same-track transition (ESCSUITE-133)', () => {
+  const adjacentOut: Clip = makeClip({
+    id: 'out',
+    sourceVideoId: 'v1',
+    timelinePosition: 0,
+    duration: 5,
+    endTime: 5,
+    transition: { type: 'fade', duration: 1 },
+  })
+  const adjacentIn: Clip = makeClip({
+    id: 'in',
+    sourceVideoId: 'v2',
+    timelinePosition: 5, // exactly where the outgoing clip ends
+    duration: 5,
+    endTime: 5,
+    animation: makeAnimation({ in: { type: 'fade', duration: 0.5, easing: 'linear' } }),
+  })
+  const adjacentTransition: TransitionInfo = {
+    outgoingClip: adjacentOut,
+    incomingClip: adjacentIn,
+    progress: 0.5,
+    type: 'fade',
+  }
+  const CURRENT_TIME = 4.5 // half a second before the incoming clip's nominal start
+
+  /** The getAnimatedValues() call made for the incoming clip, identified by its `animation` argument. */
+  const incomingCallClipTime = (spy: MockInstance<typeof animation.getAnimatedValues>) =>
+    spy.mock.calls.find((args) => args[2] === adjacentIn.animation)?.[0]
+
+  it('drawTransition asks for the incoming clip animated state at clip time 0', () => {
+    const out = video(640, 360)
+    const incoming = video(800, 450)
+    const spy = vi.spyOn(animation, 'getAnimatedValues')
+
+    drawTransition(
+      asCtx(),
+      new Map([['v1', out], ['v2', incoming]]),
+      new Map(),
+      adjacentTransition,
+      CURRENT_TIME,
+      W,
+      H
+    )
+
+    expect(incomingCallClipTime(spy)).toBe(0)
+    spy.mockRestore()
+  })
+
+  it('drawTransitionWithFrames asks for the incoming clip animated state at clip time 0', () => {
+    const outFrame = new VideoFrameDouble({ displayWidth: 640, displayHeight: 360 }) as unknown as DrawableMediaSource
+    const inFrame = new VideoFrameDouble({ displayWidth: 800, displayHeight: 450 }) as unknown as DrawableMediaSource
+    const spy = vi.spyOn(animation, 'getAnimatedValues')
+
+    drawTransitionWithFrames(asCtx(), outFrame, inFrame, adjacentTransition, CURRENT_TIME, W, H)
+
+    expect(incomingCallClipTime(spy)).toBe(0)
+    spy.mockRestore()
   })
 })
