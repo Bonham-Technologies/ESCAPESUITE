@@ -124,12 +124,18 @@ export interface CompositeOptionsLike {
   onCompanionSkipped?: () => void
 }
 
-/** What the hook calls, arity included, so a test can read the fourth argument. */
+/**
+ * What the hook calls, arity included, so a test can read the fourth or fifth
+ * argument. `knownDuration` (ESCSUITE-135) is the recorder's own duration,
+ * threaded in as a fallback for a stored take whose container was never
+ * repaired.
+ */
 export type ConvertToMP4Like = (
   blob: Blob,
   onProgress: (progress: ConversionProgressLike) => void,
   signal?: AbortSignal,
-  composite?: CompositeOptionsLike
+  composite?: CompositeOptionsLike,
+  knownDuration?: number
 ) => Promise<Blob>
 
 /**

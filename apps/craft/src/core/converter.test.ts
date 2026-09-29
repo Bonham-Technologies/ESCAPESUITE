@@ -532,6 +532,173 @@ describe('converter', () => {
     })
   })
 
+  // ESCSUITE-135: a stored take whose container repair failed, or predates it,
+  // reports `video.duration` as `Infinity` at `loadedmetadata` — every
+  // MediaRecorder take before `fixWebMMetadata()` rewrites its duration box.
+  // `Math.ceil(Infinity * 30)` is `Infinity`, and nothing bounded a capture
+  // whose frame count is that.
+  describe('a source whose container cannot say how long it is (ESCSUITE-135)', () => {
+    /**
+     * The runaway tripwire a real browser needed too (see the finding's "How
+     * verified": a fabricated probe made a real `encode()` throw at frame 500,
+     * because nothing else would ever stop the loop). Here the trip is much
+     * closer — ten calls is already many times what a 3-frame take should ever
+     * need — so a conversion that is behaving reaches it only by symptom, not
+     * by waiting anywhere near as long as the real bug would run.
+     */
+    function armRunawayTripwire(limit = 10): void {
+      const encoder = lastVideoEncoder()
+      const original = encoder.encode.bind(encoder)
+      let calls = 0
+      vi.spyOn(encoder, 'encode').mockImplementation((data, options) => {
+        calls++
+        if (calls > limit) throw new Error('runaway encode loop: tripwire fired')
+        return original(data, options)
+      })
+    }
+
+    it('derives the frame count from knownDuration instead of encoding without end', async () => {
+      const KNOWN_DURATION = 0.1 // ceil(0.1 * 30) = 3 frames
+      const promise = convertToMP4(SOURCE, () => {}, undefined, undefined, KNOWN_DURATION)
+      promise.catch(() => {})
+      const video = getLastVideoDouble()!
+      video.enableRequestVideoFrameCallback()
+      video.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: Infinity })
+      video.fireLoadedMetadata()
+      await settle()
+
+      armRunawayTripwire()
+      video.presentFrame(0)
+      video.fireEnded()
+      await settle()
+
+      // The bound comes from the recorder's own duration, not from playing
+      // until an encode() call finally throws: three frames, not the
+      // tripwire's limit.
+      expect(lastVideoEncoder().encodes.length).toBe(3)
+      expect(allFramesClosed()).toBe(true)
+    })
+
+    it('refuses the conversion up front when neither the container nor knownDuration has a usable length', { timeout: 2000 }, async () => {
+      const promise = convertToMP4(SOURCE, () => {})
+      promise.catch(() => {})
+      const video = getLastVideoDouble()!
+      video.setMetadata({ videoWidth: 1280, videoHeight: 720, duration: Infinity })
+      video.fireLoadedMetadata()
+
+      await expect(promise).rejects.toThrow(/duration/i)
+      // Refused before a single encoder was built — the conversion has
+      // written nothing at the point this throws.
+      expect(VideoEncoderDouble.instances).toHaveLength(0)
+    })
+
+    it('settles once every derived frame is captured through rVFC, without waiting for the element to end', { timeout: 2000 }, async () => {
+      // A `knownDuration` fallback (or any stored duration) can be shorter
+      // than the container's real playback length — the element itself may
+      // never fire `ended` for a long time, or not while this test is
+      // watching. The fast path must settle on the count it derived rather
+      // than sit on an event, the way the rAF fallback already does.
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { duration: 0.1 })
+      await settle()
+
+      for (let i = 0; i < 3; i++) video.presentFrame(i / 30)
+      await settle()
+
+      await promise
+      expect(lastVideoEncoder().encodes).toHaveLength(3)
+      expect(video.pause).toHaveBeenCalled()
+    })
+
+    // Coverage: the rVFC callback's re-request guard
+    // (`!video.ended && !video.paused && frameIndex < totalFrames`) and its
+    // `else if (frameIndex >= totalFrames)` companion can *both* be false in
+    // the same invocation — the element is paused (or ended, with the
+    // `ended` listener not yet run) while frames are still owed. Neither
+    // branch above ever exercises that: presenting frames plays the element
+    // straight through, and every other test either keeps it playing until
+    // its derived total is reached or lets `fireEnded()` do the finishing.
+    // This one parks it mid-capture and proves the callback does nothing at
+    // all in that turn — the design is that a paused element left one frame
+    // short is `ended`'s job to pad, not this callback's.
+    it('does nothing when the rVFC callback fires paused with frames still owed, leaving the ended handler to pad', async () => {
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { duration: 0.1 }) // totalFrames = 3
+      await settle()
+
+      // Frame 0, captured normally: the element is still playing, so the
+      // callback re-requests itself exactly as always.
+      video.presentFrame(0)
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+      expect(video.hasPendingFrameCallback()).toBe(true)
+
+      // The browser pauses the element, then fires the frame callback that
+      // was already pending — nothing new is due at the same mediaTime, so
+      // the capture loop above draws nothing either. Both guards are now
+      // false: `!video.paused` fails the re-request check, and
+      // `frameIndex (1) >= totalFrames (3)` fails the finish check.
+      video.setMetadata({ paused: true })
+      video.presentFrame(0)
+
+      // Neither branch ran: no third frame, no new callback requested, and
+      // nothing downstream of the capture (flush, the mux) has started —
+      // the conversion is simply waiting, exactly as the design intends.
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+      expect(video.hasPendingFrameCallback()).toBe(false)
+      expect(lastVideoEncoder().flushCalls).toBe(0)
+
+      // Only the element's own `ended` event can finish the capture now —
+      // its tail-padding loop owes exactly the one frame the callback above
+      // left behind.
+      video.fireEnded()
+      await settle()
+
+      const blob = await promise
+      expect(blob.type).toBe('video/mp4')
+      expect(lastVideoEncoder().encodes).toHaveLength(3)
+      expect(lastVideoEncoder().flushCalls).toBe(1)
+    })
+  })
+
+  // ESCSUITE-136: H.264 refuses an odd-sized frame outright, and the codec
+  // probe cannot catch a *this recording's* odd size by design — it only ever
+  // asks about a representative 1280x720. A composited PiP take on a display
+  // wider than 1280 whose scaled height lands odd (a stock 14"/16" MacBook Pro
+  // at its default resolution, per `compositor.ts`'s own arithmetic) is stored
+  // at exactly such a size, and its MP4 download must not fail.
+  describe('a recording with an odd pixel width or height (ESCSUITE-136)', () => {
+    it('drops the odd row and configures the even frame it actually encodes', async () => {
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { width: 1280, height: 831 })
+      await playThroughRvfc(video, 3)
+      await promise
+
+      expect(lastVideoEncoder().configureCalls[0]).toMatchObject({ width: 1280, height: 830 })
+      const ctx = getLastCanvasContext()!
+      expect(ctx.canvas.width).toBe(1280)
+      expect(ctx.canvas.height).toBe(830)
+      // `drawImage` already scales the odd source into whatever the canvas
+      // is, so the only change is the canvas itself.
+      expect(ctx.drawImage).toHaveBeenCalledWith(video.element, 0, 0, 1280, 830)
+    })
+
+    it('rounds an odd width the same way', async () => {
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { width: 1279, height: 719 })
+      await playThroughRvfc(video, 3)
+      await promise
+
+      expect(lastVideoEncoder().configureCalls[0]).toMatchObject({ width: 1278, height: 718 })
+    })
+
+    it('refuses a take with no picture at all instead of configuring a 0x0 encoder', async () => {
+      const promise = convertToMP4(SOURCE, () => {})
+      promise.catch(() => {})
+      const video = getLastVideoDouble()!
+      video.setMetadata({ videoWidth: 0, videoHeight: 0, duration: 1 })
+      video.fireLoadedMetadata()
+
+      await expect(promise).rejects.toThrow(/picture/i)
+      expect(VideoEncoderDouble.instances).toHaveLength(0)
+    })
+  })
+
   // The composite: one MP4 from a take's two video files (ESCSUITE-14 decision
   // 3). What is asserted is that the camera goes back exactly where the live
   // compositor had it — the numbers come from `core/overlayGeometry.test.ts`,
@@ -648,6 +815,29 @@ describe('converter', () => {
       // 384 = 1920 * 0.2, 216 = 384 * 9/16, and the inset is 30 rather than 20
       // because the preview measured 20 against a canvas capped at 1280 — see
       // `overlayPaddingFor`.
+      expect(ctx.drawImage).toHaveBeenCalledWith(composite.webcam.element, 30, 30, 384, 216)
+    })
+
+    // ESCSUITE-136. The screen half's own recorded width can be odd — a
+    // composited take on a display wider than 1280 whose scaled height lands
+    // odd is exactly such a take — and the overlay's geometry must be built
+    // from the even frame this conversion actually encodes, not the odd one
+    // it was recorded at: a size built from 1921 would draw the camera into a
+    // frame one column wider than the canvas this conversion ever writes.
+    it('builds the overlay geometry from the even encode width, not the odd source width', async () => {
+      const composite = startComposite({
+        width: 1921,
+        height: 1080,
+        placement: { position: 'top-left', size: 0.2, shape: 'rectangle' },
+      })
+      readyWebcam(composite.webcam)
+      await playThroughRvfc(composite.screen, 2)
+      await composite.promise
+
+      const ctx = getLastCanvasContext()!
+      expect(ctx.canvas.width).toBe(1920)
+      // At the odd recorded width these would be 384.2, 216.1125 and an inset
+      // of 30.015625 instead — see `overlayPaddingFor`.
       expect(ctx.drawImage).toHaveBeenCalledWith(composite.webcam.element, 30, 30, 384, 216)
     })
 

@@ -563,6 +563,15 @@ async function captureFramesViaPlayback(
         // Continue if video is still playing and we need more frames
         if (!video.ended && !video.paused && frameIndex < totalFrames) {
           rvfcHandle = (video as HTMLVideoElementWithRVFC).requestVideoFrameCallback(rvfcCallback);
+        } else if (frameIndex >= totalFrames) {
+          // The derived frame count was reached before the element itself
+          // ended (ESCSUITE-135): a `knownDuration` fallback can be shorter
+          // than the container's real playback length, and this conversion
+          // must settle on the count it derived rather than wait on an event
+          // that might arrive much later — or, for a source that never ends
+          // on its own, not at all. Mirrors what the rAF fallback branch
+          // below has always done.
+          finish();
         }
       });
 
@@ -761,6 +770,32 @@ export const MP4_NO_AUDIO_REASON =
   'MP4 will have no audio in this browser (no AAC encoder)';
 export const MP4_PROBE_FAILED_REASON =
   'This browser could not say whether it can encode MP4, so the conversion is not offered.';
+/**
+ * Why a conversion refused a take before encoding a single frame: neither the
+ * container nor the caller could say how long it runs (ESCSUITE-135).
+ *
+ * A repaired WebM's `video.duration` is real; an unrepaired MediaRecorder
+ * take's is `Infinity` (see "WebM Handling" in this app's CLAUDE.md) until
+ * `hooks/useMp4Download.ts` hands `convertToMP4` the recorder's own figure as
+ * `knownDuration`. This is thrown only when *that* is missing or unusable too
+ * — a caller that skipped the fallback, or a stored duration that is itself
+ * not a positive number — because a frame count derived from either one is
+ * safe to encode, and a frame count derived from neither is not a number this
+ * function may loop on.
+ */
+export const MP4_NO_DURATION_REASON =
+  "This recording's duration could not be determined, so it cannot be converted to MP4.";
+/**
+ * Why a conversion refused a take with no picture in it: rounding its frame
+ * size down to the nearest even number (see `encodeWidth` / `encodeHeight`
+ * below, ESCSUITE-136) rounds a 0-, or 1-pixel dimension down to 0 as readily
+ * as it rounds an odd one down to even, and a 0x0 (or 0x*, or *x0) encoder
+ * configuration is not a frame this function can write. An audio-only take is
+ * the one recording this is ever reached by — `convertToM4A` is what it
+ * should have been asked for instead.
+ */
+export const MP4_NO_VIDEO_REASON =
+  'This recording has no picture and cannot be converted to MP4 — try M4A instead.';
 /**
  * Why an audio-only conversion refused a take: there was no decodable audio in
  * it at all. The M4A button is disabled for a recording whose metadata says it
@@ -1028,12 +1063,18 @@ async function encodeAudioChunks(
  *   the corner it was recorded in (ESCSUITE-14 decision 3). Absent for every
  *   other conversion, and absent is what keeps that path's per-frame work and
  *   its ceilings exactly what they were.
+ * @param knownDuration - The recorder's own duration for this take, from
+ *   `record.metadata.duration` (ESCSUITE-135). Used only as a fallback, when
+ *   `video.duration` itself is not a usable number — every MediaRecorder take
+ *   reads `Infinity` there until its container is repaired — so this function
+ *   never has to trust an unbounded input to derive how many frames to encode.
  */
 export async function convertToMP4(
   webmBlob: Blob,
   onProgress: ProgressCallback,
   signal?: AbortSignal,
-  composite?: CompositeOptions
+  composite?: CompositeOptions,
+  knownDuration?: number
 ): Promise<Blob> {
   if (!isMP4ConversionSupported()) {
     throw new Error('MP4 conversion requires WebCodecs API (Chrome/Edge)');
@@ -1095,9 +1136,43 @@ export async function convertToMP4(
 
     const width = video.videoWidth;
     const height = video.videoHeight;
-    const duration = video.duration;
     const frameRate = MP4_FRAME_RATE;
-    const totalFrames = Math.ceil(duration * frameRate);
+
+    // H.264 refuses an odd-sized frame outright (ESCSUITE-136): dropping at
+    // most one row and one column is invisible, and is what every encoder
+    // pipeline does, but the codec probe cannot catch a *this recording's*
+    // odd size by design — it only ever asks about a representative 1280x720
+    // (`PROBE_WIDTH`/`PROBE_HEIGHT`). Derived once, here, so the canvas, the
+    // encoder configuration and the composite's overlay geometry all agree on
+    // the frame actually being written.
+    const encodeWidth = width - (width % 2);
+    const encodeHeight = height - (height % 2);
+    if (encodeWidth <= 0 || encodeHeight <= 0) {
+      // The one take this can be: no picture at all, which `convertToM4A`
+      // exists for. Refused before any encoder is built, so this costs
+      // nothing beyond the metadata read already in flight.
+      throw new Error(MP4_NO_VIDEO_REASON);
+    }
+
+    // `video.duration` is `Infinity` for every MediaRecorder take before its
+    // container is repaired (ESCSUITE-135) — `Math.ceil(Infinity * 30)` is
+    // `Infinity`, and a loop bounded by that never terminates. The element's
+    // own reading wins whenever it is usable (a stored `knownDuration` can be
+    // *shorter* than the real playback length); `knownDuration` — the
+    // recorder's own tally, kept regardless of the container — is the
+    // fallback `hooks/useMp4Download.ts` hands in.
+    const usableDuration =
+      Number.isFinite(video.duration) && video.duration > 0 ? video.duration : knownDuration;
+    const totalFrames =
+      usableDuration !== undefined && Number.isFinite(usableDuration) && usableDuration > 0
+        ? Math.ceil(usableDuration * frameRate)
+        : NaN;
+    if (!Number.isFinite(totalFrames) || totalFrames <= 0) {
+      // Written nothing yet, so refusing costs nothing — and refusing here,
+      // rather than trusting the arithmetic below to stay bounded, is what
+      // keeps a non-finite input from ever reaching the capture loop at all.
+      throw new Error(MP4_NO_DURATION_REASON);
+    }
 
     // The camera half, whose header was already being read while the screen's
     // was. Its geometry is built once, here, from the placement the take was
@@ -1117,7 +1192,7 @@ export async function convertToMP4(
       } else {
         overlay = {
           video: companion.video,
-          geometry: overlayGeometryFor(companion.placement, width),
+          geometry: overlayGeometryFor(companion.placement, encodeWidth),
           startOffset: companion.startOffset,
           // The same report the failure above makes, for the failure that only
           // a frame count can see (see `cleanup()` in
@@ -1184,8 +1259,9 @@ export async function convertToMP4(
       error: encoders.errorCallback('Video'),
     }));
 
-    // The same configuration `probeMP4Support()` asked about, by construction.
-    await videoEncoder.configure(mp4VideoEncoderConfig(width, height));
+    // The same configuration `probeMP4Support()` asked about, by construction
+    // — at the even size this conversion actually encodes.
+    await videoEncoder.configure(mp4VideoEncoderConfig(encodeWidth, encodeHeight));
 
     // Create audio encoder if we have audio
     let audioEncoder: AudioEncoder | null = null;
@@ -1202,10 +1278,13 @@ export async function convertToMP4(
 
     onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames (playing video)...' });
 
-    // Create canvas for frame capture
+    // Create canvas for frame capture, at the even size this conversion
+    // encodes — `ctx.drawImage(video, 0, 0, canvas.width, canvas.height)`
+    // already scales whatever the source is into it, so an odd source needs
+    // nothing else here.
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = encodeWidth;
+    canvas.height = encodeHeight;
     const ctx = canvas.getContext('2d', { alpha: false })!;
 
     // Use play-based frame capture (much faster than seek-based)

@@ -167,6 +167,22 @@ describe('useMp4Download, start to finish', () => {
     expect(setNotice.mock.calls).toEqual([[null]])
   })
 
+  // ESCSUITE-135: `convertToMP4` cannot bound its own encode loop when a
+  // stored take's container was never repaired — `video.duration` reads
+  // `Infinity` there — so the recorder's own figure, already in hand from the
+  // `getVideo()` read above, is threaded in as the fallback.
+  it('hands the converter the recording\'s own stored duration as a fallback', async () => {
+    await seed('take-1', 'Take One')
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Take One')
+    })
+
+    // `metadata(...)` above stores `duration: 30`.
+    expect(converterModule.convertToMP4.mock.calls[0][4]).toBe(30)
+  })
+
   it('clears an earlier failure once a conversion succeeds', async () => {
     await seed('take-1', 'Take One')
     converterModule.convertToMP4.mockRejectedValueOnce(new Error('No H.264 encoder'))
