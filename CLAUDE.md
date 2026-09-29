@@ -92,6 +92,10 @@ dist/
 └── artist/index.html # ESCAPEARTIST (single file)
 ```
 
+`scripts/build-all.mjs` (`pnpm build:deploy`) refuses to publish: if `turbo build` left any of
+ESCAPEPLAN, ESCAPECRAFT or ESCAPEARTIST with an empty or missing `dist`, it exits non-zero
+naming the app instead of assembling and reporting success on a half-shaped `dist/`.
+
 ## Architecture
 
 ### Shared Infrastructure

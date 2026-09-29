@@ -13,79 +13,151 @@
  * │   └── index.html      (ESCAPECRAFT - single file)
  * └── artist/
  *     └── index.html      (ESCAPEARTIST - single file)
+ *
+ * Every one of these outputs is mandatory. `turbo build --filter=<pkg>` exits
+ * 0 even when the filtered package has no `build` task at all ("0 successful,
+ * 0 total"), so a rename, a package split, or a task moved in `turbo.json`
+ * would otherwise leave this script assembling (and reporting success for) a
+ * `dist/` with an empty `craft/` or `artist/`. The checks below turn a
+ * missing or empty app output into a fatal error instead.
  */
 
 import { execSync } from 'child_process';
-import { cpSync, mkdirSync, rmSync, existsSync, copyFileSync } from 'fs';
+import { cpSync, mkdirSync, rmSync, existsSync, copyFileSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 
-const distDir = join(root, 'dist');
-const appsDir = join(root, 'apps');
-
-console.log('🏗️  Building ESCAPE Suite for production...\n');
-
-// Clean dist directory
-if (existsSync(distDir)) {
-  console.log('🧹 Cleaning dist directory...');
-  rmSync(distDir, { recursive: true });
-}
-mkdirSync(distDir, { recursive: true });
-
-// Build all apps using Turbo
-console.log('📦 Building all apps with Turbo...\n');
-try {
-  execSync('pnpm turbo build --filter=@escapesuite/plan --filter=@escapesuite/craft --filter=@escapesuite/artist', {
-    cwd: root,
-    stdio: 'inherit'
-  });
-} catch (error) {
-  console.error('❌ Build failed');
-  process.exit(1);
+/**
+ * True when `filePath` exists and is a regular file with at least one byte.
+ * An empty file — a build that created the shell but wrote nothing to it —
+ * counts the same as a missing one: both mean there is nothing to publish.
+ */
+export function isNonEmptyFile(filePath) {
+  if (!existsSync(filePath)) return false;
+  const stats = statSync(filePath);
+  return stats.isFile() && stats.size > 0;
 }
 
-console.log('\n📁 Assembling dist folder...\n');
+/**
+ * Checks whether one app's own build output directory actually produced
+ * something to publish. `requiredFile` is the file that output is judged
+ * by — `index.html` for every app in this repo, single-file builds
+ * included.
+ */
+export function checkAppDist(appDistDir, requiredFile = 'index.html') {
+  return isNonEmptyFile(join(appDistDir, requiredFile));
+}
 
-// Copy ESCAPEPLAN (main site) to dist root
-const planDist = join(appsDir, 'plan', 'dist');
-if (existsSync(planDist)) {
-  console.log('  → Copying ESCAPEPLAN to dist/');
-  cpSync(planDist, distDir, { recursive: true });
+/**
+ * Verifies the combined `dist/` this script assembles has the fixed shape
+ * `vercel.json`'s `outputDirectory` promises: a plan root page, its 404
+ * fallback, and one `index.html` each for craft and artist. Returns the
+ * list of required paths that are missing or empty — an empty array means
+ * every postcondition holds.
+ */
+export function verifyDistLayout(distDir) {
+  const required = [
+    join(distDir, 'index.html'),
+    join(distDir, '404.html'),
+    join(distDir, 'craft', 'index.html'),
+    join(distDir, 'artist', 'index.html'),
+  ];
+  return required.filter((path) => !isNonEmptyFile(path));
+}
 
-  // Create 404.html for SPA routing
-  const indexHtml = join(distDir, 'index.html');
-  const notFoundHtml = join(distDir, '404.html');
-  if (existsSync(indexHtml)) {
-    copyFileSync(indexHtml, notFoundHtml);
-    console.log('  → Created 404.html for SPA routing');
+// Only run the build when this file is executed directly (not when its
+// helpers are imported for testing).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
+
+function main() {
+  const distDir = join(root, 'dist');
+  const appsDir = join(root, 'apps');
+  const failures = [];
+
+  console.log('🏗️  Building ESCAPE Suite for production...\n');
+
+  // Clean dist directory
+  if (existsSync(distDir)) {
+    console.log('🧹 Cleaning dist directory...');
+    rmSync(distDir, { recursive: true });
   }
-} else {
-  console.warn('  ⚠️  ESCAPEPLAN dist not found');
-}
+  mkdirSync(distDir, { recursive: true });
 
-// Copy ESCAPECRAFT to dist/craft
-const craftDist = join(appsDir, 'craft', 'dist');
-const craftOut = join(distDir, 'craft');
-mkdirSync(craftOut, { recursive: true });
-if (existsSync(craftDist)) {
-  console.log('  → Copying ESCAPECRAFT to dist/craft/');
-  cpSync(craftDist, craftOut, { recursive: true });
-} else {
-  console.warn('  ⚠️  ESCAPECRAFT dist not found');
-}
+  // Build all apps using Turbo
+  console.log('📦 Building all apps with Turbo...\n');
+  try {
+    execSync('pnpm turbo build --filter=@escapesuite/plan --filter=@escapesuite/craft --filter=@escapesuite/artist', {
+      cwd: root,
+      stdio: 'inherit'
+    });
+  } catch (error) {
+    console.error('❌ Build failed');
+    process.exit(1);
+  }
 
-// Copy ESCAPEARTIST to dist/artist
-const artistDist = join(appsDir, 'artist', 'dist');
-const artistOut = join(distDir, 'artist');
-mkdirSync(artistOut, { recursive: true });
-if (existsSync(artistDist)) {
-  console.log('  → Copying ESCAPEARTIST to dist/artist/');
-  cpSync(artistDist, artistOut, { recursive: true });
-} else {
-  console.warn('  ⚠️  ESCAPEARTIST dist not found');
-}
+  console.log('\n📁 Assembling dist folder...\n');
 
-console.log('\n✅ Build complete! Output in dist/\n');
+  // Copy ESCAPEPLAN (main site) to dist root
+  const planDist = join(appsDir, 'plan', 'dist');
+  if (checkAppDist(planDist)) {
+    console.log('  → Copying ESCAPEPLAN to dist/');
+    cpSync(planDist, distDir, { recursive: true });
+
+    // Create 404.html for SPA routing
+    const indexHtml = join(distDir, 'index.html');
+    const notFoundHtml = join(distDir, '404.html');
+    if (existsSync(indexHtml)) {
+      copyFileSync(indexHtml, notFoundHtml);
+      console.log('  → Created 404.html for SPA routing');
+    }
+  } else {
+    console.error('  ❌ ESCAPEPLAN dist not found or empty — nothing to publish');
+    failures.push('ESCAPEPLAN');
+  }
+
+  // Copy ESCAPECRAFT to dist/craft
+  const craftDist = join(appsDir, 'craft', 'dist');
+  const craftOut = join(distDir, 'craft');
+  if (checkAppDist(craftDist)) {
+    console.log('  → Copying ESCAPECRAFT to dist/craft/');
+    mkdirSync(craftOut, { recursive: true });
+    cpSync(craftDist, craftOut, { recursive: true });
+  } else {
+    console.error('  ❌ ESCAPECRAFT dist not found or empty — nothing to publish');
+    failures.push('ESCAPECRAFT');
+  }
+
+  // Copy ESCAPEARTIST to dist/artist
+  const artistDist = join(appsDir, 'artist', 'dist');
+  const artistOut = join(distDir, 'artist');
+  if (checkAppDist(artistDist)) {
+    console.log('  → Copying ESCAPEARTIST to dist/artist/');
+    mkdirSync(artistOut, { recursive: true });
+    cpSync(artistDist, artistOut, { recursive: true });
+  } else {
+    console.error('  ❌ ESCAPEARTIST dist not found or empty — nothing to publish');
+    failures.push('ESCAPEARTIST');
+  }
+
+  const missingOutputs = verifyDistLayout(distDir);
+  if (missingOutputs.length > 0) {
+    console.error('\n❌ dist/ is missing required output:');
+    for (const path of missingOutputs) {
+      console.error(`   - ${path}`);
+    }
+  }
+
+  if (failures.length > 0 || missingOutputs.length > 0) {
+    console.error(
+      `\n❌ Build failed: ${failures.length > 0 ? failures.join(', ') + ' produced no dist.' : 'dist/ layout is incomplete.'}`
+    );
+    process.exit(1);
+  }
+
+  console.log('\n✅ Build complete! Output in dist/\n');
+}
