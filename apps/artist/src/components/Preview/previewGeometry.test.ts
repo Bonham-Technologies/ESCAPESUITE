@@ -194,6 +194,25 @@ describe('getOverlayBounds for text overlays', () => {
     expect(right?.centerX).toBe(0.5 * CANVAS_W - MEASURED_TEXT_WIDTH / 2)
   })
 
+  it('rotates the alignment offset with the box, so the chrome sits on a rotated run (ESCSUITE-128)', () => {
+    // Left-aligned text is anchored at its left edge, so the box's unrotated
+    // centre sits textWidth/2 to the *right* of the anchor. The renderer
+    // rotates about the anchor, so a box rotated about its own centre by the
+    // same angle lands somewhere else entirely unless the offset itself is
+    // rotated first. At 90 degrees the offset that was purely horizontal
+    // becomes purely vertical: the centre keeps the anchor's x and moves down
+    // by half the measured width.
+    const bounds = getOverlayBounds(
+      textClip({}, { textAlign: 'left', rotation: 90 }),
+      makeCanvas(),
+      undefined,
+      []
+    )
+
+    expect(bounds?.centerX).toBe(0.5 * CANVAS_W)
+    expect(bounds?.centerY).toBe(0.5 * CANVAS_H + MEASURED_TEXT_WIDTH / 2)
+  })
+
   it('applies the font style and weight before measuring', () => {
     const canvas = makeCanvas()
 
