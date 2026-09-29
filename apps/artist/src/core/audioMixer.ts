@@ -42,8 +42,10 @@ export async function extractAndMixAudio(
     const clip = clips[i];
     const track = tracks.find(t => t.id === clip.trackId);
 
-    // Skip a clip whose track has been deleted, and skip muted tracks
-    if (!track || track.muted) continue;
+    // Skip a clip whose track has been deleted, a muted track, and a hidden
+    // track (ESCSUITE-127: the preview is already silent for a hidden track
+    // — `getClipsAtTime` filters on `track.visible` — so an export agrees).
+    if (!track || track.muted || !track.visible) continue;
 
     // Get track volume (default to 1 if not set)
     const trackVolume = track.volume ?? 1;

@@ -397,15 +397,17 @@ export function usePreviewRenderLoop({
           playbackStartTime = performance.now();
           startTimelineTime = loopStart;
 
-          // Reset all videos to loop start and restart them
+          // Pause every element without seeking it here: loopStart is a
+          // timeline time, not any of these elements' source time (ESCSUITE-129
+          // — a clip not at timeline 0, or trimmed, wants
+          // clip.startTime + (loopStart - clip.timelinePosition), not
+          // loopStart itself). Emptying lastActiveClipIds below forces the
+          // clipsChanged branch on the very next frame, which already computes
+          // that per clip and seeks each element correctly.
           videoElementsRef.current.forEach(video => {
-            video.currentTime = loopStart;
             video.pause();
           });
-
-          // Reset all audio clips
           audioElementsRef.current.forEach(audio => {
-            audio.currentTime = loopStart;
             audio.pause();
           });
 

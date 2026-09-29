@@ -159,6 +159,23 @@ describe('extractAndMixAudio', () => {
     expect(offline.decodeCalls).toHaveLength(0)
   })
 
+  // ESCSUITE-127: the preview is the truth — a hidden track is silent there
+  // (`getClipsAtTime` filters on `track.visible`), so an export must agree
+  // rather than mixing in audio nothing in the editor played.
+  it('skips a clip on a hidden track entirely, without decoding its source', async () => {
+    const clip = makeClip({ duration: 0.005, endTime: 0.005 })
+
+    const mixed = await extractAndMixAudio(
+      [clip],
+      [makeTrack({ visible: false, muted: false })],
+      TOTAL_DURATION,
+      vi.fn()
+    )
+
+    expect(mixed).toBeNull()
+    expect(offline.decodeCalls).toHaveLength(0)
+  })
+
   it('copies a mono source into both channels', async () => {
     offline.decode = () => createAudioBufferDouble([ramp(480)], SAMPLE_RATE)
     const clip = makeClip({ duration: 0.005, endTime: 0.005 })

@@ -238,6 +238,25 @@ describe('PreviewPlayer transport running', () => {
     expect(store().currentTime).toBeCloseTo(1, 1)
   })
 
+  it('seeks a looping clip to its source time, not the loop point itself (ESCSUITE-129)', async () => {
+    // The clip sits at timeline position 5 and is trimmed to start 2s into its
+    // source. loopStart (5) is a timeline time; a wrong fix parks the element
+    // there directly instead of translating it into that clip's source time
+    // (2, since loopStart lands exactly on the clip's own start).
+    const clip = addClip('clip1', 5, 2)
+    store().updateClip(clip.id, { startTime: 2, endTime: 4 })
+    store().setLoopPlayback(true)
+    store().setInPoint(5)
+    store().setOutPoint(7)
+    store().setCurrentTime(6.9)
+
+    await renderPreview()
+    await play(300)
+
+    expect(store().isPlaying).toBe(true)
+    expect(doubles.media.seeks).not.toContain(5)
+  })
+
   it('ignores the in and out points when loop playback is off', async () => {
     addClip('clip1', 0, 4)
     store().setInPoint(1)
