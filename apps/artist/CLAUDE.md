@@ -856,6 +856,18 @@ out on its result — the hit test wants `1 / scale`, and asking for it separate
 second `getBoundingClientRect` per pointer move for a number that call had already computed.
 It is derived at draw time and held in no state.
 
+**A left/right-aligned text overlay's box is rotated about the text's anchor, not its own
+centre** (ESCSUITE-128). `core/canvasRenderer.ts` draws a text overlay by translating to its
+anchor — `textData.x`/`.y`, the point `fillText` is issued at — rotating, then translating
+back, so the glyphs pivot around that anchor regardless of alignment. Left/right alignment
+means the anchor sits at the run's edge rather than its centre, so `getOverlayBounds` shifts
+the reported box by `±textWidth / 2` — but that offset has to be rotated along with the box
+(`anchor + R(rotation)·(offset, 0)`) rather than added before rotating, or the box drawn by
+`selectionOverlay.ts` and read by `hitTest.ts` and `dragGeometry.ts` (all three take their
+`centerX`/`centerY`/`rotation` from this one function) drifts away from the drawn text as
+rotation grows — a full half-width off at 90°. Centre-aligned text is unaffected: its anchor
+and centre already coincide, so the offset is zero either way.
+
 **The playhead position does not re-render the preview, the timeline body, or `App`.**
 `usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every
 animation frame — a React render (and a forced layout) fifty times a second so a timecode
