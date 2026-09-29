@@ -147,7 +147,7 @@ describe('frameManager', () => {
 
       expect(frame).toBeInstanceOf(VideoFrameDouble)
       expect(decoder.frames).toEqual([{ sourceId: 'clip-a', timestamp: 1.5 }])
-      expect(manager.currentFrames.get('clip-a:1.5')).toBe(frame)
+      expect(manager.currentFrames.has(frame as VideoFrame)).toBe(true)
     })
 
     it('returns null for a source that was never loaded', async () => {
@@ -193,6 +193,28 @@ describe('frameManager', () => {
       expect(first.closed).toBe(true)
       expect(second.closed).toBe(true)
       expect(manager.currentFrames.size).toBe(0)
+      expect(allFramesClosed()).toBe(true)
+    })
+
+    // ESCSUITE-123: a media pass and a transition pass can both ask for the
+    // same source at the same timestamp in one export frame (the outgoing
+    // clip of a whole-clip transition is "active" in its own right too). Both
+    // calls must be tracked and closed — losing one is a leaked decoded
+    // VideoFrame per affected frame.
+    it('tracks and closes both frames when the same (sourceId, timestamp) is fetched twice', async () => {
+      const manager = await createFrameManager(true)
+      await loadFrameSource(manager, 'clip-a', mp4(), 'video/mp4')
+
+      const first = (await getFrameAtTime(manager, 'clip-a', 1.5)) as unknown as VideoFrameDouble
+      const second = (await getFrameAtTime(manager, 'clip-a', 1.5)) as unknown as VideoFrameDouble
+
+      expect(first).not.toBe(second)
+      expect(manager.currentFrames.size).toBe(2)
+
+      cleanupIterationFrames(manager)
+
+      expect(first.closed).toBe(true)
+      expect(second.closed).toBe(true)
       expect(allFramesClosed()).toBe(true)
     })
 
