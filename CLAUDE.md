@@ -1249,6 +1249,23 @@ element and lets the very next frame's clips-changed branch — which already ma
 each clip's source time — do the seek, and that branch was covered before. **No floor crossed**;
 artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-29 for ESCSUITE-133 (a transition evaluates the
+incoming clip's animation at the same clamped clip time its frame is fetched at):
+99.54 / 98.90 / 94.78 / 99.40, byte-identical to the 99.54 / 98.90 / 94.78 / 99.40 the commit this
+branch was rebased onto measures. Measured in one sitting, the base gives 4,213 / 4,445 branches
+and this branch the same 4,213 / 4,445 — `getIncomingClipTime`'s `Math.max(0, …)` is a call, not a
+decision — with lines 6,778 / 6,809 → 6,779 / 6,810, statements 7,645 / 7,730 → 7,646 / 7,731 and
+functions 1,679 / 1,689 → 1,680 / 1,690, one new unit each, all covered, and the same
+31 / 85 / 232 / 10 uncovered. The helper in `core/exportTypes.ts` replaces the unclamped
+`currentTime - incomingClip.timelinePosition` at both of `core/canvasRenderer.ts`'s transition
+call sites, which the preview and both exporters share; the red cases pin that the incoming clip's
+`getAnimatedValues` is asked at clip time 0 during a transition rather than at a negative time,
+and that the helper clamps. What the tests deliberately do not claim: that a fade-in preset becomes
+visible during the transition — its first keyframe is at clip time 0 and interpolation floors
+earlier times to it, so the clamped time and the negative one yield the same opacity; whether an
+in-preset should be suppressed under an incoming transition is a product decision this ticket
+left alone. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
