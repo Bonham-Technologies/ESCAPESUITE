@@ -675,6 +675,17 @@ describe('exportToWebM failure handling', () => {
     expect(allFramesClosed()).toBe(true)
   })
 
+  // ESCSUITE-131: encode() has no try around it, so a frame the encoder throws
+  // on is never closed — the catch below cleans up the media elements and the
+  // encoders, but not the frame that was mid-flight.
+  it('closes the frame it was encoding when the encoder throws', async () => {
+    webcodecs.script.failVideoEncodeAt = [2]
+
+    await expect(run()).rejects.toThrow('encode failed on attempt 2')
+
+    expect(allFramesClosed()).toBe(true)
+  })
+
   it('aborts during audio encoding and closes both encoders', async () => {
     mixAudio.mockResolvedValue(audioFor(0.2))
     const controller = new AbortController()
