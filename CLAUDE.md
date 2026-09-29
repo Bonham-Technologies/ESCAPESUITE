@@ -1233,6 +1233,22 @@ covered in the export, one above is drawn last — pin the order per exporter; t
 are byte-unchanged, since every clip is still drawn exactly once. **No floor crossed**; artist's
 floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-29 for ESCSUITE-127 and ESCSUITE-129 (a hidden
+track is silent in an export too, and loop-back seeks each clip to its source time rather than the
+loop point): 99.54 / 98.90 / **94.78** / 99.40 against the 99.54 / 98.90 / 94.77 / 99.40 the commit
+this branch was rebased onto measures — branches up a hundredth, the other three unmoved. Measured
+in one sitting, the base gives 4,212 / 4,444 branches and this branch 4,213 / 4,445: one new
+branch, covered, the same 232 uncovered as before; lines 6,780 / 6,811 → 6,778 / 6,809 and
+statements 7,647 / 7,732 → 7,645 / 7,730 each two smaller — the two `currentTime = loopStart`
+assignments the render loop's loop-back used to make — and functions 1,679 / 1,689 on both, with
+the same 31 / 85 / 10 uncovered. The one new decision is the `!track.visible` operand
+`core/audioMixer.ts` adds to the clause that already skipped a muted track and a track that is
+gone, reached from both sides by the new hidden-track case against the mixes that were already
+there. `components/Preview/usePreviewRenderLoop.ts` gained nothing: the loop-back pauses every
+element and lets the very next frame's clips-changed branch — which already maps timeline time to
+each clip's source time — do the seek, and that branch was covered before. **No floor crossed**;
+artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1240,7 +1256,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.70 | 100.00 |
-| `@escapesuite/artist` | 99.54 | 98.90 | 94.77 | 99.40 |
+| `@escapesuite/artist` | 99.54 | 98.90 | 94.78 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
