@@ -76,7 +76,7 @@ import type {
   AnimationPresetType,
   EasingType,
 } from '../../store/types';
-import { describeClip, relativeTimeInClip, fitToCanvasScale } from './clipEditorModel';
+import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
 
@@ -337,10 +337,31 @@ export function useClipEditorActions(): ClipEditorActions {
   );
 
   // Animation handlers
+  //
+  // The four handlers below (the two type changes and the two easing changes)
+  // carry a `duration` forward from either the clip's existing preset or the
+  // handler's own `?? 0.5` fallback, rather than from a slider whose own `max`
+  // already bounds it — so, unlike the two duration-change handlers below,
+  // nothing here stops that number from exceeding what the clip can hold.
+  // Clamped to `maxPresetDuration(selectedClip.duration)` (ESCSUITE-125),
+  // the same bound `trimAnimation` applies to a kept preset on a trim, and with
+  // the same `type === 'none'` exemption: a preset that is off does nothing
+  // with its `duration` (`generateInPresetKeyframes`/`generateOutPresetKeyframes`
+  // both bail out before reading it), so clamping it would report a number the
+  // UI never used and discard whatever it held if the preset is switched back
+  // on. Unclamped, a duration longer than the clip made `generateOutPresetKeyframes`
+  // compute a negative `startTime`, opening the clip already mid-animation.
   const handleAnimationInTypeChange = useCallback(
     (type: AnimationPresetType) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { in: { type, duration: selectedClip.animation?.in.duration ?? 0.5, easing: selectedClip.animation?.in.easing ?? 'ease-out' } });
+      const duration = selectedClip.animation?.in.duration ?? 0.5;
+      updateClipAnimation(selectedClip.id, {
+        in: {
+          type,
+          duration: type === 'none' ? duration : Math.min(duration, maxPresetDuration(selectedClip.duration)),
+          easing: selectedClip.animation?.in.easing ?? 'ease-out',
+        },
+      });
     },
     [selectedClip, updateClipAnimation]
   );
@@ -359,7 +380,15 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleAnimationInEasingChange = useCallback(
     (easing: EasingType) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { in: { type: selectedClip.animation?.in.type ?? 'none', duration: selectedClip.animation?.in.duration ?? 0.5, easing } });
+      const type = selectedClip.animation?.in.type ?? 'none';
+      const duration = selectedClip.animation?.in.duration ?? 0.5;
+      updateClipAnimation(selectedClip.id, {
+        in: {
+          type,
+          duration: type === 'none' ? duration : Math.min(duration, maxPresetDuration(selectedClip.duration)),
+          easing,
+        },
+      });
     },
     [selectedClip, updateClipAnimation]
   );
@@ -367,7 +396,14 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleAnimationOutTypeChange = useCallback(
     (type: AnimationPresetType) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { out: { type, duration: selectedClip.animation?.out.duration ?? 0.5, easing: selectedClip.animation?.out.easing ?? 'ease-in' } });
+      const duration = selectedClip.animation?.out.duration ?? 0.5;
+      updateClipAnimation(selectedClip.id, {
+        out: {
+          type,
+          duration: type === 'none' ? duration : Math.min(duration, maxPresetDuration(selectedClip.duration)),
+          easing: selectedClip.animation?.out.easing ?? 'ease-in',
+        },
+      });
     },
     [selectedClip, updateClipAnimation]
   );
@@ -383,7 +419,15 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleAnimationOutEasingChange = useCallback(
     (easing: EasingType) => {
       if (!selectedClip) return;
-      updateClipAnimation(selectedClip.id, { out: { type: selectedClip.animation?.out.type ?? 'none', duration: selectedClip.animation?.out.duration ?? 0.5, easing } });
+      const type = selectedClip.animation?.out.type ?? 'none';
+      const duration = selectedClip.animation?.out.duration ?? 0.5;
+      updateClipAnimation(selectedClip.id, {
+        out: {
+          type,
+          duration: type === 'none' ? duration : Math.min(duration, maxPresetDuration(selectedClip.duration)),
+          easing,
+        },
+      });
     },
     [selectedClip, updateClipAnimation]
   );

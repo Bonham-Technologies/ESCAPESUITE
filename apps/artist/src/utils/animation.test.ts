@@ -59,6 +59,31 @@ describe('getAnimatedValues', () => {
     expect(atEnd.opacity).toBe(0)
   })
 
+  // ESCSUITE-125: an out preset's duration used to reach `generateOutPresetKeyframes`
+  // unclamped, so a duration longer than the clip made `startTime = clipDuration -
+  // duration` negative — the clip opened mid-animation instead of at its base value.
+  it('clamps an out preset longer than the clip so it does not open already animated', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0, easing: 'linear' },
+      out: { type: 'fade', duration: 0.5, easing: 'linear' },
+      keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+    }
+
+    const atStart = getAnimatedValues(0, 0.4, animation, baseTransform, baseEffects)
+    expect(atStart.opacity).toBe(1)
+  })
+
+  it('clamps a slide-left out preset longer than the clip to its base position at open', () => {
+    const animation: ClipAnimation = {
+      in: { type: 'none', duration: 0, easing: 'linear' },
+      out: { type: 'slide-left', duration: 0.5, easing: 'linear' },
+      keyframes: { x: [], y: [], scaleX: [], scaleY: [], rotation: [], opacity: [], blur: [] },
+    }
+
+    const atStart = getAnimatedValues(0, 0.2, animation, baseTransform, baseEffects)
+    expect(atStart.x).toBe(0.5)
+  })
+
   it('applies scale-up animation', () => {
     const animation: ClipAnimation = {
       in: { type: 'scale-up', duration: 1, easing: 'linear' },

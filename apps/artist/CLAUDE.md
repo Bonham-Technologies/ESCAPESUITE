@@ -566,6 +566,24 @@ Clips support animated properties via keyframes:
   only way to keep the picture sane. Lengthening a clip (dragging a handle outward) changes nothing
   about its animation at all — the store only calls `trimAnimation` when the new duration is
   strictly shorter than the old one, by construction rather than by any special-case check.
+- **Choosing a preset clamps its duration too, not only a trim (ESCSUITE-125)**. `trimAnimation`'s
+  clamp above only ever runs when a trim shortens a clip that already has a preset; it never ran
+  when a preset was *chosen* in the first place. `useClipEditorActions.ts`'s four preset handlers —
+  `handleAnimationInTypeChange`, `handleAnimationInEasingChange`, `handleAnimationOutTypeChange`,
+  `handleAnimationOutEasingChange` — carry a `duration` forward from either the clip's existing
+  preset or the handler's own `?? 0.5` fallback, and neither of those was ever bounded: picking any
+  preset in Animate Out on a clip under 1s stored a duration the clip could not hold, and
+  `generateOutPresetKeyframes`' `startTime = clipDuration - duration` went negative — the clip
+  opened mid-animation, the same picture ESCSUITE-110 had already fixed for a trim. (The other two
+  handlers, `handleAnimationInDurationChange` / `handleAnimationOutDurationChange`, take their
+  `duration` straight from the slider that calls them, whose own `max={maxPresetDuration(clipDuration)}`
+  already bounds it, so they needed no change.) The fix is the same clamp trimming already makes —
+  `Math.min(duration, maxPresetDuration(selectedClip.duration))`, exempting a `type: 'none'` preset
+  for the same reason `trimAnimation` does — applied at all four write sites instead of only at
+  trim time. Belt and braces: `generateOutPresetKeyframes` itself now also clamps its `duration` to
+  `clipDuration` (not the tighter `maxPresetDuration` the UI enforces — just enough to keep
+  `startTime` from going negative), so a hand-edited project or a file saved before this fix cannot
+  reach the negative-`startTime` picture either, regardless of which handler wrote it.
 
   **The write goes through `trimClip`, not `updateClip` (review round 1).** The first version of
   this fix put the rebase inside `updateClip` — the one action that moves a clip's `startTime`/
@@ -616,6 +634,18 @@ Clips support animated properties via keyframes:
   (`EASING_TYPES` from `src/utils/easingOptions.ts`, shared with the animate-in/out presets); new
   keyframes default to `ease-in-out` and a value drag preserves the stored easing
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
+- **The playhead follows the timeline, not a local scrub state (ESCSUITE-126)**. `KeyframePanel.tsx`
+  used to keep a `previewTime` local override, set only by `handlePreviewTimeChange` (the callback
+  `ClipPreview`'s scrubber and Play button both call) and never reset back to `null` by anything —
+  so one scrub or Play press latched the panel's playhead at that offset for good: `playheadTime`
+  kept returning the stale `previewTime` instead of tracking `currentTime`, the graph's playhead
+  line and the scrubber both froze, and `Enter` (`useKeyframeGraphKeyboard.ts`'s `addAtPlayhead`)
+  added a keyframe at the stale offset instead of where the timeline actually was. The override was
+  also never scoped to a clip, so it survived a clip switch too. There was nothing for an override
+  to add: `handlePreviewTimeChange` already calls `setCurrentTime` synchronously, so the store's
+  `currentTime` *is* the preview the instant a scrub happens — `playheadTime` is now derived from it
+  alone, the same way `clipRelativeTime` beside it already was (reporting 0 rather than clamping to
+  an edge when the playhead sits outside the clip, the one difference between the two derivations).
 - **KeyframeGraph.tsx keyboard map** — the `<svg>` is one focusable
   `role="listbox"` (`tabIndex={0}`, `aria-activedescendant`) rather than one `tabIndex` per
   keyframe: a single tab stop matches the APG listbox pattern, and `tabindex` on SVG *child*

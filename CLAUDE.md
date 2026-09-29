@@ -1161,6 +1161,27 @@ and watches it pad to the total. The Playwright pin
 1280×831, true at 1280×830) is outside vitest's coverage and was run once in real Chromium: 1 / 1.
 **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-125 and ESCSUITE-126 (choosing an
+Animate In/Out preset clamps its duration to what the clip can hold, and the keyframe panel's
+playhead follows the timeline again after a clip-preview scrub): 99.54 / **98.90** / **94.67** / 99.40
+against the 99.54 / 98.89 / 94.66 / 99.40 the commit this branch was rebased onto measures —
+statements and branches each up a hundredth, lines and functions unmoved. Measured in one sitting,
+the base gives 4,205 / 4,442 branches and this branch 4,211 / 4,448: six new branches, six covered,
+the same 237 uncovered as before (statements 7,642 / 7,727 → 7,645 / 7,730, lines
+6,774 / 6,805 → 6,778 / 6,809, functions 1,680 / 1,690 on both; the same 31 / 85 / 10 uncovered).
+The six are the `type === 'none' ? duration : Math.min(duration, maxPresetDuration(clip.duration))`
+choice in each of the four preset handlers in `components/ClipEditor/useClipEditorActions.ts` — a
+switched-off preset keeps its stored duration, the exemption `trimAnimation` already makes — and
+the defensive `Math.min(duration, clipDuration)` inside `generateOutPresetKeyframes` in
+`utils/animation.ts`. The first measurement of the branch had the in-side `'none'` arm unreached —
+the out side had its case and the in side did not — and the review's one MAJOR was that arm; its
+mirror case is what took the count from five of six to six of six. `KeyframePanel.tsx` lost a
+branch rather than gaining one: the one-way `previewTime` latch and its `useState` are gone, and
+`playheadTime` is derived from `currentTime` alone. This paragraph was rewritten once: the branch
+was first measured against the tree before ESCSUITE-123 / 131 landed, and the figures above are
+against the commit it actually lands on. **No floor crossed**; artist's floors stay
+99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1168,7 +1189,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.70 | 100.00 |
-| `@escapesuite/artist` | 99.54 | 98.89 | 94.66 | 99.40 |
+| `@escapesuite/artist` | 99.54 | 98.90 | 94.67 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

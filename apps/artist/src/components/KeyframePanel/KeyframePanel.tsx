@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState } from 'react';
+import { useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorStore } from '../../store/projectStore';
 import { clipOnLockedTrack } from '../../store/trackLock';
@@ -47,9 +47,6 @@ export function KeyframePanel() {
 
   const { isOpen, selectedProperty } = keyframePanelState;
 
-  // Local preview time state (independent of main timeline when scrubbing)
-  const [previewTime, setPreviewTime] = useState<number | null>(null);
-
   // Get selected clip
   const selectedClip = useMemo(() => {
     if (!selectedClipId) return null;
@@ -83,19 +80,24 @@ export function KeyframePanel() {
     ));
   }, [selectedClip, currentTime]);
 
-  // Playhead time relative to clip (use preview time if set, otherwise main timeline)
+  // Playhead time relative to clip (ESCSUITE-126: derived from the timeline's
+  // own `currentTime` alone, same as `clipRelativeTime` above but reporting 0
+  // rather than clamping to an edge when the playhead sits outside the clip).
+  // A local "preview time" used to override this once a scrub set it, and
+  // nothing ever reset that override back to null — so the panel latched at
+  // the last scrubbed offset and stopped following the timeline. There is
+  // nothing left for an override to survive: `handlePreviewTimeChange` below
+  // writes `currentTime` itself, synchronously, so the store IS the preview.
   const playheadTime = useMemo(() => {
     if (!selectedClip) return 0;
-    if (previewTime !== null) return previewTime;
     const relative = currentTime - selectedClip.timelinePosition;
     if (relative < 0 || relative > selectedClip.duration) return 0;
     return relative;
-  }, [selectedClip, currentTime, previewTime]);
+  }, [selectedClip, currentTime]);
 
-  // Handle preview time change (from ClipPreview scrubbing)
+  // Handle preview time change (from ClipPreview scrubbing) — moves the main
+  // timeline, which `playheadTime` above then reads back.
   const handlePreviewTimeChange = useCallback((time: number) => {
-    setPreviewTime(time);
-    // Also update main timeline to sync
     if (selectedClip) {
       setCurrentTime(selectedClip.timelinePosition + time);
     }

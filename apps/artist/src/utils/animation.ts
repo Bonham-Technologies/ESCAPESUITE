@@ -286,7 +286,16 @@ function generateOutPresetKeyframes(
     return {};
   }
 
-  const startTime = clipDuration - duration;
+  // Belt and braces (ESCSUITE-125): the write paths that set a preset (and
+  // `trimAnimation`, on a trim that shortens the clip) clamp `duration` to
+  // `maxPresetDuration(clipDuration)` before it ever gets here, but a
+  // hand-edited project or an older file can still carry a `duration` longer
+  // than the clip. Clamping to `clipDuration` itself — not the tighter
+  // `maxPresetDuration` bound the UI enforces — is enough to keep `startTime`
+  // from going negative, which is the only thing this function's own math
+  // requires.
+  const clampedDuration = Math.min(duration, clipDuration);
+  const startTime = clipDuration - clampedDuration;
   const keyframes: PresetKeyframes = {};
 
   switch (preset) {
@@ -356,12 +365,12 @@ function generateOutPresetKeyframes(
       // Scale up slightly then shrink
       keyframes.scaleX = [
         { time: startTime, value: baseTransform.scaleX, easing: 'ease-in' },
-        { time: startTime + duration * 0.3, value: baseTransform.scaleX * 1.1, easing: 'ease-out' },
+        { time: startTime + clampedDuration * 0.3, value: baseTransform.scaleX * 1.1, easing: 'ease-out' },
         { time: clipDuration, value: 0, easing: 'linear' },
       ];
       keyframes.scaleY = [
         { time: startTime, value: baseTransform.scaleY, easing: 'ease-in' },
-        { time: startTime + duration * 0.3, value: baseTransform.scaleY * 1.1, easing: 'ease-out' },
+        { time: startTime + clampedDuration * 0.3, value: baseTransform.scaleY * 1.1, easing: 'ease-out' },
         { time: clipDuration, value: 0, easing: 'linear' },
       ];
       break;
