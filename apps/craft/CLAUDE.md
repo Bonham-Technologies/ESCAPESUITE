@@ -390,8 +390,18 @@ the Help button.
   `src` attribute and no `srcObject` the algorithm ends at `NETWORK_EMPTY` with **no `error`
   and no `MediaError`**. (It is not silent: `load()` queues `abort` and `emptied` on the way
   there. Nothing listens for either, and neither can re-enter a cleanup; the property that
-  matters is that no `error` is manufactured.) `generateStreamThumbnail` is exempt: it only ever sets `srcObject = null`, which
-  with no `src` attribute takes that same silent branch
+  matters is that no `error` is manufactured.)
+
+  **Removed (ESCSUITE-138):** `generateStreamThumbnail(stream: MediaStream)`, a live-preview
+  thumbnail path that was present, tested and called by nothing — the save path's thumbnail is
+  `utils/previewThumbnail.ts`'s `drawThumbnail`, reached through
+  `useRecordingController.captureThumbnail`. It also differed from its two siblings in ways
+  that would have mattered had it ever been wired: it settled only from a `srcObject`'s
+  `onloadeddata`/`onerror`, so a stream that never produced a frame left the promise pending
+  forever (no timeout, unlike `extractVideoMetadata`'s 5 s one), and its 100 ms `setTimeout`
+  called `ctx.drawImage` unguarded, where a throw would have stranded the promise rather than
+  rejected it. Deleted with its suite and the `appDoubles.ts` double's entry rather than fixed,
+  on the operator's decision, the same as ESCSUITE-85's `remuxToWebM`.
 - `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
   goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus
   `convertToMP4()`, `convertToM4A()` (the audio alone, AAC in an MP4 container; the two share
