@@ -6,6 +6,7 @@ import {
   checkAborted,
   getActiveTransition,
   getBaseDimensions,
+  getIncomingClipTime,
   getQualitySettings,
   getResolution,
   getSourceDimensions,
@@ -206,6 +207,32 @@ describe('getActiveTransition', () => {
     ]
     expect(getActiveTransition(clips, hiddenTracks, 4.5)).toBeNull()
     expect(getActiveTransition(clips, [], 4.5)).toBeNull()
+  })
+})
+
+describe('getIncomingClipTime', () => {
+  // ESCSUITE-133: a same-track incoming clip's timelinePosition sits at or
+  // after the outgoing clip's end, so an unclamped
+  // `currentTime - incomingClip.timelinePosition` is negative for the whole
+  // transition. Same shape as `getActiveTransition`'s own fixtures above.
+  const outgoingClip = timedClip('a', 't0', 0, 5, { type: 'fade', duration: 1 })
+  const incomingClip = timedClip('b', 't0', 5, 5)
+  const transition = { outgoingClip, incomingClip, progress: 0.5, type: 'fade' as TransitionType }
+
+  it('clamps to 0 rather than going negative before the incoming clip nominally starts', () => {
+    expect(getIncomingClipTime(transition, 4.5)).toBe(0)
+    expect(getIncomingClipTime(transition, 4)).toBe(0)
+    expect(getIncomingClipTime(transition, 4.999)).toBe(0)
+  })
+
+  it('passes a genuinely positive clip time through unchanged', () => {
+    // The cross-track case: the incoming clip already started before the
+    // transition window (`getActiveTransition`'s own fixture above).
+    const overlapping = {
+      ...transition,
+      incomingClip: timedClip('over', 't1', 1, 20),
+    }
+    expect(getIncomingClipTime(overlapping, 4.5)).toBe(3.5)
   })
 })
 
