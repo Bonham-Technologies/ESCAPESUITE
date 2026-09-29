@@ -549,6 +549,43 @@ describe('exportToMP4 rendering', () => {
     expect(ctx().argsFor('fillText')[0][0]).toBe('Overlay')
   })
 
+  // ESCSUITE-124: the preview interleaves media and overlays by track index
+  // (`components/Preview/drawFrame.ts`), so an overlay on a *lower* track than
+  // a media clip is invisible on screen — the export must draw it in the same
+  // place in the same order, not hoist every overlay above every media clip
+  // regardless of track index.
+  it('draws an overlay on a lower track before a media clip on a higher one', async () => {
+    const clips = [
+      makeClip({
+        id: 'shape',
+        sourceVideoId: '',
+        trackId: 'track1',
+        overlayType: 'shape',
+        shapeData: makeShapeData({ type: 'ellipse' }),
+        duration: CLIP_DURATION,
+        endTime: CLIP_DURATION,
+      }),
+      makeClip({
+        id: 'media',
+        trackId: 'track2',
+        duration: CLIP_DURATION,
+        endTime: CLIP_DURATION,
+      }),
+    ]
+    const tracks = [
+      makeTrack({ id: 'track1', index: 0 }),
+      makeTrack({ id: 'track2', index: 1 }),
+    ]
+
+    await run({ clips, tracks })
+
+    const methods = ctx().calls.map((c) => c.method)
+    // A frame is ['setTransform', 'fillRect', ...draws], so the second frame
+    // starts at the second clear — searched from index 2, past the first one.
+    const firstFrame = methods.slice(0, methods.indexOf('fillRect', 2))
+    expect(firstFrame.indexOf('ellipse')).toBeLessThan(firstFrame.indexOf('drawImage'))
+  })
+
   it('draws both sides of an active transition', async () => {
     await storeSource('video2')
     const clips = [
