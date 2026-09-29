@@ -130,6 +130,21 @@ describe('Compositor', () => {
       expect(drawsAfterStop).toBe(0)
     })
 
+    it('stops the output stream\'s own tracks on stop() — the canvas capture track is the compositor\'s to release (ESCSUITE-137)', () => {
+      // Nothing downstream ever stops the canvas capture track stop() hands
+      // out (grepped `useRecordingController.ts` and `useMediaStreams.ts`:
+      // only the raw screen/webcam/mic streams are stopped), so a live
+      // canvas capture track — and the canvas it keeps reachable — outlived
+      // every composited PiP take. stop() has to release what start() minted.
+      const compositor = new Compositor(1280, 720)
+      const stream = compositor.start(30)
+      const [track] = stream.getVideoTracks()
+
+      compositor.stop()
+
+      expect(track.stop).toHaveBeenCalledTimes(1)
+    })
+
     it('a second start() replaces the first render loop instead of orphaning it', () => {
       // ESCSUITE-58: start() scheduled a new chain into animationFrameId over the
       // old one, so stop() cancelled only the newer chain and the first kept
