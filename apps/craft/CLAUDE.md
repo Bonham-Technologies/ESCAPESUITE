@@ -1155,9 +1155,10 @@ message and navigate to its own editor itself.
   cheap (`converter.perf.test.ts` pins zero of each) and what lets it be offered on a take
   with no picture at all. It exists because a mic-only take is already an audio recording
   and what is stored for it is an audio-only WebM: it plays, and it is not an "audio file"
-  to most tools — and `convertToMP4` is no help there. It has no guard against a take with
-  no picture: it configures a 0x0 video encoder and fails with whatever the browser says,
-  which reaches the user as "Conversion failed: …" rather than as a designed refusal.
+  to most tools — and `convertToMP4` is no help there: since ESCSUITE-136 it refuses a take
+  with no picture outright, with `MP4_NO_VIDEO_REASON` ("This recording has no picture and
+  cannot be converted to MP4 — try M4A instead."), rather than configuring a 0x0 video
+  encoder and failing with whatever the browser says.
 
 `hooks/useMp4Download.ts` owns both conversions, and the rules are:
 
@@ -1247,6 +1248,35 @@ message and navigate to its own editor itself.
   than the old presence check and is not a complete answer; the real fix is a
   profile-fallback chain like ARTIST's (`apps/artist/src/core/exportMP4.ts` tries High, then
   Main, then Baseline), which CRAFT does not have yet.
+  A second, far more common instance of the same gap (ESCSUITE-136): H.264 also refuses an
+  **odd-sized** frame outright (`NotSupportedError: H264 only supports even sized frames.`),
+  and the probe cannot catch that for a specific recording either — 1280x720 is even.
+  `compositor.ts`'s own scaling arithmetic (`Math.round(height * scale)`) produces an odd
+  height on a display wider than 1280 whose scaled height does not land on a whole even
+  number, which is the *default* resolution on both current MacBook Pro sizes (e.g. 14":
+  1512x982 → 1280x**831**; 16": 1728x1117 → 1280x**827**), so a composited PiP take on either
+  of those was failing 100% of the time before the fix. `convertToMP4` now derives
+  `encodeWidth = width - (width % 2)` and `encodeHeight = height - (height % 2)` once, and
+  uses that pair for the canvas, for `mp4VideoEncoderConfig()` and — on the composite path —
+  for `overlayGeometryFor()`'s frame width, so the camera lands in the frame actually being
+  written. Dropping at most one row and one column is invisible in the output.
+- **A stored duration that is not a usable number falls back to the recorder's own, or
+  refuses** (ESCSUITE-135). Every MediaRecorder take reports `video.duration` as `Infinity`
+  at `loadedmetadata` until its container is repaired (see "WebM Handling" below) — and
+  `Math.ceil(Infinity * 30)` is `Infinity`, which used to make `captureFramesViaPlayback`'s
+  `ended` handler loop forever, synchronously, encoding the same last frame past any bound:
+  the tab stopped responding, Cancel became unreachable because the one conversion slot was
+  held by a hung event handler, and the encoder queue grew until the tab was OOM-killed.
+  `useMp4Download` now passes `record.metadata.duration` — already in hand from the
+  `getVideo()` read it does before converting — into `convertToMP4` as `knownDuration`;
+  `convertToMP4` uses `video.duration` whenever that is itself finite and positive (a stored
+  duration can be *shorter* than the real playback length) and falls back to `knownDuration`
+  otherwise, refusing with `MP4_NO_DURATION_REASON` before building a single encoder if
+  neither is usable. The `requestVideoFrameCallback` capture path also now finishes as soon
+  as it has captured its derived frame count, rather than waiting on the video's own `ended`
+  event — which the rAF fallback already did, and which matters here because a `knownDuration`
+  shorter than the container's real length would otherwise leave the capture waiting on an
+  event that might arrive much later, or not at all while anything is watching.
 - **Every encoder a conversion builds is released in one place, and a codec that dies says
   so** (ESCSUITE-74). `conversionEncoders()` in `core/converter.ts` is both halves of that,
   because they are one problem seen twice. A `VideoEncoder`/`AudioEncoder` is a hardware
