@@ -1200,6 +1200,22 @@ red-first case that asserts the track's `stop()` after `stop()`; it adds no deci
 read a hundredth lower with strictly nothing less covered, which is why the figure moves and the
 floor does not. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-29 for ESCSUITE-128 (a rotated left- or
+right-aligned text overlay's selection box, hit test and marquee box follow the rotation):
+99.54 / 98.90 / 94.67 / 99.40, byte-identical to the 99.54 / 98.90 / 94.67 / 99.40 the commit this
+branch was rebased onto measures. Measured in one sitting, the base gives 4,211 / 4,448 branches
+and this branch the same 4,211 / 4,448: the change adds no decision at all. Lines
+6,778 / 6,809 → 6,783 / 6,814 and statements 7,645 / 7,730 → 7,650 / 7,735, five new units each,
+all covered; functions 1,680 / 1,690 on both; the same 31 / 85 / 237 / 10 uncovered. The five are
+`components/Preview/previewGeometry.ts`'s `getOverlayBounds` turning the alignment offset it
+already computed — half the text width, one way for left and the other for right — into a
+displacement along the rotated baseline (`offset × cos θ`, `offset × sin θ`) rather than along
+the screen's x axis, which is the one function `selectionOverlay.ts`, `hitTest.ts` and
+`dragGeometry.ts` all read from; the red case rotates a right-aligned text through 90° and expects
+its centre displaced in y. This paragraph was rewritten once: the branch was first measured before
+ESCSUITE-123 / 131 and 125 / 126 landed, and the figures above are against the commit it actually
+lands on. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

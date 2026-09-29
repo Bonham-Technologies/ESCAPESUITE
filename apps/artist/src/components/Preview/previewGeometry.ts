@@ -128,17 +128,27 @@ export function getOverlayBounds(
     const textWidth = maxLineWidth * scale;
     const textHeight = totalHeight * scale;
 
-    // Adjust center based on text alignment
-    let centerX = x * project.width;
+    // Left/right alignment anchors the text at its edge rather than its
+    // centre, so the unrotated box sits textWidth/2 off to one side of the
+    // point the renderer rotates about (canvasRenderer.ts translates to the
+    // anchor, rotates, then translates back). The offset has to be rotated
+    // along with everything else — anchor + R(rotation)·(offset, 0) — or the
+    // reported box drifts away from the drawn glyphs as rotation grows.
+    const anchorX = x * project.width;
+    const anchorY = y * project.height;
+    let offset = 0;
     if (textData.textAlign === 'left') {
-      centerX += textWidth / 2;
+      offset = textWidth / 2;
     } else if (textData.textAlign === 'right') {
-      centerX -= textWidth / 2;
+      offset = -textWidth / 2;
     }
+    const rad = (rotation * Math.PI) / 180;
+    const centerX = anchorX + offset * Math.cos(rad);
+    const centerY = anchorY + offset * Math.sin(rad);
 
     return {
       centerX,
-      centerY: y * project.height,
+      centerY,
       width: textWidth,
       height: textHeight,
       rotation,
