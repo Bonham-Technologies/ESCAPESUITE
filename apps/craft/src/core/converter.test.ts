@@ -608,6 +608,54 @@ describe('converter', () => {
       expect(lastVideoEncoder().encodes).toHaveLength(3)
       expect(video.pause).toHaveBeenCalled()
     })
+
+    // Coverage: the rVFC callback's re-request guard
+    // (`!video.ended && !video.paused && frameIndex < totalFrames`) and its
+    // `else if (frameIndex >= totalFrames)` companion can *both* be false in
+    // the same invocation — the element is paused (or ended, with the
+    // `ended` listener not yet run) while frames are still owed. Neither
+    // branch above ever exercises that: presenting frames plays the element
+    // straight through, and every other test either keeps it playing until
+    // its derived total is reached or lets `fireEnded()` do the finishing.
+    // This one parks it mid-capture and proves the callback does nothing at
+    // all in that turn — the design is that a paused element left one frame
+    // short is `ended`'s job to pad, not this callback's.
+    it('does nothing when the rVFC callback fires paused with frames still owed, leaving the ended handler to pad', async () => {
+      const { promise, video } = start(p => convertToMP4(SOURCE, p), { duration: 0.1 }) // totalFrames = 3
+      await settle()
+
+      // Frame 0, captured normally: the element is still playing, so the
+      // callback re-requests itself exactly as always.
+      video.presentFrame(0)
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+      expect(video.hasPendingFrameCallback()).toBe(true)
+
+      // The browser pauses the element, then fires the frame callback that
+      // was already pending — nothing new is due at the same mediaTime, so
+      // the capture loop above draws nothing either. Both guards are now
+      // false: `!video.paused` fails the re-request check, and
+      // `frameIndex (1) >= totalFrames (3)` fails the finish check.
+      video.setMetadata({ paused: true })
+      video.presentFrame(0)
+
+      // Neither branch ran: no third frame, no new callback requested, and
+      // nothing downstream of the capture (flush, the mux) has started —
+      // the conversion is simply waiting, exactly as the design intends.
+      expect(lastVideoEncoder().encodes).toHaveLength(1)
+      expect(video.hasPendingFrameCallback()).toBe(false)
+      expect(lastVideoEncoder().flushCalls).toBe(0)
+
+      // Only the element's own `ended` event can finish the capture now —
+      // its tail-padding loop owes exactly the one frame the callback above
+      // left behind.
+      video.fireEnded()
+      await settle()
+
+      const blob = await promise
+      expect(blob.type).toBe('video/mp4')
+      expect(lastVideoEncoder().encodes).toHaveLength(3)
+      expect(lastVideoEncoder().flushCalls).toBe(1)
+    })
   })
 
   // ESCSUITE-136: H.264 refuses an odd-sized frame outright, and the codec
