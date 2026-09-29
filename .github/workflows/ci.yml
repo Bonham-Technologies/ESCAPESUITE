@@ -29,13 +29,15 @@ jobs:
   lint-and-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # For pull_request_target, only run for changeset bot (not Dependabot, which uses pull_request)
+    # For pull_request_target, only run for the changesets bot's own PR from THIS repo
+    # (not Dependabot, which uses pull_request; and never a fork, whatever its branch is
+    # named — the head ref is the PR author's to choose, ESCSUITE-122)
     # This prevents duplicate workflow runs for Dependabot PRs. Every other job depends
     # (directly or transitively) on this job or `test`, so the filter propagates.
     if: |
       github.event_name != 'pull_request_target' ||
-      github.actor == 'github-actions[bot]' ||
-      startsWith(github.head_ref, 'changeset-release/')
+      (github.actor == 'github-actions[bot]' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -99,8 +101,8 @@ jobs:
     timeout-minutes: 30
     if: |
       github.event_name != 'pull_request_target' ||
-      github.actor == 'github-actions[bot]' ||
-      startsWith(github.head_ref, 'changeset-release/')
+      (github.actor == 'github-actions[bot]' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -772,8 +774,8 @@ jobs:
     if: |
       always() && (
         github.event_name != 'pull_request_target' ||
-        github.actor == 'github-actions[bot]' ||
-        startsWith(github.head_ref, 'changeset-release/')
+        (github.actor == 'github-actions[bot]' &&
+         github.event.pull_request.head.repo.full_name == github.repository)
       )
     # Don't cancel ci-status when new commits are pushed - let it complete
     # This prevents "canceled" status from blocking PRs when commits are pushed quickly
