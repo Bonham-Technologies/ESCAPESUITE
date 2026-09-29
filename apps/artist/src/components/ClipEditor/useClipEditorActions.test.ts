@@ -663,7 +663,7 @@ describe('useClipEditorActions animation', () => {
     const clip = mediaClip()
     act(() => {
       store().updateClipAnimation(clip.id, {
-        in: { type: 'none', duration: 1.5, easing: 'linear' },
+        in: { type: 'none', duration: 0.5, easing: 'linear' },
       })
     })
     spies.updateClipAnimation.mockClear()
@@ -672,7 +672,91 @@ describe('useClipEditorActions animation', () => {
     act(() => result.current.handleAnimationInTypeChange('slide-left'))
 
     expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
-      in: { type: 'slide-left', duration: 1.5, easing: 'linear' },
+      in: { type: 'slide-left', duration: 0.5, easing: 'linear' },
+    })
+  })
+
+  // ESCSUITE-125: a preset type or easing change used to write back whatever
+  // duration the clip already carried (or the handler's own 0.5s fallback) with
+  // no bound, so choosing a preset on a clip shorter than 1s stored a duration
+  // the clip could not hold — `generateOutPresetKeyframes` then computed a
+  // negative `startTime` and the clip opened mid-animation. Clamped the same way
+  // `trimAnimation` clamps a kept preset: `maxPresetDuration(selectedClip.duration)`,
+  // exempting a `type: 'none'` preset (its duration does nothing, so clamping it
+  // would throw away a number the UI never used).
+  describe('clamping a preset\'s duration to what the clip can hold (ESCSUITE-125)', () => {
+    it('clamps a fresh out preset chosen on a clip shorter than 1s', () => {
+      const clip = mediaClip(0, 0.4)
+      const { result } = mount()
+
+      act(() => result.current.handleAnimationOutTypeChange('fade'))
+
+      expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+        out: { type: 'fade', duration: 0.2, easing: 'ease-in' },
+      })
+      expect(clipNow(clip.id).animation?.out).toMatchObject({ type: 'fade', duration: 0.2 })
+    })
+
+    it('clamps a fresh in preset chosen on a clip shorter than 1s', () => {
+      const clip = mediaClip(0, 0.4)
+      const { result } = mount()
+
+      act(() => result.current.handleAnimationInTypeChange('fade'))
+
+      expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+        in: { type: 'fade', duration: 0.2, easing: 'ease-out' },
+      })
+    })
+
+    it('re-clamps an already-oversized out preset\'s duration on an easing change', () => {
+      const clip = mediaClip(0, 0.4)
+      act(() => {
+        store().updateClipAnimation(clip.id, {
+          out: { type: 'fade', duration: 0.5, easing: 'linear' },
+        })
+      })
+      spies.updateClipAnimation.mockClear()
+      const { result } = mount()
+
+      act(() => result.current.handleAnimationOutEasingChange('ease-in-out'))
+
+      expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+        out: { type: 'fade', duration: 0.2, easing: 'ease-in-out' },
+      })
+    })
+
+    it('re-clamps an already-oversized in preset\'s duration on an easing change', () => {
+      const clip = mediaClip(0, 0.4)
+      act(() => {
+        store().updateClipAnimation(clip.id, {
+          in: { type: 'fade', duration: 0.5, easing: 'linear' },
+        })
+      })
+      spies.updateClipAnimation.mockClear()
+      const { result } = mount()
+
+      act(() => result.current.handleAnimationInEasingChange('ease-in-out'))
+
+      expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+        in: { type: 'fade', duration: 0.2, easing: 'ease-in-out' },
+      })
+    })
+
+    it('leaves a switched-off preset\'s duration unclamped, the exemption trimAnimation also makes', () => {
+      const clip = mediaClip(0, 0.4)
+      act(() => {
+        store().updateClipAnimation(clip.id, {
+          out: { type: 'fade', duration: 1.5, easing: 'linear' },
+        })
+      })
+      spies.updateClipAnimation.mockClear()
+      const { result } = mount()
+
+      act(() => result.current.handleAnimationOutTypeChange('none'))
+
+      expect(spies.updateClipAnimation).toHaveBeenCalledWith(clip.id, {
+        out: { type: 'none', duration: 1.5, easing: 'linear' },
+      })
     })
   })
 

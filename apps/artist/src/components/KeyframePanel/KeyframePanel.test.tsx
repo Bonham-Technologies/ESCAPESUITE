@@ -486,6 +486,50 @@ describe('KeyframePanel', () => {
       expect(store().currentTime).toBeCloseTo(2 + expected, 6)
       expect(screen.getByText(`${expected.toFixed(2)}s / ${CLIP_DURATION.toFixed(2)}s`)).toBeInTheDocument()
     })
+
+    // ESCSUITE-126: `previewTime` was the only thing `playheadTime` read once a
+    // scrub had set it, and nothing ever reset it back to `null` — so the panel
+    // latched at the last scrubbed offset and stopped following the timeline,
+    // even though the timeline kept moving underneath it (playback, a seek from
+    // the main player, undo/redo).
+    it('follows the timeline again after a scrub, instead of latching', () => {
+      addClip('clip1', 2, CLIP_DURATION)
+      store().setSelectedClipId('clip1')
+      store().setKeyframePanelOpen(true)
+      render(<KeyframePanel />)
+
+      const scrubber = document.body.querySelector<HTMLElement>('[class*="scrubber"]')!
+      scrubber.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 430, height: 10, right: 430, bottom: 10, x: 0, y: 0 }) as DOMRect
+      fireEvent.mouseDown(scrubber, { clientX: 100 }) // previews 1.00s
+
+      // The timeline moves on its own after the scrub — a seek, playback, undo.
+      act(() => store().setCurrentTime(2.5))
+
+      expect(screen.getByText(`0.50s / ${CLIP_DURATION.toFixed(2)}s`)).toBeInTheDocument()
+    })
+
+    it('adds a keyframe at the timeline\'s offset, not the stale scrub, once the timeline has moved', () => {
+      addClip('clip1', 2, CLIP_DURATION)
+      store().setSelectedClipId('clip1')
+      store().setKeyframePanelOpen(true)
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+      const svg = measureGraph()
+
+      const scrubber = document.body.querySelector<HTMLElement>('[class*="scrubber"]')!
+      scrubber.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 430, height: 10, right: 430, bottom: 10, x: 0, y: 0 }) as DOMRect
+      fireEvent.mouseDown(scrubber, { clientX: 100 }) // previews 1.00s
+
+      act(() => store().setCurrentTime(4)) // timeline moves to clip-relative 2.00s
+
+      svg.focus()
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      const added = keyframesOf('opacity')!.find((kf) => Math.abs(kf.time - 2) < 0.001)
+      expect(added).toBeDefined()
+    })
   })
 
   // ESCSUITE-88. The store has always refused an edit to a clip on a locked
