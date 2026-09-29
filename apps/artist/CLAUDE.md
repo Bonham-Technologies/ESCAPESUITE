@@ -1944,6 +1944,14 @@ The export pipeline includes several optimizations to improve performance:
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
 - **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
 - **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
+- **Decoded frame ownership (`frameManager.ts`, ESCSUITE-123)**: every `VideoFrame` `getFrameAtTime`
+  fetches is tracked in `currentFrames` — a `Set`, not a map keyed by `${sourceId}:${timestamp}` —
+  and `cleanupIterationFrames` closes every one of them once the export frame is drawn. The key used
+  to collide: a whole-clip transition's outgoing clip is fetched once as an ordinary active clip and
+  again as the transition's own outgoing side, at the bit-identical source time, and each fetch is a
+  distinct decoded frame (the decode worker hands back a fresh `frame.clone()` per request). A
+  string-keyed map silently dropped the first fetch, leaking a full decoded frame per frame of every
+  transition; the `Set` keeps and closes both.
 
 ### MP4 Export Reliability (`src/core/exporter.ts`)
 MP4 export includes robust error handling and codec compatibility:
@@ -1953,6 +1961,14 @@ MP4 export includes robust error handling and codec compatibility:
 - **Backpressure timeout**: 30-second timeout on encoder queue wait to detect stuck encoders
 - **Quality-based audio bitrate**: Audio bitrate scales with quality setting (128k/192k/256k) instead of hardcoded value
 - **Error checkpoints**: Validates encoder state at loop start, during backpressure, and before finalization
+
+`exportWebM.ts`'s own frame loop does not have this error-tracking asymmetry fixed — a VP9 encoder
+error is still only logged, where MP4 tracks `videoEncoderError` and checks it every frame — but its
+`encode()` call (ESCSUITE-131) is wrapped in `try { videoEncoder.encode(frame, { keyFrame }) } finally
+{ frame.close() }`, mirroring the frame-closing shape of MP4's own encode block (which closes the
+canvas-drawn frame on both its success and its fatal-retry paths): an encoder that throws mid-export
+no longer leaves the frame it was encoding for the GC to finalise on top of the error that is already
+failing the export.
 
 ### Black Flash Prevention (`src/core/exporter.ts`)
 To prevent black frames during export:
