@@ -2,7 +2,7 @@
 // modifiers the transition type dictates, so the assertions here are on the
 // recorded geometry: which source was drawn, with what alpha, clip region or
 // offset, at a given progress.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { drawTransition, drawTransitionWithFrames } from './canvasRenderer'
 import {
   createRecordingContext,
@@ -531,7 +531,7 @@ describe('the incoming clip animation time during a same-track transition (ESCSU
   const CURRENT_TIME = 4.5 // half a second before the incoming clip's nominal start
 
   /** The getAnimatedValues() call made for the incoming clip, identified by its `animation` argument. */
-  const incomingCallClipTime = (spy: ReturnType<typeof vi.spyOn>) =>
+  const incomingCallClipTime = (spy: MockInstance<typeof animation.getAnimatedValues>) =>
     spy.mock.calls.find((args) => args[2] === adjacentIn.animation)?.[0]
 
   it('drawTransition asks for the incoming clip animated state at clip time 0', () => {

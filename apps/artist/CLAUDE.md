@@ -2001,6 +2001,24 @@ and overlays within it did. The ruling that decided the direction: the preview i
 arranges the timeline by, so it is the two exporters (and the headless bundle, which shares them
 for free) that had to be made to match the preview, not the reverse.
 
+**The incoming side's animation is clamped to the same clip time as its frame (ESCSUITE-133).**
+`drawTransition` and `drawTransitionWithFrames` (`core/canvasRenderer.ts`) each draw two sides
+per frame, and the incoming side's clip time used to be `currentTime - incomingClip.timelinePosition`
+with no floor — negative for the whole transition whenever the incoming clip's `timelinePosition`
+is at or after the outgoing clip's end, which is the ordinary case for two clips placed back to
+back on one track (the same-track case `getActiveTransition` looks for first). The frame drawn
+underneath was already clamped in that case (`exportMP4.ts`'s own frame fetch falls back to
+`incomingClip.startTime`, the clip's first frame, whenever its unclamped source time would be
+negative); the animated opacity/transform/blur was not, so the two halves of the same draw
+disagreed about which instant of the clip they were showing. `getIncomingClipTime`
+(`core/exportTypes.ts`) is the shared clamp — `Math.max(0, currentTime - incomingClip.timelinePosition)`
+— both functions call now, so the preview and both exporters (which draw a transition's incoming
+side through these same two functions) can't drift apart on it. Its own doc comment is explicit
+about what this does and does not change: `interpolateKeyframes` already floors any time at or
+before a property's first keyframe to that keyframe's own value, so a `fade` in-preset (whose
+first keyframe sits at time 0, value 0) reads as opacity 0 whether the clip time handed to it is
+0 or -0.5 — clamping fixes the inconsistency, not that preset's own opacity during the overlap.
+
 `exportMP4.perf.test.ts` pins the cost: **exactly one `setTransform` per frame** (a version
 that set it per clip would slip under a per-frame call ceiling and would have to be wrong about
 what it multiplied), and the per-frame call ceiling itself re-measured 24 → 25 for that one
