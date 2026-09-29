@@ -1116,6 +1116,27 @@ with none by every render RTL's auto-cleanup unmounts without an upload — and 
 Set's `??=`, reached on the first upload and again on the second. **No floor crossed**; artist's
 floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-28 for ESCSUITE-123 and ESCSUITE-131 (an MP4 export
+no longer leaks one decoded `VideoFrame` per frame of every transition, and a WebM export closes
+the frame it was encoding when `encode()` throws): **99.54** / **98.89** / **94.66** / 99.40
+against the 99.52 / 98.88 / 94.64 / 99.40 the commit this branch was rebased onto measures — lines,
+statements and branches each up a hundredth or two, functions unmoved. Measured in one sitting, the
+base gives 4,204 / 4,442 branches and this branch 4,205 / 4,442: no new branch at all, and one
+*fewer* uncovered (238 → 237); lines 6,772 / 6,804 → 6,774 / 6,805 and statements
+7,640 / 7,726 → 7,642 / 7,727 (one new unit each, covered, and one pre-existing uncovered unit
+each newly reached: 32 → 31 lines, 86 → 85 statements); functions 1,680 / 1,690 on both. The
+newly reached arm, statement and line are all in `core/exportMP4.ts`'s WebCodecs decode path,
+which no test had ever entered — `VideoDecodeManager.isSupported()` is false in jsdom, so the two
+export `*.perf.test.ts` files' "one `VideoFrame` created and closed per encoded frame" law counts
+only the canvas-drawn encode frame and was vacuous for decode frames — until
+`core/exportMP4.decodeFrameLeak.test.ts` mocked the decoder in and drove a whole-clip transition
+through it. The fix itself adds no decision: `core/frameManager.ts`'s per-iteration frame set is a
+`Set<VideoFrame>` where it was a `Map` keyed by source and timestamp (a transition fetches the
+outgoing clip twice at one timestamp, and the second fetch evicted the first unclosed), and
+`core/exportWebM.ts`'s `encode()` sits in a `try`/`finally` that closes the frame either way. The
+reviewer reverted the manager to the `Map` and watched the three new cases go red with the
+report's exact text. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1123,7 +1144,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.67 | 100.00 |
-| `@escapesuite/artist` | 99.52 | 98.88 | 94.64 | 99.40 |
+| `@escapesuite/artist` | 99.54 | 98.89 | 94.66 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
