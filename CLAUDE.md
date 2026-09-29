@@ -1186,13 +1186,27 @@ was first measured against the tree before ESCSUITE-123 / 131 landed, and the fi
 against the commit it actually lands on. **No floor crossed**; artist's floors stay
 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-28 for ESCSUITE-137 and ESCSUITE-138 (the compositor
+releases the canvas capture track it minted when it stops, and the unwired `generateStreamThumbnail`
+is deleted): 100.00 / **99.51** / 97.70 / 100.00 against the 100.00 / 99.52 / 97.70 / 100.00 the
+commit this branch was rebased onto measures — statements down a hundredth, the other three
+unmoved, and every denominator smaller: lines 2,343 → 2,321, statements 2,494 / 2,506 →
+2,473 / 2,485, branches 1,322 / 1,353 → 1,318 / 1,349 and functions 451 → 446. The deleted function
+and its helpers were fully covered, so removing them took covered units out of the numerator as
+fast as the denominator — the same arithmetic ESCSUITE-99 and 108 went through — and the
+uncovered counts did not move: the same 12 statements and 31 branches. The one line the branch
+adds, `Compositor.stop()` stopping every track of the stream it handed out, is covered by the
+red-first case that asserts the track's `stop()` after `stop()`; it adds no decision. Statements
+read a hundredth lower with strictly nothing less covered, which is why the figure moves and the
+floor does not. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.52 | 97.70 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.51 | 97.70 | 100.00 |
 | `@escapesuite/artist` | 99.54 | 98.90 | 94.67 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
