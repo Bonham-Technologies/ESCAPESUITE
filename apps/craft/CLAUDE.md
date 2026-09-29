@@ -348,7 +348,12 @@ the Help button.
   the take's target frame rate by the deadline gate described under "The PiP frame gate".
   `start()` returns the recorded `captureStream`; `startPreviewOnly()` is the same draw loop
   with no capture, for a separate-tracks take where the canvas is only what the user watches.
-  The overlay it draws is `core/overlayGeometry.ts`'s `drawOverlay()`, not its own method
+  The overlay it draws is `core/overlayGeometry.ts`'s `drawOverlay()`, not its own method.
+  `stop()` (and so `dispose()`) also stops that `captureStream()`'s own tracks (ESCSUITE-137):
+  no caller ever did — `useRecordingController` folds the output stream's video track into
+  `recordingScreen` and `useMediaStreams.stopAllStreams()` only stopped the raw screen/webcam/
+  mic streams before disposing the compositor — so a composited PiP take's canvas capture
+  track, and the (up to 1280-wide) canvas it kept reachable, used to outlive the take entirely
 - `overlayGeometry.ts`: `drawOverlay()` — where the webcam sits in a frame and how it is
   drawn there (the 16:9 derivation, the four corners, the circular centre-crop, both clip
   paths, the border) — plus `overlayGeometryFor()` / `overlayPaddingFor()` and **five** constants:
