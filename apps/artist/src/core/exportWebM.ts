@@ -285,14 +285,14 @@ export async function exportToWebM(
       // draw below is project-space, exactly as the preview's is.
       openOutputFrame(ctx, projectSize, outputSize);
 
-      // Separate media clips from overlay clips
+      // Media clips need their source video synced to time (below) before
+      // anything can be drawn; overlays don't. `activeClips` itself —
+      // `getClipsAtTime`'s result — is already sorted by track index, and
+      // stays the single source of composite order: see the draw loop below.
       const mediaClips: typeof activeClips = [];
-      const overlayClips: typeof activeClips = [];
 
       for (const clipData of activeClips) {
-        if (clipData.clip.overlayType) {
-          overlayClips.push(clipData);
-        } else {
+        if (!clipData.clip.overlayType) {
           mediaClips.push(clipData);
         }
       }
@@ -340,48 +340,39 @@ export async function exportToWebM(
       // Helper to calculate clip time
       const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
 
-      // Draw each media clip (bottom to top by track index)
-      for (const { clip } of mediaClips) {
+      // Composite media and overlay clips in one pass, in `activeClips`' own
+      // track order — the same single interleaved pass the preview draws
+      // (`components/Preview/drawFrame.ts`), so an overlay on a lower track
+      // than a media clip is exactly as hidden behind it here as it is on
+      // screen, and a blur shape only reaches the content actually below it.
+      for (const { clip } of activeClips) {
         // Skip clips that are part of an active transition
         if (activeTransition &&
             (clip.id === activeTransition.outgoingClip.id || clip.id === activeTransition.incomingClip.id)) {
           continue;
         }
 
-        const clipTime = getClipTime(clip);
+        if (!clip.overlayType) {
+          const clipTime = getClipTime(clip);
 
-        // Try video first, then image - require readyState >= 2 (frame data available)
-        const video = videoElements.get(clip.sourceVideoId);
-        if (video && video.readyState >= 2) {
-          drawClipToCanvas(
-            ctx, video, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
-          );
+          // Try video first, then image - require readyState >= 2 (frame data available)
+          const video = videoElements.get(clip.sourceVideoId);
+          if (video && video.readyState >= 2) {
+            drawClipToCanvas(
+              ctx, video, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
+            );
+            continue;
+          }
+
+          const image = imageElements.get(clip.sourceVideoId);
+          if (image) {
+            drawImageToCanvasWithModifiers(
+              ctx, image, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
+            );
+          }
           continue;
         }
 
-        const image = imageElements.get(clip.sourceVideoId);
-        if (image) {
-          drawImageToCanvasWithModifiers(
-            ctx, image, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
-          );
-        }
-      }
-
-      // Draw transition if active
-      if (activeTransition) {
-        drawTransition(
-          ctx, videoElements, imageElements, activeTransition, currentTime,
-          projectSize.width, projectSize.height, drawOptions
-        );
-      }
-
-      // Draw overlay clips in track order (lower index = rendered first = behind)
-      // This ensures blur overlays on higher tracks can blur content on lower tracks
-      const sortedOverlayClips = [...overlayClips].sort((a, b) => {
-        return (a.track?.index || 0) - (b.track?.index || 0);
-      });
-
-      for (const { clip } of sortedOverlayClips) {
         const overlayClipTime = getClipTime(clip);
 
         // Build base transform from overlay's own properties
@@ -425,6 +416,14 @@ export async function exportToWebM(
             ctx, clip.textData, projectSize.width, projectSize.height, animated, drawOptions.filterScale
           );
         }
+      }
+
+      // Draw transition if active
+      if (activeTransition) {
+        drawTransition(
+          ctx, videoElements, imageElements, activeTransition, currentTime,
+          projectSize.width, projectSize.height, drawOptions
+        );
       }
 
       // Create VideoFrame from canvas — timestamp relative to export start (not timeline)

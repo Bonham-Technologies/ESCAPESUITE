@@ -377,14 +377,14 @@ export async function exportToMP4(
       // draw below is project-space, exactly as the preview's is.
       openOutputFrame(ctx, projectSize, outputSize);
 
-      // Separate media clips from overlay clips
+      // Media clips need a decoded frame fetched (async, below) before anything
+      // can be drawn; overlays don't. `activeClips` itself — `getClipsAtTime`'s
+      // result — is already sorted by track index, and stays the single source
+      // of composite order: see the draw loop below.
       const mediaClips: typeof activeClips = [];
-      const overlayClips: typeof activeClips = [];
 
       for (const clipData of activeClips) {
-        if (clipData.clip.overlayType) {
-          overlayClips.push(clipData);
-        } else {
+        if (!clipData.clip.overlayType) {
           mediaClips.push(clipData);
         }
       }
@@ -453,36 +453,32 @@ export async function exportToMP4(
         }))
       );
 
-      // Composite each media clip (bottom to top by track index)
-      for (const { clip, clipTime, frame } of frames) {
+      // Composite media and overlay clips in one pass, in `activeClips`' own
+      // track order — the same single interleaved pass the preview draws
+      // (`components/Preview/drawFrame.ts`), so an overlay on a lower track
+      // than a media clip is exactly as hidden behind it here as it is on
+      // screen, and a blur shape only reaches the content actually below it.
+      const frameByClipId = new Map(
+        frames.map(({ clip, clipTime, frame }) => [clip.id, { clipTime, frame }])
+      );
+
+      for (const { clip } of activeClips) {
         // Skip clips that are part of an active transition
         if (activeTransition &&
             (clip.id === activeTransition.outgoingClip.id || clip.id === activeTransition.incomingClip.id)) {
           continue;
         }
 
-        if (frame) {
-          drawMediaWithFrame(
-            ctx, frame, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
-          );
+        if (!clip.overlayType) {
+          const media = frameByClipId.get(clip.id);
+          if (media?.frame) {
+            drawMediaWithFrame(
+              ctx, media.frame, clip, media.clipTime, projectSize.width, projectSize.height, undefined, drawOptions
+            );
+          }
+          continue;
         }
-      }
 
-      // Draw transition if active
-      if (activeTransition) {
-        drawTransitionWithFrames(
-          ctx, outgoingFrame, incomingFrame, activeTransition, currentTime,
-          projectSize.width, projectSize.height, drawOptions
-        );
-      }
-
-      // Draw overlay clips in track order (lower index = rendered first = behind)
-      // This ensures blur overlays on higher tracks can blur content on lower tracks
-      const sortedOverlayClips = [...overlayClips].sort((a, b) => {
-        return (a.track?.index || 0) - (b.track?.index || 0);
-      });
-
-      for (const { clip } of sortedOverlayClips) {
         const overlayClipTime = getClipTime(clip);
 
         // Build base transform from overlay's own properties
@@ -526,6 +522,14 @@ export async function exportToMP4(
             ctx, clip.textData, projectSize.width, projectSize.height, animated, drawOptions.filterScale
           );
         }
+      }
+
+      // Draw transition if active
+      if (activeTransition) {
+        drawTransitionWithFrames(
+          ctx, outgoingFrame, incomingFrame, activeTransition, currentTime,
+          projectSize.width, projectSize.height, drawOptions
+        );
       }
 
       // Create VideoFrame from canvas — timestamp relative to export start (not timeline)
