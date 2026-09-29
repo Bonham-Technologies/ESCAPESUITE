@@ -435,10 +435,17 @@ export async function exportToWebM(
         duration: frameDurationUs,
       });
 
-      // Encode frame (keyframe every 2 seconds)
+      // Encode frame (keyframe every 2 seconds). ESCSUITE-131: close the frame
+      // whether encode() succeeds or throws — mirroring exportMP4.ts's own
+      // encode block, which closes the frame on both its success and its
+      // fatal-retry paths — so a wedged encoder never leaves a decoded/rendered
+      // frame for the GC to finalise on top of the error it just raised.
       const keyFrame = frameCount % frameRate === 0;
-      videoEncoder.encode(frame, { keyFrame });
-      frame.close();
+      try {
+        videoEncoder.encode(frame, { keyFrame });
+      } finally {
+        frame.close();
+      }
 
       frameCount++;
 

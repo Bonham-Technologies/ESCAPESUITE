@@ -147,7 +147,7 @@ describe('frameManager', () => {
 
       expect(frame).toBeInstanceOf(VideoFrameDouble)
       expect(decoder.frames).toEqual([{ sourceId: 'clip-a', timestamp: 1.5 }])
-      expect(manager.currentFrames.get('clip-a:1.5')).toBe(frame)
+      expect(manager.currentFrames.has(frame as VideoFrame)).toBe(true)
     })
 
     it('returns null for a source that was never loaded', async () => {

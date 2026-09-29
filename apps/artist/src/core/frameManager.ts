@@ -14,7 +14,13 @@ import {
 export interface FrameManager {
   factory: FrameSourceFactory;
   sources: Map<string, IFrameSource>;
-  currentFrames: Map<string, VideoFrame>;
+  // A Set, not a Map keyed by `${sourceId}:${timestamp}` (ESCSUITE-123): that
+  // key is not unique — a transition's outgoing clip is fetched once as an
+  // ordinary active clip and once as the transition's own outgoing side, at
+  // the bit-identical source time, and the decode worker hands back a
+  // distinct `frame.clone()` each time. A Map silently drops the first,
+  // leaking it; nothing reads currentFrames by key, so a Set costs nothing.
+  currentFrames: Set<VideoFrame>;
   useWebCodecs: boolean;
 }
 
@@ -28,7 +34,7 @@ export async function createFrameManager(useWebCodecs: boolean): Promise<FrameMa
   return {
     factory,
     sources: new Map(),
-    currentFrames: new Map(),
+    currentFrames: new Set(),
     useWebCodecs: factory.isWebCodecsEnabled(),
   };
 }
@@ -62,9 +68,13 @@ export async function getFrameAtTime(
   try {
     const frame = await source.getFrame(timestamp);
 
-    // Track VideoFrame objects for cleanup at end of frame iteration
+    // Track VideoFrame objects for cleanup at end of frame iteration. Add
+    // rather than key-and-overwrite: the same (sourceId, timestamp) can be
+    // fetched more than once in a single export frame (a whole-clip
+    // transition's outgoing clip is also an "active" clip), and each fetch is
+    // a distinct decoded frame that owns its own close().
     if (frame instanceof VideoFrame) {
-      manager.currentFrames.set(`${sourceId}:${timestamp}`, frame);
+      manager.currentFrames.add(frame);
     }
 
     return frame;
