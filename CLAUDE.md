@@ -271,9 +271,12 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
 - **Journey test**: one end-to-end journey covering record → edit → export across ESCAPECRAFT and ESCAPEARTIST
 - **Production-layout tests**: `apps/e2e/tests/production/` runs against the combined
   `dist/` from `pnpm build:deploy`, served on ONE port by `apps/e2e/scripts/serve-dist.mjs`
-  (which mirrors `vercel.json`'s rewrites). That is the only setup where CRAFT (`/craft/`)
-  and ARTIST (`/artist/`) share `video-editor-db`, so the cross-app IndexedDB tests live
-  there: `pnpm build:deploy && pnpm test:e2e:production`
+  (which mirrors `vercel.json`'s rewrites, and — since ESCSUITE-121 part 2 — reads and sends
+  `vercel.json`'s `headers` block too, so the suite runs under the real hosted
+  Content-Security-Policy and `X-Frame-Options` rather than none at all; `tests/production/csp-media.spec.ts`
+  is the regression test, proving a `blob:` video source survives that CSP in both apps). That
+  is the only setup where CRAFT (`/craft/`) and ARTIST (`/artist/`) share `video-editor-db`,
+  so the cross-app IndexedDB tests live there: `pnpm build:deploy && pnpm test:e2e:production`
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.
