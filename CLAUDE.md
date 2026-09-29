@@ -1137,13 +1137,37 @@ outgoing clip twice at one timestamp, and the second fetch evicted the first unc
 reviewer reverted the manager to the `Map` and watched the three new cases go red with the
 report's exact text. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-28 for ESCSUITE-135 and ESCSUITE-136 (an MP4
+conversion of a take whose duration reads `Infinity` refuses or bounds itself instead of encoding
+without end, and a recording with an odd pixel width or height is encoded one row or column
+smaller instead of being refused by the H.264 encoder): 100.00 / **99.52** / **97.70** / 100.00
+against the 100.00 / 99.51 / 97.67 / 100.00 the commit this branch was rebased onto measures —
+statements up a hundredth, branches up three, lines and functions unmoved at exactly 100.00.
+Measured in one sitting, the base gives 1,303 / 1,334 branches and this branch 1,322 / 1,353:
+nineteen new branches, nineteen covered, the same 31 uncovered as before (statements
+2,484 / 2,496 → 2,494 / 2,506, lines 2,333 → 2,343, functions 451 on both; the same 12 statements
+uncovered). The nineteen are all in `core/converter.ts`'s `convertToMP4`: the finite-or-fallback
+duration choice and the `knownDuration` default, the refusal of a duration that is still not
+finite and positive, the refusal of a picture with no even pixels in it, the two even-rounding
+subtractions' guards, the composite path's `overlayGeometryFor` taking the even width, and — in
+the `requestVideoFrameCallback` branch — the new `else if (frameIndex >= totalFrames)` that
+settles the conversion on the count it derived rather than on `ended`. The first measurement of
+the branch came back at 1,321 / 1,353, one arm short: that `else if`'s *false* side, a frame
+callback arriving while the element is paused or ended with frames still owed, which does nothing
+and leaves the `ended` handler to pad — reached by a case that pauses the double mid-take, fires
+the pending callback, asserts nothing was encoded, flushed or re-requested, then ends the element
+and watches it pad to the total. The Playwright pin
+`apps/e2e/tests/escapecraft/mp4-odd-frame-size.spec.ts` (`VideoEncoder.isConfigSupported` false at
+1280×831, true at 1280×830) is outside vitest's coverage and was run once in real Chromium: 1 / 1.
+**No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.51 | 97.67 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.52 | 97.70 | 100.00 |
 | `@escapesuite/artist` | 99.54 | 98.89 | 94.66 | 99.40 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
