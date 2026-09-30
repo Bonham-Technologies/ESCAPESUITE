@@ -2033,7 +2033,7 @@ project once ESCSUITE-94 made a preset's width follow the project's aspect — i
 608×1080, narrower than 1920, and the label gave no hint. The dimensions are recomputed on every
 render, so switching projects or resizing the canvas updates every option's label immediately.
 
-### Export Performance Optimizations (`src/core/exporter.ts`)
+### Export Performance Optimizations (`src/core/exportMP4.ts`, `src/core/exportWebM.ts`, `src/core/frameSource.ts`, `src/core/frameManager.ts`)
 The export pipeline includes several optimizations to improve performance:
 - **Background tab export (MP4)**: Uses WebCodecs `VideoDecoder` in a Web Worker for frame decoding, enabling full-speed exports even when the browser tab is in the background. Web Workers are not subject to browser throttling that affects `setTimeout` and `video.play()` on the main thread.
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
@@ -2050,7 +2050,7 @@ The export pipeline includes several optimizations to improve performance:
   string-keyed map silently dropped the first fetch, leaking a full decoded frame per frame of every
   transition; the `Set` keeps and closes both.
 
-### MP4 Export Reliability (`src/core/exporter.ts`)
+### MP4 Export Reliability (`src/core/exportMP4.ts`)
 MP4 export includes robust error handling and codec compatibility:
 - **H.264 codec validation**: Uses `VideoEncoder.isConfigSupported()` to verify codec support before encoding
 - **Codec fallback chain**: Tries five H.264 profiles across two hardware-acceleration passes —
@@ -2072,12 +2072,15 @@ canvas-drawn frame on both its success and its fatal-retry paths): an encoder th
 no longer leaves the frame it was encoding for the GC to finalise on top of the error that is already
 failing the export.
 
-### Black Flash Prevention (`src/core/exporter.ts`)
+### Black Flash Prevention (`src/core/exportWebM.ts`, `src/core/canvasRenderer.ts`)
 To prevent black frames during export:
 - **Seek timeout**: 500ms for reliable seeking
-- **Frame readiness**: `waitForFrameReady()` ensures video.readyState >= 2 with event-based waiting
+- **Frame readiness**: `exportWebM.ts`'s frame loop waits inline for `video.readyState >= 2`
+  (`HAVE_CURRENT_DATA`), event-based with a `requestAnimationFrame` poll and a 300ms fallback
 - **Post-seek verification**: Always waits for frame data after successful seek
-- **Transition safety**: `drawTransition()` includes readyState verification
+- **Transition safety**: `drawTransition()` (`canvasRenderer.ts`) warns when a transition's video
+  is below `readyState >= 1` — "forgiving" on purpose, per its own comment, to match the preview
+  player's threshold rather than the frame loop's stricter `>= 2`
 
 ### Responsive Inspector (`src/app/InspectorSidebar.tsx`, `src/app/MobileInspectorToggle.tsx`, `src/App.module.css`)
 The inspector panel (ClipEditor) adapts to different screen sizes. `App.tsx` owns the
