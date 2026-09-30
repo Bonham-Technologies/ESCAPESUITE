@@ -305,6 +305,49 @@ describe('buildSourceVideo for an audio companion', () => {
   })
 })
 
+// ESCSUITE-143. `capturedPicture` is the primary's own answer to "is this
+// take sound only?" — the same question a companion's role already answers
+// via `part?.isAudio`. Defaults to `true` so every call above, none of which
+// passes it, keeps meaning what it always has.
+describe('buildSourceVideo for a take with no picture', () => {
+  it('stores the primary as audio when no picture was captured, no role needed', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'rec-audio-only',
+      now: 0,
+      blob: new Blob(['mic'], { type: 'audio/webm' }),
+      duration: 6,
+      width: 0,
+      height: 0,
+      hasAudio: true,
+      hasWebcam: false,
+      capturedPicture: false,
+    })
+
+    expect(sourceVideo.mediaType).toBe('audio')
+    expect(sourceVideo.frameRate).toBe(0)
+    // No role at all — a plain take's primary never has one — and the take is
+    // still named the same way a plain take's primary always is.
+    expect('role' in sourceVideo).toBe(false)
+    expect(sourceVideo.name).toBe(`Recording ${new Date(0).toLocaleString()}`)
+  })
+
+  it('defaults to true, so every existing caller keeps meaning "this is a picture"', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'rec-1',
+      now: 0,
+      blob: new Blob(['screen'], { type: 'video/webm' }),
+      duration: 6,
+      width: 1280,
+      height: 720,
+      hasAudio: false,
+      hasWebcam: false,
+    })
+
+    expect(sourceVideo.mediaType).toBe('video')
+    expect(sourceVideo.frameRate).toBe(30)
+  })
+})
+
 describe('buildRecordingEntry carries hasWebcam rather than the config', () => {
   it('takes the answer it is given, so a part can differ from the take', () => {
     // The audio halves of a webcam take have no camera in them, and the list
