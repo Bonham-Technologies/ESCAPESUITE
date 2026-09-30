@@ -1779,7 +1779,8 @@ the outcome, not on the double.
 - WebM from MediaRecorder needs post-processing for proper scrubbing
 - WebCodecs API only works in Chrome/Edge. Where it is missing, `recorder-factory.ts` falls
   back to MediaRecorder, so recording still works — it is the WebCodecs recorder and the
-  (currently unwired) conversion paths in `converter.ts` that are Chrome/Edge only
+  conversion paths in `converter.ts` (the library's MP4 and M4A downloads) that are Chrome/Edge
+  only
 - Recording the webcam as a separate track needs `MediaStreamTrackProcessor` on top of
   WebCodecs (`canRecordSeparateTracks()`). It is the one feature with no fallback: the toggle
   stays on screen and `disabled`, carrying the reason, and the take is recorded as a composited
