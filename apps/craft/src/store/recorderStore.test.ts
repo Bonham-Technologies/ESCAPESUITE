@@ -428,6 +428,41 @@ describe('recorderStore', () => {
       expect(useRecorderStore.getState().recordings[0].hasAudio).toBe(true)
     })
 
+    // ESCSUITE-143. `mediaType` is what keeps the MP4 button disabled for a
+    // take with no picture across a reload, not only for the life of the tab
+    // that saved it.
+    it('reads mediaType back for a take with no picture', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        {
+          id: 'mic-only',
+          name: 'Mic only',
+          duration: 5,
+          size: 50,
+          width: 0,
+          height: 0,
+          frameRate: 0,
+          mediaType: 'audio',
+          hasAudio: true,
+        } as SourceVideo,
+      ])
+      vi.mocked(getThumbnail).mockResolvedValue(undefined)
+
+      await useRecorderStore.getState().loadRecordings()
+
+      expect(useRecorderStore.getState().recordings[0].mediaType).toBe('audio')
+    })
+
+    it('leaves mediaType off a recording saved before the field existed', async () => {
+      vi.mocked(getRecordingsMetadata).mockResolvedValue([
+        { id: 'legacy', name: 'Legacy', duration: 5, size: 50 } as SourceVideo,
+      ])
+      vi.mocked(getThumbnail).mockResolvedValue(undefined)
+
+      await useRecorderStore.getState().loadRecordings()
+
+      expect('mediaType' in useRecorderStore.getState().recordings[0]).toBe(false)
+    })
+
     it('defaults createdAt to 0 when recordedAt is missing', async () => {
       vi.mocked(getRecordingsMetadata).mockResolvedValue([
         { id: 'no-date', name: 'No Date', duration: 5, size: 50 } as SourceVideo,

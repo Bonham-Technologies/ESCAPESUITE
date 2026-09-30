@@ -122,6 +122,33 @@ describe('buildRecordingEntry', () => {
 
     expect(entry.hasAudio).toBe(false)
   })
+
+  // ESCSUITE-143. `mediaType` is what lets the library disable MP4 for a take
+  // with no picture — carried onto the list entry the same way `takeId` and
+  // `role` already are: present only when the stored record has it.
+  it('carries mediaType onto the list entry when the stored record has one', () => {
+    const entry = buildRecordingEntry({
+      sourceVideo: { ...sourceVideo, mediaType: 'audio' },
+      now: 123,
+      size: 456,
+      hasWebcam: false,
+      hasAudio: true,
+    })
+
+    expect(entry.mediaType).toBe('audio')
+  })
+
+  it('leaves mediaType off the entry when the stored record has none', () => {
+    const entry = buildRecordingEntry({
+      sourceVideo,
+      now: 123,
+      size: 456,
+      hasWebcam: true,
+      hasAudio: false,
+    })
+
+    expect('mediaType' in entry).toBe(false)
+  })
 })
 
 describe('buildSourceVideo for a separate-tracks take', () => {

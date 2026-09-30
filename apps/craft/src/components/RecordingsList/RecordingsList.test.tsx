@@ -10,6 +10,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RecordingsList } from './RecordingsList'
 import type { Mp4Conversion } from '../../hooks/useMp4Download'
+import { MP4_NO_VIDEO_REASON } from '../../core/converter'
 import type { Recording } from '../../store/types'
 import styles from '../../App.module.css'
 
@@ -227,6 +228,34 @@ describe('RecordingsList MP4 downloads', () => {
     expect(mp4).not.toHaveAttribute('aria-describedby')
     expect(container.querySelector(`.${styles.mp4BlockedReason}`)).toBeNull()
     expect(screen.queryByText(checking)).toBeNull()
+  })
+
+  // ESCSUITE-143. Mirrors "says a take has no audio rather than offering an
+  // empty file" below: MP4 gets the same disabled-with-a-reason treatment for
+  // a take with no picture, rather than letting the user start a conversion
+  // `convertToMP4` can only refuse at the last step.
+  it('says a take has no picture rather than offering an MP4 conversion', () => {
+    renderList([makeRecording({ id: 'r7', name: 'Take Seven', mediaType: 'audio' })])
+
+    const mp4 = screen.getByRole('button', { name: 'Download Take Seven as MP4' })
+    expect(mp4).toBeDisabled()
+    expect(mp4).toHaveAttribute('title', MP4_NO_VIDEO_REASON)
+    // The take is still audible, so both of the other downloads are untouched.
+    expect(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Take Seven' })).toBeEnabled()
+  })
+
+  it('lets the browser-level reason win over a take with no picture', () => {
+    // A browser that cannot convert at all is the truer reason than this
+    // take's own shape — the same precedence `blockedReason` reads in.
+    const reason = 'This browser cannot convert to MP4.'
+    renderList([makeRecording({ id: 'r7', name: 'Take Seven', mediaType: 'audio' })], {
+      mp4BlockedReason: reason,
+    })
+
+    const mp4 = screen.getByRole('button', { name: 'Download Take Seven as MP4' })
+    expect(mp4).toBeDisabled()
+    expect(mp4).toHaveAttribute('title', reason)
   })
 
   it('offers the conversion with a note where the MP4 will be silent', () => {
