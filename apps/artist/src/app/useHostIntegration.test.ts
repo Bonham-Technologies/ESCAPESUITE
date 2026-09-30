@@ -100,8 +100,11 @@ describe('inbound messages', () => {
     })
   })
 
-  it('LOAD_VIDEO reports a fetch it could not complete', async () => {
-    vi.mocked(loadVideoFromUrl).mockRejectedValue(new Error('404'))
+  it('LOAD_VIDEO reports a fetch it could not complete, in its own words (ESCSUITE-130)', async () => {
+    const refusal =
+      'Could not load the video from https://host.example: this deployment does not allow ' +
+      'loading from other origins (Content-Security-Policy), or the server refused the request.'
+    vi.mocked(loadVideoFromUrl).mockRejectedValue(new Error(refusal))
     await mountIntegration()
 
     await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/gone.mp4' } })
@@ -109,8 +112,22 @@ describe('inbound messages', () => {
     expect(deps.addSourceVideo).not.toHaveBeenCalled()
     expect(sendMessage).toHaveBeenCalledWith({
       type: 'ERROR',
+      payload: { message: refusal, code: 'LOAD_ERROR' },
+    })
+    expect(deps.showNotification).toHaveBeenCalledWith(refusal, 'error')
+  })
+
+  it('LOAD_VIDEO falls back to a generic message for a rejection with none (ESCSUITE-130)', async () => {
+    vi.mocked(loadVideoFromUrl).mockRejectedValue('boom')
+    await mountIntegration()
+
+    await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/gone.mp4' } })
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'ERROR',
       payload: { message: 'Failed to load video', code: 'LOAD_ERROR' },
     })
+    expect(deps.showNotification).toHaveBeenCalledWith('Failed to load video', 'error')
   })
 
   it.each([
@@ -238,14 +255,27 @@ describe('the ?video= parameter', () => {
     expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
   })
 
-  it('logs a url it could not load', async () => {
+  it('logs a url it could not load, and tells the user why (ESCSUITE-130)', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.mocked(loadVideoFromUrl).mockRejectedValue(new Error('404'))
+    const refusal =
+      'Could not load the video from https://host.example: this deployment does not allow ' +
+      'loading from other origins (Content-Security-Policy), or the server refused the request.'
+    vi.mocked(loadVideoFromUrl).mockRejectedValue(new Error(refusal))
 
     await mountIntegration({ videos: ['https://host.example/gone.mp4'] })
 
     expect(consoleError).toHaveBeenCalledWith('Failed to load video from URL:', expect.any(Error))
     expect(deps.addSourceVideo).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith(refusal, 'error')
+  })
+
+  it('falls back to a generic notification for a rejection with no message (ESCSUITE-130)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(loadVideoFromUrl).mockRejectedValue('boom')
+
+    await mountIntegration({ videos: ['https://host.example/gone.mp4'] })
+
+    expect(deps.showNotification).toHaveBeenCalledWith('Failed to load video', 'error')
   })
 })
 
