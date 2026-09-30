@@ -168,6 +168,19 @@ interface PresetKeyframes {
 }
 
 /**
+ * Which of a clip's two animation presets a caller is talking about — the same
+ * two names `ClipAnimation` uses for them.
+ */
+export type PresetSide = 'in' | 'out';
+
+/**
+ * The preset keyframes of a side that is not being applied. One shared frozen
+ * object rather than a fresh `{}` per call, so suppressing a preset allocates
+ * nothing — every read of it below is a property lookup that misses.
+ */
+const NO_PRESET_KEYFRAMES: PresetKeyframes = Object.freeze({});
+
+/**
  * Generate keyframes for an "in" animation preset
  */
 function generateInPresetKeyframes(
@@ -424,6 +437,31 @@ function mergeKeyframes(base: Keyframe[], override: Keyframe[]): Keyframe[] {
 // ============================================
 
 /**
+ * Per-call adjustments to how a clip's animation is evaluated.
+ *
+ * Optional, and every default is the behaviour this function always had: a
+ * caller that passes nothing gets both presets and every keyframe.
+ */
+export interface AnimatedValuesOptions {
+  /**
+   * One preset side to leave out of this evaluation (ESCSUITE-139) — the clip's
+   * own keyframes are unaffected either way.
+   *
+   * For the renderer, this is "a transition owns the entrance of its incoming
+   * clip and the exit of its outgoing clip": while a clip is the incoming side
+   * of an active transition its in-preset is suppressed, and while it is the
+   * outgoing side its out-preset is. Leaving a side out IS the steady state the
+   * ruling asks for, with no second interpolation path and no special values to
+   * invent: every in-preset's LAST keyframe and every out-preset's FIRST
+   * keyframe hold the clip's own base transform/effects, so an ignored
+   * in-preset reads exactly as "already finished" and an ignored out-preset
+   * exactly as "not started yet", for every property the preset drives rather
+   * than for opacity alone.
+   */
+  suppressPreset?: PresetSide;
+}
+
+/**
  * Get all animated property values at a specific time within a clip
  *
  * @param clipTime - Time relative to clip start (seconds)
@@ -431,6 +469,7 @@ function mergeKeyframes(base: Keyframe[], override: Keyframe[]): Keyframe[] {
  * @param animation - The clip's animation configuration (can be undefined)
  * @param baseTransform - The clip's base transform values
  * @param baseEffects - The clip's base effect values
+ * @param options - Per-call adjustments; see {@link AnimatedValuesOptions}
  * @returns All animated values at this point in time
  */
 export function getAnimatedValues(
@@ -438,7 +477,8 @@ export function getAnimatedValues(
   clipDuration: number,
   animation: ClipAnimation | undefined,
   baseTransform: ClipTransform,
-  baseEffects: ClipEffects
+  baseEffects: ClipEffects,
+  options?: AnimatedValuesOptions
 ): AnimatedValues {
   // Start with base values
   const result: AnimatedValues = {
@@ -457,23 +497,32 @@ export function getAnimatedValues(
     return result;
   }
 
-  // Generate preset keyframes
-  const inKeyframes = generateInPresetKeyframes(
-    animation.in.type,
-    animation.in.duration,
-    animation.in.easing,
-    baseTransform,
-    baseEffects
-  );
+  // Generate preset keyframes. A suppressed side contributes no keyframes at
+  // all (ESCSUITE-139) — the merge below then leaves that property's track to
+  // the other preset and the clip's own keyframes, and a property neither of
+  // those touches keeps the base value it was seeded with. Composing with
+  // ESCSUITE-125's clamps needs nothing: the generator that would have clamped
+  // is simply not called.
+  const inKeyframes = options?.suppressPreset === 'in'
+    ? NO_PRESET_KEYFRAMES
+    : generateInPresetKeyframes(
+        animation.in.type,
+        animation.in.duration,
+        animation.in.easing,
+        baseTransform,
+        baseEffects
+      );
 
-  const outKeyframes = generateOutPresetKeyframes(
-    animation.out.type,
-    animation.out.duration,
-    animation.out.easing,
-    clipDuration,
-    baseTransform,
-    baseEffects
-  );
+  const outKeyframes = options?.suppressPreset === 'out'
+    ? NO_PRESET_KEYFRAMES
+    : generateOutPresetKeyframes(
+        animation.out.type,
+        animation.out.duration,
+        animation.out.easing,
+        clipDuration,
+        baseTransform,
+        baseEffects
+      );
 
   // For each animatable property, merge presets with custom keyframes and interpolate
   const properties: AnimatableProperty[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur', 'volume'];

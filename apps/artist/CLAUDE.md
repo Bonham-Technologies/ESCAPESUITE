@@ -505,7 +505,21 @@ Clips support animated properties via keyframes:
 - **Preset animations**: Clips can have in/out presets (`fade`, `slide-*`, `scale-*`, `pop`, `blur`)
 - **Custom keyframes**: Per-property keyframe arrays override presets when present; each keyframe's
   easing is editable on its own in the keyframe panel, not only per preset
-- `getAnimatedValues(time, clipDuration, animation, transform, effects)`: Returns interpolated values for a given time — the one entry point, for both the preview and the exporters
+- `getAnimatedValues(time, clipDuration, animation, transform, effects, options?)`: Returns interpolated values for a given time — the one entry point, for both the preview and the exporters
+- **One preset side can be left out of an evaluation (`AnimatedValuesOptions.suppressPreset`,
+  ESCSUITE-139)**, and that is the whole of the option argument. `'in'` skips the in-preset,
+  `'out'` skips the out-preset, and anything else about the evaluation — the other preset, every
+  authored keyframe track, the base transform/effects — is exactly as it was. It exists for one
+  caller, the renderer's two transition paths: a transition owns the entrance of its incoming clip
+  and the exit of its outgoing clip, so the side's own matching preset must not fight it (the
+  Transitions note in the Export Pipeline section has the ruling and the plumbing). Deliberately
+  **not** a second interpolation routine, and deliberately not a set of "steady state" values
+  either: an in-preset's last keyframe and an out-preset's first keyframe already hold the clip's
+  base values, so *not generating* the side is identical to treating it as finished / not started,
+  for every property that preset drives. It costs nothing — a suppressed side's generator is not
+  called at all, `NO_PRESET_KEYFRAMES` is one frozen object for the module, and the perf files'
+  animation-lookup counts per frame are unchanged because this is an argument to the one lookup
+  each draw already made.
 - Keyframes are stored relative to clip start time (0 = clip start)
 - There is **no memo cache**. There used to be one (`getAnimatedValuesCached`, keyed
   `clipId:time`, cleared at export start), but an export draws each clip time exactly once,
@@ -2044,6 +2058,49 @@ about what this does and does not change: `interpolateKeyframes` already floors 
 before a property's first keyframe to that keyframe's own value, so a `fade` in-preset (whose
 first keyframe sits at time 0, value 0) reads as opacity 0 whether the clip time handed to it is
 0 or -0.5 — clamping fixes the inconsistency, not that preset's own opacity during the overlap.
+
+**A transition owns the entrance of its incoming clip and the exit of its outgoing clip
+(ESCSUITE-139).** ESCSUITE-133's last sentence above named what it deliberately did not fix, and
+this is it: a clip with its own `fade` in-preset, sitting on the incoming side of a `fade`
+transition, was faded *twice* — once by the transition (the whole point of it) and once by its own
+preset, which reads opacity 0 for the entire overlap when the incoming clip's clip time is the
+clamped 0. The arriving picture stayed invisible until the transition was over, and then snapped
+in. The outgoing side had the mirror of it: its own fade-out multiplied the transition's, so the
+departing picture vanished early, and a `blur` or `scale` preset on either side compounded the
+same way (every property the preset drives, not opacity alone). The ruling: **while a clip is the
+incoming side of an active transition its in-preset is treated as complete (steady state), and
+while it is the outgoing side its out-preset is treated as not started. The clip's own keyframes
+still apply, and a preset outside a transition window is untouched.**
+
+There is still exactly ONE evaluation path. `getAnimatedValues` takes an optional sixth argument,
+`AnimatedValuesOptions`, whose only member is `suppressPreset?: 'in' | 'out'`; the suppressed
+side's generator is simply not called, and `NO_PRESET_KEYFRAMES` (one frozen `{}` for the module)
+stands in for its output, so the merge below leaves that property's track to the other preset and
+to the clip's own keyframes. Leaving a side out **is** the steady state the ruling asks for, with
+no invented values and no second interpolation routine: every in-preset's LAST keyframe and every
+out-preset's FIRST keyframe already hold the clip's base transform/effects. It composes with
+ESCSUITE-125's clamps for free — the generator that would have clamped is the one not being
+called.
+
+The renderer says which side it is drawing through `TransitionModifiers.suppressPreset`
+(`core/exportTypes.ts`), the one field there that is not geometry. `transitionSideModifiers` in
+`core/canvasRenderer.ts` is where it is set — `'out'` for the outgoing side, `'in'` for the
+incoming — written onto whatever object `transitionModifiersFor` leaves behind (or the frames
+pipeline's `crossfade` fallback, or `{}` for the element pipeline's draw-untouched case), because
+the suppression applies to a side of *any* active transition including a type with no geometry of
+its own. Mutating that object is free and safe: both producers build a fresh one per call, so a
+transition frame still allocates exactly the one modifiers object per side, and
+`animatedValuesFor` maps the field onto one of two frozen `PRESET_SUPPRESSION` option objects
+rather than building a literal per draw. `drawClipToCanvas` and `drawImageToCanvasWithModifiers`
+read it and pass it on, which is why the fix reaches the preview and both exporters at once and
+why a **non-transition** draw — which passes no modifiers at all — cannot be affected.
+
+The compositing order is untouched: the incoming clip is still skipped by the ordinary track-order
+pass (in `drawFrame.ts` and in both exporters — ESCSUITE-124's one interleaved pass) and drawn only
+as the transition's own side, so nothing double-draws. The animation-lookup counts the three
+`*.perf.test.ts` files pin are unchanged too, by construction: suppression is an argument to the
+same one `getAnimatedValues` call each draw already made, never an extra lookup — it in fact does
+strictly *less* work, skipping one preset generator per suppressed side.
 
 `exportMP4.perf.test.ts` pins the cost: **exactly one `setTransform` per frame** (a version
 that set it per clip would slip under a per-frame call ceiling and would have to be wrong about

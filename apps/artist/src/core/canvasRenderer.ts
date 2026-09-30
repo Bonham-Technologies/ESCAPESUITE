@@ -4,6 +4,7 @@
 import type { Clip, TextOverlayData, ShapeOverlayData, TransitionType } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getAnimatedValues } from '../utils/animation';
+import type { AnimatedValuesOptions, PresetSide } from '../utils/animation';
 import type {
   DrawableMediaSource,
   MediaDrawOptions,
@@ -15,6 +16,20 @@ import { blendModeToCanvas, getSourceDimensions, getIncomingClipTime } from './e
 import { drawWithMaskAndStroke } from './clipMask';
 
 /**
+ * The one options object per suppressible side, built once for the module
+ * (ESCSUITE-139).
+ *
+ * `getAnimatedValues` takes its adjustments as an object, and a transition
+ * frame calls this twice per frame for as long as it lasts — a literal here
+ * would be two allocations per frame for a value that has exactly two possible
+ * contents.
+ */
+const PRESET_SUPPRESSION: Readonly<Record<PresetSide, AnimatedValuesOptions>> = {
+  in: Object.freeze({ suppressPreset: 'in' }),
+  out: Object.freeze({ suppressPreset: 'out' }),
+};
+
+/**
  * The animated transform/effect values of a clip at one instant.
  *
  * Always computed. There used to be a memo cache here keyed by clip id and
@@ -23,13 +38,14 @@ import { drawWithMaskAndStroke } from './clipMask';
  * clip at the same time after every edit, so it could not use the cache at all
  * without showing pre-edit values.
  */
-function animatedValuesFor(clip: Clip, clipTime: number) {
+function animatedValuesFor(clip: Clip, clipTime: number, suppressPreset?: PresetSide) {
   return getAnimatedValues(
     clipTime,
     clip.duration,
     clip.animation,
     clip.transform || DEFAULT_TRANSFORM,
-    clip.effects || DEFAULT_EFFECTS
+    clip.effects || DEFAULT_EFFECTS,
+    suppressPreset ? PRESET_SUPPRESSION[suppressPreset] : undefined
   );
 }
 
@@ -334,8 +350,9 @@ export function drawClipToCanvas(
   transitionModifiers?: TransitionModifiers,
   options?: MediaDrawOptions
 ) {
-  // Get animated values - this applies presets and custom keyframes
-  const animated = animatedValuesFor(clip, clipTime);
+  // Get animated values - this applies presets and custom keyframes, minus the
+  // one preset side an active transition has taken over (ESCSUITE-139).
+  const animated = animatedValuesFor(clip, clipTime, transitionModifiers?.suppressPreset);
 
   // Save context state
   ctx.save();
@@ -490,8 +507,9 @@ export function drawImageToCanvasWithModifiers(
   transitionModifiers?: TransitionModifiers,
   options?: MediaDrawOptions
 ) {
-  // Get animated values - this applies presets and custom keyframes
-  const animated = animatedValuesFor(clip, clipTime);
+  // Get animated values - this applies presets and custom keyframes, minus the
+  // one preset side an active transition has taken over (ESCSUITE-139).
+  const animated = animatedValuesFor(clip, clipTime, transitionModifiers?.suppressPreset);
 
   ctx.save();
 
@@ -635,6 +653,34 @@ function transitionModifiersFor(
 }
 
 /**
+ * Everything one side of a transition draws with: the geometry above, plus the
+ * preset side the transition owns (ESCSUITE-139).
+ *
+ * The suppression is not geometry — it applies to a side of *any* active
+ * transition, including one `transitionModifiersFor` has no geometry for — so
+ * it is written onto whatever object that function leaves behind rather than
+ * chosen alongside it. Mutating is safe and free: both `transitionModifiersFor`
+ * and `fallback` build a fresh object per call and share it with nobody, so a
+ * transition frame allocates exactly the one modifiers object per side it
+ * always did.
+ *
+ * `fallback` is the pipeline's own answer for a type with no geometry: the
+ * frames path crossfades, the element path draws untouched and passes none.
+ */
+function transitionSideModifiers(
+  type: TransitionType,
+  progress: number,
+  side: TransitionSide,
+  w: number,
+  h: number,
+  fallback?: (side: TransitionSide) => TransitionModifiers
+): TransitionModifiers {
+  const modifiers = transitionModifiersFor(type, progress, side, w, h) ?? fallback?.(side) ?? {};
+  modifiers.suppressPreset = side === 'outgoing' ? 'out' : 'in';
+  return modifiers;
+}
+
+/**
  * Draw a transition between two clips (supports both video and image)
  */
 export function drawTransition(
@@ -693,7 +739,7 @@ export function drawTransition(
       clipTime,
       w,
       h,
-      transitionModifiersFor(type, progress, side, w, h) ?? undefined,
+      transitionSideModifiers(type, progress, side, w, h),
       options
     );
   };
@@ -771,7 +817,7 @@ export function drawTransitionWithFrames(
       clipTime,
       w,
       h,
-      transitionModifiersFor(type, progress, side, w, h) ?? crossfade(side),
+      transitionSideModifiers(type, progress, side, w, h, crossfade),
       options
     );
   };
