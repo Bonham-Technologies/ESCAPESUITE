@@ -16,7 +16,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { headersFor, matchesSource } from './serve-dist.mjs'
+import { headersFor, matchesSource, resolveFile } from './serve-dist.mjs'
 import realVercelConfig from '../../../vercel.json' with { type: 'json' }
 
 test('matchesSource anchors the pattern at both ends', () => {
@@ -74,4 +74,17 @@ test('headersFor, called with no config, reads the real vercel.json — the serv
   // And the whole thing is literally vercel.json's own array for a path every
   // pattern in it matches — proof this reads the file rather than a copy of it.
   assert.deepEqual(headers, realVercelConfig.headers[0].headers)
+})
+
+// ESCSUITE-140: `/_vercel/*` (the @vercel/analytics beacon endpoint,
+// `/_vercel/insights/script.js` in practice) has no local build output. Before
+// this fix it fell through vercel.json's SPA catch-all to dist/index.html,
+// which the browser then failed to parse as JS on every ESCAPEARTIST page
+// load under this local server ("Unexpected token '<'"). It must 404 instead,
+// the same way an unmatched /assets or /favicon path already does.
+test('resolveFile 404s a /_vercel path instead of falling through to the SPA', () => {
+  assert.equal(resolveFile('/_vercel/insights/script.js'), null)
+  assert.equal(resolveFile('/_vercel/speed-insights/script.js'), null)
+  // The bare prefix with nothing after it, and no trailing slash either.
+  assert.equal(resolveFile('/_vercel'), null)
 })
