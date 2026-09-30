@@ -65,6 +65,18 @@ export interface CapturedTake {
   /** The webcam toggle, as it stood when the take started. */
   webcamEnabled: boolean;
   /**
+   * Whether the take captured a picture at all — a stream AND its toggle, for
+   * either the screen or the webcam. The same question `recorder-factory.ts`
+   * is asked as `hasVideoSource` when it picks a recorder (an audio-only take
+   * forces MediaRecorder, because WebCodecsRecorder is built around a video
+   * track), computed once by the controller from the streams it really
+   * acquired and carried here so the save path never has to re-derive it from
+   * a role. `false` is the *only* thing that makes the primary an audio part
+   * (ESCSUITE-143): screen and webcam off, microphone on is a take with no
+   * companions and no role, so `companionPartFor` cannot see it either.
+   */
+  hasVideoSource: boolean;
+  /**
    * Where the webcam overlay sat while the take was recorded — the same
    * values the compositor was built with, copied at the same moment
    * (ESCSUITE-104). Read by the save path only for a companion take; carried
@@ -125,6 +137,14 @@ export interface BuildSourceVideoInput {
   startOffset?: number;
   /** Primary only: the overlay geometry the take was recorded with. */
   overlayPlacement?: OverlayPlacement;
+  /**
+   * Whether this part has a picture in it at all. Defaults to `true` so every
+   * caller that is not the primary — a companion, and every call site that
+   * predates ESCSUITE-143 — keeps meaning what it always has; `role` already
+   * answers the question for a companion (`part?.isAudio`), so only the
+   * primary ever passes this explicitly, as `CapturedTake.hasVideoSource`.
+   */
+  capturedPicture?: boolean;
 }
 
 /** The SourceVideo metadata written to storage alongside a finished recording's blob. */
@@ -141,6 +161,7 @@ export function buildSourceVideo({
   role,
   startOffset,
   overlayPlacement,
+  capturedPicture = true,
 }: BuildSourceVideoInput): SourceVideo {
   const takeName = `Recording ${new Date(now).toLocaleString()}`;
   // The role's own noun, from the one table that has it. Both parts of a take
@@ -148,6 +169,12 @@ export function buildSourceVideo({
   // with its half named — which is what its own WebM download is called and
   // what ARTIST shows as the source's name.
   const part = companionPartFor(role);
+  // Sound only, either because the role says so (a mic/system companion) or
+  // because the take never had a picture to begin with (ESCSUITE-143): screen
+  // and webcam both off is a fact about the *take*, not about any role, and
+  // `companionPartFor` cannot see it — there is no role at all on a take
+  // recorded as one file.
+  const isAudioOnly = part?.isAudio || !capturedPicture;
   return {
     id,
     name: part ? `${takeName} — ${part.label}` : takeName,
@@ -158,14 +185,14 @@ export function buildSourceVideo({
     // what ESCAPEARTIST's own audio importer writes (core/videoProcessor.ts),
     // and a part that arrived from a recording should be indistinguishable
     // from one that arrived from a file.
-    frameRate: part?.isAudio ? 0 : 30,
+    frameRate: isAudioOnly ? 0 : 30,
     mimeType: blob.type,
     size: blob.size,
     // Everything in ARTIST that decides whether to draw a clip, decode a
     // frame or export a video track branches on this. A mic part written as
     // 'video' would be a black rectangle in the preview and a wasted encode
     // in the export.
-    mediaType: part?.isAudio ? 'audio' : 'video',
+    mediaType: isAudioOnly ? 'audio' : 'video',
     source: 'recording',
     recordedAt: now,
     // The list entry's `hasAudio` only lives as long as the tab. This is the

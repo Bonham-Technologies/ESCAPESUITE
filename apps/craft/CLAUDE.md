@@ -957,6 +957,19 @@ files.) `getRecorderType` gets it too:
 its answer is what `useRecordingSave` keys the `fixWebMMetadata` repair off, so an audio-only take
 would otherwise be saved as unseekable WebM.
 
+**The same boolean is what keeps an audio-only take's own stored metadata honest (ESCSUITE-143).**
+The controller carries it as `CapturedTake.hasVideoSource`, and `useRecordingSave` reads it for the
+primary the same way `part?.isAudio` reads a companion's role: no picture means no
+`extractVideoMetadata` probe (which reports `videoWidth || 1920`, so an audio file would otherwise
+come back a lying `1920x1080`), no thumbnail (a mic/system companion's own contract — the library
+draws its empty placeholder), and `buildSourceVideo`'s new `capturedPicture` argument turns both
+`mediaType` and `frameRate` to the audio companions' own answer: `'audio'`, `width: 0`, `height: 0`,
+`frameRate: 0`, duration the recorder's own clock. Before this, a take with Screen and Webcam both
+off and only the microphone on — which `recordReadiness.ts` allows — was the one shape
+`companionPartFor` could never see, because a plain take's primary carries no `role` at all: it was
+stored exactly like a screen recording, and ESCAPEARTIST placed it on a video track with a picture
+that never came.
+
 ### Frame timestamps and keyframes
 
 `WebCodecsRecorder` stamps every encoded `VideoFrame` with the **recording clock at capture** —
