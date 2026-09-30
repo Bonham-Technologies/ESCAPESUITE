@@ -183,6 +183,11 @@ export const useRecorderStore = create<RecorderStore>((set, get) => ({
           hasAudio: m.hasAudio ?? true,
           ...(m.takeId !== undefined ? { takeId: m.takeId } : {}),
           ...(m.role !== undefined ? { role: m.role } : {}),
+          // Written by `buildSourceVideo` since ESCSUITE-14 (companions) and
+          // ESCSUITE-143 (a picture-less primary); absent on a recording saved
+          // before either. Read back so the MP4 button stays disabled for an
+          // audio-only take across a reload, not only for the life of the tab.
+          ...(m.mediaType !== undefined ? { mediaType: m.mediaType } : {}),
         };
       })
     );

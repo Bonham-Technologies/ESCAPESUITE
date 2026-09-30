@@ -211,7 +211,7 @@ export function buildSourceVideo({
 }
 
 export interface BuildRecordingEntryInput {
-  sourceVideo: Pick<SourceVideo, 'id' | 'name' | 'duration' | 'takeId' | 'role'>;
+  sourceVideo: Pick<SourceVideo, 'id' | 'name' | 'duration' | 'takeId' | 'role' | 'mediaType'>;
   now: number;
   size: number;
   /**
@@ -263,5 +263,10 @@ export function buildRecordingEntry({
     // library's grouping sees nothing to group.
     ...(sourceVideo.takeId !== undefined ? { takeId: sourceVideo.takeId } : {}),
     ...(sourceVideo.role !== undefined ? { role: sourceVideo.role } : {}),
+    // Absent rather than defaulted, the same rule as the two above — but this
+    // one is in practice always present, since `buildSourceVideo` writes it
+    // unconditionally (ESCSUITE-143: it is what lets the list disable MP4 for
+    // a take with no picture, the same way `hasAudio` already disables M4A).
+    ...(sourceVideo.mediaType !== undefined ? { mediaType: sourceVideo.mediaType } : {}),
   };
 }
