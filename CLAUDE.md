@@ -1372,13 +1372,37 @@ The cross-app guarantee itself is pinned outside vitest's measurement by
 green on this branch, red on main with ESCAPECRAFT's take gone. **No floor crossed**; artist's
 floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-30 for ESCSUITE-144, 145 and 146 (the composite
+MP4's webcam border and corner scaled to the frame the way the preview and ARTIST already scale
+them; an orphaned companion's "Open in Editor" hands over its own id when the primary it names is
+gone from the library; Play and Download say so through the app's notice when a recording's bytes
+are gone): 100.00 / **99.52** / 97.73 / 100.00 against the 100.00 / 99.51 / 97.73 / 100.00 the
+commit this branch was rebased onto measures — statements up a hundredth, the other three unmoved.
+Measured in one sitting, the base gives 1,335 / 1,366 branches and this branch 1,337 / 1,368: two
+new branches, both covered, the same 31 uncovered as before (statements 2,477 / 2,489 →
+2,488 / 2,500, lines 2,325 → 2,336, functions 446 → 448, every denominator growing by exactly what
+the numerator did; the same 12 statements uncovered, in the same four files). The net two are
+`scaleToFrame`'s `frameWidth <= 0` guard in `core/overlayGeometry.ts` — reached from both sides by
+the 1280 / 1920 / 3840 pins and the zero-width case — and `RecordingsList.tsx`'s
+"is the take's primary present in the list" choice, reached with the primary present by the
+existing handoff cases and absent by the orphaned-companion red case; `overlayPaddingFor` lost the
+guard it used to carry when it became a call to `scaleToFrame`, and the two new functions are
+`scaleToFrame` itself and the presence predicate. `useRecordingLibrary.ts`'s missing-bytes `else`
+branches on a decision the `if (!blob)` already made, so it adds statements and no branch, and the
+review's one MAJOR — two `??` fallbacks in `Compositor`'s constructor that no caller could reach —
+was deleted rather than tested, which is why the count is two of two and not four of six. The
+compositor and converter perf ceilings and the `App.*rerender*` pins are byte-unchanged. The
+artist mirror pin for the scaled border (`utils/overlayPlacement.test.ts`) is test code in the
+other package and moves no figure there. **No floor crossed**; craft's floors stay
+100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.51 | 97.73 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
 | `@escapesuite/artist` | 99.56 | 98.91 | 94.82 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
