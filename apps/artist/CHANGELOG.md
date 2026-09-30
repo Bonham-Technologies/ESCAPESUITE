@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.41
+
+### Patch Changes
+
+- 56dc61a: A video URL the deployment cannot fetch now says why
+
 ## 2.12.40
 
 ### Patch Changes
