@@ -1519,11 +1519,11 @@ renders a plain `<p>` — not a second status region — "Track locked — unloc
 to edit this clip".
 
 The **media library** (`VideoUploader.tsx`) asks `lockedSourceVideoIds` and disables the
-per-item Remove button (`title="Used by a clip on a locked track"`) and Clear All
-(`title="Media is used by a clip on a locked track"`). Clear All refuses in its handler as well
-as being disabled, and it is the one refusal enforced at the UI rather than in the store:
-`clearAllVideos()` deletes the blobs from IndexedDB *before* the per-source `removeSourceVideo`
-calls, so a store refusal afterwards would leave a locked clip pointing at bytes that are gone.
+per-item Remove button (`title="Used by a clip on a locked track"`). Clear All (ESCSUITE-142) is
+the bulk form of Clear Unused — per id, `deleteVideo` then `removeSourceVideo` over the editor's
+own `sourceVideos` — so a source a locked track's clip still uses is simply skipped, the same
+way Clear Unused already skips it by never counting an in-use source "unused"; the button itself
+carries no locked-specific disabled state, and clicking it clears everything else.
 
 The **keyframe panel** (ESCSUITE-88, see "Keyframe Panel" above): `KeyframePanel` derives
 `trackLocked` from the whole-store read it already does and threads `locked` down to
