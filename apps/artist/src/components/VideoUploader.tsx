@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processVideoFile, processImageFile, processAudioFile } from '../core/videoProcessor';
-import { getStorageEstimate, clearAllVideos, deleteVideo, resolveThumbnailUrl } from '../core/storage';
+import { getStorageEstimate, deleteVideo, resolveThumbnailUrl } from '../core/storage';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
@@ -66,10 +66,9 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
 
   /**
    * The media a clip on a locked track uses, which nothing here may delete
-   * (ESCSUITE-84). The store refuses `removeSourceVideo` for it, but clear-all
-   * wipes the blobs out of IndexedDB *first* — a refusal after that would
-   * leave the locked clip pointing at bytes that are gone — so clear-all is
-   * all-or-nothing here instead.
+   * (ESCSUITE-84). Clear All skips these ids the same way Clear Unused always
+   * has — a locked source is in use, so it was never going to appear in
+   * `unusedVideos` either — rather than refusing the whole action.
    */
   const lockedMedia = useMemo(() => lockedSourceVideoIds(clips, tracks), [clips, tracks]);
 
@@ -118,20 +117,28 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
     }
   }, [unusedVideos, unusedSize, removeSourceVideo, refreshStorageInfo]);
 
-  // Clear all storage (IndexedDB + in-memory state)
+  // Clear all storage — the bulk form of Clear Unused (ESCSUITE-142): per id,
+  // over the editor's own `sourceVideos`, so its blast radius can only ever be
+  // what the library shows. `video-editor-db` is shared with ESCAPECRAFT,
+  // which keeps recordings ARTIST never imported and has no row for — a
+  // whole-object-store wipe used to take those too. A source a locked
+  // track's clip still uses is left alone, the same way it was never counted
+  // "unused" for Clear Unused either (ESCSUITE-84).
   const handleClearAllStorage = useCallback(async () => {
-    if (lockedMedia.size > 0) return; // ESCSUITE-84
-    if (confirm('Clear ALL stored media? This cannot be undone.')) {
+    const clearable = sourceVideos.filter((v) => !lockedMedia.has(v.id));
+    if (clearable.length === 0) return;
+    if (confirm('Remove every file in this library? This cannot be undone.')) {
       try {
-        await clearAllVideos();
-        // Also clear any in-memory state
-        sourceVideos.forEach(v => removeSourceVideo(v.id));
+        for (const video of clearable) {
+          await deleteVideo(video.id);
+          removeSourceVideo(video.id);
+        }
         refreshStorageInfo();
       } catch (e) {
         console.error('Failed to clear storage:', e);
       }
     }
-  }, [lockedMedia, sourceVideos, removeSourceVideo, refreshStorageInfo]);
+  }, [sourceVideos, lockedMedia, removeSourceVideo, refreshStorageInfo]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const allFiles = Array.from(files);
@@ -323,10 +330,7 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
               <button
                 className={`${styles.storageClearButton} ${styles.clearAll}`}
                 onClick={handleClearAllStorage}
-                disabled={lockedMedia.size > 0}
-                title={lockedMedia.size > 0
-                  ? 'Media is used by a clip on a locked track'
-                  : 'Clear all stored media'}
+                title="Remove every file in this library"
               >
                 Clear All
               </button>

@@ -442,7 +442,7 @@ describe('VideoUploader', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
       await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
-      expect(globalThis.confirm).toHaveBeenCalledWith('Clear ALL stored media? This cannot be undone.')
+      expect(globalThis.confirm).toHaveBeenCalledWith('Remove every file in this library? This cannot be undone.')
       expect(await getAllVideoMetadata()).toHaveLength(0)
     })
 
@@ -494,20 +494,39 @@ describe('VideoUploader', () => {
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('craft-take')
     })
 
-    // ESCSUITE-84: clear-all deletes the BLOBS before it touches the store, so
-    // a store refusal afterwards would leave a locked clip pointing at bytes
-    // that are gone. It is all-or-nothing here instead.
-    it('refuses to clear everything while a clip on a locked track uses media', async () => {
+    // ESCSUITE-84 + ESCSUITE-142: a source a clip on a locked track uses is
+    // skipped, exactly as Clear Unused already skips it (it is never counted
+    // "unused"). Deleting per id means there is no longer a blob-before-store
+    // ordering problem, so this is no longer all-or-nothing: the unlocked
+    // source still clears.
+    it('clears everything except media a clip on a locked track uses', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      const clip = addClip('clip1', 0, 4)
+      store().updateTrack(clip.trackId, { locked: true })
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'other.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'other.mp4' })
+      render(<VideoUploader onProjectFile={onProjectFile} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('video1')
+      expect(remainingIds).not.toContain('video2')
+    })
+
+    // Nothing to clear at all — every source is locked-in-use — is a no-op,
+    // the same way Clear Unused's own handler no-ops when unusedVideos is
+    // empty: no confirm, nothing touched.
+    it('does nothing when every stored source is locked in use', async () => {
       await storeVideo('video1', new Blob(['bytes']), videoMeta)
       store().addSourceVideo(videoMeta)
       const clip = addClip('clip1', 0, 4)
       store().updateTrack(clip.trackId, { locked: true })
       render(<VideoUploader onProjectFile={onProjectFile} />)
 
-      const button = await screen.findByTitle('Media is used by a clip on a locked track')
-      expect(button).toBeDisabled()
-
-      // The handler refuses too, however the click reaches it.
+      const button = await screen.findByRole('button', { name: 'Clear All' })
       fireEvent.click(button)
       await act(async () => { await Promise.resolve() })
 

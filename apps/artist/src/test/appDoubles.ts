@@ -34,7 +34,6 @@ export function storageDouble() {
     getStorageEstimate: vi.fn(() =>
       Promise.resolve({ used: 0, quota: 100000000, available: 100000000 })
     ),
-    clearAllVideos: vi.fn(() => Promise.resolve()),
     deleteVideo: vi.fn(() => Promise.resolve()),
     saveSessionState: vi.fn(() => Promise.resolve()),
     getSessionState: vi.fn(() => Promise.resolve(undefined)),
