@@ -1305,6 +1305,26 @@ close and whose third is closed regardless; `serve-dist.mjs` is not in this pack
 and carries its own `node:test` case for the `/_vercel` refusal. **No floor crossed**; artist's
 floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-29 for ESCSUITE-130 (a `?video=` or host `LOAD_VIDEO`
+preload the hosted Content-Security-Policy refuses names the origin it tried and the policy that
+stopped it, instead of a bare `Failed to fetch`): 99.54 / 98.90 / **94.81** / 99.46 against the
+99.54 / 98.90 / 94.80 / 99.46 the commit this branch was rebased onto measures — branches up a
+hundredth, the other three unmoved. Measured in one sitting, the base gives 4,212 / 4,443 branches
+and this branch 4,222 / 4,453: ten new branches, ten covered, the same 231 uncovered as before
+(lines 6,778 / 6,809 → 6,791 / 6,822, statements 7,645 / 7,730 → 7,658 / 7,743, functions
+1,679 / 1,688 → 1,680 / 1,689, every denominator growing by exactly what the numerator did; the
+same 31 lines, 85 statements and 9 functions uncovered). The ten are `describeFetchFailure`'s
+`instanceof Error` choice and its URL-parse `try` / `catch` in `utils/integration.ts` — an
+unparsable URL falls back to the raw string as the named origin — and the two `instanceof Error`
+choices at the `LOAD_VIDEO` and `?video=` catch sites in `hooks/useHostIntegration.ts`, each
+reached from both sides by the cross-origin refusal, the `'http://a b/x'` case and the three
+rejections with a plain string. The first measurement of the branch had the three non-`Error` arms
+unreached; the review's ruling was to keep them rather than delete them, because each catch also
+awaits `processVideoFile`, whose IndexedDB writes reject with a `DOMException` that does not extend
+`Error` in browsers, and the fix round's three string-rejection cases are why the count is ten of
+ten. The two branches still uncovered in `utils/integration.ts` are the streaming reader's, which
+predate this ticket. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1312,7 +1332,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.70 | 100.00 |
-| `@escapesuite/artist` | 99.54 | 98.90 | 94.80 | 99.46 |
+| `@escapesuite/artist` | 99.54 | 98.90 | 94.81 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
