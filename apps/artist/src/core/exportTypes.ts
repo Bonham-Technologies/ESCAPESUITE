@@ -1,6 +1,7 @@
 // Shared types, constants, and utility functions for the export pipeline
 
 import type { Clip, Track, ExportOptions, ExportProgress, BlendMode, SourceVideo } from '../store/types';
+import type { PresetSide } from '../utils/animation';
 
 /**
  * A drawable media source that can be used with canvas drawImage.
@@ -337,6 +338,21 @@ export interface TransitionModifiers {
   offsetX?: number;
   offsetY?: number;
   clipRegion?: { x: number; y: number; width: number; height: number };
+  /**
+   * The clip's own animation preset this transition takes over (ESCSUITE-139):
+   * `'in'` for the incoming side, `'out'` for the outgoing one. Handed straight
+   * to `getAnimatedValues`' `suppressPreset`, so the side arriving under a fade
+   * is not also faded in by its own fade-in preset, and the side leaving is not
+   * faded out twice.
+   *
+   * Unlike every other field here it is not geometry: it applies to a side of
+   * *any* active transition, including a type with no geometry of its own, and
+   * it is the one field a caller outside `drawTransition` /
+   * `drawTransitionWithFrames` never sets. An ordinary (non-transition) draw
+   * passes no modifiers at all, which is why a preset outside a transition
+   * window is untouched.
+   */
+  suppressPreset?: PresetSide;
 }
 
 /**

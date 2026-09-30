@@ -3,7 +3,7 @@
 // recorded geometry: which source was drawn, with what alpha, clip region or
 // offset, at a given progress.
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
-import { drawTransition, drawTransitionWithFrames } from './canvasRenderer'
+import { drawClipToCanvas, drawTransition, drawTransitionWithFrames } from './canvasRenderer'
 import {
   createRecordingContext,
   type RecordingCanvasRenderingContext2D,
@@ -562,5 +562,196 @@ describe('the incoming clip animation time during a same-track transition (ESCSU
 
     expect(incomingCallClipTime(spy)).toBe(0)
     spy.mockRestore()
+  })
+})
+
+// ESCSUITE-139: a transition owns the entrance of its incoming clip and the
+// exit of its outgoing clip. A clip with a `fade` in-preset sitting on the
+// incoming side of a `fade` transition used to be faded twice — once by the
+// transition, which is the whole point of it, and once by its own preset, which
+// reads zero for the entire overlap — so the arriving picture was invisible
+// until the transition was over. The outgoing side had the mirror of it: its
+// own fade-out multiplied the transition's, so the departing picture vanished
+// early. Both are drawn here at progress 0.5, where the correct answer is the
+// transition's own 0.5 on each side and nothing else.
+//
+// The fixture is the same-track adjacency of the ESCSUITE-133 block above (the
+// ordinary case for two clips placed back to back), so the incoming clip's own
+// clip time is the clamped 0 — the very instant its `fade` in-preset reads 0.
+describe('a transition owns its sides own entrance and exit (ESCSUITE-139)', () => {
+  /** Fades out over its own last second, which is exactly the transition. */
+  const fadingOut: Clip = makeClip({
+    id: 'out',
+    sourceVideoId: 'v1',
+    timelinePosition: 0,
+    duration: 5,
+    endTime: 5,
+    transition: { type: 'fade', duration: 1 },
+    animation: makeAnimation({ out: { type: 'fade', duration: 1, easing: 'linear' } }),
+  })
+  /** Fades in over its own first second. */
+  const fadingIn: Clip = makeClip({
+    id: 'in',
+    sourceVideoId: 'v2',
+    timelinePosition: 5, // exactly where the outgoing clip ends
+    duration: 5,
+    endTime: 5,
+    animation: makeAnimation({ in: { type: 'fade', duration: 1, easing: 'linear' } }),
+  })
+  /** Half a second into the one-second transition: progress 0.5. */
+  const CURRENT_TIME = 4.5
+
+  const transitionWithPresets = (
+    type: TransitionType = 'fade',
+    progress = 0.5
+  ): TransitionInfo => ({
+    outgoingClip: fadingOut,
+    incomingClip: fadingIn,
+    progress,
+    type,
+  })
+
+  describe('drawTransition', () => {
+    let videos: Map<string, HTMLVideoElement>
+    let out: HTMLVideoElement
+    let incoming: HTMLVideoElement
+
+    beforeEach(() => {
+      out = video(640, 360)
+      incoming = video(800, 450)
+      videos = new Map([
+        ['v1', out],
+        ['v2', incoming],
+      ])
+    })
+
+    it('crossfades at the transition own progress, not the presets on top of it', () => {
+      drawTransition(asCtx(), videos, new Map(), transitionWithPresets(), CURRENT_TIME, W, H)
+
+      expect(drawnSources()).toEqual([out, incoming])
+      // The outgoing clip's own fade-out is treated as not started and the
+      // incoming clip's own fade-in as complete, so each side carries the
+      // transition's alpha alone.
+      expect(drawnAlphas()).toEqual([0.5, 0.5])
+    })
+
+    it('gives each side the transition alpha that belongs to it, not the mirror', () => {
+      // A quarter of the way through, where the two sides' alphas differ: the
+      // `[0.5, 0.5]` the case above asserts is the one progress at which a
+      // transition drawn back to front would still pass. 4.25 is progress 0.25
+      // of the outgoing clip's last second, so the fixture is self-consistent —
+      // the outgoing clip's own fade-out is three-quarters through (opacity
+      // 0.75, suppressed) and the incoming clip's clip time is still the
+      // clamped 0 (its own fade-in at opacity 0, suppressed).
+      drawTransition(
+        asCtx(),
+        videos,
+        new Map(),
+        transitionWithPresets('fade', 0.25),
+        4.25,
+        W,
+        H
+      )
+
+      expect(drawnSources()).toEqual([out, incoming])
+      expect(drawnAlphas()).toEqual([0.75, 0.25])
+    })
+
+    it('suppresses the presets for a transition type with no geometry of its own', () => {
+      // An unrecognised type draws both sides untouched in this pipeline. It is
+      // still an active transition, so it still owns both sides' presets.
+      drawTransition(
+        asCtx(),
+        videos,
+        new Map(),
+        transitionWithPresets('iris' as TransitionType),
+        CURRENT_TIME,
+        W,
+        H
+      )
+
+      expect(drawnAlphas()).toEqual([1, 1])
+    })
+
+    it('still applies the incoming clip own keyframes', () => {
+      // A preset is suppressed; an authored keyframe track is not.
+      const keyframed: TransitionInfo = {
+        ...transitionWithPresets(),
+        incomingClip: {
+          ...fadingIn,
+          animation: makeAnimation({
+            in: { type: 'fade', duration: 1, easing: 'linear' },
+            keyframes: {
+              x: [
+                { time: 0, value: 0.25, easing: 'linear' },
+                { time: 5, value: 0.75, easing: 'linear' },
+              ],
+            },
+          }),
+        },
+      }
+
+      drawTransition(asCtx(), videos, new Map(), keyframed, CURRENT_TIME, W, H)
+
+      // 800x450 centred at x = 0.25 * 1920 = 480 is drawn from x = 80.
+      expect(ctx.argsFor('drawImage').map((a) => a[1])).toEqual([640, 80])
+      expect(drawnAlphas()).toEqual([0.5, 0.5])
+    })
+
+    it('leaves the same clip fade-out alone when it is drawn as an ordinary clip', () => {
+      // Nothing outside a transition window changes: the suppression rides on
+      // the transition's own modifiers, so an ordinary draw of the very same
+      // clip at the very same instant still fades.
+      drawClipToCanvas(asCtx(), out, fadingOut, 4.5, W, H)
+
+      expect(drawnAlphas()).toEqual([0.5])
+    })
+  })
+
+  describe('drawTransitionWithFrames', () => {
+    let outFrame: DrawableMediaSource
+    let inFrame: DrawableMediaSource
+
+    beforeEach(() => {
+      outFrame = new VideoFrameDouble({
+        displayWidth: 640,
+        displayHeight: 360,
+      }) as unknown as DrawableMediaSource
+      inFrame = new VideoFrameDouble({
+        displayWidth: 800,
+        displayHeight: 450,
+      }) as unknown as DrawableMediaSource
+    })
+
+    it('crossfades at the transition own progress, not the presets on top of it', () => {
+      drawTransitionWithFrames(
+        asCtx(),
+        outFrame,
+        inFrame,
+        transitionWithPresets(),
+        CURRENT_TIME,
+        W,
+        H
+      )
+
+      expect(drawnSources()).toEqual([outFrame, inFrame])
+      expect(drawnAlphas()).toEqual([0.5, 0.5])
+    })
+
+    it('suppresses the presets behind this pipeline crossfade fallback', () => {
+      // An unrecognised type crossfades here rather than drawing untouched, and
+      // that fallback is still the transition speaking for both sides.
+      drawTransitionWithFrames(
+        asCtx(),
+        outFrame,
+        inFrame,
+        transitionWithPresets('iris' as TransitionType),
+        CURRENT_TIME,
+        W,
+        H
+      )
+
+      expect(drawnAlphas()).toEqual([0.5, 0.5])
+    })
   })
 })
