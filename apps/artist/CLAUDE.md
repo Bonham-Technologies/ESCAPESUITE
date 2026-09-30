@@ -2040,7 +2040,9 @@ The export pipeline includes several optimizations to improve performance:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for MP4 files (background-capable)
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
 - **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
-- **Encoder backpressure**: Waits while `videoEncoder.encodeQueueSize > 20` to prevent memory exhaustion
+- **Encoder backpressure**: MP4's loop waits while `videoEncoder.encodeQueueSize > 5`, paired with
+  the 30-second backpressure timeout below; WebM's own loop waits above `> 20`. Both exist to
+  prevent memory exhaustion
 - **Decoded frame ownership (`frameManager.ts`, ESCSUITE-123)**: every `VideoFrame` `getFrameAtTime`
   fetches is tracked in `currentFrames` — a `Set`, not a map keyed by `${sourceId}:${timestamp}` —
   and `cleanupIterationFrames` closes every one of them once the export frame is drawn. The key used
