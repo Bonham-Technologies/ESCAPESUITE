@@ -601,10 +601,13 @@ describe('a transition owns its sides own entrance and exit (ESCSUITE-139)', () 
   /** Half a second into the one-second transition: progress 0.5. */
   const CURRENT_TIME = 4.5
 
-  const transitionWithPresets = (type: TransitionType = 'fade'): TransitionInfo => ({
+  const transitionWithPresets = (
+    type: TransitionType = 'fade',
+    progress = 0.5
+  ): TransitionInfo => ({
     outgoingClip: fadingOut,
     incomingClip: fadingIn,
-    progress: 0.5,
+    progress,
     type,
   })
 
@@ -630,6 +633,28 @@ describe('a transition owns its sides own entrance and exit (ESCSUITE-139)', () 
       // incoming clip's own fade-in as complete, so each side carries the
       // transition's alpha alone.
       expect(drawnAlphas()).toEqual([0.5, 0.5])
+    })
+
+    it('gives each side the transition alpha that belongs to it, not the mirror', () => {
+      // A quarter of the way through, where the two sides' alphas differ: the
+      // `[0.5, 0.5]` the case above asserts is the one progress at which a
+      // transition drawn back to front would still pass. 4.25 is progress 0.25
+      // of the outgoing clip's last second, so the fixture is self-consistent —
+      // the outgoing clip's own fade-out is three-quarters through (opacity
+      // 0.75, suppressed) and the incoming clip's clip time is still the
+      // clamped 0 (its own fade-in at opacity 0, suppressed).
+      drawTransition(
+        asCtx(),
+        videos,
+        new Map(),
+        transitionWithPresets('fade', 0.25),
+        4.25,
+        W,
+        H
+      )
+
+      expect(drawnSources()).toEqual([out, incoming])
+      expect(drawnAlphas()).toEqual([0.75, 0.25])
     })
 
     it('suppresses the presets for a transition type with no geometry of its own', () => {

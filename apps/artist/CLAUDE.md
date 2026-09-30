@@ -2102,6 +2102,27 @@ as the transition's own side, so nothing double-draws. The animation-lookup coun
 same one `getAnimatedValues` call each draw already made, never an extra lookup — it in fact does
 strictly *less* work, skipping one preset generator per suppressed side.
 
+**Two known consequences, both deliberate.** *The selection chrome disagrees with the picture during
+a transition.* The preview's selection box (`components/Preview/previewGeometry.ts`) and a drag's
+keyframe-mode starting point (`components/Preview/dragGeometry.ts`) each call `getAnimatedValues`
+WITHOUT the suppression, so while a transition is running, a **geometric** preset (`slide-*`,
+`scale-*`, `pop`) on the suppressed side puts the box — and the point a drag starts from — where the
+picture no longer is; under a `fade` or `dissolve` (which move nothing) the two agreed before this
+ticket and disagree after it. Tracked as a follow-up ticket; the fix means handing those two modules
+the active transition, which is a lookup on a path the perf ceilings do not cover, so it was kept out
+of this change rather than smuggled in.
+
+*A preset longer than the transition steps at the boundary.* The suppression is decided per frame
+from whether a transition is active, so it ends exactly when the transition window does, and the
+preset it was hiding resumes mid-curve. A 3 s `fade` in-preset under a 1 s transition is fully
+opaque through the overlap (its own fade suppressed, the transition's alpha doing the work), then
+drops to roughly a third at the boundary and fades up again over its remaining two seconds; the
+out-side mirror pops back to full opacity the instant the transition starts. Equal durations — the
+ordinary case, and what the inspector's own sliders encourage — are continuous, because the preset
+resumes exactly where it ends. This follows from the ruling rather than working around it: the
+alternative is rescaling the user's authored preset to fit the transition, which is a different
+feature and a different ticket.
+
 `exportMP4.perf.test.ts` pins the cost: **exactly one `setTransform` per frame** (a version
 that set it per clip would slip under a per-frame call ceiling and would have to be wrong about
 what it multiplied), and the per-frame call ceiling itself re-measured 24 → 25 for that one
