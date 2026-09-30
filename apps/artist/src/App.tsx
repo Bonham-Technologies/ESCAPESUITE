@@ -251,6 +251,7 @@ function App() {
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           onConfirmOpenChange={setResolutionConfirmOpen}
           onProjectFile={handleProjectFile}
+          showNotification={showNotification}
         />
 
         {/* Center - Preview */}

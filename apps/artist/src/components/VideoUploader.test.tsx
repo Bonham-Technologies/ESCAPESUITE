@@ -3,9 +3,11 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { VideoUploader, VideoLibrary } from './VideoUploader'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore'
-import { storeVideo, getAllVideoMetadata } from '../core/storage'
+import { storeVideo, getAllVideoMetadata, storeThumbnail, getThumbnail } from '../core/storage'
+import * as storageModule from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { SourceVideo } from '../store/types'
+import type { ShowNotification } from '../app/useNotification'
 import styles from './VideoUploader.module.css'
 import { lastObjectUrl } from '../test/objectUrls'
 
@@ -89,6 +91,9 @@ const file = (name: string, type: string, content = 'x') => new File([content], 
  */
 let onProjectFile: Mock<(file: File) => void>
 
+/** What `App` passes down: the notice-channel report of a Clear All partial failure. */
+let showNotification: Mock<ShowNotification>
+
 const dropZone = () => screen.getByText('Drop media or click to browse').parentElement!
 const fileInput = () => screen.getByLabelText('Add media files') as HTMLInputElement
 
@@ -108,6 +113,7 @@ describe('VideoUploader', () => {
     mockProcessImageFile.mockResolvedValue(imageMeta)
     mockProcessAudioFile.mockResolvedValue(audioMeta)
     onProjectFile = vi.fn()
+    showNotification = vi.fn()
     vi.stubGlobal('confirm', vi.fn(() => true))
     vi.stubGlobal('alert', vi.fn())
   })
@@ -130,7 +136,7 @@ describe('VideoUploader', () => {
      * unasserted.
      */
     async function renderUploader(): Promise<void> {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
       await act(async () => {
         await Promise.resolve()
       })
@@ -167,7 +173,7 @@ describe('VideoUploader', () => {
 
   describe('storage information', () => {
     it('reports what is used against the quota', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       expect(await screen.findByText('50.0 MB / 500.0 MB')).toBeInTheDocument()
       const fill = document.querySelector<HTMLElement>(`.${styles.storageProgressFill}`)!
@@ -177,7 +183,7 @@ describe('VideoUploader', () => {
 
     it('warns when less than 100MB is left', async () => {
       scriptStorage(60 * MB, 100 * MB)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       await waitFor(() =>
         expect(document.querySelector(`.${styles.storageBar}`)).toHaveClass(styles.storageWarning)
@@ -191,7 +197,7 @@ describe('VideoUploader', () => {
       })
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
         await waitFor(() =>
           expect(errorLog).toHaveBeenCalledWith(
@@ -208,7 +214,7 @@ describe('VideoUploader', () => {
 
   describe('importing media', () => {
     it('imports a dropped video into the media library', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
       const dropped = file('test.mp4', 'video/mp4')
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [dropped] } })
@@ -219,7 +225,7 @@ describe('VideoUploader', () => {
     })
 
     it('routes an image to the image processor', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('test.png', 'image/png')])
 
@@ -229,7 +235,7 @@ describe('VideoUploader', () => {
     })
 
     it('routes audio to the audio processor', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('test.mp3', 'audio/mp3')])
 
@@ -238,7 +244,7 @@ describe('VideoUploader', () => {
     })
 
     it('clears the file input so the same file can be picked again', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
       const input = fileInput()
       // jsdom never reports a non-empty value for a file input, so record what
       // the component writes rather than reading the value back.
@@ -258,7 +264,7 @@ describe('VideoUploader', () => {
 
     it('drops the finished upload from the list after a moment', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
       await act(async () => {
@@ -282,7 +288,7 @@ describe('VideoUploader', () => {
     // that failed CI with every assertion green.
     it('arms no timer past its own unmount (ESCSUITE-120)', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-      const { unmount } = render(<VideoUploader onProjectFile={onProjectFile} />)
+      const { unmount } = render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('a.mp4', 'video/mp4'), file('b.mp4', 'video/mp4')] } })
       await act(async () => {
@@ -303,7 +309,7 @@ describe('VideoUploader', () => {
     })
 
     it('rejects files that are not media at all', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('notes.txt', 'text/plain')])
 
@@ -315,7 +321,7 @@ describe('VideoUploader', () => {
 
     it('refuses a file that would not fit in the remaining quota', async () => {
       scriptStorage(10 * MB, 15 * MB)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('big.mp4', 'video/mp4', 'x'.repeat(2048))])
 
@@ -331,7 +337,7 @@ describe('VideoUploader', () => {
       mockProcessVideoFile.mockRejectedValue(new Error('Unsupported codec'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -350,7 +356,7 @@ describe('VideoUploader', () => {
       mockProcessVideoFile.mockRejectedValue(new Error('QuotaExceededError: no room'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -366,7 +372,7 @@ describe('VideoUploader', () => {
       mockProcessVideoFile.mockRejectedValue('kaboom')
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -385,7 +391,7 @@ describe('VideoUploader', () => {
     // `useProjectActions` now; the seven cases that drove the uploader's own
     // dialog moved there and to App.project.test.tsx with them.
     it('hands a dropped project file up, and asks nothing itself', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
       const projectFile = file('my.veditor', '')
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [projectFile] } })
@@ -395,7 +401,7 @@ describe('VideoUploader', () => {
     })
 
     it('hands a picked project file up the same way', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
       const projectFile = file('my.veditor', '')
 
       selectFiles([projectFile])
@@ -405,7 +411,7 @@ describe('VideoUploader', () => {
 
     it('hands it up whatever is on the timeline — the caller decides what to ask', async () => {
       addClip('clip1', 0, 2)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('my.veditor', '')])
 
@@ -415,7 +421,7 @@ describe('VideoUploader', () => {
     })
 
     it('ignores the media alongside a project file', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('my.veditor', ''), file('test.mp4', 'video/mp4')])
 
@@ -424,7 +430,7 @@ describe('VideoUploader', () => {
     })
 
     it('leaves a file that is not a project to the media path', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -434,16 +440,34 @@ describe('VideoUploader', () => {
   })
 
   describe('freeing space', () => {
+    // Two of this describe's cases spy on the real `deleteVideo` (imported
+    // as `* as storageModule` above) to make one id fail, or to react mid-loop
+    // to a specific id. `vi.clearAllMocks()` in the outer `beforeEach` clears
+    // call history but does not undo a `mockImplementation` — only
+    // `mockRestore` does — so left alone, either spy would keep intercepting
+    // every later test's `deleteVideo` calls in this file, CRAFT-shaped id
+    // checks and locked-track locking included.
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
     it('clears every stored video once confirmed', async () => {
       await storeVideo('video1', new Blob(['bytes']), videoMeta)
       store().addSourceVideo(videoMeta)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
       await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
-      expect(globalThis.confirm).toHaveBeenCalledWith('Clear ALL stored media? This cannot be undone.')
-      expect(await getAllVideoMetadata()).toHaveLength(0)
+      expect(globalThis.confirm).toHaveBeenCalledWith(
+        'Remove every file this project imported? Files on a locked track stay. This cannot be undone.'
+      )
+      // Not `toHaveLength(0)`: this describe's rows accumulate in the real
+      // fake-indexeddb across its tests (no per-test reset — see the
+      // ESCSUITE-142 review's finding on this file), so an exact length here
+      // would only be safe by being first. `not.toContain` stays true
+      // regardless of what a test inserted above this one (NIT 3).
+      expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('video1')
     })
 
     // ESCSUITE-113: every source Clear All drops holds a live
@@ -455,7 +479,7 @@ describe('VideoUploader', () => {
       const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
       await storeVideo('video1', new Blob(['bytes']), videoMeta)
       store().addSourceVideo({ ...videoMeta, thumbnailUrl: 'blob:thumb-1' })
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -467,7 +491,7 @@ describe('VideoUploader', () => {
       vi.mocked(globalThis.confirm).mockReturnValue(false)
       await storeVideo('kept', new Blob(['bytes']), { ...videoMeta, id: 'kept' })
       store().addSourceVideo(videoMeta)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -476,20 +500,174 @@ describe('VideoUploader', () => {
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('kept')
     })
 
-    // ESCSUITE-84: clear-all deletes the BLOBS before it touches the store, so
-    // a store refusal afterwards would leave a locked clip pointing at bytes
-    // that are gone. It is all-or-nothing here instead.
-    it('refuses to clear everything while a clip on a locked track uses media', async () => {
+    // ESCSUITE-142: the shared `video-editor-db` also holds ESCAPECRAFT's own
+    // recordings — rows this editor never imported and has no row for. Clear
+    // All must touch only what the library shows (`sourceVideos`), the same
+    // way Clear Unused already does, not sweep the whole object store.
+    it('leaves a recording ESCAPECRAFT owns untouched', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('craft-take', new Blob(['bytes']), {
+        ...videoMeta, id: 'craft-take', name: 'take.webm', source: 'recording',
+      })
+      // The reported defect was `db.clear('videos')` *and* `db.clear('thumbnails')`
+      // — pin the other half of the loss too (NIT 1).
+      await storeThumbnail('craft-take', new Blob(['thumb']))
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+      // Both halves of the ticket's contract: CRAFT's row survives (MINOR 6
+      // adds the second half — video1, which the library DOES own, is
+      // actually gone rather than only dropped from the store).
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('craft-take')
+      expect(remainingIds).not.toContain('video1')
+      expect(await getThumbnail('craft-take')).toBeDefined()
+    })
+
+    // ESCSUITE-84 + ESCSUITE-142: a source a clip on a locked track uses is
+    // skipped, exactly as Clear Unused already skips it (it is never counted
+    // "unused"). Deleting per id means there is no longer a blob-before-store
+    // ordering problem, so this is no longer all-or-nothing: the unlocked
+    // source still clears.
+    it('clears everything except media a clip on a locked track uses', async () => {
       await storeVideo('video1', new Blob(['bytes']), videoMeta)
       store().addSourceVideo(videoMeta)
       const clip = addClip('clip1', 0, 4)
       store().updateTrack(clip.trackId, { locked: true })
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'other.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'other.mp4' })
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
-      const button = await screen.findByTitle('Media is used by a clip on a locked track')
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('video1')
+      expect(remainingIds).not.toContain('video2')
+    })
+
+    // MINOR 2 (ESCSUITE-142 review): a delete failing partway through must
+    // not be console-only, and must not leave the meter reporting the
+    // pre-clear figure. The loop also does not abort on the first failure —
+    // it catches each id on its own, so a bad id does not strand every id
+    // after it.
+    it('reports how many files it could not remove, and still clears the rest', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'two.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'two.mp4' })
+      await storeVideo('video3', new Blob(['bytes']), { ...videoMeta, id: 'video3', name: 'three.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video3', name: 'three.mp4' })
+
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'video2') throw new Error('disk full')
+        return realDeleteVideo(id)
+      })
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const callsBeforeClick = estimate.mock.calls.length
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video2']))
+      expect(showNotification).toHaveBeenCalledWith('Could not remove 1 file from storage', 'error')
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('video2')
+      expect(remainingIds).not.toContain('video1')
+      expect(remainingIds).not.toContain('video3')
+      // The meter refresh ran despite the failure (`finally`, not the end of
+      // a successful `try`).
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+    })
+
+    // ESCSUITE-142 review round 2 (coverage): the previous case only ever
+    // failed one id, so the notice's plural branch (`failed !== 1 ? 's' :
+    // ''`) was never reached. Two failures also exercises "the surviving
+    // rows are the failed ones" with more than one survivor.
+    it('pluralises the notice when more than one file could not be removed', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'two.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'two.mp4' })
+      await storeVideo('video3', new Blob(['bytes']), { ...videoMeta, id: 'video3', name: 'three.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video3', name: 'three.mp4' })
+
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'video1' || id === 'video2') throw new Error('disk full')
+        return realDeleteVideo(id)
+      })
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() =>
+        expect(store().sourceVideos.map((v) => v.id).sort()).toEqual(['video1', 'video2'])
+      )
+      expect(showNotification).toHaveBeenCalledWith('Could not remove 2 files from storage', 'error')
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('video1')
+      expect(remainingIds).toContain('video2')
+      expect(remainingIds).not.toContain('video3')
+    })
+
+    // MINOR 3 (ESCSUITE-142 review): the render-time `lockedMedia` snapshot
+    // the button uses to decide what to *offer* is not safe to trust once the
+    // loop is `await`ing between ids — a track locked while an earlier id's
+    // delete is still in flight must not cost a later id its bytes, which is
+    // exactly the hazard the old all-or-nothing design existed to avoid.
+    it('does not delete the blob of a source locked while an earlier delete is still in flight', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'two.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'two.mp4' })
+      // video2's own clip, on its own track — unlocked when Clear All is
+      // clicked, so video2 starts out clearable.
+      store().addClipToTimeline(
+        { id: 'clip2', sourceVideoId: 'video2', name: 'clip2', startTime: 0, endTime: 4, duration: 4 },
+        undefined,
+        10
+      )
+      const clip2 = store().project.timeline.clips.find((c) => c.id === 'clip2')!
+
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'video1') {
+          // Lock video2's track while video1's delete is still in flight —
+          // between the two awaits the loop takes.
+          store().updateTrack(clip2.trackId, { locked: true })
+        }
+        return realDeleteVideo(id)
+      })
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video2']))
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video2')
+    })
+
+    // Nothing to clear at all — every source is locked-in-use — is a dead
+    // click, and MAJOR 1 (ESCSUITE-142 review) is that a dead click must not
+    // look like a live one: the button says why up front instead.
+    it('disables Clear All, with a reason, when every stored source is locked in use', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      const clip = addClip('clip1', 0, 4)
+      store().updateTrack(clip.trackId, { locked: true })
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      const button = await screen.findByTitle('Every file is on a locked track')
       expect(button).toBeDisabled()
 
-      // The handler refuses too, however the click reaches it.
       fireEvent.click(button)
       await act(async () => { await Promise.resolve() })
 
@@ -498,9 +676,26 @@ describe('VideoUploader', () => {
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
     })
 
+    // The ticket's own trigger, step for step: CRAFT recordings push the
+    // origin's storage usage up (so the button's render gate — the meter, not
+    // the library — still shows it), while ARTIST's own library is empty.
+    // MAJOR 1: this must not be a silent no-op behind a button that looks
+    // live — it must say so and refuse to open the confirm at all.
+    it('disables Clear All, with a reason, when this library is empty', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      const button = await screen.findByTitle('Nothing to clear')
+      expect(button).toBeDisabled()
+
+      fireEvent.click(button)
+      await act(async () => { await Promise.resolve() })
+
+      expect(globalThis.confirm).not.toHaveBeenCalled()
+    })
+
     it('hides the clear-all button when almost nothing is stored', async () => {
       scriptStorage(1024, 500 * MB)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       await screen.findByText('1.0 KB / 500.0 MB')
       expect(screen.queryByRole('button', { name: 'Clear All' })).not.toBeInTheDocument()
@@ -511,7 +706,7 @@ describe('VideoUploader', () => {
       store().addSourceVideo(videoMeta)
       store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048 })
       addClip('clip1', 0, 2) // references video1
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
 
@@ -527,7 +722,7 @@ describe('VideoUploader', () => {
         ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048, thumbnailUrl: 'blob:unused-thumb',
       })
       addClip('clip1', 0, 2) // references video1
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
 
@@ -538,7 +733,7 @@ describe('VideoUploader', () => {
     it('hides the clear-unused button when every source is in use', async () => {
       store().addSourceVideo(videoMeta)
       addClip('clip1', 0, 2)
-      render(<VideoUploader onProjectFile={onProjectFile} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       await screen.findByText('50.0 MB / 500.0 MB')
       expect(screen.queryByRole('button', { name: /Clear Unused/ })).not.toBeInTheDocument()

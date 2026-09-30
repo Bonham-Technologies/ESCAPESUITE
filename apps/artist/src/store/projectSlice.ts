@@ -112,8 +112,10 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     // All-or-nothing, like every other group refusal: this takes every clip
     // that uses the source with it, and a clip on a locked track cannot be
     // removed — so the source stays too (ESCSUITE-84). The media library's
-    // Remove and Clear All buttons ask the same question, because clearing
-    // deletes the blobs before the store hears about it.
+    // per-item Remove deletes the blob before asking, so it checks this same
+    // question itself; Clear All filters locked ids out of its own loop
+    // instead, both up front and freshly per id as the loop runs
+    // (ESCSUITE-142).
     const { clips, tracks } = state.project.timeline;
     if (lockedSourceVideoIds(clips, tracks).has(id)) return state; // ESCSUITE-84
     const removed = state.sourceVideos.find((v) => v.id === id);

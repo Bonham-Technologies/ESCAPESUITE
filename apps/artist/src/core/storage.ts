@@ -121,14 +121,6 @@ export async function deleteProject(id: string): Promise<void> {
 
 // Storage utilities
 
-export async function clearAllData(): Promise<void> {
-  const db = await getDB()
-  await db.clear('videos')
-  await db.clear('thumbnails')
-  await db.clear('projects')
-  await db.clear('settings')
-}
-
 export async function hasSpaceForFile(fileSize: number): Promise<boolean> {
   const { available } = await getStorageEstimate()
   // Leave 10MB buffer
@@ -139,12 +131,6 @@ export async function getTotalVideoSize(): Promise<number> {
   const db = await getDB()
   const records = await db.getAll('videos')
   return records.reduce((total, record) => total + (record.blob?.size || 0), 0)
-}
-
-export async function clearAllVideos(): Promise<void> {
-  const db = await getDB()
-  await db.clear('videos')
-  await db.clear('thumbnails')
 }
 
 // Session state operations (auto-save/restore)

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processVideoFile, processImageFile, processAudioFile } from '../core/videoProcessor';
-import { getStorageEstimate, clearAllVideos, deleteVideo, resolveThumbnailUrl } from '../core/storage';
+import { getStorageEstimate, deleteVideo, resolveThumbnailUrl } from '../core/storage';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
@@ -35,9 +35,22 @@ interface VideoUploaderProps {
    * compile rather than silently swallowing a dropped project.
    */
   onProjectFile: (file: File) => void;
+  /**
+   * Reports Clear All's outcome when it is not simply "nothing happened" —
+   * today, only a partial failure (some ids deleted, some not). Required for
+   * the same reason `onProjectFile` is: a caller that forgets it fails to
+   * compile rather than a failed clear silently reaching only the console
+   * (ESCSUITE-142 review, MINOR 2).
+   *
+   * Typed inline, matching `useNotification`'s `ShowNotification` union,
+   * rather than importing that type from `../app/` — this is `components/`,
+   * and nothing else here reaches into `app/` even for a type (ESCSUITE-142
+   * review round 2, NIT).
+   */
+  showNotification: (message: string, type: 'error' | 'success' | 'info') => void;
 }
 
-export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
+export function VideoUploader({ onProjectFile, showNotification }: VideoUploaderProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
@@ -66,12 +79,20 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
 
   /**
    * The media a clip on a locked track uses, which nothing here may delete
-   * (ESCSUITE-84). The store refuses `removeSourceVideo` for it, but clear-all
-   * wipes the blobs out of IndexedDB *first* — a refusal after that would
-   * leave the locked clip pointing at bytes that are gone — so clear-all is
-   * all-or-nothing here instead.
+   * (ESCSUITE-84). Clear All skips these ids the same way Clear Unused always
+   * has — a locked source is in use, so it was never going to appear in
+   * `unusedVideos` either — rather than refusing the whole action. This is
+   * the render-time snapshot, good enough to decide what the button *offers*;
+   * the loop that actually deletes reads a fresh copy per id instead (see
+   * `handleClearAllStorage`'s comment).
    */
   const lockedMedia = useMemo(() => lockedSourceVideoIds(clips, tracks), [clips, tracks]);
+
+  /** What Clear All would actually touch right now — everything but a source a locked track's clip uses. */
+  const clearableVideos = useMemo(
+    () => sourceVideos.filter((v) => !lockedMedia.has(v.id)),
+    [sourceVideos, lockedMedia]
+  );
 
   // Calculate which videos are unused (not referenced by any clip)
   const { unusedVideos, unusedSize } = useMemo(() => {
@@ -118,20 +139,55 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
     }
   }, [unusedVideos, unusedSize, removeSourceVideo, refreshStorageInfo]);
 
-  // Clear all storage (IndexedDB + in-memory state)
+  // Clear all storage — the bulk form of Clear Unused (ESCSUITE-142): per id,
+  // over the editor's own `sourceVideos`, so its blast radius can only ever be
+  // what the library shows. `video-editor-db` is shared with ESCAPECRAFT,
+  // which keeps recordings ARTIST never imported and has no row for — a
+  // whole-object-store wipe used to take those too. A source a locked
+  // track's clip still uses is left alone, the same way it was never counted
+  // "unused" for Clear Unused either (ESCSUITE-84).
+  //
+  // The loop re-derives the locked set from live store state before each
+  // delete, rather than trusting `clearableVideos` (a render-time snapshot
+  // closed over at click time): a track locked while an earlier id's delete
+  // is still in flight must not cost the later id its bytes, which is
+  // exactly the hazard the old all-or-nothing design existed to avoid
+  // (ESCSUITE-142 review, MINOR 3). A skip here is not a failure — it is
+  // the same refusal Clear Unused's own filter makes by never seeing the id
+  // in the first place.
+  //
+  // A per-id delete/remove failure does not stop the rest of the batch —
+  // each id is caught on its own, so one bad id cannot strand every id after
+  // it — and is reported once, by count, through the notice channel rather
+  // than the console alone (ESCSUITE-142 review, MINOR 2). The meter refresh
+  // runs in `finally`, so a partial failure still leaves it current.
   const handleClearAllStorage = useCallback(async () => {
-    if (lockedMedia.size > 0) return; // ESCSUITE-84
-    if (confirm('Clear ALL stored media? This cannot be undone.')) {
+    if (clearableVideos.length === 0) return;
+    if (confirm('Remove every file this project imported? Files on a locked track stay. This cannot be undone.')) {
+      let failed = 0;
       try {
-        await clearAllVideos();
-        // Also clear any in-memory state
-        sourceVideos.forEach(v => removeSourceVideo(v.id));
+        for (const video of clearableVideos) {
+          const { clips: liveClips, tracks: liveTracks } = useEditorStore.getState().project.timeline;
+          if (lockedSourceVideoIds(liveClips, liveTracks).has(video.id)) continue;
+          try {
+            await deleteVideo(video.id);
+            removeSourceVideo(video.id);
+          } catch (e) {
+            failed += 1;
+            console.error('Failed to clear storage:', e);
+          }
+        }
+      } finally {
         refreshStorageInfo();
-      } catch (e) {
-        console.error('Failed to clear storage:', e);
+      }
+      if (failed > 0) {
+        showNotification(
+          `Could not remove ${failed} file${failed !== 1 ? 's' : ''} from storage`,
+          'error'
+        );
       }
     }
-  }, [lockedMedia, sourceVideos, removeSourceVideo, refreshStorageInfo]);
+  }, [clearableVideos, removeSourceVideo, refreshStorageInfo, showNotification]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const allFiles = Array.from(files);
@@ -323,10 +379,12 @@ export function VideoUploader({ onProjectFile }: VideoUploaderProps) {
               <button
                 className={`${styles.storageClearButton} ${styles.clearAll}`}
                 onClick={handleClearAllStorage}
-                disabled={lockedMedia.size > 0}
-                title={lockedMedia.size > 0
-                  ? 'Media is used by a clip on a locked track'
-                  : 'Clear all stored media'}
+                disabled={clearableVideos.length === 0}
+                title={clearableVideos.length === 0
+                  ? (sourceVideos.length === 0
+                      ? 'Nothing to clear'
+                      : 'Every file is on a locked track')
+                  : 'Remove every file this project imported — files on a locked track stay'}
               >
                 Clear All
               </button>
