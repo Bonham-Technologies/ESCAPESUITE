@@ -119,7 +119,7 @@ export function headersFor(requestPath, config = vercelConfig) {
 }
 
 /** The `vercel.json` rewrite table, in priority order. */
-function resolveFile(requestPath) {
+export function resolveFile(requestPath) {
   const onDisk = fileFor(requestPath)
   if (onDisk) return onDisk
 
@@ -132,6 +132,15 @@ function resolveFile(requestPath) {
   // vercel.json's SPA catch-all is `/((?!craft|artist|assets|favicon).*)`: a
   // build artefact that isn't on disk must 404, not silently return the hub.
   if (/^\/(assets|favicon)/.test(requestPath)) {
+    return null
+  }
+  // `/_vercel/*` (e.g. `/_vercel/insights/script.js`, injected by
+  // @vercel/analytics) is a Vercel platform endpoint with no local build
+  // output — it only exists on the real hosted deployment. Falling through to
+  // the SPA catch-all served index.html for it, which the browser then failed
+  // to parse as JS ("Unexpected token '<'") on every ESCAPEARTIST page load
+  // under this local server (ESCSUITE-140). 404 it explicitly instead.
+  if (/^\/_vercel(\/|$)/.test(requestPath)) {
     return null
   }
   return fileFor('/index.html')

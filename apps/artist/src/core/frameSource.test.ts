@@ -231,24 +231,6 @@ describe('frameSource', () => {
       expect(source.requiresCleanup()).toBe(true);
     });
 
-    it('releases frames by closing them', async () => {
-      const manager = new VideoDecodeManager();
-      await manager.initialize();
-
-      const source = await WebCodecsFrameSource.create(
-        manager,
-        'test-source',
-        new ArrayBuffer(1024),
-        'video/mp4'
-      );
-
-      // Create a real instance of MockVideoFrame (which is stubbed as VideoFrame)
-      const mockFrame = new MockVideoFrame() as unknown as VideoFrame;
-
-      source.releaseFrame(mockFrame);
-      expect(mockFrame.close).toHaveBeenCalled();
-    });
-
     it('disposes the source', async () => {
       const manager = new VideoDecodeManager();
       await manager.initialize();
@@ -572,7 +554,6 @@ describe('frameSource', () => {
       // All sources should implement the same interface
       for (const source of sources) {
         expect(typeof source.getFrame).toBe('function');
-        expect(typeof source.releaseFrame).toBe('function');
         expect(typeof source.getInfo).toBe('function');
         expect(typeof source.requiresCleanup).toBe('function');
         expect(typeof source.dispose).toBe('function');

@@ -104,7 +104,11 @@ export function cleanupIterationFrames(manager: FrameManager): void {
  */
 function cleanupCurrentFrames(manager: FrameManager): void {
   for (const frame of manager.currentFrames.values()) {
-    frame.close();
+    try {
+      frame.close();
+    } catch {
+      // Frame may already be closed
+    }
   }
   manager.currentFrames.clear();
 }

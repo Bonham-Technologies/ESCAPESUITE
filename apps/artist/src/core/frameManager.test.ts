@@ -258,5 +258,30 @@ describe('frameManager', () => {
       const manager: FrameManager = await createFrameManager(false)
       await expect(disposeFrameManager(manager)).resolves.toBeUndefined()
     })
+
+    // Mirrors cleanupIterationFrames' own "survives a frame that is already
+    // closed" case: disposeFrameManager's outstanding-frame sweep
+    // (cleanupCurrentFrames) must not let one frame's throwing close() stop
+    // the rest being closed, or the sources being disposed and the factory
+    // torn down.
+    it('closes every remaining frame even when one throws while closing, and still disposes the sources', async () => {
+      const manager = await createFrameManager(true)
+      await loadFrameSource(manager, 'clip-a', mp4(), 'video/mp4')
+      const first = (await getFrameAtTime(manager, 'clip-a', 0)) as unknown as VideoFrameDouble
+      const second = (await getFrameAtTime(manager, 'clip-a', 1)) as unknown as VideoFrameDouble
+      // A real VideoFrame throws when closed twice; stand in for whatever
+      // makes one frame's close() throw.
+      first.close = () => {
+        throw new Error('already closed')
+      }
+
+      await expect(disposeFrameManager(manager)).resolves.toBeUndefined()
+
+      expect(second.closed).toBe(true)
+      expect(manager.currentFrames.size).toBe(0)
+      expect(manager.sources.size).toBe(0)
+      expect(decoder.disposedSources).toEqual(['clip-a'])
+      expect(decoder.terminated).toBe(1)
+    })
   })
 })

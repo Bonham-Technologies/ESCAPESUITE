@@ -1266,6 +1266,22 @@ earlier times to it, so the clamped time and the negative one yield the same opa
 in-preset should be suppressed under an incoming transition is a product decision this ticket
 left alone. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-09-29 for ESCSUITE-140 (post-sweep hygiene: the dead
+`ImportedTake.thumbnailUrls` and `IFrameSource.releaseFrame` deleted, `disposeFrameManager`'s close
+guarded, `/_vercel/*` answered 404 by the local production server): 99.54 / 98.90 / **94.80** /
+**99.46** against the 99.54 / 98.90 / 94.78 / 99.40 the commit this branch was rebased onto measures
+— branches up two hundredths and functions up six, lines and statements unmoved, and every
+denominator smaller: lines 6,779 / 6,810 → 6,778 / 6,809, statements 7,646 / 7,731 → 7,645 / 7,730,
+branches 4,213 / 4,445 → 4,212 / 4,443 and functions 1,680 / 1,690 → 1,679 / 1,688. The deleted
+units were covered, so the numerators fell with them, and two branches and one function that had
+never been reached — `releaseFrame`'s two implementations' bodies among them — went out of the
+uncovered column too (232 → 231 branches, 10 → 9 functions; the same 31 lines and 85 statements).
+The one line the branch adds to a source file, the `try` / `catch` around `frame.close()` in
+`cleanupCurrentFrames`, is covered from both sides by the red case whose second frame throws on
+close and whose third is closed regardless; `serve-dist.mjs` is not in this package's measurement
+and carries its own `node:test` case for the `/_vercel` refusal. **No floor crossed**; artist's
+floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1273,7 +1289,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.70 | 100.00 |
-| `@escapesuite/artist` | 99.54 | 98.90 | 94.78 | 99.40 |
+| `@escapesuite/artist` | 99.54 | 98.90 | 94.80 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
