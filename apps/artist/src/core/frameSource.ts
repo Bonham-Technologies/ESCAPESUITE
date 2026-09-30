@@ -47,12 +47,6 @@ export interface IFrameSource {
   getFrame(timestamp: number): Promise<DrawableFrame>;
 
   /**
-   * Release a frame when done with it (for cleanup)
-   * @param frame The frame to release
-   */
-  releaseFrame(frame: DrawableFrame): void;
-
-  /**
    * Get information about the source
    */
   getInfo(): SourceInfo;
@@ -108,12 +102,6 @@ export class WebCodecsFrameSource implements IFrameSource {
       throw new Error('Source has been disposed');
     }
     return this.manager.getFrame(this.sourceId, timestamp);
-  }
-
-  releaseFrame(frame: DrawableFrame): void {
-    if (frame instanceof VideoFrame) {
-      frame.close();
-    }
   }
 
   getInfo(): SourceInfo {
@@ -240,10 +228,6 @@ export class HTMLVideoFrameSource implements IFrameSource {
     }
 
     return video;
-  }
-
-  releaseFrame(_frame: DrawableFrame): void {
-    // HTMLVideoElement doesn't need manual cleanup
   }
 
   getInfo(): SourceInfo {
