@@ -1083,9 +1083,9 @@ assertion to flip when it is hoisted.
 - Both apps share `video-editor-db` IndexedDB database
 - Recordings stored with `source: 'recording'` and `recordedAt` timestamp
 - "Send to Editor" opens ESCAPEARTIST with `?loadVideo=<id>` parameter — the id of a take's
-  **primary** part, whichever row was clicked (`takeId ?? id`). ARTIST resolving the siblings and
-  placing them on the timeline is ESCSUITE-14 slice 2; today it opens the one source it was
-  given
+  **primary** part, whichever row was clicked (`takeId ?? id`). ARTIST resolves the siblings and
+  places every part of the take on the timeline in one undo step; see `apps/artist/CLAUDE.md`'s
+  "A handed-over take is several files" for the detail
 - Same-origin deployment (Vercel) enables seamless data sharing
 
 ### Embedding
@@ -1261,8 +1261,9 @@ message and navigate to its own editor itself.
   enabled button and a failure part-way, landing in the notice channel as
   `mp4ConversionFailed(...)` exactly as before this gate existed. That is strictly better
   than the old presence check and is not a complete answer; the real fix is a
-  profile-fallback chain like ARTIST's (`apps/artist/src/core/exportMP4.ts` tries High, then
-  Main, then Baseline), which CRAFT does not have yet.
+  profile-fallback chain like ARTIST's (`apps/artist/src/core/exportMP4.ts` tries five profiles
+  — High, Main, Baseline, then High and Main again at Level 5.1 for 1440p/4K — across two
+  hardware-acceleration passes), which CRAFT does not have yet.
   A second, far more common instance of the same gap (ESCSUITE-136): H.264 also refuses an
   **odd-sized** frame outright (`NotSupportedError: H264 only supports even sized frames.`),
   and the probe cannot catch that for a specific recording either — 1280x720 is even.
@@ -1779,7 +1780,8 @@ the outcome, not on the double.
 - WebM from MediaRecorder needs post-processing for proper scrubbing
 - WebCodecs API only works in Chrome/Edge. Where it is missing, `recorder-factory.ts` falls
   back to MediaRecorder, so recording still works — it is the WebCodecs recorder and the
-  (currently unwired) conversion paths in `converter.ts` that are Chrome/Edge only
+  conversion paths in `converter.ts` (the library's MP4 and M4A downloads) that are Chrome/Edge
+  only
 - Recording the webcam as a separate track needs `MediaStreamTrackProcessor` on top of
   WebCodecs (`canRecordSeparateTracks()`). It is the one feature with no fallback: the toggle
   stays on screen and `disabled`, carrying the reason, and the take is recorded as a composited

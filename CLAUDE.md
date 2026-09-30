@@ -232,8 +232,15 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - Proved end to end in a real iframe by `apps/e2e/tests/integration/host-embedding.spec.ts`.
 
 ### Headless render service (services/headless-artist)
-- `@escapesuite/headless-artist`: a one-shot CLI that renders ESCAPEARTIST projects in headless
-  Chromium (via Playwright) outside the browser — for servers or GPU boxes, no UI involved.
+- `@escapesuite/headless-artist`: a CLI with two commands — one-shot `render` and a long-running
+  `serve` (`http.createServer` with `GET /healthz`, `POST /render`, a bounded FIFO job queue, a
+  1 MB body cap and a sink allow-list) — that renders ESCAPEARTIST projects in headless Chromium
+  (via Playwright) outside the browser, for servers or GPU boxes with no UI involved. A job spec
+  names its input as either a self-contained `bundle` or a `manifest` (a small JSON pointing at
+  source media already on disk, for a large project) and writes to one of four output sinks —
+  `volume`, `command`, `webhook`, `s3` — each producing a verification manifest (hash, dimensions,
+  duration) alongside the render. `services/headless-artist/README.md` is the protocol reference,
+  the way the Integration API section above links `apps/artist/src/utils/integration.ts`.
 - Drives the same `dist-headless/headless.html` bundle ESCAPEARTIST builds for the browser
   (`window.__renderProject` / `window.__renderProjectToFile` — see `apps/artist/CLAUDE.md`).
 - Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);
@@ -287,7 +294,7 @@ Test counts change frequently as coverage grows; run `pnpm test` for the current
 
 ### Performance benchmarks
 
-`pnpm perf` measures, it does not assert. `apps/e2e/scripts/perf.mjs` runs the Chromium-only
+The benchmarks measure, they do not assert. `apps/e2e/scripts/perf.mjs` runs the Chromium-only
 Playwright project in `apps/e2e/tests/perf/` (`playwright.perf.config.ts`: one worker, no
 retries, fixed launch args) and then the headless kit's `src/perf.bench.test.ts`, then
 **always** merges whatever results exist with `apps/e2e/scripts/perf-report.mjs` into
@@ -295,7 +302,13 @@ retries, fixed launch args) and then the headless kit's `src/perf.bench.test.ts`
 `$GITHUB_STEP_SUMMARY` in CI) — a failed benchmark still leaves the surviving numbers
 readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is emptied by the
 perf project's `globalSetup` first, so a stale result can never be reported as current.
-All three outputs are gitignored.
+All three outputs are gitignored. `tests/perf/` also holds `visual.spec.ts`, which is not a
+benchmark and does assert: a `toHaveScreenshot` pixel guard on the composited preview (self-skips
+when no baseline exists for the platform — only macOS is committed) and a blur-band measurement
+with no such skip, so it runs everywhere `pnpm perf` runs, CI included. It rides along in the
+same `pnpm perf` invocation because it protects the same preview-rasterisation work the
+benchmarks measure, not because it is one itself — a red `pnpm perf` from a moved pixel or a
+blur band outside tolerance means this spec, not a benchmark or a tripwire below.
 
 Ten benchmarks, each run three times and reported as the median: four
 ESCAPEARTIST, five ESCAPECRAFT, and the headless kit render. The four
@@ -1397,8 +1410,8 @@ Nine jobs, with `ci-status` as the single required check (`perf` is informationa
 - Builds ESCAPECRAFT and ESCAPEARTIST in standalone mode (`VITE_BUILD_MODE=standalone`)
 - Also downloads the `headless-artist-kit` artifact from the same CI run and renames the
   tarball to `escapesuite-headless-artist-<VERSION>.tgz` (VERSION here is the umbrella release's
-  own version — the higher of the craft and artist versions — not the kit package's
-  independent `0.1.0`)
+  own version — the higher of the craft and artist versions — not the kit package's own
+  independent version)
 - On `main`, creates a GitHub Release and attaches the single-file HTML builds — each named
   for its own app's version — and the headless-artist kit tarball directly to it
 - No cloud storage step and no license injection — the downloads are plain HTML files (and one
