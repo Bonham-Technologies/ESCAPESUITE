@@ -205,7 +205,6 @@ describe('importTake', () => {
 
     expect(take.alreadyInLibrary).toBe(true)
     expect(take.clipParts).toEqual([])
-    expect(take.thumbnailUrls).toEqual([])
     expect(added).toEqual([])
     expect(getVideo).not.toHaveBeenCalled()
     expect(getThumbnail).not.toHaveBeenCalled()
@@ -222,15 +221,13 @@ describe('importTake', () => {
   it('reports each part thumbnail as the blob URL the library entry carries', async () => {
     vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
 
-    const take = await importTake(primary, addSourceVideo)
+    await importTake(primary, addSourceVideo)
 
-    // Each part gets a handle of its own, and the library entries carry exactly
-    // the ones the take reports.
-    expect(take.thumbnailUrls).toEqual([
+    // Each part gets a handle of its own, and the library entries carry them.
+    expect(added.map((v) => v.thumbnailUrl)).toEqual([
       expect.stringMatching(OBJECT_URL_PATTERN),
       expect.stringMatching(OBJECT_URL_PATTERN),
     ])
-    expect(added.map((v) => v.thumbnailUrl)).toEqual(take.thumbnailUrls)
   })
 
   it('skips a part whose blob is gone, and still brings in the rest', async () => {
@@ -330,9 +327,8 @@ describe('importTake', () => {
 
     // A thumbnail is cosmetic: losing one costs a picture, never a track.
     expect(added.map((v) => v.id)).toEqual(['take-1', 'take-1-webcam'])
-    expect(added[0].thumbnailUrl).toBeUndefined()
+    expect(added.map((v) => v.thumbnailUrl)).toEqual([undefined, undefined])
     expect(take.clipParts).toHaveLength(2)
-    expect(take.thumbnailUrls).toEqual([])
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()
   })
 
