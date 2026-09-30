@@ -476,6 +476,24 @@ describe('VideoUploader', () => {
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('kept')
     })
 
+    // ESCSUITE-142: the shared `video-editor-db` also holds ESCAPECRAFT's own
+    // recordings — rows this editor never imported and has no row for. Clear
+    // All must touch only what the library shows (`sourceVideos`), the same
+    // way Clear Unused already does, not sweep the whole object store.
+    it('leaves a recording ESCAPECRAFT owns untouched', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('craft-take', new Blob(['bytes']), {
+        ...videoMeta, id: 'craft-take', name: 'take.webm', source: 'recording',
+      })
+      render(<VideoUploader onProjectFile={onProjectFile} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('craft-take')
+    })
+
     // ESCSUITE-84: clear-all deletes the BLOBS before it touches the store, so
     // a store refusal afterwards would leave a locked clip pointing at bytes
     // that are gone. It is all-or-nothing here instead.
