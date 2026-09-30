@@ -5,7 +5,6 @@ import { getStorageEstimate, deleteVideo, resolveThumbnailUrl } from '../core/st
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
-import type { ShowNotification } from '../app/useNotification';
 import styles from './VideoUploader.module.css';
 
 interface UploadProgress {
@@ -42,8 +41,13 @@ interface VideoUploaderProps {
    * the same reason `onProjectFile` is: a caller that forgets it fails to
    * compile rather than a failed clear silently reaching only the console
    * (ESCSUITE-142 review, MINOR 2).
+   *
+   * Typed inline, matching `useNotification`'s `ShowNotification` union,
+   * rather than importing that type from `../app/` — this is `components/`,
+   * and nothing else here reaches into `app/` even for a type (ESCSUITE-142
+   * review round 2, NIT).
    */
-  showNotification: ShowNotification;
+  showNotification: (message: string, type: 'error' | 'success' | 'info') => void;
 }
 
 export function VideoUploader({ onProjectFile, showNotification }: VideoUploaderProps) {
@@ -160,7 +164,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   const handleClearAllStorage = useCallback(async () => {
     if (clearableVideos.length === 0) return;
     if (confirm('Remove every file this project imported? Files on a locked track stay. This cannot be undone.')) {
-      const failed: string[] = [];
+      let failed = 0;
       try {
         for (const video of clearableVideos) {
           const { clips: liveClips, tracks: liveTracks } = useEditorStore.getState().project.timeline;
@@ -169,16 +173,16 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
             await deleteVideo(video.id);
             removeSourceVideo(video.id);
           } catch (e) {
-            failed.push(video.name);
+            failed += 1;
             console.error('Failed to clear storage:', e);
           }
         }
       } finally {
         refreshStorageInfo();
       }
-      if (failed.length > 0) {
+      if (failed > 0) {
         showNotification(
-          `Could not remove ${failed.length} file${failed.length !== 1 ? 's' : ''} from storage`,
+          `Could not remove ${failed} file${failed !== 1 ? 's' : ''} from storage`,
           'error'
         );
       }
