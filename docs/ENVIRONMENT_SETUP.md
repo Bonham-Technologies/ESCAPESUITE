@@ -21,10 +21,11 @@ pnpm dev            # all apps: plan :5173, craft :5174, artist :5175
 
 No `.env.local` files are needed to run any app.
 
-## Optional: `VITE_BUILD_MODE`
+## Optional: `VITE_BUILD_MODE` and `VITE_EDITOR_URL`
 
-The only environment variable read anywhere in the repo is `VITE_BUILD_MODE`, which selects the
-build target for ESCAPECRAFT and ESCAPEARTIST:
+No environment variable is required to build or run any app. Two optional ones are read:
+
+`VITE_BUILD_MODE` selects the build target for ESCAPECRAFT and ESCAPEARTIST:
 
 ```bash
 # Normal web build (default if unset)
@@ -33,6 +34,14 @@ pnpm build:artist
 
 # Offline single-file build (VITE_BUILD_MODE=standalone is set for you)
 pnpm build:standalone
+```
+
+`VITE_EDITOR_URL` overrides where ESCAPECRAFT sends recordings for editing (default `/artist/`,
+normalised to a single trailing slash) — useful for a self-hoster deploying CRAFT and ARTIST at
+different paths:
+
+```bash
+VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
 ```
 
 There is nothing else to configure.
