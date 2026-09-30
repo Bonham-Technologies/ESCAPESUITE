@@ -2108,7 +2108,7 @@ keyframe-mode starting point (`components/Preview/dragGeometry.ts`) each call `g
 WITHOUT the suppression, so while a transition is running, a **geometric** preset (`slide-*`,
 `scale-*`, `pop`) on the suppressed side puts the box — and the point a drag starts from — where the
 picture no longer is; under a `fade` or `dissolve` (which move nothing) the two agreed before this
-ticket and disagree after it. Tracked as a follow-up ticket; the fix means handing those two modules
+ticket and disagree after it. Tracked as ESCSUITE-147; the fix means handing those two modules
 the active transition, which is a lookup on a path the perf ceilings do not cover, so it was kept out
 of this change rather than smuggled in.
 
