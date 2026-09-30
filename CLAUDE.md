@@ -1410,8 +1410,8 @@ Nine jobs, with `ci-status` as the single required check (`perf` is informationa
 - Builds ESCAPECRAFT and ESCAPEARTIST in standalone mode (`VITE_BUILD_MODE=standalone`)
 - Also downloads the `headless-artist-kit` artifact from the same CI run and renames the
   tarball to `escapesuite-headless-artist-<VERSION>.tgz` (VERSION here is the umbrella release's
-  own version — the higher of the craft and artist versions — not the kit package's
-  independent `0.1.0`)
+  own version — the higher of the craft and artist versions — not the kit package's own
+  independent version)
 - On `main`, creates a GitHub Release and attaches the single-file HTML builds — each named
   for its own app's version — and the headless-artist kit tarball directly to it
 - No cloud storage step and no license injection — the downloads are plain HTML files (and one
