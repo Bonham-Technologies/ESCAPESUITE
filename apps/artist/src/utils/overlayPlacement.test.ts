@@ -379,7 +379,7 @@ describe('agrees with craft\'s scaled border and corner (ESCSUITE-144)', () => {
     [1280, 3, 8],
     [1920, 4.5, 12],
     [3840, 9, 24],
-  ])('at a %ipx capture, the border is %i and the corner is %i', (width, border, corner) => {
+  ])('at a %ipx capture, the border is %spx and the corner is %spx', (width, border, corner) => {
     const frame = { width, height: (width * 9) / 16 }
     const camera = { width, height: (width * 9) / 16 }
     const placement: OverlayPlacement = { position: 'bottom-right', size: 0.2, shape: 'rectangle' }
