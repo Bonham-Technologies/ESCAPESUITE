@@ -1261,8 +1261,9 @@ message and navigate to its own editor itself.
   enabled button and a failure part-way, landing in the notice channel as
   `mp4ConversionFailed(...)` exactly as before this gate existed. That is strictly better
   than the old presence check and is not a complete answer; the real fix is a
-  profile-fallback chain like ARTIST's (`apps/artist/src/core/exportMP4.ts` tries High, then
-  Main, then Baseline), which CRAFT does not have yet.
+  profile-fallback chain like ARTIST's (`apps/artist/src/core/exportMP4.ts` tries five profiles
+  — High, Main, Baseline, then High and Main again at Level 5.1 for 1440p/4K — across two
+  hardware-acceleration passes), which CRAFT does not have yet.
   A second, far more common instance of the same gap (ESCSUITE-136): H.264 also refuses an
   **odd-sized** frame outright (`NotSupportedError: H264 only supports even sized frames.`),
   and the probe cannot catch that for a specific recording either — 1280x720 is even.

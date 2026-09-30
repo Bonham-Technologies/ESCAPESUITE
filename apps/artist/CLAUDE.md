@@ -2053,7 +2053,12 @@ The export pipeline includes several optimizations to improve performance:
 ### MP4 Export Reliability (`src/core/exporter.ts`)
 MP4 export includes robust error handling and codec compatibility:
 - **H.264 codec validation**: Uses `VideoEncoder.isConfigSupported()` to verify codec support before encoding
-- **Codec fallback chain**: Tries profiles in order: High Profile (`avc1.640028`) → Main Profile (`avc1.4d0028`) → Baseline Profile (`avc1.42001f`)
+- **Codec fallback chain**: Tries five H.264 profiles across two hardware-acceleration passes —
+  `prefer-hardware` first, then `no-preference` so the headless/CI path works without a GPU. Each
+  pass walks High Profile (`avc1.640028`) → Main Profile (`avc1.4d0028`) → Baseline Profile
+  (`avc1.42001f`) → High Profile Level 5.1 (`avc1.640033`) → Main Profile Level 5.1
+  (`avc1.4d0033`); the first three are Level 4.0/3.1, which `isConfigSupported` rejects above
+  1920x1080, so the two Level 5.1 entries are listed last and exist to cover 1440p and 4K
 - **Encoder error tracking**: Captures errors from encoder callbacks and propagates them instead of silent failures
 - **Backpressure timeout**: 30-second timeout on encoder queue wait to detect stuck encoders
 - **Quality-based audio bitrate**: Audio bitrate scales with quality setting (128k/192k/256k) instead of hardcoded value
