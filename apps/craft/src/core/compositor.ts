@@ -5,6 +5,8 @@ import {
   COMPOSITOR_MAX_WIDTH,
   DEFAULT_OVERLAY_PADDING,
   drawOverlay,
+  OVERLAY_BORDER_WIDTH,
+  OVERLAY_CORNER_RADIUS,
   type OverlayGeometry,
 } from './overlayGeometry';
 
@@ -71,6 +73,11 @@ export class Compositor {
       // ?? not || — a zero padding is a real choice (overlay flush against the
       // canvas edge), whereas a zero webcam size is nonsense input.
       padding: config.padding ?? DEFAULT_OVERLAY_PADDING,
+      // Unscaled (ESCSUITE-144): this canvas is capped at COMPOSITOR_MAX_WIDTH
+      // just above, so `scaleToFrame` would be the identity here anyway — the
+      // live preview draws the border and the corner exactly as it always has.
+      borderWidth: config.borderWidth ?? OVERLAY_BORDER_WIDTH,
+      cornerRadius: config.cornerRadius ?? OVERLAY_CORNER_RADIUS,
     };
   }
 

@@ -364,3 +364,35 @@ describe('strokeForPlacement', () => {
     )
   })
 })
+
+// ESCSUITE-144: craft's own composite MP4 used to draw the border and the
+// corner as a flat 3px / 8px of the raw capture, rather than scaling them the
+// way `overlayPaddingFor` scales the padding — so a 1920-wide take's MP4
+// showed two thirds of the border and the corner this side of the handoff
+// (and the live preview) agree on. Craft's `overlayGeometry.ts` now scales
+// both by the same `scaleToFrame` shape this file's `strokeForPlacement` and
+// `maskForPlacement` already used. This pins the two sides' numbers together
+// at three widths so the next drift fails here instead of only showing up in
+// a downloaded file.
+describe('agrees with craft\'s scaled border and corner (ESCSUITE-144)', () => {
+  it.each([
+    [1280, 3, 8],
+    [1920, 4.5, 12],
+    [3840, 9, 24],
+  ])('at a %ipx capture, the border is %i and the corner is %i', (width, border, corner) => {
+    const frame = { width, height: (width * 9) / 16 }
+    const camera = { width, height: (width * 9) / 16 }
+    const placement: OverlayPlacement = { position: 'bottom-right', size: 0.2, shape: 'rectangle' }
+
+    // The border, in frame pixels: strokeForPlacement stores it as a fraction
+    // of the resolution, so multiplying back by a resolution equal to the
+    // frame recovers craft's own pixel count.
+    expect(strokeForPlacement(frame, frame).width * frame.width).toBeCloseTo(border, 10)
+
+    // The corner, in frame pixels: the mask's radius is a fraction of the
+    // drawn box's shorter side, so multiplying back by that side recovers it.
+    const mask = maskForPlacement(placement, frame, camera)
+    const box = { width: frame.width * placement.size, height: (frame.width * placement.size * 9) / 16 }
+    expect(mask.radius! * Math.min(box.width, box.height)).toBeCloseTo(corner, 10)
+  })
+})

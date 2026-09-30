@@ -38,22 +38,47 @@ export const DEFAULT_OVERLAY_PADDING = 20;
  * the same two numbers so a change to the border here cannot silently stop
  * matching what the editor draws.
  *
- * The width, and `OVERLAY_CORNER_RADIUS` below, are pixels of *this* frame,
- * unlike the padding, which `overlayPaddingFor` scales — the border and the
- * corner are the weight and the radius the compositor has always drawn, and this
- * commit changes neither.
+ * The width, and `OVERLAY_CORNER_RADIUS` below, are the recorded 1280-wide
+ * preview's pixels (ESCSUITE-144): `overlayGeometryFor` scales both by
+ * `scaleToFrame`, the same shape `overlayPaddingFor` already scales the
+ * padding by, so a composite drawn from a wider raw capture shows the border
+ * and the corner at the fraction of the frame the user actually watched
+ * rather than two thirds of it. `Compositor` fills its own config with these
+ * two constants unscaled, which is correct rather than an oversight: its
+ * canvas is capped at `COMPOSITOR_MAX_WIDTH`, where `scaleToFrame` is the
+ * identity, so the live preview stays byte-identical.
  */
 export const OVERLAY_BORDER_COLOR = 'rgba(255, 255, 255, 0.8)';
 export const OVERLAY_BORDER_WIDTH = 3;
 
 /**
- * The rounded overlay's corner radius, in pixels of this frame.
+ * The rounded overlay's corner radius, in pixels of a frame at or below
+ * `COMPOSITOR_MAX_WIDTH` — see `OVERLAY_BORDER_WIDTH` above for how a wider
+ * frame's is derived.
  *
  * Was a function-local in `drawOverlay`; lifted out unchanged for the same
  * reason as the border — ARTIST stores it as `OVERLAY_CORNER_RADIUS_FRACTION`
  * (8/1280) and the two should be readable side by side.
  */
 export const OVERLAY_CORNER_RADIUS = 8;
+
+/**
+ * Scales a number measured against a preview capped at `COMPOSITOR_MAX_WIDTH`
+ * up to what it should be in a frame `frameWidth` pixels wide.
+ *
+ * The one shape `overlayPaddingFor`, and now the border and the corner, are
+ * all scaled by: identity at or below the cap (a frame the preview was never
+ * capped for), and `n x frameWidth / cap` above it, so the drawn quantity is
+ * always the same *fraction* of the frame the user watched it as.
+ *
+ * A frame with no width has no corners; the conversion fails on its own 0x0
+ * encoder configuration a moment later, and answering the input unscaled here
+ * keeps this total rather than handing NaN coordinates to a canvas.
+ */
+export function scaleToFrame(n: number, frameWidth: number): number {
+  if (frameWidth <= 0) return n;
+  return (n * frameWidth) / Math.min(frameWidth, COMPOSITOR_MAX_WIDTH);
+}
 
 /**
  * Where the camera goes in a frame, and what shape it is.
@@ -73,6 +98,10 @@ export interface OverlayGeometry {
   webcamShape: WebcamShape;
   /** Inset from the frame's edges, in pixels **of this frame**. */
   padding: number;
+  /** The border's stroke weight, in pixels **of this frame** (ESCSUITE-144). */
+  borderWidth: number;
+  /** The rounded-rectangle corner radius, in pixels **of this frame** (ESCSUITE-144). */
+  cornerRadius: number;
 }
 
 /**
@@ -86,19 +115,18 @@ export interface OverlayGeometry {
  * the preview the user watched did. Scaling by
  * `frameWidth / min(frameWidth, cap)` is exactly 1 for any frame the preview
  * was not capped for, and 1.5 at 1920.
- *
- * A frame with no width has no corners; the conversion fails on its own 0x0
- * encoder configuration a moment later, and answering the default here keeps
- * this total rather than handing NaN coordinates to a canvas.
  */
 export function overlayPaddingFor(frameWidth: number): number {
-  if (frameWidth <= 0) return DEFAULT_OVERLAY_PADDING;
-  return (DEFAULT_OVERLAY_PADDING * frameWidth) / Math.min(frameWidth, COMPOSITOR_MAX_WIDTH);
+  return scaleToFrame(DEFAULT_OVERLAY_PADDING, frameWidth);
 }
 
 /**
  * The geometry a take's stored `overlayPlacement` describes, in a frame this
  * wide — what `convertToMP4` builds once, before it starts encoding.
+ *
+ * The border and the corner (ESCSUITE-144) are scaled by `scaleToFrame`
+ * exactly as the padding is, so the composite this geometry draws into shows
+ * them at the same fraction of the frame the live preview did.
  */
 export function overlayGeometryFor(
   placement: OverlayPlacement,
@@ -109,6 +137,8 @@ export function overlayGeometryFor(
     webcamSize: placement.size,
     webcamShape: placement.shape,
     padding: overlayPaddingFor(frameWidth),
+    borderWidth: scaleToFrame(OVERLAY_BORDER_WIDTH, frameWidth),
+    cornerRadius: scaleToFrame(OVERLAY_CORNER_RADIUS, frameWidth),
   };
 }
 
@@ -128,7 +158,7 @@ export function drawOverlay(
   geometry: OverlayGeometry
 ): void {
   const { width, height } = frame;
-  const { webcamPosition, webcamSize, webcamShape, padding } = geometry;
+  const { webcamPosition, webcamSize, webcamShape, padding, borderWidth, cornerRadius } = geometry;
 
   // Calculate webcam dimensions
   const webcamWidth = width * webcamSize;
@@ -210,12 +240,12 @@ export function drawOverlay(
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
     ctx.strokeStyle = OVERLAY_BORDER_COLOR;
-    ctx.lineWidth = OVERLAY_BORDER_WIDTH;
+    ctx.lineWidth = borderWidth;
     ctx.stroke();
   } else {
     // Draw rectangular webcam overlay
     // Create rounded rectangle clip path
-    const borderRadius = OVERLAY_CORNER_RADIUS;
+    const borderRadius = cornerRadius;
     ctx.beginPath();
     ctx.roundRect(x, y, webcamWidth, webcamHeight, borderRadius);
     ctx.closePath();
@@ -229,7 +259,7 @@ export function drawOverlay(
     ctx.beginPath();
     ctx.roundRect(x, y, webcamWidth, webcamHeight, borderRadius);
     ctx.strokeStyle = OVERLAY_BORDER_COLOR;
-    ctx.lineWidth = OVERLAY_BORDER_WIDTH;
+    ctx.lineWidth = borderWidth;
     ctx.stroke();
   }
 }
