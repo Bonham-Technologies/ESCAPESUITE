@@ -120,6 +120,13 @@ export function useRecordingLibrary({
       // without telling this one. Silence here was indistinguishable from a
       // dialog that just never opened (ESCSUITE-146); the same missing blob
       // already raises a notice from "Upload to host".
+      //
+      // The three fields are cleared rather than left standing: the URL
+      // above was just revoked, so a stale value here would be a dead
+      // `blob:` handle behind whatever dialog was already open.
+      setPlaybackUrl(null);
+      setPlaybackName('');
+      setPlaybackDuration(0);
       setNotice(RECORDING_UNAVAILABLE);
       void refreshStorageSpace();
     }
