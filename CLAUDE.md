@@ -165,6 +165,10 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
   init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm', name: string }` after a
   successful export (`name` is the download filename; not sent on failure or cancellation).
+  Inbound `LOAD_VIDEO` (`{ url }`) fetches that URL the same way `?video=` does, so it is bound by
+  the same `connect-src` — a URL the page's policy refuses gets an `ERROR` reply naming the origin
+  and the policy (`code: 'LOAD_ERROR'`) instead of a generic failure. See "URL params (ARTIST)"
+  below and ESCSUITE-130.
 - **CRAFT → host**: `{ type: 'SEND_TO_EDITOR', payload: { id } }` when embedded, instead of the
   `window.open()` it uses standalone. `id` addresses the recording in the shared IndexedDB.
   CRAFT's header "Open Editor" button is deliberately *not* routed through the host — it still
@@ -216,7 +220,13 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `?suppressRestore=1` to skip the
   "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
   the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
-  applied only while the name is still the default `Untitled Project`).
+  applied only while the name is still the default `Untitled Project`). `?video=url` (and the
+  inbound `LOAD_VIDEO` message, below) fetch the URL from the page itself, so both are bound by
+  its own `connect-src` — on the hosted deployment (`connect-src 'self' ...` in `vercel.json`)
+  that means a **same-origin URL only**; a cross-origin one is refused before it leaves the page,
+  and `loadVideoFromUrl` says so by naming the origin and the likely Content-Security-Policy
+  cause, rather than a bare `Failed to fetch` (ESCSUITE-130). A self-hosted or standalone build
+  fetches under whatever `connect-src` it sets itself.
 - **`?hostOrigin=<origin>`** (both apps): the host's own origin, e.g. `https://host.example`.
   Recommended for production hosts — and effectively required of a host that offers CRAFT's
   "Upload to host", since the `'*'` fallback hands that message's **bytes**, not just an id, to

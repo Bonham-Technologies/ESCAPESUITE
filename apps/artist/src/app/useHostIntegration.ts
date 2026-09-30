@@ -156,7 +156,13 @@ export function useHostIntegration({
               addSourceVideo(metadata);
               sendMessage({ type: 'VIDEO_LOADED', payload: { id: metadata.id, name: metadata.name } });
             } catch (error) {
-              sendMessage({ type: 'ERROR', payload: { message: 'Failed to load video', code: 'LOAD_ERROR' } });
+              // ESCSUITE-130: loadVideoFromUrl already names the URL's origin
+              // and, for a cross-origin URL, the likely Content-Security-Policy
+              // cause — pass that on rather than flattening it to one generic
+              // sentence, both to the user and to the host that asked for it.
+              const message = error instanceof Error ? error.message : 'Failed to load video';
+              showNotification(message, 'error');
+              sendMessage({ type: 'ERROR', payload: { message, code: 'LOAD_ERROR' } });
             }
           }
           break;
@@ -243,6 +249,13 @@ export function useHostIntegration({
           addSourceVideo(metadata);
         } catch (error) {
           console.error('Failed to load video from URL:', error);
+          // ESCSUITE-130: same message loadVideoFromUrl raised for the
+          // console — names the origin and, cross-origin, the CSP — rather
+          // than a generic failure the user cannot act on.
+          showNotification(
+            error instanceof Error ? error.message : 'Failed to load video',
+            'error'
+          );
         }
       });
     }

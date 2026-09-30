@@ -199,6 +199,24 @@ no guards. A payload that fails validation is answered with
 `{ type: 'ERROR', payload: { message, code: 'INVALID_PROJECT' } }` and the current project is left
 untouched, undo history included. An absent payload is still silently ignored, as it always was.
 
+**`LOAD_VIDEO` and `?video=` fetch through the page's own `connect-src` (ESCSUITE-130)**:
+`loadVideoFromUrl` (`utils/integration.ts`) is a plain `fetch(url)`, so both are bound by whatever
+Content-Security-Policy the deployment sets — on the hosted deployment (`connect-src 'self'
+https://api.vercel.com https://vercel.live` in `vercel.json`) that means a **same-origin URL
+only**; a cross-origin one never leaves the page. The browser throws a bare `TypeError: Failed to
+fetch` for that refusal, a CORS refusal and an ordinary network failure alike, with no way to tell
+them apart from the exception — so `loadVideoFromUrl` catches it, resolves the URL's origin, and
+throws a message naming that origin and, when it differs from `location.origin`, the likely
+Content-Security-Policy cause (`Could not load the video from <origin>: this deployment does not
+allow loading from other origins (Content-Security-Policy), or the server refused the request.`).
+A same-origin rejection keeps a plain "the request failed" message — that is an ordinary network
+or 404 failure, not a policy one. `useHostIntegration` passes that message on rather than a
+generic one: the `?video=` path shows it via `showNotification` (as well as the existing
+`console.error`), and inbound `LOAD_VIDEO` both shows it and answers the host with
+`{ type: 'ERROR', payload: { message, code: 'LOAD_ERROR' } }` carrying it. A self-hosted or
+standalone build fetches under whatever `connect-src` it sets itself, so this only bites the
+hosted deployment. See the root `CLAUDE.md`'s "URL params (ARTIST)" bullet.
+
 ```ts
 { type: 'EXPORT_COMPLETE', payload: { blob: Blob, format: 'mp4' | 'webm', name: string } }
 // name is `${projectName || 'export'}.${format}`
@@ -208,7 +226,7 @@ untouched, undo history included. An absent payload is still silently ignored, a
 
 | Param | Effect |
 |-------|--------|
-| `?video=<url>` | Load a video from a URL (repeatable) |
+| `?video=<url>` | Load a video from a URL (repeatable). Fetched from the page itself, so bound by its `connect-src` — same-origin only on the hosted deployment (ESCSUITE-130, see above) |
 | `?project=<base64>` | Base64-encoded project state — *documented but not currently implemented* (parsed, never applied) |
 | `?autoplay=true` | Start playback once loaded — *documented but not currently implemented* (parsed, never applied) |
 | `?loadVideo=<id>` | Load a **take** from IndexedDB (ESCAPECRAFT handoff). The id names the take's primary part; every part of it joins the media library and is placed on the timeline — see "A handed-over take is several files" below |

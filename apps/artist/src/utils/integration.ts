@@ -155,7 +155,12 @@ export async function loadVideoFromUrl(
   url: string,
   onProgress?: (progress: number) => void
 ): Promise<{ blob: Blob; name: string }> {
-  const response = await fetch(url);
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw describeFetchFailure(url, error);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to fetch video: ${response.statusText}`);
@@ -202,6 +207,40 @@ export async function loadVideoFromUrl(
   });
 
   return { blob, name: extractFilename(url) };
+}
+
+/**
+ * A rejected `fetch` throws a bare `TypeError: Failed to fetch` for a CSP
+ * refusal, a CORS refusal and an ordinary network failure alike — the
+ * browser gives no way to tell those apart from the exception alone
+ * (ESCSUITE-130). Name the URL's origin, and only say the deployment's
+ * Content-Security-Policy may be the cause when that origin differs from
+ * this page's own: on the hosted deployment `connect-src 'self' ...`
+ * refuses every cross-origin fetch before it reaches the network, so
+ * `?video=`/`LOAD_VIDEO` only ever works with a same-origin URL there. A
+ * same-origin rejection is left generic — that is a plain network or 404
+ * failure, not a policy one, and naming the CSP would be misleading.
+ */
+function describeFetchFailure(url: string, error: unknown): Error {
+  if (!(error instanceof TypeError)) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  let origin: string;
+  try {
+    origin = new URL(url, window.location.href).origin;
+  } catch {
+    origin = url;
+  }
+
+  if (origin === window.location.origin) {
+    return new Error(`Could not load the video from ${origin}: the request failed.`);
+  }
+
+  return new Error(
+    `Could not load the video from ${origin}: this deployment does not allow loading from ` +
+      'other origins (Content-Security-Policy), or the server refused the request.'
+  );
 }
 
 /**
@@ -269,7 +308,10 @@ export function generateShareUrl(
  * Integration message types for documentation:
  *
  * Incoming messages (from parent):
- * - LOAD_VIDEO: { url: string } - Load a video from URL
+ * - LOAD_VIDEO: { url: string } - Load a video from URL. Fetched from this page, so bound by its
+ *   own connect-src (ESCSUITE-130): on the hosted deployment that is same-origin only, and a URL
+ *   the policy refuses gets an ERROR reply (code: 'LOAD_ERROR') naming the origin and the likely
+ *   cause instead of a generic failure — see loadVideoFromUrl.
  * - LOAD_PROJECT: Project - Load a project. The payload IS the project object
  *   (not wrapped in a `data` field). Since ESCSUITE-102 a present payload is
  *   validated the same way a dropped .veditor file is (`parseProject` in
@@ -351,7 +393,8 @@ export function generateShareUrl(
  *   part.
  *
  * URL parameters (read once at startup, see parseUrlParams):
- * - video=<url> - Load a video from a URL (repeatable)
+ * - video=<url> - Load a video from a URL (repeatable). Fetched from this page, so bound by its
+ *   own connect-src (ESCSUITE-130) — see LOAD_VIDEO above.
  * - project=<base64> - Load a base64-encoded project
  *   [documented but not currently implemented - parsed, never applied]
  * - autoplay=true - Start playback once loaded
