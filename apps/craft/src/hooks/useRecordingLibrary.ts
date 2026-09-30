@@ -11,7 +11,7 @@ import { analytics } from '../utils/analytics';
 import { downloadBlob } from '../utils/downloadBlob';
 import { sendToEditor } from '../utils/sendToEditor';
 import { safeFileName } from '../utils/recordingFormat';
-import { DELETE_FAILED } from '../utils/notices';
+import { DELETE_FAILED, RECORDING_UNAVAILABLE } from '../utils/notices';
 import type { Recording } from '../store/types';
 
 export interface RecordingLibraryDeps {
@@ -113,6 +113,15 @@ export function useRecordingLibrary({
       // Pass known duration so the player doesn't depend on WebM metadata
       const recording = recordings.find(r => r.id === id);
       setPlaybackDuration(recording?.duration || 0);
+    } else {
+      // The row is drawn from metadata the store still holds, but the bytes
+      // it names are gone — most commonly a delete from ARTIST's media
+      // library in another tab, which removes the shared IndexedDB row
+      // without telling this one. Silence here was indistinguishable from a
+      // dialog that just never opened (ESCSUITE-146); the same missing blob
+      // already raises a notice from "Upload to host".
+      setNotice(RECORDING_UNAVAILABLE);
+      void refreshStorageSpace();
     }
   };
 
@@ -131,7 +140,12 @@ export function useRecordingLibrary({
   // Download a recording as WebM (instant — blob is already fixed during save)
   const handleDownload = async (id: string, name: string) => {
     const blob = await getVideoBlob(id);
-    if (!blob) return;
+    if (!blob) {
+      // Same missing-blob fact as handlePlayRecording's else — see there.
+      setNotice(RECORDING_UNAVAILABLE);
+      void refreshStorageSpace();
+      return;
+    }
 
     analytics.recordingDownloaded();
     // The same anchor the MP4 path uses, deferred revoke included.
