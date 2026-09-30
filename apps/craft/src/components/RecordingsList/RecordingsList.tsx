@@ -157,6 +157,19 @@ export function RecordingsList({
             // and carries no conversions: those are the take's downloads and
             // live on the primary row.
             const companionLabel = companionPartFor(recording.role);
+            // ESCSUITE-145: a row's `takeId` names its primary, but the
+            // primary can be gone — deleted from ARTIST's media library while
+            // this list still holds the orphaned companion (`takeOrder.ts`
+            // shows it rather than hiding a file the user can still delete).
+            // Sending an id nothing in this list answers to would hand the
+            // editor a `?loadVideo=` that resolves to nothing at all, so this
+            // falls back to the row's own id whenever its `takeId` is absent
+            // from the list — which degrades exactly the way a non-primary id
+            // already does: imported and placed alone.
+            const editorTargetId =
+              recording.takeId && recordings.some((r) => r.id === recording.takeId)
+                ? recording.takeId
+                : recording.id;
             // One note for the whole library, and only while there is one: it
             // is a fact about the app (a codec the browser lacks, a conversion
             // already running) rather than about this take.
@@ -243,10 +256,11 @@ export function RecordingsList({
                     </button>
                   )}
                   {/* One take opens one project: either row hands over the
-                      primary's id and the editor resolves the siblings. */}
+                      primary's id and the editor resolves the siblings — or,
+                      for an orphaned companion, its own id (ESCSUITE-145). */}
                   <button
                     className={styles.iconButton}
-                    onClick={() => onSendToEditor(recording.takeId ?? recording.id)}
+                    onClick={() => onSendToEditor(editorTargetId)}
                     title="Open in Editor"
                     aria-label={`Open ${recording.name} in Editor`}
                   >
