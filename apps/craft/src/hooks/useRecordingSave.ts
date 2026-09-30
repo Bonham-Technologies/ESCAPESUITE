@@ -45,6 +45,11 @@ export type { CapturedTake };
  * A default of `true` for any of these would be the bug ESCSUITE-70 deleted,
  * reached again by leaving an argument out; nothing in the app takes this
  * path, since the controller always says.
+ *
+ * `hasVideoSource` is the one field where `true` is the exception rather than
+ * the bug, stated here on purpose: "a bare screen" above is a picture, so
+ * `true` is what a caller saying nothing is taken to mean, and `false` would
+ * silently store a screen recording as an audio file (ESCSUITE-143).
  */
 const NOTHING_CAPTURED: CapturedTake = {
   micAcquired: false,
@@ -52,6 +57,7 @@ const NOTHING_CAPTURED: CapturedTake = {
   systemAudioEnabled: false,
   webcamEnabled: false,
   overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+  hasVideoSource: true,
 };
 
 /** Save a finished take. `recordedDuration` is what the recorder timed. */
@@ -109,19 +115,33 @@ export function useRecordingSave({
     }
 
     const id = uuidv4();
-    // Pass the known duration since WebM from MediaRecorder often has issues
-    const metadata = await extractVideoMetadata(blob, recordedDuration);
+    // A take with no picture (screen and webcam both off) is sound only, and
+    // probing it would invent one: `extractVideoMetadata` reports
+    // `videoWidth || 1920`, so an audio-only WebM comes back 1920x1080 exactly
+    // the way a video did (ESCSUITE-143). Stored the way an audio companion
+    // already is — 0x0, the recorder's own clock for the duration — with no
+    // probe run at all.
+    const metadata = captured.hasVideoSource
+      ? await extractVideoMetadata(blob, recordedDuration) // Pass the known duration since WebM from MediaRecorder often has issues
+      : { duration: recordedDuration, width: 0, height: 0 };
     const now = Date.now();
 
-    // Use pre-captured thumbnail from live preview (more reliable than from blob)
-    // Fall back to generating from blob if capture failed
-    let thumbnail = capturedThumbnailRef.current;
-    if (!thumbnail) {
-      try {
-        thumbnail = await generateThumbnail(blob);
-      } catch {
-        // Create a simple placeholder thumbnail if all else fails
-        thumbnail = await createPlaceholderThumbnail();
+    // A take with no picture has nothing to decode a thumbnail from either —
+    // same reasoning as the metadata probe above, and the same contract an
+    // audio companion already follows: no thumbnail at all, so the library
+    // draws its own empty placeholder instead of a generated blank frame.
+    let thumbnail: Blob | null = null;
+    if (captured.hasVideoSource) {
+      // Use pre-captured thumbnail from live preview (more reliable than from blob)
+      // Fall back to generating from blob if capture failed
+      thumbnail = capturedThumbnailRef.current;
+      if (!thumbnail) {
+        try {
+          thumbnail = await generateThumbnail(blob);
+        } catch {
+          // Create a simple placeholder thumbnail if all else fails
+          thumbnail = await createPlaceholderThumbnail();
+        }
       }
     }
     capturedThumbnailRef.current = null; // Clear for next recording
@@ -215,6 +235,11 @@ export function useRecordingSave({
       height: metadata.height,
       hasAudio,
       hasWebcam: captured.webcamEnabled,
+      // Sound only, the same fact `captured.hasVideoSource` is everywhere else
+      // in this pass (ESCSUITE-143) — `buildSourceVideo` turns it into
+      // `mediaType`/`frameRate`, the same way a role already does for a
+      // companion.
+      capturedPicture: captured.hasVideoSource,
       ...(isCompanionTake
         ? { takeId: id, role: 'screen' as const, startOffset: 0, overlayPlacement }
         : {}),
@@ -230,12 +255,19 @@ export function useRecordingSave({
     // ARTIST immediately, and (for a separate-tracks take) its companions
     // never written at all (ESCSUITE-107). Warn once and carry on with no
     // thumbnail, the same posture the companions' own loop takes below.
+    //
+    // No thumbnail at all is also the take-with-no-picture's own answer
+    // (ESCSUITE-143): `thumbnail` is `null` for such a take, exactly the way a
+    // mic/system companion's is, so nothing is stored and `primaryThumbnailUrl`
+    // stays unset.
     let primaryThumbnailUrl: string | undefined;
-    try {
-      await storeThumbnail(id, thumbnail);
-      primaryThumbnailUrl = createBlobUrl(thumbnail);
-    } catch (error) {
-      console.warn('Recording thumbnail could not be saved:', error);
+    if (thumbnail) {
+      try {
+        await storeThumbnail(id, thumbnail);
+        primaryThumbnailUrl = createBlobUrl(thumbnail);
+      } catch (error) {
+        console.warn('Recording thumbnail could not be saved:', error);
+      }
     }
 
     // A companion may never cost the take another part: the primary's own

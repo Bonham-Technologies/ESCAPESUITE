@@ -1,4 +1,5 @@
 import { NO_AUDIO_TRACK_REASON, type Mp4Conversion } from '../../hooks/useMp4Download';
+import { MP4_NO_VIDEO_REASON } from '../../core/converter';
 import type { Recording } from '../../store/types';
 import { formatDuration } from '../../utils/recordingFormat';
 import { companionPartFor } from '../../utils/companionParts';
@@ -90,7 +91,11 @@ const FORMAT_LABELS: Record<Mp4Conversion['format'], string> = {
  * (`m4aBlockedReason` — an AAC encoder is a hard requirement there, where an
  * MP4 merely goes silent without one) and by the recording (`hasAudio`, the
  * one gate this component decides for itself, because it is a fact about the
- * row rather than about the app).
+ * row rather than about the app). MP4 has the mirror-image per-recording gate
+ * (ESCSUITE-143): a take with no picture at all — `mediaType === 'audio'`, a
+ * mic-only take — disables the button with `MP4_NO_VIDEO_REASON`, the same
+ * sentence `convertToMP4` itself throws if this ever slipped through, rather
+ * than letting the user start a conversion that can only fail.
  *
  * The note and the blocked reason are two props because they are two
  * questions. A button can be blocked by something not worth saying out loud
@@ -129,7 +134,16 @@ export function RecordingsList({
             // The row being converted shows its progress instead of a reason:
             // "one at a time" is not why *this* button is unavailable.
             const converting = mp4Converting?.id === recording.id ? mp4Converting : null;
-            const blockedReason = converting ? null : mp4BlockedReason;
+            // The browser's answer first, then this recording's — the same
+            // order `m4aReason` below reads in. A take with no picture at all
+            // (a mic-only take, ESCSUITE-143) is refused by the converter
+            // itself (`MP4_NO_VIDEO_REASON`), so the button is disabled with
+            // that reason up front rather than offering a conversion that can
+            // only fail at click.
+            const blockedReason =
+              converting
+                ? null
+                : mp4BlockedReason ?? (recording.mediaType === 'audio' ? MP4_NO_VIDEO_REASON : null);
             // What the conversion in flight is called, so a row running an M4A
             // does not describe itself as converting to MP4.
             const convertingLabel = converting ? FORMAT_LABELS[converting.format] : null;

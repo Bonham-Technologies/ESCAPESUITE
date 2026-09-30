@@ -84,6 +84,7 @@ function captured(overrides: Partial<CapturedTake> = {}): CapturedTake {
     systemAudioEnabled: false,
     webcamEnabled: false,
     overlayPlacement: { position: 'bottom-right', size: 0.2, shape: 'circle' },
+    hasVideoSource: true,
     ...overrides,
   }
 }
@@ -419,6 +420,63 @@ describe('useRecordingSave list entry', () => {
     expect(added).toEqual([])
     expect(await getRecordingsMetadata()).toEqual([])
     expect(vi.mocked(storeThumbnail)).not.toHaveBeenCalled()
+  })
+})
+
+// ESCSUITE-143. A take recorded with Screen and Webcam both off (Microphone
+// alone satisfies the record gate — recordReadiness.ts) has no picture at
+// all, and used to be stored as a 1920x1080 30fps video: `extractVideoMetadata`
+// reports `videoWidth || 1920` for a file with no video track, and
+// `companionPartFor(undefined)` — there is no role on a plain take's primary —
+// answers `null`, so nothing about the take's *role* ever said "this is
+// audio". The fix is `captured.hasVideoSource`, resolved by the controller
+// from the same streams `recorder-factory.ts` is asked about, carried to the
+// save path instead of re-derived from a role that was never going to answer
+// it.
+describe('useRecordingSave for a take with no picture', () => {
+  it('stores it as audio, like an audio companion — no probe, no thumbnail', async () => {
+    capturedThumbnailRef.current = new Blob(['preview-frame'], { type: 'image/jpeg' })
+    const { result } = mountSave()
+
+    await result.current(RAW, 6, null, captured({ micAcquired: true, hasVideoSource: false }))
+
+    // Neither decoding step is asked to invent a picture that is not there:
+    // extractVideoMetadata would report 1920x1080 and generateThumbnail would
+    // land on the placeholder, both of which used to happen.
+    expect(thumbnailModule.extractVideoMetadata).not.toHaveBeenCalled()
+    expect(thumbnailModule.generateThumbnail).not.toHaveBeenCalled()
+
+    const stored = await getRecordingsMetadata()
+    expect(stored).toHaveLength(1)
+    expect(stored[0]).toMatchObject({
+      mediaType: 'audio',
+      width: 0,
+      height: 0,
+      frameRate: 0,
+    })
+    // The recorder's own clock, exactly as an audio companion's duration is —
+    // there is no file to probe one out of.
+    expect(stored[0].duration).toBe(6)
+
+    // No thumbnail at all, the same contract a mic/system companion already
+    // follows: the library draws its own empty placeholder rather than a
+    // generated blank frame, and a pre-captured preview frame (there should
+    // never be one for a take with nothing on screen, but this take is handed
+    // one anyway) is not used either.
+    await expect(getThumbnail(stored[0].id)).resolves.toBeUndefined()
+    expect(added).toHaveLength(1)
+    expect('thumbnailUrl' in added[0]).toBe(false)
+  })
+
+  it('still records a picture take as video — the branch the fix must not flip', async () => {
+    const { result } = mountSave()
+
+    await result.current(RAW, 6, null, captured({ hasVideoSource: true }))
+
+    expect(thumbnailModule.extractVideoMetadata).toHaveBeenCalledTimes(1)
+    const stored = await getRecordingsMetadata()
+    expect(stored[0].mediaType).toBe('video')
+    expect(stored[0].frameRate).toBe(30)
   })
 })
 

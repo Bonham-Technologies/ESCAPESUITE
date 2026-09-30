@@ -122,6 +122,33 @@ describe('buildRecordingEntry', () => {
 
     expect(entry.hasAudio).toBe(false)
   })
+
+  // ESCSUITE-143. `mediaType` is what lets the library disable MP4 for a take
+  // with no picture — carried onto the list entry the same way `takeId` and
+  // `role` already are: present only when the stored record has it.
+  it('carries mediaType onto the list entry when the stored record has one', () => {
+    const entry = buildRecordingEntry({
+      sourceVideo: { ...sourceVideo, mediaType: 'audio' },
+      now: 123,
+      size: 456,
+      hasWebcam: false,
+      hasAudio: true,
+    })
+
+    expect(entry.mediaType).toBe('audio')
+  })
+
+  it('leaves mediaType off the entry when the stored record has none', () => {
+    const entry = buildRecordingEntry({
+      sourceVideo,
+      now: 123,
+      size: 456,
+      hasWebcam: true,
+      hasAudio: false,
+    })
+
+    expect('mediaType' in entry).toBe(false)
+  })
 })
 
 describe('buildSourceVideo for a separate-tracks take', () => {
@@ -302,6 +329,49 @@ describe('buildSourceVideo for an audio companion', () => {
     expect(webcam.frameRate).toBe(30)
     expect(primary.mediaType).toBe('video')
     expect(primary.frameRate).toBe(30)
+  })
+})
+
+// ESCSUITE-143. `capturedPicture` is the primary's own answer to "is this
+// take sound only?" — the same question a companion's role already answers
+// via `part?.isAudio`. Defaults to `true` so every call above, none of which
+// passes it, keeps meaning what it always has.
+describe('buildSourceVideo for a take with no picture', () => {
+  it('stores the primary as audio when no picture was captured, no role needed', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'rec-audio-only',
+      now: 0,
+      blob: new Blob(['mic'], { type: 'audio/webm' }),
+      duration: 6,
+      width: 0,
+      height: 0,
+      hasAudio: true,
+      hasWebcam: false,
+      capturedPicture: false,
+    })
+
+    expect(sourceVideo.mediaType).toBe('audio')
+    expect(sourceVideo.frameRate).toBe(0)
+    // No role at all — a plain take's primary never has one — and the take is
+    // still named the same way a plain take's primary always is.
+    expect('role' in sourceVideo).toBe(false)
+    expect(sourceVideo.name).toBe(`Recording ${new Date(0).toLocaleString()}`)
+  })
+
+  it('defaults to true, so every existing caller keeps meaning "this is a picture"', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'rec-1',
+      now: 0,
+      blob: new Blob(['screen'], { type: 'video/webm' }),
+      duration: 6,
+      width: 1280,
+      height: 720,
+      hasAudio: false,
+      hasWebcam: false,
+    })
+
+    expect(sourceVideo.mediaType).toBe('video')
+    expect(sourceVideo.frameRate).toBe(30)
   })
 })
 

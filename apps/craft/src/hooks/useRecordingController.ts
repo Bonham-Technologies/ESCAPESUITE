@@ -658,6 +658,7 @@ export function useRecordingController({
             systemAudioEnabled,
             webcamEnabled,
             overlayPlacement,
+            hasVideoSource,
           }).then(() => {
             setState('idle');
           }).catch((err) => {

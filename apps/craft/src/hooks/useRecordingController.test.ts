@@ -49,6 +49,9 @@ const CAPTURED_DEFAULTS = {
   systemAudioEnabled: false,
   webcamEnabled: false,
   overlayPlacement: { position: 'bottom-right' as const, size: 0.2, shape: 'circle' as const },
+  // `defaultConfig.screenEnabled` is true, so every test that spreads this in
+  // without overriding screen/webcam is a take with a picture (ESCSUITE-143).
+  hasVideoSource: true,
 }
 
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
@@ -1129,6 +1132,24 @@ describe('useRecordingController what the take captured', () => {
     expect(
       await capturedAudioOf({ microphoneEnabled: false }, { mic: micStreamWithTrack() })
     ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
+  })
+
+  // ESCSUITE-143. Screen and webcam both off is the one shape that leaves the
+  // take with no picture at all — the save path's own `hasVideoSource` is what
+  // tells `buildSourceVideo` to store it the way an audio companion already is
+  // rather than inventing a 1920x1080 frame rate for a file that has none.
+  it('says there is no video source for a take with both video sources off', async () => {
+    expect(
+      await capturedAudioOf(
+        { screenEnabled: false, webcamEnabled: false, microphoneEnabled: true },
+        { screen: null, webcam: null, mic: micStreamWithTrack() }
+      )
+    ).toEqual({
+      micAcquired: true,
+      separateTracks: false,
+      ...CAPTURED_DEFAULTS,
+      hasVideoSource: false,
+    })
   })
 })
 

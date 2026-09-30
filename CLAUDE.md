@@ -1325,13 +1325,36 @@ awaits `processVideoFile`, whose IndexedDB writes reject with a `DOMException` t
 ten. The two branches still uncovered in `utils/integration.ts` are the streaming reader's, which
 predate this ticket. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/craft` was re-measured 2026-09-30 for ESCSUITE-143 (a take with no picture — the
+microphone alone — is stored as audio, the way the ESCSUITE-14 companions are, instead of as a
+1920×1080 video with a fabricated thumbnail; and the library's MP4 button disables itself with the
+converter's own reason for such a row): 100.00 / 99.51 / **97.73** / 100.00 against the
+100.00 / 99.51 / 97.70 / 100.00 the commit this branch was rebased onto measures — branches up three
+hundredths, the other three unmoved. Measured in one sitting, the base gives 1,318 / 1,349 branches
+and this branch 1,335 / 1,366: seventeen new branches, seventeen covered, the same 31 uncovered as
+before (statements 2,473 / 2,485 → 2,477 / 2,489, lines 2,321 → 2,325, functions 446 on both; the
+same 12 statements uncovered, all in the four files that carried them before — `VideoPlayer.tsx`,
+`converter.ts`, `webcodecs-recorder.ts` and `useRecordingController.ts`). Every file the ticket
+touches measures 100 on branches and statements: `hooks/useRecordingSave.ts`'s `hasVideoSource`
+choice — resolved once per attempt from the same streams the recorder factory sees and carried in
+`onStop`'s closure, so the recorder, the repair key and the stored `mediaType` cannot disagree —
+and the arm it gates, which skips the metadata probe and the thumbnail and stores
+`mediaType: 'audio'` with no dimensions; `utils/recordingMetadata.ts`'s audio shape;
+`store/recorderStore.ts` carrying the optional `mediaType` through `buildRecordingEntry`, so a
+recording stored before this change reads as video; and `RecordingsList.tsx`'s
+`mp4BlockedReason ?? (mediaType === 'audio' ? MP4_NO_VIDEO_REASON : null)`, reached with an
+audio row by the review's red case and with a video row by every download case that was already
+there. The thirteen red cases (a microphone-only take stored as audio, no probe, no thumbnail, MP4
+disabled with the reason) and the six the fix round added are what put every arm on both sides.
+**No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.51 | 97.70 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.51 | 97.73 | 100.00 |
 | `@escapesuite/artist` | 99.54 | 98.90 | 94.81 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |

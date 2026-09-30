@@ -7,7 +7,7 @@ export type {
   OverlayPlacement,
 } from '@escapesuite/shared/types'
 
-import type { RecordingRole } from '@escapesuite/shared/types'
+import type { MediaType, RecordingRole } from '@escapesuite/shared/types'
 
 // Recording-specific types
 
@@ -177,6 +177,14 @@ export interface Recording {
   takeId?: string;
   /** Which half of the take this row is; absent on a single-file take. */
   role?: RecordingRole;
+  /**
+   * `'audio'` for a part with no picture — an audio companion, or (since
+   * ESCSUITE-143) a take recorded with no video source at all. Absent rather
+   * than defaulted to `'video'`: a recording saved before this field existed
+   * simply says nothing, and the library reads that the same way it already
+   * reads a missing `hasWebcam`/`hasAudio` — as "not known to be otherwise".
+   */
+  mediaType?: MediaType;
 }
 
 export interface RecorderStore {
