@@ -1013,3 +1013,108 @@ describe('trimAnimation (ESCSUITE-110)', () => {
     expect(result.keyframes.opacity?.[1].value).toBeCloseTo(0.91, 5)
   })
 })
+
+// ESCSUITE-139: a transition owns the entrance of its incoming clip and the
+// exit of its outgoing clip, so the renderer asks for one of those sides'
+// animated state with that clip's own preset dropped. Dropping it IS the
+// steady state the ruling asks for, with no second interpolation path and no
+// special values: every in-preset's LAST keyframe and every out-preset's FIRST
+// keyframe hold the clip's own base transform/effects, so an ignored in-preset
+// reads exactly as "already finished" and an ignored out-preset exactly as
+// "not started yet".
+describe('getAnimatedValues with a preset side suppressed (ESCSUITE-139)', () => {
+  const fadeBothWays: ClipAnimation = {
+    in: { type: 'fade', duration: 0.5, easing: 'linear' },
+    out: { type: 'fade', duration: 0.5, easing: 'linear' },
+    keyframes: {},
+  }
+
+  it('reads a suppressed in-preset as complete at the very start of the clip', () => {
+    // Without the option, the same instant is the fade's own opacity 0.
+    expect(getAnimatedValues(0, 2, fadeBothWays, baseTransform, baseEffects).opacity).toBe(0)
+
+    const suppressed = getAnimatedValues(0, 2, fadeBothWays, baseTransform, baseEffects, {
+      suppressPreset: 'in',
+    })
+
+    expect(suppressed.opacity).toBe(baseTransform.opacity)
+  })
+
+  it('leaves the out-preset applied while the in-preset is suppressed', () => {
+    const atEnd = getAnimatedValues(2, 2, fadeBothWays, baseTransform, baseEffects, {
+      suppressPreset: 'in',
+    })
+
+    expect(atEnd.opacity).toBe(0)
+  })
+
+  it('reads a suppressed out-preset as not started at the very end of the clip', () => {
+    expect(getAnimatedValues(2, 2, fadeBothWays, baseTransform, baseEffects).opacity).toBe(0)
+
+    const suppressed = getAnimatedValues(2, 2, fadeBothWays, baseTransform, baseEffects, {
+      suppressPreset: 'out',
+    })
+
+    expect(suppressed.opacity).toBe(baseTransform.opacity)
+  })
+
+  it('leaves the in-preset applied while the out-preset is suppressed', () => {
+    const atStart = getAnimatedValues(0, 2, fadeBothWays, baseTransform, baseEffects, {
+      suppressPreset: 'out',
+    })
+
+    expect(atStart.opacity).toBe(0)
+  })
+
+  it('still applies the clip own keyframes', () => {
+    // The ruling suppresses a preset, not the animation: a keyframe track the
+    // user authored is what they authored, transition or no transition.
+    const animation: ClipAnimation = {
+      in: { type: 'fade', duration: 0.5, easing: 'linear' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: {
+        x: [
+          { time: 0, value: 0, easing: 'linear' },
+          { time: 2, value: 0.8, easing: 'linear' },
+        ],
+      },
+    }
+
+    const suppressed = getAnimatedValues(1, 2, animation, baseTransform, baseEffects, {
+      suppressPreset: 'in',
+    })
+
+    expect(suppressed.x).toBeCloseTo(0.4, 10)
+    expect(suppressed.opacity).toBe(baseTransform.opacity)
+  })
+
+  it('suppresses every property the preset drives, not only opacity', () => {
+    // `blur` is the in-preset that writes two tracks, so it is the one that
+    // would expose a suppression written per property instead of per side.
+    const animation: ClipAnimation = {
+      in: { type: 'blur', duration: 0.5, easing: 'linear' },
+      out: { type: 'none', duration: 0, easing: 'linear' },
+      keyframes: {},
+    }
+
+    const plain = getAnimatedValues(0, 2, animation, baseTransform, baseEffects)
+    expect(plain.blur).toBe(20)
+    expect(plain.opacity).toBe(0)
+
+    const suppressed = getAnimatedValues(0, 2, animation, baseTransform, baseEffects, {
+      suppressPreset: 'in',
+    })
+
+    expect(suppressed.blur).toBe(baseEffects.blur)
+    expect(suppressed.opacity).toBe(baseTransform.opacity)
+  })
+
+  it('applies both presets when the options say nothing', () => {
+    // The empty-options case, so the suppression can only ever be opt-in.
+    const atStart = getAnimatedValues(0, 2, fadeBothWays, baseTransform, baseEffects, {})
+    const atEnd = getAnimatedValues(2, 2, fadeBothWays, baseTransform, baseEffects, {})
+
+    expect(atStart.opacity).toBe(0)
+    expect(atEnd.opacity).toBe(0)
+  })
+})
