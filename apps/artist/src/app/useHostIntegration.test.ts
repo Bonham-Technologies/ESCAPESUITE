@@ -117,6 +117,19 @@ describe('inbound messages', () => {
     expect(deps.showNotification).toHaveBeenCalledWith(refusal, 'error')
   })
 
+  it('LOAD_VIDEO falls back to a generic message for a rejection with none (ESCSUITE-130)', async () => {
+    vi.mocked(loadVideoFromUrl).mockRejectedValue('boom')
+    await mountIntegration()
+
+    await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/gone.mp4' } })
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'ERROR',
+      payload: { message: 'Failed to load video', code: 'LOAD_ERROR' },
+    })
+    expect(deps.showNotification).toHaveBeenCalledWith('Failed to load video', 'error')
+  })
+
   it.each([
     ['no payload at all', undefined],
     ['a payload with no url', { name: 'clip.mp4' }],
@@ -254,6 +267,15 @@ describe('the ?video= parameter', () => {
     expect(consoleError).toHaveBeenCalledWith('Failed to load video from URL:', expect.any(Error))
     expect(deps.addSourceVideo).not.toHaveBeenCalled()
     expect(deps.showNotification).toHaveBeenCalledWith(refusal, 'error')
+  })
+
+  it('falls back to a generic notification for a rejection with no message (ESCSUITE-130)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(loadVideoFromUrl).mockRejectedValue('boom')
+
+    await mountIntegration({ videos: ['https://host.example/gone.mp4'] })
+
+    expect(deps.showNotification).toHaveBeenCalledWith('Failed to load video', 'error')
   })
 })
 

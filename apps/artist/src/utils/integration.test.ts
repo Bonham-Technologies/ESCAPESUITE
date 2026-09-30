@@ -510,6 +510,21 @@ describe('integration', () => {
       await expect(loadVideoFromUrl('https://example.com/clip.mp4')).rejects.toThrow('boom')
     })
 
+    it('falls back to the raw string when a refused URL cannot be parsed for its origin', async () => {
+      vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'))
+
+      await expect(loadVideoFromUrl('http://a b/x')).rejects.toThrow(
+        'Could not load the video from http://a b/x: this deployment does not allow loading ' +
+          'from other origins (Content-Security-Policy), or the server refused the request.'
+      )
+    })
+
+    it('wraps a non-Error, non-TypeError fetch rejection in an Error', async () => {
+      vi.mocked(fetch).mockRejectedValue('boom')
+
+      await expect(loadVideoFromUrl('https://example.com/clip.mp4')).rejects.toThrow('boom')
+    })
+
     it('tracks progress when streaming', async () => {
       const onProgress = vi.fn()
       const chunks = [
