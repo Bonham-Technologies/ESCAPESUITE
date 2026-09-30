@@ -232,8 +232,15 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - Proved end to end in a real iframe by `apps/e2e/tests/integration/host-embedding.spec.ts`.
 
 ### Headless render service (services/headless-artist)
-- `@escapesuite/headless-artist`: a one-shot CLI that renders ESCAPEARTIST projects in headless
-  Chromium (via Playwright) outside the browser — for servers or GPU boxes, no UI involved.
+- `@escapesuite/headless-artist`: a CLI with two commands — one-shot `render` and a long-running
+  `serve` (`http.createServer` with `GET /healthz`, `POST /render`, a bounded FIFO job queue, a
+  1 MB body cap and a sink allow-list) — that renders ESCAPEARTIST projects in headless Chromium
+  (via Playwright) outside the browser, for servers or GPU boxes with no UI involved. A job spec
+  names its input as either a self-contained `bundle` or a `manifest` (a small JSON pointing at
+  source media already on disk, for a large project) and writes to one of four output sinks —
+  `volume`, `command`, `webhook`, `s3` — each producing a verification manifest (hash, dimensions,
+  duration) alongside the render. `services/headless-artist/README.md` is the protocol reference,
+  the way the Integration API section above links `apps/artist/src/utils/integration.ts`.
 - Drives the same `dist-headless/headless.html` bundle ESCAPEARTIST builds for the browser
   (`window.__renderProject` / `window.__renderProjectToFile` — see `apps/artist/CLAUDE.md`).
 - Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);
