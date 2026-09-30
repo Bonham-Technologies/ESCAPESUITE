@@ -586,6 +586,38 @@ describe('VideoUploader', () => {
       await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
     })
 
+    // ESCSUITE-142 review round 2 (coverage): the previous case only ever
+    // failed one id, so the notice's plural branch (`failed !== 1 ? 's' :
+    // ''`) was never reached. Two failures also exercises "the surviving
+    // rows are the failed ones" with more than one survivor.
+    it('pluralises the notice when more than one file could not be removed', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'two.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'two.mp4' })
+      await storeVideo('video3', new Blob(['bytes']), { ...videoMeta, id: 'video3', name: 'three.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video3', name: 'three.mp4' })
+
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'video1' || id === 'video2') throw new Error('disk full')
+        return realDeleteVideo(id)
+      })
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() =>
+        expect(store().sourceVideos.map((v) => v.id).sort()).toEqual(['video1', 'video2'])
+      )
+      expect(showNotification).toHaveBeenCalledWith('Could not remove 2 files from storage', 'error')
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('video1')
+      expect(remainingIds).toContain('video2')
+      expect(remainingIds).not.toContain('video3')
+    })
+
     // MINOR 3 (ESCSUITE-142 review): the render-time `lockedMedia` snapshot
     // the button uses to decide what to *offer* is not safe to trust once the
     // loop is `await`ing between ids — a track locked while an earlier id's
