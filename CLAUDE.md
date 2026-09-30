@@ -287,7 +287,7 @@ Test counts change frequently as coverage grows; run `pnpm test` for the current
 
 ### Performance benchmarks
 
-`pnpm perf` measures, it does not assert. `apps/e2e/scripts/perf.mjs` runs the Chromium-only
+The benchmarks measure, they do not assert. `apps/e2e/scripts/perf.mjs` runs the Chromium-only
 Playwright project in `apps/e2e/tests/perf/` (`playwright.perf.config.ts`: one worker, no
 retries, fixed launch args) and then the headless kit's `src/perf.bench.test.ts`, then
 **always** merges whatever results exist with `apps/e2e/scripts/perf-report.mjs` into
@@ -295,7 +295,13 @@ retries, fixed launch args) and then the headless kit's `src/perf.bench.test.ts`
 `$GITHUB_STEP_SUMMARY` in CI) — a failed benchmark still leaves the surviving numbers
 readable, though `pnpm perf` itself then exits non-zero. `perf-results/` is emptied by the
 perf project's `globalSetup` first, so a stale result can never be reported as current.
-All three outputs are gitignored.
+All three outputs are gitignored. `tests/perf/` also holds `visual.spec.ts`, which is not a
+benchmark and does assert: a `toHaveScreenshot` pixel guard on the composited preview (self-skips
+when no baseline exists for the platform — only macOS is committed) and a blur-band measurement
+with no such skip, so it runs everywhere `pnpm perf` runs, CI included. It rides along in the
+same `pnpm perf` invocation because it protects the same preview-rasterisation work the
+benchmarks measure, not because it is one itself — a red `pnpm perf` from a moved pixel or a
+blur band outside tolerance means this spec, not a benchmark or a tripwire below.
 
 Ten benchmarks, each run three times and reported as the median: four
 ESCAPEARTIST, five ESCAPECRAFT, and the headless kit render. The four
