@@ -45,12 +45,15 @@ export const OVERLAY_MARGIN_FRACTION = DEFAULT_OVERLAY_PADDING / COMPOSITOR_MAX_
 /**
  * ESCAPECRAFT's rounded-rectangle corner, as a fraction of the frame's width.
  *
- * `drawOverlay` rounds the camera's corners by a flat `OVERLAY_CORNER_RADIUS`
- * (8 px) on a canvas capped at `COMPOSITOR_MAX_WIDTH`
- * (`apps/craft/src/core/overlayGeometry.ts`), so what the user saw is 8/1280 of
- * the frame. Stored as a fraction for the same reason the inset is one: ARTIST
- * has a resolution-change dialog, and a pixel count would silently restyle the
- * corners of a clip the user never touched.
+ * The live preview rounds the camera's corners by a flat `OVERLAY_CORNER_RADIUS`
+ * (8 px), because `Compositor`'s canvas is always at or below
+ * `COMPOSITOR_MAX_WIDTH` — `drawOverlay` itself just takes the radius off the
+ * geometry it is handed (`apps/craft/src/core/overlayGeometry.ts`), and the
+ * offline composite scales that same 8 px by `scaleToFrame` for a capture
+ * wider than the cap (ESCSUITE-144), so what the user saw is 8/1280 of the
+ * frame either way. Stored as a fraction for the same reason the inset is
+ * one: ARTIST has a resolution-change dialog, and a pixel count would
+ * silently restyle the corners of a clip the user never touched.
  */
 export const OVERLAY_CORNER_RADIUS_FRACTION = 8 / COMPOSITOR_MAX_WIDTH;
 
@@ -58,8 +61,11 @@ export const OVERLAY_CORNER_RADIUS_FRACTION = 8 / COMPOSITOR_MAX_WIDTH;
  * ESCAPECRAFT's border weight at the compositor's cap, as a fraction of a
  * frame that wide.
  *
- * `OVERLAY_BORDER_WIDTH` (3 px) on a canvas capped at `COMPOSITOR_MAX_WIDTH`.
- * Unlike the corner radius, this is **not** the number that gets stored: see
+ * The live preview draws `OVERLAY_BORDER_WIDTH` (3 px) flat, for the same
+ * reason the corner is flat there: `Compositor`'s canvas never exceeds
+ * `COMPOSITOR_MAX_WIDTH`. The offline composite scales that same constant by
+ * `scaleToFrame` for a wider capture (ESCSUITE-144). Unlike the corner
+ * radius, this is **not** the number that gets stored: see
  * `strokeForPlacement`, which turns it into craft's border in *frame* pixels and
  * then into a fraction of the *project's* width, because those are two different
  * widths and `clip.stroke.width` is read against the second one. It is named
@@ -282,13 +288,15 @@ export function maskForPlacement(
  * It does take the two **widths**, because unlike the mask's radius the border's
  * weight does not cancel. The radius is a fraction of the clip's drawn box and
  * both its numerator and that box scale with the frame, so the frame's width
- * drops out. Nothing drops out here: craft's 3 px is 3 px of its *capture*
- * canvas, which it caps only **above** `COMPOSITOR_MAX_WIDTH`, while
+ * drops out. Nothing drops out here: craft's 3 px is 3 px of the frame the live
+ * preview was capped to — `Compositor`'s canvas never exceeds
+ * `COMPOSITOR_MAX_WIDTH` — and craft's offline composite reproduces that same
+ * scaling via `scaleToFrame` rather than a second cap (ESCSUITE-144), while
  * `clip.stroke.width` is multiplied by the **project's** width when it is drawn
  * (`core/clipMask.ts`). So the conversion is in two steps, and the widths it
  * reads are different ones:
  *
- * 1. the border in **frame** pixels is craft's own `overlayPaddingFor` shape
+ * 1. the border in **frame** pixels is craft's own `scaleToFrame` shape
  *    applied to 3 rather than 20 — `3 x frame.width / min(frame.width,
  *    COMPOSITOR_MAX_WIDTH)`, i.e. a flat 3 px at or below the cap and
  *    `OVERLAY_STROKE_WIDTH_FRACTION` of the frame above it. Written below as
