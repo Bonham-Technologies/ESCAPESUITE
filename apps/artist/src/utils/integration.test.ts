@@ -483,6 +483,33 @@ describe('integration', () => {
         .rejects.toThrow('Failed to fetch video: Not Found')
     })
 
+    it('names the origin and the CSP when a cross-origin fetch is refused (ESCSUITE-130)', async () => {
+      vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'))
+
+      await expect(loadVideoFromUrl('https://example.com/clip.mp4')).rejects.toThrow(
+        'Could not load the video from https://example.com: this deployment does not allow ' +
+          'loading from other origins (Content-Security-Policy), or the server refused the request.'
+      )
+    })
+
+    it('keeps a same-origin refusal generic — that is a plain network failure, not a policy one', async () => {
+      vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'))
+
+      await expect(
+        loadVideoFromUrl(`${window.location.origin}/clip.mp4`)
+      ).rejects.toThrow(`Could not load the video from ${window.location.origin}: the request failed.`)
+      await expect(loadVideoFromUrl(`${window.location.origin}/clip.mp4`)).rejects.not.toThrow(
+        /Content-Security-Policy/
+      )
+    })
+
+    it('re-throws a non-TypeError fetch rejection unchanged', async () => {
+      const original = new Error('boom')
+      vi.mocked(fetch).mockRejectedValue(original)
+
+      await expect(loadVideoFromUrl('https://example.com/clip.mp4')).rejects.toThrow('boom')
+    })
+
     it('tracks progress when streaming', async () => {
       const onProgress = vi.fn()
       const chunks = [

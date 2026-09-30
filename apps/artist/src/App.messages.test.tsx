@@ -75,7 +75,7 @@ describe('App inbound messages', () => {
       })
     })
 
-    it('reports a fetch that fails', async () => {
+    it('reports a fetch that fails, in loadVideoFromUrl\'s own words (ESCSUITE-130)', async () => {
       vi.mocked(loadVideoFromUrl).mockRejectedValueOnce(new Error('404'))
       await renderApp()
 
@@ -83,7 +83,7 @@ describe('App inbound messages', () => {
 
       expect(sendMessage).toHaveBeenCalledWith({
         type: 'ERROR',
-        payload: { message: 'Failed to load video', code: 'LOAD_ERROR' },
+        payload: { message: '404', code: 'LOAD_ERROR' },
       })
     })
 
