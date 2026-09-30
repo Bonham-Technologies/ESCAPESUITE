@@ -1083,9 +1083,9 @@ assertion to flip when it is hoisted.
 - Both apps share `video-editor-db` IndexedDB database
 - Recordings stored with `source: 'recording'` and `recordedAt` timestamp
 - "Send to Editor" opens ESCAPEARTIST with `?loadVideo=<id>` parameter — the id of a take's
-  **primary** part, whichever row was clicked (`takeId ?? id`). ARTIST resolving the siblings and
-  placing them on the timeline is ESCSUITE-14 slice 2; today it opens the one source it was
-  given
+  **primary** part, whichever row was clicked (`takeId ?? id`). ARTIST resolves the siblings and
+  places every part of the take on the timeline in one undo step; see `apps/artist/CLAUDE.md`'s
+  "A handed-over take is several files" for the detail
 - Same-origin deployment (Vercel) enables seamless data sharing
 
 ### Embedding
