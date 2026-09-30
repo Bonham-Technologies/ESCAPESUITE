@@ -45,6 +45,11 @@ export type { CapturedTake };
  * A default of `true` for any of these would be the bug ESCSUITE-70 deleted,
  * reached again by leaving an argument out; nothing in the app takes this
  * path, since the controller always says.
+ *
+ * `hasVideoSource` is the one field where `true` is the exception rather than
+ * the bug, stated here on purpose: "a bare screen" above is a picture, so
+ * `true` is what a caller saying nothing is taken to mean, and `false` would
+ * silently store a screen recording as an audio file (ESCSUITE-143).
  */
 const NOTHING_CAPTURED: CapturedTake = {
   micAcquired: false,
