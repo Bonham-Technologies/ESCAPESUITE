@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.43
+
+### Patch Changes
+
+- 73c2b0a: Clear All in the media library removes only the library's own files; it no longer deletes ESCAPECRAFT's recordings.
+
 ## 2.12.41
 
 ### Patch Changes
