@@ -134,7 +134,8 @@ header's existing `aria-live="polite" aria-atomic="true"` region, and
 `src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`,
 `CAPTURE_UNANSWERED`, `START_FAILED`, `LIBRARY_UNREADABLE`, `DETECTION_FAILED`,
 `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
-`SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED` and
+`SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED`,
+`RECORDING_UNAVAILABLE` and
 `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
@@ -1443,6 +1444,18 @@ part alone downloads its WebM from that part's own row.
   `utils/overlayPlacement.ts` reads the cap as unconditional — `20/1280 × frame.width`, so 10 px
   at 640 — and therefore agrees with this at and above 1280 and **disagrees below it**. ARTIST is
   out of this slice's scope; the divergence is ESCSUITE-69 item 4.)
+- **The border and the corner are scaled to the frame too (ESCSUITE-144), the same way the
+  inset is.** `overlayGeometryFor()` used to hand `drawOverlay` the flat module constants
+  (`OVERLAY_BORDER_WIDTH` 3, `OVERLAY_CORNER_RADIUS` 8) unscaled, so a composite drawn from a
+  raw capture wider than the 1280 cap showed a border and a corner at two thirds the fraction
+  of the frame the live preview — and ARTIST's own `strokeForPlacement` /
+  `maskForPlacement`, which already assumed craft scaled them — both agree on. `OverlayGeometry`
+  now carries `borderWidth` and `cornerRadius` alongside `padding`, both filled by the shared
+  `scaleToFrame(n, frameWidth)` helper `overlayPaddingFor` is written in terms of, and
+  `drawOverlay` reads them instead of the constants. `Compositor` fills its own config with the
+  two constants unscaled — its canvas is always at or below the cap, where `scaleToFrame` is the
+  identity, so the live preview is byte-identical. `apps/artist/src/utils/overlayPlacement.test.ts`
+  pins the two sides' numbers together at 1280, 1920 and 3840 wide.
 - **Its audio is the primary's own track, and that is already the mix.**
   `WebCodecsRecorder` writes the microphone and system companions as a *second tap* on tracks
   the mix is already reading rather than diverting them, so the primary's audio track is the
@@ -1578,7 +1591,17 @@ Every companion row's meta line is prefixed with the track it is: `Webcam track 
 `Microphone track • `, `System audio track • `. Each is playable, WebM-downloadable and deletable
 on its own, and carries **no** MP4 and **no** M4A — not even M4A on an audio row, because that
 row's own bytes are already an audio file and a per-part conversion would be the take's own
-composite pretending to exist. "Open in Editor" on any row hands over `takeId ?? id`, i.e. the take. Deleting the primary deletes its companions (`useRecordingLibrary.handleDeleteRecording`);
+composite pretending to exist. "Open in Editor" on any row hands over `takeId ?? id`, i.e. the
+take — unless a row's `takeId` names no row actually in the list (ESCSUITE-145): the primary can
+be gone, deleted from ARTIST's media library in another tab, while an orphaned companion is still
+shown here (a row a user cannot see is a file they cannot delete). `RecordingsList` checks the
+whole list rather than trusting a row's own `takeId`, and an orphan falls back to its own id — the
+same degradation `takeImport` already gives a non-primary id: imported and placed alone. Play and
+Download on any row whose bytes are no longer in storage — the same missing-blob fact, reached
+without deleting anything here, e.g. from ARTIST's `Clear All` or its own delete — raise
+`RECORDING_UNAVAILABLE` through the notice channel instead of doing nothing at all
+(ESCSUITE-146); nothing is disabled, since a row like that is still deletable. Deleting the
+primary deletes its companions (`useRecordingLibrary.handleDeleteRecording`);
 deleting the companion alone **demotes the primary by construction** — its own `takeId` stays,
 and with nothing grouped under it the row renders as a plain take, so no stored metadata is
 rewritten on a delete.
