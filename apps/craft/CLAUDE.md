@@ -94,7 +94,7 @@ selector contract above.
 | `App.tsx` | The composition: the per-field store selectors, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `sidebarLocked` (`isRecordingActive \|\| state === 'preparing' \|\| state === 'saving'` — wider than `isRecordingActive`, which also arms the transport bar's stop/cancel button, ESCSUITE-106, so neither `'preparing'` nor `'saving'` may make that button claim it can stop or cancel a take that has no recorder yet or has already finished; ESCSUITE-104). `'preparing'` is in `sidebarLocked` because `CapturedTake` is captured after `acquireStreams()` resolves, still mid-`'preparing'` — a toggle flipped before that snapshot would look live for a take it will never describe. `SourceTogglesPanel` also gets `showMeters={isRecordingActive}`, narrower than `sidebarLocked`: the audio meters draw live levels the store never resets between takes, so gating them on the wider lock would leave them on screen, frozen, for the whole time a finished take is saving. `toggleSource`, `modalOpen` (`showHelpModal \|\| playbackUrl !== null`), the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
 | `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
-| `utils/notices.ts` | The app's whole vocabulary of notices — eleven strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
+| `utils/notices.ts` | The app's whole vocabulary of notices — fourteen strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
 | `utils/downloadBlob.ts` | The anchor both downloads share: object URL, `<a download>`, click, remove, deferred revoke. No naming logic of its own — the caller hands it a finished filename |
 | `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace`. Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
 | `utils/separateTracksReadiness.ts` | `separateTracksBlockedReason` — whether "Record webcam as a separate track" may be switched on, and the sentence the toggle says when it may not. Pure, over two booleans: what the browser can do (`canRecordSeparateTracks()`) and whether there is room for two tracks (`hasSeparateTracksSpace`). The browser's answer wins when both are false, because nobody can act on "not enough storage" in Safari. Owns both reasons, beside their gate for the same reason `NO_STORAGE_SPACE` is |
@@ -108,7 +108,7 @@ selector contract above.
 | `components/SourceToggles/SourceTogglesPanel.tsx` | The Sources panel's subscription: the five store fields `SourceToggles` draws, selected here rather than in `App` so the ~12-a-second `audioLevels` push redraws this panel and nothing else. Takes `disabled`, `showMeters` and `onToggleSource` as props — `disabled` is `App`'s `sidebarLocked`, true from the moment a take starts preparing until the write to storage is done (ESCSUITE-104), not just while it is actively recording; `showMeters` is the narrower `isRecordingActive`, kept apart because the meters draw live levels the store never resets between takes and must not sit on screen, frozen, through the whole time a finished take is saving. `SourceToggles` itself stays driven by props alone, which is what its own test asserts |
 | `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, plus the "Record webcam as a separate track" toggle and the one paragraph under it that carries either `SEPARATE_TRACKS_HELP` or the reason the toggle is disabled — never both, so it is one `<p>` and one `aria-describedby` target. Every control reports a config patch; `separateTracksReason` arrives as a prop, so this stays props-only. It draws unconditionally; whether the panel exists at all is the caller's decision. `disabled` (from `WebcamOverlaySettingsPanel`, ultimately `App`'s `sidebarLocked`) covers a take that is preparing or being saved as well as one still recording (ESCSUITE-104) — the stored placement is `captured` once `acquireStreams()` resolves and must not look movable before that snapshot or while the write it feeds is still happening |
 | `components/WebcamOverlaySettings/WebcamOverlaySettingsPanel.tsx` | The overlay panel's one subscription: `hasSeparateTracksSpace`, turned into `separateTracksReason` with `canRecordSeparateTracks()`. Selected here rather than in `App` for the same reason `SourceTogglesPanel` owns `audioLevels` — a field `App` merely passes through still re-renders `App` and every hook it calls |
-| `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its six action buttons (four on any companion row — webcam, microphone or system audio — none of which carries MP4 or M4A; see "A take can be several files"), each labelled with the recording's own name — plus the conversion's progress row (named after the format actually running) and the one visible note the MP4 and M4A buttons are described by (`mp4Note`, which is not the same thing as `mp4BlockedReason` — see "Download Formats"). The one gate it decides for itself is `recording.hasAudio`, which disables M4A: a fact about the row rather than about the app. It also resolves each row's `companionPartFor(recording.role)`, which is what hides MP4 and M4A on a companion row and hands `onSendToEditor` the take (`recording.takeId ?? recording.id`). Props only; it touches no storage and holds no state |
+| `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its six action buttons (four on any companion row — webcam, microphone or system audio — none of which carries MP4 or M4A; see "A take can be several files"), each labelled with the recording's own name — plus the conversion's progress row (named after the format actually running) and the one visible note the MP4 and M4A buttons are described by (`mp4Note`, which is not the same thing as `mp4BlockedReason` — see "Download Formats"). The one gate it decides for itself is `recording.hasAudio`, which disables M4A: a fact about the row rather than about the app. It also resolves each row's `companionPartFor(recording.role)`, which is what hides MP4 and M4A on a companion row and hands `onSendToEditor` the take's primary id when that row is actually present in the list, else the row's own id (ESCSUITE-145). Props only; it touches no storage and holds no state |
 | `components/RecordingsList/RecordingsListPanel.tsx` | The library's own subscription and state: `useMp4Download` lives here rather than in `App`, so a progress report redraws the list and nothing else. It is also where the *format* is chosen — `onDownloadMp4` and `onDownloadM4a` are the same `startMp4Download` with a different last argument. Selects only `setNotice`, which is a stable action. The other four handlers still come down from `App`, because `useRecordingLibrary` owns the playback dialog the shortcuts need |
 | `components/RecordingPreview/RecordingPreview.tsx` | The preview stage: the compositor's canvas, a mirrored stream, or the idle placeholder — checked in that order so PiP wins during a composite take — with the countdown laid over the top. It only places the App's two DOM refs |
 | `components/RecordingPreview/CountdownOverlay.tsx` | The 3-2-1 overlay and its own subscription to `countdownValue`, so a countdown tick re-renders one digit rather than the preview stage and everything above it. `state` stays a prop — `App` derives it for the transport bar too, and it changes once per transition rather than on a tick |
@@ -134,7 +134,8 @@ header's existing `aria-live="polite" aria-atomic="true"` region, and
 `src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`,
 `CAPTURE_UNANSWERED`, `START_FAILED`, `LIBRARY_UNREADABLE`, `DETECTION_FAILED`,
 `NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
-`SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED` and
+`SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED`,
+`RECORDING_UNAVAILABLE` and
 `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
@@ -186,6 +187,16 @@ Two related rules follow from it:
   still describes the take just finished until the *next* one starts. `useRecordingSave`
   reads it there (ESCSUITE-62) so a take whose tick box was cleared is stored as having no
   audio, rather than as a silent recording with an M4A button.
+
+**`RECORDING_UNAVAILABLE`** covers two more paths through the same channel, on any row —
+companion or primary. `useRecordingLibrary`'s `handlePlayRecording` and `handleDownload` each
+raise it, and re-run `refreshStorageSpace()`, when `getVideoBlob` answers `undefined` for a row
+the library still shows: the row is drawn from metadata the store still holds, but its bytes are
+gone — typically a recording deleted from ARTIST's media library in another tab, which removes
+the shared IndexedDB row without telling this one (ESCSUITE-146). Before this, both handlers did
+nothing at all: no dialog, no file, no explanation, while the row kept showing its name, duration,
+size and thumbnail. Nothing is disabled either way — the ruling is that a row whose blob is
+missing is still deletable — only Play and Download now say so instead of the silent no-op.
 
 ### The record button only offers what it can deliver
 
@@ -1096,9 +1107,12 @@ assertion to flip when it is hoisted.
 - Both apps share `video-editor-db` IndexedDB database
 - Recordings stored with `source: 'recording'` and `recordedAt` timestamp
 - "Send to Editor" opens ESCAPEARTIST with `?loadVideo=<id>` parameter — the id of a take's
-  **primary** part, whichever row was clicked (`takeId ?? id`). ARTIST resolves the siblings and
-  places every part of the take on the timeline in one undo step; see `apps/artist/CLAUDE.md`'s
-  "A handed-over take is several files" for the detail
+  **primary** part, whichever row was clicked, *unless* that row's own primary is no longer in
+  CRAFT's library (its own id then, ESCSUITE-145): an orphaned companion — its primary deleted
+  from ARTIST's media library elsewhere — hands over its own id rather than one that resolves to
+  nothing, and ARTIST imports it alone rather than answering "Recording not found". Given a
+  primary, ARTIST resolves the siblings and places every part of the take on the timeline in one
+  undo step; see `apps/artist/CLAUDE.md`'s "A handed-over take is several files" for the detail
 - Same-origin deployment (Vercel) enables seamless data sharing
 
 ### Embedding
@@ -1443,6 +1457,24 @@ part alone downloads its WebM from that part's own row.
   `utils/overlayPlacement.ts` reads the cap as unconditional — `20/1280 × frame.width`, so 10 px
   at 640 — and therefore agrees with this at and above 1280 and **disagrees below it**. ARTIST is
   out of this slice's scope; the divergence is ESCSUITE-69 item 4.)
+- **The border and the corner are scaled to the frame too (ESCSUITE-144), the same way the
+  inset is.** `overlayGeometryFor()` used to hand `drawOverlay` the flat module constants
+  (`OVERLAY_BORDER_WIDTH` 3, `OVERLAY_CORNER_RADIUS` 8) unscaled, so a composite drawn from a
+  raw capture wider than the 1280 cap showed a border and a corner at two thirds the fraction
+  of the frame the live preview — and ARTIST's own `strokeForPlacement` /
+  `maskForPlacement`, which already assumed craft scaled them — both agree on. `OverlayGeometry`
+  now carries `borderWidth` and `cornerRadius` alongside `padding`, both filled by the shared
+  `scaleToFrame(n, frameWidth)` helper `overlayPaddingFor` is written in terms of, and
+  `drawOverlay` reads them instead of the constants. `Compositor` fills its own config with the
+  two constants unscaled — its canvas is always at or below the cap, where `scaleToFrame` is the
+  identity, so the live preview is byte-identical. `apps/artist/src/utils/overlayPlacement.test.ts`
+  pins the two sides' numbers together at 1280, 1920 and 3840 wide — all at or above the cap.
+  Below it, the border now agrees everywhere (craft is the identity there, and
+  `strokeForPlacement` reads `max(frame.width, 1280)`), but the corner still does not:
+  ARTIST's `maskForPlacement` is the unconditional `frame.width × 8/1280`, so a 640-wide
+  separate-tracks take is 8 px in craft's preview and MP4 and 4 px once ARTIST places it — the
+  same below-the-cap family as the inset's divergence just above, and the same ESCSUITE-69
+  item 4 this slice did not touch.
 - **Its audio is the primary's own track, and that is already the mix.**
   `WebCodecsRecorder` writes the microphone and system companions as a *second tap* on tracks
   the mix is already reading rather than diverting them, so the primary's audio track is the
@@ -1578,7 +1610,16 @@ Every companion row's meta line is prefixed with the track it is: `Webcam track 
 `Microphone track • `, `System audio track • `. Each is playable, WebM-downloadable and deletable
 on its own, and carries **no** MP4 and **no** M4A — not even M4A on an audio row, because that
 row's own bytes are already an audio file and a per-part conversion would be the take's own
-composite pretending to exist. "Open in Editor" on any row hands over `takeId ?? id`, i.e. the take. Deleting the primary deletes its companions (`useRecordingLibrary.handleDeleteRecording`);
+composite pretending to exist. "Open in Editor" on any row hands over `takeId ?? id`, i.e. the
+take — unless a row's `takeId` names no row actually in the list (ESCSUITE-145): the primary can
+be gone, deleted from ARTIST's media library in another tab, while an orphaned companion is still
+shown here (a row a user cannot see is a file they cannot delete). `RecordingsList` checks the
+whole list rather than trusting a row's own `takeId`, and an orphan falls back to its own id — the
+same degradation `takeImport` already gives a non-primary id: imported and placed alone. Play and
+Download on any row whose bytes are no longer in storage do something rather than nothing — see
+`RECORDING_UNAVAILABLE` under "Errors and notices" (ESCSUITE-146), which is not specific to a
+companion row. Deleting the
+primary deletes its companions (`useRecordingLibrary.handleDeleteRecording`);
 deleting the companion alone **demotes the primary by construction** — its own `takeId` stays,
 and with nothing grouped under it the row renders as a plain take, so no stored metadata is
 rewritten on a delete.

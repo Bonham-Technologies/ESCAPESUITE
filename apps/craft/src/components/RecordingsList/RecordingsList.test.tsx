@@ -528,6 +528,21 @@ describe('a take recorded as separate tracks', () => {
     expect(calls.onSendToEditor.mock.calls).toEqual([['take-1'], ['take-1']])
   })
 
+  it('falls back to its own id when its primary is gone (ESCSUITE-145)', async () => {
+    // The primary was deleted from ARTIST's media library, so `takeOrder.ts`
+    // shows the orphaned companion on its own — a row the user can still see
+    // and delete. Sending its `takeId` (the deleted primary's id) to the
+    // editor would answer "Recording not found" for bytes that are still in
+    // storage and still listed; the row's own id opens it alone instead.
+    const { calls } = renderList([companion])
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Open Standup Demo — webcam in Editor' })
+    )
+
+    expect(calls.onSendToEditor).toHaveBeenCalledWith('part-2')
+  })
+
   it('claims nothing about a missing webcam on the primary row', () => {
     renderList([primary, companion])
 

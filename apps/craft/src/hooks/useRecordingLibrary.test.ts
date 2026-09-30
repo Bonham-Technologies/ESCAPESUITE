@@ -12,7 +12,7 @@ import { useRecordingLibrary } from './useRecordingLibrary'
 import { storeVideo, getVideoBlob, deleteVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { analyticsModule, sendToEditorModule, resetAppDoubles } from '../test/appDoubles'
-import { DELETE_FAILED } from '../utils/notices'
+import { DELETE_FAILED, RECORDING_UNAVAILABLE } from '../utils/notices'
 import type { Recording, SourceVideo } from '../store/types'
 
 vi.mock('../utils/sendToEditor', async () => (await import('../test/appDoubles')).sendToEditorModule)
@@ -134,7 +134,11 @@ describe('useRecordingLibrary playback', () => {
     expect(result.current.playbackName).toBe('Second')
   })
 
-  it('opens nothing when the blob has gone missing', async () => {
+  it('opens nothing when the blob has gone missing, and says so (ESCSUITE-146)', async () => {
+    // Deleted from ARTIST's media library in another tab, most commonly: the
+    // row is still listed here, but its bytes are gone from the shared
+    // IndexedDB. Silence used to be indistinguishable from a dialog that just
+    // never opened; now it is the one thing the app's notice channel is for.
     const { result } = mountLibrary([listed('gone', 'Gone', 10)])
 
     await act(async () => {
@@ -143,6 +147,10 @@ describe('useRecordingLibrary playback', () => {
 
     expect(result.current.playbackUrl).toBeNull()
     expect(result.current.playbackName).toBe('')
+    expect(setNotice).toHaveBeenCalledWith(RECORDING_UNAVAILABLE)
+    // The freed room is another tab's doing, but this tab's headroom reading
+    // is stale the moment it discovers the bytes are gone.
+    expect(refreshStorageSpace).toHaveBeenCalled()
   })
 
   // Changed assertion: closing used to leave playbackDuration standing, so a
@@ -218,7 +226,7 @@ describe('useRecordingLibrary downloading', () => {
     }
   })
 
-  it('downloads nothing when the blob has gone missing', async () => {
+  it('downloads nothing when the blob has gone missing, and says so (ESCSUITE-146)', async () => {
     const { result } = mountLibrary([listed('gone', 'Gone', 10)])
 
     await act(async () => {
@@ -228,6 +236,8 @@ describe('useRecordingLibrary downloading', () => {
     expect(clicks).toEqual([])
     expect(analyticsModule.track).not.toHaveBeenCalled()
     expect(URL.createObjectURL).not.toHaveBeenCalled()
+    expect(setNotice).toHaveBeenCalledWith(RECORDING_UNAVAILABLE)
+    expect(refreshStorageSpace).toHaveBeenCalled()
   })
 })
 

@@ -44,6 +44,8 @@ const RECTANGLE: OverlayGeometry = {
   webcamSize: 0.2,
   webcamShape: 'rectangle',
   padding: 20,
+  borderWidth: 3,
+  cornerRadius: 8,
 }
 const CIRCLE: OverlayGeometry = { ...RECTANGLE, webcamShape: 'circle' }
 
@@ -80,7 +82,18 @@ describe('overlayGeometryFor', () => {
       webcamSize: 0.3,
       webcamShape: 'rectangle',
       padding: 30,
+      borderWidth: 4.5,
+      cornerRadius: 12,
     })
+  })
+
+  it('leaves the border and the corner flat at or below the compositor cap', () => {
+    // ESCSUITE-144: below the cap the scale factor is 1, so the preview and a
+    // composite drawn from a frame this narrow stay exactly the numbers
+    // `Compositor` has always drawn.
+    expect(
+      overlayGeometryFor({ position: 'top-left', size: 0.3, shape: 'rectangle' }, 1280)
+    ).toMatchObject({ borderWidth: 3, cornerRadius: 8 })
   })
 })
 
@@ -150,6 +163,43 @@ describe('drawOverlay', () => {
     // and `convertToMP4` is now exactly such a caller.
     expect(ctx.save).toHaveBeenCalledTimes(1)
     expect(ctx.restore).toHaveBeenCalledTimes(1)
+  })
+
+  it('draws the border and the corner at the frame\'s own scale, not a flat pixel count', () => {
+    // ESCSUITE-144: a 1920-wide composite is watched at the same fraction of
+    // the frame as the 1280-wide preview, so the border and the corner must
+    // scale the way `overlayPaddingFor` already scales the padding.
+    const wide = ctxFor(1920, 1080)
+    drawOverlay(wide as unknown as CanvasRenderingContext2D, webcamElement(), wide.canvas, {
+      ...RECTANGLE,
+      borderWidth: overlayGeometryFor(
+        { position: 'bottom-right', size: 0.2, shape: 'rectangle' },
+        1920
+      ).borderWidth,
+      cornerRadius: overlayGeometryFor(
+        { position: 'bottom-right', size: 0.2, shape: 'rectangle' },
+        1920
+      ).cornerRadius,
+    })
+    expect(wide.lineWidth).toBe(4.5)
+    expect(wide.roundRect).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      12
+    )
+
+    const narrow = ctxFor(1280, 720)
+    drawOverlay(narrow as unknown as CanvasRenderingContext2D, webcamElement(), narrow.canvas, RECTANGLE)
+    expect(narrow.lineWidth).toBe(3)
+    expect(narrow.roundRect).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      8
+    )
   })
 
   it('scales the overlay with the size, and honours a zero padding', () => {

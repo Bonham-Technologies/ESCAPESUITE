@@ -5,6 +5,8 @@ import {
   COMPOSITOR_MAX_WIDTH,
   DEFAULT_OVERLAY_PADDING,
   drawOverlay,
+  OVERLAY_BORDER_WIDTH,
+  OVERLAY_CORNER_RADIUS,
   type OverlayGeometry,
 } from './overlayGeometry';
 
@@ -44,7 +46,11 @@ export class Compositor {
    */
   private static readonly FRAME_TOLERANCE_MS = 4;
 
-  constructor(width: number, height: number, config: Partial<CompositorConfig> = {}) {
+  constructor(
+    width: number,
+    height: number,
+    config: Partial<Omit<CompositorConfig, 'borderWidth' | 'cornerRadius'>> = {}
+  ) {
     this.canvas = document.createElement('canvas');
     // Cap compositor resolution to 720p — reduces draw cost by ~55% vs 1080p
     // MediaRecorder re-encodes anyway so full resolution isn't needed here
@@ -71,6 +77,13 @@ export class Compositor {
       // ?? not || — a zero padding is a real choice (overlay flush against the
       // canvas edge), whereas a zero webcam size is nonsense input.
       padding: config.padding ?? DEFAULT_OVERLAY_PADDING,
+      // Unscaled, and not a caller's choice at all — see the constructor's
+      // parameter type (ESCSUITE-144): this canvas is capped at
+      // COMPOSITOR_MAX_WIDTH just above, so `scaleToFrame` would be the
+      // identity here anyway, and the live preview draws the border and the
+      // corner exactly as it always has.
+      borderWidth: OVERLAY_BORDER_WIDTH,
+      cornerRadius: OVERLAY_CORNER_RADIUS,
     };
   }
 

@@ -153,10 +153,16 @@ export async function importTake(
   // take is every recording made before ESCSUITE-14 and every composited PiP
   // take after it.
   //
-  // `orderTakeParts` trusts that what it is handed is a take's *primary* — it
-  // groups on `part.takeId === primary.id`. This is its only caller, and what
-  // it passes is the `?loadVideo=` record, which is the primary by definition;
-  // keep it that way.
+  // `orderTakeParts` groups on `part.takeId === primary.id` — it does not
+  // check that `primary` really is one. This is its only caller, and what it
+  // passes is the `?loadVideo=` record: ordinarily the take's primary, but
+  // since ESCSUITE-145 CRAFT can hand over an orphaned *companion's* own id
+  // instead (its primary was deleted elsewhere, and its `takeId` names no
+  // row in CRAFT's library any more). Grouping on that companion's own id
+  // finds no siblings — a row whose `takeId` equalled it would have to be a
+  // primary in its own right — so `parts` comes back holding just the one
+  // record, which is exactly the degradation this module already gives any
+  // non-primary id: imported and placed alone.
   //
   // A scan that fails is answered the same way a missing companion is: the
   // primary's blob is already in hand, so refusing the whole take over a

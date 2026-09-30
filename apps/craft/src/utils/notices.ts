@@ -114,3 +114,14 @@ export const MP4_SAVED_WITHOUT_WEBCAM =
  */
 export const DELETE_FAILED =
   'That recording could not be fully deleted — reload the library to see what is left.'
+
+/**
+ * Said when Play or Download found nothing to read: the row is drawn from
+ * metadata the store still holds, but `getVideoBlob` answered `undefined` —
+ * typically because the recording was deleted from ESCAPEARTIST's media
+ * library in another tab, which removes the shared IndexedDB row without
+ * telling this one. `UPLOAD_UNAVAILABLE` stays a separate sentence: it also
+ * covers a host that could not be reached, which is not true of these two.
+ */
+export const RECORDING_UNAVAILABLE =
+  'That recording could not be read from your library — its file is no longer in storage.'
