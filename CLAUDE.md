@@ -1348,6 +1348,30 @@ there. The thirteen red cases (a microphone-only take stored as audio, no probe,
 disabled with the reason) and the six the fix round added are what put every arm on both sides.
 **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-30 for ESCSUITE-142 (the media library's Clear All
+scopes to the project's own sources instead of wiping the `videos` and `thumbnails` stores of the
+`video-editor-db` it shares with ESCAPECRAFT): **99.56** / **98.91** / **94.82** / 99.46 against the
+99.54 / 98.90 / 94.81 / 99.46 the commit this branch was rebased onto measures — lines, statements
+and branches each up a hundredth or two, functions unmoved. Measured in one sitting, the base gives
+4,222 / 4,453 branches and this branch 4,230 / 4,461: eight new branches, eight covered, the same 231
+uncovered as before. Lines 6,791 / 6,822 → 6,794 / 6,824 and statements 7,658 / 7,743 →
+7,662 / 7,746 each carry one *fewer* uncovered unit (31 → 30 lines, 85 → 84 statements): the old
+Clear All's `catch` logged to the console and nothing had ever reached it, and it went out with
+`clearAllVideos` and `clearAllData` — the two deleted functions are also why functions read
+1,680 / 1,689 → 1,679 / 1,688 with the same 9 uncovered. The eight new branches are all in
+`components/VideoUploader.tsx`: the `clearableVideos.length === 0` disable and its three-way
+`title`, the per-id live lock check (`lockedSourceVideoIds` read from `useEditorStore.getState()`
+before each delete), the per-id `try` / `catch` that counts a failure instead of stopping the
+batch, the `failed > 0` notice gate and the plural in its text — each reached from both sides by
+the CRAFT-only-row regression, the empty and all-locked library, the track locked between two
+deletes, the one-failure and two-failure partial batches, and the ordinary clears that were already
+there. `store/projectSlice.ts` gained no branch (its change is a comment), and the one branch still
+uncovered in `core/storage.ts` — `record.blob?.size || 0` in the size total — predates the ticket.
+The cross-app guarantee itself is pinned outside vitest's measurement by
+`apps/e2e/tests/production/clear-all-scoped.spec.ts`, run once here against `pnpm build:deploy`:
+green on this branch, red on main with ESCAPECRAFT's take gone. **No floor crossed**; artist's
+floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1355,7 +1379,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.51 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.54 | 98.90 | 94.81 | 99.46 |
+| `@escapesuite/artist` | 99.56 | 98.91 | 94.82 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
