@@ -1396,6 +1396,31 @@ artist mirror pin for the scaled border (`utils/overlayPlacement.test.ts`) is te
 other package and moves no figure there. **No floor crossed**; craft's floors stay
 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-09-30 for ESCSUITE-139 (a transition owns its incoming
+clip's entrance and its outgoing clip's exit: the renderer evaluates the incoming clip with its
+Animate In preset suppressed and the outgoing clip with its Animate Out preset suppressed, so a
+preset fade no longer stacks on the crossfade): 99.56 / 98.91 / 94.82 / 99.46, byte-identical on
+every percentage to the 99.56 / 98.91 / 94.82 / 99.46 the commit this branch was rebased onto
+measures. Measured in one sitting, the base gives 4,230 / 4,461 branches and this branch
+4,237 / 4,468: seven new branches, seven covered, the same 231 uncovered as before (lines
+6,794 / 6,824 → 6,799 / 6,829, statements 7,662 / 7,746 → 7,667 / 7,751, functions
+1,679 / 1,688 → 1,680 / 1,689, every denominator growing by exactly what the numerator did; the
+same 30 / 84 / 9 uncovered). The seven are `getAnimatedValues`' two `suppressPreset === 'in'` /
+`=== 'out'` choices in `utils/animation.ts`, which swap one preset's generated keyframes for an
+empty list; `animatedValuesFor`'s "hand the frozen suppression option through or not" in
+`core/canvasRenderer.ts`, the new function, plus the `?? fallback?.(side) ?? {}` chain in the
+shared modifier builder that replaced the two per-call-site `??` lines, and the
+`side === 'outgoing' ? 'out' : 'in'` that stamps the side onto `TransitionModifiers` — each reached
+from both sides by the red cases (the incoming clip asked at clip time 0 with its in-preset
+suppressed, the outgoing with its out-preset suppressed, a `fade` in-preset invisible under the
+crossfade, an untouched clip outside the window) and the `progress: 0.25` case that pins the two
+sides' alphas apart at `[0.75, 0.25]`. The three export/preview perf ceiling files are
+byte-unchanged: every clip is still evaluated and drawn exactly once per frame. What the tests
+deliberately leave to ESCSUITE-147: the selection chrome and a keyframe-mode drag's seed still
+evaluate without the suppression, which `apps/artist/CLAUDE.md` names beside the boundary step a
+preset longer than its transition takes. **No floor crossed**; artist's floors stay
+99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
