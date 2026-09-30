@@ -1,5 +1,6 @@
 import { VideoUploader, VideoLibrary } from '../components/VideoUploader';
 import { ResolutionPicker } from '../components/ResolutionPicker';
+import type { ShowNotification } from './useNotification';
 import styles from '../App.module.css';
 
 interface MediaLibrarySidebarProps {
@@ -21,6 +22,8 @@ interface MediaLibrarySidebarProps {
    * uploader asks nothing and loads nothing itself.
    */
   onProjectFile: (file: File) => void;
+  /** Passed straight to `VideoUploader`: how it reports a Clear All partial failure. */
+  showNotification: ShowNotification;
 }
 
 /**
@@ -36,6 +39,7 @@ export function MediaLibrarySidebar({
   onToggle,
   onConfirmOpenChange,
   onProjectFile,
+  showNotification,
 }: MediaLibrarySidebarProps) {
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''}`}>
@@ -61,7 +65,7 @@ export function MediaLibrarySidebar({
       {!collapsed && (
         <>
           <div className={styles.uploaderContainer}>
-            <VideoUploader onProjectFile={onProjectFile} />
+            <VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />
             <ResolutionPicker onConfirmOpenChange={onConfirmOpenChange} />
           </div>
 
