@@ -20,9 +20,10 @@ beforeEach(() => {
 /**
  * The sidebar with its required props, any of which a test can override.
  *
- * Two of them are pure pass-throughs the sidebar has no behaviour of its own
- * for — the picker's confirm-open report and the uploader's project-file handoff
- * — and every case below needs them filled in.
+ * Three of them are pure pass-throughs the sidebar has no behaviour of its own
+ * for — the picker's confirm-open report, the uploader's project-file handoff
+ * and its notice channel (ESCSUITE-142) — and every case below needs them
+ * filled in.
  */
 const renderSidebar = (overrides: Partial<ComponentProps<typeof MediaLibrarySidebar>> = {}) =>
   render(
@@ -31,6 +32,7 @@ const renderSidebar = (overrides: Partial<ComponentProps<typeof MediaLibrarySide
       onToggle={vi.fn()}
       onConfirmOpenChange={vi.fn()}
       onProjectFile={vi.fn()}
+      showNotification={vi.fn()}
       {...overrides}
     />
   );
