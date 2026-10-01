@@ -21,22 +21,35 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  * Build first: `pnpm build:standalone` (root) or, per app,
  * `pnpm --filter=@escapesuite/<app> run build:standalone`.
  */
-function assertSingleFileDist(distDir: string) {
+function assertSingleFileDist(appLabel: string, distDir: string) {
   if (!existsSync(distDir)) {
     throw new Error(
-      `${distDir} does not exist. Run "pnpm build:standalone" before this test.`
+      `${distDir} does not exist. Run the STANDALONE build first — ` +
+      `"pnpm build:standalone" (repo root) or ` +
+      `"pnpm --filter=@escapesuite/<app> run build:standalone" — before this test.`
     )
   }
-  const files = readdirSync(distDir)
-  expect(files).toEqual(['index.html'])
+  const files = readdirSync(distDir).sort()
+  // A custom message rather than relying on toEqual's default diff: a plain
+  // `pnpm build` (or `build:deploy`) leaves dist/ with index.html *and* a
+  // separate decodeWorker-*.js chunk, which is exactly what the bug this
+  // guards against looks like — so a failure here should say which build
+  // mode was expected, not just report two array lengths that differ.
+  const message =
+    `${appLabel}'s dist/ (${distDir}) must contain exactly one file, index.html, ` +
+    `which only the STANDALONE build produces — found [${files.join(', ')}]. ` +
+    `If this ran against a hosted/plain build, run the standalone build first: ` +
+    `"pnpm build:standalone" (repo root) or ` +
+    `"pnpm --filter=@escapesuite/<app> run build:standalone".`
+  expect(files, message).toEqual(['index.html'])
 }
 
 test.describe('standalone dist/ is exactly one file (ESCSUITE-153)', () => {
   test('ESCAPEARTIST', () => {
-    assertSingleFileDist(resolve(__dirname, '../../../artist/dist'))
+    assertSingleFileDist('ESCAPEARTIST', resolve(__dirname, '../../../artist/dist'))
   })
 
   test('ESCAPECRAFT', () => {
-    assertSingleFileDist(resolve(__dirname, '../../../craft/dist'))
+    assertSingleFileDist('ESCAPECRAFT', resolve(__dirname, '../../../craft/dist'))
   })
 })

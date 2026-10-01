@@ -5,7 +5,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { isSingleFileBuild } from './src/build/singleFileBuild'
+import { isSingleFileBuild } from './singleFileBuild.js'
 
 /**
  * Headless-build Vite plugin: rewrite module-worker instantiation to classic workers.
@@ -109,7 +109,11 @@ function headlessInlineWorkersPlugin(outDir: string, htmlFile: string) {
       // Anything still emitted as a separate .js chunk would be loaded over file://
       // and blocked. If discovery above missed a worker (e.g. Vite changed the URL
       // expression again), this is where we find out.
-      const leftovers = readdirSync(outDir).filter((f) => f.endsWith('.js'))
+      // recursive: true — a top-level-only scan would miss a stray .js vite
+      // emits into a subdirectory (e.g. dist/assets/), which is exactly the
+      // kind of future emission-shape change this guard exists to catch
+      // (ESCSUITE-153 review round 1, NIT).
+      const leftovers = (readdirSync(outDir, { recursive: true }) as string[]).filter((f) => f.endsWith('.js'))
       if (leftovers.length > 0) {
         throw new Error(
           `[headless-inline-workers] ${outDir} still contains separate script file(s) ` +
@@ -171,11 +175,14 @@ function headlessInlineWorkersPlugin(outDir: string, htmlFile: string) {
 // the headless-artist CLI) and standalone (a downloaded GitHub Release asset)
 // — which both need every worker inlined; false for the hosted (saas) build,
 // served over http(s), which keeps its worker as a separate, fetchable chunk.
-// See src/build/singleFileBuild.ts. ESCSUITE-153: the standalone build used to
+// See singleFileBuild.js, beside this file. ESCSUITE-153: the standalone build used to
 // read only VITE_HEADLESS here, so it shipped index.html plus a second,
 // never-attached decodeWorker-*.js — a downloaded build's MP4 export hung
 // forever trying to start a worker that was never there.
 const SINGLE_FILE_BUILD = isSingleFileBuild(process.env)
+// A separate question from SINGLE_FILE_BUILD above: standalone and saas both
+// build dist/index.html and differ only in whether the worker gets inlined;
+// only the headless build's output location and entry file are different.
 const OUT_DIR = process.env.VITE_HEADLESS === 'true' ? 'dist-headless' : 'dist'
 const ENTRY_HTML = process.env.VITE_HEADLESS === 'true' ? 'headless.html' : 'index.html'
 

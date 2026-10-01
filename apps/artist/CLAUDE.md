@@ -459,7 +459,9 @@ skips there.
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
 - Target: ESNext, no code splitting
 - `build:standalone` produces an offline single-file build for air-gapped use
-- **`isSingleFileBuild(env)`** (`src/build/singleFileBuild.ts`, unit tested) names, once, which
+- **`isSingleFileBuild(env)`** (`singleFileBuild.js`, beside `vite.config.ts`; unit tested from
+  `src/build/singleFileBuild.test.ts`, since `vitest`'s `test.include` only looks under `src/`)
+  names, once, which
   builds must ship as exactly one HTML file with `decodeWorker` inlined as a blob URL rather
   than a separate chunk: true for `VITE_HEADLESS=true` or `VITE_BUILD_MODE=standalone`, false for
   the hosted (`saas`) default. Both single-file targets run from `file://` — the headless render
@@ -473,7 +475,12 @@ skips there.
   predicate. ESCSUITE-153: before this, only `VITE_HEADLESS` was checked, so the standalone build
   shipped `dist/index.html` plus a second, un-inlined `decodeWorker-*.js` that
   `standalone-release.yml` never attaches to the release — a downloaded build's MP4 export had no
-  worker file to start at all. Guarded end to end by
+  worker file to start at all. `singleFileBuild.js` is plain JS, not TypeScript, with a
+  hand-written `singleFileBuild.d.ts` beside it: `vite.config.ts` is type-checked under
+  `tsconfig.node.json`, which lacks `allowImportingTsExtensions`, so a `.ts`-suffixed import from
+  it fails `tsc -b` (TS5097) — and an extensionless import instead trips Vite's
+  `configLoader: 'native'` warning on every invocation. A plain `.js` file carries its own real
+  extension (no warning) without ever being a `.ts` import (no TS5097). Guarded end to end by
   `apps/e2e/tests/standalone/dist-single-file.spec.ts`, a node-side assertion (no browser fixture)
   that each of `apps/artist/dist` and `apps/craft/dist` contains exactly one file after
   `build:standalone` — `playwright.standalone.config.ts` serves the whole directory with `npx
