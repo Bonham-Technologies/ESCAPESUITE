@@ -267,7 +267,7 @@ describe('ExportDialog', () => {
       expect(primaryExport()).toBeDisabled()
       expect(primaryExport()).toHaveAttribute('title', 'This browser cannot encode WebM video — Chrome or Edge can.')
       expect(
-        screen.getByText(/This browser cannot encode WebM video.*Use Advanced options to export MP4 instead\./)
+        screen.getByText(/This browser cannot encode WebM video.*Choose MP4 under Advanced options to export anyway\./)
       ).toBeInTheDocument()
       // Not the "neither" sentence — MP4 is still available.
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
