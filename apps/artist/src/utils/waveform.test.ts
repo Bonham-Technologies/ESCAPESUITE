@@ -77,6 +77,87 @@ describe('waveform utilities', () => {
       expect(result[0].min).toBe(-0.5);
       expect(result[0].max).toBe(0.8);
     });
+
+    describe('with a reusable output buffer (ESCSUITE-13 round 2, MAJOR-1(d))', () => {
+      it('writes into and returns the given buffer instead of allocating', () => {
+        const peaks: WaveformPeak[] = [
+          { min: -0.2, max: 0.2 },
+          { min: -0.5, max: 0.5 },
+          { min: -0.3, max: 0.8 },
+          { min: -0.7, max: 0.1 },
+        ];
+        const buffer: WaveformPeak[] = [];
+        const result = resamplePeaks(peaks, 2, buffer);
+
+        expect(result).toBe(buffer);
+        expect(result).toEqual([
+          { min: -0.5, max: 0.5 },
+          { min: -0.7, max: 0.8 },
+        ]);
+      });
+
+      it('mutates an object already at an index rather than replacing it', () => {
+        const peaks: WaveformPeak[] = [
+          { min: -0.2, max: 0.2 },
+          { min: -0.9, max: 0.9 },
+        ];
+        const reused = { min: 0, max: 0 };
+        const buffer: WaveformPeak[] = [reused];
+
+        const result = resamplePeaks(peaks, 1, buffer);
+
+        expect(result[0]).toBe(reused);
+        expect(reused).toEqual({ min: -0.9, max: 0.9 });
+      });
+
+      it('grows the buffer when the new request is longer than its last use', () => {
+        const peaks: WaveformPeak[] = [
+          { min: -0.1, max: 0.1 },
+          { min: -0.2, max: 0.2 },
+        ];
+        const buffer: WaveformPeak[] = [{ min: -0.9, max: 0.9 }];
+
+        const result = resamplePeaks(peaks, 2, buffer);
+
+        expect(result).toHaveLength(2);
+        // The one pre-existing slot is reused; the new slot is a fresh object.
+        expect(result[0]).toEqual({ min: -0.1, max: 0.1 });
+        expect(result[1]).toEqual({ min: -0.2, max: 0.2 });
+      });
+
+      it('shrinks a longer previous buffer to exactly the new request', () => {
+        const peaks: WaveformPeak[] = [{ min: -0.4, max: 0.4 }];
+        const buffer: WaveformPeak[] = [
+          { min: -0.1, max: 0.1 },
+          { min: -0.2, max: 0.2 },
+          { min: -0.3, max: 0.3 },
+        ];
+
+        const result = resamplePeaks(peaks, 1, buffer);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual({ min: -0.4, max: 0.4 });
+      });
+
+      it('never aliases a source peak object, even on the single-sample path', () => {
+        const source = { min: -0.6, max: 0.6 };
+        const buffer: WaveformPeak[] = [];
+
+        const result = resamplePeaks([source], 1, buffer);
+        result[0].min = 1;
+
+        // Mutating the output must not corrupt the caller's source data.
+        expect(source.min).toBe(-0.6);
+      });
+
+      it('empties rather than discards the buffer for empty input', () => {
+        const buffer: WaveformPeak[] = [{ min: -0.1, max: 0.1 }];
+        const result = resamplePeaks([], 10, buffer);
+
+        expect(result).toBe(buffer);
+        expect(result).toEqual([]);
+      });
+    });
   });
 
   describe('getPeaksForRange', () => {

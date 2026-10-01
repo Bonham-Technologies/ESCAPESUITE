@@ -27,7 +27,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createElement } from 'react'
 import { render } from '@testing-library/react'
 import { TimelineTrack } from './TimelineTrack'
-import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
+import {
+  getLastCanvasContext,
+  installCanvasDouble,
+  uninstallCanvasDouble,
+} from '../../test/doubles/canvas'
 import { resetStoreForTest, addClip, video } from '../../test/fixtures/projectStore'
 import * as waveformUtils from '../../utils/waveform'
 import type { Clip, SourceVideo, Track } from '../../store/types'
@@ -102,6 +106,8 @@ describe('TimelineTrack waveform resample ceiling (ESCSUITE-13)', () => {
   })
 
   it('resamples once on mount, never again for a render that leaves the window unchanged', () => {
+    // Exact, measured 2026-10-01: one resample for the mount, zero more for
+    // five further renders that change nothing about this clip's window.
     const clip: Clip = { ...addClip('clip1', 0, 60), trackId: TRACK_ID }
     const { rerender } = render(trackElement({ pixelsPerSecond: 50, clip }))
     expect(resampleSpy).toHaveBeenCalledTimes(1)
@@ -129,32 +135,95 @@ describe('TimelineTrack waveform resample ceiling (ESCSUITE-13)', () => {
     expect(resampleSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('resamples exactly once per zoom change and once per scroll change', () => {
+  it('resamples once per zoom change, once per bucket-crossing scroll, and never for a scroll inside one bucket or a revisited window', () => {
+    // Exact, measured 2026-10-01: six distinct window states below, five of
+    // which actually move the window — the sixth is a revisit of state 3's
+    // window (ESCSUITE-13 round 2, MAJOR-2's cache-hit reachability) and a
+    // seventh (not counted here, see the `scroll bucketing` case below) stays
+    // inside state 3's 64px bucket and costs nothing either.
     const clip: Clip = { ...addClip('clip1', 0, 60), trackId: TRACK_ID }
 
-    // Zoom 1: the clip's whole 3000px box fits on screen (no viewport given)
-    // — the zoomed-out fallback. One resample for the mount.
+    // 1. Zoom 1: the clip's whole 3000px box fits on screen (no viewport
+    //    given). One resample for the mount.
     const { rerender } = render(trackElement({ pixelsPerSecond: 50, clip }))
     expect(resampleSpy).toHaveBeenCalledTimes(1)
 
-    // Zoom to 10x: the clip's box is now 30,000px. Still no viewport given,
-    // so still the fallback — but the box itself changed, so the fallback's
-    // own sample pass has to run again.
+    // 2. Zoom to 10x: the clip's box is now 30,000px. Still no viewport
+    //    given — but the box itself changed, so the sample pass has to run
+    //    again even without a narrower window.
     rerender(trackElement({ pixelsPerSecond: 500, clip }))
     expect(resampleSpy).toHaveBeenCalledTimes(2)
 
-    // Scroll into view: the viewport is narrower than the 30,000px box, so
-    // this is now windowed. One more pass for the newly visible slice.
+    // 3. Scroll into view: the viewport is narrower than the 30,000px box,
+    //    so this is now windowed. One more pass for the newly visible slice.
     rerender(trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 0, viewportRight: 3000 }))
     expect(resampleSpy).toHaveBeenCalledTimes(3)
 
-    // Scroll again: a different slice of the same clip. One more pass.
+    // 4. Scroll again: a different slice of the same clip. One more pass.
     rerender(trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 6000, viewportRight: 9000 }))
     expect(resampleSpy).toHaveBeenCalledTimes(4)
 
-    // The scrollbar settling on the exact same position (e.g. a resize that
-    // reports an unchanged width): no scroll actually happened, no resample.
+    // 5. The scrollbar settling on the exact same position (e.g. a resize
+    //    that reports an unchanged width): no scroll actually happened, no
+    //    resample.
     rerender(trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 6000, viewportRight: 9000 }))
     expect(resampleSpy).toHaveBeenCalledTimes(4)
+
+    // 6. Scrolled back to state 3's viewport: a cache hit, not a fifth
+    //    resample (ESCSUITE-13 round 2, MAJOR-2 — the cache's entire reason
+    //    for existing is exercised here, not just its bookkeeping).
+    rerender(trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 0, viewportRight: 3000 }))
+    expect(resampleSpy).toHaveBeenCalledTimes(4)
+  })
+
+  it('does not resample for a scroll that stays inside one 64px bucket (MAJOR-1(a))', () => {
+    // Exact, measured 2026-10-01.
+    const clip: Clip = { ...addClip('clip1', 0, 60), trackId: TRACK_ID }
+    const { rerender } = render(
+      trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 0, viewportRight: 3000 })
+    )
+    expect(resampleSpy).toHaveBeenCalledTimes(1)
+
+    // A one-pixel scroll: still the same 64px bucket on both ends.
+    rerender(trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 1, viewportRight: 3001 }))
+    expect(resampleSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AudioWaveform draw ceiling: one fillRect per sample, zero extra canvas calls (MINOR-4)', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+    installCanvasDouble()
+  })
+
+  afterEach(() => {
+    uninstallCanvasDouble()
+  })
+
+  it('draws exactly one fillRect per sample, one getContext/clearRect/scale per draw — exact, measured 2026-10-01', () => {
+    const clip: Clip = { ...addClip('clip1', 0, 60), trackId: TRACK_ID }
+    // A windowed draw — width exceeds the 2000-sample floor and the window
+    // holds plenty of source peaks, so the sample count equals the window's
+    // own pixel width exactly (see `AudioWaveform.test.tsx`'s ESCSUITE-13
+    // suite for the derivation).
+    const windowWidth = 2048
+    render(
+      trackElement({
+        pixelsPerSecond: 500,
+        clip,
+        viewportLeft: 0,
+        viewportRight: windowWidth,
+      })
+    )
+
+    const ctx = getLastCanvasContext()!
+    // The draw path allocates nothing per call: it reads `displayPeaks[i]`
+    // and calls exactly one 2D-context method per bar, no object or array
+    // construction in between (ESCSUITE-13 round 2, MAJOR-1). A regression
+    // that started building an intermediate array, or drawing more than one
+    // rect per sample, would move this count — it would not stay exact.
+    expect(ctx.argsFor('fillRect')).toHaveLength(windowWidth)
+    expect(ctx.argsFor('clearRect')).toHaveLength(1)
+    expect(ctx.argsFor('scale')).toHaveLength(1)
   })
 })
