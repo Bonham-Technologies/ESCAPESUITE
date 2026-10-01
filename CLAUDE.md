@@ -1454,6 +1454,33 @@ constructed against the exports that already run. The two new functions are the 
 no decision; `exportTypes.ts`'s three uncovered branches and the exporters' own predate the
 ticket. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-153 and ESCSUITE-29's second
+mechanism (the standalone build is one file again — the worker-inlining plugins and the
+leftover-`.js` guard now follow one `singleFileBuild` predicate that is true for the headless and
+the standalone build alike — and `VideoDecodeManager.initialize()` settles: the worker's `error`
+or `messageerror` rejects it, a worker that never answers rejects it after ten seconds, the
+export's Cancel rejects it, and when the worker cannot start the MP4 export falls back to the
+in-page decoder with a progress line saying so instead of hanging): 99.58 / 98.94 / **94.99** /
+99.47 against the 99.58 / 98.94 / 94.93 / 99.47 the commit this branch was rebased onto measures
+— branches up six hundredths, the other three unmoved. Measured in one sitting, the base gives
+4,315 / 4,545 branches and this branch 4,327 / 4,555: ten new branches, twelve more covered, so
+the uncovered column falls 230 → 228 — the worker doubles enter two arms of the decode-worker
+path that no earlier test had reached, because jsdom has no `Worker` and the path had only ever
+been exercised in a real browser (lines 6,876 / 6,905 → 6,923 / 6,952, statements
+7,755 / 7,838 → 7,803 / 7,886, functions 1,701 / 1,710 → 1,708 / 1,717, the same 29 / 83 / 9
+uncovered). The ten are `core/videoDecodeManager.ts`'s settle path —
+the timeout, the abort, the `error` and `messageerror` handlers, the ignored late events after a
+settle, the `new Worker` throw that clears its own timer, and the empty-message fallback —
+`core/frameSource.ts`'s worker-unavailable fallback and `core/exportMP4.ts`'s one-time
+fallback message, each reached from both sides by the never-answers, errors, errors-with-no-
+message, late-after-ready, cancelled and happy worker doubles and the exporter cases that assert
+the fallback message once against the exports that already run. `singleFileBuild.js` sits beside
+`vite.config.ts` as plain JavaScript (so Vite's config loader stays native) with its three cases
+pinned by `singleFileBuild.test.ts`, and is outside this package's `src` measurement; the dist
+shape is pinned outside vitest by the new node-side e2e guard and by one standalone build run
+here (exactly `index.html`, the worker inlined as a blob). `exportMP4.perf.test.ts` and the render
+pins are byte-unchanged. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 `@escapesuite/plan`, `@escapesuite/craft` and `@escapesuite/artist` were re-measured 2026-10-01 for
 ESCSUITE-31 (the two "Download offline build" anchors fire an analytics event; `recordingDeleted`
 and `videoImported` are wired at their one call site each; the never-called `overlayAdded` is
@@ -1576,7 +1603,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.58 | 98.94 | 94.93 | 99.47 |
+| `@escapesuite/artist` | 99.58 | 98.94 | 94.99 | 99.47 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
