@@ -481,4 +481,58 @@ describe('parseProject (ESCSUITE-102)', () => {
 
     expect(result.ok).toBe(true)
   })
+
+  describe('resolution validation (ESCSUITE-152)', () => {
+    it.each([
+      ['null', null],
+      ['a string', '1080p'],
+      ['0x0', { width: 0, height: 0 }],
+      ['negative dimensions', { width: -1920, height: -1080 }],
+      ['NaN dimensions', { width: NaN, height: NaN }],
+      ['a missing width', { height: 1080 }],
+      ['one more than 8K wide', { width: 7681, height: 4320 }],
+    ])('rejects a project whose resolution is %s', (_label, badResolution) => {
+      const bad = { ...validProject(), resolution: badResolution }
+
+      const result = parseProject(bad)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.reason).toMatch(/resolution/i)
+      }
+    })
+
+    it('still accepts odd dimensions — the exporters round those to even (ESCSUITE-111)', () => {
+      const odd = validProject()
+      odd.resolution = { width: 1921, height: 1081 }
+
+      const result = parseProject(odd)
+
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.project.resolution).toEqual({ width: 1921, height: 1081 })
+      }
+    })
+
+    it('accepts the 8K ceiling exactly', () => {
+      const atCeiling = validProject()
+      atCeiling.resolution = { width: 7680, height: 4320 }
+
+      const result = parseProject(atCeiling)
+
+      expect(result.ok).toBe(true)
+    })
+
+    it('leaves a project with no resolution at all to the migration default (1920x1080)', () => {
+      const noResolution: Record<string, unknown> = { ...validProject() }
+      delete noResolution.resolution
+
+      const result = parseProject(noResolution)
+
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.project.resolution).toEqual({ width: 1920, height: 1080 })
+      }
+    })
+  })
 })
