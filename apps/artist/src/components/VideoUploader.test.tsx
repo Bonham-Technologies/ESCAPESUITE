@@ -26,6 +26,11 @@ vi.mock('../core/videoProcessor', () => ({
   processAudioFile: mockProcessAudioFile,
 }))
 
+const { mockAnalytics } = vi.hoisted(() => ({
+  mockAnalytics: { videoImported: vi.fn() },
+}))
+vi.mock('../utils/analytics', () => ({ analytics: mockAnalytics }))
+
 // Only the thumbnail read is a collaborator: the library's lazy rebuild
 // (ESCSUITE-117) has to be driveable one landing at a time, including one that
 // lands after the source has gone. Everything else in storage stays real, on
@@ -222,6 +227,8 @@ describe('VideoUploader', () => {
       expect(await screen.findByText('Complete')).toBeInTheDocument()
       expect(mockProcessVideoFile).toHaveBeenCalledWith(dropped)
       expect(store().sourceVideos).toEqual([videoMeta])
+      // ESCSUITE-31: declared and tested in isolation but never called before.
+      expect(mockAnalytics.videoImported).toHaveBeenCalledWith('video')
     })
 
     it('routes an image to the image processor', async () => {
@@ -232,6 +239,7 @@ describe('VideoUploader', () => {
       await waitFor(() => expect(mockProcessImageFile).toHaveBeenCalledTimes(1))
       expect(mockProcessVideoFile).not.toHaveBeenCalled()
       expect(store().sourceVideos).toEqual([imageMeta])
+      expect(mockAnalytics.videoImported).toHaveBeenCalledWith('image')
     })
 
     it('routes audio to the audio processor', async () => {
@@ -241,6 +249,7 @@ describe('VideoUploader', () => {
 
       await waitFor(() => expect(mockProcessAudioFile).toHaveBeenCalledTimes(1))
       expect(store().sourceVideos).toEqual([audioMeta])
+      expect(mockAnalytics.videoImported).toHaveBeenCalledWith('audio')
     })
 
     it('clears the file input so the same file can be picked again', async () => {
@@ -343,6 +352,7 @@ describe('VideoUploader', () => {
 
         expect(await screen.findByText('Unsupported codec')).toBeInTheDocument()
         expect(errorLog).toHaveBeenCalledWith('Failed to process media:', expect.any(Error))
+        expect(mockAnalytics.videoImported).not.toHaveBeenCalled()
 
         fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
 

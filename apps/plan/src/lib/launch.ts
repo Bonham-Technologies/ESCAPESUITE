@@ -23,3 +23,13 @@ export function launchTool(tool: ToolId): void {
     window.location.assign(toolUrl(tool))
   }
 }
+
+/**
+ * Reports a click on either "Download the offline build" anchor before the
+ * browser follows it. Both anchors navigate to `RELEASES_URL` in a new tab
+ * (`target="_blank"`), so — unlike `launchTool`'s same-tab `location.assign` —
+ * there is no race between this call and the navigation it precedes.
+ */
+export function trackOfflineDownload(): void {
+  analytics.offlineBuildDownloaded()
+}

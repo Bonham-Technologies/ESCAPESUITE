@@ -1715,7 +1715,9 @@ upstream-requests page has its own row.
   - `Recording Completed` (with duration)
   - `Recording Sent to Editor`
   - `Recording Downloaded`
-  - `Recording Deleted`
+  - `Recording Deleted` — `useRecordingLibrary`'s `handleDeleteRecording`, once per row the user
+    deleted (the primary, or a companion deleted on its own), regardless of how many companions
+    the cascade took with it; not reported when the deletion itself fails (ESCSUITE-31)
 
 ### Testing
 

@@ -36,4 +36,11 @@ describe('analytics', () => {
       expect(track).toHaveBeenCalledWith('Tool Launched', { tool: 'artist' })
     })
   })
+
+  describe('analytics.offlineBuildDownloaded', () => {
+    it('tracks Offline Build Downloaded event', () => {
+      analytics.offlineBuildDownloaded()
+      expect(track).toHaveBeenCalledWith('Offline Build Downloaded', undefined)
+    })
+  })
 })

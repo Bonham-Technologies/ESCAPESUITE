@@ -81,6 +81,9 @@ export function useRecordingLibrary({
     try {
       await deleteVideo(id);
       removeRecording(id);
+      // Reports the row the user actually asked to delete — once, regardless
+      // of how many companions the cascade above took with it.
+      analytics.recordingDeleted();
     } catch (error) {
       failed = true;
       console.error(`Could not delete recording ${id}:`, error);

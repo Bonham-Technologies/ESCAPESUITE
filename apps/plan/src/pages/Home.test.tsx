@@ -3,17 +3,18 @@ import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import Home from './Home'
 
-// launchTool is a collaborator (it does real navigation/analytics work) —
-// mock it here, never the Home module under test.
+// launchTool and trackOfflineDownload are collaborators (real navigation/analytics
+// work) — mock them here, never the Home module under test.
 vi.mock('../lib/launch', async () => {
   const actual = await vi.importActual<typeof import('../lib/launch')>('../lib/launch')
   return {
     ...actual,
     launchTool: vi.fn(),
+    trackOfflineDownload: vi.fn(),
   }
 })
 
-import { launchTool } from '../lib/launch'
+import { launchTool, trackOfflineDownload } from '../lib/launch'
 
 // Home renders no router-aware components (every link is a plain external <a>),
 // so it needs no router wrapper.
@@ -102,5 +103,32 @@ describe('Home (open-source landing)', () => {
     renderHome()
     await user.click(screen.getByRole('button', { name: /use escapeartist/i }))
     expect(launchTool).toHaveBeenCalledWith('artist')
+  })
+
+  it('tracks the offline build download from the hero link', async () => {
+    const user = userEvent.setup()
+    renderHome()
+    // The anchor navigates to a new tab (target="_blank"), so following it in
+    // jsdom raises "Not implemented: navigation" noise that is not the point
+    // of this test — only that the tracker fires before that navigation.
+    const navError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await user.click(screen.getAllByRole('link', { name: /offline build/i })[0])
+    } finally {
+      navError.mockRestore()
+    }
+    expect(trackOfflineDownload).toHaveBeenCalledTimes(1)
+  })
+
+  it('tracks the offline build download from the footer CTA link', async () => {
+    const user = userEvent.setup()
+    renderHome()
+    const navError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await user.click(screen.getByRole('link', { name: 'Download offline build' }))
+    } finally {
+      navError.mockRestore()
+    }
+    expect(trackOfflineDownload).toHaveBeenCalledTimes(1)
   })
 })
