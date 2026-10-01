@@ -452,6 +452,165 @@ describe('projectStore integration', () => {
         expect(useEditorStore.getState().sourceVideos).toBe(before.sourceVideos)
       })
     })
+
+    // ESCSUITE-149: a storage clear (Clear Unused / Clear All) deletes the
+    // source's bytes from IndexedDB itself, so it must not be undoable the way
+    // `removeSourceVideo` is — an undo that handed a `SourceVideo` back after
+    // this would restore a tile nothing can play, place or export. Modelled on
+    // ESCSUITE-117's `setSourceThumbnail`: it bypasses `pushToHistory`
+    // entirely, and — because the clear can reach back past edits that are
+    // already on the undo stack — it also scrubs every existing snapshot
+    // (`scrubRemovedSources`) so no future undo/redo can resurrect the ids.
+    describe('removeSourceVideosPermanently', () => {
+      const made = (id: string, overrides: Partial<SourceVideo> = {}): SourceVideo => ({
+        id, name: `${id}.mp4`, duration: 10, width: 1920, height: 1080,
+        frameRate: 30, mimeType: 'video/mp4', size: 1000000, ...overrides,
+      })
+
+      beforeEach(() => {
+        vi.mocked(URL.revokeObjectURL).mockClear()
+      })
+
+      it('removes every named source in one write', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        useEditorStore.getState().addSourceVideo(made('video2'))
+        useEditorStore.getState().addSourceVideo(made('video3'))
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1', 'video2'])
+
+        expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['video3'])
+      })
+
+      it('revokes every removed source\'s thumbnail URL', () => {
+        useEditorStore.getState().addSourceVideo(made('video1', { thumbnailUrl: 'blob:thumb-1' }))
+        useEditorStore.getState().addSourceVideo(made('video2', { thumbnailUrl: 'blob:thumb-2' }))
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1', 'video2'])
+
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-2')
+      })
+
+      it('removes any clip that references a removed source, and recalculates duration', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().addClipToTimeline(
+          { id: 'clip1', sourceVideoId: 'video1', name: 'Clip1', startTime: 0, endTime: 5, duration: 5 },
+          trackId, 0
+        )
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1'])
+
+        const state = useEditorStore.getState()
+        expect(state.project.timeline.clips).toHaveLength(0)
+        expect(state.project.timeline.duration).toBe(0)
+      })
+
+      it('leaves a clip that references a kept source alone', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        useEditorStore.getState().addSourceVideo(made('video2'))
+        const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().addClipToTimeline(
+          { id: 'clip1', sourceVideoId: 'video2', name: 'Clip1', startTime: 0, endTime: 5, duration: 5 },
+          trackId, 0
+        )
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1'])
+
+        expect(useEditorStore.getState().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
+      })
+
+      it('prunes the selection when the selected clip\'s source is removed (ESCSUITE-101)', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().addClipToTimeline(
+          { id: 'clip1', sourceVideoId: 'video1', name: 'Clip1', startTime: 0, endTime: 5, duration: 5 },
+          trackId, 0
+        )
+        useEditorStore.getState().setSelectedClipId('clip1')
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1'])
+
+        expect(useEditorStore.getState().selectedClipId).toBeNull()
+      })
+
+      it('records no undo step of its own', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        const before = useEditorStore.getState().history.past.length
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1'])
+
+        expect(useEditorStore.getState().history.past).toHaveLength(before)
+      })
+
+      it('is a no-op for an empty id list', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        const before = useEditorStore.getState()
+
+        useEditorStore.getState().removeSourceVideosPermanently([])
+
+        expect(useEditorStore.getState().sourceVideos).toBe(before.sourceVideos)
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      })
+
+      it('ignores an id naming no source without affecting the rest', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+
+        useEditorStore.getState().removeSourceVideosPermanently(['no-such-id', 'video1'])
+
+        expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
+      })
+
+      // The headline bug: an undo entry already on the stack before the clear
+      // must not be able to hand the cleared source back.
+      it('scrubs the removed ids out of every existing undo snapshot, so undo cannot restore them', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        const pastLengthBeforeClear = useEditorStore.getState().history.past.length
+        expect(pastLengthBeforeClear).toBeGreaterThan(0)
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1'])
+
+        // No new entry, and canUndo() reflects the history exactly as it
+        // stood before the clear.
+        expect(useEditorStore.getState().history.past).toHaveLength(pastLengthBeforeClear)
+        expect(useEditorStore.getState().canUndo()).toBe(true)
+
+        useEditorStore.getState().undo()
+
+        expect(useEditorStore.getState().sourceVideos.find((v) => v.id === 'video1')).toBeUndefined()
+      })
+
+      it('scrubs a clip referencing the removed source out of an existing undo snapshot too', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+        const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+        useEditorStore.getState().addClipToTimeline(
+          { id: 'clip1', sourceVideoId: 'video1', name: 'Clip1', startTime: 0, endTime: 5, duration: 5 },
+          trackId, 0
+        )
+
+        useEditorStore.getState().removeSourceVideosPermanently(['video1'])
+        // The one snapshot on the stack is the one taken just before
+        // `addClipToTimeline` — the source is there, the clip is not yet.
+        useEditorStore.getState().undo()
+
+        const state = useEditorStore.getState()
+        expect(state.sourceVideos.find((v) => v.id === 'video1')).toBeUndefined()
+        expect(state.project.timeline.clips.some((c) => c.sourceVideoId === 'video1')).toBe(false)
+      })
+
+      // A plain, single-item removal is a different action and must stay
+      // undoable — pin it here so the two paths cannot be confused with one
+      // another.
+      it('does not change what a plain removeSourceVideo does: that stays undoable', () => {
+        useEditorStore.getState().addSourceVideo(made('video1'))
+
+        useEditorStore.getState().removeSourceVideo('video1')
+        expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
+
+        useEditorStore.getState().undo()
+        expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+      })
+    })
   })
 
   describe('undo/redo', () => {
