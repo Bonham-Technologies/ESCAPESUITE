@@ -808,6 +808,26 @@ describe('exportToWebM failure handling', () => {
     expect(error.message).toBe('audio encoder failed')
     expect(errors).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
   })
+
+  // Review round 1, MAJOR 2(c): an error reported on the *last* frame's
+  // encode() call lands after the frame loop has already run its final
+  // iteration — there is no next iteration left for the top-of-loop check at
+  // the top of the `for` to catch it on, and the queue never grows past the
+  // backpressure threshold in this fixture — so only the pre-finalize check
+  // can surface it. 6 is this fixture's frame count (CLIP_DURATION 0.2s @
+  // 30fps); run() with the default clip is deliberate so this is exactly the
+  // last encode() call.
+  it('surfaces a video encoder error reported after the last frame, before finalizing', async () => {
+    webcodecs.script.videoErrorAfterEncodes = 6
+
+    const error = (await run().catch((e: unknown) => e)) as ExportError
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('video encoder failed')
+    expect(
+      error.exportLog.some((e) => e.detail === 'Video encoder error before finalize: video encoder failed')
+    ).toBe(true)
+  })
 })
 
 describe('exportToWebM codec selection', () => {
