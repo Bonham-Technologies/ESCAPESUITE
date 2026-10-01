@@ -1628,6 +1628,38 @@ perf ceiling files and the render pins are byte-unchanged. **Two floors rise**: 
 `scripts/coverage-report.mjs`, because a floor is the achieved coverage rounded down and this
 branch carries both past a whole percent; artist's floors are now 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-13 (timeline waveforms keep their
+detail when zoomed in: the visible window of a clip is resampled at the pixel width it is drawn
+at, in 64 px offset buckets coalesced on `requestAnimationFrame`, with the output capped at the
+source's own peak count, a sample-bounded LRU cache whose evicted buffers are reused, the full-clip
+2,000-sample array kept only as the zoomed-out fallback, and a continuous switch between the
+two): 99.71 / **99.11** / **95.21** / 99.65 against the 99.71 / 99.09 / 95.10 / 99.65 the
+commit this branch was rebased onto measures — statements up two hundredths, branches up eleven,
+lines and functions unmoved. Measured in one sitting, the base gives 4,407 / 4,634 branches and
+this branch 4,457 / 4,681: forty-seven new branches, fifty more covered, so the uncovered column
+falls 227 → 224 (lines 7,006 / 7,026 → 7,082 / 7,102 with the same 20 uncovered, statements
+7,888 / 7,960 → 7,972 / 8,043 with 72 → 71, functions 1,722 / 1,728 → 1,729 / 1,735 with the
+same 6). The new decisions are `components/Timeline/AudioWaveform.tsx`'s window bucketing, its
+"fully off-screen" early return taken before bucketing, the cache key, hit and touch-on-hit, the
+two eviction triggers (a 500,000-sample budget, stated in bytes in its comment, and an entry cap
+that only guards the sparse-entry case), the free-buffer pool and its cap, and the
+`devicePixelRatio` fallback; `useScrollSync.ts`'s rAF coalescing in a `useLayoutEffect` sized
+on the same frame as the scroll; `Timeline.tsx`'s measured first-paint width with a finite
+fallback where `Infinity` used to be; `TimelineTrack.tsx`'s stable per-clip range objects and the
+prune that drops a removed clip's cache entry; and `utils/waveform.ts`'s buffer-reusing resample
+— each reached from both sides by the zoom-10 detail case (an exact 10×, not a tie), the seam
+case at the switch count, the 300 px drag that resamples five or six times and not twenty, the
+LRU-versus-FIFO case, the burst past the pool cap, the left-edge and prune cases, and the
+scroll-and-zoom cases that were already there. One guard the measurement found reachable only
+through a sparse array — the single-sample path's null check — was deleted rather than tested,
+the way ESCSUITE-110 and 118 treated theirs, and `utils/waveform.ts` is 100 on all four without
+it. The new `TimelineTrack.waveform.perf.test.ts` pins one resample per bucket crossing, none
+per animation frame, no allocation in the draw path and one `fillRect` per visible sample, each
+with its dated measurement; `timelineGestures.perf.test.ts`, `drawFrame.perf.test.ts`, both
+export ceilings and the render pins are byte-unchanged. The one branch still uncovered in
+`AudioWaveform.tsx` is its pre-existing `if (!ctx)`. **No floor crossed**; artist's floors stay
+99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1635,7 +1667,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.71 | 99.09 | 95.10 | 99.65 |
+| `@escapesuite/artist` | 99.71 | 99.11 | 95.21 | 99.65 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
