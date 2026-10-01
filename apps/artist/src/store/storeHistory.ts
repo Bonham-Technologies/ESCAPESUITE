@@ -88,12 +88,24 @@ export function scrubDeadThumbnails(
  * every snapshot already on the stack — the clear itself pushes no entry of
  * its own, so there is nothing for `undo`/`redo` to walk back across that
  * this does not also reach.
+ *
+ * Returns the exact `history` object, not a structurally-equal copy, when
+ * nothing in `past` or `future` carries any of `removedIds` — there is no
+ * `removedIds.length === 0` fast path separate from that (ESCSUITE-149
+ * review, MINOR 4): an empty list carries nothing by construction, so the
+ * general check already covers it, and a caller does not have to special-case
+ * "nothing to scrub" to find out whether anything changed. This is what lets
+ * `removeSourceVideosPermanently` (`projectSlice.ts`) tell "scrubbed a stale
+ * snapshot" apart from "truly nothing to do" with `history === state.history`
+ * — needed because an id can legitimately be gone from the *live* library
+ * (nothing left to remove or revoke there) while an older snapshot still
+ * names it, e.g. a source deleted once already via the undoable
+ * `removeSourceVideo` and then named again in a later storage clear.
  */
 export function scrubRemovedSources(
   history: { past: UndoableState[]; future: UndoableState[] },
   removedIds: readonly string[]
 ): { past: UndoableState[]; future: UndoableState[] } {
-  if (removedIds.length === 0) return history;
   const removed = new Set(removedIds);
   const carriesARemovedSource = (snapshot: UndoableState) =>
     snapshot.sourceVideos.some((v) => removed.has(v.id)) ||
@@ -115,7 +127,12 @@ export function scrubRemovedSources(
       sourceVideos: snapshot.sourceVideos.filter((v) => !removed.has(v.id)),
     };
   };
-  return { past: history.past.map(scrubOne), future: history.future.map(scrubOne) };
+  const past = history.past.map(scrubOne);
+  const future = history.future.map(scrubOne);
+  const sameElements = (a: UndoableState[], b: UndoableState[]) => a.every((s, i) => s === b[i]);
+  return sameElements(past, history.past) && sameElements(future, history.future)
+    ? history
+    : { past, future };
 }
 
 export { getUndoableState, pushToHistory };

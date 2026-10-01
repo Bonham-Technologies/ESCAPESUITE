@@ -145,11 +145,14 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
           await deleteVideo(video.id);
           removedIds.push(video.id);
         }
-        refreshStorageInfo();
       } catch (e) {
         console.error('Failed to clear unused videos:', e);
       } finally {
+        // Both run regardless of outcome (ESCSUITE-149 review, NIT 2): the
+        // ids before a mid-loop failure are still permanently gone, and the
+        // meter has to say so even when the clear as a whole did not finish.
         if (removedIds.length > 0) removeSourceVideosPermanently(removedIds);
+        refreshStorageInfo();
       }
     }
   }, [unusedVideos, unusedSize, removeSourceVideosPermanently, refreshStorageInfo]);
@@ -171,11 +174,15 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   // the same refusal Clear Unused's own filter makes by never seeing the id
   // in the first place.
   //
-  // A per-id delete/remove failure does not stop the rest of the batch —
-  // each id is caught on its own, so one bad id cannot strand every id after
-  // it — and is reported once, by count, through the notice channel rather
-  // than the console alone (ESCSUITE-142 review, MINOR 2). The meter refresh
-  // runs in `finally`, so a partial failure still leaves it current.
+  // A per-id delete failure does not stop the rest of the batch — each id is
+  // caught on its own, so one bad id cannot strand the ids after it — and is
+  // reported once, by count, through the notice channel rather than the
+  // console alone (ESCSUITE-142 review, MINOR 2). The permanent-removal write
+  // and the meter refresh both run in `finally`, in that order (ESCSUITE-149
+  // review, NIT 3 — the remove is no longer inside the per-id `try`, so it is
+  // no longer part of what "per-id" above describes), so a partial failure
+  // still removes exactly the ids whose bytes are actually gone and still
+  // leaves the meter current.
   //
   // ESCSUITE-149: unlike Clear Unused, this can take clips on the timeline
   // with it (every clip that referenced a cleared source), which is why the

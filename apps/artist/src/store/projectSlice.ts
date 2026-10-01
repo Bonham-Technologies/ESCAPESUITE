@@ -185,7 +185,18 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     if (ids.length === 0) return state;
     const removedIds = new Set(ids);
     const removed = state.sourceVideos.filter((v) => removedIds.has(v.id));
-    if (removed.length === 0) return state;
+    if (removed.length === 0) {
+      // Nothing left in the *live* library to remove or revoke — but one of
+      // these ids can still be sitting in an existing undo/redo snapshot (its
+      // bytes already deleted by this same caller, just via a batch that
+      // landed earlier, or by a plain `removeSourceVideo` before this one
+      // ran), so the scrub still has to run (ESCSUITE-149 review, MAJOR 1).
+      // `scrubRemovedSources` returns the identical `history` object when
+      // nothing anywhere carries these ids, so this stays a true no-op —
+      // same `state`, no new object — in that case.
+      const history = scrubRemovedSources(state.history, ids);
+      return history === state.history ? state : { history };
+    }
     revokeSourceThumbnails(removed);
     const { clips } = state.project.timeline;
     const kept = clips.filter((c) => !c.sourceVideoId || !removedIds.has(c.sourceVideoId));
