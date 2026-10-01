@@ -1471,6 +1471,27 @@ file-drop case against the handoff, load and restore cases that by ruling fire n
 floor crossed**; plan's floors stay 100 / 100 / 100 / 100, craft's 100 / 99 / 97 / 100 and
 artist's 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-151 (a `.veditor` load restores the
+bytes ARTIST needs and nothing ESCAPECRAFT owns: a re-stored source carries no `source`,
+`takeId`, `role`, `startOffset` or `overlayPlacement`, a source already present keeps its stored
+row and only lends those five identity fields, and both paths go through ESCSUITE-97's duration
+and dimension recovery): 99.56 / **98.92** / 94.86 / 99.46 against the
+99.56 / 98.91 / 94.86 / 99.46 the commit this branch was rebased onto measures — statements up a
+hundredth, the other three unmoved. Measured in one sitting, the base gives 4,267 / 4,498
+branches and this branch 4,271 / 4,502: four new branches, four covered, the same 231 uncovered
+as before (lines 6,813 / 6,843 → 6,830 / 6,860, statements 7,681 / 7,765 → 7,698 / 7,782,
+functions 1,681 / 1,690 on both, every denominator growing by exactly what the numerator did;
+the same 30 / 84 / 9 uncovered). The four are `core/projectManager.ts`'s
+three-way metadata choice for a loaded source — the file's `meta` when it has one, else the
+stored row's metadata when the row is present, else the blob probe — and the `existing` gate
+that skips `storeVideo` / `storeThumbnail` for a present row, each reached from both sides by
+the resurrected-row, present-row, meta-less-file and old-format cases, with the stored
+`Infinity` duration and negative dimensions recovered on the present-row path by the two round-3
+cases. Three review rounds put them there: the first found the present-row branch returning
+stored metadata whole and losing a handed-over take's waveform on reopen, the second found the
+meta-less file re-probing a present row, the third found the stored-metadata path skipping
+ESCSUITE-97's recovery. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1478,7 +1499,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.56 | 98.91 | 94.86 | 99.46 |
+| `@escapesuite/artist` | 99.56 | 98.92 | 94.86 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

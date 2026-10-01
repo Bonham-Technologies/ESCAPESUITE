@@ -10,7 +10,7 @@ import {
 } from './projectManager'
 // The real storage layer, running on the fake-indexeddb installed by
 // src/test/setup.ts — save/load really round-trips through IndexedDB here.
-import { getThumbnail, getVideo, storeThumbnail, storeVideo } from './storage'
+import { deleteVideo, getAllVideoMetadata, getThumbnail, getVideo, storeThumbnail, storeVideo } from './storage'
 import type { Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { lastObjectUrl } from '../test/objectUrls'
@@ -314,6 +314,155 @@ describe('loadProject', () => {
     const { sourceVideos } = await loadProject(veditorFile({ videos: [] }, 'none'))
     expect(sourceVideos).toEqual([])
   })
+
+  it('resurrects bytes but not CRAFT take identity for a source CRAFT no longer has (ESCSUITE-151)', async () => {
+    const videoId = uniqueId('deleted-take')
+    const take: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      takeId: videoId,
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: { position: 'bottom-right', size: 0.25, shape: 'circle' },
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), take)
+    // CRAFT deleted the take: the row is gone from the shared DB entirely.
+    await deleteVideo(videoId)
+
+    const file = veditorFile(
+      {
+        videos: [
+          {
+            id: videoId,
+            name: take.name,
+            mimeType: take.mimeType,
+            data: base64Of([1, 2, 3]),
+            meta: {
+              duration: take.duration,
+              width: take.width,
+              height: take.height,
+              frameRate: take.frameRate,
+              mediaType: take.mediaType,
+              source: take.source,
+              takeId: take.takeId,
+              role: take.role,
+              startOffset: take.startOffset,
+              overlayPlacement: take.overlayPlacement,
+              hasWebcam: take.hasWebcam,
+            },
+          },
+        ],
+      },
+      videoId
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0].source).toBeUndefined()
+    expect(sourceVideos[0].takeId).toBeUndefined()
+    expect(sourceVideos[0].role).toBeUndefined()
+    expect(sourceVideos[0].startOffset).toBeUndefined()
+    expect(sourceVideos[0].overlayPlacement).toBeUndefined()
+    // The bytes and the rest of the recording's metadata are still restored.
+    expect(sourceVideos[0].duration).toBe(12)
+    expect(sourceVideos[0].hasWebcam).toBe(true)
+
+    const all = await getAllVideoMetadata()
+    const restored = all.find((v) => v.id === videoId)
+    expect(restored).toBeDefined()
+    expect(restored!.source).toBeUndefined()
+    expect(restored!.takeId).toBeUndefined()
+
+    // ESCAPECRAFT's own library filter (apps/craft/src/core/storage.ts),
+    // replicated inline: the resurrected copy must not pass it. (Other tests
+    // in this file share the same fake-indexeddb instance and may leave their
+    // own `source: 'recording'` rows behind, so this checks the one id rather
+    // than asserting the whole filtered list is empty.)
+    expect(
+      all.filter((v) => v.source === 'recording').some((v) => v.id === videoId)
+    ).toBe(false)
+
+    // Self-contained: this test's own row does not linger for later tests in
+    // this file (which all share one fake-indexeddb instance) to trip over.
+    await deleteVideo(videoId)
+  })
+
+  it("keeps a present source's own CRAFT identity but still restores everything else from the file (ESCSUITE-151)", async () => {
+    const videoId = uniqueId('already-present')
+    const stored: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      takeId: videoId,
+      role: 'screen',
+      startOffset: 0,
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+
+    // A .veditor referencing the same id, carrying its own newer meta — as if
+    // it were re-saved after the waveform was recomputed.
+    const file = veditorFile(
+      {
+        videos: [
+          {
+            id: videoId,
+            name: 'take.webm',
+            mimeType: 'video/webm',
+            data: base64Of([1, 2, 3]),
+            meta: {
+              duration: 20,
+              width: 640,
+              height: 480,
+              frameRate: 30,
+              waveformData: [{ min: -1, max: 1 }],
+            },
+          },
+        ],
+      },
+      videoId
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({
+      // The file's own meta wins for everything CRAFT doesn't own.
+      duration: 20,
+      width: 640,
+      height: 480,
+      frameRate: 30,
+      waveformData: [{ min: -1, max: 1 }],
+      // But CRAFT's take identity stays the stored record's, not the file's.
+      source: 'recording',
+      takeId: videoId,
+      role: 'screen',
+      startOffset: 0,
+    })
+
+    // Nothing is written back to the DB for an id already present.
+    const dbMetadata = (await getVideo(videoId))!.metadata
+    expect(dbMetadata).toEqual(stored)
+
+    // Self-contained: this test's own row does not linger for later tests in
+    // this file (which all share one fake-indexeddb instance) to trip over.
+    await deleteVideo(videoId)
+  })
 })
 
 describe('project file metadata round trip (ESCSUITE-97)', () => {
@@ -390,8 +539,13 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     })
 
     // The blob probe would report Infinity if the load path fell back to it —
-    // scripted here so the assertion below is proof the meta path was used,
-    // not a coincidence of a probe that happened to work.
+    // scripted here so the assertion below is proof the restored values came
+    // from the file's own meta (the real `resolveStoredDuration`/
+    // `resolveMetaDimensions` path, run the same way whether or not this id
+    // is already in the DB — ESCSUITE-151 round 1 tried reusing the stored
+    // record wholesale instead, which would have made this pass by
+    // coincidence rather than by actually reading `meta`), not a coincidence
+    // of a probe that happened to work.
     media.script({ video: { duration: Infinity, durationAfterSeek: 12, durationStaysUnknown: true } })
 
     const reopened = new File([JSON.stringify(saved)], 'take.veditor', { type: 'application/json' })
@@ -400,6 +554,65 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     expect(sourceVideos).toHaveLength(1)
     expect(sourceVideos[0]).toEqual(take)
     expect(media.videos).toHaveLength(0) // never probed the blob
+  })
+
+  it('clears CRAFT take identity but still restores everything else from meta when the source is no longer in the shared DB (ESCSUITE-151)', async () => {
+    const videoId = uniqueId('deleted-take')
+    const take: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24, // not the extractMetadataFromBlob default of 30
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [
+        { min: -0.5, max: 0.5 },
+        { min: -0.2, max: 0.3 },
+      ],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: { position: 'bottom-right', size: 0.25, shape: 'circle' },
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), take)
+
+    await saveProject(createTestProject(videoId), [take])
+    const saved = await capturedProjectFile()
+
+    // CRAFT deleted the take after the project was saved: the row is gone
+    // from the shared DB entirely, so this load genuinely resurrects it.
+    await deleteVideo(videoId)
+
+    // The blob probe would report Infinity if the load path fell back to it —
+    // scripted here so the assertion below is proof meta's duration/width/
+    // height were still usable and trusted, exactly as they would be for any
+    // other import.
+    media.script({ video: { duration: Infinity, durationAfterSeek: 12, durationStaysUnknown: true } })
+
+    const reopened = new File([JSON.stringify(saved)], 'take.veditor', { type: 'application/json' })
+    const { sourceVideos } = await loadProject(reopened)
+
+    expect(sourceVideos).toHaveLength(1)
+    expect(sourceVideos[0]).toEqual({
+      ...take,
+      source: undefined,
+      takeId: undefined,
+      role: undefined,
+      startOffset: undefined,
+      overlayPlacement: undefined,
+    })
+    expect(media.videos).toHaveLength(0) // never probed the blob
+
+    // Self-contained: this test's own row does not linger for later tests in
+    // this file (which all share one fake-indexeddb instance) to trip over.
+    await deleteVideo(videoId)
   })
 
   it('still loads an old-format file with no meta, resolving a headerless take through the shared probe instead of Infinity', async () => {
@@ -424,6 +637,167 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     expect(sourceVideos[0].duration).toBe(9)
     expect(Number.isFinite(sourceVideos[0].duration)).toBe(true)
     expect(sourceVideos[0].frameRate).toBe(30) // the hard-coded fallback, unchanged for an old file
+  })
+
+  it('trusts a present row\'s own stored metadata for a meta-less file instead of re-probing the blob (ESCSUITE-151 round 2)', async () => {
+    const videoId = uniqueId('present-no-meta')
+    const stored: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [
+        { min: -0.5, max: 0.5 },
+        { min: -0.2, max: 0.3 },
+      ],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: { position: 'bottom-right', size: 0.25, shape: 'circle' },
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+
+    // If the load path fell back to extractMetadataFromBlob, this is what it
+    // would report — obviously different from what's stored, so the
+    // assertions below can only pass if the probe never ran.
+    media.script({ video: { duration: 999, videoWidth: 1, videoHeight: 1 } })
+
+    // An old-format entry for the same id: bytes, but no `meta` at all.
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(videoId),
+          videos: [
+            { id: videoId, name: 'take.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toEqual(stored)
+    expect(media.videos).toHaveLength(0) // extractMetadataFromBlob never ran
+
+    await deleteVideo(videoId)
+  })
+
+  it('recovers a present row\'s own non-finite stored duration from the blob for a meta-less file (ESCSUITE-151 round 3)', async () => {
+    const videoId = uniqueId('present-no-meta-bad-duration')
+    const stored: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: Infinity, // pre-ESCSUITE-97 row: never went through the duration probe
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [
+        { min: -0.5, max: 0.5 },
+        { min: -0.2, max: 0.3 },
+      ],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+
+    // The same headerless-WebM discovery every other importer uses: a seek
+    // past the end reveals the real length.
+    media.script({ video: { duration: Infinity, durationAfterSeek: 9, durationStaysUnknown: true } })
+
+    // A meta-less entry for the same id.
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(videoId),
+          videos: [
+            { id: videoId, name: 'take.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toEqual({ ...stored, duration: 9 })
+    expect(Number.isFinite(sourceVideos[0].duration)).toBe(true)
+    // Everything a blob probe could never recover is still the stored value.
+    expect(sourceVideos[0].waveformData).toEqual(stored.waveformData)
+    expect(sourceVideos[0].hasAudio).toBe(true)
+    expect(sourceVideos[0].recordedAt).toBe(1700000000000)
+
+    await deleteVideo(videoId)
+  })
+
+  it("recovers a present row's own unusable stored dimensions from the blob for a meta-less file (ESCSUITE-151 round 3)", async () => {
+    const videoId = uniqueId('present-no-meta-bad-dims')
+    const stored: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: -1, // corrupt/placeholder — not the audio-only "0 is fine" case
+      height: -1,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [{ min: -0.5, max: 0.5 }],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+
+    media.script({ video: { duration: 12, videoWidth: 640, videoHeight: 480 } })
+
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(videoId),
+          videos: [
+            { id: videoId, name: 'take.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toEqual({ ...stored, width: 640, height: 480 })
+    // Everything a blob probe could never recover is still the stored value.
+    expect(sourceVideos[0].waveformData).toEqual(stored.waveformData)
+    expect(sourceVideos[0].hasAudio).toBe(true)
+
+    await deleteVideo(videoId)
   })
 
   /** A .veditor file whose `meta` is built by hand rather than by saveProject. */

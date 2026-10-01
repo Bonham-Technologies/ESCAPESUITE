@@ -226,6 +226,13 @@ export async function loadProject(
     // Convert base64 back to blob
     const blob = base64ToBlob(videoData.data, videoData.mimeType);
 
+    // Is this id already in the shared DB? A `.veditor` load restores the
+    // bytes ARTIST needs; it is not authority over metadata it does not own
+    // (ESCSUITE-151). Checked up front because it decides two things below:
+    // which five fields describe CRAFT's take identity, and whether this
+    // video's bytes/thumbnail get written to the DB at all.
+    const existing = await getVideo(videoData.id);
+
     // A file saved since ESCSUITE-97 carries the live SourceVideo's own
     // fields in `meta` — waveform peaks, take identity, the real frame rate —
     // so those are trusted in preference to a blob probe. But `meta` came out
@@ -234,9 +241,28 @@ export async function loadProject(
     // number (review round 1), so each is validated and, only when it fails,
     // recovered from the blob rather than stored unquestioned. The common
     // case — a `meta` written by this same `saveProject` — never touches the
-    // blob at all.
+    // blob at all. This runs the same way whether or not `existing` is set:
+    // a present source's own duration/dimensions/waveform are still worth
+    // restoring from the file being reopened (review round 1 tried reusing
+    // `existing.metadata` wholesale instead, which silently dropped a
+    // reopened CRAFT take's waveform — CRAFT never computes one — and let a
+    // stored non-finite duration bypass this same recovery).
     //
-    // An older file has no `meta` at all, and falls back to reconstructing
+    // An older file has no `meta` at all. If this id is already in the shared
+    // DB, the stored record is still strictly more than a blob probe can ever
+    // recover — waveform peaks, `hasAudio`, `recordedAt` — so it is trusted
+    // over re-probing (review round 2: re-probing here silently dropped all
+    // three and replaced a known-good stored duration with a re-derived one,
+    // for a file that happens to predate ESCSUITE-97 referencing a source
+    // that happens to still be live). "Trusted" still means run through the
+    // same `resolveStoredDuration`/`resolveMetaDimensions` recovery the
+    // file-`meta` branch above uses, not copied unquestioned: the stored
+    // record can itself predate ESCSUITE-97 (or otherwise carry a
+    // `duration: Infinity`/unusable dimension of its own), and round 2's
+    // first attempt at this branch copied it straight through — reintroducing
+    // the exact Infinity bug ESCSUITE-97 fixed, just one layer further out
+    // (review round 3). Only a source this DB has never heard of — a
+    // genuinely old file, old source — falls back to reconstructing
     // everything from the blob (through `extractMetadataFromBlob`, which
     // itself now goes through the same duration probe every other importer
     // uses).
@@ -257,6 +283,10 @@ export async function loadProject(
         width,
         height,
       };
+    } else if (existing) {
+      const duration = await resolveStoredDuration(blob, existing.metadata);
+      const { width, height } = await resolveMetaDimensions(blob, existing.metadata, existing.metadata);
+      metadata = { ...existing.metadata, duration, width, height };
     } else {
       metadata = await extractMetadataFromBlob(blob, videoData);
     }
@@ -271,14 +301,49 @@ export async function loadProject(
     // file has no real thumbnail to resolve over it (review round 1).
     delete metadata.thumbnailUrl;
 
-    // Store video
-    await storeVideo(videoData.id, blob, metadata);
-
-    // Store thumbnail if present
-    if (videoData.thumbnail) {
-      const thumbnailBlob = base64ToBlob(videoData.thumbnail, 'image/jpeg');
-      await storeThumbnail(videoData.id, thumbnailBlob);
+    if (existing) {
+      // CRAFT's take identity belongs to whatever is already stored under
+      // this id, never to the file: these five fields are the only ones
+      // `source: 'recording'` means anything for
+      // (`getAllVideoMetadata().filter(v => v.source === 'recording')`,
+      // apps/craft/src/core/storage.ts), and a `.veditor` that happens to
+      // carry an identical-looking `meta` must not be able to assert them
+      // over what CRAFT (or an earlier load) actually wrote (ESCSUITE-151).
+      metadata.source = existing.metadata.source;
+      metadata.takeId = existing.metadata.takeId;
+      metadata.role = existing.metadata.role;
+      metadata.startOffset = existing.metadata.startOffset;
+      metadata.overlayPlacement = existing.metadata.overlayPlacement;
+      // thumbnailUrl is a live `blob:` handle that never survives a reload on
+      // its own (ESCSUITE-96) — refreshed here from what's actually stored;
+      // the file's own embedded thumbnail (if any) is not written, matching
+      // `storeThumbnail` being skipped below for an id already present.
       metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
+    } else {
+      // This id is not already in the shared DB, so restoring it resurrects a
+      // copy under an identity CRAFT no longer recognises as live. A
+      // `source: 'recording'` here would put a take the user deleted in
+      // CRAFT straight back into CRAFT's own library, and
+      // `takeId`/`role`/`startOffset`/`overlayPlacement` describe a
+      // take-group this restored copy is not part of (ESCSUITE-151). Cleared
+      // outright, not set to `'import'`: ARTIST's own importers
+      // (`core/videoProcessor.ts`) never write a `source` on a dragged-in
+      // file either — it's simply absent.
+      delete metadata.source;
+      delete metadata.takeId;
+      delete metadata.role;
+      delete metadata.startOffset;
+      delete metadata.overlayPlacement;
+
+      // Store video
+      await storeVideo(videoData.id, blob, metadata);
+
+      // Store thumbnail if present
+      if (videoData.thumbnail) {
+        const thumbnailBlob = base64ToBlob(videoData.thumbnail, 'image/jpeg');
+        await storeThumbnail(videoData.id, thumbnailBlob);
+        metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
+      }
     }
 
     sourceVideos.push(metadata);
