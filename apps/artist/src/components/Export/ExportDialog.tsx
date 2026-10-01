@@ -1,7 +1,16 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
-import { exportToWebM, exportToMP4, isMP4ExportSupported, ExportAbortedError, ExportError } from '../../core/exporter';
+import {
+  exportToWebM,
+  exportToMP4,
+  isMP4ExportSupported,
+  isWebMExportSupported,
+  ExportAbortedError,
+  ExportError,
+  EXPORT_NO_WEBCODECS_REASON,
+  WEBM_NO_CODEC_REASON,
+} from '../../core/exporter';
 import { getResolution } from '../../core/exportTypes';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
@@ -60,6 +69,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set alongside `error` only when the failed run was WebM, the failure was
+  // an ExportError (a diagnosed codec problem, not an abort or a generic
+  // crash) and MP4 is actually available — the WebM-side mirror of MP4's own
+  // "Try WebM Instead" recovery (ESCSUITE-29 Mechanism 1), offered inline
+  // rather than replacing the dialog with a dedicated screen, since WebM is
+  // already this dialog's own default/fallback format.
+  const [offerMp4Fallback, setOfferMp4Fallback] = useState(false);
   const [mp4FailedError, setMp4FailedError] = useState<string | null>(null);
 
   // The export currently in flight, if any — the only thing Cancel, ×, and
@@ -78,6 +94,76 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const latestExportRef = useRef<AbortController | null>(null);
 
   const mp4Supported = isMP4ExportSupported();
+
+  // WebM's own support is a real codec probe (ESCSUITE-22/29) rather than a
+  // boolean read of which globals exist, so — unlike `mp4Supported` above —
+  // it cannot be answered synchronously at render time. Optimistic `true`
+  // until the probe resolves: a user in Chrome/Edge (by far the common case)
+  // never sees the primary button flash disabled-then-enabled, and a user
+  // the probe does disable sees it happen within one effect tick of the
+  // dialog opening, well before they could have clicked anything.
+  const [webmSupported, setWebmSupported] = useState(true);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    // Probe at the size the export will actually use once a preset is
+    // chosen, not the raw project resolution (review round 1, MINOR 2): a
+    // project whose native size this browser cannot configure but whose
+    // 720p/480p preset it can should not read as unsupported. Re-runs
+    // whenever the chosen resolution preset changes, not on every render —
+    // `advancedOptions.resolution` is the only part of `advancedOptions` in
+    // the dependency list.
+    // Built from the two primitives already in the dependency list below,
+    // rather than closing over `projectResolution` itself, so this effect's
+    // only real inputs are the ones listed — a fresh object every render
+    // would otherwise still need the object itself in the deps, which is
+    // exactly the per-render re-probe this is written to avoid.
+    const probeResolution = { width: projectResolution.width, height: projectResolution.height };
+    const { width, height } = getResolution(
+      advancedOptions.resolution,
+      probeResolution.width,
+      probeResolution.height,
+      probeResolution
+    );
+    isWebMExportSupported(width, height).then((supported) => {
+      if (!cancelled) setWebmSupported(supported);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, projectResolution.width, projectResolution.height, advancedOptions.resolution]);
+
+  // Neither format can be exported — no WebCodecs in this browser at all
+  // (Firefox/Safari before their recent VideoEncoder support, or any browser
+  // with it disabled). Both download buttons are disabled below, with this
+  // sentence shown in the main body rather than behind the collapsed
+  // Advanced panel — the ESCSUITE-22 fix for the dialog offering an enabled
+  // "Download WebM" button that silently failed as soon as it was clicked.
+  const neitherFormatSupported = !mp4Supported && !webmSupported;
+
+  // Why the WebM-flavoured buttons (primary + advanced) are disabled, or
+  // null when WebM is offered. Mirrors `separateTracksBlockedReason` in
+  // ESCAPECRAFT: the browser's answer either way, worded for what WebM
+  // specifically needs — VP9/VP8 — distinct from "no WebCodecs at all".
+  const webmBlockedReason = webmSupported
+    ? null
+    : neitherFormatSupported
+      ? EXPORT_NO_WEBCODECS_REASON
+      : WEBM_NO_CODEC_REASON;
+
+  // The Advanced "Download {format}" button must gate on the format the
+  // click will actually run, not the one selected in the radio (review
+  // round 1, MAJOR 1): `handleExport` already falls back from 'mp4' to
+  // 'webm' whenever MP4 is unsupported (see `format` below), which is the
+  // intentional behaviour `falls back to WebM when MP4 is chosen in a
+  // browser without MP4 support` pins — a restored `{format:'mp4'}` setting
+  // in a now-MP4-less browser must still export, as WebM. Gating on this
+  // effective format rather than the selected one keeps that export reachable
+  // while still refusing to run an export that would fail outright.
+  const effectiveAdvancedFormat: 'webm' | 'mp4' =
+    advancedOptions.format === 'mp4' && mp4Supported ? 'mp4' : 'webm';
+  const advancedBlockedReason = effectiveAdvancedFormat === 'webm' ? webmBlockedReason : null;
 
   // Load last export settings on dialog open
   useEffect(() => {
@@ -102,6 +188,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     }
 
     setError(null);
+    setOfferMp4Fallback(false);
     setMp4FailedError(null);
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
@@ -214,7 +301,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
       console.error('Export failed:', err);
       if (err instanceof ExportError) {
-        console.debug('[MP4 Export] Diagnostic log:', err.exportLog);
+        console.debug(`[${format === 'mp4' ? 'MP4' : 'WebM'} Export] Diagnostic log:`, err.exportLog);
       }
 
       // Track the failure
@@ -226,6 +313,12 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
           setMp4FailedError(errorMessage);
         } else {
           setError(errorMessage);
+          // ESCSUITE-29 Mechanism 1: a WebM ExportError is a diagnosed codec
+          // problem (the VP9/VP8 probe found nothing, or the encoder reported
+          // one mid-export) rather than a generic crash, so — when MP4 is
+          // actually available — offer it as a one-click alternative here,
+          // the same thing MP4's own failure screen offers for WebM.
+          setOfferMp4Fallback(err instanceof ExportError && mp4Supported);
         }
         setProgress(null);
       }
@@ -258,12 +351,18 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // The dialog stays mounted, so a stale alert would be re-announced the next
     // time it opens.
     setError(null);
+    setOfferMp4Fallback(false);
     onClose();
   }, [onClose]);
 
   const handleWebMFallback = useCallback(() => {
     // Start a WebM export with the same quality/resolution settings
     handleExport('webm', true);
+  }, [handleExport]);
+
+  const handleMp4Fallback = useCallback(() => {
+    // Start an MP4 export with the same quality/resolution settings
+    handleExport('mp4', true);
   }, [handleExport]);
 
   // Modal keyboard behaviour — initial focus, the Tab trap, Escape-to-close and
@@ -327,6 +426,22 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             </div>
           ) : (
             <>
+              {/* Neither format can be exported — shown here, in the main
+                  body, rather than behind the collapsed Advanced panel (the
+                  dialog's only other "not supported" notice, MP4's, lived
+                  there, which is exactly what let an unusable WebM button
+                  through unremarked — ESCSUITE-22). */}
+              {neitherFormatSupported && (
+                <div className={styles.error} role="alert">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="15" y1="9" x2="9" y2="15" />
+                    <line x1="9" y1="9" x2="15" y2="15" />
+                  </svg>
+                  {EXPORT_NO_WEBCODECS_REASON}
+                </div>
+              )}
+
               {error && (
                 <div className={styles.error} role="alert">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -337,6 +452,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   Export failed: {error}
                 </div>
               )}
+              {offerMp4Fallback && (
+                <button
+                  className={styles.exportButton}
+                  style={{ marginBottom: '12px' }}
+                  onClick={handleMp4Fallback}
+                >
+                  Try MP4 Instead
+                </button>
+              )}
 
               <div className={styles.primarySection}>
                 {timeRange ? (
@@ -344,14 +468,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     <button
                       className={styles.primaryExportButton}
                       onClick={() => handleExport(undefined, false)}
-                      disabled={clips.length === 0}
+                      disabled={clips.length === 0 || !webmSupported}
+                      title={webmBlockedReason ?? undefined}
                     >
                       Export Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})
                     </button>
                     <button
                       className={styles.primaryExportButton}
                       onClick={() => handleExport(undefined, false, true)}
-                      disabled={clips.length === 0}
+                      disabled={clips.length === 0 || !webmSupported}
+                      title={webmBlockedReason ?? undefined}
                       style={{ background: 'var(--bg-hover)', color: 'var(--text-primary)' }}
                     >
                       Export Full Video
@@ -361,12 +487,26 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   <button
                     className={styles.primaryExportButton}
                     onClick={() => handleExport(undefined, false)}
-                    disabled={clips.length === 0}
+                    disabled={clips.length === 0 || !webmSupported}
+                    title={webmBlockedReason ?? undefined}
                   >
                     Download WebM
                   </button>
                 )}
               </div>
+
+              {/* WebM is possible but MP4 is not, or vice versa — say which,
+                  without waiting for the Advanced panel (ESCSUITE-22: "when
+                  only one format is possible, that one stays enabled and the
+                  other is disabled with its reason"). The MP4-only radio's
+                  own reason already lives in the Advanced panel below; this
+                  is the WebM-side mirror, said where the primary button
+                  actually is. */}
+              {!neitherFormatSupported && webmBlockedReason && (
+                <div className={styles.summary} role="status">
+                  {webmBlockedReason} Choose MP4 under Advanced options to export anyway.
+                </div>
+              )}
 
               {/* MP4 decodes through WebCodecs (in a worker) when the decode worker
                   starts successfully; WebM always drives an HTMLVideoElement from
@@ -407,16 +547,19 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     <div className={styles.section}>
                       <label className={styles.label}>Format</label>
                       <div className={styles.radioGroup}>
-                        <label className={styles.radio}>
+                        <label className={`${styles.radio} ${!webmSupported ? styles.radioDisabled : ''}`}>
                           <input
                             type="radio"
                             name="format"
                             value="webm"
                             checked={advancedOptions.format === 'webm'}
                             onChange={() => setAdvancedOptions({ ...advancedOptions, format: 'webm' })}
+                            disabled={!webmSupported}
                           />
                           <span>WebM (VP9 + Opus)</span>
-                          <span className={styles.radioHint}>Smaller file size</span>
+                          <span className={styles.radioHint}>
+                            {webmSupported ? 'Smaller file size' : 'Not supported in this browser'}
+                          </span>
                         </label>
                         <label className={`${styles.radio} ${!mp4Supported ? styles.radioDisabled : ''}`}>
                           <input
@@ -465,7 +608,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     <button
                       className={styles.advancedExportButton}
                       onClick={() => handleExport(undefined, true)}
-                      disabled={clips.length === 0}
+                      disabled={clips.length === 0 || advancedBlockedReason !== null}
+                      title={advancedBlockedReason ?? undefined}
                     >
                       Download {advancedOptions.format === 'mp4' ? 'MP4' : 'WebM'}
                     </button>
@@ -485,6 +629,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
               <button
                 className={styles.exportButton}
                 onClick={handleWebMFallback}
+                disabled={!webmSupported}
+                title={webmBlockedReason ?? undefined}
               >
                 Try WebM Instead
               </button>

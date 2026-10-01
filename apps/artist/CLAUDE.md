@@ -2306,7 +2306,9 @@ MP4 export includes robust error handling and codec compatibility:
   (`avc1.4d0033`); the first three are Level 4.0/3.1, which `isConfigSupported` rejects above
   1920x1080, so the two Level 5.1 entries are listed last and exist to cover 1440p and 4K
 - **Encoder error tracking**: Captures errors from encoder callbacks and propagates them instead of silent failures
-- **Backpressure timeout**: 30-second timeout on encoder queue wait to detect stuck encoders
+- **Backpressure timeout**: 30-second timeout on encoder queue wait to detect stuck encoders, via
+  the same `waitForEncoderBackpressure()` (`exportTypes.ts`) `exportWebM.ts` calls — see "WebM
+  Export Reliability" below for why it is one function rather than two copies of the same loop
 - **Quality-based audio bitrate**: Audio bitrate scales with quality setting (128k/192k/256k) instead of hardcoded value
 - **Error checkpoints**: Validates encoder state at loop start, during backpressure, and before finalization
 - **The decode worker starting up can no longer hang the export (`core/videoDecodeManager.ts`,
@@ -2326,13 +2328,137 @@ MP4 export includes robust error handling and codec compatibility:
   path for every source, the same degradation it already takes per-source for an unsupported codec,
   rather than failing or hanging the whole export.
 
-`exportWebM.ts`'s own frame loop does not have this error-tracking asymmetry fixed — a VP9 encoder
-error is still only logged, where MP4 tracks `videoEncoderError` and checks it every frame — but its
-`encode()` call (ESCSUITE-131) is wrapped in `try { videoEncoder.encode(frame, { keyFrame }) } finally
-{ frame.close() }`, mirroring the frame-closing shape of MP4's own encode block (which closes the
-canvas-drawn frame on both its success and its fatal-retry paths): an encoder that throws mid-export
-no longer leaves the frame it was encoding for the GC to finalise on top of the error that is already
-failing the export.
+`exportWebM.ts`'s `encode()` call (ESCSUITE-131) is wrapped in
+`try { videoEncoder.encode(frame, { keyFrame }) } finally { frame.close() }`, mirroring the
+frame-closing shape of MP4's own encode block (which closes the canvas-drawn frame on both its
+success and its fatal-retry paths): an encoder that throws mid-export no longer leaves the frame
+it was encoding for the GC to finalise on top of the error that is already failing the export.
+
+### WebM Export Reliability (`src/core/exportWebM.ts`, `src/core/exportTypes.ts`)
+
+ESCSUITE-29 Mechanism 1 closed the error-tracking asymmetry the paragraph above used to describe:
+a VP9 encoder error used to be only `console.error`-ed, where MP4 tracked `videoEncoderError` and
+checked it every frame, and the exporter never probed a codec at all — `videoEncoder.configure()`
+was called with a hard-coded `'vp09.00.10.08'`, with no `isConfigSupported()` call anywhere in the
+file and no fallback. WebM's shape now matches MP4's:
+
+- **Codec ladder, shared with MP4's.** `exportTypes.ts`'s `findSupportedVideoConfig()` — try each
+  `VideoEncoderConfig` in order, skip one whose probe throws, return the first one
+  `VideoEncoder.isConfigSupported()` answers `supported: true` for — is the one function both
+  ladders walk: `exportMP4.ts`'s ten-entry H.264 ladder (five profiles × two
+  hardware-acceleration passes) and `exportWebM.ts`'s two-entry one, `webMVideoCodecConfigs()`:
+  VP9 (`vp09.00.10.08`) first, VP8 as the fallback every Matroska-capable browser still has. The
+  probe and the real `configure()` call ask about the **same** configuration — width, height,
+  bitrate, framerate, all the export's own — so there is no gap between what was asked and what
+  gets encoded. Neither VP9 nor VP8 supported throws an `ExportError` before any encoder is
+  constructed at all, not partway through building one. It returns `{ config, candidate }`
+  (review round 1, MINOR 3) rather than `config` alone: `config` is what `.configure()` is called
+  with — the browser's own normalised answer when it offers one — and `candidate` is the exact
+  entry from the input list that was found supported, never touched by the browser. A caller that
+  needs to know *which* configuration it asked about — `exportWebM.ts` labelling its muxer track
+  `'vp9'` or `'vp8'` — reads `candidate`, because nothing guarantees `config.codec` still looks
+  like the string that was asked about once a browser has normalised it.
+- **Opus, probed independently of video** — the same `AudioEncoder.isConfigSupported()` shape
+  MP4's own AAC check uses: no Opus support drops the audio and still produces a working, silent
+  WebM (`console.warn('Opus not supported, exporting without audio')`), never refuses the export
+  outright.
+- **Encoder error tracking.** The video encoder's `error:` callback now stores the exception in
+  `videoEncoderError`, checked at the top of every frame iteration and inside the backpressure
+  wait, exactly where MP4 checks its own; the audio encoder's `error:` callback does the same,
+  checked once more before finalising.
+- **Backpressure timeout, factored into one `waitForEncoderBackpressure()` (`exportTypes.ts`)
+  both exporters call** — not copied inline a second time, and (review round 1, MINOR 1) not left
+  as a third copy either: `exportMP4.ts`'s own inline loop was replaced with the same call,
+  `threshold: 5` where WebM passes `threshold: 20`, everything else identical — same mid-wait
+  error check, same 30-second stuck-encoder timeout, same `ExportError` message. `now`/`sleep` are
+  injectable parameters so both the timeout and the error-during-wait paths are direct unit tests
+  rather than needing a real encoder double to actually stall for 30 real seconds; MP4's own
+  twelve codec tests and both export `*.perf.test.ts` files are unchanged by the refactor, since
+  nothing about what gets called or logged differs from the loop they replaced.
+- **`ExportError` and `ExportLogEntry` moved to `exportTypes.ts`** (both exporters import them from
+  there now; `exportMP4.ts` re-exports them so every existing `from './exportMP4'` import keeps
+  working) so `exportWebM.ts` can throw the same diagnosed-failure shape — message, structured
+  log, frame index, total frames — without importing the MP4 module just for its error class. A
+  WebM failure that is not already an `ExportError` or an `ExportAbortedError` is wrapped in one
+  on the way out, the same catch-all `exportMP4.ts`'s own catch block has always done.
+
+### Export Dialog Browser Support (`src/components/Export/ExportDialog.tsx`, `src/core/exportTypes.ts`)
+
+`isMP4ExportSupported()` and `isWebMExportSupported()` answer two different questions, on
+purpose, and the dialog reads each one differently:
+
+- **`isMP4ExportSupported()`** is a synchronous read of which globals exist —
+  `VideoEncoder`/`VideoDecoder`/`VideoFrame` — unchanged by ESCSUITE-22/29. It says nothing about
+  whether this browser's `VideoEncoder` can actually configure H.264; that question is answered
+  only at export time, by the ladder above, with its own recovery screen on failure (below). This
+  is a real, if narrow, asymmetry with WebM's probe (next bullet), not an oversight — see "What is
+  still asymmetric" below.
+- **`isWebMExportSupported(width, height)`** is a real, asynchronous probe (ESCSUITE-22/29: it
+  used to be `return isMP4ExportSupported();`, which could not tell a browser that merely has
+  WebCodecs from one that can actually encode VP9 or VP8 — exactly the gap ESCSUITE-29 traced).
+  `hasWebMEncodeGlobals()` is the one predicate it and `exportWebM.ts`'s own early guard both
+  read: only `VideoEncoder`/`VideoFrame` need to exist, not `VideoDecoder` — WebM never decodes
+  through WebCodecs; it seeks `HTMLVideoElement`s directly. From there it asks the same
+  `findSupportedVideoConfig()` ladder `exportWebM.ts` configures from, at **the size the export
+  will actually use** — `getResolution(advancedOptions.resolution, …)`'s answer, not the raw
+  project resolution, so a project whose native size this browser cannot configure but whose
+  720p/480p preset it can does not read as unsupported outright (review round 1, MINOR 2).
+  `ExportDialog` calls it in a `useEffect` keyed on `isOpen`, the project's own width/height and
+  the *selected resolution preset* — so it re-probes when the preset changes, not on every
+  render — into a `webmSupported` state that starts optimistically `true` (so the common case —
+  Chrome/Edge, both formats work — never flashes a disabled button) and flips to `false`, with a
+  reason, only once the probe actually says no. The effect's `cancelled` flag is the ESCSUITE-98
+  run-identity shape: closing the dialog before a probe resolves, then reopening it before the
+  stale one settles, must not let the stale answer overwrite the fresh one.
+
+The dialog's **three support states**:
+
+| State | Shown |
+|---|---|
+| Both formats possible (the common case) | No notice; both are offered as usual |
+| Only one is possible | The unsupported one's primary button is `disabled`, with its reason in both a `title` and a visible line in the main body: `WEBM_NO_CODEC_REASON` ("This browser cannot encode WebM video — Chrome or Edge can.") for WebM. MP4's own "Not supported in this browser" is unchanged by this ticket and still lives only in the Advanced panel's radio — the one place MP4 can be chosen at all — so the main body gets *louder* for the WebM-unsupported half and no louder for the MP4-unsupported half (that asymmetry is section ESCSUITE-22's own finding and is still open; see below) |
+| Neither is possible (no WebCodecs at all) | `EXPORT_NO_WEBCODECS_REASON` ("Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.") as a `role="alert"` row in the dialog's **main body**, not behind "Advanced options" — every download button, primary **and** Advanced, stays on screen, `disabled`, the same say-why-do-not-hide shape ESCAPECRAFT's MP4/M4A buttons and `separateTracksBlockedReason` use (`apps/craft/CLAUDE.md`'s "Download Formats") |
+
+Before ESCSUITE-22, the dialog's only "not supported" notice was MP4's, and it lived behind the
+collapsed Advanced panel — so a browser with no WebCodecs at all still showed an enabled "Download
+WebM" button front and center, which failed the instant it was clicked. `EXPORT_NO_WEBCODECS_REASON`
+and `WEBM_NO_CODEC_REASON` both live in `exportTypes.ts`, beside the probe, for the same reason
+ESCAPECRAFT's own disabled-reason constants live beside their gates rather than in a shared notices
+file: nothing has gone wrong yet.
+
+**The Advanced "Download {format}" button gates on the format the click will actually run, not
+the one selected in the radio** (review round 1, MAJOR 1). `handleExport` already falls back from
+`'mp4'` to `'webm'` whenever MP4 is unsupported — the intentional behaviour behind a restored
+`{format:'mp4'}` setting in a now-MP4-less browser still exporting, as WebM, when the Advanced
+button is clicked — so `effectiveAdvancedFormat` recomputes that same fallback
+(`advancedOptions.format === 'mp4' && mp4Supported ? 'mp4' : 'webm'`) and the button disables
+exactly when *that* format is blocked, with the blocking reason as its `title`. The button's
+*label* still reads the selected format, not the effective one, deliberately: relabelling it would
+read correctly but breaks nothing for the user, since the one existing case where they can diverge
+(a stale `'mp4'` setting with MP4 now unsupported) already explains itself via the one-format
+sentence above the primary section.
+
+**A WebM failure can offer MP4 as a retry, the mirror of MP4's own "Try WebM Instead."** MP4's
+failure has always replaced the dialog with a dedicated recovery screen (`mp4FailedError`) offering
+WebM as the alternative, regardless of what kind of error it was — gated on `webmSupported`
+(review round 1, MINOR 5: the browser the WebM probe exists to catch — WebCodecs present, no
+usable codec — is exactly the one where a failed MP4 export used to still offer a WebM retry that
+could not work either). WebM's failure stays inline — the usual `error` alert above the
+still-present primary button — because WebM is already this dialog's own default/fallback format;
+but when the failure is specifically an `ExportError` (a diagnosed codec problem: the ladder found
+nothing, or the encoder failed mid-export) *and* MP4 is actually available, a "Try MP4 Instead"
+button appears beside the alert, running `exportToMP4` with the same quality/resolution settings.
+A plain `Error` (an abort, a generic crash) or MP4 being unavailable offers nothing further — there
+is nothing more useful to suggest.
+
+**What is still asymmetric, on purpose.** `isMP4ExportSupported()` was not upgraded to a real
+per-codec probe by this ticket — only WebM's was (ESCSUITE-29 Mechanism 1's actual scope). A
+browser that has WebCodecs globals but no H.264 encoder still reads `mp4Supported: true` up front
+and only discovers otherwise at export time, via MP4's own ladder and its `mp4FailedError`
+recovery screen. This is why MP4's "Not supported in this browser" reason can still only appear
+in the Advanced panel: there is no up-front answer to show in the main body for MP4 the way there
+now is for WebM. Giving MP4 the same up-front treatment is unclaimed follow-up work, not a defect
+in this ticket.
 
 ### Black Flash Prevention (`src/core/exportWebM.ts`, `src/core/canvasRenderer.ts`)
 To prevent black frames during export:

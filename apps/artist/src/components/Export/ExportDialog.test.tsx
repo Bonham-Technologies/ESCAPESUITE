@@ -11,10 +11,11 @@ import { lastObjectUrl } from '../../test/objectUrls'
 // The exporter itself is driven by its own suite; here it is a scripted
 // collaborator. The real error classes come through importOriginal so the
 // dialog's instanceof checks are the ones production runs.
-const { mockExportToWebM, mockExportToMP4, mockIsMP4ExportSupported } = vi.hoisted(() => ({
+const { mockExportToWebM, mockExportToMP4, mockIsMP4ExportSupported, mockIsWebMExportSupported } = vi.hoisted(() => ({
   mockExportToWebM: vi.fn(),
   mockExportToMP4: vi.fn(),
   mockIsMP4ExportSupported: vi.fn(() => true),
+  mockIsWebMExportSupported: vi.fn(() => Promise.resolve(true)),
 }))
 
 vi.mock('../../core/exporter', async (importOriginal) => ({
@@ -22,6 +23,7 @@ vi.mock('../../core/exporter', async (importOriginal) => ({
   exportToWebM: mockExportToWebM,
   exportToMP4: mockExportToMP4,
   isMP4ExportSupported: mockIsMP4ExportSupported,
+  isWebMExportSupported: mockIsWebMExportSupported,
 }))
 
 const { mockGetSetting, mockSetSetting } = vi.hoisted(() => ({
@@ -118,6 +120,8 @@ describe('ExportDialog', () => {
     mockExportToMP4.mockResolvedValue(new Blob())
     mockSendMessage.mockReset()
     mockIsMP4ExportSupported.mockReturnValue(true)
+    mockIsWebMExportSupported.mockReset()
+    mockIsWebMExportSupported.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(undefined)
 
     resetStoreForTest()
@@ -239,6 +243,204 @@ describe('ExportDialog', () => {
       fireEvent.click(mp4)
       expect(mp4).toBeChecked()
       expect(webm).not.toBeChecked()
+    })
+
+    // Coverage round: the test above only ever fires the MP4 radio's own
+    // onChange (webm is already selected by default, so switching away from
+    // it never exercises webm's). Switching to MP4 and back exercises both,
+    // and the Advanced export (effective format, and the setting persisted
+    // for next time) confirms the switch actually took, not just the radio's
+    // own `checked` state.
+    it('switches back to WebM after MP4, and the Advanced export reflects it', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      const webm = screen.getByRole('radio', { name: /webm/i })
+      const mp4 = screen.getByRole('radio', { name: /mp4/i })
+
+      fireEvent.click(mp4)
+      expect(mp4).toBeChecked()
+
+      fireEvent.click(webm)
+      expect(webm).toBeChecked()
+      expect(mp4).not.toBeChecked()
+
+      fireEvent.click(advancedExport())
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(mockExportToMP4).not.toHaveBeenCalled()
+      expect(mockSetSetting).toHaveBeenCalledWith(
+        'lastExportSettings',
+        expect.objectContaining({ format: 'webm' })
+      )
+    })
+  })
+
+  // ESCSUITE-22/29: isWebMExportSupported() is a real codec probe now, so the
+  // dialog has three states — both formats possible (the `rendering` suite
+  // above exercises this one throughout), only one, or neither — and each
+  // says so before the user can click into a dead end.
+  describe('browser support', () => {
+    it('offers both formats when both can be exported', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(primaryExport()).toBeEnabled()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('disables WebM with its own reason when only MP4 can be exported, leaving MP4 reachable', async () => {
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(primaryExport()).toBeDisabled()
+      expect(primaryExport()).toHaveAttribute('title', 'This browser cannot encode WebM video — Chrome or Edge can.')
+      expect(
+        screen.getByText(/This browser cannot encode WebM video.*Choose MP4 under Advanced options to export anyway\./)
+      ).toBeInTheDocument()
+      // Not the "neither" sentence — MP4 is still available.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      fireEvent.click(advancedToggle())
+      expect(screen.getByRole('radio', { name: /webm/i })).toBeDisabled()
+      expect(screen.getByRole('radio', { name: /mp4/i })).toBeEnabled()
+
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(mockExportToMP4).toHaveBeenCalledTimes(1))
+    })
+
+    it('disables both formats with one sentence, in the main body, when neither can be exported', async () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.'
+      )
+      expect(primaryExport()).toBeDisabled()
+
+      // Not hidden behind the collapsed Advanced panel.
+      expect(advancedToggle()).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    // Review round 1, MAJOR 1: the primary buttons were disabled, but the
+    // Advanced "Download {format}" button was gated on `clips.length === 0`
+    // alone — one click into the panel the dialog itself points you at
+    // ("Advanced options") reached a button that still ran the failing
+    // export.
+    it('disables the Advanced download button too, with the same sentence, when neither format can be exported', async () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      fireEvent.click(advancedToggle())
+
+      const advanced = advancedExport()
+      expect(advanced).toBeDisabled()
+      expect(advanced).toHaveAttribute(
+        'title',
+        'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.'
+      )
+      fireEvent.click(advanced)
+      expect(mockExportToWebM).not.toHaveBeenCalled()
+    })
+
+    // Review round 2: `effectiveAdvancedFormat`'s `&& mp4Supported` operand is
+    // only reached when `advancedOptions.format === 'mp4'` — the test above
+    // never selects MP4, so it always short-circuits before touching this
+    // operand. A restored `{format:'mp4'}` setting does select it, and in a
+    // browser with neither format is exactly the dangerous case: without this
+    // operand, `effectiveAdvancedFormat` would read 'mp4' regardless of
+    // `mp4Supported`, `advancedBlockedReason` would resolve to `null` (it is
+    // only ever `webmBlockedReason`, and only when the effective format is
+    // 'webm'), and the dialog would open straight onto an enabled
+    // "Download MP4" that `handleExport` itself would still run as WebM
+    // (its own, separate fallback) — into `exportWebM.ts`'s
+    // "requires WebCodecs API" throw, in the one browser this ticket exists
+    // to warn before any click.
+    it('disables the Advanced button for a restored MP4 setting when neither format can be exported', async () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      const advanced = await screen.findByRole('button', { name: /download mp4/i })
+      expect(advanced).toBeDisabled()
+      expect(advanced).toHaveAttribute(
+        'title',
+        'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.'
+      )
+      fireEvent.click(advanced)
+      expect(mockExportToWebM).not.toHaveBeenCalled()
+      expect(mockExportToMP4).not.toHaveBeenCalled()
+    })
+
+    it('probes at the resolution the selected preset will actually export, not the raw project size', async () => {
+      store().setProjectResolution(1920, 1080)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(mockIsWebMExportSupported).toHaveBeenCalledWith(1920, 1080)
+      mockIsWebMExportSupported.mockClear()
+
+      // Switching to the 720p preset re-probes at 720p's own dimensions —
+      // the ones `exportToWebM` will actually configure the encoder at —
+      // rather than leaving the stale 1080p answer in place.
+      fireEvent.click(advancedToggle())
+      fireEvent.change(screen.getByDisplayValue('Project — 1920×1080'), { target: { value: '720p' } })
+      await settle()
+
+      expect(mockIsWebMExportSupported).toHaveBeenCalledWith(1280, 720)
+    })
+
+    it('probes once per dialog open, not once per render', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      expect(mockIsWebMExportSupported).toHaveBeenCalledTimes(1)
+
+      // Neither toggling the disclosure nor changing quality/format touches
+      // the probe's own dependencies (isOpen, project size, resolution
+      // preset), so re-rendering for these must not re-probe.
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+      fireEvent.change(screen.getByDisplayValue('Medium'), { target: { value: 'high' } })
+      await settle()
+
+      expect(mockIsWebMExportSupported).toHaveBeenCalledTimes(1)
+    })
+
+    // Review round 1, MAJOR 2(a): the `cancelled` guard in the probe's effect
+    // cleanup is the ESCSUITE-98 run-identity shape — without it, a probe
+    // started by an earlier open can still overwrite a later one's answer
+    // once it finally resolves.
+    it('does not let a stale probe from an earlier open overwrite a later one', async () => {
+      let resolveStale!: (supported: boolean) => void
+      mockIsWebMExportSupported.mockReturnValueOnce(
+        new Promise<boolean>((resolve) => {
+          resolveStale = resolve
+        })
+      )
+      const { rerender } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      // Close before the first probe ever resolves.
+      rerender(<ExportDialog isOpen={false} onClose={onClose} />)
+
+      // Reopen; the second probe (the default mock) resolves true.
+      rerender(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      expect(primaryExport()).toBeEnabled()
+
+      // The stale first probe now resolves false. It must not undo the
+      // current (correct) answer.
+      resolveStale(false)
+      await settle()
+
+      expect(primaryExport()).toBeEnabled()
     })
   })
 
@@ -892,6 +1094,82 @@ describe('ExportDialog', () => {
       }
     })
 
+    // ESCSUITE-29 Mechanism 1: a WebM ExportError is a diagnosed codec
+    // problem (the probe found nothing, or the encoder failed mid-export)
+    // rather than a generic crash — mirroring MP4's own "Try WebM Instead",
+    // offer MP4 as a one-click alternative when it is actually available.
+    it('offers an MP4 retry after a WebM ExportError, with the codec\'s own words', async () => {
+      const log = [{ phase: 'codec', detail: 'no supported video codec', timestamp: 1 }]
+      mockExportToWebM.mockRejectedValue(
+        new ExportError('No supported video codec found. WebM export requires VP9 or VP8 support.', log)
+      )
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(primaryExport())
+
+        await waitFor(() =>
+          expect(screen.getByRole('alert')).toHaveTextContent(
+            'Export failed: No supported video codec found. WebM export requires VP9 or VP8 support.'
+          )
+        )
+        expect(debugLog).toHaveBeenCalledWith('[WebM Export] Diagnostic log:', log)
+
+        const retry = screen.getByRole('button', { name: 'Try MP4 Instead' })
+        fireEvent.click(retry)
+
+        await waitFor(() => expect(mockExportToMP4).toHaveBeenCalledTimes(1))
+        expect(mp4Args()[2]).toEqual({
+          format: 'webm',
+          quality: 'medium',
+          resolution: 'project',
+          timeRange: undefined,
+        })
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
+    it('does not offer an MP4 retry for a plain WebM failure', async () => {
+      mockExportToWebM.mockRejectedValue(new Error('Encoding failed'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(primaryExport())
+
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+        expect(screen.queryByRole('button', { name: 'Try MP4 Instead' })).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    // Review round 1, MAJOR 2(b): `setOfferMp4Fallback` checks
+    // `err instanceof ExportError && mp4Supported` — this is the
+    // `&& mp4Supported` half, which the test above never exercised (it used
+    // a plain Error, not an ExportError).
+    it('does not offer an MP4 retry for a WebM ExportError when MP4 is unsupported', async () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      const log = [{ phase: 'codec', detail: 'no supported video codec', timestamp: 1 }]
+      mockExportToWebM.mockRejectedValue(
+        new ExportError('No supported video codec found. WebM export requires VP9 or VP8 support.', log)
+      )
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(primaryExport())
+
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+        expect(screen.queryByRole('button', { name: 'Try MP4 Instead' })).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
     it('offers a WebM retry after an MP4 failure and logs the diagnostic trail', async () => {
       const log = [{ phase: 'encode', detail: 'encoder died', timestamp: 1 }]
       mockExportToMP4.mockRejectedValue(new ExportError('Encoder unavailable', log))
@@ -940,6 +1218,31 @@ describe('ExportDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }))
 
         expect(onClose).toHaveBeenCalledTimes(1)
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    // Review round 1, MINOR 5: the MP4 failure screen's "Try WebM Instead"
+    // was gated only on `mp4FailedError` — exactly the browser the WebM
+    // probe exists to catch (WebCodecs present, no usable codec) reaches MP4
+    // failing with WebM also unsupported, and used to still hand back a
+    // recovery button that could not work either.
+    it('disables the WebM retry on the MP4 failure screen when WebM is also unsupported', async () => {
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockExportToMP4.mockRejectedValue(new Error('Encoder unavailable'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        await settle()
+        fireEvent.click(advancedToggle())
+        fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+        fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+        const retry = screen.getByRole('button', { name: 'Try WebM Instead' })
+        expect(retry).toBeDisabled()
+        expect(retry).toHaveAttribute('title', 'This browser cannot encode WebM video — Chrome or Edge can.')
       } finally {
         errorLog.mockRestore()
       }

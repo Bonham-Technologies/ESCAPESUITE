@@ -1,9 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
+  EXPORT_NO_WEBCODECS_REASON,
   ExportAbortedError,
+  ExportError,
+  WEBM_NO_CODEC_REASON,
   blendModeToCanvas,
   calculateTimelineDuration,
   checkAborted,
+  findSupportedVideoConfig,
   getActiveTransition,
   getBaseDimensions,
   getIncomingClipTime,
@@ -14,6 +18,8 @@ import {
   isWebMExportSupported,
   loadImageElement,
   loadVideoElement,
+  waitForEncoderBackpressure,
+  webMVideoCodecConfigs,
   yieldToMain,
 } from './exportTypes'
 import type { Clip, Track, SourceVideo, TransitionType } from '../store/types'
@@ -267,24 +273,266 @@ describe('blendModeToCanvas', () => {
 })
 
 describe('export support probes', () => {
-  it('report supported when the three WebCodecs globals exist', () => {
+  it('report supported when the three WebCodecs globals exist', async () => {
     const codecs = installWebCodecsDoubles()
     try {
       expect(isMP4ExportSupported()).toBe(true)
-      expect(isWebMExportSupported()).toBe(true)
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
     } finally {
       codecs.uninstall()
     }
   })
 
-  it('report unsupported when WebCodecs is absent', () => {
+  it('report unsupported when WebCodecs is absent', async () => {
     const restore = removeWebCodecsGlobals()
     try {
       expect(isMP4ExportSupported()).toBe(false)
-      expect(isWebMExportSupported()).toBe(false)
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(false)
     } finally {
       restore()
     }
+  })
+})
+
+describe('findSupportedVideoConfig', () => {
+  it('returns the first config whose isConfigSupported() answers true', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = (c) => c.codec === 'b'
+      const found = await findSupportedVideoConfig([
+        { codec: 'a' } as VideoEncoderConfig,
+        { codec: 'b' } as VideoEncoderConfig,
+        { codec: 'c' } as VideoEncoderConfig,
+      ])
+      expect(found?.config).toMatchObject({ codec: 'b' })
+      expect(found?.candidate).toMatchObject({ codec: 'b' })
+      expect(codecs.encoder.configs.map((c) => (c as { codec: string }).codec)).toEqual(['a', 'b'])
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('skips a config whose probe throws and keeps trying', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = (c) =>
+        c.codec === 'a' ? Promise.reject(new Error('probe blew up')) : true
+      const found = await findSupportedVideoConfig([
+        { codec: 'a' } as VideoEncoderConfig,
+        { codec: 'b' } as VideoEncoderConfig,
+      ])
+      expect(found?.config).toMatchObject({ codec: 'b' })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('returns null when nothing in the list is supported', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = () => false
+      const found = await findSupportedVideoConfig([{ codec: 'a' } as VideoEncoderConfig])
+      expect(found).toBeNull()
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  // Review round 1, MINOR 3: a caller that needs to know *which candidate it
+  // asked about* (exportWebM.ts labelling its muxer track) must read
+  // `candidate`, not `config` — the browser owes nothing about what
+  // `config.codec` looks like once it has normalised it.
+  it('keeps the original candidate even when the browser returns a differently-normalised config', async () => {
+    const previous = (globalThis as { VideoEncoder?: unknown }).VideoEncoder
+    ;(globalThis as { VideoEncoder?: unknown }).VideoEncoder = {
+      isConfigSupported: async (config: VideoEncoderConfig) => ({
+        supported: true,
+        config: { ...config, codec: 'vp08.00.10.08' },
+      }),
+    }
+    try {
+      const found = await findSupportedVideoConfig([{ codec: 'vp8' } as VideoEncoderConfig])
+      expect(found?.candidate.codec).toBe('vp8')
+      expect(found?.config.codec).toBe('vp08.00.10.08')
+    } finally {
+      ;(globalThis as { VideoEncoder?: unknown }).VideoEncoder = previous
+    }
+  })
+})
+
+describe('webMVideoCodecConfigs', () => {
+  it('offers VP9 before VP8, at the requested size and bitrate', () => {
+    expect(webMVideoCodecConfigs(1280, 720, 5_000_000, 30)).toEqual([
+      { codec: 'vp09.00.10.08', width: 1280, height: 720, bitrate: 5_000_000, framerate: 30, latencyMode: 'quality' },
+      { codec: 'vp8', width: 1280, height: 720, bitrate: 5_000_000, framerate: 30, latencyMode: 'quality' },
+    ])
+  })
+})
+
+describe('isWebMExportSupported', () => {
+  it('falls back to VP8 when VP9 cannot be configured', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = (c) => c.codec === 'vp8'
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('reports unsupported when neither VP9 nor VP8 can be configured', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = () => false
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(false)
+    } finally {
+      codecs.uninstall()
+    }
+  })
+})
+
+describe('export reason sentences', () => {
+  it('names the two browsers that can export, for the no-WebCodecs-at-all case', () => {
+    expect(EXPORT_NO_WEBCODECS_REASON).toBe(
+      'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.'
+    )
+  })
+
+  it('names the two browsers that can export, for the no-WebM-codec case', () => {
+    expect(WEBM_NO_CODEC_REASON).toBe('This browser cannot encode WebM video — Chrome or Edge can.')
+  })
+})
+
+describe('waitForEncoderBackpressure', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // Coverage round: every other case here injects its own `sleep`, so the
+  // default parameter — `(ms) => new Promise((resolve) => setTimeout(resolve, ms))`
+  // — never actually runs. This one calls the function with no `sleep` at
+  // all, under fake timers, and advances the clock by the 5ms the real
+  // default sleeps for.
+  it('uses the real setTimeout-based sleep when none is injected', async () => {
+    vi.useFakeTimers()
+    const encoder = { encodeQueueSize: 25 }
+
+    const promise = waitForEncoderBackpressure({
+      encoder,
+      threshold: 20,
+      getError: () => null,
+      log: vi.fn(),
+      exportLog: [],
+      frameIndex: 0,
+      totalFrames: 10,
+    })
+
+    // The queue drains while the real sleep is pending; advancing past its
+    // 5ms resolves it, and the loop's next check finds the queue clear.
+    encoder.encodeQueueSize = 10
+    await vi.advanceTimersByTimeAsync(5)
+
+    await expect(promise).resolves.toBeUndefined()
+  })
+
+  it('resolves immediately when the queue is already at or under the threshold', async () => {
+    const log = vi.fn()
+    await waitForEncoderBackpressure({
+      encoder: { encodeQueueSize: 5 },
+      threshold: 20,
+      getError: () => null,
+      log,
+      exportLog: [],
+      frameIndex: 0,
+      totalFrames: 10,
+    })
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it('waits (sleeping between checks) until the queue drains', async () => {
+    const encoder = { encodeQueueSize: 25 }
+    const sleep = vi.fn(async () => {
+      encoder.encodeQueueSize = 10
+    })
+    await waitForEncoderBackpressure({
+      encoder,
+      threshold: 20,
+      getError: () => null,
+      log: vi.fn(),
+      exportLog: [],
+      frameIndex: 0,
+      totalFrames: 10,
+      sleep,
+    })
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws the encoder error reported while waiting, logging it', async () => {
+    const error = new Error('encoder exploded')
+    const log = vi.fn()
+    const exportLog: Array<{ phase: string; detail: string; timestamp: number }> = []
+
+    await expect(
+      waitForEncoderBackpressure({
+        encoder: { encodeQueueSize: 25 },
+        threshold: 20,
+        getError: () => error,
+        log,
+        exportLog,
+        frameIndex: 3,
+        totalFrames: 10,
+        sleep: vi.fn(async () => {}),
+      })
+    ).rejects.toBe(error)
+
+    expect(log).toHaveBeenCalledWith('error', 'Encoder error during backpressure: encoder exploded')
+  })
+
+  it('gives up with an ExportError once the timeout elapses with no progress', async () => {
+    const log = vi.fn()
+    let now = 0
+    await expect(
+      waitForEncoderBackpressure({
+        encoder: { encodeQueueSize: 25 },
+        threshold: 20,
+        getError: () => null,
+        log,
+        exportLog: [],
+        frameIndex: 4,
+        totalFrames: 10,
+        timeoutMs: 100,
+        now: () => now,
+        sleep: vi.fn(async () => {
+          now += 60
+        }),
+      })
+    ).rejects.toMatchObject({
+      name: 'ExportError',
+      message: 'Video encoder backpressure timeout - encoder may be stuck',
+      frameIndex: 4,
+      totalFrames: 10,
+    })
+
+    expect(log).toHaveBeenCalledWith('fatal', 'Backpressure timeout at frame 4, queue size: 25')
+  })
+
+  it('carries the caller\'s own log into the thrown ExportError', async () => {
+    const exportLog = [{ phase: 'init', detail: 'start', timestamp: 0 }]
+    const error = (await waitForEncoderBackpressure({
+      encoder: { encodeQueueSize: 25 },
+      threshold: 20,
+      getError: () => null,
+      log: vi.fn(),
+      exportLog,
+      frameIndex: 0,
+      totalFrames: 1,
+      timeoutMs: -1,
+      now: () => 0,
+      sleep: vi.fn(async () => {}),
+    }).catch((e: unknown) => e)) as ExportError
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.exportLog).toBe(exportLog)
   })
 })
 

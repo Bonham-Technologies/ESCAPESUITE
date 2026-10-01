@@ -26,6 +26,8 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   getActiveTransition,
+  findSupportedVideoConfig,
+  waitForEncoderBackpressure,
   ExportError,
 } from './exportTypes';
 import {
@@ -43,10 +45,12 @@ import {
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
 
-// `ExportLogEntry` and `ExportError` now live in exportTypes.ts, so exportWebM.ts
-// can import them without reaching into this module; re-exported here so every
-// existing `import { ExportError } from './exportMP4'` (and the `exporter.ts`
-// barrel, which re-exports from here) keeps resolving unchanged.
+// `ExportLogEntry` and `ExportError` live in exportTypes.ts (moved there by
+// ESCSUITE-152, independently of ESCSUITE-29 Mechanism 1 doing the same
+// thing on this branch), so exportWebM.ts can import them without reaching
+// into this module; re-exported here so every existing
+// `import { ExportError } from './exportMP4'` (and the `exporter.ts` barrel,
+// which re-exports from here) keeps resolving unchanged.
 export type { ExportLogEntry } from './exportTypes';
 export { ExportError } from './exportTypes';
 
@@ -270,12 +274,17 @@ export async function exportToMP4(
     'avc1.4d0033', // Main Profile Level 5.1
   ];
 
-  // Find a supported H.264 codec configuration
-  let videoConfig: VideoEncoderConfig | null = null;
+  // Find a supported H.264 codec configuration. Two passes flattened into one
+  // candidate list, in order: prefer-hardware first (GPU acceleration), then
+  // no-preference (allows software encoding) — the second pass ensures the
+  // headless / CI path works even without a GPU (e.g. Playwright Chromium,
+  // Docker). `findSupportedVideoConfig` (exportTypes.ts) is the shared ladder
+  // walker the WebM exporter's VP9/VP8 probe also uses (ESCSUITE-29).
   const hwModes: VideoEncoderConfig['hardwareAcceleration'][] = ['prefer-hardware', 'no-preference'];
-  outer: for (const hwMode of hwModes) {
+  const h264Configs: VideoEncoderConfig[] = [];
+  for (const hwMode of hwModes) {
     for (const codec of h264Codecs) {
-      const config: VideoEncoderConfig = {
+      h264Configs.push({
         codec,
         width,
         height,
@@ -283,24 +292,25 @@ export async function exportToMP4(
         framerate: frameRate,
         latencyMode: 'quality',
         hardwareAcceleration: hwMode,
-      };
-      try {
-        const support = await VideoEncoder.isConfigSupported(config);
-        if (support.supported) {
-          videoConfig = support.config || config;
-          log('codec', `Selected H.264 codec: ${codec} hw=${hwMode} (${width}x${height} @ ${videoBitrate}bps)`);
-          console.log(`[MP4 Export] Using H.264 codec: ${codec} (${hwMode})`);
-          break outer;
-        }
-      } catch {
-        // This codec not supported, try next
-      }
+      });
     }
   }
 
-  if (!videoConfig) {
+  const foundVideoConfig = await findSupportedVideoConfig(h264Configs);
+
+  if (!foundVideoConfig) {
     throw new Error('No supported H.264 codec found. MP4 export requires H.264 support.');
   }
+
+  // Log the candidate we asked about, not `found.config` — the browser's own
+  // normalised answer is not guaranteed to echo it (review round 1, NIT 3),
+  // and the candidate is what this ladder actually chose.
+  const { config: videoConfig, candidate: videoCandidate } = foundVideoConfig;
+  log(
+    'codec',
+    `Selected H.264 codec: ${videoCandidate.codec} hw=${videoCandidate.hardwareAcceleration} (${width}x${height} @ ${videoBitrate}bps)`
+  );
+  console.log(`[MP4 Export] Using H.264 codec: ${videoCandidate.codec} (${videoCandidate.hardwareAcceleration})`);
 
   // Create video encoder with error tracking
   let videoEncoderError: Error | null = null;
@@ -577,28 +587,20 @@ export async function exportToMP4(
         log('progress', `Encoded frame ${frameCount}/${totalFrames}`);
       }
 
-      // Backpressure: wait for encoder to catch up if queue is too large
-      // This prevents memory exhaustion while allowing smooth encoding
-      const backpressureStart = Date.now();
-      const backpressureTimeout = 30000; // 30 second timeout
-      while (videoEncoder.encodeQueueSize > 5) {
-        // Check for encoder errors during backpressure wait
-        if (videoEncoderError) {
-          log('error', `Encoder error during backpressure: ${videoEncoderError.message}`);
-          throw videoEncoderError;
-        }
-        // Check for timeout (encoder might be stuck)
-        if (Date.now() - backpressureStart > backpressureTimeout) {
-          log('fatal', `Backpressure timeout at frame ${frameIndex}, queue size: ${videoEncoder.encodeQueueSize}`);
-          throw new ExportError(
-            'Video encoder backpressure timeout - encoder may be stuck',
-            exportLog,
-            frameIndex,
-            totalFrames
-          );
-        }
-        await new Promise(resolve => setTimeout(resolve, 5));
-      }
+      // Backpressure: wait for encoder to catch up if queue is too large.
+      // Shared with exportWebM.ts's own wait (review round 1, MINOR 1) rather
+      // than keeping a second copy of the same loop — same mid-wait error
+      // check, same 30s stuck-encoder timeout, same ExportError — differing
+      // only in MP4's own tighter queue threshold.
+      await waitForEncoderBackpressure({
+        encoder: videoEncoder,
+        threshold: 5,
+        getError: () => videoEncoderError,
+        log,
+        exportLog,
+        frameIndex,
+        totalFrames,
+      });
 
       // Update progress periodically
       if (frameCount % 5 === 0 || frameCount === totalFrames) {

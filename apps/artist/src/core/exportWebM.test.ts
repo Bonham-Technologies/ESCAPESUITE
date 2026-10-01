@@ -1,12 +1,14 @@
 // The WebM export pipeline. Unlike the MP4 path this one seeks HTMLVideoElements
-// directly and has no codec ladder, so the interesting behaviour is the frame
-// loop, the VP9/Opus muxing, and what it does when things go wrong. Real
-// storage, real canvas renderer, real animation engine; doubles for WebCodecs,
-// the media elements, the 2D context, mediabunny and the audio mixer.
+// directly rather than decoding through WebCodecs, so the interesting
+// behaviour is the frame loop, the VP9/VP8/Opus muxing and probing, and what
+// it does when things go wrong (ESCSUITE-29 Mechanism 1 gave this exporter
+// the same codec ladder and error-surfacing shape exportMP4.ts already had).
+// Real storage, real canvas renderer, real animation engine; doubles for
+// WebCodecs, the media elements, the 2D context, mediabunny and the audio
+// mixer.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToWebM } from './exportWebM'
-import { ExportError } from './exportMP4'
-import { ExportAbortedError } from './exportTypes'
+import { ExportAbortedError, ExportError } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import {
@@ -779,22 +781,150 @@ describe('exportToWebM failure handling', () => {
     expect(webcodecs.videoEncoders[0].state).toBe('closed')
   })
 
-  it('logs an encoder error without failing the export', async () => {
+  // ESCSUITE-29 Mechanism 1: the error callback used to only console.error —
+  // nothing ever read the flag it set, so a mid-export encoder failure never
+  // failed the export. It now surfaces as an ExportError, the same shape
+  // exportMP4.ts's own asynchronous-error test expects.
+  it('surfaces an asynchronous video encoder error with the diagnostic log', async () => {
     webcodecs.script.videoErrorAfterEncodes = 2
 
-    const blob = await run()
+    const error = (await run().catch((e: unknown) => e)) as ExportError
 
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('video encoder failed')
+    expect(error.frameIndex).toBe(2)
+    expect(error.totalFrames).toBe(6)
     expect(errors).toHaveBeenCalledWith('Video encoder error:', expect.any(Error))
-    expect(blob.size).toBe(128)
+    expect(error.exportLog.some((e) => e.phase === 'error')).toBe(true)
   })
 
-  it('logs an audio encoder error without failing the export', async () => {
+  it('surfaces an asynchronous audio encoder error', async () => {
     mixAudio.mockResolvedValue(audioFor(0.2))
     webcodecs.script.audioErrorAfterEncodes = 1
 
-    const blob = await run()
+    const error = (await run().catch((e: unknown) => e)) as ExportError
 
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('audio encoder failed')
     expect(errors).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
-    expect(blob.size).toBe(128)
+  })
+
+  // Coverage round: `waitForEncoderBackpressure`'s `getError` arrow — here,
+  // `() => videoEncoderError` — is passed on every export, but its own `while`
+  // loop body only runs `getError()` when `encodeQueueSize` actually exceeds
+  // the threshold (20), which this suite's 6-frame fixture never naturally
+  // does. A 12-frame clip gives an intermediate progress checkpoint
+  // (frameCount 5 of 12) to force the queue over threshold at, well before
+  // the frame whose own encode() call reports the error (6) — so the error
+  // is live exactly when the backpressure wait's own check runs, not caught
+  // by the top-of-loop check (which only ever sees it on the *next*
+  // iteration) or the pre-finalize one (there are six frames left to encode).
+  it('rejects with the encoder error raised while the backpressure wait is checking it', async () => {
+    const clips = [makeClip({ duration: 12 / 30, endTime: 12 / 30 })]
+    webcodecs.script.videoErrorAfterEncodes = 6
+    const onProgress = vi.fn((p: ExportProgress) => {
+      if (p.message === 'Encoding frame 5/12...') {
+        webcodecs.videoEncoders[0].encodeQueueSize = 25
+      }
+    })
+
+    const error = (await run({ clips, onProgress }).catch((e: unknown) => e)) as ExportError
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('video encoder failed')
+    expect(
+      error.exportLog.some((e) => e.detail === 'Encoder error during backpressure: video encoder failed')
+    ).toBe(true)
+  })
+
+  // Review round 1, MAJOR 2(c): an error reported on the *last* frame's
+  // encode() call lands after the frame loop has already run its final
+  // iteration — there is no next iteration left for the top-of-loop check at
+  // the top of the `for` to catch it on, and the queue never grows past the
+  // backpressure threshold in this fixture — so only the pre-finalize check
+  // can surface it. 6 is this fixture's frame count (CLIP_DURATION 0.2s @
+  // 30fps); run() with the default clip is deliberate so this is exactly the
+  // last encode() call.
+  it('surfaces a video encoder error reported after the last frame, before finalizing', async () => {
+    webcodecs.script.videoErrorAfterEncodes = 6
+
+    const error = (await run().catch((e: unknown) => e)) as ExportError
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('video encoder failed')
+    expect(
+      error.exportLog.some((e) => e.detail === 'Video encoder error before finalize: video encoder failed')
+    ).toBe(true)
+  })
+})
+
+describe('exportToWebM codec selection', () => {
+  it('configures VP9 by default', async () => {
+    await run()
+
+    expect(webcodecs.encoder.configs).toHaveLength(1)
+    expect(webcodecs.encoder.configs[0]).toMatchObject({ codec: 'vp09.00.10.08' })
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ codec: 'vp09.00.10.08' })
+    expect(getMediabunnyState().videoSources[0].codec).toBe('vp9')
+  })
+
+  it('falls back to VP8 when VP9 cannot be configured', async () => {
+    webcodecs.encoder.answer = (c) => c.codec === 'vp8'
+
+    await run()
+
+    expect((webcodecs.encoder.configs as Array<{ codec: string }>).map((c) => c.codec)).toEqual([
+      'vp09.00.10.08',
+      'vp8',
+    ])
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ codec: 'vp8' })
+    expect(getMediabunnyState().videoSources[0].codec).toBe('vp8')
+  })
+
+  it('skips a codec whose support probe throws', async () => {
+    webcodecs.encoder.answer = (c) =>
+      c.codec === 'vp09.00.10.08' ? Promise.reject(new Error('probe blew up')) : true
+
+    await run()
+
+    expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ codec: 'vp8' })
+  })
+
+  it('throws an ExportError before constructing any encoder when neither VP9 nor VP8 is supported', async () => {
+    webcodecs.encoder.answer = () => false
+
+    const error = (await run().catch((e: unknown) => e)) as ExportError
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('No supported video codec found. WebM export requires VP9 or VP8 support.')
+    expect(webcodecs.encoder.configs).toHaveLength(2)
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+    expect(getMediabunnyState().outputs).toHaveLength(0)
+  })
+})
+
+describe('exportToWebM audio codec selection', () => {
+  it('drops the audio when Opus is not supported', async () => {
+    mixAudio.mockResolvedValue(audioFor(0.2))
+    webcodecs.audio.answer = () => false
+
+    await run()
+
+    expect(warns).toHaveBeenCalledWith('Opus not supported, exporting without audio')
+    expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
+    expect(webcodecs.audioEncoders).toHaveLength(0)
+  })
+
+  it('drops the audio when the Opus support probe throws', async () => {
+    mixAudio.mockResolvedValue(audioFor(0.2))
+    webcodecs.audio.answer = () => Promise.reject(new Error('probe blew up'))
+
+    await run()
+
+    expect(warns).toHaveBeenCalledWith(
+      'Failed to check Opus support, exporting without audio:',
+      expect.objectContaining({ message: 'probe blew up' })
+    )
+    expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
   })
 })

@@ -76,17 +76,35 @@ test.describe('WebCodecs Unavailable', () => {
     await openExportDialog(page)
     await openExportAdvancedOptions(page)
 
-    // MP4 needs the WebCodecs H.264 encoder, so the dialog says so instead of
-    // offering an export that would fail, and leaves WebM selected.
-    await expect(page.getByText('Not supported in this browser')).toBeVisible()
-    await expect(page.getByRole('radio', { name: /WebM/ })).toBeChecked()
+    // Neither format can encode without WebCodecs at all, so both radios say
+    // so (ESCSUITE-22: isWebMExportSupported() used to delegate to the MP4
+    // check, which made this true already — this pins that it still is now
+    // that WebM has its own real codec probe).
+    await expect(page.getByText('Not supported in this browser')).toHaveCount(2)
+    await expect(page.getByRole('radio', { name: /WebM/ })).toBeDisabled()
+    await expect(page.getByRole('radio', { name: /MP4/ })).toBeDisabled()
   })
 
-  test('WebM export still available', async ({ page }) => {
+  // ESCSUITE-22: this used to be named "WebM export still available" and
+  // asserted exactly the bug the ticket reports — an enabled "Download WebM"
+  // button in a browser with no WebCodecs at all, which failed the instant it
+  // was clicked. isWebMExportSupported() is a real probe now, so the dialog
+  // says so up front instead.
+  test('says this browser cannot export', async ({ page }) => {
     await seedTextClip(page)
     await openExportDialog(page)
 
-    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeEnabled()
+    const alert = page.getByRole('alert')
+    await expect(alert).toBeVisible()
+    await expect(alert).toHaveText(
+      'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.'
+    )
+    // Said in the main body, not behind the collapsed Advanced disclosure.
+    await expect(page.getByRole('button', { name: 'Advanced options' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeDisabled()
   })
 })
 
@@ -97,16 +115,22 @@ test.describe('Codec Not Supported', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  test('handles unsupported codec gracefully', async ({ page }) => {
+  // ESCSUITE-22/29: WebCodecs exists here, but every isConfigSupported() call
+  // answers false — the exact shape of browser the old naive check (global
+  // existence only) could not tell apart from a working one, and the one the
+  // probe this ticket added exists to catch. The dialog's own `isMP4ExportSupported()`
+  // is a global-existence check only (unchanged by this ticket), so MP4 still
+  // reads "available" here even though it would fail the same way at export
+  // time — WebM's own real probe is what is under test.
+  test('says WebM cannot be encoded instead of offering a button that would fail', async ({ page }) => {
     await seedTextClip(page)
-
-    // The dialog still opens and still offers a usable export path when the
-    // browser reports every encoder config as unsupported.
     await openExportDialog(page)
-    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeEnabled()
+
+    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeDisabled()
+    await expect(page.getByText(/This browser cannot encode WebM video/)).toBeVisible()
 
     await openExportAdvancedOptions(page)
-    await expect(page.getByRole('radio', { name: /WebM/ })).toBeChecked()
+    await expect(page.getByRole('radio', { name: /WebM/ })).toBeDisabled()
   })
 })
 

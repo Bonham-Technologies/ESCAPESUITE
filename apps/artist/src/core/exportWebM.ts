@@ -18,7 +18,6 @@ import type { MediaDrawOptions, ProgressCallback } from './exportTypes';
 import { openOutputFrame, projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
-  isWebMExportSupported,
   getQualitySettings,
   getResolution, getBaseDimensions,
   loadVideoElement,
@@ -26,10 +25,16 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   getActiveTransition,
+  findSupportedVideoConfig,
+  webMVideoCodecConfigs,
+  waitForEncoderBackpressure,
+  hasWebMEncodeGlobals,
   // Shared with exportMP4.ts, which re-exports it for existing callers — both
   // exporters import it from its actual home so neither depends on the other
-  // (review round, ESCSUITE-152).
+  // (ESCSUITE-152 moved it here; ESCSUITE-29 Mechanism 1 is why this file
+  // needs it at all).
   ExportError,
+  type ExportLogEntry,
 } from './exportTypes';
 import {
   drawClipToCanvas,
@@ -53,7 +58,14 @@ export async function exportToWebM(
   signal?: AbortSignal,
   projectResolution?: { width: number; height: number }
 ): Promise<Blob> {
-  if (!isWebMExportSupported()) {
+  // WebM never decodes through WebCodecs (this exporter seeks
+  // HTMLVideoElements directly), so only VideoEncoder/VideoFrame need to
+  // exist — unlike `isMP4ExportSupported()`, which also needs VideoDecoder.
+  // Whether a WebCodecs-capable browser can actually *configure* VP9 or VP8
+  // is answered below, by the real ladder, not here. `hasWebMEncodeGlobals()`
+  // is the one predicate this and `isWebMExportSupported` both read (review
+  // round 1, MAJOR 2(d)): it used to be written out here a second time.
+  if (!hasWebMEncodeGlobals()) {
     throw new Error('WebM export requires WebCodecs API (Chrome/Edge)');
   }
 
@@ -63,6 +75,15 @@ export async function exportToWebM(
 
   // Check for early abort
   checkAborted(signal);
+
+  // Diagnostic logging for debugging export failures — mirrors exportMP4.ts,
+  // so a failure from either exporter carries the same kind of trail.
+  const exportLog: ExportLogEntry[] = [];
+  const log = (phase: string, detail: string) => {
+    exportLog.push({ phase, detail, timestamp: performance.now() });
+  };
+
+  log('init', `Starting WebM export with ${clips.length} clips`);
 
   const exportTracks = tracks || [{ id: 'default', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }];
 
@@ -79,13 +100,38 @@ export async function exportToWebM(
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) {
     throw new ExportError(
       `Cannot export at ${width}x${height}: resolved output resolution must be at least 2x2`,
-      []
+      exportLog
     );
   }
 
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;
+
+  // Probe VP9, falling back to VP8, at the real output size and bitrate —
+  // before loading any media or constructing any encoder (ESCSUITE-29
+  // Mechanism 1: the old code hard-coded 'vp09.00.10.08' with no probe at
+  // all). `findSupportedVideoConfig`/`webMVideoCodecConfigs` are the same
+  // helpers the MP4 H.264 ladder uses, so the probe and the real
+  // `configure()` below ask about the exact same configuration.
+  const foundVideoConfig = await findSupportedVideoConfig(
+    webMVideoCodecConfigs(width, height, videoBitrate, frameRate)
+  );
+  if (!foundVideoConfig) {
+    log('codec', 'No supported WebM video codec found (tried VP9, VP8)');
+    throw new ExportError(
+      'No supported video codec found. WebM export requires VP9 or VP8 support.',
+      exportLog
+    );
+  }
+  // The muxer track family follows the candidate we asked about, never the
+  // browser's own (possibly differently-spelled) normalised answer (review
+  // round 1, MINOR 3/NIT 3) — `webMVideoCodecConfigs` only ever offers
+  // `'vp09.00.10.08'` or `'vp8'`, so this is an exact match, not a guess.
+  const { config: videoConfig, candidate: videoCandidate } = foundVideoConfig;
+  const videoCodecFamily = videoCandidate.codec === 'vp8' ? 'vp8' : 'vp9';
+  log('codec', `Selected WebM codec: ${videoCandidate.codec} (${width}x${height} @ ${videoBitrate}bps)`);
+  console.log(`[WebM Export] Using video codec: ${videoCandidate.codec}`);
 
   // The space every draw call below is in, as against the raster they land on.
   // A caller with no project resolution (only the tests, today — both the editor
@@ -119,7 +165,7 @@ export async function exportToWebM(
   // Slice audio to the selected time range
   // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
   const audioChannels = 2;
-  const audioData = fullAudioData && options.timeRange ? (() => {
+  let audioData = fullAudioData && options.timeRange ? (() => {
     const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
     const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
     return fullAudioData.slice(startSample, endSample);
@@ -177,40 +223,60 @@ export async function exportToWebM(
     target,
   });
 
-  // Create video and audio packet sources
-  const videoSource = new EncodedVideoPacketSource('vp9');
+  // Create video packet source — the family actually negotiated above, which
+  // is VP8 whenever the VP9 probe failed.
+  const videoSource = new EncodedVideoPacketSource(videoCodecFamily);
   output.addVideoTrack(videoSource, { frameRate });
 
+  // Opus, probed independently of video — a browser with no Opus encoder
+  // still gets a working, silent WebM, the same way exportMP4.ts drops audio
+  // when AAC is unsupported rather than refusing the whole export.
   let audioSource: EncodedAudioPacketSource | null = null;
   if (audioData) {
-    audioSource = new EncodedAudioPacketSource('opus');
-    output.addAudioTrack(audioSource);
+    const opusConfig = {
+      codec: 'opus',
+      sampleRate,
+      numberOfChannels: 2,
+      bitrate: audioBitrate,
+    };
+    try {
+      const support = await AudioEncoder.isConfigSupported(opusConfig);
+      if (!support.supported) {
+        console.warn('Opus not supported, exporting without audio');
+        audioData = null;
+      } else {
+        audioSource = new EncodedAudioPacketSource('opus');
+        output.addAudioTrack(audioSource);
+      }
+    } catch (e) {
+      console.warn('Failed to check Opus support, exporting without audio:', e);
+      audioData = null;
+    }
   }
 
   // Start the output
   await output.start();
 
-  // Create video encoder
+  // Create video encoder with error tracking (ESCSUITE-29: the error
+  // callback used to only console.error — nothing ever read the flag it set,
+  // so the only way a mid-export encoder failure surfaced was whatever
+  // DOMException happened to escape the next call).
+  let videoEncoderError: Error | null = null;
   const videoEncoder = new VideoEncoder({
     output: async (chunk, meta) => {
       await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
     },
     error: (e) => {
       console.error('Video encoder error:', e);
+      videoEncoderError = e instanceof Error ? e : new Error(String(e));
     },
   });
 
-  await videoEncoder.configure({
-    codec: 'vp09.00.10.08',
-    width,
-    height,
-    bitrate: videoBitrate,
-    framerate: frameRate,
-    latencyMode: 'quality',
-  });
+  await videoEncoder.configure(videoConfig);
 
   // Create audio encoder if we have audio
   let audioEncoder: AudioEncoder | null = null;
+  let audioEncoderError: Error | null = null;
   if (audioData && audioSource) {
     audioEncoder = new AudioEncoder({
       output: async (chunk, meta) => {
@@ -218,6 +284,7 @@ export async function exportToWebM(
       },
       error: (e) => {
         console.error('Audio encoder error:', e);
+        audioEncoderError = e instanceof Error ? e : new Error(String(e));
       },
     });
 
@@ -230,6 +297,7 @@ export async function exportToWebM(
   }
 
   onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+  log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
 
   // Use real-time playback approach for reliable frame capture
   // This plays videos at normal speed and captures frames, avoiding seek issues
@@ -287,6 +355,13 @@ export async function exportToWebM(
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       // Check for abort at start of each frame
       checkAborted(signal);
+
+      // Check for an encoder error reported since the last frame (ESCSUITE-29:
+      // the asynchronous `error:` callback above can fire between frames with
+      // nothing else to notice it).
+      if (videoEncoderError) {
+        throw videoEncoderError;
+      }
 
       const currentTime = rangeStart + frameIndex / frameRate;
 
@@ -463,11 +538,20 @@ export async function exportToWebM(
 
       frameCount++;
 
-      // Backpressure: wait for encoder to catch up if queue is too large
-      // This prevents memory exhaustion while allowing smooth encoding
-      while (videoEncoder.encodeQueueSize > 20) {
-        await new Promise(resolve => setTimeout(resolve, 5));
-      }
+      // Backpressure: wait for encoder to catch up if queue is too large.
+      // This prevents memory exhaustion while allowing smooth encoding, and
+      // — ESCSUITE-29 — rethrows an encoder error reported while waiting
+      // instead of only the naive queue check, and gives up after 30s of no
+      // progress rather than waiting on an encoder that silently wedged.
+      await waitForEncoderBackpressure({
+        encoder: videoEncoder,
+        threshold: 20,
+        getError: () => videoEncoderError,
+        log,
+        exportLog,
+        frameIndex,
+        totalFrames,
+      });
 
       // Update progress periodically
       if (frameCount % 5 === 0 || frameCount === totalFrames) {
@@ -525,6 +609,18 @@ export async function exportToWebM(
       }
     }
 
+    log('frames', `Frame loop complete: ${frameCount} frames encoded`);
+
+    // Check for any encoder errors before finalizing
+    if (videoEncoderError) {
+      log('error', `Video encoder error before finalize: ${(videoEncoderError as Error).message}`);
+      throw videoEncoderError;
+    }
+    if (audioEncoderError) {
+      log('error', `Audio encoder error before finalize: ${(audioEncoderError as Error).message}`);
+      throw audioEncoderError;
+    }
+
     // Flush and finalize
     onProgress({ phase: 'muxing', progress: 92, message: 'Finalizing WebM...' });
 
@@ -571,7 +667,15 @@ export async function exportToWebM(
       }
     } catch { /* ignore */ }
 
-    // Re-throw the error (including ExportAbortedError)
-    throw error;
+    // Re-throw ExportAbortedError and ExportError as-is
+    if (error instanceof ExportError || (error instanceof Error && error.name === 'ExportAbortedError')) {
+      throw error;
+    }
+
+    // Wrap other errors (including the encoder's own `error:` callback,
+    // ESCSUITE-29) in ExportError to carry the diagnostic log.
+    const message = error instanceof Error ? error.message : String(error);
+    log('error', `Export failed: ${message}`);
+    throw new ExportError(message, exportLog, frameCount, totalFrames);
   }
 }

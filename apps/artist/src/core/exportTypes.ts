@@ -129,7 +129,8 @@ export class ExportAbortedError extends Error {
 }
 
 /**
- * Structured log entry for export diagnostics
+ * Structured log entry for export diagnostics. Shared by both exporters so a
+ * failure from either carries the same shape of trail (`ExportError` below).
  */
 export interface ExportLogEntry {
   phase: string;
@@ -191,10 +192,200 @@ export function isMP4ExportSupported(): boolean {
 }
 
 /**
- * Check if WebM export via WebCodecs is supported
+ * What `findSupportedVideoConfig` found: the config to actually `configure()`
+ * the encoder with, and the exact candidate (from the caller's own input
+ * list) that was found supported.
+ *
+ * These can differ: `support.config` is the browser's own normalised answer
+ * when it offers one, and nothing requires it to echo the candidate's `codec`
+ * string unchanged (a browser is free to rewrite `'vp8'` into a fuller
+ * `'vp08.00.10.08'`, say). A caller that needs to know *which configuration
+ * it asked for* — `exportWebM.ts` labelling its muxer track VP9 or VP8 — reads
+ * `candidate`, never `config`, because `candidate` is the object the caller
+ * itself constructed and never touched by the browser (review round 1,
+ * MINOR 3: the original code pattern-matched `config.codec`, which is latent
+ * rather than live only because Chromium happens to echo the string today).
  */
-export function isWebMExportSupported(): boolean {
-  return isMP4ExportSupported();
+export interface SupportedVideoConfig {
+  config: VideoEncoderConfig;
+  candidate: VideoEncoderConfig;
+}
+
+/**
+ * Try each video encoder config in order and return the first one
+ * `VideoEncoder.isConfigSupported` accepts — or `null` once every candidate
+ * has been asked and none were. A config whose probe throws is skipped
+ * rather than treated as a refusal, the same way a real `isConfigSupported()`
+ * call that rejects is not a "no".
+ *
+ * Shared by the MP4 H.264 ladder (`exportMP4.ts`) and the WebM VP9/VP8 probe
+ * below (ESCSUITE-29 Mechanism 1: before this, `exportWebM.ts` asked nothing
+ * at all and hard-coded `vp09.00.10.08`), so there is exactly one place that
+ * decides what "this browser can encode that" means for a codec list.
+ */
+export async function findSupportedVideoConfig(
+  configs: VideoEncoderConfig[]
+): Promise<SupportedVideoConfig | null> {
+  for (const config of configs) {
+    try {
+      const support = await VideoEncoder.isConfigSupported(config);
+      if (support.supported) {
+        return { config: support.config || config, candidate: config };
+      }
+    } catch {
+      // This codec isn't supported, try the next one.
+    }
+  }
+  return null;
+}
+
+/**
+ * The WebM video ladder: VP9 first (smaller files, and the codec
+ * `exportWebM.ts` always configured regardless of whether this call ever
+ * answered), VP8 as the fallback every Matroska-capable browser still has.
+ * A function rather than a constant so the bitrate/framerate the probe asks
+ * about can be the export's own — `isWebMExportSupported` and `exportToWebM`
+ * call it with the same arguments, so the probe and the real `configure()`
+ * never ask a different question.
+ */
+export function webMVideoCodecConfigs(
+  width: number,
+  height: number,
+  videoBitrate: number,
+  frameRate: number
+): VideoEncoderConfig[] {
+  return [
+    { codec: 'vp09.00.10.08', width, height, bitrate: videoBitrate, framerate: frameRate, latencyMode: 'quality' },
+    { codec: 'vp8', width, height, bitrate: videoBitrate, framerate: frameRate, latencyMode: 'quality' },
+  ];
+}
+
+/**
+ * A representative bitrate/framerate for the export dialog's up-front probe.
+ * The dialog asks before the user has chosen a quality setting — `quality`
+ * only scales bitrate, never which codecs exist — so one fixed, reasonable
+ * figure is enough to answer "can this browser encode WebM at all", the same
+ * reasoning CRAFT's own `probeMP4Support()` documents for probing at a
+ * representative size instead of the take's own.
+ */
+const WEBM_PROBE_BITRATE = 5_000_000;
+const WEBM_PROBE_FRAMERATE = 30;
+
+/**
+ * Shown in the export dialog when neither WebM nor MP4 can be exported at
+ * all — no WebCodecs in this browser (Firefox/Safari before their recent
+ * `VideoEncoder` support landed, and anything that disables it).
+ */
+export const EXPORT_NO_WEBCODECS_REASON =
+  'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.';
+
+/**
+ * Shown in the export dialog when `VideoEncoder` exists but this browser can
+ * configure neither VP9 nor VP8 — the failure ESCSUITE-29 traced: a browser
+ * that passes a bare "does WebCodecs exist" check and then fails opaquely
+ * mid-export because nothing ever asked the codec itself.
+ */
+export const WEBM_NO_CODEC_REASON =
+  'This browser cannot encode WebM video — Chrome or Edge can.';
+
+/**
+ * Whether the two WebCodecs globals WebM encoding needs — `VideoEncoder` and
+ * `VideoFrame`, not `VideoDecoder`, since WebM never decodes through
+ * WebCodecs (`exportWebM.ts` seeks `HTMLVideoElement`s directly) — both
+ * exist. The one predicate `isWebMExportSupported` and `exportToWebM`'s own
+ * early guard both call (review round 1, MAJOR 2(d)): written twice, the two
+ * copies can drift independently and a mutation to either one's `||` can go
+ * unnoticed by a suite that only ever removes both globals together.
+ */
+export function hasWebMEncodeGlobals(): boolean {
+  return typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined';
+}
+
+/**
+ * Check if WebM export via WebCodecs is supported.
+ *
+ * Unlike `isMP4ExportSupported()` this is a real probe, not a boolean read of
+ * which globals exist (ESCSUITE-22/29: it used to be
+ * `return isMP4ExportSupported();`, which answered "yes" for any browser with
+ * WebCodecs even when that browser's `VideoEncoder` cannot configure VP9 *or*
+ * VP8 — the export would then fail opaquely partway through).
+ *
+ * `width`/`height` should be the size the export will actually configure the
+ * encoder at — which, once a resolution preset is chosen, is
+ * `getResolution(preset, …)`'s answer, not necessarily the raw project
+ * resolution (review round 1, MINOR 2: `ExportDialog` passes
+ * `getResolution(advancedOptions.resolution, …)` and re-probes when the
+ * preset changes, precisely so a project whose native size this browser
+ * cannot configure doesn't read as unsupported when a smaller preset would
+ * have worked). This function itself takes whatever size it is given; it has
+ * no opinion on which one that should be.
+ */
+export async function isWebMExportSupported(width: number, height: number): Promise<boolean> {
+  if (!hasWebMEncodeGlobals()) {
+    return false;
+  }
+  const found = await findSupportedVideoConfig(
+    webMVideoCodecConfigs(width, height, WEBM_PROBE_BITRATE, WEBM_PROBE_FRAMERATE)
+  );
+  return found !== null;
+}
+
+/**
+ * Wait for a WebCodecs encoder's queue to drain before handing it another
+ * frame, the way both exporters guard against unbounded memory growth — but
+ * read the encoder's own asynchronous `error:` callback while waiting
+ * (`getError`) and give up after `timeoutMs` of no progress, rather than
+ * waiting forever on an encoder that silently wedged (ESCSUITE-29: before
+ * this, `exportWebM.ts`'s wait read neither).
+ *
+ * A free function with injectable `now`/`sleep` rather than inline in the
+ * frame loop so both branches — the error arriving mid-wait, and the
+ * timeout — are each a direct unit test instead of needing a real encoder
+ * double to actually stall for 30 real seconds.
+ */
+export async function waitForEncoderBackpressure(params: {
+  encoder: { encodeQueueSize: number };
+  threshold: number;
+  getError: () => Error | null;
+  log: (phase: string, detail: string) => void;
+  exportLog: ExportLogEntry[];
+  frameIndex: number;
+  totalFrames: number;
+  timeoutMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}): Promise<void> {
+  const {
+    encoder,
+    threshold,
+    getError,
+    log,
+    exportLog,
+    frameIndex,
+    totalFrames,
+    timeoutMs = 30000,
+    now = Date.now,
+    sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+  } = params;
+
+  const start = now();
+  while (encoder.encodeQueueSize > threshold) {
+    const err = getError();
+    if (err) {
+      log('error', `Encoder error during backpressure: ${err.message}`);
+      throw err;
+    }
+    if (now() - start > timeoutMs) {
+      log('fatal', `Backpressure timeout at frame ${frameIndex}, queue size: ${encoder.encodeQueueSize}`);
+      throw new ExportError(
+        'Video encoder backpressure timeout - encoder may be stuck',
+        exportLog,
+        frameIndex,
+        totalFrames
+      );
+    }
+    await sleep(5);
+  }
 }
 
 /**
