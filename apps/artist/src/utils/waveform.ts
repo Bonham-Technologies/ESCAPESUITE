@@ -126,12 +126,17 @@ export function resamplePeaks(
     let max = 0;
 
     if (endIndex <= startIndex) {
-      // Use single sample
+      // Use single sample. peaks is dense (every index < peaks.length holds
+      // a real element) by construction here, the same assumption the
+      // multi-sample branch below already makes of peaks[j] — so this reads
+      // it unconditionally rather than guarding against a hole no caller can
+      // produce (ESCSUITE-13 coverage round: the guard's false side was only
+      // reachable via a constructed sparse array, deleted per the
+      // ESCSUITE-110 / 118 precedent of removing an operand nothing can
+      // reach rather than testing it with one).
       const single = peaks[startIndex];
-      if (single) {
-        min = single.min;
-        max = single.max;
-      }
+      min = single.min;
+      max = single.max;
     } else {
       // Combine multiple samples - find overall min/max
       for (let j = startIndex; j < endIndex; j++) {
