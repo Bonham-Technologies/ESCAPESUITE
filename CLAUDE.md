@@ -428,10 +428,14 @@ recorded frame rate specifically (ESCSUITE-86: it settled why the screen take re
 and the benchmark keeps `setInterval` as its default painter regardless, so every other
 `taskMsPerFrame` figure stays comparable).
 
-CI runs them in a `perf` job that needs `build`, is `continue-on-error: true` and is
-deliberately **not** in `ci-status`'s `needs` — runner CPU varies, so a number moving is
-worth looking at and never worth blocking a merge on. It uploads `perf-report.json` (and
-any `*.cpuprofile`) as the `perf-report` artifact.
+CI runs them in their own workflow, `.github/workflows/perf.yml` (ESCSUITE-26): on every
+push to `main` or `dev`, on a pull request that carries the **`perf` label** (add the label,
+then push or re-run — the workflow listens for `labeled` and `synchronize`), and by hand via
+`workflow_dispatch`. It is `continue-on-error: true` and was never in `ci-status`'s `needs` —
+runner CPU varies, so a number moving is worth looking at and never worth blocking a merge
+on — which is why taking it off every PR costs nothing in regression protection and saves
+about fifteen runner-minutes per push. It uploads `perf-report.json` (and any `*.cpuprofile`)
+as the `perf-report` artifact.
 
 `PERF_PROFILE=1 pnpm perf` additionally records a CPU profile of each browser benchmark —
 on a **fourth, discarded run**, so the medians stay unprofiled — into
@@ -1487,7 +1491,7 @@ never above what the suite actually achieves:
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
-Nine jobs, with `ci-status` as the single required check (`perf` is informational and deliberately not one of its dependencies):
+Eight jobs, with `ci-status` as the single required check. The benchmarks live in a separate workflow, `perf.yml`, which is informational and was never one of its dependencies:
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
@@ -1497,9 +1501,10 @@ Nine jobs, with `ci-status` as the single required check (`perf` is informationa
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
 | `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes (E2E halves skipped for Dependabot) |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
-| `perf` | `pnpm perf` benchmarks; informational only, never gates | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
 | `ci-status` | Summary/gate job | All PRs |
+
+The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes to `main`/`dev`, PRs labelled `perf`, and `workflow_dispatch`; informational only, never gates, skipped for Dependabot.
 
 **CI Optimizations:**
 - Concurrency control cancels in-progress runs when new commits are pushed
