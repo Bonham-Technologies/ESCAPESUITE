@@ -694,6 +694,112 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     await deleteVideo(videoId)
   })
 
+  it('recovers a present row\'s own non-finite stored duration from the blob for a meta-less file (ESCSUITE-151 round 3)', async () => {
+    const videoId = uniqueId('present-no-meta-bad-duration')
+    const stored: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: Infinity, // pre-ESCSUITE-97 row: never went through the duration probe
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [
+        { min: -0.5, max: 0.5 },
+        { min: -0.2, max: 0.3 },
+      ],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+
+    // The same headerless-WebM discovery every other importer uses: a seek
+    // past the end reveals the real length.
+    media.script({ video: { duration: Infinity, durationAfterSeek: 9, durationStaysUnknown: true } })
+
+    // A meta-less entry for the same id.
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(videoId),
+          videos: [
+            { id: videoId, name: 'take.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toEqual({ ...stored, duration: 9 })
+    expect(Number.isFinite(sourceVideos[0].duration)).toBe(true)
+    // Everything a blob probe could never recover is still the stored value.
+    expect(sourceVideos[0].waveformData).toEqual(stored.waveformData)
+    expect(sourceVideos[0].hasAudio).toBe(true)
+    expect(sourceVideos[0].recordedAt).toBe(1700000000000)
+
+    await deleteVideo(videoId)
+  })
+
+  it("recovers a present row's own unusable stored dimensions from the blob for a meta-less file (ESCSUITE-151 round 3)", async () => {
+    const videoId = uniqueId('present-no-meta-bad-dims')
+    const stored: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: -1, // corrupt/placeholder — not the audio-only "0 is fine" case
+      height: -1,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [{ min: -0.5, max: 0.5 }],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+
+    media.script({ video: { duration: 12, videoWidth: 640, videoHeight: 480 } })
+
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(videoId),
+          videos: [
+            { id: videoId, name: 'take.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toEqual({ ...stored, width: 640, height: 480 })
+    // Everything a blob probe could never recover is still the stored value.
+    expect(sourceVideos[0].waveformData).toEqual(stored.waveformData)
+    expect(sourceVideos[0].hasAudio).toBe(true)
+
+    await deleteVideo(videoId)
+  })
+
   /** A .veditor file whose `meta` is built by hand rather than by saveProject. */
   function veditorFileWithMeta(videoId: string, meta: Record<string, unknown>, thumbnail?: string): File {
     return new File(
