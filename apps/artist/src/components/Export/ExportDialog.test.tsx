@@ -244,6 +244,36 @@ describe('ExportDialog', () => {
       expect(mp4).toBeChecked()
       expect(webm).not.toBeChecked()
     })
+
+    // Coverage round: the test above only ever fires the MP4 radio's own
+    // onChange (webm is already selected by default, so switching away from
+    // it never exercises webm's). Switching to MP4 and back exercises both,
+    // and the Advanced export (effective format, and the setting persisted
+    // for next time) confirms the switch actually took, not just the radio's
+    // own `checked` state.
+    it('switches back to WebM after MP4, and the Advanced export reflects it', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      const webm = screen.getByRole('radio', { name: /webm/i })
+      const mp4 = screen.getByRole('radio', { name: /mp4/i })
+
+      fireEvent.click(mp4)
+      expect(mp4).toBeChecked()
+
+      fireEvent.click(webm)
+      expect(webm).toBeChecked()
+      expect(mp4).not.toBeChecked()
+
+      fireEvent.click(advancedExport())
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(mockExportToMP4).not.toHaveBeenCalled()
+      expect(mockSetSetting).toHaveBeenCalledWith(
+        'lastExportSettings',
+        expect.objectContaining({ format: 'webm' })
+      )
+    })
   })
 
   // ESCSUITE-22/29: isWebMExportSupported() is a real codec probe now, so the

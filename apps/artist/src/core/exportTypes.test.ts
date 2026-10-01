@@ -404,6 +404,37 @@ describe('export reason sentences', () => {
 })
 
 describe('waitForEncoderBackpressure', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // Coverage round: every other case here injects its own `sleep`, so the
+  // default parameter — `(ms) => new Promise((resolve) => setTimeout(resolve, ms))`
+  // — never actually runs. This one calls the function with no `sleep` at
+  // all, under fake timers, and advances the clock by the 5ms the real
+  // default sleeps for.
+  it('uses the real setTimeout-based sleep when none is injected', async () => {
+    vi.useFakeTimers()
+    const encoder = { encodeQueueSize: 25 }
+
+    const promise = waitForEncoderBackpressure({
+      encoder,
+      threshold: 20,
+      getError: () => null,
+      log: vi.fn(),
+      exportLog: [],
+      frameIndex: 0,
+      totalFrames: 10,
+    })
+
+    // The queue drains while the real sleep is pending; advancing past its
+    // 5ms resolves it, and the loop's next check finds the queue clear.
+    encoder.encodeQueueSize = 10
+    await vi.advanceTimersByTimeAsync(5)
+
+    await expect(promise).resolves.toBeUndefined()
+  })
+
   it('resolves immediately when the queue is already at or under the threshold', async () => {
     const log = vi.fn()
     await waitForEncoderBackpressure({

@@ -126,6 +126,15 @@ export interface VideoEncoderRecord {
   readonly flushes: number
   readonly closes: number
   readonly state: 'unconfigured' | 'configured' | 'closed'
+  /**
+   * Mutable, unlike every other field here: a test driving the real export
+   * pipeline through `waitForEncoderBackpressure`'s `encodeQueueSize >
+   * threshold` check has no other way to force the queue over threshold —
+   * the double's own accounting stays near zero under normal driving — so
+   * this is written directly from a test (see exportMP4.test.ts /
+   * exportWebM.test.ts's backpressure-wait coverage).
+   */
+  encodeQueueSize: number
 }
 
 export interface AudioEncoderRecord {

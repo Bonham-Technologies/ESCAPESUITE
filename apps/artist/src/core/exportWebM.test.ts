@@ -809,6 +809,34 @@ describe('exportToWebM failure handling', () => {
     expect(errors).toHaveBeenCalledWith('Audio encoder error:', expect.any(Error))
   })
 
+  // Coverage round: `waitForEncoderBackpressure`'s `getError` arrow — here,
+  // `() => videoEncoderError` — is passed on every export, but its own `while`
+  // loop body only runs `getError()` when `encodeQueueSize` actually exceeds
+  // the threshold (20), which this suite's 6-frame fixture never naturally
+  // does. A 12-frame clip gives an intermediate progress checkpoint
+  // (frameCount 5 of 12) to force the queue over threshold at, well before
+  // the frame whose own encode() call reports the error (6) — so the error
+  // is live exactly when the backpressure wait's own check runs, not caught
+  // by the top-of-loop check (which only ever sees it on the *next*
+  // iteration) or the pre-finalize one (there are six frames left to encode).
+  it('rejects with the encoder error raised while the backpressure wait is checking it', async () => {
+    const clips = [makeClip({ duration: 12 / 30, endTime: 12 / 30 })]
+    webcodecs.script.videoErrorAfterEncodes = 6
+    const onProgress = vi.fn((p: ExportProgress) => {
+      if (p.message === 'Encoding frame 5/12...') {
+        webcodecs.videoEncoders[0].encodeQueueSize = 25
+      }
+    })
+
+    const error = (await run({ clips, onProgress }).catch((e: unknown) => e)) as ExportError
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('video encoder failed')
+    expect(
+      error.exportLog.some((e) => e.detail === 'Encoder error during backpressure: video encoder failed')
+    ).toBe(true)
+  })
+
   // Review round 1, MAJOR 2(c): an error reported on the *last* frame's
   // encode() call lands after the frame loop has already run its final
   // iteration — there is no next iteration left for the top-of-loop check at
