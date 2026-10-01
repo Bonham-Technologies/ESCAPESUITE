@@ -1757,7 +1757,10 @@ and queries `styles.menuBackdrop`.
 - `<Analytics />` is mounted by `bootstrapApp()`, not by `src/main.tsx` directly
 - Custom events in `src/utils/analytics.ts`:
   - `Video Imported` (with type: video/image/audio) — `VideoUploader.tsx`'s `handleFiles`, after
-    `addSourceVideo` succeeds for that file; not reported when processing throws (ESCSUITE-31)
+    `addSourceVideo` succeeds for that file; not reported when processing throws (ESCSUITE-31).
+    Counts a user-initiated import only — a file dropped or picked in the media library — so
+    the CRAFT handoff, a project load and a session restore all stay silent: none of them is
+    an import
   - `Project Created`
   - `Project Saved`
   - `Export Started` (with format)

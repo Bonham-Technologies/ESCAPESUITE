@@ -283,6 +283,9 @@ describe('useRecordingLibrary list actions', () => {
     expect(vi.mocked(deleteVideo).mock.calls.map(([id]) => id)).toEqual(['part-2', 'take-1'])
     expect(removed).toEqual(['part-2', 'take-1'])
     expect(setNotice).not.toHaveBeenCalled()
+    // Once for the take the user deleted, not once per part the cascade took with it.
+    expect(analyticsModule.track).toHaveBeenCalledTimes(1)
+    expect(analyticsModule.track).toHaveBeenCalledWith('Recording Deleted', undefined)
   })
 
   it('leaves the primary alone when the companion is deleted', async () => {
@@ -326,6 +329,10 @@ describe('useRecordingLibrary list actions', () => {
     // The remedy is still re-measured — a failed delete may still have freed
     // some space.
     expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
+    // The primary — the row the user actually asked to delete — still succeeded,
+    // so it is still reported, exactly once, despite the companion that failed.
+    expect(analyticsModule.track).toHaveBeenCalledTimes(1)
+    expect(analyticsModule.track).toHaveBeenCalledWith('Recording Deleted', undefined)
   })
 
   it('says so once when the primary itself cannot be deleted', async () => {
