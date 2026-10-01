@@ -317,6 +317,18 @@ describe('VideoUploader', () => {
       })
     })
 
+    // ESCSUITE-4: the status text had no accessible announcement at all — a
+    // screen reader heard nothing as an upload moved from processing to
+    // complete. role="status" carries an implicit aria-live="polite", so no
+    // separate aria-live attribute is needed alongside it.
+    it('announces the upload status to assistive tech (ESCSUITE-4)', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
+
+      expect(await screen.findByText('Complete')).toHaveAttribute('role', 'status')
+    })
+
     it('rejects files that are not media at all', async () => {
       render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
