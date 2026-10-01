@@ -1596,6 +1596,38 @@ hashed `pulse` keyframe name without it, and no text in the panel computes below
 media-type badge inside its thumbnail. The render pins and every `*.perf.test.ts` file are
 byte-unchanged. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-22 and ESCSUITE-29's first
+mechanism (the WebM export probes VP9 then VP8 at the output size through the one helper the
+MP4 ladder uses, probes Opus on its own, configures what the probe answered, reads its encoder's
+`error:` callback and rethrows it through the shared backpressure wait with the thirty-second
+stuck-encoder timeout; the export dialog disables both downloads with one visible sentence when
+the browser has no WebCodecs, disables only the format that cannot be encoded otherwise — the
+Advanced "Download" button included, gated on the effective format — and no longer offers a
+retry in a format that cannot work): **99.71** / **99.09** / **95.10** / **99.65** against the
+99.58 / 98.94 / 94.99 / 99.47 the commit this branch was rebased onto measures — every figure up,
+lines by thirteen hundredths, statements by fifteen, branches by eleven and functions by
+eighteen. Measured in one sitting, the base gives 4,327 / 4,555 branches and this branch
+4,407 / 4,634: seventy-nine new branches, eighty more covered, so the uncovered column falls
+228 → 227; lines 6,923 / 6,952 → 7,006 / 7,026 with 29 → 20 uncovered, statements
+7,803 / 7,886 → 7,888 / 7,960 with 83 → 72, and functions 1,708 / 1,717 → 1,722 / 1,728 with
+9 → 6. The numerators outrun the denominators because the probe-and-fail paths the WebM
+exporter and the dialog had carried since they were written — the `error:` callback, the
+stuck-encoder timeout, the codec-unsupported refusal, the format radios' handlers — are driven
+for the first time by the red cases that mirror the MP4 side's. The seventy-nine new branches
+are `core/exportTypes.ts`'s `findSupportedVideoConfig` (now returning the candidate it asked
+for beside the browser's normalised config), `webMVideoCodecConfigs`, `hasWebMEncodeGlobals`,
+`isWebMExportSupported` and the shared `waitForEncoderBackpressure` that `exportMP4.ts`'s
+inline loop became, `core/exportWebM.ts`'s probe, Opus and error arms, and `ExportDialog.tsx`'s
+three-state gate, effective-format choice, probe-at-the-selected-resolution and retry gates —
+each reached from both sides by the no-WebCodecs, one-format, both-format, saved-MP4-preference,
+VP9-unsupported, both-unsupported, Opus-missing, error-during-wait, stale-probe and
+preset-change cases, with the review's four mutations each turning a named case red; the
+measurement round added the default-`sleep`, WebM-radio and both `getError` cases. Both export
+perf ceiling files and the render pins are byte-unchanged. **Two floors rise**: statements
+98 → **99** and branches 94 → **95**, in `apps/artist/vite.config.ts` and
+`scripts/coverage-report.mjs`, because a floor is the achieved coverage rounded down and this
+branch carries both past a whole percent; artist's floors are now 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1603,7 +1635,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.58 | 98.94 | 94.99 | 99.47 |
+| `@escapesuite/artist` | 99.71 | 99.09 | 95.10 | 99.65 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
