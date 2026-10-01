@@ -319,6 +319,37 @@ describe('ExportDialog', () => {
       expect(mockExportToWebM).not.toHaveBeenCalled()
     })
 
+    // Review round 2: `effectiveAdvancedFormat`'s `&& mp4Supported` operand is
+    // only reached when `advancedOptions.format === 'mp4'` — the test above
+    // never selects MP4, so it always short-circuits before touching this
+    // operand. A restored `{format:'mp4'}` setting does select it, and in a
+    // browser with neither format is exactly the dangerous case: without this
+    // operand, `effectiveAdvancedFormat` would read 'mp4' regardless of
+    // `mp4Supported`, `advancedBlockedReason` would resolve to `null` (it is
+    // only ever `webmBlockedReason`, and only when the effective format is
+    // 'webm'), and the dialog would open straight onto an enabled
+    // "Download MP4" that `handleExport` itself would still run as WebM
+    // (its own, separate fallback) — into `exportWebM.ts`'s
+    // "requires WebCodecs API" throw, in the one browser this ticket exists
+    // to warn before any click.
+    it('disables the Advanced button for a restored MP4 setting when neither format can be exported', async () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      const advanced = await screen.findByRole('button', { name: /download mp4/i })
+      expect(advanced).toBeDisabled()
+      expect(advanced).toHaveAttribute(
+        'title',
+        'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.'
+      )
+      fireEvent.click(advanced)
+      expect(mockExportToWebM).not.toHaveBeenCalled()
+      expect(mockExportToMP4).not.toHaveBeenCalled()
+    })
+
     it('probes at the resolution the selected preset will actually export, not the raw project size', async () => {
       store().setProjectResolution(1920, 1080)
       render(<ExportDialog isOpen={true} onClose={onClose} />)
