@@ -169,6 +169,17 @@ export async function exportToMP4(
     console.log('[MP4 Export] Using WebCodecs for video decoding (background-capable)');
   } else {
     console.log('[MP4 Export] Using HTMLVideoElement for video decoding (standard mode)');
+    // Tell the user: the dialog's own copy promises background-tab encoding,
+    // which only holds when WebCodecs actually decoded this export — not when
+    // the decode worker could not start (ESCSUITE-153 / ESCSUITE-29
+    // Mechanism 2) or WebCodecs/Worker was never available in the first
+    // place. Without this, the only signal of the degraded path is a
+    // console.warn nobody but a developer will see.
+    onProgress({
+      phase: 'preparing',
+      progress: 12,
+      message: 'Decoding in the page; keep this tab in the foreground',
+    });
   }
 
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
