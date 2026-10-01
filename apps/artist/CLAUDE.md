@@ -919,6 +919,45 @@ the reported box by `±textWidth / 2` — but that offset has to be rotated alon
 rotation grows — a full half-width off at 90°. Centre-aligned text is unaffected: its anchor
 and centre already coincide, so the offset is zero either way.
 
+**A keyframed clip is opaque to the pointer, not invisible to it** (ESCSUITE-3). Outside
+keyframe mode a clip carrying custom keyframes has no live handles in the one handle pass that
+runs there — RESTRICTION 2 in `hitTestHandles` passes `skipKeyframed: true` to `hitHandlesOnClip`
+for the selected clip's own handle pass (`hitTest.ts:179`), since it is only movable from the
+keyframe panel; the keyframe-mode pass passes `false` there on purpose (`hitTest.ts:147`), which
+is how a keyframed clip's handles stay live once its own panel is open — but `hitTestHandles`'
+second pass (the z-order body test over every clip, outside keyframe mode) no longer `continue`s
+past it the way it used to. It reports the same `{ clipId, clipType, mode: 'move' }` any other
+clip's body would, at the clip's **animated** position for the current time (`getOverlayBounds`
+already evaluates `getAnimatedValues` for this, with no `suppressPreset`). A bare `continue`
+there used to let the click fall through to whatever clip was on the track below, or, with
+nothing behind it, start a marquee whose release deselected everything. `useTransformHandles.ts`'s
+`handleMouseDown` and `getCursor` are what turn that body hit into a refusal, reusing
+ESCSUITE-88's shape verbatim: `geometry.hasCustomKeyframes(clip) && !isKeyframeMode` selects the
+clip and starts nothing — no `gestureHistory.begin()`, no drag state, no window listeners — and
+the cursor reads `not-allowed`, exactly as a clip on a locked track does. `isKeyframeMode`
+(`keyframePanelOpen && clip.id === selectedClipId`) is the exemption: inside keyframe mode, for
+the clip the panel has open, a drag is how a keyframe gets set, so it is not refused there.
+`getCursor` runs on every pointer move, so it finds the hit's clip once and hands it to both
+checks — `isTrackLocked(tracks, clip.trackId)` and `hasCustomKeyframes(clip)` — rather than
+having each repeat the lookup `hitTestHandles` already did to produce the hit (ESCSUITE-3 review
+round 1, NIT-4; `handleMouseDown` already had the clip in hand and needed no change).
+
+No `suppressPreset` outside a transition is not the same as "a hit test is never inside one" —
+the preview does draw transitions, and the pointer works during them. The renderer suppresses
+one preset side per side of an active transition (`core/canvasRenderer.ts`), and
+`getOverlayBounds` has no way to be told, so inside a transition the hit box, the selection
+chrome, the marquee and the drag seed can all disagree with the drawn frame. That is
+ESCSUITE-147's gap; it applied to every clip carrying a preset before this ticket and now
+applies to keyframed ones too — this ticket neither introduces nor fixes it.
+
+The body test is geometry only — `getOverlayBounds` never reads opacity — so a clip animated to
+`opacity: 0` is still picked rather than clicked through, the same way a clip with a static
+`transform.opacity: 0` (or mid an out-preset fade) always was; a follow-up ticket covers making
+the hit test opacity-aware. And because `selectionOverlay.ts` declines to draw any chrome for a
+keyframed clip until its own panel is open, selecting one this way shows in the inspector and on
+the timeline row, not on the canvas — unlike the locked-track case it otherwise mirrors, where
+the full box and handles are drawn and simply inert.
+
 **The playhead position does not re-render the preview, the timeline body, or `App`.**
 `usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every
 animation frame — a React render (and a forced layout) fifty times a second so a timecode

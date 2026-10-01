@@ -472,6 +472,15 @@ describe('PreviewPlayer cursor', () => {
     expect(await hover(preview, 960, 540)).toBe('not-allowed')
   })
 
+  // ESCSUITE-3: the same promise as a locked row's — a press here selects and
+  // starts nothing, so the cursor says so before the press.
+  it('offers not-allowed over a clip with custom keyframes, panel closed', async () => {
+    const { shape, preview } = await selectedShape()
+    store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+
+    expect(await hover(preview, 960, 540)).toBe('not-allowed')
+  })
+
   it('falls back to the default cursor over empty canvas', async () => {
     const { preview } = await selectedShape()
     expect(await hover(preview, 100, 100)).toBe('default')
@@ -557,17 +566,41 @@ describe('PreviewPlayer keyframe-mode interaction', () => {
     await settle(FRAME_MS)
   })
 
-  it('ignores a clip that has custom keyframes while the panel is closed', async () => {
+  // ESCSUITE-3: a keyframed clip used to be invisible to the pointer while
+  // the panel is closed — not just unmovable, but a click through it that
+  // landed on empty canvas (and cleared the selection) or on whatever clip
+  // was underneath. It is picked like a clip on a locked track instead: the
+  // press selects it and starts no gesture, so nothing about it moves.
+  it('selects a clip with custom keyframes while the panel is closed, without moving it', async () => {
     const keyed = addShape({ x: 0.5 })
     store().setClipKeyframe(keyed.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
     store().setSelectedClipId(null)
 
     const preview = await renderPreview()
     fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
-    fireEvent.mouseUp(preview.canvas, preview.at(960, 540))
+    await settle()
+    fireEvent.mouseMove(window, preview.at(960 + 200, 540))
+    await settle(FRAME_MS)
+    fireEvent.mouseUp(window)
+    await settle(FRAME_MS)
+
+    expect(store().selectedClipId).toBe(keyed.id)
+    expect(clipOf(keyed.id).shapeData!.x).toBe(0.5)
+  })
+
+  it('does not fall through a keyframed clip to the plain clip beneath it', async () => {
+    addClip('clip1', 0, 4)
+    const keyed = addShape({ x: 0.5 })
+    store().setClipKeyframe(keyed.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+    store().setSelectedClipId(null)
+
+    const preview = await renderPreview()
+    fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
     await settle()
 
-    expect(store().selectedClipId).toBeNull()
+    expect(store().selectedClipId).toBe(keyed.id)
+    fireEvent.mouseUp(window)
+    await settle()
   })
 })
 

@@ -36,7 +36,7 @@ import type { ClipTransform, TextOverlayData, ShapeOverlayData } from '../../sto
 import * as geometry from './previewGeometry';
 import * as hitTest from './hitTest';
 import { clipsIntersectingMarquee, measureDragStart, textClipAtPoint } from './dragGeometry';
-import { clipOnLockedTrack } from '../../store/trackLock';
+import { clipOnLockedTrack, isTrackLocked } from '../../store/trackLock';
 import { getCursorForMode } from './cursor';
 import type { DragMode, ManipulableClipType } from './types';
 
@@ -214,6 +214,19 @@ export function useTransformHandles({
 
       // Check if we should use animated values (keyframe mode)
       const isKeyframeMode = keyframePanelOpen && clip.id === selectedClipId;
+
+      // A clip carrying custom keyframes (ESCSUITE-3) is picked the same way,
+      // *outside* keyframe mode: the body hit itself is what stops the click
+      // falling through to whatever is on the track below (hitTest.ts's second
+      // pass no longer skips it), and the gesture stops here rather than
+      // starting a drag the keyframe panel owns. Inside keyframe mode, for the
+      // clip the panel has open, a drag is exactly how a keyframe gets set —
+      // `isKeyframeMode` is what the panel is for — so it is exempted.
+      if (geometry.hasCustomKeyframes(clip) && !isKeyframeMode) {
+        setSelectedClipId(hit.clipId);
+        return;
+      }
+
       const canvas = canvasRef.current;
 
       const {
@@ -654,6 +667,8 @@ export function useTransformHandles({
   // pointer's promise about what a press would start, and on a locked row a
   // press starts nothing. The `dragState` branch asks too, defensively — a
   // locked clip can no longer reach it, but a row locked *mid-gesture* can.
+  // A keyframed clip outside keyframe mode (ESCSUITE-3) reads the same way,
+  // for the same reason: a press over it selects and starts nothing.
   const getCursor = useCallback((e: MouseEvent<HTMLCanvasElement>): string => {
     if (isPlaying) return 'default';
     if (dragState) {
@@ -665,10 +680,24 @@ export function useTransformHandles({
     const pos = getCanvasPosition(e);
     const hit = hitTestHandles(pos.x, pos.y, screenScaleOf(pos));
     if (!hit) return 'default';
-    return clipOnLockedTrack(clips, tracks, hit.clipId)
-      ? 'not-allowed'
-      : getCursorForMode(hit.mode);
-  }, [isPlaying, dragState, clips, tracks, getCanvasPosition, hitTestHandles]);
+
+    // This runs on every pointer move over the canvas, so the locked and
+    // keyframed checks below share one lookup instead of each finding the
+    // clip again (ESCSUITE-3 review round 1, NIT-4) — `isTrackLocked` takes
+    // the resolved track id directly, where `clipOnLockedTrack` would repeat
+    // the find `hitTestHandles` already did to produce `hit`. The assertion
+    // is safe: `hit.clipId` only ever names a clip `hitTestHandles` found in
+    // this same `clips` array.
+    const clip = clips.find(c => c.id === hit.clipId)!;
+    const isKeyframeMode = keyframePanelOpen && hit.clipId === selectedClipId;
+    if (
+      isTrackLocked(tracks, clip.trackId) ||
+      (geometry.hasCustomKeyframes(clip) && !isKeyframeMode)
+    ) {
+      return 'not-allowed';
+    }
+    return getCursorForMode(hit.mode);
+  }, [isPlaying, dragState, clips, tracks, getCanvasPosition, hitTestHandles, keyframePanelOpen, selectedClipId]);
 
   const handleMouseMoveForCursor = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
     setCursor(getCursor(e));
