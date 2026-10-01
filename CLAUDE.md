@@ -1492,6 +1492,31 @@ stored metadata whole and losing a handed-over take's waveform on reopen, the se
 meta-less file re-probing a present row, the third found the stored-metadata path skipping
 ESCSUITE-97's recovery. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-149 (a storage clear is not undoable:
+Clear Unused and Clear All go through one non-history `removeSourceVideosPermanently` that drops
+the sources and their clips in a single write, prunes the selection and the clipboard, revokes
+the `blob:` thumbnails and scrubs both history stacks, so undo can no longer restore a tile whose
+bytes are gone): **99.57** / **98.93** / **94.92** / **99.47** against the
+99.56 / 98.92 / 94.86 / 99.46 the commit this branch was rebased onto measures — every figure up,
+branches by six hundredths. Measured in one sitting, the base gives 4,271 / 4,502 branches and
+this branch 4,304 / 4,534: thirty-two new branches, thirty-three more covered, so the uncovered
+column falls 231 → 230 — the one pre-existing arm newly reached is the plural in Clear Unused's
+confirm sentence in `components/VideoUploader.tsx`, which the all-deletes-reject case drives with
+two unused files where every earlier case had one (lines 6,830 / 6,860 → 6,864 / 6,893 with
+30 → 29 uncovered, statements 7,698 / 7,782 → 7,742 / 7,825 with 84 → 83, functions
+1,681 / 1,690 → 1,697 / 1,706 with the same 9). The thirty-two are `store/projectSlice.ts`'s
+`removeSourceVideosPermanently` — the empty-ids refusal, the "nothing left in the live library
+but still in a snapshot" arm that scrubs anyway and returns the identical state object when the
+scrub changed nothing, the clip and clipboard prunes — and `store/storeHistory.ts`'s
+`scrubRemovedSources`, which touches a snapshot only when it carries a removed source or a clip
+of one and returns the same `history` reference otherwise; plus the two Clear handlers' "no
+delete succeeded" guards. Each is reached from both sides by the undo-after-clear, redo-after-clear,
+already-gone, true-no-op, clipboard-pruned, clipboard-kept-by-reference, mid-loop-lock, partial-
+and all-fail cases against the plain clears that were already there; the review's neutering run
+(the scrub made a no-op) turned exactly the four scrub-dependent cases red. Both `*.perf.test.ts`
+files and the render pins are byte-unchanged. **No floor crossed**; artist's floors stay
+99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1499,7 +1524,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.56 | 98.92 | 94.86 | 99.46 |
+| `@escapesuite/artist` | 99.57 | 98.93 | 94.92 | 99.47 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

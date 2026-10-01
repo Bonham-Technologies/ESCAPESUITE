@@ -470,7 +470,7 @@ describe('VideoUploader', () => {
 
       await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
       expect(globalThis.confirm).toHaveBeenCalledWith(
-        'Remove every file this project imported? Files on a locked track stay. This cannot be undone.'
+        'Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. This cannot be undone.'
       )
       // Not `toHaveLength(0)`: this describe's rows accumulate in the real
       // fake-indexeddb across its tests (no per-test reset — see the
@@ -478,6 +478,41 @@ describe('VideoUploader', () => {
       // would only be safe by being first. `not.toContain` stays true
       // regardless of what a test inserted above this one (NIT 3).
       expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('video1')
+    })
+
+    // ESCSUITE-149: Clear All deletes the bytes from IndexedDB itself, so it
+    // must not be undoable — an undo that handed a `SourceVideo` back
+    // afterwards would restore a tile nothing can play, place or export, and
+    // (since a clip on the timeline can reference the cleared source) could
+    // bring a clip back pointing at nothing. `useEditorStore.getState()`
+    // reaches past this file's `store()` wrapper for `undo`/`canUndo`, which
+    // have nothing mounted to flush.
+    it('is not undoable: undo after Clear All brings back neither the source nor its clip', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      const trackId = store().project.timeline.tracks[0].id
+      store().addClipToTimeline(
+        { id: 'clip-cleared', sourceVideoId: 'video1', name: 'Clip', startTime: 0, endTime: 5, duration: 5 },
+        trackId, 0
+      )
+      const pastLengthBeforeClear = useEditorStore.getState().history.past.length
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+      expect(store().project.timeline.clips).toHaveLength(0)
+      // No new undo entry: canUndo() reflects the history exactly as it stood
+      // before the clear.
+      expect(useEditorStore.getState().history.past).toHaveLength(pastLengthBeforeClear)
+      expect(useEditorStore.getState().canUndo()).toBe(true)
+
+      useEditorStore.getState().undo()
+
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).not.toContain('video1')
+      expect(
+        useEditorStore.getState().project.timeline.clips.some((c) => c.sourceVideoId === 'video1')
+      ).toBe(false)
     })
 
     // ESCSUITE-113: every source Clear All drops holds a live
@@ -628,6 +663,49 @@ describe('VideoUploader', () => {
       expect(remainingIds).not.toContain('video3')
     })
 
+    // ESCSUITE-149 coverage round: `if (removedIds.length > 0)
+    // removeSourceVideosPermanently(removedIds)`'s false arm was unreached —
+    // every committed case up to now had at least one delete succeed. When
+    // every `deleteVideo` in the batch rejects, `removedIds` stays empty and
+    // the permanent-removal write must never run: every source stays in both
+    // the store and the database, the notice still names the full count, the
+    // meter still refreshes, and — since no store action ran at all — the
+    // history is untouched, the exact same object as before the click.
+    //
+    // Spies directly on the store action rather than only on its
+    // consequences: `removeSourceVideosPermanently([])` is itself a no-op
+    // (its own `ids.length === 0` guard), so "the library is unchanged"
+    // alone cannot tell "never called" apart from "called with nothing to
+    // do" — only `not.toHaveBeenCalled()` can.
+    it('does not call removeSourceVideosPermanently when every delete in the batch rejects', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'two.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'two.mp4' })
+
+      vi.spyOn(storageModule, 'deleteVideo').mockRejectedValue(new Error('disk full'))
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+      const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const callsBeforeClick = estimate.mock.calls.length
+      const historyBefore = useEditorStore.getState().history
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith('Could not remove 2 files from storage', 'error')
+      )
+      expect(removeSourceVideosPermanently).not.toHaveBeenCalled()
+      expect(store().sourceVideos.map((v) => v.id).sort()).toEqual(['video1', 'video2'])
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('video1')
+      expect(remainingIds).toContain('video2')
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+      expect(useEditorStore.getState().history).toBe(historyBefore)
+    })
+
     // MINOR 3 (ESCSUITE-142 review): the render-time `lockedMedia` snapshot
     // the button uses to decide what to *offer* is not safe to trust once the
     // loop is `await`ing between ids — a track locked while an earlier id's
@@ -738,6 +816,107 @@ describe('VideoUploader', () => {
 
       await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:unused-thumb')
+    })
+
+    // ESCSUITE-149 review, NIT 2: the meter refresh used to be the last
+    // statement of the `try`, so a delete that threw partway through the loop
+    // skipped it — unlike Clear All, which already refreshed in `finally`.
+    // The ids before the failure are still permanently removed (the
+    // permanent-removal write already ran in `finally`), so the meter should
+    // reflect that even though the whole clear did not finish cleanly.
+    it('refreshes the storage meter even when a delete fails partway through', async () => {
+      await storeVideo('unused1', new Blob(['bytes']), { ...videoMeta, id: 'unused1' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused1', name: 'one.mp4', size: 1024 })
+      await storeVideo('unused2', new Blob(['bytes']), { ...videoMeta, id: 'unused2' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused2', name: 'two.mp4', size: 1024 })
+
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'unused2') throw new Error('disk full')
+        return realDeleteVideo(id)
+      })
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const callsBeforeClick = estimate.mock.calls.length
+
+      fireEvent.click(await screen.findByRole('button', { name: /Clear Unused/ }))
+
+      // 'unused1' (deleted before the throw) is permanently removed; 'unused2'
+      // (the one that threw) is left in the library, bytes intact.
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).not.toContain('unused1'))
+      expect(store().sourceVideos.map((v) => v.id)).toContain('unused2')
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+    })
+
+    // ESCSUITE-149 coverage round: `if (removedIds.length > 0)
+    // removeSourceVideosPermanently(removedIds)`'s false arm was unreached
+    // here too. Clear Unused's loop has no per-id try/catch, so the very
+    // first rejection aborts it — only one `deleteVideo` is ever actually
+    // attempted — but every id handed to it rejects, so `removedIds` stays
+    // empty throughout and the permanent-removal write must never run: both
+    // sources stay in the store and the database, the meter still refreshes,
+    // and — since no store action ran at all — the history is untouched, the
+    // exact same object as before the click. (Clear Unused has no notice
+    // channel of its own on failure — only `console.error` — unlike Clear
+    // All's counted notice.)
+    //
+    // Spies directly on the store action rather than only on its
+    // consequences: `removeSourceVideosPermanently([])` is itself a no-op
+    // (its own `ids.length === 0` guard), so "the library is unchanged"
+    // alone cannot tell "never called" apart from "called with nothing to
+    // do" — only `not.toHaveBeenCalled()` can.
+    it('does not call removeSourceVideosPermanently when every delete in the batch rejects', async () => {
+      await storeVideo('unused1', new Blob(['bytes']), { ...videoMeta, id: 'unused1' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused1', name: 'one.mp4', size: 1024 })
+      await storeVideo('unused2', new Blob(['bytes']), { ...videoMeta, id: 'unused2' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused2', name: 'two.mp4', size: 1024 })
+
+      vi.spyOn(storageModule, 'deleteVideo').mockRejectedValue(new Error('disk full'))
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const callsBeforeClick = estimate.mock.calls.length
+      const historyBefore = useEditorStore.getState().history
+
+      fireEvent.click(await screen.findByRole('button', { name: /Clear Unused/ }))
+
+      await waitFor(() => expect(consoleError).toHaveBeenCalled())
+      expect(removeSourceVideosPermanently).not.toHaveBeenCalled()
+      expect(store().sourceVideos.map((v) => v.id).sort()).toEqual(['unused1', 'unused2'])
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('unused1')
+      expect(remainingIds).toContain('unused2')
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+      expect(useEditorStore.getState().history).toBe(historyBefore)
+    })
+
+    // ESCSUITE-149: Clear Unused is as non-undoable as Clear All, and —
+    // "unused" meaning no clip refers to it — can never remove a clip. The
+    // final assertion is that invariant: the clip the library started with
+    // is still exactly what it was.
+    it('is not undoable: undo after Clear Unused does not restore the source, and removes no clips', async () => {
+      await storeVideo('unused', new Blob(['bytes']), { ...videoMeta, id: 'unused' })
+      store().addSourceVideo(videoMeta)
+      store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048 })
+      const usedClip = addClip('clip1', 0, 2) // references video1
+      const pastLengthBeforeClear = useEditorStore.getState().history.past.length
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
+
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
+      expect(store().project.timeline.clips).toEqual([usedClip])
+      expect(useEditorStore.getState().history.past).toHaveLength(pastLengthBeforeClear)
+      expect(useEditorStore.getState().canUndo()).toBe(true)
+
+      useEditorStore.getState().undo()
+
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).not.toContain('unused')
     })
 
     it('hides the clear-unused button when every source is in use', async () => {

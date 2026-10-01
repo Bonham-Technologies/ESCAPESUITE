@@ -76,7 +76,12 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addSourceVideo = useEditorStore((state) => state.addSourceVideo);
-  const removeSourceVideo = useEditorStore((state) => state.removeSourceVideo);
+  // Clear Unused and Clear All both delete bytes from IndexedDB themselves —
+  // a storage clear, not an edit — so neither goes through the undoable
+  // per-id `removeSourceVideo`; both batch the ids whose `deleteVideo`
+  // actually succeeded into one `removeSourceVideosPermanently` call
+  // (ESCSUITE-149).
+  const removeSourceVideosPermanently = useEditorStore((state) => state.removeSourceVideosPermanently);
 
   /**
    * The media a clip on a locked track uses, which nothing here may delete
@@ -123,22 +128,34 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
     refreshStorageInfo();
   }, [refreshStorageInfo]);
 
-  // Clear unused videos (not in any clip)
+  // Clear unused videos (not in any clip). A storage clear, not an edit
+  // (ESCSUITE-149): the ids whose `deleteVideo` actually succeeded are
+  // collected and handed to `removeSourceVideosPermanently` in one call after
+  // the loop, rather than removed one at a time as each delete lands — that
+  // single non-undoable write is what stops undo from handing back a source
+  // whose bytes are already gone. "Unused" means no clip refers to it, so
+  // this can never touch the timeline.
   const handleClearUnusedVideos = useCallback(async () => {
     if (unusedVideos.length === 0) return;
     const message = `Remove ${unusedVideos.length} unused media file${unusedVideos.length !== 1 ? 's' : ''}? This will free ${formatFileSize(unusedSize)}.`;
     if (confirm(message)) {
+      const removedIds: string[] = [];
       try {
         for (const video of unusedVideos) {
           await deleteVideo(video.id);
-          removeSourceVideo(video.id);
+          removedIds.push(video.id);
         }
-        refreshStorageInfo();
       } catch (e) {
         console.error('Failed to clear unused videos:', e);
+      } finally {
+        // Both run regardless of outcome (ESCSUITE-149 review, NIT 2): the
+        // ids before a mid-loop failure are still permanently gone, and the
+        // meter has to say so even when the clear as a whole did not finish.
+        if (removedIds.length > 0) removeSourceVideosPermanently(removedIds);
+        refreshStorageInfo();
       }
     }
-  }, [unusedVideos, unusedSize, removeSourceVideo, refreshStorageInfo]);
+  }, [unusedVideos, unusedSize, removeSourceVideosPermanently, refreshStorageInfo]);
 
   // Clear all storage — the bulk form of Clear Unused (ESCSUITE-142): per id,
   // over the editor's own `sourceVideos`, so its blast radius can only ever be
@@ -157,28 +174,43 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   // the same refusal Clear Unused's own filter makes by never seeing the id
   // in the first place.
   //
-  // A per-id delete/remove failure does not stop the rest of the batch —
-  // each id is caught on its own, so one bad id cannot strand every id after
-  // it — and is reported once, by count, through the notice channel rather
-  // than the console alone (ESCSUITE-142 review, MINOR 2). The meter refresh
-  // runs in `finally`, so a partial failure still leaves it current.
+  // A per-id delete failure does not stop the rest of the batch — each id is
+  // caught on its own, so one bad id cannot strand the ids after it — and is
+  // reported once, by count, through the notice channel rather than the
+  // console alone (ESCSUITE-142 review, MINOR 2). The permanent-removal write
+  // and the meter refresh both run in `finally`, in that order (ESCSUITE-149
+  // review, NIT 3 — the remove is no longer inside the per-id `try`, so it is
+  // no longer part of what "per-id" above describes), so a partial failure
+  // still removes exactly the ids whose bytes are actually gone and still
+  // leaves the meter current.
+  //
+  // ESCSUITE-149: unlike Clear Unused, this can take clips on the timeline
+  // with it (every clip that referenced a cleared source), which is why the
+  // confirm copy says so. The ids whose `deleteVideo` succeeded are collected
+  // across the whole loop and handed to `removeSourceVideosPermanently` once,
+  // in `finally`, alongside the meter refresh — a storage clear is not an
+  // edit, so it must not be undoable, and that single non-undoable write
+  // (rather than one per id, as the loop used to make) is what stops undo
+  // from handing back a source whose bytes this already deleted.
   const handleClearAllStorage = useCallback(async () => {
     if (clearableVideos.length === 0) return;
-    if (confirm('Remove every file this project imported? Files on a locked track stay. This cannot be undone.')) {
+    if (confirm('Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. This cannot be undone.')) {
       let failed = 0;
+      const removedIds: string[] = [];
       try {
         for (const video of clearableVideos) {
           const { clips: liveClips, tracks: liveTracks } = useEditorStore.getState().project.timeline;
           if (lockedSourceVideoIds(liveClips, liveTracks).has(video.id)) continue;
           try {
             await deleteVideo(video.id);
-            removeSourceVideo(video.id);
+            removedIds.push(video.id);
           } catch (e) {
             failed += 1;
             console.error('Failed to clear storage:', e);
           }
         }
       } finally {
+        if (removedIds.length > 0) removeSourceVideosPermanently(removedIds);
         refreshStorageInfo();
       }
       if (failed > 0) {
@@ -188,7 +220,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         );
       }
     }
-  }, [clearableVideos, removeSourceVideo, refreshStorageInfo, showNotification]);
+  }, [clearableVideos, removeSourceVideosPermanently, refreshStorageInfo, showNotification]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const allFiles = Array.from(files);

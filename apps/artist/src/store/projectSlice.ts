@@ -4,7 +4,7 @@
 
 import type { StateCreator } from 'zustand';
 import type { EditorState, Project, SourceVideo } from './types';
-import { pushToHistory, scrubDeadThumbnails } from './storeHistory';
+import { pushToHistory, scrubDeadThumbnails, scrubRemovedSources } from './storeHistory';
 import { createEmptyProject, calculateTimelineDuration } from './projectFactory';
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
@@ -12,7 +12,7 @@ import { lockedSourceVideoIds } from './trackLock';
 import { pruneSelection } from './selectionPrune';
 import { revokeSourceThumbnails, revokeThumbnailUrl } from '../core/storage';
 
-export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo' | 'setSourceThumbnail'>;
+export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideo' | 'removeSourceVideosPermanently' | 'setSourceThumbnail'>;
 
 export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice> = (set) => ({
   project: createEmptyProject(),
@@ -158,6 +158,67 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
       selectedClipIds: pruned.selectedClipIds,
       clipboard: newClipboard,
       history,
+    };
+  }),
+
+  // ESCSUITE-149: a storage clear (Clear Unused / Clear All,
+  // `components/VideoUploader.tsx`) deletes the source's bytes from
+  // IndexedDB itself — a different thing from `removeSourceVideo`, which only
+  // ever drops the in-memory reference. Pushing an undo step for that would
+  // let `undo()` hand a `SourceVideo` back whose bytes are already gone: the
+  // tile renders but cannot be played, placed or exported. Modelled on
+  // ESCSUITE-117's `setSourceThumbnail` — no `pushToHistory` — but unlike that
+  // one-field repair this also has to reach backwards: an edit already on the
+  // undo stack before the clear must not be able to resurrect these ids
+  // either, so every existing snapshot is scrubbed too
+  // (`scrubRemovedSources`, `storeHistory.ts`).
+  //
+  // Takes every id in one state write, same as `removeSourceVideo` per id:
+  // removes the sources, drops any clip that referenced one (recalculating
+  // duration), prunes the clipboard (ESCSUITE-100) and the selection
+  // (ESCSUITE-101), and revokes each removed source's `blob:` thumbnail
+  // (ESCSUITE-113). Unlike `removeSourceVideo` this is **not** all-or-nothing
+  // on a locked track: the caller (`VideoUploader.tsx`) only ever hands this
+  // the ids whose bytes it already deleted, having filtered locked ones out
+  // itself before asking storage to delete anything.
+  removeSourceVideosPermanently: (ids: string[]) => set((state) => {
+    if (ids.length === 0) return state;
+    const removedIds = new Set(ids);
+    const removed = state.sourceVideos.filter((v) => removedIds.has(v.id));
+    if (removed.length === 0) {
+      // Nothing left in the *live* library to remove or revoke — but one of
+      // these ids can still be sitting in an existing undo/redo snapshot (its
+      // bytes already deleted by this same caller, just via a batch that
+      // landed earlier, or by a plain `removeSourceVideo` before this one
+      // ran), so the scrub still has to run (ESCSUITE-149 review, MAJOR 1).
+      // `scrubRemovedSources` returns the identical `history` object when
+      // nothing anywhere carries these ids, so this stays a true no-op —
+      // same `state`, no new object — in that case.
+      const history = scrubRemovedSources(state.history, ids);
+      return history === state.history ? state : { history };
+    }
+    revokeSourceThumbnails(removed);
+    const { clips } = state.project.timeline;
+    const kept = clips.filter((c) => !c.sourceVideoId || !removedIds.has(c.sourceVideoId));
+    const newClipboard = state.clipboard && state.clipboard.some((c) => c.sourceVideoId && removedIds.has(c.sourceVideoId))
+      ? state.clipboard.filter((c) => !c.sourceVideoId || !removedIds.has(c.sourceVideoId))
+      : state.clipboard;
+    const pruned = pruneSelection(kept, state.selectedClipId, state.selectedClipIds);
+    return {
+      sourceVideos: state.sourceVideos.filter((v) => !removedIds.has(v.id)),
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: kept,
+          duration: calculateTimelineDuration(kept),
+        },
+      },
+      selectedClipId: pruned.selectedClipId,
+      selectedClipIds: pruned.selectedClipIds,
+      clipboard: newClipboard,
+      history: scrubRemovedSources(state.history, ids),
     };
   }),
 
