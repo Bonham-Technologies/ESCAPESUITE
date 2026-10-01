@@ -188,6 +188,41 @@ describe('TimelineTrack waveform resample ceiling (ESCSUITE-13)', () => {
     rerender(trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 1, viewportRight: 3001 }))
     expect(resampleSpy).toHaveBeenCalledTimes(1)
   })
+
+  it('a 300px drag over 20 frames at 15px/frame resamples 5-6 times, not 20 (ESCSUITE-13 round 3)', () => {
+    // Measured 2026-10-01: exactly 6 with the window/phase chosen below.
+    // 300 / 64 (one bucket) is ~4.7, so a drag crossing that much ground
+    // visits 5 or 6 distinct buckets depending on exactly where the drag
+    // starts relative to the grid (the "phase") — asserting a range rather
+    // than one exact count, because the point of the ceiling is "not one
+    // resample per frame", not pinning a phase nobody chose on purpose. The
+    // window width (3072 = 48 x 64) is itself bucket-aligned so its own end
+    // doesn't drift independently of the start as the drag moves — the
+    // property under test is the *start*'s bucket crossings, not an
+    // artefact of an arbitrary window width.
+    const clip: Clip = { ...addClip('clip1', 0, 60), trackId: TRACK_ID }
+    const windowWidth = 3072
+    const { rerender } = render(
+      trackElement({ pixelsPerSecond: 500, clip, viewportLeft: 0, viewportRight: windowWidth })
+    )
+    expect(resampleSpy).toHaveBeenCalledTimes(1) // the mount
+
+    for (let frame = 1; frame <= 20; frame++) {
+      const viewportLeft = frame * 15
+      rerender(
+        trackElement({
+          pixelsPerSecond: 500,
+          clip,
+          viewportLeft,
+          viewportRight: viewportLeft + windowWidth,
+        })
+      )
+    }
+
+    // 1 (mount) + 5 or 6 bucket crossings over the drag.
+    expect(resampleSpy.mock.calls.length).toBeGreaterThanOrEqual(1 + 5)
+    expect(resampleSpy.mock.calls.length).toBeLessThanOrEqual(1 + 6)
+  })
 })
 
 describe('AudioWaveform draw ceiling: one fillRect per sample, zero extra canvas calls (MINOR-4)', () => {

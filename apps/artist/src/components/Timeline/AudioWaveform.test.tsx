@@ -3,6 +3,7 @@ import { render, cleanup } from '@testing-library/react'
 import {
   AudioWaveform,
   MAX_CACHE_SAMPLES,
+  MAX_CACHE_ENTRIES,
   MAX_BACKING_DIMENSION,
   WINDOW_BUCKET_PX,
 } from './AudioWaveform'
@@ -557,6 +558,25 @@ describe('AudioWaveform', () => {
       expect(canvas.width).toBeCloseTo(parseFloat(canvas.style.width) * dpr, 0)
     })
 
+    it('draws the same detail whether the whole-clip window is implicit or explicit (MINOR-3 seam, ESCSUITE-13 round 3)', () => {
+      // The round-1 bug was a hard jump at the fallback/windowed switch
+      // (2000 samples either side of it, regardless of pixel width); round
+      // 2's continuous formula (MINOR-3) was meant to remove the switch
+      // entirely, but nothing had pinned the one case that most directly
+      // proves there's no seam left: a caller who happens to know its
+      // viewport (and so always passes `visibleRangePx`, even when that
+      // viewport covers the whole clip) must see *exactly* what a caller
+      // with no viewport to report sees.
+      const duration = 60
+      const peaks = monotonicPeaks(duration * 1000)
+      const fullWidth = 3000 // exceeds the 2000-sample floor, so this also exercises the post-MINOR-3 formula rather than a degenerate small case
+
+      const implicitBars = distinctBarsDrawn(peaks, duration, fullWidth)
+      const explicitBars = distinctBarsDrawn(peaks, duration, fullWidth, { offset: 0, width: fullWidth })
+
+      expect(Math.abs(implicitBars - explicitBars)).toBeLessThanOrEqual(1)
+    })
+
     describe('scroll bucketing (MAJOR-1(a))', () => {
       it('does not re-sample for a scroll that stays inside one 64px bucket', () => {
         const duration = 60
@@ -594,6 +614,37 @@ describe('AudioWaveform', () => {
         expect(resampleSpy).toHaveBeenCalledTimes(1)
 
         resampleSpy.mockRestore()
+      })
+
+      it('never inflates a genuinely zero-width window into a visible tail (ESCSUITE-13 round 3, defect 1)', () => {
+        const duration = 60
+        const peaks = monotonicPeaks(duration * 1000)
+        const resampleSpy = vi.spyOn(waveformUtils, 'resamplePeaks')
+        try {
+          // A clip entirely past the right edge: `TimelineTrack`'s
+          // `visibleRangeFor` reports exactly this shape — `{ offset:
+          // clipWidth, width: 0 }` — for a clip just past the strict
+          // viewport but still inside the virtualiser's wider overscan, so
+          // it is mounted and rendering at all. `offset: 12345` is
+          // deliberately not a multiple of 64: bucketing it outward
+          // (floor 12288, ceil 12352) would manufacture a 64px window out
+          // of nothing if the zero-width check ran *after* bucketing
+          // instead of before it.
+          render(
+            <AudioWaveform
+              peaks={peaks}
+              sourceDuration={duration}
+              startTime={0}
+              endTime={duration}
+              width={30000}
+              visibleRangePx={{ offset: 12345, width: 0 }}
+              height={40}
+            />
+          )
+          expect(resampleSpy).not.toHaveBeenCalled()
+        } finally {
+          resampleSpy.mockRestore()
+        }
       })
     })
 
@@ -702,9 +753,11 @@ describe('AudioWaveform', () => {
         const width = 1000
         const entrySize = MAX_BACKING_DIMENSION
         const dprFor = (i: number) => entrySize / width + i
-        // +20, not +1: past the first eviction, this also drives the evicted
-        // array back into `freeBuffers` enough times to fill and then exceed
-        // its own small cap, exercising both sides of that guard too.
+        // +20, not +1, for a comfortable margin past the first eviction.
+        // (This does *not* exercise `freeBuffers` filling past its own cap —
+        // each insert here pops at most one buffer before pushing at most
+        // one back, so the pool only ever oscillates between 0 and 1; see
+        // the dedicated "free-buffer pool" test below for that.)
         const windowCount = Math.ceil(MAX_CACHE_SAMPLES / entrySize) + 20
 
         function setDpr(value: number): void {
@@ -769,6 +822,250 @@ describe('AudioWaveform', () => {
 
         resampleSpy.mockRestore()
       }, 20000)
+
+      it('evicts on entry count alone when the sample budget is nowhere near exceeded (MAX_CACHE_ENTRIES)', () => {
+        // MAX_CACHE_SAMPLES and MAX_CACHE_ENTRIES are independent
+        // conditions (`&&`) in the same eviction check; the sibling tests
+        // above all exercise the sample-budget side being the one that's
+        // false. This exercises the *other* side of that `&&`: entries tiny
+        // enough (5 samples, via a 5ms window of a 1000/sec source) that
+        // 1025 of them total only ~5,125 samples — nowhere near the 500,000
+        // budget — so only MAX_CACHE_ENTRIES (1024) ever forces an eviction.
+        const duration = 60
+        const peaks = monotonicPeaks(duration * 1000)
+        const windowAt = (i: number) => {
+          Object.defineProperty(window, 'devicePixelRatio', { value: 1 + i, configurable: true })
+          return (
+            <AudioWaveform
+              peaks={peaks}
+              sourceDuration={duration}
+              startTime={0}
+              endTime={0.005}
+              width={100}
+              height={40}
+            />
+          )
+        }
+
+        const { rerender } = render(windowAt(0)) // entry 0 — will be evicted
+        for (let i = 1; i < MAX_CACHE_ENTRIES; i++) {
+          rerender(windowAt(i))
+        }
+
+        const resampleSpy = vi.spyOn(waveformUtils, 'resamplePeaks')
+        try {
+          // The 1025th distinct window: entries.size would reach 1025,
+          // past MAX_CACHE_ENTRIES, forcing the eviction of entry 0 even
+          // though the sample budget is barely touched.
+          rerender(windowAt(MAX_CACHE_ENTRIES))
+          expect(resampleSpy).toHaveBeenCalledTimes(1)
+
+          rerender(windowAt(0)) // entry 0 — evicted, a miss
+          expect(resampleSpy).toHaveBeenCalledTimes(2)
+        } finally {
+          resampleSpy.mockRestore()
+        }
+      }, 20000)
+
+      it('is LRU, not FIFO: touching the oldest entry spares it from eviction in favour of the second-oldest', () => {
+        // Driven by MAX_CACHE_SAMPLES, the same mechanism (and the same
+        // entry size) the sibling "evicts the least-recently-touched" test
+        // above uses, so this isolates exactly one variable: a touch
+        // partway through. 31 entries of 16,000 samples each (496,000,
+        // under the 500,000 budget) is one short of forcing an eviction; a
+        // 32nd pushes the total to 512,000 and forces exactly one.
+        const duration = 60
+        const peaks = monotonicPeaks(duration * 1000)
+        const width = 1000
+        const entrySize = MAX_BACKING_DIMENSION
+        const dprFor = (i: number) => entrySize / width + i
+        const PRE_EVICTION_COUNT = Math.floor(MAX_CACHE_SAMPLES / entrySize) // 31
+
+        function setDpr(value: number): void {
+          Object.defineProperty(window, 'devicePixelRatio', { value, configurable: true })
+        }
+
+        function windowAt(i: number) {
+          setDpr(dprFor(i))
+          return (
+            <AudioWaveform
+              peaks={peaks}
+              sourceDuration={duration}
+              startTime={0}
+              endTime={duration}
+              width={width}
+              height={40}
+            />
+          )
+        }
+
+        // Fill to one short of forcing an eviction, in order: entry 0 is
+        // the oldest, entry 30 the newest, nothing evicted yet.
+        const { rerender } = render(windowAt(0))
+        for (let i = 1; i < PRE_EVICTION_COUNT; i++) {
+          rerender(windowAt(i))
+        }
+
+        // Touch the oldest (entry 0) now that every other entry is already
+        // present: a plain re-render with the same props is a cache *hit*,
+        // moving it to the most-recently-used end, past all 30 of them.
+        rerender(windowAt(0))
+
+        // One more distinct window pushes the total over budget by 16,000 —
+        // enough to force evicting exactly one entry. A true LRU evicts
+        // entry 1 here (now the oldest *untouched* one, since entry 0 moved
+        // to the end); a FIFO cache would instead evict entry 0, since it
+        // was inserted first.
+        rerender(windowAt(PRE_EVICTION_COUNT))
+
+        const resampleSpy = vi.spyOn(waveformUtils, 'resamplePeaks')
+        try {
+          rerender(windowAt(1)) // entry 1 — evicted
+          expect(resampleSpy).toHaveBeenCalledTimes(1)
+
+          rerender(windowAt(0)) // entry 0 — touched, survives
+          expect(resampleSpy).toHaveBeenCalledTimes(1)
+        } finally {
+          resampleSpy.mockRestore()
+        }
+      })
+
+      it('fills the free-buffer pool up to its own cap and drops the rest (ESCSUITE-13 round 3)', () => {
+        // The round-2 re-review found the free-buffer pool untestable past
+        // its own cap: with entries near MAX_BACKING_DIMENSION in size, one
+        // eviction (freeing ~16,000 samples) always covers the next insert's
+        // overshoot (also capped at ~16,000), so the pool only ever holds 0
+        // or 1 buffer at a time. Forcing a *burst* of evictions — enough to
+        // actually fill the pool past MAX_FREE_BUFFERS — needs many *small*
+        // entries, each far below MAX_BACKING_DIMENSION: this builds 663
+        // entries of exactly 751 samples each (a 1s window of a 751-peaks/sec
+        // source — 498,213 total, under the 500,000 budget), distinguished
+        // only by `devicePixelRatio` (which the cache key includes).
+        //
+        // A single big, MAX_BACKING_DIMENSION-sized (16,000) entry — the
+        // same clip's *whole* 200s range — then pushes the total to 514,213,
+        // 14,213 over budget. 751 does not divide evenly into either the
+        // budget or MAX_BACKING_DIMENSION, so (unlike a construction built
+        // from round numbers) eviction overshoots its target rather than
+        // landing exactly on it: it stops after 19 entries (19 x 751 =
+        // 14,269), leaving the cache 356 samples *under* budget — enough
+        // headroom that the 17 tiny follow-up renders below (each adding a
+        // handful of samples) never trigger a second eviction of their own,
+        // which would otherwise replenish the pool and make it look
+        // bottomless instead of capped.
+        //
+        // Reuse is observed indirectly, through `resamplePeaks`' own
+        // `output` buffer argument (ESCSUITE-13 round 2, MAJOR-1(d)):
+        // captured at call time (before `resamplePeaks` mutates it in
+        // place), a length of 0 is a freshly allocated array and a length of
+        // 751 is one of the 19 evicted entries' buffers, handed back for
+        // reuse.
+        const sourceDuration = 200
+        const SMALL_ENTRY_SIZE = 751
+        const peaks: WaveformPeak[] = Array.from(
+          { length: SMALL_ENTRY_SIZE * sourceDuration },
+          () => ({ min: 0, max: 0 })
+        )
+        const SMALL_ENTRY_COUNT = 663 // see the derivation above: 19 evicted, margin 356
+
+        function setDpr(value: number): void {
+          Object.defineProperty(window, 'devicePixelRatio', { value, configurable: true })
+        }
+
+        /** A 1s window of the source — exactly 751 of its 751/sec peaks. */
+        function smallWindow() {
+          return (
+            <AudioWaveform
+              peaks={peaks}
+              sourceDuration={sourceDuration}
+              startTime={0}
+              endTime={1}
+              width={100}
+              height={40}
+            />
+          )
+        }
+
+        /** The source's whole 200s range, wide enough to hit the 16,000 cap. */
+        function bigWindow() {
+          return (
+            <AudioWaveform
+              peaks={peaks}
+              sourceDuration={sourceDuration}
+              startTime={0}
+              endTime={sourceDuration}
+              width={20000}
+              height={40}
+            />
+          )
+        }
+
+        setDpr(1)
+        const { rerender } = render(smallWindow())
+        for (let i = 1; i < SMALL_ENTRY_COUNT; i++) {
+          setDpr(1 + i)
+          rerender(smallWindow())
+        }
+
+        // The big entry: triggers the 19-entry eviction burst.
+        setDpr(1)
+        rerender(bigWindow())
+
+        // Capture each resample's `output` buffer length *at call time*.
+        // `original` must be the *real* function, not a leftover spy from an
+        // earlier test: `vi.spyOn` on an already-spied property hands back
+        // the existing spy rather than wrapping it again, so capturing it
+        // here and then setting its own `mockImplementation` to call
+        // "itself" would recurse forever. Every spy in this file is torn
+        // down in a `finally` for exactly this reason.
+        const original = resamplePeaks
+        const bufferLengthsAtCall: number[] = []
+        const resampleSpy = vi.spyOn(waveformUtils, 'resamplePeaks')
+        try {
+          resampleSpy.mockImplementation((windowPeaks, targetSamples, output) => {
+            bufferLengthsAtCall.push(output ? output.length : -1)
+            return original(windowPeaks, targetSamples, output)
+          })
+
+          // 16 more, brand-new, *tiny* windows (0.01s — a handful of peaks,
+          // not 751, and each distinct from the others so none is a cache
+          // hit): each should be handed one of the pool's 16 reused buffers
+          // regardless of how small its own request is, since reuse hands
+          // back whatever the buffer already held — `resamplePeaks` resizes
+          // it to fit *after* this call is observed.
+          for (let i = 0; i < 16; i++) {
+            setDpr(1)
+            rerender(
+              <AudioWaveform
+                peaks={peaks}
+                sourceDuration={sourceDuration}
+                startTime={10 + i * 0.1}
+                endTime={10 + i * 0.1 + 0.01}
+                width={100}
+                height={40}
+              />
+            )
+          }
+          expect(bufferLengthsAtCall).toEqual(Array(16).fill(SMALL_ENTRY_SIZE))
+
+          // The 17th: the pool is empty now (only 16 were ever kept, of the
+          // 19 evicted) — a fresh, empty buffer, not an 18th or 19th reused one.
+          setDpr(1)
+          rerender(
+            <AudioWaveform
+              peaks={peaks}
+              sourceDuration={sourceDuration}
+              startTime={30}
+              endTime={30.01}
+              width={100}
+              height={40}
+            />
+          )
+          expect(bufferLengthsAtCall[16]).toBe(0)
+        } finally {
+          resampleSpy.mockRestore()
+        }
+      }, 40000)
     })
 
     describe('devicePixelRatio (ESCSUITE-13 round 2, MAJOR-2)', () => {

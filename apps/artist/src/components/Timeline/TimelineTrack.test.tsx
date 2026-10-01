@@ -10,6 +10,7 @@ import type React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import { TimelineTrack } from './TimelineTrack'
+import { pruneVisibleRangeCache } from './visibleRangeCache'
 import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
 import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
 import { DEFAULT_SHAPE_OVERLAY_DATA } from '../../store/types'
@@ -675,5 +676,39 @@ describe('TimelineTrack drag', () => {
     })
 
     expect(root.querySelector(`.${styles.clipPreview}`)).toHaveStyle({ width: '0px' })
+  })
+})
+
+describe('pruneVisibleRangeCache (ESCSUITE-13 round 3, defect 2)', () => {
+  it('deletes entries for clips no longer present, and keeps the rest', () => {
+    const cache = new Map<string, { offset: number; width: number }>([
+      ['stays', { offset: 10, width: 20 }],
+      ['removed-1', { offset: 30, width: 40 }],
+      ['removed-2', { offset: 50, width: 60 }],
+    ])
+
+    pruneVisibleRangeCache(cache, [makeClip('stays', 0)])
+
+    expect([...cache.keys()]).toEqual(['stays'])
+    expect(cache.get('stays')).toEqual({ offset: 10, width: 20 })
+  })
+
+  it('leaves an already-pruned (or empty) cache untouched', () => {
+    const cache = new Map<string, { offset: number; width: number }>()
+
+    pruneVisibleRangeCache(cache, [makeClip('clip1', 0)])
+
+    expect(cache.size).toBe(0)
+  })
+
+  it('deletes nothing when every cached clip is still present', () => {
+    const cache = new Map<string, { offset: number; width: number }>([
+      ['a', { offset: 1, width: 2 }],
+      ['b', { offset: 3, width: 4 }],
+    ])
+
+    pruneVisibleRangeCache(cache, [makeClip('a', 0), makeClip('b', 5)])
+
+    expect([...cache.keys()].sort()).toEqual(['a', 'b'])
   })
 })

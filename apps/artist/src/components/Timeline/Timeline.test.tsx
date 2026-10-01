@@ -3,6 +3,8 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { Timeline } from './Timeline'
 import { useEditorStore } from '../../store/projectStore'
 import type { SourceVideo } from '../../store/types'
+import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
+import * as waveformUtils from '../../utils/waveform'
 
 // Mock ResizeObserver
 class ResizeObserverMock {
@@ -361,5 +363,69 @@ describe('Timeline - track controls', () => {
     const unmutedTrack = useEditorStore.getState().project.timeline.tracks[0]
     expect(unmutedTrack.muted).toBe(false)
     expect(unmutedTrack.volume).toBe(0.5)
+  })
+
+  describe('the viewport default on first paint (ESCSUITE-13 round 3, MINOR-6)', () => {
+    const wideVideo: SourceVideo = {
+      id: 'wide-video',
+      name: 'wide.mp4',
+      duration: 60,
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      mimeType: 'video/mp4',
+      size: 1000000,
+      hasAudio: true,
+      // Dense enough that the window this test cares about is never
+      // source-bottlenecked.
+      waveformData: Array.from({ length: 6000 }, () => ({ min: -0.5, max: 0.5 })),
+    }
+
+    beforeEach(() => {
+      installCanvasDouble()
+      useEditorStore.getState().addSourceVideo(wideVideo)
+      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+      // 60s at the default zoom's 50px/s is a 3000px box — far wider than
+      // DEFAULT_VIEWPORT_WIDTH (1280), and jsdom's `clientWidth` is always 0,
+      // so without a finite default this clip's whole box would be the
+      // window on every render this test ever makes.
+      useEditorStore.getState().addClipToTimeline(
+        {
+          id: 'wide-clip',
+          name: 'Wide Clip',
+          sourceVideoId: wideVideo.id,
+          startTime: 0,
+          endTime: 60,
+          duration: 60,
+          animation: undefined,
+        },
+        trackId,
+        0
+      )
+    })
+
+    afterEach(() => {
+      uninstallCanvasDouble()
+    })
+
+    it('resamples the default-width window on first paint, not the whole 3000px clip', () => {
+      const resampleSpy = vi.spyOn(waveformUtils, 'resamplePeaks')
+      try {
+        const { container } = render(<Timeline />)
+
+        // Exactly one resample for the mount — no "Infinity on frame one,
+        // the real window on frame two" double resample.
+        expect(resampleSpy).toHaveBeenCalledTimes(1)
+
+        // Windowed to the 1280px default, not the clip's own 3000px box:
+        // `canvas.style.width` is the clearest external evidence, since the
+        // old `Infinity`-driven fallback would have sized the canvas to the
+        // whole clip instead.
+        const canvas = container.querySelector('canvas')!
+        expect(canvas.style.width).toBe('1280px')
+      } finally {
+        resampleSpy.mockRestore()
+      }
+    })
   })
 })
