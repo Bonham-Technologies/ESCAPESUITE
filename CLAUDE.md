@@ -1447,6 +1447,30 @@ constructed against the exports that already run. The two new functions are the 
 no decision; `exportTypes.ts`'s three uncovered branches and the exporters' own predate the
 ticket. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/plan`, `@escapesuite/craft` and `@escapesuite/artist` were re-measured 2026-10-01 for
+ESCSUITE-31 (the two "Download offline build" anchors fire an analytics event; `recordingDeleted`
+and `videoImported` are wired at their one call site each; the never-called `overlayAdded` is
+deleted). Plan: 100.00 / 100.00 / 100.00 / 100.00 on both trees — the anchor handler and its
+event are three lines, every one executed by the new click cases (lines 73, statements 74,
+branches 19, functions 23, each fully covered). Craft: 100.00 / 99.52 / 97.73 / 100.00, the same
+four figures as the commit this branch was rebased onto; lines 2,336 → 2,337 and statements
+2,488 / 2,500 → 2,489 / 2,501, the one new statement being the `recordingDeleted()` call at the
+end of `useRecordingLibrary.ts`'s delete cascade, outside the companion loop, reached by the
+single-part, multi-part and companion-rejects cases that now assert it fires exactly once;
+branches 1,337 / 1,368 and functions 448 unmoved, the same 31 branches and 12 statements
+uncovered as before. Artist: 99.56 / 98.91 / **94.86** / 99.46 against the
+99.56 / 98.91 / 94.85 / 99.46 the commit this branch was rebased onto measures — branches up a
+hundredth, the other three unmoved. Measured in one sitting, the base gives 4,263 / 4,494
+branches and this branch 4,267 / 4,498: four new branches, four covered, the same 231 uncovered
+as before; lines 6,813 / 6,843 and statements 7,681 / 7,765 on both trees (the two lines
+`videoImported()` adds in `components/VideoUploader.tsx` are balanced by the deleted
+`overlayAdded` declaration in `utils/analytics.ts`), and functions 1,682 / 1,691 → 1,681 / 1,690,
+the one fewer being that deleted declaration, with the same 30 / 84 / 9 uncovered. The four
+branches are the hosted-build gate around the import event, reached from both sides by the
+file-drop case against the handoff, load and restore cases that by ruling fire nothing. **No
+floor crossed**; plan's floors stay 100 / 100 / 100 / 100, craft's 100 / 99 / 97 / 100 and
+artist's 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1454,7 +1478,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.56 | 98.91 | 94.85 | 99.46 |
+| `@escapesuite/artist` | 99.56 | 98.91 | 94.86 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
