@@ -459,6 +459,26 @@ skips there.
 - `vite-plugin-singlefile`: Builds entire app into a single HTML file (all assets inlined)
 - Target: ESNext, no code splitting
 - `build:standalone` produces an offline single-file build for air-gapped use
+- **`isSingleFileBuild(env)`** (`src/build/singleFileBuild.ts`, unit tested) names, once, which
+  builds must ship as exactly one HTML file with `decodeWorker` inlined as a blob URL rather
+  than a separate chunk: true for `VITE_HEADLESS=true` or `VITE_BUILD_MODE=standalone`, false for
+  the hosted (`saas`) default. Both single-file targets run from `file://` — the headless render
+  bundle (opened by Playwright and the headless-artist CLI) and the standalone offline build
+  (downloaded from a GitHub Release and opened directly) — where Chromium blocks a page from
+  loading a worker script as a separate `file://` resource; the hosted build is served over
+  http(s), where a separate worker chunk is an ordinary same-origin fetch. `vite.config.ts` gates
+  `headlessClassicWorkersPlugin`, `headlessInlineWorkersPlugin` (now parameterised on the output
+  directory and entry HTML filename rather than assuming the headless build's own
+  `dist-headless/headless.html`) and the `worker: { format: 'iife' }` override on this one
+  predicate. ESCSUITE-153: before this, only `VITE_HEADLESS` was checked, so the standalone build
+  shipped `dist/index.html` plus a second, un-inlined `decodeWorker-*.js` that
+  `standalone-release.yml` never attaches to the release — a downloaded build's MP4 export had no
+  worker file to start at all. Guarded end to end by
+  `apps/e2e/tests/standalone/dist-single-file.spec.ts`, a node-side assertion (no browser fixture)
+  that each of `apps/artist/dist` and `apps/craft/dist` contains exactly one file after
+  `build:standalone` — `playwright.standalone.config.ts` serves the whole directory with `npx
+  serve`, which is why the browser-driven standalone specs never caught a second file sitting
+  next to `index.html`.
 
 ### Overlay System
 - **ShapeType**: `'rectangle' | 'ellipse' | 'line' | 'arrow' | 'blur'`
@@ -2282,6 +2302,22 @@ MP4 export includes robust error handling and codec compatibility:
 - **Backpressure timeout**: 30-second timeout on encoder queue wait to detect stuck encoders
 - **Quality-based audio bitrate**: Audio bitrate scales with quality setting (128k/192k/256k) instead of hardcoded value
 - **Error checkpoints**: Validates encoder state at loop start, during backpressure, and before finalization
+- **The decode worker starting up can no longer hang the export (`core/videoDecodeManager.ts`,
+  `core/frameSource.ts`, `core/frameManager.ts`, ESCSUITE-153 / ESCSUITE-29 Mechanism 2).**
+  `VideoDecodeManager.initialize()` used to resolve only on the worker's `WORKER_READY` message;
+  a worker that never started — missing from a standalone download (its own fix is below), blocked
+  by a CSP, or that fired `error`/`messageerror` instead — left the promise unsettled forever, and
+  `FrameSourceFactory.initialize()` awaited it directly, so the export parked at "Loading media
+  files…" with nothing thrown, nothing logged, and no way for Cancel to free it (`checkAborted()` is
+  only consulted at points the export had not yet reached). `initialize()` now always settles:
+  reject immediately on the worker's own `error` or `messageerror` event (the message names the
+  worker), reject after a bounded 10s timeout if it posts nothing at all, and reject immediately if
+  an optional `AbortSignal` is already aborted or aborts while the wait is pending — threaded down
+  from `exportToMP4`'s own `signal` through `createFrameManager` so Cancel does not have to wait out
+  the full timeout. `FrameSourceFactory.initialize()` catches that rejection, logs it, and sets
+  `useWebCodecs` false instead of letting it escape — so `createSource()` takes the HTMLVideoElement
+  path for every source, the same degradation it already takes per-source for an unsupported codec,
+  rather than failing or hanging the whole export.
 
 `exportWebM.ts`'s own frame loop does not have this error-tracking asymmetry fixed — a VP9 encoder
 error is still only logged, where MP4 tracks `videoEncoderError` and checks it every frame — but its
@@ -2421,8 +2457,9 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   reads it, so a `project.json` carrying the legacy `textOverlays`/`shapeOverlays` arrays
   renders and exports identically with or without the store. A project with neither array is
   untouched (the conversion returns the same `Timeline` object).
-- `vite.config.ts` headless plugins emit workers as classic scripts and inline them
-  as blob URLs, because `file://` pages cannot load module or file workers.
+- `vite.config.ts`'s single-file-build plugins (shared with the standalone build —
+  `isSingleFileBuild`, see "Build Configuration" above) emit workers as classic scripts and
+  inline them as blob URLs, because `file://` pages cannot load module or file workers.
 - **The two call-site shapes, and the fail-loud contract.** `headlessInlineWorkersPlugin`
   reads each emitted worker `.js`, embeds it as a blob URL in `window.__wb`, deletes the file
   and rewrites the `new Worker(...)` call sites to read that map. Vite has emitted two
@@ -2435,7 +2472,8 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   the files are deleted, a rewrite that silently stops matching is a broken bundle, so the
   plugin **throws** rather than warning: if a discovered worker file is missing on disk, if
   any inlined filename survives inside a `new URL(...)`/`new Worker(...)` expression after the
-  rewrite, or if any `.js` file is left behind in `dist-headless/`. That turns a future
+  rewrite, or if any `.js` file is left behind in the output directory (`dist-headless/` for the
+  headless build, `dist/` for standalone). That turns a future
   emission change red in CI's `build` job (which runs for Dependabot PRs) instead of only in
   `e2e`/`kit-docker`, which Dependabot skips. Vite 8.3 broke exactly this and shipped a
   headless bundle whose workers 404'd from `file://` with
