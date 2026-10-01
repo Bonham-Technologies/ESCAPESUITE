@@ -12,6 +12,11 @@ import {
 import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
+// The export error class lives beside the MP4 pipeline (it predates this one
+// needing it at all) and is re-exported from `exporter.ts`'s barrel; WebM
+// reaches for the same class rather than minting its own so both exporters'
+// resolution guard (ESCSUITE-152) surfaces identically to `ExportDialog`.
+import { ExportError } from './exportMP4';
 import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import type { MediaDrawOptions, ProgressCallback } from './exportTypes';
@@ -68,6 +73,17 @@ export async function exportToWebM(
   // Use the bottom-most track's source dimensions as the base
   const { width: baseWidth, height: baseHeight } = getBaseDimensions(clips, exportTracks, sourceVideos);
   const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
+
+  // Defensive guard at the door (ESCSUITE-152): see exportMP4.ts's twin
+  // check for why — a hand-built `projectResolution` can still bypass
+  // `parseProject`, and this is clearer than whatever WebCodecs would say.
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) {
+    throw new ExportError(
+      `Cannot export at ${width}x${height}: resolved output resolution must be at least 2x2`,
+      []
+    );
+  }
+
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;

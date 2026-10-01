@@ -81,6 +81,35 @@ export type ParseProjectResult =
   | { ok: true; project: Project }
   | { ok: false; reason: string };
 
+// The smallest raster worth encoding, and the largest the exporters are ever
+// asked to produce (7680x4320, 8K) — both ends of the range `parseProject`
+// accepts a `resolution` within (ESCSUITE-152).
+const MIN_RESOLUTION_DIMENSION = 2;
+const MAX_RESOLUTION_WIDTH = 7680;
+const MAX_RESOLUTION_HEIGHT = 4320;
+
+function isValidResolutionDimension(value: unknown, max: number): boolean {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_RESOLUTION_DIMENSION &&
+    value <= max
+  );
+}
+
+/** A `resolution` of the shape `parseProject` is willing to trust. Odd
+ * dimensions are fine — the exporters round those to even (ESCSUITE-111). */
+function isValidResolution(resolution: unknown): resolution is { width: number; height: number } {
+  if (!resolution || typeof resolution !== 'object') {
+    return false;
+  }
+  const { width, height } = resolution as { width?: unknown; height?: unknown };
+  return (
+    isValidResolutionDimension(width, MAX_RESOLUTION_WIDTH) &&
+    isValidResolutionDimension(height, MAX_RESOLUTION_HEIGHT)
+  );
+}
+
 /**
  * Validate a project shape before anything downstream touches it, and only
  * then run the existing migration on it.
@@ -102,7 +131,14 @@ export type ParseProjectResult =
  * run, every clip's `trackId` must be a string naming a track that survived
  * migration. A clip's `sourceVideoId` is never checked here — media is
  * re-linked separately, so a clip pointing at a video the load has not
- * brought back yet is not this function's business.
+ * brought back yet is not this function's business. `resolution`, if
+ * present, must be an object with finite integer `width` and `height` both
+ * between 2 and 8K (ESCSUITE-152) — an unvalidated `{width:0,height:0}` used
+ * to reach `VideoEncoder.configure` through the default `'project'` export
+ * preset and fail deep inside the exporter instead of at the door. An
+ * *absent* `resolution` is not rejected: that is exactly what
+ * `ensureTimelineHasTracks`'s own migration default (1920x1080, below)
+ * already handles, unchanged by this ticket.
  */
 export function parseProject(input: unknown): ParseProjectResult {
   if (!input || typeof input !== 'object') {
@@ -110,6 +146,14 @@ export function parseProject(input: unknown): ParseProjectResult {
   }
 
   const candidate = input as Partial<Project>;
+
+  if (candidate.resolution !== undefined && !isValidResolution(candidate.resolution)) {
+    return {
+      ok: false,
+      reason: 'Project resolution must be an object with a whole-number width and height, both between 2 and 7680x4320 (8K)',
+    };
+  }
+
   const timeline = candidate.timeline as Partial<Project['timeline']> | undefined;
 
   if (!timeline || typeof timeline !== 'object') {

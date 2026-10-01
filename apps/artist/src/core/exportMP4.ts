@@ -108,6 +108,20 @@ export async function exportToMP4(
   // Use the bottom-most track's source dimensions as the base
   const { width: baseWidth, height: baseHeight } = getBaseDimensions(clips, exportTracks, sourceVideos);
   const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
+
+  // Defensive guard at the door (ESCSUITE-152): `parseProject` rejects a
+  // malformed project `resolution` before it ever reaches the store, but a
+  // caller that builds `ExportOptions`/`projectResolution` by hand — a
+  // headless job spec, today's only other caller — has no such gate, and
+  // `VideoEncoder.configure` rejects a 0x0 (or non-finite) raster far less
+  // clearly than this does.
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) {
+    throw new ExportError(
+      `Cannot export at ${width}x${height}: resolved output resolution must be at least 2x2`,
+      exportLog
+    );
+  }
+
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;
