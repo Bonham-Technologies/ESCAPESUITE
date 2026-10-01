@@ -1517,6 +1517,29 @@ and all-fail cases against the plain clears that were already there; the review'
 files and the render pins are byte-unchanged. **No floor crossed**; artist's floors stay
 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-3 (a click on a keyframed clip in
+the preview selects it at its animated position instead of falling through to the clip beneath):
+99.57 / **98.94** / **94.93** / 99.47 against the 99.57 / 98.93 / 94.92 / 99.47 the commit this
+branch was rebased onto measures — statements and branches each up a hundredth, lines and
+functions unmoved. Measured in one sitting, the base gives 4,304 / 4,534 branches and this
+branch 4,311 / 4,541: seven new branches, seven covered, the same 230 uncovered as before (lines
+6,864 / 6,893 → 6,870 / 6,899, statements 7,742 / 7,825 → 7,748 / 7,831, functions
+1,697 / 1,706 → 1,698 / 1,707, every denominator growing by exactly what the numerator did; the
+same 29 / 83 / 9 uncovered). The
+seven are `components/Preview/hitTest.ts`'s "keyframed and not in keyframe mode" choice that
+replaced the `continue` — the handle pass that still skips a keyframed clip's handles outside
+keyframe mode, against the clip pass that now picks it — and `useTransformHandles.ts`'s
+`isKeyframeMode` (the panel open and the hit's clip selected) with the cursor refusal it feeds,
+which now finds the hit's clip once per pointer move instead of twice; each reached from both
+sides by the animated-position and rotation-from-a-keyframe cases (both red under a
+`currentTime → undefined` mutant), the plain-above-keyframed and keyframed-above-plain cases, the
+panel-open-nothing-selected case and the locked-row refusal that was already there. The four
+`*.perf.test.ts` files and the render pins are byte-unchanged; the hit test runs on mousedown
+and, through the cursor, on every pointer move, and the removed `continue` makes the common case
+cheaper, not dearer. What is deliberately left: a clip animated to opacity 0 still takes the
+click (ESCSUITE-155), and the hit box ignores a transition's modifiers (ESCSUITE-147). **No
+floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1524,7 +1547,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.57 | 98.93 | 94.92 | 99.47 |
+| `@escapesuite/artist` | 99.57 | 98.94 | 94.93 | 99.47 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
