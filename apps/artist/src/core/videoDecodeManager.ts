@@ -58,10 +58,22 @@ interface PendingRequest {
  * Manages video decoding using a Web Worker with WebCodecs
  */
 export class VideoDecodeManager {
+  /**
+   * How long initialize() waits for WORKER_READY before giving up
+   * (ESCSUITE-153 / ESCSUITE-29 Mechanism 2). A worker that never starts —
+   * missing from the bundle, blocked by CSP — used to leave initialize()'s
+   * promise unsettled forever, hanging the MP4 export at "Loading media
+   * files…" with no error and a Cancel button that could not free it.
+   */
+  private static readonly READY_TIMEOUT_MS = 10000;
+
   private worker: Worker | null = null;
   private isReady = false;
   private readyPromise: Promise<void> | null = null;
   private readyResolve: (() => void) | null = null;
+  private readyReject: ((error: Error) => void) | null = null;
+  private readyTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private readyAbortCleanup: (() => void) | null = null;
 
   // Request tracking
   private nextRequestId = 1;
@@ -95,9 +107,31 @@ export class VideoDecodeManager {
   }
 
   /**
-   * Initialize the decode worker
+   * Clear whatever is waiting on the worker becoming ready — the timeout and
+   * the abort listener, if either was set up — without settling the promise.
+   * Called from every settle path so none of them can fire again afterward.
    */
-  async initialize(): Promise<void> {
+  private clearReadyWait(): void {
+    if (this.readyTimeoutId !== null) {
+      clearTimeout(this.readyTimeoutId);
+      this.readyTimeoutId = null;
+    }
+    if (this.readyAbortCleanup) {
+      this.readyAbortCleanup();
+      this.readyAbortCleanup = null;
+    }
+  }
+
+  /**
+   * Initialize the decode worker.
+   *
+   * Settles once: on WORKER_READY (resolve), on the worker's own `error` or
+   * `messageerror` event (reject), after READY_TIMEOUT_MS of silence (reject),
+   * or when `signal` aborts while the wait is still pending (reject) — so a
+   * worker that fails to start, for any reason, never leaves a caller hanging
+   * (ESCSUITE-153 / ESCSUITE-29 Mechanism 2).
+   */
+  async initialize(signal?: AbortSignal): Promise<void> {
     if (this.worker) {
       return this.readyPromise || Promise.resolve();
     }
@@ -106,8 +140,37 @@ export class VideoDecodeManager {
       throw new Error('WebCodecs VideoDecoder is not supported in this browser');
     }
 
-    this.readyPromise = new Promise((resolve) => {
-      this.readyResolve = resolve;
+    if (signal?.aborted) {
+      throw new Error('Decode worker initialization was aborted');
+    }
+
+    this.readyPromise = new Promise<void>((resolve, reject) => {
+      this.readyResolve = () => {
+        this.clearReadyWait();
+        this.readyResolve = null;
+        this.readyReject = null;
+        resolve();
+      };
+      this.readyReject = (error: Error) => {
+        this.clearReadyWait();
+        this.readyResolve = null;
+        this.readyReject = null;
+        reject(error);
+      };
+
+      this.readyTimeoutId = setTimeout(() => {
+        this.readyReject?.(
+          new Error(`Decode worker did not become ready within ${VideoDecodeManager.READY_TIMEOUT_MS}ms`)
+        );
+      }, VideoDecodeManager.READY_TIMEOUT_MS);
+
+      if (signal) {
+        const onAbort = () => {
+          this.readyReject?.(new Error('Decode worker initialization was aborted'));
+        };
+        signal.addEventListener('abort', onAbort);
+        this.readyAbortCleanup = () => signal.removeEventListener('abort', onAbort);
+      }
     });
 
     // Create worker from module
@@ -126,6 +189,12 @@ export class VideoDecodeManager {
       if (this.errorCallback) {
         this.errorCallback(`Worker error: ${error.message}`, true);
       }
+      this.readyReject?.(new Error(`Decode worker failed to start: ${error.message || 'unknown error'}`));
+    };
+
+    this.worker.onmessageerror = () => {
+      console.error('Decode worker message error: received an unparseable message');
+      this.readyReject?.(new Error('Decode worker failed to start: received an unparseable message'));
     };
 
     return this.readyPromise;
@@ -140,10 +209,7 @@ export class VideoDecodeManager {
     switch (message.type) {
       case 'WORKER_READY':
         this.isReady = true;
-        if (this.readyResolve) {
-          this.readyResolve();
-          this.readyResolve = null;
-        }
+        this.readyResolve?.();
         break;
 
       case 'SOURCE_READY': {
@@ -384,6 +450,8 @@ export class VideoDecodeManager {
    * Terminate the worker and free all resources
    */
   terminate(): void {
+    this.clearReadyWait();
+
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
@@ -392,6 +460,7 @@ export class VideoDecodeManager {
     this.isReady = false;
     this.readyPromise = null;
     this.readyResolve = null;
+    this.readyReject = null;
 
     // Reject all pending requests
     for (const pending of this.pendingRequests.values()) {
