@@ -271,7 +271,7 @@ describe('VideoUploader', () => {
       expect(valueWrites).toEqual([''])
     })
 
-    it('drops the finished upload from the list after a moment', async () => {
+    it('drops the finished upload from the list after a moment, fading first (ESCSUITE-4)', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
       render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
@@ -285,6 +285,15 @@ describe('VideoUploader', () => {
 
       act(() => {
         vi.advanceTimersByTime(2000)
+      })
+
+      // The removal is a fade, not a pop: the row is still there, marked for
+      // the transition, until the fade itself has had time to run.
+      const row = screen.getByText('Complete').closest(`.${styles.uploadItem}`)
+      expect(row).toHaveClass(styles.uploadItemRemoving)
+
+      act(() => {
+        vi.advanceTimersByTime(200)
       })
 
       expect(screen.queryByText('Complete')).not.toBeInTheDocument()

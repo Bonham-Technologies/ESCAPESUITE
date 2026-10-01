@@ -1611,6 +1611,36 @@ failure were still permanently removed. Unlike Clear Unused, Clear All can take 
 every clip that referenced a cleared source — so its confirm copy says so ("including any clip
 that still uses it").
 
+**The media library's motion and type scale** (ESCSUITE-4). The upload progress bar's
+`.progressFill` pulses opacity 1 → 0.5 → 1 forever while a file is `'processing'` — a real
+progress bar it is not, since the fill is already full width — and an unconditional
+`animation: pulse 1.5s ease-in-out infinite` ran for a viewer who had asked the OS for reduced
+motion (`grep -rn "prefers-reduced-motion" apps/ packages/` found nothing anywhere else in the
+repo either). `VideoUploader.module.css` now adds `@media (prefers-reduced-motion: reduce) {
+.progressFill { animation: none } }` *beside* the unconditional declaration, rather than only
+scoping the `@keyframes pulse` rule itself under `(prefers-reduced-motion: no-preference)` —
+an unscoped, merely-unreferenced `@keyframes` would still leave the computed `animation-name`
+reading `pulse`, and it is the explicit `animation: none` override that makes it read `none`.
+A finished upload's row used to pop out of the list outright, 2 s after `'complete'`, with no
+transition; `.uploadItem` now transitions `opacity` (`var(--transition-normal)`), the row is
+given `removing: true` (`.uploadItemRemoving { opacity: 0 }`) for one more
+`UPLOAD_ROW_FADE_MS` (200ms) before `VideoUploader.tsx`'s removal timer actually drops it from
+`uploads`, and `.uploadStatus` — the "Processing...", "Complete" and error text, which had no
+accessible announcement of any kind — now carries `role="status"` (an implicit
+`aria-live="polite"`, so no separate `aria-live` attribute is needed beside it). Separately,
+the library's six ad-hoc font sizes between 8px and 13px — `.mediaTypeBadge` at 8px,
+`.storageInfo` and `.storageClearButton` at 10px (plus the unused, `display: none`
+`.dropZoneHint`, also 10px), `.videoMeta` at 11px and `.videoName` at 13px — are now a small
+scale: badge and per-file metadata at 11px, the storage row at 11px, small buttons/controls at
+12px, and the filename stays the scale's largest size at 13px. Nothing else in the sidebar
+(`ResolutionPicker.module.css`, `App.module.css`) was already below 11px, so the floor holds
+across the whole panel. Pinned by `VideoUploader.test.tsx` (`role="status"`, and the fade's
+`removing` class surviving the first 2000ms of the removal timer before the row actually
+leaves) and, end to end under `reducedMotion: 'reduce'`, by
+`apps/e2e/tests/accessibility/core.spec.ts`'s "the upload progress animation is off under
+reduced motion, and no library text is smaller than 11px" (computed `animation-name: none` on
+`.progressFill`, and every leaf text node in the sidebar at or above 11px).
+
 The **keyframe panel** (ESCSUITE-88, see "Keyframe Panel" above): `KeyframePanel` derives
 `trackLocked` from the whole-store read it already does and threads `locked` down to
 `KeyframeTrack`, `KeyframeGraph` and `useKeyframeGraphKeyboard`. A plain `<p>` under the title

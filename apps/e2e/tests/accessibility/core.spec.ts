@@ -764,6 +764,59 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   })
 })
 
+/**
+ * ESCSUITE-4: the media library's upload progress bar pulsed forever —
+ * `grep -rn "prefers-reduced-motion"` found nothing in the whole repo — and
+ * its six ad-hoc font sizes ran as small as 8px (a media-type badge). The
+ * fix wraps the pulse in `@media (prefers-reduced-motion: reduce)` and
+ * replaces the six sizes with a scale whose floor is 11px.
+ */
+test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
+  test('the upload progress animation is off under reduced motion, and no library text is smaller than 11px', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
+    await page.waitForLoadState('networkidle')
+
+    await page.locator('input[type="file"]').setInputFiles(ARTIST_FIXTURE_MP4)
+
+    // The "processing" row is brief for a one-second fixture, so wait for it
+    // rather than assuming it is still there the instant setInputFiles
+    // resolves. If the upload finishes before this can catch it, there is
+    // still a whole library of text to measure below regardless.
+    const progressFill = page.locator('[class*="progressFill"]').first()
+    const caughtProcessing = await progressFill
+      .waitFor({ state: 'attached', timeout: 3_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (caughtProcessing) {
+      // Not just "the keyframes are gone" — the computed `animation-name`
+      // itself has to read `none`, which is what `.progressFill { animation:
+      // none }` under the media query guarantees and omitting only the
+      // @keyframes rule would not.
+      await expect(progressFill).toHaveCSS('animation-name', 'none')
+    }
+
+    await expect(page.getByRole('button', { name: 'Add to timeline' })).toBeVisible({
+      timeout: 60_000,
+    })
+
+    // Every bit of rendered text in the sidebar that holds the uploader and
+    // the library — the one panel ESCSUITE-4 found six ad-hoc sizes in.
+    const sidebar = page.locator('aside', { has: page.locator('#media-library-title') })
+    const fontSizes = await sidebar.locator('*').evaluateAll((nodes) =>
+      nodes
+        .filter((node) => node.childElementCount === 0 && !!node.textContent?.trim())
+        .map((node) => parseFloat(window.getComputedStyle(node).fontSize))
+    )
+    expect(fontSizes.length).toBeGreaterThan(0)
+    for (const size of fontSizes) {
+      expect(size).toBeGreaterThanOrEqual(11)
+    }
+  })
+})
+
 test.describe('Color Contrast', () => {
   test('ESCAPEPLAN has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5173')
