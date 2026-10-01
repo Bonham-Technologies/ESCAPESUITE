@@ -3,6 +3,7 @@
 
 import type { EditorState, UndoableState } from './types';
 import { createUndoableSnapshot } from '../utils/deepClone';
+import { calculateTimelineDuration } from './projectFactory';
 
 // Maximum history size to prevent memory issues
 const MAX_HISTORY_SIZE = 50;
@@ -62,6 +63,56 @@ export function scrubDeadThumbnails(
       sourceVideos: snapshot.sourceVideos.map((v) =>
         v.thumbnailUrl && dead.has(v.thumbnailUrl) ? { ...v, thumbnailUrl: undefined } : v
       ),
+    };
+  };
+  return { past: history.past.map(scrubOne), future: history.future.map(scrubOne) };
+}
+
+/**
+ * Clear a set of permanently-removed source ids — and any clip that
+ * referenced one — out of every history snapshot that still carries them.
+ *
+ * `scrubDeadThumbnails`'s sibling, for a removal `removeSourceVideosPermanently`
+ * (`store/projectSlice.ts`) makes rather than a field going stale: a storage
+ * clear (Clear Unused / Clear All, `components/VideoUploader.tsx`) deletes the
+ * source's bytes from IndexedDB itself, so an undo/redo that handed the
+ * `SourceVideo` back would restore a tile nothing can ever play, place or
+ * export again (ESCSUITE-149). Unlike `scrubDeadThumbnails`, which clears one
+ * field and leaves the rest of the snapshot's source alone, this drops the
+ * whole `SourceVideo` — the source itself is gone, not just its thumbnail —
+ * and any clip in that snapshot's timeline that named it, recalculating the
+ * snapshot's own `timeline.duration` so a restored past/future state stays
+ * internally consistent with the clips it actually holds.
+ *
+ * Called from the same (non-undoable) action that performs the removal, over
+ * every snapshot already on the stack — the clear itself pushes no entry of
+ * its own, so there is nothing for `undo`/`redo` to walk back across that
+ * this does not also reach.
+ */
+export function scrubRemovedSources(
+  history: { past: UndoableState[]; future: UndoableState[] },
+  removedIds: readonly string[]
+): { past: UndoableState[]; future: UndoableState[] } {
+  if (removedIds.length === 0) return history;
+  const removed = new Set(removedIds);
+  const carriesARemovedSource = (snapshot: UndoableState) =>
+    snapshot.sourceVideos.some((v) => removed.has(v.id)) ||
+    snapshot.project.timeline.clips.some((c) => c.sourceVideoId && removed.has(c.sourceVideoId));
+  const scrubOne = (snapshot: UndoableState): UndoableState => {
+    if (!carriesARemovedSource(snapshot)) return snapshot;
+    const clips = snapshot.project.timeline.clips.filter(
+      (c) => !c.sourceVideoId || !removed.has(c.sourceVideoId)
+    );
+    return {
+      project: {
+        ...snapshot.project,
+        timeline: {
+          ...snapshot.project.timeline,
+          clips,
+          duration: calculateTimelineDuration(clips),
+        },
+      },
+      sourceVideos: snapshot.sourceVideos.filter((v) => !removed.has(v.id)),
     };
   };
   return { past: history.past.map(scrubOne), future: history.future.map(scrubOne) };

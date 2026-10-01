@@ -583,6 +583,23 @@ export interface EditorState {
   addSourceVideo: (video: SourceVideo) => void;
   removeSourceVideo: (id: string) => void;
   /**
+   * Permanently remove a batch of sources whose bytes are already gone from
+   * storage — NOT undoable (ESCSUITE-149).
+   *
+   * `removeSourceVideo` only ever drops the in-memory reference, so undo can
+   * safely hand it back; a storage clear (Clear Unused / Clear All,
+   * `components/VideoUploader.tsx`) deletes the bytes from IndexedDB itself,
+   * so an undo that restored the `SourceVideo` would restore a tile nothing
+   * can play, place or export again. This records no undo step of its own —
+   * same as `setSourceThumbnail` — and, because the clear can reach back past
+   * edits already on the undo stack, it also scrubs every existing past/future
+   * snapshot so no later undo/redo can resurrect these ids either. One state
+   * write for the whole batch: removes the sources, drops any clip that
+   * referenced one, prunes the clipboard and the selection, and revokes each
+   * removed source's `blob:` thumbnail.
+   */
+  removeSourceVideosPermanently: (ids: string[]) => void;
+  /**
    * Put a rebuilt thumbnail handle on a source that has none — NOT undoable
    * (ESCSUITE-117).
    *
