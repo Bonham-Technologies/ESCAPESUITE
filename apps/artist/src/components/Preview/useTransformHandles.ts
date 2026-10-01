@@ -36,7 +36,7 @@ import type { ClipTransform, TextOverlayData, ShapeOverlayData } from '../../sto
 import * as geometry from './previewGeometry';
 import * as hitTest from './hitTest';
 import { clipsIntersectingMarquee, measureDragStart, textClipAtPoint } from './dragGeometry';
-import { clipOnLockedTrack } from '../../store/trackLock';
+import { clipOnLockedTrack, isTrackLocked } from '../../store/trackLock';
 import { getCursorForMode } from './cursor';
 import type { DragMode, ManipulableClipType } from './types';
 
@@ -680,10 +680,19 @@ export function useTransformHandles({
     const pos = getCanvasPosition(e);
     const hit = hitTestHandles(pos.x, pos.y, screenScaleOf(pos));
     if (!hit) return 'default';
+
+    // This runs on every pointer move over the canvas, so the locked and
+    // keyframed checks below share one lookup instead of each finding the
+    // clip again (ESCSUITE-3 review round 1, NIT-4) — `isTrackLocked` takes
+    // the resolved track id directly, where `clipOnLockedTrack` would repeat
+    // the find `hitTestHandles` already did to produce `hit`. The assertion
+    // is safe: `hit.clipId` only ever names a clip `hitTestHandles` found in
+    // this same `clips` array.
+    const clip = clips.find(c => c.id === hit.clipId)!;
     const isKeyframeMode = keyframePanelOpen && hit.clipId === selectedClipId;
     if (
-      clipOnLockedTrack(clips, tracks, hit.clipId) ||
-      (geometry.clipHasCustomKeyframes(clips, hit.clipId) && !isKeyframeMode)
+      isTrackLocked(tracks, clip.trackId) ||
+      (geometry.hasCustomKeyframes(clip) && !isKeyframeMode)
     ) {
       return 'not-allowed';
     }

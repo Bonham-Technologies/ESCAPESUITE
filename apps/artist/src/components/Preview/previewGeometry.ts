@@ -219,18 +219,6 @@ export function hasCustomKeyframes(clip: Clip): boolean {
 }
 
 /**
- * {@link hasCustomKeyframes}, by id rather than by the clip itself — false for
- * an id that names no clip. Mirrors `clipOnLockedTrack`'s shape (trackLock.ts)
- * so a caller holding only a `HandleHit`'s `clipId`, such as the preview's
- * cursor (ESCSUITE-3), does not need its own defensive clip lookup beside the
- * one `hitTestHandles` already did to produce the hit.
- */
-export function clipHasCustomKeyframes(clips: Clip[], clipId: string): boolean {
-  const clip = clips.find((c) => c.id === clipId);
-  return clip !== undefined && hasCustomKeyframes(clip);
-}
-
-/**
  * A point in project pixels, expressed in a clip's own unrotated frame.
  *
  * Every box on the preview is axis-aligned before its rotation is applied, so
