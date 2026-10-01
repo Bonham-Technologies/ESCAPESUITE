@@ -10,6 +10,8 @@ import type React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import { TimelineTrack } from './TimelineTrack'
+import { pruneVisibleRangeCache } from './visibleRangeCache'
+import * as visibleRangeCacheModule from './visibleRangeCache'
 import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
 import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
 import { DEFAULT_SHAPE_OVERLAY_DATA } from '../../store/types'
@@ -675,5 +677,142 @@ describe('TimelineTrack drag', () => {
     })
 
     expect(root.querySelector(`.${styles.clipPreview}`)).toHaveStyle({ width: '0px' })
+  })
+})
+
+describe('pruneVisibleRangeCache (ESCSUITE-13 round 3, defect 2)', () => {
+  it('deletes entries for clips no longer present, and keeps the rest', () => {
+    const cache = new Map<string, { offset: number; width: number }>([
+      ['stays', { offset: 10, width: 20 }],
+      ['removed-1', { offset: 30, width: 40 }],
+      ['removed-2', { offset: 50, width: 60 }],
+    ])
+
+    pruneVisibleRangeCache(cache, [makeClip('stays', 0)])
+
+    expect([...cache.keys()]).toEqual(['stays'])
+    expect(cache.get('stays')).toEqual({ offset: 10, width: 20 })
+  })
+
+  it('leaves an already-pruned (or empty) cache untouched', () => {
+    const cache = new Map<string, { offset: number; width: number }>()
+
+    pruneVisibleRangeCache(cache, [makeClip('clip1', 0)])
+
+    expect(cache.size).toBe(0)
+  })
+
+  it('deletes nothing when every cached clip is still present', () => {
+    const cache = new Map<string, { offset: number; width: number }>([
+      ['a', { offset: 1, width: 2 }],
+      ['b', { offset: 3, width: 4 }],
+    ])
+
+    pruneVisibleRangeCache(cache, [makeClip('a', 0), makeClip('b', 5)])
+
+    expect([...cache.keys()].sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('TimelineTrack wiring pruneVisibleRangeCache (ESCSUITE-13 round 4, MINOR-2)', () => {
+  // Every test above calls `pruneVisibleRangeCache` directly — none of them
+  // pin that `TimelineTrack` itself actually calls it, at the right time,
+  // with the cache it actually keeps. `vi.spyOn` without a
+  // `mockImplementation` still calls through to the real function, so
+  // `spy.mock.calls[n][0]` is the *live* `Map` instance `TimelineTrack`
+  // mutated — inspectable directly, not just indirectly through whatever
+  // `TimelineTrack` renders.
+  const withAudio: SourceVideo = {
+    ...video,
+    hasAudio: true,
+    waveformData: Array.from({ length: 200 }, (_, i) => ({ min: -i / 200, max: i / 200 })),
+  }
+
+  beforeEach(() => {
+    resetStoreForTest()
+    installCanvasDouble()
+  })
+
+  afterEach(() => {
+    uninstallCanvasDouble()
+  })
+
+  it('prunes the removed clip\'s entry, keeps the remaining clip\'s, and does not re-prune for an unchanged clips array', () => {
+    // Both clips are windowed (not whole-clip-visible), so `stableVisibleRange`
+    // actually populates the cache for each rather than only ever calling
+    // `cache.delete` — see `stableVisibleRange`'s own doc comment.
+    const clip1 = makeClip('clip1', 0, 60) // 0-3000px at PPS=50
+    const clip2 = makeClip('clip2', 10, 2) // 500-600px at PPS=50
+    const sourceVideos = [withAudio]
+    const pruneSpy = vi.spyOn(visibleRangeCacheModule, 'pruneVisibleRangeCache')
+
+    const { rerender } = render(
+      <TimelineTrack
+        track={makeTrack()}
+        clips={[clip1, clip2]}
+        allClips={[clip1, clip2]}
+        sourceVideos={sourceVideos}
+        pixelsPerSecond={PPS}
+        viewportLeft={0}
+        viewportRight={550}
+        selectedClipId={null}
+        selectedClipIds={new Set()}
+        dragState={null}
+        trimState={null}
+        onClipMouseDown={vi.fn()}
+        onTrimMouseDown={vi.fn()}
+      />
+    )
+    expect(pruneSpy).toHaveBeenCalledTimes(1)
+    const cache = pruneSpy.mock.calls[0][0]
+    expect(cache.has('clip1')).toBe(true)
+    expect(cache.has('clip2')).toBe(true)
+
+    // Remove clip2: a new `clips` array, a different identity.
+    const afterRemoval = [clip1]
+    rerender(
+      <TimelineTrack
+        track={makeTrack()}
+        clips={afterRemoval}
+        allClips={afterRemoval}
+        sourceVideos={sourceVideos}
+        pixelsPerSecond={PPS}
+        viewportLeft={0}
+        viewportRight={550}
+        selectedClipId={null}
+        selectedClipIds={new Set()}
+        dragState={null}
+        trimState={null}
+        onClipMouseDown={vi.fn()}
+        onTrimMouseDown={vi.fn()}
+      />
+    )
+    expect(pruneSpy).toHaveBeenCalledTimes(2)
+    expect(cache.has('clip2')).toBe(false)
+    expect(cache.has('clip1')).toBe(true)
+
+    // Re-render with the exact same `clips` array reference as the previous
+    // render (only `dragState` changes): no prune call at all, not even a
+    // no-op one.
+    rerender(
+      <TimelineTrack
+        track={makeTrack()}
+        clips={afterRemoval}
+        allClips={afterRemoval}
+        sourceVideos={sourceVideos}
+        pixelsPerSecond={PPS}
+        viewportLeft={0}
+        viewportRight={550}
+        selectedClipId={null}
+        selectedClipIds={new Set()}
+        dragState={makeDrag({ clipId: 'some-other-clip' })}
+        trimState={null}
+        onClipMouseDown={vi.fn()}
+        onTrimMouseDown={vi.fn()}
+      />
+    )
+    expect(pruneSpy).toHaveBeenCalledTimes(2)
+
+    pruneSpy.mockRestore()
   })
 })

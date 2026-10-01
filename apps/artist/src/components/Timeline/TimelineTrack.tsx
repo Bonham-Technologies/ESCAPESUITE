@@ -1,9 +1,10 @@
 import React from 'react';
 import type { Clip, SourceVideo, Track } from '../../store/types';
-import { formatTime, timeToPixels } from '../../utils/timeUtils';
+import { clamp, formatTime, timeToPixels } from '../../utils/timeUtils';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
 import { CLIP_THUMB_ASPECT, maskClipPathFor } from '../../utils/maskClipPath';
+import { pruneVisibleRangeCache } from './visibleRangeCache';
 import type { DragState, TrimState } from './types';
 import styles from './Timeline.module.css';
 
@@ -63,6 +64,61 @@ function clipBoxHeightFor(trackHeight: number): number {
   );
 }
 
+/**
+ * The slice of a clip's box, in clip-local pixels, that falls inside
+ * `[viewportLeft, viewportRight]` — both in the same absolute timeline pixels
+ * as `clipX`. Feeds `AudioWaveform`'s `visibleRangePx` (ESCSUITE-13): a clip
+ * entirely outside the viewport gets a zero-width slice (its waveform, if any,
+ * simply draws nothing), and one entirely inside gets `{ offset: 0, width:
+ * clipWidth }` — indistinguishable from "no viewport known" on purpose, since
+ * both mean the whole clip is what's on screen.
+ */
+function visibleRangeFor(
+  clipX: number,
+  clipWidth: number,
+  viewportLeft: number,
+  viewportRight: number
+): { offset: number; width: number } | undefined {
+  const offset = clamp(viewportLeft - clipX, 0, clipWidth);
+  const end = clamp(viewportRight - clipX, 0, clipWidth);
+  const width = Math.max(0, end - offset);
+  // The whole clip is on screen: report no window at all rather than one that
+  // happens to equal it, so `AudioWaveform` takes its cheap zoomed-out
+  // fallback instead of doing windowed work for a clip that needs none.
+  if (offset === 0 && width >= clipWidth) return undefined;
+  return { offset, width };
+}
+
+/**
+ * `visibleRangeFor`, but handing back the *same* object across renders when
+ * its offset and width haven't changed for this clip (ESCSUITE-13 round 2,
+ * NIT-2). A clip drag elsewhere on this track re-renders every row on every
+ * pointer frame, and most of those renders move nothing about a clip that
+ * isn't the one being dragged — `AudioWaveform` doesn't key its memo on this
+ * object's identity either way (see its own `visibleRangePx` doc), so this is
+ * a pure allocation saving, never a correctness requirement.
+ */
+function stableVisibleRange(
+  cache: Map<string, { offset: number; width: number }>,
+  clipId: string,
+  clipX: number,
+  clipWidth: number,
+  viewportLeft: number,
+  viewportRight: number
+): { offset: number; width: number } | undefined {
+  const computed = visibleRangeFor(clipX, clipWidth, viewportLeft, viewportRight);
+  if (!computed) {
+    cache.delete(clipId);
+    return undefined;
+  }
+  const cached = cache.get(clipId);
+  if (cached && cached.offset === computed.offset && cached.width === computed.width) {
+    return cached;
+  }
+  cache.set(clipId, computed);
+  return computed;
+}
+
 interface TimelineTrackProps {
   track: Track;
   /**
@@ -79,6 +135,21 @@ interface TimelineTrackProps {
   sourceVideos: SourceVideo[];
   /** Horizontal scale of the timeline, in pixels per second of media. */
   pixelsPerSecond: number;
+  /**
+   * The scrolled-into-view horizontal span of the track area, in the same
+   * absolute timeline pixels as `timeToPixels` (0 at the project's own start,
+   * not this row's). Both default to leaving every clip's whole box "visible"
+   * — `Timeline` only knows the real span once its `ResizeObserver` has fired
+   * once, and a caller with no viewport to report (most `TimelineTrack`
+   * tests) gets the pre-ESCSUITE-13 whole-clip waveform behaviour.
+   *
+   * Used only to tell `AudioWaveform` which slice of a clip's waveform is
+   * actually on screen (ESCSUITE-13) — nothing else here is viewport-aware,
+   * since `clips` is already the virtualiser's near-viewport-with-overscan
+   * answer.
+   */
+  viewportLeft?: number;
+  viewportRight?: number;
   selectedClipId: string | null;
   selectedClipIds: Set<string>;
   /** The drag in progress, or null. Drives the ghost position and the preview. */
@@ -114,6 +185,8 @@ export const TimelineTrack = React.memo(function TimelineTrack({
   allClips,
   sourceVideos,
   pixelsPerSecond,
+  viewportLeft = -Infinity,
+  viewportRight = Infinity,
   selectedClipId,
   selectedClipIds,
   dragState,
@@ -123,6 +196,20 @@ export const TimelineTrack = React.memo(function TimelineTrack({
 }: TimelineTrackProps) {
   /** The box every clip on this row draws in — see `clipBoxHeightFor`. */
   const clipBoxHeight = clipBoxHeightFor(track.height);
+  /** Per-clip `visibleRangePx` objects, reused across renders — see `stableVisibleRange`. */
+  const visibleRangeCacheRef = React.useRef(new Map<string, { offset: number; width: number }>());
+  /** The `clips` array `visibleRangeCacheRef` was last pruned against — see below. */
+  const prunedForClipsRef = React.useRef<Clip[] | null>(null);
+
+  // Prune (see `pruneVisibleRangeCache`), keyed on `clips`' own identity
+  // rather than running every render: `Timeline`'s `clipsByTrack` memo (see
+  // `TimelineTrack`'s own doc comment) only gives this row a new `clips`
+  // array when the virtualiser's answer actually changes, so this is no
+  // more frequent than that.
+  if (prunedForClipsRef.current !== clips) {
+    prunedForClipsRef.current = clips;
+    pruneVisibleRangeCache(visibleRangeCacheRef.current, clips);
+  }
 
   return (
     <div
@@ -194,6 +281,14 @@ export const TimelineTrack = React.memo(function TimelineTrack({
                 startTime={clip.startTime}
                 endTime={clip.endTime}
                 width={clipWidth}
+                visibleRangePx={stableVisibleRange(
+                  visibleRangeCacheRef.current,
+                  clip.id,
+                  clipX,
+                  clipWidth,
+                  viewportLeft,
+                  viewportRight
+                )}
                 height={clipBoxHeight}
                 isAudioClip={isAudioClip}
                 isSelected={isSelected}

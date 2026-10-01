@@ -8,20 +8,29 @@
 // The width half needs a ResizeObserver, which jsdom has none of; the recording
 // double stands in, and delivers the resize entry a browser would.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { useScrollSync, type ScrollSyncDeps } from './useScrollSync'
 import { installResizeObserverDouble, type ResizeObserverDouble } from '../../test/doubles/resizeObserver'
 
 let resizeObserver: ResizeObserverDouble
 
 beforeEach(() => {
+  vi.useFakeTimers()
   resizeObserver = installResizeObserverDouble()
 })
 
 afterEach(() => {
   resizeObserver.uninstall()
   vi.clearAllMocks()
+  vi.useRealTimers()
 })
+
+/** Flush the one animation frame `handleTrackScroll` coalesces onto. */
+function flushScrollFrame(): void {
+  act(() => {
+    vi.advanceTimersByTime(16)
+  })
+}
 
 /** A div reporting `clientWidth`, which jsdom otherwise pins at 0. */
 function pane(clientWidth = 0): HTMLDivElement {
@@ -53,16 +62,23 @@ function mountSync(panes: Partial<Panes> = {}) {
 }
 
 describe('useScrollSync mirroring', () => {
-  it('sends the track area’s horizontal offset to the ruler and its vertical one to the headers', () => {
+  it('sends the track area’s horizontal offset to the ruler and its vertical one to the headers immediately, and the virtualiser one frame later', () => {
     const { container, ruler, headers, deps, result } = mountSync()
     container!.scrollLeft = 120
     container!.scrollTop = 45
 
     result.current.handleTrackScroll()
 
+    // The ruler and headers are plain DOM writes — no reason to wait a frame.
     expect(ruler!.scrollLeft).toBe(120)
     expect(headers!.scrollTop).toBe(45)
-    expect(deps.onVirtualScroll).toHaveBeenCalledWith(120)
+    // The virtualiser's update is coalesced onto the next animation frame
+    // (ESCSUITE-13 round 2, MAJOR-1(c)) — nothing yet.
+    expect(deps.onVirtualScroll).not.toHaveBeenCalled()
+
+    flushScrollFrame()
+
+    expect(deps.onVirtualScroll).toHaveBeenCalledExactlyOnceWith(120)
   })
 
   it('still tells the virtualiser when the ruler and headers are not mounted', () => {
@@ -70,8 +86,53 @@ describe('useScrollSync mirroring', () => {
     container!.scrollLeft = 80
 
     result.current.handleTrackScroll()
+    flushScrollFrame()
 
     expect(deps.onVirtualScroll).toHaveBeenCalledWith(80)
+  })
+
+  it('coalesces several scroll events inside one frame into a single, latest-wins virtualiser update', () => {
+    const { container, deps, result } = mountSync()
+
+    container!.scrollLeft = 10
+    result.current.handleTrackScroll()
+    container!.scrollLeft = 55
+    result.current.handleTrackScroll()
+    container!.scrollLeft = 240
+    result.current.handleTrackScroll()
+
+    expect(deps.onVirtualScroll).not.toHaveBeenCalled()
+
+    flushScrollFrame()
+
+    expect(deps.onVirtualScroll).toHaveBeenCalledExactlyOnceWith(240)
+  })
+
+  it('schedules a fresh frame for the scroll after the one that just ran', () => {
+    const { container, deps, result } = mountSync()
+
+    container!.scrollLeft = 10
+    result.current.handleTrackScroll()
+    flushScrollFrame()
+    expect(deps.onVirtualScroll).toHaveBeenCalledTimes(1)
+
+    container!.scrollLeft = 20
+    result.current.handleTrackScroll()
+    flushScrollFrame()
+
+    expect(deps.onVirtualScroll).toHaveBeenCalledTimes(2)
+    expect(deps.onVirtualScroll).toHaveBeenLastCalledWith(20)
+  })
+
+  it('cancels a pending frame on unmount', () => {
+    const { container, deps, result, unmount } = mountSync()
+    container!.scrollLeft = 30
+    result.current.handleTrackScroll()
+
+    unmount()
+    flushScrollFrame()
+
+    expect(deps.onVirtualScroll).not.toHaveBeenCalled()
   })
 
   it('does nothing at all without a track area', () => {
