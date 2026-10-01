@@ -255,6 +255,9 @@ describe('useRecordingLibrary list actions', () => {
     // Deleting is the remedy the blocked Record button recommends, so the
     // headroom has to be re-read or the button stays disabled afterwards.
     expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
+    // ESCSUITE-31: declared and tested in isolation but never called — wire it
+    // to the one deletion that actually succeeded.
+    expect(analyticsModule.track).toHaveBeenCalledWith('Recording Deleted', undefined)
   })
 
   it('hands a recording to the editor by id', () => {
@@ -340,5 +343,7 @@ describe('useRecordingLibrary list actions', () => {
     expect(setNotice).toHaveBeenCalledTimes(1)
     expect(setNotice).toHaveBeenCalledWith(DELETE_FAILED)
     expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
+    // Nothing was actually deleted, so there is nothing to report.
+    expect(analyticsModule.track).not.toHaveBeenCalled()
   })
 })
