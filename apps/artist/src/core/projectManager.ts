@@ -226,6 +226,14 @@ export async function loadProject(
     // Convert base64 back to blob
     const blob = base64ToBlob(videoData.data, videoData.mimeType);
 
+    // A source already in the shared DB — most likely a take ESCAPECRAFT
+    // still owns, or one an earlier import/load already restored — keeps
+    // exactly the metadata it already has. A `.veditor` load restores the
+    // bytes ARTIST needs; it is not authority over metadata it does not own
+    // (ESCSUITE-151), so even an identical-looking `meta` in the file must
+    // not overwrite what is already stored.
+    const existing = await getVideo(videoData.id);
+
     // A file saved since ESCSUITE-97 carries the live SourceVideo's own
     // fields in `meta` — waveform peaks, take identity, the real frame rate —
     // so those are trusted in preference to a blob probe. But `meta` came out
@@ -241,7 +249,14 @@ export async function loadProject(
     // itself now goes through the same duration probe every other importer
     // uses).
     let metadata: SourceVideo;
-    if (videoData.meta) {
+    if (existing) {
+      metadata = {
+        ...existing.metadata,
+        // thumbnailUrl is a live `blob:` handle that never survives a reload
+        // on its own (ESCSUITE-96) — refreshed here; nothing else is touched.
+        thumbnailUrl: await resolveThumbnailUrl(videoData.id),
+      };
+    } else if (videoData.meta) {
       const duration = await resolveStoredDuration(blob, {
         ...videoData.meta,
         name: videoData.name,
@@ -257,28 +272,46 @@ export async function loadProject(
         width,
         height,
       };
+
+      // A stored thumbnail (below) is the only legitimate source of a live
+      // `thumbnailUrl` — never a value that arrived in the file itself.
+      // `meta` is typed to exclude `thumbnailUrl`, but nothing stops a
+      // hand-edited file from smuggling one in through the `...videoData.meta`
+      // spread above, and it must not reach IndexedDB via `storeVideo` below
+      // (ESCSUITE-96 is exactly the failure mode a stale `blob:` handle in
+      // storage causes) or survive into the returned `SourceVideo` when the
+      // file has no real thumbnail to resolve over it (review round 1).
+      delete metadata.thumbnailUrl;
+
+      // This id is not already in the shared DB, so restoring it resurrects a
+      // copy under an identity CRAFT no longer recognises as live. A
+      // `source: 'recording'` here would put a take the user deleted in
+      // CRAFT straight back into CRAFT's own library
+      // (`getAllVideoMetadata().filter(v => v.source === 'recording')`,
+      // apps/craft/src/core/storage.ts), and `takeId`/`role`/`startOffset`/
+      // `overlayPlacement` describe a take-group this restored copy is not
+      // part of (ESCSUITE-151). Cleared outright, not set to `'import'`:
+      // ARTIST's own importers (`core/videoProcessor.ts`) never write a
+      // `source` on a dragged-in file either — it's simply absent.
+      delete metadata.source;
+      delete metadata.takeId;
+      delete metadata.role;
+      delete metadata.startOffset;
+      delete metadata.overlayPlacement;
     } else {
       metadata = await extractMetadataFromBlob(blob, videoData);
     }
 
-    // A stored thumbnail (below) is the only legitimate source of a live
-    // `thumbnailUrl` — never a value that arrived in the file itself. `meta`
-    // is typed to exclude `thumbnailUrl`, but nothing stops a hand-edited
-    // file from smuggling one in through the `...videoData.meta` spread
-    // above, and it must not reach IndexedDB via `storeVideo` below
-    // (ESCSUITE-96 is exactly the failure mode a stale `blob:` handle in
-    // storage causes) or survive into the returned `SourceVideo` when the
-    // file has no real thumbnail to resolve over it (review round 1).
-    delete metadata.thumbnailUrl;
+    if (!existing) {
+      // Store video
+      await storeVideo(videoData.id, blob, metadata);
 
-    // Store video
-    await storeVideo(videoData.id, blob, metadata);
-
-    // Store thumbnail if present
-    if (videoData.thumbnail) {
-      const thumbnailBlob = base64ToBlob(videoData.thumbnail, 'image/jpeg');
-      await storeThumbnail(videoData.id, thumbnailBlob);
-      metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
+      // Store thumbnail if present
+      if (videoData.thumbnail) {
+        const thumbnailBlob = base64ToBlob(videoData.thumbnail, 'image/jpeg');
+        await storeThumbnail(videoData.id, thumbnailBlob);
+        metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
+      }
     }
 
     sourceVideos.push(metadata);

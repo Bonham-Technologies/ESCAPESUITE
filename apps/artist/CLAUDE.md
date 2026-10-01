@@ -157,6 +157,15 @@ pnpm lint                # Run ESLint
   hand-edited file's value is not a real, non-negative finite number (review round 1); a
   `thumbnailUrl` inside `meta` is never trusted either way; the only source of one is
   `resolveThumbnailUrl` over what is actually stored, exactly as ESCSUITE-96 already required.
+  `loadProject` only ever writes metadata for a source **not already in the shared DB**; one
+  still there — a take ESCAPECRAFT owns, or an earlier import/load already restored — keeps
+  what it has, byte-for-byte, and only its `thumbnailUrl` is refreshed. A resurrected source
+  (one the id names nothing for) is written with `source`/`takeId`/`role`/`startOffset`/
+  `overlayPlacement` cleared rather than copied from `meta`: those fields are CRAFT's take
+  identity, not ARTIST's, and copying them back onto a copy the DB doesn't already hold used to
+  put a take the user had deleted in CRAFT straight back into CRAFT's own library — CRAFT reads
+  `getAllVideoMetadata().filter(v => v.source === 'recording')` (root CLAUDE.md, "Data Flow"),
+  with no notion of "this one came from a project file" to exclude it (ESCSUITE-151).
 - `videoDecodeManager.ts`: Main thread API for WebCodecs video decoding via Web Worker
 - `frameSource.ts`: Abstraction layer for frame sources (WebCodecs or HTMLVideoElement fallback)
 
