@@ -6,4 +6,5 @@ import { trackEvent } from '@escapesuite/shared/analytics'
 // ESCAPEPLAN Events
 export const analytics = {
   toolLaunched: (tool: 'craft' | 'artist') => trackEvent('Tool Launched', { tool }),
+  offlineBuildDownloaded: () => trackEvent('Offline Build Downloaded'),
 }

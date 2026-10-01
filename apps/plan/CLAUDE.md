@@ -49,7 +49,7 @@ src/
 ├── utils/
 │   └── themeStorage.ts    # Theme persistence utilities
 ├── lib/
-│   ├── launch.ts          # Tool URLs + "launch tool" analytics event
+│   ├── launch.ts          # Tool URLs + "launch tool"/"offline build downloaded" analytics events
 │   └── analytics.ts       # Vercel Analytics tracking
 └── pages/
     ├── Home.tsx            # Landing page — links to ESCAPECRAFT and ESCAPEARTIST
@@ -79,6 +79,19 @@ In production (Vercel), all tools are on the same domain:
 
 `src/lib/launch.ts` resolves the right URL per environment and fires a "tool launched" analytics
 event before navigating.
+
+### Analytics
+- Vercel Analytics via `@vercel/analytics`, **in the hosted build only** — see the root
+  `CLAUDE.md`'s "Vercel Analytics" for the `BUILD_MODE === 'saas'` gate and why the standalone
+  build ships no analytics runtime at all.
+- Custom events in `src/lib/analytics.ts`:
+  - `Tool Launched` (with tool: craft/artist) — `launchTool()` in `lib/launch.ts`, called from
+    the hero and tools-section CTA buttons on `Home.tsx`
+  - `Offline Build Downloaded` — `trackOfflineDownload()` in `lib/launch.ts`, wired to the
+    `onClick` of both "Download the offline build" anchors on `Home.tsx` (the hero link and the
+    open-source section's CTA). Both anchors are `target="_blank"`, so there is no race between
+    firing the event and the browser following the link, unlike `launchTool`'s same-tab
+    `location.assign`
 
 ## Theme Support
 

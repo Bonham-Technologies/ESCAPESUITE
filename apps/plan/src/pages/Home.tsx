@@ -1,4 +1,4 @@
-import { launchTool, GITHUB_URL, RELEASES_URL } from '../lib/launch'
+import { launchTool, trackOfflineDownload, GITHUB_URL, RELEASES_URL } from '../lib/launch'
 import { useSeo, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from '../lib/seo'
 import styles from './Home.module.css'
 
@@ -29,7 +29,7 @@ export default function Home() {
           <p className={styles.heroLinks}>
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">View on GitHub</a>
             {' · '}
-            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
+            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" onClick={trackOfflineDownload}>
               Download the offline build
             </a>
           </p>
@@ -160,6 +160,7 @@ export default function Home() {
             href={RELEASES_URL}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={trackOfflineDownload}
           >
             Download offline build
           </a>
