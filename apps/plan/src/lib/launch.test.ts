@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// analytics.toolLaunched is a collaborator — mock it, never the module under test.
+// analytics.toolLaunched/offlineBuildDownloaded are collaborators — mock them,
+// never the module under test.
 vi.mock('./analytics', () => ({
-  analytics: { toolLaunched: vi.fn() },
+  analytics: { toolLaunched: vi.fn(), offlineBuildDownloaded: vi.fn() },
 }))
 
 import { analytics } from './analytics'
-import { toolUrl, launchTool, GITHUB_URL, RELEASES_URL } from './launch'
+import { toolUrl, launchTool, trackOfflineDownload, GITHUB_URL, RELEASES_URL } from './launch'
 
 describe('constants', () => {
   it('GITHUB_URL points at the repository', () => {
@@ -85,5 +86,16 @@ describe('launchTool', () => {
     launchTool('craft')
     expect(assignSpy).toHaveBeenCalledWith('/craft/')
     expect(openSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('trackOfflineDownload', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('tracks an Offline Build Downloaded analytics event', () => {
+    trackOfflineDownload()
+    expect(analytics.offlineBuildDownloaded).toHaveBeenCalledTimes(1)
   })
 })
