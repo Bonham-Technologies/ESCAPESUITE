@@ -158,8 +158,10 @@ export async function exportToMP4(
   // Use WebCodecs-based frame decoding when available for background-capable export
   onProgress({ phase: 'preparing', progress: 12, message: 'Loading media files...' });
 
-  // Create frame manager - uses WebCodecs when available, falls back to HTMLVideoElement
-  const frameManager = await createFrameManager(isWebCodecsAvailable());
+  // Create frame manager - uses WebCodecs when available, falls back to HTMLVideoElement.
+  // signal lets a cancelled export interrupt the decode worker's startup wait
+  // instead of sitting through its full timeout (ESCSUITE-29 Mechanism 2).
+  const frameManager = await createFrameManager(isWebCodecsAvailable(), signal);
   const imageElements: Map<string, HTMLImageElement> = new Map();
 
   // Log which mode we're using

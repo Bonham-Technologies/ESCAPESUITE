@@ -290,11 +290,32 @@ export class FrameSourceFactory {
 
   /**
    * Initialize the factory (creates VideoDecodeManager if using WebCodecs)
+   *
+   * `signal`, when given, is forwarded to the decode manager so a cancelled
+   * export does not have to wait out the manager's full startup timeout
+   * (ESCSUITE-29 Mechanism 2).
+   *
+   * If the decode worker fails to start for any reason — missing from a
+   * standalone download (ESCSUITE-153), blocked by CSP, timed out, or the
+   * wait was aborted — this degrades to the HTMLVideoElement path instead of
+   * throwing or hanging; createSource() already falls back per-source when
+   * WebCodecs is unavailable, so a factory with useWebCodecs forced off here
+   * takes exactly that path for every source.
    */
-  async initialize(): Promise<void> {
+  async initialize(signal?: AbortSignal): Promise<void> {
     if (this.useWebCodecs && !this.manager) {
-      this.manager = new VideoDecodeManager();
-      await this.manager.initialize();
+      const manager = new VideoDecodeManager();
+      try {
+        await manager.initialize(signal);
+        this.manager = manager;
+      } catch (error) {
+        console.warn(
+          'WebCodecs decode worker failed to start, falling back to HTMLVideoElement:',
+          error
+        );
+        manager.terminate();
+        this.useWebCodecs = false;
+      }
     }
   }
 
