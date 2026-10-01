@@ -1135,7 +1135,7 @@ component.
 | `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, **masked thumbnail**, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
 | `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — its props are stable through a clip drag, a marquee and playback, so the whole column sits those out. **Not through a trim**: `useTrackHeaderActions`' `handleDeleteTrack` depends on `clips`, and a trim writes the store every move, so `onDeleteTrack` changes identity per frame and the column re-renders anyway |
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
-| `AudioWaveform.tsx` | The canvas waveform inside a clip, capped at 4000 CSS px of backing store and CSS-scaled beyond it, because browsers refuse a canvas much wider |
+| `AudioWaveform.tsx` | The canvas waveform inside a clip. Resamples the clip's *visible window* — not its whole box — so detail follows zoom instead of being frozen at a whole-clip cap (ESCSUITE-13); the CSS size and the backing store are always the same clamped number, so a canvas never stretches past what it actually holds |
 | `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
 | `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture. Invalidation is **event-based**, so a layout change that fires neither — an autosave or an undo changing a row's height mid-drag — would leave it stale where the old per-frame measurement absorbed it; unreachable through the UI today (a clip drag writes nothing until release, and no control resizes a track while a pointer is down), and if row heights ever become dynamic the hook to reach for is the `ResizeObserver` `useScrollSync` already installs on this container, not a third listener |
 | `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
@@ -2493,11 +2493,47 @@ computed once, when the media arrives, so a source that arrived without them nev
 non-empty `waveformData`, so a source with peaks and no flag shows nothing — which is why the
 take import fills the flag in for a recording stored before ESCAPECRAFT wrote one.
 
+**Resolution follows the visible window, not the clip box** (ESCSUITE-13). Before this, the
+component always resampled the clip's *whole* trimmed range to at most 2000 samples and drew
+it across a canvas capped at `MAX_CANVAS_WIDTH` (4000 CSS px), with `canvas.style.width`
+stretched to the clip's full (unclamped) width beyond that. Zooming in bought nothing: a 60s
+clip read exactly 2000 distinct peak values at zoom 1 (3000px box) *and* at zoom 10 (30,000px
+box, a 7.5x CSS stretch of the same 4000px bitmap) — the resample never got finer, only wider.
+Three ceilings stacked to cause it: the 2000-sample cap, the 4000px backing-store clamp, and
+(unreachable without raising the other two) `utils/waveform.ts`'s 100 peaks/sec source
+envelope.
+
+The fix moves the unit of resampling from "the clip" to "the slice of the clip actually on
+screen": `TimelineTrack` computes each clip's `visibleRangePx` — the intersection of its box
+with `Timeline`'s `scrollLeft`/`containerWidth` (both exposed from `useVirtualizedTimeline`,
+previously unused outside it) — and passes it to `AudioWaveform`. A clip whose whole box fits
+on screen gets `undefined` (the **zoomed-out fallback**: resample the whole clip to
+`FALLBACK_SAMPLE_CAP` = 2000, unchanged from before, since there is no window narrower than
+the clip to speak of). A clip wider than the viewport gets `{ offset, width }` in clip-local
+pixels, and resamples only `getPeaksForRange`'s slice for that window, to
+`visibleWidthPx * devicePixelRatio` samples (capped at `MAX_BACKING_DIMENSION` = 16000, the
+same real browser limit the old clamp cited) — so scrolling or zooming in on a wide clip keeps
+shrinking the *time span* one resample covers, which is what actually buys detail, rather than
+stretching the same whole-clip array wider. The resample itself is a `useMemo` over primitives
+derived from props (never the `visibleRangePx` object's identity, so a `TimelineTrack`
+re-render that leaves the window unchanged — a clip drag elsewhere on the same row, a
+playback tick — costs nothing); each `AudioWaveform` instance also keeps a small
+`(zoom bucket, window) → resampled peaks` cache on a ref, invalidated outright the moment its
+`peaks` array reference changes, so scrubbing back and forth over one clip at one zoom does not
+re-resample every pixel of scroll. `TimelineTrack.waveform.perf.test.ts` pins the call-count
+property: one resample per zoom or scroll change, zero per animation frame.
+
+The CSS/backing-store stretch is gone too, on **both** paths: the backing store and
+`canvas.style.width` are now always derived from the same number — the requested width (the
+window's, or the whole clip's in the fallback) clamped to `MAX_BACKING_DIMENSION / dpr` — so
+they can never disagree. The canvas is also repositioned with an explicit `style.left` (the
+window's offset, 0 in the fallback) rather than relying on `.waveform`'s CSS default, since it
+no longer spans the clip's full box when windowed.
+
 Waveform visualization adapts to clip selection state:
 - **Default colors**: Purple (`rgba(138, 43, 226, 0.6)`) for audio, blue tint for video with audio
 - **Selected state**: White (`rgba(255, 255, 255, 0.85)`) for high contrast against blue selection background
 - **Custom color**: `color` prop overrides default/selected colors when provided
-- **Extreme zoom handling**: Canvas width clamped to `MAX_CANVAS_WIDTH` (4000px) to prevent exceeding browser limits (~32,767px). CSS scales the canvas up for wider clips while maintaining visual quality.
 - **Height is the exception to that, and must fit exactly** (ESCSUITE-76): the component writes
   one number to both the backing store and `style.height`, so nothing is rescaled vertically —
   what matters is that the number is the **clip box**, because `.clip` is `overflow: hidden` and

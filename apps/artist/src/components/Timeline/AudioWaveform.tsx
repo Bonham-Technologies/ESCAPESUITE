@@ -5,18 +5,49 @@
  */
 
 import { useRef, useEffect, useMemo } from 'react';
+import { clamp, pixelsToTime } from '../../utils/timeUtils';
 import type { WaveformPeak } from '../../store/types';
 import { resamplePeaks, getPeaksForRange } from '../../utils/waveform';
 import styles from './AudioWaveform.module.css';
 
 /**
- * Maximum canvas width in CSS pixels before DPR scaling.
- * Browsers have hard limits on canvas dimensions (typically ~32,767 pixels).
- * With a 2x DPR, a 16,000px CSS width would hit this limit.
- * We use a conservative 4000px to ensure reliability across all devices.
- * The canvas will be CSS-scaled up if the clip is wider than this.
+ * A number of CSS pixels' worth of bitmap the backing store will hold before
+ * `devicePixelRatio` scaling, independent of how wide the clip's box is. This
+ * is a real browser limit (a canvas is capped at roughly 32,767px per
+ * dimension) rather than a quality choice, and it is now applied to the CSS
+ * size too (see the draw effect below) — ESCSUITE-13 found the old
+ * code clamping only the backing store and stretching `canvas.style.width` to
+ * the clip's full (unclamped) width, which bought zooming in nothing: a
+ * fixed-size bitmap smeared across a growing CSS box loses resolution, it
+ * does not gain it. A canvas can no longer disagree with its own backing
+ * store about how many pixels it holds.
  */
-const MAX_CANVAS_WIDTH = 4000;
+const MAX_BACKING_DIMENSION = 16000;
+
+/**
+ * The sample count used when the **whole clip** is on screen — nothing to
+ * scroll, so there is no "visible window" narrower than the clip itself. This
+ * is the pre-ESCSUITE-13 cap, kept as the cheap, zoomed-out fallback: at this
+ * size the clip's own box is small enough that detail is rarely the
+ * bottleneck, and skipping the windowed math below avoids recomputing a
+ * sub-range on every render for a clip that never needs one.
+ */
+const FALLBACK_SAMPLE_CAP = 2000;
+
+/**
+ * How many distinct (clip, zoom, window) resamples a single `AudioWaveform`
+ * instance remembers before evicting the oldest. Bounds memory for a clip the
+ * user scrubs back and forth over for a long time; one instance lives exactly
+ * as long as its clip is mounted (see {@link WaveformCache}), so there is
+ * nothing to evict on a *clip* change beyond letting React unmount it.
+ */
+const MAX_CACHE_ENTRIES = 50;
+
+interface WaveformCache {
+  /** The `peaks` array this cache's entries were resampled from. */
+  peaksRef: WaveformPeak[];
+  entries: Map<string, WaveformPeak[]>;
+}
 
 interface AudioWaveformProps {
   /** Peak data from the source media */
@@ -28,17 +59,32 @@ interface AudioWaveformProps {
   /** End time within source (for trimmed clips) */
   endTime: number;
   /**
-   * Width of the clip in pixels.
-   *
-   * The **deliberate exception** to "one number, drawn at that size": the effect
-   * below clamps the backing store to {@link MAX_CANVAS_WIDTH} and floors the CSS
-   * width to the full `width`, so a clip wider than the clamp really is a bitmap
-   * stretched horizontally. That is a browser limit rather than a choice — a
-   * canvas is capped at roughly 32,767px per dimension — and stretching a
-   * waveform along its time axis costs only horizontal resolution. Height has no
-   * such excuse and no such clamp.
+   * Width of the clip's **whole box** in pixels, used only to map pixels to
+   * source time (`width` / (`endTime` - `startTime`) is the clip's local
+   * pixels-per-second). It is **not** necessarily how wide the canvas this
+   * component draws is — see {@link visibleRangePx}.
    */
   width: number;
+  /**
+   * The slice of the clip's box that is actually scrolled into view, in the
+   * same pixel units as {@link width} and 0 at the clip's own left edge.
+   *
+   * ESCSUITE-13: a clip's box can be far wider than any viewport once zoomed
+   * in, and resampling the *whole* box into a capped-size array throws detail
+   * away that zooming in should have revealed — the sample that would have
+   * shown it was averaged together with thousands of others outside the
+   * window ever being scrolled into. Passing the visible slice instead means
+   * only the audio actually on screen is resampled, at a resolution that
+   * follows the window's own (device-pixel) width rather than the clip's.
+   *
+   * Omitted — or covering the whole clip — selects the **zoomed-out
+   * fallback**: the pre-ESCSUITE-13 behaviour of resampling the entire clip
+   * to at most {@link FALLBACK_SAMPLE_CAP} samples, which is exactly right
+   * when there is no scrolling to speak of. `TimelineTrack` computes this
+   * from `Timeline`'s scroll position and container width; a caller with no
+   * viewport to report (a direct render, a test) gets the fallback.
+   */
+  visibleRangePx?: { offset: number; width: number };
   /**
    * Height of the clip **box** in pixels — not of the track row.
    *
@@ -62,38 +108,104 @@ interface AudioWaveformProps {
   isSelected?: boolean;
 }
 
+/** `window.devicePixelRatio`, read defensively — 0 and NaN both fold to 1. */
+function readDevicePixelRatio(): number {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+  return dpr && dpr > 0 ? dpr : 1;
+}
+
 export function AudioWaveform({
   peaks,
   sourceDuration,
   startTime,
   endTime,
   width,
+  visibleRangePx,
   height,
   color,
   isAudioClip = false,
   isSelected = false,
 }: AudioWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cacheRef = useRef<WaveformCache | null>(null);
 
-  // Get peaks for the visible range (respecting trim points)
-  const visiblePeaks = useMemo(() => {
-    if (!peaks || peaks.length === 0) return [];
-    return getPeaksForRange(peaks, sourceDuration, startTime, endTime);
-  }, [peaks, sourceDuration, startTime, endTime]);
+  // The full clip box, in local (clip-relative) pixels — used only to map
+  // pixels to source time, never to size the canvas (see `visibleRangePx`).
+  const fullWidthPx = Math.max(0, Math.floor(width));
 
-  // Calculate the effective canvas width (clamped to max for browser compatibility)
-  const effectiveCanvasWidth = useMemo(() => {
-    return Math.min(Math.floor(width), MAX_CANVAS_WIDTH);
-  }, [width]);
+  // The slice actually on screen, clamped into [0, fullWidthPx]. Omitted (or
+  // covering the whole clip) is the zoomed-out fallback — see the prop doc.
+  const offsetPx = clamp(visibleRangePx?.offset ?? 0, 0, fullWidthPx);
+  const visibleWidthPx = clamp(
+    visibleRangePx?.width ?? fullWidthPx - offsetPx,
+    0,
+    fullWidthPx - offsetPx
+  );
+  // Whether the *caller* is reporting a window at all, not whether that
+  // window happens to cover the whole clip — a caller who knows it is windowed
+  // and asks for the whole clip anyway (an ultra-wide viewport, say) still
+  // gets the device-pixel-resolution formula below, because there genuinely
+  // is a viewport bounding it, even if nothing is scrolled off today.
+  const isWindowed = visibleRangePx != null;
 
-  // Resample to fit display width
+  const dpr = readDevicePixelRatio();
+
+  // Resample only the visible window's source-time range, at a resolution
+  // that follows the window's own (device-pixel) width when it is narrower
+  // than the clip — the zoomed-out fallback keeps the old whole-clip cap.
   const displayPeaks = useMemo(() => {
-    if (visiblePeaks.length === 0 || width <= 0) return [];
-    // Use 1 sample per pixel for crisp rendering, max 2000 samples
-    // Use effectiveCanvasWidth to match actual canvas resolution
-    const targetSamples = Math.min(Math.ceil(effectiveCanvasWidth), 2000);
-    return resamplePeaks(visiblePeaks, targetSamples);
-  }, [visiblePeaks, width, effectiveCanvasWidth]);
+    if (!peaks || peaks.length === 0 || visibleWidthPx <= 0 || fullWidthPx <= 0) return [];
+
+    const clipTimeSpan = endTime - startTime;
+    const localPxPerSecond = clipTimeSpan > 0 ? fullWidthPx / clipTimeSpan : 0;
+    const windowStartTime =
+      localPxPerSecond > 0 ? startTime + pixelsToTime(offsetPx, localPxPerSecond) : startTime;
+    const windowEndTime =
+      localPxPerSecond > 0
+        ? startTime + pixelsToTime(offsetPx + visibleWidthPx, localPxPerSecond)
+        : endTime;
+
+    const targetSamples = isWindowed
+      ? Math.max(1, Math.min(Math.ceil(visibleWidthPx * dpr), MAX_BACKING_DIMENSION))
+      : Math.min(Math.ceil(visibleWidthPx), FALLBACK_SAMPLE_CAP);
+
+    // One cache per (clip, zoom bucket, window): a `peaks` array identifies
+    // the clip's source media, and the cache is thrown away — not patched —
+    // the moment that reference changes, so a clip that gets new waveform
+    // data never reads a stale resample back.
+    if (!cacheRef.current || cacheRef.current.peaksRef !== peaks) {
+      cacheRef.current = { peaksRef: peaks, entries: new Map() };
+    }
+    const cache = cacheRef.current.entries;
+    const zoomBucket = Math.round(fullWidthPx);
+    const windowBucket = isWindowed
+      ? `${Math.round(offsetPx)}-${Math.round(offsetPx + visibleWidthPx)}`
+      : 'full';
+    const cacheKey = `${zoomBucket}:${windowBucket}:${dpr}`;
+
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const windowPeaks = getPeaksForRange(peaks, sourceDuration, windowStartTime, windowEndTime);
+    const resampled = resamplePeaks(windowPeaks, targetSamples);
+
+    cache.set(cacheKey, resampled);
+    if (cache.size > MAX_CACHE_ENTRIES) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey !== undefined) cache.delete(oldestKey);
+    }
+    return resampled;
+  }, [
+    peaks,
+    sourceDuration,
+    startTime,
+    endTime,
+    fullWidthPx,
+    offsetPx,
+    visibleWidthPx,
+    isWindowed,
+    dpr,
+  ]);
 
   // Draw waveform on canvas
   useEffect(() => {
@@ -103,25 +215,20 @@ export function AudioWaveform({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size (use device pixel ratio for crisp rendering)
-    // Clamp canvas dimensions to prevent exceeding browser limits
-    const dpr = window.devicePixelRatio || 1;
-    const canvasWidth = effectiveCanvasWidth;
-    const canvasHeight = Math.floor(height);
+    // The backing store and the CSS size are derived from the *same* clamped
+    // number on both dimensions, so they can never disagree — the ESCSUITE-13
+    // bug was exactly this pair drifting apart (CSS stretched past what the
+    // bitmap actually held).
+    const maxCssDimension = MAX_BACKING_DIMENSION / dpr;
+    const canvasWidth = Math.min(visibleWidthPx, maxCssDimension);
+    const canvasHeight = Math.min(Math.max(0, Math.floor(height)), maxCssDimension);
 
-    // Ensure canvas dimensions don't exceed browser limits even with DPR
-    // Most browsers limit to ~32,767 pixels per dimension
-    const maxDimension = 16000; // Safe limit with 2x DPR = 32,000
-    const scaledWidth = Math.min(canvasWidth * dpr, maxDimension);
-    const scaledHeight = Math.min(canvasHeight * dpr, maxDimension);
-    const actualDpr = scaledWidth / canvasWidth;
-
-    canvas.width = scaledWidth;
-    canvas.height = scaledHeight;
-    // CSS width is the full requested width - canvas will be scaled up if needed
-    canvas.style.width = `${Math.floor(width)}px`;
+    canvas.width = Math.round(canvasWidth * dpr);
+    canvas.height = Math.round(canvasHeight * dpr);
+    canvas.style.left = `${offsetPx}px`;
+    canvas.style.width = `${canvasWidth}px`;
     canvas.style.height = `${canvasHeight}px`;
-    ctx.scale(actualDpr, actualDpr);
+    ctx.scale(dpr, dpr);
 
     // Clear canvas
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -135,23 +242,36 @@ export function AudioWaveform({
     const centerY = canvasHeight / 2;
     const amplitude = (canvasHeight / 2) * 0.85; // Leave some padding
 
-    const samplesPerPixel = displayPeaks.length / canvasWidth;
+    // One bar per *sample*, not per pixel: at the fallback's whole-clip
+    // resolution this draws exactly as before, but once a window resamples to
+    // more entries than the canvas has CSS pixels (ESCSUITE-13's device-pixel
+    // resolution), each bar is a fraction of a CSS pixel wide — which the
+    // `scale(dpr)` above turns into a whole device pixel, giving the window
+    // genuinely more distinct bars rather than the same ones stretched wider.
+    const barWidth = canvasWidth / displayPeaks.length;
 
-    for (let x = 0; x < canvasWidth; x++) {
-      const peakIndex = Math.floor(x * samplesPerPixel);
-      const peak = displayPeaks[peakIndex];
-
-      if (!peak) continue;
+    for (let i = 0; i < displayPeaks.length; i++) {
+      const peak = displayPeaks[i];
+      const x = i * barWidth;
 
       // Calculate Y positions
       const minY = centerY - peak.max * amplitude;
       const maxY = centerY - peak.min * amplitude;
 
-      // Draw vertical bar from min to max
+      // Draw a bar spanning this sample's slice of the canvas
       const barHeight = Math.max(1, maxY - minY);
-      ctx.fillRect(x, minY, 1, barHeight);
+      ctx.fillRect(x, minY, barWidth, barHeight);
     }
-  }, [displayPeaks, width, height, color, isAudioClip, isSelected, effectiveCanvasWidth]);
+  }, [
+    displayPeaks,
+    visibleWidthPx,
+    offsetPx,
+    height,
+    color,
+    isAudioClip,
+    isSelected,
+    dpr,
+  ]);
 
   if (!peaks || peaks.length === 0 || width <= 0 || height <= 0) {
     return null;

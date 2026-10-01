@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Clip, SourceVideo, Track } from '../../store/types';
-import { formatTime, timeToPixels } from '../../utils/timeUtils';
+import { clamp, formatTime, timeToPixels } from '../../utils/timeUtils';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
 import { CLIP_THUMB_ASPECT, maskClipPathFor } from '../../utils/maskClipPath';
@@ -63,6 +63,31 @@ function clipBoxHeightFor(trackHeight: number): number {
   );
 }
 
+/**
+ * The slice of a clip's box, in clip-local pixels, that falls inside
+ * `[viewportLeft, viewportRight]` — both in the same absolute timeline pixels
+ * as `clipX`. Feeds `AudioWaveform`'s `visibleRangePx` (ESCSUITE-13): a clip
+ * entirely outside the viewport gets a zero-width slice (its waveform, if any,
+ * simply draws nothing), and one entirely inside gets `{ offset: 0, width:
+ * clipWidth }` — indistinguishable from "no viewport known" on purpose, since
+ * both mean the whole clip is what's on screen.
+ */
+function visibleRangeFor(
+  clipX: number,
+  clipWidth: number,
+  viewportLeft: number,
+  viewportRight: number
+): { offset: number; width: number } | undefined {
+  const offset = clamp(viewportLeft - clipX, 0, clipWidth);
+  const end = clamp(viewportRight - clipX, 0, clipWidth);
+  const width = Math.max(0, end - offset);
+  // The whole clip is on screen: report no window at all rather than one that
+  // happens to equal it, so `AudioWaveform` takes its cheap zoomed-out
+  // fallback instead of doing windowed work for a clip that needs none.
+  if (offset === 0 && width >= clipWidth) return undefined;
+  return { offset, width };
+}
+
 interface TimelineTrackProps {
   track: Track;
   /**
@@ -79,6 +104,21 @@ interface TimelineTrackProps {
   sourceVideos: SourceVideo[];
   /** Horizontal scale of the timeline, in pixels per second of media. */
   pixelsPerSecond: number;
+  /**
+   * The scrolled-into-view horizontal span of the track area, in the same
+   * absolute timeline pixels as `timeToPixels` (0 at the project's own start,
+   * not this row's). Both default to leaving every clip's whole box "visible"
+   * — `Timeline` only knows the real span once its `ResizeObserver` has fired
+   * once, and a caller with no viewport to report (most `TimelineTrack`
+   * tests) gets the pre-ESCSUITE-13 whole-clip waveform behaviour.
+   *
+   * Used only to tell `AudioWaveform` which slice of a clip's waveform is
+   * actually on screen (ESCSUITE-13) — nothing else here is viewport-aware,
+   * since `clips` is already the virtualiser's near-viewport-with-overscan
+   * answer.
+   */
+  viewportLeft?: number;
+  viewportRight?: number;
   selectedClipId: string | null;
   selectedClipIds: Set<string>;
   /** The drag in progress, or null. Drives the ghost position and the preview. */
@@ -114,6 +154,8 @@ export const TimelineTrack = React.memo(function TimelineTrack({
   allClips,
   sourceVideos,
   pixelsPerSecond,
+  viewportLeft = -Infinity,
+  viewportRight = Infinity,
   selectedClipId,
   selectedClipIds,
   dragState,
@@ -194,6 +236,7 @@ export const TimelineTrack = React.memo(function TimelineTrack({
                 startTime={clip.startTime}
                 endTime={clip.endTime}
                 width={clipWidth}
+                visibleRangePx={visibleRangeFor(clipX, clipWidth, viewportLeft, viewportRight)}
                 height={clipBoxHeight}
                 isAudioClip={isAudioClip}
                 isSelected={isSelected}

@@ -87,11 +87,22 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     visibleClips,
     onScroll: onVirtualScroll,
     setContainerWidth,
+    scrollLeft,
+    containerWidth,
   } = useVirtualizedTimeline({
     clips,
     pixelsPerSecond,
     overscan: 300, // Render clips 300px outside viewport
   });
+
+  // The on-screen span of the track area, in absolute timeline pixels —
+  // ESCSUITE-13 feeds this to `AudioWaveform` (via `TimelineTrack`) so a
+  // clip's waveform resamples only the slice actually scrolled into view. The
+  // container's width is 0 until its `ResizeObserver` has fired once (see
+  // `useScrollSync`), and `viewportRight` is left unbounded until then rather
+  // than briefly collapsing every waveform to nothing on first paint.
+  const viewportLeft = scrollLeft;
+  const viewportRight = containerWidth > 0 ? scrollLeft + containerWidth : Infinity;
 
   // Group visible clips by track for efficient rendering
   const visibleClipsByTrack = useMemo(
@@ -277,6 +288,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
                 allClips={clips}
                 sourceVideos={sourceVideos}
                 pixelsPerSecond={pixelsPerSecond}
+                viewportLeft={viewportLeft}
+                viewportRight={viewportRight}
                 selectedClipId={selectedClipId}
                 selectedClipIds={selectedClipIds}
                 dragState={dragState}
