@@ -775,6 +775,38 @@ describe('VideoUploader', () => {
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:unused-thumb')
     })
 
+    // ESCSUITE-149 review, NIT 2: the meter refresh used to be the last
+    // statement of the `try`, so a delete that threw partway through the loop
+    // skipped it — unlike Clear All, which already refreshed in `finally`.
+    // The ids before the failure are still permanently removed (the
+    // permanent-removal write already ran in `finally`), so the meter should
+    // reflect that even though the whole clear did not finish cleanly.
+    it('refreshes the storage meter even when a delete fails partway through', async () => {
+      await storeVideo('unused1', new Blob(['bytes']), { ...videoMeta, id: 'unused1' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused1', name: 'one.mp4', size: 1024 })
+      await storeVideo('unused2', new Blob(['bytes']), { ...videoMeta, id: 'unused2' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused2', name: 'two.mp4', size: 1024 })
+
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'unused2') throw new Error('disk full')
+        return realDeleteVideo(id)
+      })
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const callsBeforeClick = estimate.mock.calls.length
+
+      fireEvent.click(await screen.findByRole('button', { name: /Clear Unused/ }))
+
+      // 'unused1' (deleted before the throw) is permanently removed; 'unused2'
+      // (the one that threw) is left in the library, bytes intact.
+      await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).not.toContain('unused1'))
+      expect(store().sourceVideos.map((v) => v.id)).toContain('unused2')
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+    })
+
     // ESCSUITE-149: Clear Unused is as non-undoable as Clear All, and —
     // "unused" meaning no clip refers to it — can never remove a clip. The
     // final assertion is that invariant: the clip the library started with
