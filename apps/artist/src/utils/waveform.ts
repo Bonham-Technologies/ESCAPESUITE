@@ -86,45 +86,71 @@ export async function extractWaveformData(
  *
  * @param peaks - Original peak data
  * @param targetSamples - Number of samples to output
- * @returns Resampled peak data
+ * @param output - An array to reuse instead of allocating a fresh one
+ *   (ESCSUITE-13 round 2, MAJOR-1(d)). When supplied, each `{min,max}` object
+ *   already at an index is mutated in place rather than replaced, and the
+ *   array is resized to exactly `targetSamples` — so a caller that resamples
+ *   the same clip repeatedly (a scroll, a zoom) can hand back its own
+ *   previous output and avoid allocating `targetSamples` new objects every
+ *   time. Omitted, this allocates fresh, as before. Never aliases a source
+ *   `peaks` element directly (the single-sample branch below used to): the
+ *   output must be safe to mutate on a later call without corrupting the
+ *   caller's source data.
+ * @returns Resampled peak data — `output` itself when supplied
  */
 export function resamplePeaks(
   peaks: WaveformPeak[],
-  targetSamples: number
+  targetSamples: number,
+  output?: WaveformPeak[]
 ): WaveformPeak[] {
   if (peaks.length === 0 || targetSamples <= 0) {
+    if (output) {
+      output.length = 0;
+      return output;
+    }
     return [];
   }
 
-  if (peaks.length === targetSamples) {
+  if (peaks.length === targetSamples && !output) {
     return peaks;
   }
 
-  const result: WaveformPeak[] = [];
+  const result = output ?? [];
   const ratio = peaks.length / targetSamples;
 
   for (let i = 0; i < targetSamples; i++) {
     const startIndex = Math.floor(i * ratio);
     const endIndex = Math.min(Math.floor((i + 1) * ratio), peaks.length);
 
+    let min = 0;
+    let max = 0;
+
     if (endIndex <= startIndex) {
       // Use single sample
-      result.push(peaks[startIndex] || { min: 0, max: 0 });
+      const single = peaks[startIndex];
+      if (single) {
+        min = single.min;
+        max = single.max;
+      }
     } else {
       // Combine multiple samples - find overall min/max
-      let min = 0;
-      let max = 0;
-
       for (let j = startIndex; j < endIndex; j++) {
         const peak = peaks[j];
         if (peak.min < min) min = peak.min;
         if (peak.max > max) max = peak.max;
       }
+    }
 
-      result.push({ min, max });
+    const existing = result[i];
+    if (existing) {
+      existing.min = min;
+      existing.max = max;
+    } else {
+      result[i] = { min, max };
     }
   }
 
+  result.length = targetSamples;
   return result;
 }
 

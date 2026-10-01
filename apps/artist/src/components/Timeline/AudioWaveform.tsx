@@ -22,31 +22,115 @@ import styles from './AudioWaveform.module.css';
  * does not gain it. A canvas can no longer disagree with its own backing
  * store about how many pixels it holds.
  */
-const MAX_BACKING_DIMENSION = 16000;
+export const MAX_BACKING_DIMENSION = 16000;
 
 /**
- * The sample count used when the **whole clip** is on screen — nothing to
- * scroll, so there is no "visible window" narrower than the clip itself. This
- * is the pre-ESCSUITE-13 cap, kept as the cheap, zoomed-out fallback: at this
- * size the clip's own box is small enough that detail is rarely the
- * bottleneck, and skipping the windowed math below avoids recomputing a
- * sub-range on every render for a clip that never needs one.
+ * The floor on how few samples a window is ever resampled to, so long as the
+ * window's own source data can support it — **not** a separate "fallback
+ * mode" (ESCSUITE-13 round 2, MINOR-3). Before round 2 this was a hard cap
+ * used only when the whole clip was on screen, and a clip scrolled one pixel
+ * past "fully visible" jumped straight to the device-pixel-resolution
+ * formula below — a 2000 → ~5000 sample discontinuity for a 1px scroll, with
+ * the envelope visibly flattening at the exact moment a clip's edge crossed
+ * the viewport edge. {@link targetSamplesFor} now applies the same formula
+ * everywhere: request at least this many samples (never more than the
+ * window's own peak count — see {@link MAX_BACKING_DIMENSION}'s sibling
+ * concern, overshoot, below), and *more* than this only when the window's
+ * own pixel width asks for more. The quantity that decides which regime
+ * applies is a **sample count**, not a pixel threshold, so there is no
+ * boundary left to be discontinuous across.
  */
-const FALLBACK_SAMPLE_CAP = 2000;
+export const FALLBACK_SAMPLE_FLOOR = 2000;
 
 /**
- * How many distinct (clip, zoom, window) resamples a single `AudioWaveform`
- * instance remembers before evicting the oldest. Bounds memory for a clip the
- * user scrubs back and forth over for a long time; one instance lives exactly
- * as long as its clip is mounted (see {@link WaveformCache}), so there is
- * nothing to evict on a *clip* change beyond letting React unmount it.
+ * Scroll quantisation (ESCSUITE-13 round 2, MAJOR-1(a)): the visible window
+ * is rounded outward to this many CSS pixels before anything downstream reads
+ * it, so a scroll that moves by less than one bucket's width changes nothing
+ * — not the memo's dependencies, not the cache key, not the canvas's size or
+ * position — and costs no resample at all. A real scroll gesture crosses many
+ * buckets, so this only removes work a human could never perceive: no frame
+ * of a scroll shows a window merely 1px different from the frame before, and
+ * rounding *outward* (floor the start, ceil the end) means the bucketed
+ * window always contains the actually-visible one, which also hides a frame
+ * or two of render lag behind the scroll (see `TimelineTrack.waveform.perf.test.ts`
+ * and this ticket's round-2 report, MINOR-6).
  */
-const MAX_CACHE_ENTRIES = 50;
+export const WINDOW_BUCKET_PX = 64;
+
+/**
+ * Sample budget for a single `AudioWaveform` instance's resample cache
+ * (ESCSUITE-13 round 2, MINOR-2): the combined length of every entry
+ * currently held, evicted least-recently-*touched* first — a cache hit moves
+ * its entry to the most-recently-used end, so a window the user keeps
+ * scrolling back to is never the one that gets evicted. 2,000,000 peaks is a
+ * generous circuit breaker rather than a tight budget: now that a window's
+ * own sample count is capped at the source's actual peak count for that
+ * window ({@link targetSamplesFor}) rather than an arbitrary per-pixel
+ * request, a realistic session's worth of distinct windows for one clip
+ * comes nowhere near this, and the bound exists only against a pathological
+ * case (a corrupted `sourceDuration` inflating a window's apparent peak
+ * count, say).
+ */
+export const MAX_CACHE_SAMPLES = 2_000_000;
+
+/**
+ * How many evicted resample arrays one instance keeps on hand to hand back to
+ * {@link resamplePeaks} instead of letting the next miss allocate fresh
+ * (MAJOR-1(d)). Small and arbitrary — it only needs to be big enough that a
+ * burst of evictions (a long continuous scroll through all-new windows)
+ * doesn't immediately run the pool dry.
+ */
+const MAX_FREE_BUFFERS = 16;
 
 interface WaveformCache {
   /** The `peaks` array this cache's entries were resampled from. */
   peaksRef: WaveformPeak[];
+  /**
+   * Resample results, **least-recently-touched first**. A hit deletes and
+   * re-inserts its key, which `Map` places at the end — true LRU, so
+   * eviction (always from the front) never removes the entry being
+   * repeatedly revisited.
+   */
   entries: Map<string, WaveformPeak[]>;
+  /** Sum of every entry's length — what {@link MAX_CACHE_SAMPLES} bounds. */
+  totalSamples: number;
+  /** Evicted entries' arrays, ready for `resamplePeaks` to reuse (MAJOR-1(d)). */
+  freeBuffers: WaveformPeak[][];
+}
+
+/**
+ * Round a window outward to the nearest {@link WINDOW_BUCKET_PX} grid line,
+ * clamped into `[0, maxWidth]`. The result always contains
+ * `[rawOffset, rawOffset + rawWidth]` — rounding the start down and the end
+ * up can only widen the window, never narrow it past what was asked for.
+ */
+function bucketWindow(
+  rawOffset: number,
+  rawWidth: number,
+  maxWidth: number
+): { offset: number; width: number } {
+  // `rawOffset` arrives already clamped into `[0, maxWidth]` (its one caller
+  // is the component, right after its own `clamp` call), so flooring it can
+  // never go negative — there is no `Math.max(0, …)` here to guard that.
+  const rawEnd = rawOffset + rawWidth;
+  const start = Math.floor(rawOffset / WINDOW_BUCKET_PX) * WINDOW_BUCKET_PX;
+  const end = Math.min(maxWidth, Math.ceil(rawEnd / WINDOW_BUCKET_PX) * WINDOW_BUCKET_PX);
+  return { offset: start, width: Math.max(0, end - start) };
+}
+
+/**
+ * How many samples to resample a window to: at least {@link FALLBACK_SAMPLE_FLOOR}
+ * when the window's own data supports it, otherwise one sample per device
+ * pixel of the window's width — but never more samples than the window
+ * actually contains (ESCSUITE-13 round 2, MAJOR-1(b)). Production peaks are
+ * extracted at 100/s (`utils/waveform.ts`), so a 6s window holds 600 of them;
+ * asking `resamplePeaks` for more than that only has it duplicate real peaks
+ * to pad the request; every duplicate is a wasted allocation and a wasted
+ * `fillRect` carrying no information the browser didn't already have.
+ */
+function targetSamplesFor(visibleWidthPx: number, dpr: number, windowPeakCount: number): number {
+  const pixelCandidate = Math.ceil(visibleWidthPx * dpr);
+  return Math.min(Math.max(FALLBACK_SAMPLE_FLOOR, pixelCandidate), windowPeakCount, MAX_BACKING_DIMENSION);
 }
 
 interface AudioWaveformProps {
@@ -75,14 +159,14 @@ interface AudioWaveformProps {
    * shown it was averaged together with thousands of others outside the
    * window ever being scrolled into. Passing the visible slice instead means
    * only the audio actually on screen is resampled, at a resolution that
-   * follows the window's own (device-pixel) width rather than the clip's.
+   * follows the window's own (device-pixel) width.
    *
-   * Omitted — or covering the whole clip — selects the **zoomed-out
-   * fallback**: the pre-ESCSUITE-13 behaviour of resampling the entire clip
-   * to at most {@link FALLBACK_SAMPLE_CAP} samples, which is exactly right
-   * when there is no scrolling to speak of. `TimelineTrack` computes this
-   * from `Timeline`'s scroll position and container width; a caller with no
-   * viewport to report (a direct render, a test) gets the fallback.
+   * Omitted — or covering the whole clip — is simply the smallest possible
+   * window: the whole clip. There is no separate "fallback mode" any more
+   * (round 2, MINOR-3) — the same formula ({@link targetSamplesFor}) runs
+   * either way, so a caller with no viewport to report (a direct render, a
+   * test) gets exactly what `TimelineTrack` would ask for if it, too, could
+   * see the whole clip without scrolling.
    */
   visibleRangePx?: { offset: number; width: number };
   /**
@@ -108,9 +192,14 @@ interface AudioWaveformProps {
   isSelected?: boolean;
 }
 
-/** `window.devicePixelRatio`, read defensively — 0 and NaN both fold to 1. */
+/**
+ * `window.devicePixelRatio`, read defensively — 0 and NaN both fold to 1. No
+ * `typeof window` guard: ESCAPEARTIST is browser-only (no SSR anywhere in
+ * this codebase — `PreviewPlayer.tsx` reads the same global unguarded), so
+ * that check has no caller that could ever take its other side.
+ */
 function readDevicePixelRatio(): number {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+  const dpr = window.devicePixelRatio;
   return dpr && dpr > 0 ? dpr : 1;
 }
 
@@ -133,79 +222,86 @@ export function AudioWaveform({
   // pixels to source time, never to size the canvas (see `visibleRangePx`).
   const fullWidthPx = Math.max(0, Math.floor(width));
 
-  // The slice actually on screen, clamped into [0, fullWidthPx]. Omitted (or
-  // covering the whole clip) is the zoomed-out fallback — see the prop doc.
-  const offsetPx = clamp(visibleRangePx?.offset ?? 0, 0, fullWidthPx);
-  const visibleWidthPx = clamp(
-    visibleRangePx?.width ?? fullWidthPx - offsetPx,
+  // The requested slice, clamped into [0, fullWidthPx], then quantised to the
+  // scroll bucket — see `bucketWindow`. Omitted (or covering the whole clip)
+  // is unaffected: bucketing an offset of 0 and a width of `fullWidthPx` is a
+  // no-op, since the end is clamped to `fullWidthPx` either way.
+  const rawOffsetPx = clamp(visibleRangePx?.offset ?? 0, 0, fullWidthPx);
+  const rawVisibleWidthPx = clamp(
+    visibleRangePx?.width ?? fullWidthPx - rawOffsetPx,
     0,
-    fullWidthPx - offsetPx
+    fullWidthPx - rawOffsetPx
   );
-  // Whether the *caller* is reporting a window at all, not whether that
-  // window happens to cover the whole clip — a caller who knows it is windowed
-  // and asks for the whole clip anyway (an ultra-wide viewport, say) still
-  // gets the device-pixel-resolution formula below, because there genuinely
-  // is a viewport bounding it, even if nothing is scrolled off today.
-  const isWindowed = visibleRangePx != null;
+  const { offset: offsetPx, width: visibleWidthPx } = bucketWindow(
+    rawOffsetPx,
+    rawVisibleWidthPx,
+    fullWidthPx
+  );
 
   const dpr = readDevicePixelRatio();
 
   // Resample only the visible window's source-time range, at a resolution
-  // that follows the window's own (device-pixel) width when it is narrower
-  // than the clip — the zoomed-out fallback keeps the old whole-clip cap.
+  // that follows the window's own (device-pixel) width — see
+  // `targetSamplesFor`. Memoised on primitives only (never `visibleRangePx`'s
+  // object identity), so a render that leaves the bucketed window unchanged
+  // — a drag elsewhere on the row, a playback tick, a scroll that stayed
+  // inside one 64px bucket — costs nothing here.
   const displayPeaks = useMemo(() => {
     if (!peaks || peaks.length === 0 || visibleWidthPx <= 0 || fullWidthPx <= 0) return [];
 
-    const clipTimeSpan = endTime - startTime;
-    const localPxPerSecond = clipTimeSpan > 0 ? fullWidthPx / clipTimeSpan : 0;
-    const windowStartTime =
-      localPxPerSecond > 0 ? startTime + pixelsToTime(offsetPx, localPxPerSecond) : startTime;
-    const windowEndTime =
-      localPxPerSecond > 0
-        ? startTime + pixelsToTime(offsetPx + visibleWidthPx, localPxPerSecond)
-        : endTime;
+    // `fullWidthPx > 0` here implies `endTime > startTime`: both are derived
+    // from the same clip (`width = duration * pixelsPerSecond`,
+    // `duration = endTime - startTime` — see `TimelineTrack.tsx`), so no
+    // caller that reaches this line can have a non-positive time span.
+    const localPxPerSecond = fullWidthPx / (endTime - startTime);
+    const windowStartTime = startTime + pixelsToTime(offsetPx, localPxPerSecond);
+    const windowEndTime = startTime + pixelsToTime(offsetPx + visibleWidthPx, localPxPerSecond);
 
-    const targetSamples = isWindowed
-      ? Math.max(1, Math.min(Math.ceil(visibleWidthPx * dpr), MAX_BACKING_DIMENSION))
-      : Math.min(Math.ceil(visibleWidthPx), FALLBACK_SAMPLE_CAP);
-
-    // One cache per (clip, zoom bucket, window): a `peaks` array identifies
+    // One cache per (clip, zoom, window, trim): a `peaks` array identifies
     // the clip's source media, and the cache is thrown away — not patched —
     // the moment that reference changes, so a clip that gets new waveform
-    // data never reads a stale resample back.
+    // data never reads a stale resample back. `startTime`/`endTime`/
+    // `sourceDuration` are in the key (not just the window's own pixels)
+    // because they are what `getPeaksForRange` actually reads — a trim that
+    // changes them without moving the clip's pixel window must still miss.
     if (!cacheRef.current || cacheRef.current.peaksRef !== peaks) {
-      cacheRef.current = { peaksRef: peaks, entries: new Map() };
+      cacheRef.current = { peaksRef: peaks, entries: new Map(), totalSamples: 0, freeBuffers: [] };
     }
-    const cache = cacheRef.current.entries;
-    const zoomBucket = Math.round(fullWidthPx);
-    const windowBucket = isWindowed
-      ? `${Math.round(offsetPx)}-${Math.round(offsetPx + visibleWidthPx)}`
-      : 'full';
-    const cacheKey = `${zoomBucket}:${windowBucket}:${dpr}`;
+    const cache = cacheRef.current;
+    const cacheKey = `${Math.round(fullWidthPx)}:${Math.round(offsetPx)}-${Math.round(offsetPx + visibleWidthPx)}:${dpr}:${startTime}:${endTime}:${sourceDuration}`;
 
-    const cached = cache.get(cacheKey);
-    if (cached) return cached;
+    const cached = cache.entries.get(cacheKey);
+    if (cached) {
+      // Touch: delete-then-set moves this key to the end of the map, so the
+      // next eviction pass (oldest-first) leaves it alone — true LRU.
+      cache.entries.delete(cacheKey);
+      cache.entries.set(cacheKey, cached);
+      return cached;
+    }
 
     const windowPeaks = getPeaksForRange(peaks, sourceDuration, windowStartTime, windowEndTime);
-    const resampled = resamplePeaks(windowPeaks, targetSamples);
+    const targetSamples = targetSamplesFor(visibleWidthPx, dpr, windowPeaks.length);
 
-    cache.set(cacheKey, resampled);
-    if (cache.size > MAX_CACHE_ENTRIES) {
-      const oldestKey = cache.keys().next().value;
-      if (oldestKey !== undefined) cache.delete(oldestKey);
+    const buffer = cache.freeBuffers.pop() ?? [];
+    const resampled = resamplePeaks(windowPeaks, targetSamples, buffer);
+
+    cache.entries.set(cacheKey, resampled);
+    cache.totalSamples += resampled.length;
+
+    // Evict oldest-touched-first until back under budget. `cache.entries` is
+    // in LRU order (oldest first) by construction, so a plain forward
+    // iteration visits exactly the entries eviction should consider, in the
+    // order it should consider them, and `totalSamples` reaching 0 when the
+    // map empties means this can never read past the end of it.
+    for (const [key, value] of cache.entries) {
+      if (cache.totalSamples <= MAX_CACHE_SAMPLES) break;
+      cache.entries.delete(key);
+      cache.totalSamples -= value.length;
+      if (cache.freeBuffers.length < MAX_FREE_BUFFERS) cache.freeBuffers.push(value);
     }
+
     return resampled;
-  }, [
-    peaks,
-    sourceDuration,
-    startTime,
-    endTime,
-    fullWidthPx,
-    offsetPx,
-    visibleWidthPx,
-    isWindowed,
-    dpr,
-  ]);
+  }, [peaks, sourceDuration, startTime, endTime, fullWidthPx, offsetPx, visibleWidthPx, dpr]);
 
   // Draw waveform on canvas
   useEffect(() => {
@@ -225,6 +321,11 @@ export function AudioWaveform({
 
     canvas.width = Math.round(canvasWidth * dpr);
     canvas.height = Math.round(canvasHeight * dpr);
+    // The window's own offset, not 0 — this is what makes a scrolled window's
+    // canvas line up with the slice of the clip it actually drew (ESCSUITE-13
+    // round 2, MAJOR-3). Deleting this line draws the right audio in the
+    // wrong place: the middle of a long clip's waveform, painted over its
+    // beginning.
     canvas.style.left = `${offsetPx}px`;
     canvas.style.width = `${canvasWidth}px`;
     canvas.style.height = `${canvasHeight}px`;
@@ -242,10 +343,10 @@ export function AudioWaveform({
     const centerY = canvasHeight / 2;
     const amplitude = (canvasHeight / 2) * 0.85; // Leave some padding
 
-    // One bar per *sample*, not per pixel: at the fallback's whole-clip
-    // resolution this draws exactly as before, but once a window resamples to
-    // more entries than the canvas has CSS pixels (ESCSUITE-13's device-pixel
-    // resolution), each bar is a fraction of a CSS pixel wide — which the
+    // One bar per *sample*, not per pixel: at a 1-sample-per-pixel window
+    // this draws exactly as before, but once a window resamples to more
+    // entries than the canvas has CSS pixels (the device-pixel-resolution
+    // case), each bar is a fraction of a CSS pixel wide — which the
     // `scale(dpr)` above turns into a whole device pixel, giving the window
     // genuinely more distinct bars rather than the same ones stretched wider.
     const barWidth = canvasWidth / displayPeaks.length;
@@ -262,16 +363,7 @@ export function AudioWaveform({
       const barHeight = Math.max(1, maxY - minY);
       ctx.fillRect(x, minY, barWidth, barHeight);
     }
-  }, [
-    displayPeaks,
-    visibleWidthPx,
-    offsetPx,
-    height,
-    color,
-    isAudioClip,
-    isSelected,
-    dpr,
-  ]);
+  }, [displayPeaks, visibleWidthPx, offsetPx, height, color, isAudioClip, isSelected, dpr]);
 
   if (!peaks || peaks.length === 0 || width <= 0 || height <= 0) {
     return null;

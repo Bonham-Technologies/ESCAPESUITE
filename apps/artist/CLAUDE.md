@@ -2507,14 +2507,14 @@ The fix moves the unit of resampling from "the clip" to "the slice of the clip a
 screen": `TimelineTrack` computes each clip's `visibleRangePx` — the intersection of its box
 with `Timeline`'s `scrollLeft`/`containerWidth` (both exposed from `useVirtualizedTimeline`,
 previously unused outside it) — and passes it to `AudioWaveform`. A clip whose whole box fits
-on screen gets `undefined` (the **zoomed-out fallback**: resample the whole clip to
-`FALLBACK_SAMPLE_CAP` = 2000, unchanged from before, since there is no window narrower than
-the clip to speak of). A clip wider than the viewport gets `{ offset, width }` in clip-local
-pixels, and resamples only `getPeaksForRange`'s slice for that window, to
-`visibleWidthPx * devicePixelRatio` samples (capped at `MAX_BACKING_DIMENSION` = 16000, the
-same real browser limit the old clamp cited) — so scrolling or zooming in on a wide clip keeps
-shrinking the *time span* one resample covers, which is what actually buys detail, rather than
-stretching the same whole-clip array wider. The resample itself is a `useMemo` over primitives
+on screen gets `undefined` (a zero-allocation shortcut: there is no window narrower than the
+clip to speak of). A clip wider than the viewport gets `{ offset, width }` in clip-local
+pixels. Either way, `AudioWaveform` resamples only `getPeaksForRange`'s slice for that window
+— the whole clip's range in the `undefined` case — so scrolling or zooming in on a wide clip
+keeps shrinking the *time span* one resample covers, which is what actually buys detail, rather
+than stretching the same whole-clip array wider. (Round 2, below, replaced the sample-count
+formula sketched in the original PR here with a continuous one and added scroll-side
+throttling; see that section for what actually ships.) The resample itself is a `useMemo` over primitives
 derived from props (never the `visibleRangePx` object's identity, so a `TimelineTrack`
 re-render that leaves the window unchanged — a clip drag elsewhere on the same row, a
 playback tick — costs nothing); each `AudioWaveform` instance also keeps a small
@@ -2529,6 +2529,72 @@ window's, or the whole clip's in the fallback) clamped to `MAX_BACKING_DIMENSION
 they can never disagree. The canvas is also repositioned with an explicit `style.left` (the
 window's offset, 0 in the fallback) rather than relying on `.waveform`'s CSS default, since it
 no longer spans the clip's full box when windowed.
+
+**Round 2 (same ticket, same day): the fix above was correct but too expensive on scroll, and
+left a visible seam.** A scroll fires faster than it renders — a trackpad or inertial scroll can
+raise many `scroll` events inside one animation frame — and each one wrote `scrollLeft` into
+React state that every on-screen audio clip's window depends on, so one scroll *event* (not
+frame) cost one full `resamplePeaks` allocation per visible clip, with the request itself
+overshooting the source's real 100 peaks/sec envelope by 5–10x (a 6s window asked for
+thousands of samples a 600-peak source cannot supply, and `resamplePeaks` dutifully
+duplicated what it had to answer). There was also a visible discontinuity exactly at the
+fallback/windowed boundary — a clip that had just filled the viewport read 2000 samples, the
+same clip scrolled one pixel further read several thousand, and the envelope visibly flattened
+at that frame. Four changes, all in `AudioWaveform.tsx` unless noted:
+
+- **The window is quantised to a 64px grid** (`WINDOW_BUCKET_PX`, `bucketWindow`) before
+  anything downstream reads it — rounding the start down and the end up, so the bucketed window
+  always contains what was actually asked for. A scroll that moves by less than one bucket
+  changes nothing: not the memo's dependencies, not the cache key, not the canvas's size or
+  position. This also closes the discontinuity above as a side effect: the bucketed window is
+  usually a little *wider* than the viewport, which hides a frame or two of scroll/render lag
+  behind its edges.
+- **There is no separate "fallback mode" any more.** `targetSamplesFor` runs one formula
+  everywhere: at least `FALLBACK_SAMPLE_FLOOR` (2000) samples when the window's own data
+  supports it, otherwise one sample per device pixel of the window — but *never* more samples
+  than `getPeaksForRange` actually returned for that window (`windowPeakCount`, no overshoot).
+  Because the formula is continuous in the window's own pixel width rather than switching on
+  "is this windowed at all", there is no boundary left to be discontinuous across, and
+  `TimelineTrack`'s `visibleRangeFor` still reports no window (`undefined`) for a clip that
+  fully fits on screen purely as a zero-allocation shortcut, not because the arithmetic differs.
+- **The scroll handler itself is rAF-coalesced** (`useScrollSync.ts`'s `handleTrackScroll`):
+  the ruler and the track headers are synchronous DOM writes as before, but the call that feeds
+  React state (and therefore every visible clip's resample) is deferred to at most once per
+  animation frame, latest `scrollLeft` wins — the same pattern `useVirtualizedTimeline.ts`'s
+  `useScrollTracker` already used elsewhere in this file, just not on this path.
+- **`resamplePeaks` (`utils/waveform.ts`) takes an optional reusable output array.** Each
+  `AudioWaveform` instance keeps a small pool of evicted entries' arrays
+  (`WaveformCache.freeBuffers`) and hands one to a cache-miss resample instead of letting it
+  allocate fresh — `resamplePeaks` mutates each `{min,max}` slot already at an index rather
+  than replacing it, and never aliases a source peak object (the old single-sample branch
+  returned `peaks[i]` directly, which would have let a later mutation of a reused buffer
+  corrupt the caller's own data).
+
+  The cache itself (`WaveformCache`) is also now a real LRU, not FIFO: a hit deletes and
+  re-inserts its `Map` key, which places it at the end, so eviction — always from the front —
+  never removes a window the user keeps scrolling back to. It is bounded by total samples held
+  (`MAX_CACHE_SAMPLES` = 2,000,000, a circuit breaker rather than a tight budget now that a
+  window's own size is capped at its source peak count) rather than by entry count, and its key
+  additionally includes `startTime`/`endTime`/`sourceDuration` — the window's pixels alone
+  under-specify what `getPeaksForRange` actually reads, so a trim that moves those without
+  moving the clip's pixel window must still miss rather than reading back a stale slice.
+- **`useScrollSync.ts`'s container-width measurement moved from a passive effect to
+  `useLayoutEffect`.** A passive effect runs after the first paint, so `containerWidth` stayed
+  at its initial 0 for one frame, `viewportRight` read `Infinity`, and every clip — including
+  one wide enough that the (then-)fallback path clamped its canvas — took the whole-clip path
+  for that one frame, visibly compressing a wide clip's waveform into the left part of its box
+  until the real width arrived. A layout effect runs before paint, so the browser never shows
+  that frame.
+
+**What the fix is actually worth**: production peaks are still extracted at 100/sec
+(`utils/waveform.ts`), which is now **the** binding ceiling above roughly one screen pixel per
+10ms of clip (\~100px/sec of clip on screen) — past that point `targetSamplesFor` is capped by
+`windowPeakCount`, not by pixels, and more zoom buys nothing further without raising the
+extraction rate too. Below that point, a 60s clip's finest window improves from 30ms/sample
+(whole clip ÷ 2000) to the source's own 10ms/sample floor — about **3x**, not the order of
+magnitude a dense synthetic test source can show. The ticket's own worst case is where it
+matters most: a 10-minute clip's whole-clip fallback was 300ms/sample, so the same 10ms floor
+there is about **30x**.
 
 Waveform visualization adapts to clip selection state:
 - **Default colors**: Purple (`rgba(138, 43, 226, 0.6)`) for audio, blue tint for video with audio

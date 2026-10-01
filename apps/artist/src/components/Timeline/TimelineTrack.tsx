@@ -88,6 +88,36 @@ function visibleRangeFor(
   return { offset, width };
 }
 
+/**
+ * `visibleRangeFor`, but handing back the *same* object across renders when
+ * its offset and width haven't changed for this clip (ESCSUITE-13 round 2,
+ * NIT-2). A clip drag elsewhere on this track re-renders every row on every
+ * pointer frame, and most of those renders move nothing about a clip that
+ * isn't the one being dragged — `AudioWaveform` doesn't key its memo on this
+ * object's identity either way (see its own `visibleRangePx` doc), so this is
+ * a pure allocation saving, never a correctness requirement.
+ */
+function stableVisibleRange(
+  cache: Map<string, { offset: number; width: number }>,
+  clipId: string,
+  clipX: number,
+  clipWidth: number,
+  viewportLeft: number,
+  viewportRight: number
+): { offset: number; width: number } | undefined {
+  const computed = visibleRangeFor(clipX, clipWidth, viewportLeft, viewportRight);
+  if (!computed) {
+    cache.delete(clipId);
+    return undefined;
+  }
+  const cached = cache.get(clipId);
+  if (cached && cached.offset === computed.offset && cached.width === computed.width) {
+    return cached;
+  }
+  cache.set(clipId, computed);
+  return computed;
+}
+
 interface TimelineTrackProps {
   track: Track;
   /**
@@ -165,6 +195,8 @@ export const TimelineTrack = React.memo(function TimelineTrack({
 }: TimelineTrackProps) {
   /** The box every clip on this row draws in — see `clipBoxHeightFor`. */
   const clipBoxHeight = clipBoxHeightFor(track.height);
+  /** Per-clip `visibleRangePx` objects, reused across renders — see `stableVisibleRange`. */
+  const visibleRangeCacheRef = React.useRef(new Map<string, { offset: number; width: number }>());
 
   return (
     <div
@@ -236,7 +268,14 @@ export const TimelineTrack = React.memo(function TimelineTrack({
                 startTime={clip.startTime}
                 endTime={clip.endTime}
                 width={clipWidth}
-                visibleRangePx={visibleRangeFor(clipX, clipWidth, viewportLeft, viewportRight)}
+                visibleRangePx={stableVisibleRange(
+                  visibleRangeCacheRef.current,
+                  clip.id,
+                  clipX,
+                  clipWidth,
+                  viewportLeft,
+                  viewportRight
+                )}
                 height={clipBoxHeight}
                 isAudioClip={isAudioClip}
                 isSelected={isSelected}
