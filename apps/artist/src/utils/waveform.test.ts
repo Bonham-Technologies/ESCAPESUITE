@@ -78,6 +78,52 @@ describe('waveform utilities', () => {
       expect(result[0].max).toBe(0.8);
     });
 
+    describe('the single-sample bucket branch (coverage round, line ~131)', () => {
+      // `resamplePeaks`' single-sample path (a bucket narrower than one
+      // source sample: `endIndex <= startIndex`) reads `peaks[startIndex]`
+      // defensively — `if (single) { ... }` — but for any *dense* `peaks`
+      // array this check's false side is mathematically unreachable:
+      // `startIndex = Math.floor(i * ratio)` with `ratio = peaks.length /
+      // targetSamples` and `i < targetSamples` always satisfies `startIndex
+      // < peaks.length`, so `peaks[startIndex]` is always a real element.
+      // The two cases below exercise both sides directly rather than
+      // relying on it showing up incidentally inside a differently-focused
+      // test ("upsamples by repeating peaks" above already takes the true
+      // side, just not as the thing it's asserting on).
+      it('copies the one real source sample when a bucket is far narrower than it (true side)', () => {
+        // ratio = 1/49: every one of the 49 buckets maps to at most the
+        // single real sample at index 0 — confirmed by construction (not
+        // asserted here) to never take the multi-sample branch at all, so
+        // this is a clean, unambiguous exercise of the true side on every
+        // iteration, first and last included.
+        const peaks: WaveformPeak[] = [{ min: -0.6, max: 0.9 }];
+        const result = resamplePeaks(peaks, 49);
+
+        expect(result).toHaveLength(49);
+        expect(result[0]).toEqual({ min: -0.6, max: 0.9 });
+        expect(result[48]).toEqual({ min: -0.6, max: 0.9 });
+      });
+
+      it('defaults a bucket to {min:0,max:0} when its source sample is missing (false side)', () => {
+        // Same 1-source/49-bucket shape as above — chosen so that, like
+        // that test, every bucket takes the single-sample branch and none
+        // ever reaches the multi-sample `else` (which has no defensive
+        // check of its own and would throw on a missing element instead of
+        // defaulting). The one source "sample" is a hole, not an element —
+        // `peaks[0]` is `undefined` even though `0` is a valid index — the
+        // only way to make `if (single)` false for a dense-looking array,
+        // since a real array can never do it (see the describe's own
+        // comment). This is the fallback `resamplePeaks` falls back to
+        // rather than throwing on a malformed/sparse `peaks` array.
+        const peaks: WaveformPeak[] = new Array(1);
+        const result = resamplePeaks(peaks, 49);
+
+        expect(result).toHaveLength(49);
+        expect(result[0]).toEqual({ min: 0, max: 0 });
+        expect(result[48]).toEqual({ min: 0, max: 0 });
+      });
+    });
+
     describe('with a reusable output buffer (ESCSUITE-13 round 2, MAJOR-1(d))', () => {
       it('writes into and returns the given buffer instead of allocating', () => {
         const peaks: WaveformPeak[] = [
