@@ -774,14 +774,27 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
   /**
    * `.progressFill` only exists in the DOM for the brief window a file is
-   * `'processing'` (ESCSUITE-4 review, QUALITY-1: a first version of this
-   * test waited up to 3s to catch it live and skipped the whole assertion if
-   * it missed — silently passing on a fast machine without checking anything).
-   * Reading the compiled CSS-module class name straight out of the loaded
-   * stylesheet — it is declared whether or not any element currently carries
-   * it — and asserting against a probe element this test creates and owns
-   * removes the timing dependency entirely: the probe exists for exactly as
-   * long as the assertion needs it to.
+   * `'processing'` (ESCSUITE-4 review round 1, QUALITY-1: a first version of
+   * this test waited up to 3s to catch it live and skipped the whole
+   * assertion if it missed — silently passing on a fast machine without
+   * checking anything). Reading the compiled CSS-module class name straight
+   * out of the loaded stylesheet — it is declared whether or not any element
+   * currently carries it — and asserting against a probe element this test
+   * creates and owns removes the timing dependency entirely: the probe
+   * exists for exactly as long as the assertion needs it to.
+   *
+   * ESCAPEARTIST has more than one CSS module with a local class literally
+   * named `progressFill` — `ExportDialog.module.css`'s has no `animation` at
+   * all — so round 2 found matching on the selector text alone picks
+   * whichever one `document.styleSheets` happens to list first, not
+   * necessarily `VideoUploader.module.css`'s. Requiring the same rule's
+   * `animation` declaration to also name the pulse keyframes ties the two
+   * together and finds the right one regardless of sheet order.
+   *
+   * The keyframe name itself is also a CSS-module-scoped identifier (e.g.
+   * `_pulse_161md_1`, confirmed by inspecting the dev server's compiled
+   * CSS), never the literal `pulse` — callers match `/pulse/i` rather than
+   * asserting equality against it.
    */
   async function pulseAnimationName(targetPage: Page): Promise<string> {
     await targetPage.goto(`${ARTIST_URL}/?suppressRestore=1`)
@@ -796,6 +809,7 @@ test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
           continue
         }
         for (const rule of Array.from(rules)) {
+          if (!/animation:[^;]*pulse/i.test(rule.cssText)) continue
           const match = rule.cssText.match(/\.([\w-]*progressFill[\w-]*)/)
           if (match) return match[1]
         }
@@ -803,7 +817,9 @@ test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
       return null
     })
     if (!progressFillClass) {
-      throw new Error('could not find the compiled .progressFill class name in any stylesheet')
+      throw new Error(
+        'could not find a .progressFill rule whose animation names the pulse keyframes in any stylesheet'
+      )
     }
 
     return targetPage.evaluate((className) => {
@@ -826,14 +842,18 @@ test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
     expect(await pulseAnimationName(page)).toBe('none')
 
     // `no-preference`, in a separate browser context so this check never
-    // shares a page with the `reduce` one above: the pulse is still on,
-    // which is what proves the assertion above is actually exercising the
-    // media query rather than a typo (`animation: none` unconditionally,
-    // say) that would read "none" either way.
+    // shares a page with the `reduce` one above: the pulse is still running
+    // (a hashed keyframe name, e.g. `_pulse_161md_1`, hence the pattern
+    // rather than an exact match), which is what proves the assertion above
+    // is actually exercising the media query rather than a typo
+    // (`animation: none` unconditionally, say) that would read "none"
+    // either way.
     const context = await browser.newContext({ reducedMotion: 'no-preference' })
     try {
       const otherPage = await context.newPage()
-      expect(await pulseAnimationName(otherPage)).toBe('pulse')
+      const name = await pulseAnimationName(otherPage)
+      expect(name).not.toBe('none')
+      expect(name).toMatch(/pulse/i)
     } finally {
       await context.close()
     }
