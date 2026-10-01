@@ -35,20 +35,38 @@ describe('export support probes', () => {
     restores.push(() => webcodecs.uninstall())
 
     expect(isMP4ExportSupported()).toBe(true)
-    expect(isWebMExportSupported()).toBe(true)
   })
 
-  it.each(['VideoEncoder', 'VideoDecoder', 'VideoFrame'])(
-    'reports export as unsupported without %s',
-    (missing) => {
+  it('reports WebM export as supported when it can configure VP9', async () => {
+    const webcodecs = installWebCodecsDoubles()
+    restores.push(() => webcodecs.uninstall())
+
+    await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+  })
+
+  it.each(['VideoEncoder', 'VideoFrame'])(
+    'reports both MP4 and WebM export as unsupported without %s',
+    async (missing) => {
       const webcodecs = installWebCodecsDoubles()
       restores.push(() => webcodecs.uninstall())
       restores.push(removeGlobal(missing))
 
       expect(isMP4ExportSupported()).toBe(false)
-      expect(isWebMExportSupported()).toBe(false)
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(false)
     }
   )
+
+  // ESCSUITE-22: WebM never decodes through WebCodecs — it seeks
+  // HTMLVideoElements directly — so unlike MP4 it does not need VideoDecoder.
+  // The two probes used to be the same function; this is the split.
+  it('reports MP4 as unsupported without VideoDecoder, but leaves WebM supported', async () => {
+    const webcodecs = installWebCodecsDoubles()
+    restores.push(() => webcodecs.uninstall())
+    restores.push(removeGlobal('VideoDecoder'))
+
+    expect(isMP4ExportSupported()).toBe(false)
+    await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+  })
 })
 
 describe('exportToWebM', () => {
