@@ -15,7 +15,7 @@ import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { isWebCodecsAvailable } from './frameSource';
-import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback } from './exportTypes';
+import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback, ExportLogEntry } from './exportTypes';
 import { openOutputFrame, projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
@@ -26,6 +26,7 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   getActiveTransition,
+  ExportError,
 } from './exportTypes';
 import {
   drawMediaWithFrame,
@@ -42,31 +43,12 @@ import {
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
 
-/**
- * Structured log entry for export diagnostics
- */
-export interface ExportLogEntry {
-  phase: string;
-  detail: string;
-  timestamp: number;
-}
-
-/**
- * Error class that carries the export diagnostic log for debugging
- */
-export class ExportError extends Error {
-  public readonly exportLog: ExportLogEntry[];
-  public readonly frameIndex: number | undefined;
-  public readonly totalFrames: number | undefined;
-
-  constructor(message: string, exportLog: ExportLogEntry[], frameIndex?: number, totalFrames?: number) {
-    super(message);
-    this.name = 'ExportError';
-    this.exportLog = exportLog;
-    this.frameIndex = frameIndex;
-    this.totalFrames = totalFrames;
-  }
-}
+// `ExportLogEntry` and `ExportError` now live in exportTypes.ts, so exportWebM.ts
+// can import them without reaching into this module; re-exported here so every
+// existing `import { ExportError } from './exportMP4'` (and the `exporter.ts`
+// barrel, which re-exports from here) keeps resolving unchanged.
+export type { ExportLogEntry } from './exportTypes';
+export { ExportError } from './exportTypes';
 
 /**
  * Export timeline to MP4 using WebCodecs + Mediabunny
