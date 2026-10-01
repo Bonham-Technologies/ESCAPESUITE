@@ -183,12 +183,18 @@ export function hitTestHandles(
     if (handle) return handle;
   }
 
-  // Second pass: Check body hit on ALL clips in z-order (highest first)
-  // Skip clips that have custom keyframes (they can only be manipulated in keyframe mode)
+  // Second pass: Check body hit on ALL clips in z-order (highest first),
+  // keyframed ones included. A keyframed clip is only *manipulable* from the
+  // keyframe panel (RESTRICTION 2 above skips it in the handle passes), but it
+  // still occupies the pixels it is drawn at — at its *animated* position,
+  // since getOverlayBounds below takes currentTime and evaluates the same
+  // getAnimatedValues the preview draws with. Reporting a hit here, rather
+  // than skipping to whatever is underneath, is what stops a click from
+  // falling through a keyframed clip to the one on the lower track. The
+  // caller (handleMouseDown in useTransformHandles.ts) is the one that turns
+  // this `move` into a refusal — selecting the clip without starting a drag —
+  // the same way it already does for a clip on a locked track.
   for (const { clip } of manipulableClips) {
-    // RESTRICTION 2: Skip clips with custom keyframes when not in keyframe mode
-    if (hasCustomKeyframes(clip)) continue;
-
     const clipType = getClipType(clip, sourceVideos);
     if (!clipType) continue;
 

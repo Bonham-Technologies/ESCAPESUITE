@@ -919,6 +919,28 @@ the reported box by `±textWidth / 2` — but that offset has to be rotated alon
 rotation grows — a full half-width off at 90°. Centre-aligned text is unaffected: its anchor
 and centre already coincide, so the offset is zero either way.
 
+**A keyframed clip is opaque to the pointer, not invisible to it** (ESCSUITE-3). Outside
+keyframe mode a clip carrying custom keyframes has no live handles — RESTRICTION 2 in
+`hitTestHandles` skips it in both handle passes, since it is only movable from the keyframe
+panel — but `hitTestHandles`' second pass (the z-order body test over every clip) no longer
+`continue`s past it the way it used to. It reports the same `{ clipId, clipType, mode: 'move'
+}` any other clip's body would, at the clip's **animated** position for the current time
+(`getOverlayBounds` already evaluates `getAnimatedValues` for this, with no `suppressPreset` —
+that option is a transition's alone). A bare `continue` there used to let the click fall
+through to whatever clip was on the track below, or, with nothing behind it, start a marquee
+whose release deselected everything. `useTransformHandles.ts`'s `handleMouseDown` and
+`getCursor` are what turn that body hit into a refusal, reusing ESCSUITE-88's shape verbatim:
+`geometry.hasCustomKeyframes(clip) && !isKeyframeMode` (the body-hit's own clip, in
+`handleMouseDown`) or `geometry.clipHasCustomKeyframes(clips, hit.clipId) && !isKeyframeMode`
+(by id, in `getCursor`, which only has the hit's `clipId`) selects the clip and starts nothing
+— no `gestureHistory.begin()`, no drag state, no window listeners — and the cursor reads
+`not-allowed`, exactly as a clip on a locked track does. `isKeyframeMode` (`keyframePanelOpen
+&& clip.id === selectedClipId`) is the exemption: inside keyframe mode, for the clip the panel
+has open, a drag is how a keyframe gets set, so it is not refused there.
+`clipHasCustomKeyframes` (`previewGeometry.ts`) is `hasCustomKeyframes` by id rather than by
+clip, mirroring `clipOnLockedTrack`'s shape (`store/trackLock.ts`) for the one caller — the
+cursor — that only has an id to ask with.
+
 **The playhead position does not re-render the preview, the timeline body, or `App`.**
 `usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every
 animation frame — a React render (and a forced layout) fifty times a second so a timecode
