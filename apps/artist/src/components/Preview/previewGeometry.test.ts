@@ -6,6 +6,7 @@
 // copied off a run.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
+  clipHasCustomKeyframes,
   contentBox,
   getCanvasPosition,
   getClipType,
@@ -425,6 +426,19 @@ describe('hasCustomKeyframes', () => {
     const clip = makeClip({ animation: makeAnimation({ keyframes: { volume: [kf(0, 0.5)] } }) })
 
     expect(hasCustomKeyframes(clip)).toBe(false)
+  })
+})
+
+describe('clipHasCustomKeyframes', () => {
+  it('reads the same answer as hasCustomKeyframes, by id', () => {
+    const clip = makeClip({ animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }) })
+
+    expect(clipHasCustomKeyframes([clip], clip.id)).toBe(true)
+    expect(clipHasCustomKeyframes([makeClip()], 'clip1')).toBe(false)
+  })
+
+  it('is false for an id that names no clip, the way clipOnLockedTrack is for a locked check', () => {
+    expect(clipHasCustomKeyframes([makeClip()], 'not-in-the-scene')).toBe(false)
   })
 })
 

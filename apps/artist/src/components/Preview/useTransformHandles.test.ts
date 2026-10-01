@@ -157,6 +157,36 @@ describe('useTransformHandles drag listeners', () => {
     expect(result.current.cursor).toBe('default')
   })
 
+  // ESCSUITE-3. A clip carrying custom keyframes is picked like a clip on a
+  // locked track — selected, with no gesture, so it cannot be dragged, resized
+  // or rotated from the canvas while the panel is closed — rather than being
+  // treated as if the pixels it is drawn at were empty.
+  it('selects a clip with custom keyframes without starting a gesture', async () => {
+    const shape = addShape()
+    store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+    store().setSelectedClipId(null)
+    const { result } = mountHandles()
+
+    await act(async () => result.current.handleMouseDown(at(960, 540)))
+
+    expect(store().selectedClipId).toBe(shape.id)
+    expect(dragTypes(addListener)).toEqual([])
+    expect(result.current.marqueeStart).toBeNull()
+  })
+
+  // The flip side: inside keyframe mode, for the clip the panel has open, a
+  // drag is exactly how a keyframe gets set, so it is not refused.
+  it('still starts a gesture on a keyframed clip once the keyframe panel is open for it', async () => {
+    const shape = addShape()
+    store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+    store().setKeyframePanelOpen(true)
+    const { result } = mountHandles()
+
+    await act(async () => result.current.handleMouseDown(at(960, 540)))
+
+    expect(dragTypes(addListener)).toEqual(['mousemove', 'mouseup'])
+  })
+
   it('binds nothing while the transport is playing', async () => {
     addShape()
     store().setIsPlaying(true)
@@ -212,6 +242,28 @@ describe('useTransformHandles cursor', () => {
     expect(await cursorAt(960, 540 - SHAPE.halfH - GRIP)).toBe('not-allowed')
     // Empty canvas is still empty canvas — the marquee is unaffected.
     expect(await cursorAt(100, 100)).toBe('default')
+  })
+
+  // ESCSUITE-3: the same promise as a locked row's — a press over a keyframed
+  // clip, panel closed, selects it and does nothing else.
+  it('offers not-allowed over a clip with custom keyframes, panel closed', async () => {
+    const shape = addShape()
+    store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+
+    expect(await cursorAt(960, 540)).toBe('not-allowed')
+    // Empty canvas is still empty canvas.
+    expect(await cursorAt(100, 100)).toBe('default')
+  })
+
+  // The flip side: once the keyframe panel is open for that clip, a drag is
+  // how a keyframe gets set, so the cursor goes back to promising one.
+  it('offers the ordinary drag cursors once the keyframe panel is open for it', async () => {
+    const shape = addShape()
+    store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+    store().setKeyframePanelOpen(true)
+
+    expect(await cursorAt(960, 540)).toBe('move')
+    expect(await cursorAt(960, 540 - SHAPE.halfH - GRIP)).toBe('crosshair')
   })
 
   it('offers the default cursor over empty canvas', async () => {

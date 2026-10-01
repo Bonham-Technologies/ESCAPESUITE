@@ -132,10 +132,24 @@ describe('hitTestHandles body hits', () => {
     expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
   })
 
-  it('skips clips with custom keyframes while the keyframe panel is closed', () => {
+  // ESCSUITE-3: a keyframed clip is not manipulable from the canvas while the
+  // keyframe panel is closed, but it is not empty space either — it is picked
+  // like any other clip, just not moved from here (useTransformHandles.ts
+  // refuses the gesture the way it refuses one on a locked track).
+  it('treats a keyframed clip as opaque, not as nothing, while the keyframe panel is closed', () => {
     const clip = mediaClip({ animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }) })
 
-    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
+    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [clip] }))).toEqual({
+      clipId: 'clip1',
+      clipType: 'video',
+      mode: 'move',
+    })
+  })
+
+  it('one keyframe on one property is enough to make a clip opaque', () => {
+    const clip = mediaClip({ animation: makeAnimation({ keyframes: { opacity: [kf(0, 0.5)] } }) })
+
+    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [clip] }))?.clipId).toBe('clip1')
   })
 
   it('skips a clip whose kind it cannot name', () => {
@@ -189,6 +203,24 @@ describe('hitTestHandles z-order', () => {
   it('falls through the top clip to the one below when the top one misses', () => {
     // The text overlay is only 100x48, so a point 200px out clears it.
     expect(hitAt(CENTER_X + 150, CENTER_Y, scene({ clips: [media, text] }))?.clipId).toBe('clip1')
+  })
+
+  // ESCSUITE-3: the bug this regression pins was a bare `continue` past a
+  // keyframed clip in the z-order loop, which landed the click on whatever
+  // was underneath it instead.
+  it('does not fall through a keyframed clip to the plain one beneath it', () => {
+    const upper = makeTrack({ id: 'track2', index: 5 })
+    const plain = mediaClip({ id: 'plain', trackId: track.id })
+    const keyframed = mediaClip({
+      id: 'keyframed',
+      trackId: upper.id,
+      animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }),
+    })
+
+    expect(
+      hitAt(CENTER_X, CENTER_Y, scene({ clips: [plain, keyframed], tracks: [track, upper] }))
+        ?.clipId
+    ).toBe('keyframed')
   })
 })
 
@@ -279,14 +311,21 @@ describe('hitTestHandles handles on the selected clip', () => {
     expect(hitAt(CENTER_X, CENTER_Y, audioScene)).toBeNull()
   })
 
-  it('offers no handles on a selected clip with custom keyframes', () => {
+  it('offers no handles on a selected clip with custom keyframes, but still its body (ESCSUITE-3)', () => {
     const keyframed = scene({
       clips: [mediaClip({ animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }) })],
       selectedClipId: 'clip1',
     })
 
     expect(hitAt(CENTER_X, CENTER_Y - HALF_H - ROTATION_HANDLE_OFFSET, keyframed)).toBeNull()
-    expect(hitAt(CENTER_X, CENTER_Y, keyframed)).toBeNull()
+    // The first pass (handles on the selected clip) still declines it; the
+    // body hit comes from the second pass, which now treats it like any other
+    // clip rather than invisible to the pointer.
+    expect(hitAt(CENTER_X, CENTER_Y, keyframed)).toEqual({
+      clipId: 'clip1',
+      clipType: 'video',
+      mode: 'move',
+    })
   })
 
   it('offers no handles on a clip that is not the selected one', () => {
