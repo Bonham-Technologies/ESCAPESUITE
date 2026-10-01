@@ -639,6 +639,61 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     expect(sourceVideos[0].frameRate).toBe(30) // the hard-coded fallback, unchanged for an old file
   })
 
+  it('trusts a present row\'s own stored metadata for a meta-less file instead of re-probing the blob (ESCSUITE-151 round 2)', async () => {
+    const videoId = uniqueId('present-no-meta')
+    const stored: SourceVideo = {
+      id: videoId,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      recordedAt: 1700000000000,
+      waveformData: [
+        { min: -0.5, max: 0.5 },
+        { min: -0.2, max: 0.3 },
+      ],
+      hasAudio: true,
+      takeId: 'take-primary-id',
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: { position: 'bottom-right', size: 0.25, shape: 'circle' },
+      hasWebcam: true,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+
+    // If the load path fell back to extractMetadataFromBlob, this is what it
+    // would report — obviously different from what's stored, so the
+    // assertions below can only pass if the probe never ran.
+    media.script({ video: { duration: 999, videoWidth: 1, videoHeight: 1 } })
+
+    // An old-format entry for the same id: bytes, but no `meta` at all.
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(videoId),
+          videos: [
+            { id: videoId, name: 'take.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toEqual(stored)
+    expect(media.videos).toHaveLength(0) // extractMetadataFromBlob never ran
+
+    await deleteVideo(videoId)
+  })
+
   /** A .veditor file whose `meta` is built by hand rather than by saveProject. */
   function veditorFileWithMeta(videoId: string, meta: Record<string, unknown>, thumbnail?: string): File {
     return new File(
