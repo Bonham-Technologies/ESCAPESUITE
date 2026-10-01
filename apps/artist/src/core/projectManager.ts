@@ -254,8 +254,15 @@ export async function loadProject(
     // over re-probing (review round 2: re-probing here silently dropped all
     // three and replaced a known-good stored duration with a re-derived one,
     // for a file that happens to predate ESCSUITE-97 referencing a source
-    // that happens to still be live). Only a source this DB has never heard
-    // of — a genuinely old file, old source — falls back to reconstructing
+    // that happens to still be live). "Trusted" still means run through the
+    // same `resolveStoredDuration`/`resolveMetaDimensions` recovery the
+    // file-`meta` branch above uses, not copied unquestioned: the stored
+    // record can itself predate ESCSUITE-97 (or otherwise carry a
+    // `duration: Infinity`/unusable dimension of its own), and round 2's
+    // first attempt at this branch copied it straight through — reintroducing
+    // the exact Infinity bug ESCSUITE-97 fixed, just one layer further out
+    // (review round 3). Only a source this DB has never heard of — a
+    // genuinely old file, old source — falls back to reconstructing
     // everything from the blob (through `extractMetadataFromBlob`, which
     // itself now goes through the same duration probe every other importer
     // uses).
@@ -277,7 +284,9 @@ export async function loadProject(
         height,
       };
     } else if (existing) {
-      metadata = { ...existing.metadata };
+      const duration = await resolveStoredDuration(blob, existing.metadata);
+      const { width, height } = await resolveMetaDimensions(blob, existing.metadata, existing.metadata);
+      metadata = { ...existing.metadata, duration, width, height };
     } else {
       metadata = await extractMetadataFromBlob(blob, videoData);
     }
