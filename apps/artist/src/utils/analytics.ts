@@ -12,10 +12,6 @@ export const analytics = {
   projectCreated: () => trackEvent('Project Created'),
   projectSaved: () => trackEvent('Project Saved'),
 
-  // Editing events
-  overlayAdded: (type: 'text' | 'shape' | 'blur') =>
-    trackEvent('Overlay Added', { type }),
-
   // Export events
   exportStarted: (format: 'webm' | 'mp4') =>
     trackEvent('Export Started', { format }),

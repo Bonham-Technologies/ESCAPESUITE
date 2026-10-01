@@ -48,23 +48,6 @@ describe('analytics', () => {
     })
   })
 
-  describe('analytics.overlayAdded', () => {
-    it('tracks text overlay', () => {
-      analytics.overlayAdded('text')
-      expect(trackEvent).toHaveBeenCalledWith('Overlay Added', { type: 'text' })
-    })
-
-    it('tracks shape overlay', () => {
-      analytics.overlayAdded('shape')
-      expect(trackEvent).toHaveBeenCalledWith('Overlay Added', { type: 'shape' })
-    })
-
-    it('tracks blur overlay', () => {
-      analytics.overlayAdded('blur')
-      expect(trackEvent).toHaveBeenCalledWith('Overlay Added', { type: 'blur' })
-    })
-  })
-
   describe('analytics.exportStarted', () => {
     it('tracks WebM export start', () => {
       analytics.exportStarted('webm')

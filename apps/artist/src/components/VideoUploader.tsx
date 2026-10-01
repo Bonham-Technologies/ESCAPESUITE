@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processVideoFile, processImageFile, processAudioFile } from '../core/videoProcessor';
 import { getStorageEstimate, deleteVideo, resolveThumbnailUrl } from '../core/storage';
+import { analytics } from '../utils/analytics';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
@@ -241,6 +242,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
           metadata = await processVideoFile(file);
         }
         addSourceVideo(metadata);
+        analytics.videoImported(isImage ? 'image' : isAudio ? 'audio' : 'video');
 
         setUploads((prev) =>
           prev.map((u) =>
