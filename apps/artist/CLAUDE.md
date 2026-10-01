@@ -1611,6 +1611,48 @@ failure were still permanently removed. Unlike Clear Unused, Clear All can take 
 every clip that referenced a cleared source — so its confirm copy says so ("including any clip
 that still uses it").
 
+**The media library's motion and type scale** (ESCSUITE-4). The upload progress bar's
+`.progressFill` pulses opacity 1 → 0.5 → 1 forever while a file is `'processing'` — a real
+progress bar it is not, since the fill is already full width — and an unconditional
+`animation: pulse 1.5s ease-in-out infinite` ran for a viewer who had asked the OS for reduced
+motion (`grep -rn "prefers-reduced-motion" apps/ packages/` found nothing anywhere else in the
+repo either). `VideoUploader.module.css` now adds `@media (prefers-reduced-motion: reduce) {
+.progressFill { animation: none } }` *beside* the unconditional declaration, rather than only
+scoping the `@keyframes pulse` rule itself under `(prefers-reduced-motion: no-preference)` —
+an unscoped, merely-unreferenced `@keyframes` would still leave the computed `animation-name`
+reading `pulse`, and it is the explicit `animation: none` override that makes it read `none`.
+A finished upload's row used to pop out of the list outright, 2 s after `'complete'`, with no
+transition; `.uploadItem` now transitions `opacity` (`var(--transition-normal)`), the row is
+given `removing: true` (`.uploadItemRemoving { opacity: 0 }`) for one more
+`UPLOAD_ROW_FADE_MS` (200ms) before `VideoUploader.tsx`'s removal timer actually drops it from
+`uploads`, and `.uploadStatus` — the "Processing...", "Complete" and error text, which had no
+accessible announcement of any kind — now carries `role="status"` (an implicit
+`aria-live="polite"`, so no separate `aria-live` attribute is needed beside it). Separately,
+the library's six ad-hoc font sizes between 8px and 13px — `.mediaTypeBadge` at 8px,
+`.storageInfo` and `.storageClearButton` at 10px (plus the unused, `display: none`
+`.dropZoneHint`, also 10px), `.videoMeta` at 11px and `.videoName` at 13px — are now a small
+scale: badge and per-file metadata at 11px, the storage row at 11px, small buttons/controls at
+12px, and the filename stays the scale's largest size at 13px. `.mediaTypeBadge`'s padding is
+trimmed from `1px 4px` to `1px 3px` alongside the font bump (review round 1, QUALITY-2): it is
+`position: absolute` with only `bottom`/`right` set inside the 64x36px thumbnail, which has its
+own `overflow: hidden`, so nothing but the badge's own box size keeps it off the thumbnail's
+left and top edges — an `overflow: hidden` ancestor hides a box that spills past it rather than
+stopping it from spilling. Nothing else in the sidebar (`ResolutionPicker.module.css`,
+`App.module.css`) was already below 11px, so the floor holds across the whole panel. Pinned by
+`VideoUploader.test.tsx` (`role="status"`, and the fade's `removing` class surviving the first
+2000ms of the removal timer before the row actually leaves) and, end to end, by two
+`apps/e2e/tests/accessibility/core.spec.ts` cases: "the upload progress animation turns off
+under reduced motion and stays on without it" reads the compiled `.progressFill` class name
+straight out of the loaded stylesheet and asserts a probe element wearing it computes
+`animation-name: none` under `reducedMotion: 'reduce'` and `pulse` under `'no-preference'` in a
+second browser context — deliberately not timing-dependent on catching a real upload's brief
+`'processing'` window, which review round 1 found a first version of this test could miss
+entirely and silently pass without checking anything (QUALITY-1); and "no library text is
+smaller than 11px, and the media-type badge stays inside its thumbnail" uploads an inline 1x1
+PNG (the cheapest media kind that renders a `.mediaTypeBadge` at all — a plain video gets none)
+and asserts every leaf text node in the sidebar is at or above 11px and the badge's bounding box
+lies entirely within its thumbnail's.
+
 The **keyframe panel** (ESCSUITE-88, see "Keyframe Panel" above): `KeyframePanel` derives
 `trackLocked` from the whole-store read it already does and threads `locked` down to
 `KeyframeTrack`, `KeyframeGraph` and `useKeyframeGraphKeyboard`. A plain `<p>` under the title

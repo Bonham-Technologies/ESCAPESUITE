@@ -43,7 +43,8 @@
 
 .dropZoneHint {
   color: var(--text-muted);
-  font-size: 10px;
+  /* Type scale (ESCSUITE-4): controls read at 12px. */
+  font-size: 12px;
   display: none;
 }
 
@@ -61,6 +62,16 @@
   background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
   padding: var(--spacing-sm) var(--spacing-md);
+  /*
+   * ESCSUITE-4: a finished upload used to pop out of the list outright when
+   * its removal timer fired. `.uploadItemRemoving` (set for the last stretch
+   * of that timer, in VideoUploader.tsx) now fades it instead.
+   */
+  transition: opacity var(--transition-normal);
+}
+
+.uploadItemRemoving {
+  opacity: 0;
 }
 
 .uploadInfo {
@@ -93,6 +104,19 @@
   height: 100%;
   background: var(--accent-primary);
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+/*
+ * ESCSUITE-4: the pulse ran unconditionally for a viewer who has asked the OS
+ * for reduced motion. `animation: none` here — rather than only omitting the
+ * @keyframes — is what makes the computed `animation-name` actually read
+ * `none`; the @keyframes rule staying unscoped and merely unused would still
+ * leave `animation-name: pulse` in the computed style.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .progressFill {
+    animation: none;
+  }
 }
 
 @keyframes pulse {
@@ -155,6 +179,7 @@
 }
 
 .videoName {
+  /* Type scale (ESCSUITE-4): the filename, the scale's largest size. */
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
@@ -163,6 +188,7 @@
 }
 
 .videoMeta {
+  /* Type scale (ESCSUITE-4): badge and meta read at 11px. */
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 2px;
@@ -237,7 +263,8 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  font-size: 10px;
+  /* Type scale (ESCSUITE-4): the storage row reads at 11px. */
+  font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -276,7 +303,8 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 2px 6px;
-  font-size: 10px;
+  /* Type scale (ESCSUITE-4): controls read at 12px. */
+  font-size: 12px;
   color: var(--text-muted);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -412,9 +440,22 @@
   right: 2px;
   background: rgba(0, 0, 0, 0.7);
   color: white;
-  font-size: 8px;
+  /*
+   * Type scale (ESCSUITE-4): badge and meta read at 11px (was 8px). Only
+   * `bottom`/`right` are set here, so nothing but this box's own size keeps
+   * it off the thumbnail's left/top edges (the thumbnail's `overflow:
+   * hidden` would hide an overflow rather than prevent it). Padding is
+   * trimmed from the 8px-font value (1px 4px) to 1px 3px so the badge's own
+   * box — about 15px tall, about 29px wide for "IMG"/"AUD" at 11px bold with
+   * 0.5px letter-spacing — stays well inside the 64x36px thumbnail's corner
+   * (budget: under ~18px tall, under ~40px wide; ESCSUITE-4 review,
+   * QUALITY-2). The fit is pinned end to end by
+   * apps/e2e/tests/accessibility/core.spec.ts's badge/thumbnail containment
+   * check.
+   */
+  font-size: 11px;
   font-weight: 700;
-  padding: 1px 4px;
+  padding: 1px 3px;
   border-radius: 2px;
   letter-spacing: 0.5px;
 }

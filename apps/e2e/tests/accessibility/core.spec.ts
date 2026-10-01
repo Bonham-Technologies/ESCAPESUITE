@@ -764,6 +764,161 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   })
 })
 
+/**
+ * ESCSUITE-4: the media library's upload progress bar pulsed forever —
+ * `grep -rn "prefers-reduced-motion"` found nothing in the whole repo — and
+ * its six ad-hoc font sizes ran as small as 8px (a media-type badge). The
+ * fix wraps the pulse in `@media (prefers-reduced-motion: reduce)` and
+ * replaces the six sizes with a scale whose floor is 11px.
+ */
+test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
+  /**
+   * `.progressFill` only exists in the DOM for the brief window a file is
+   * `'processing'` (ESCSUITE-4 review round 1, QUALITY-1: a first version of
+   * this test waited up to 3s to catch it live and skipped the whole
+   * assertion if it missed — silently passing on a fast machine without
+   * checking anything). Reading the compiled CSS-module class name straight
+   * out of the loaded stylesheet — it is declared whether or not any element
+   * currently carries it — and asserting against a probe element this test
+   * creates and owns removes the timing dependency entirely: the probe
+   * exists for exactly as long as the assertion needs it to.
+   *
+   * ESCAPEARTIST has more than one CSS module with a local class literally
+   * named `progressFill` — `ExportDialog.module.css`'s has no `animation` at
+   * all — so round 2 found matching on the selector text alone picks
+   * whichever one `document.styleSheets` happens to list first, not
+   * necessarily `VideoUploader.module.css`'s. Requiring the same rule's
+   * `animation` declaration to also name the pulse keyframes ties the two
+   * together and finds the right one regardless of sheet order.
+   *
+   * The keyframe name itself is also a CSS-module-scoped identifier (e.g.
+   * `_pulse_161md_1`, confirmed by inspecting the dev server's compiled
+   * CSS), never the literal `pulse` — callers match `/pulse/i` rather than
+   * asserting equality against it.
+   */
+  async function pulseAnimationName(targetPage: Page): Promise<string> {
+    await targetPage.goto(`${ARTIST_URL}/?suppressRestore=1`)
+    await targetPage.waitForLoadState('networkidle')
+
+    const progressFillClass = await targetPage.evaluate(() => {
+      for (const sheet of Array.from(document.styleSheets)) {
+        let rules: CSSRuleList
+        try {
+          rules = sheet.cssRules
+        } catch {
+          continue
+        }
+        for (const rule of Array.from(rules)) {
+          if (!/animation:[^;]*pulse/i.test(rule.cssText)) continue
+          const match = rule.cssText.match(/\.([\w-]*progressFill[\w-]*)/)
+          if (match) return match[1]
+        }
+      }
+      return null
+    })
+    if (!progressFillClass) {
+      throw new Error(
+        'could not find a .progressFill rule whose animation names the pulse keyframes in any stylesheet'
+      )
+    }
+
+    return targetPage.evaluate((className) => {
+      const probe = document.createElement('div')
+      probe.className = className
+      document.body.appendChild(probe)
+      const name = window.getComputedStyle(probe).animationName
+      probe.remove()
+      return name
+    }, progressFillClass)
+  }
+
+  test('the upload progress animation turns off under reduced motion and stays on without it (ESCSUITE-4)', async ({
+    page,
+    browser,
+  }) => {
+    // `reduce`: the `@media (prefers-reduced-motion: reduce) { .progressFill
+    // { animation: none } }` override turns the pulse off entirely.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    expect(await pulseAnimationName(page)).toBe('none')
+
+    // `no-preference`, in a separate browser context so this check never
+    // shares a page with the `reduce` one above: the pulse is still running
+    // (a hashed keyframe name, e.g. `_pulse_161md_1`, hence the pattern
+    // rather than an exact match), which is what proves the assertion above
+    // is actually exercising the media query rather than a typo
+    // (`animation: none` unconditionally, say) that would read "none"
+    // either way.
+    const context = await browser.newContext({ reducedMotion: 'no-preference' })
+    try {
+      const otherPage = await context.newPage()
+      const name = await pulseAnimationName(otherPage)
+      expect(name).not.toBe('none')
+      expect(name).toMatch(/pulse/i)
+    } finally {
+      await context.close()
+    }
+  })
+
+  test('no library text is smaller than 11px, and the media-type badge stays inside its thumbnail (ESCSUITE-4)', async ({
+    page,
+  }) => {
+    await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
+    await page.waitForLoadState('networkidle')
+
+    // A 1x1 PNG, inline rather than a fixture file: `processImageFile` needs
+    // real, decodable image bytes (`<img>`'s `onload` has to fire), and an
+    // image is the cheapest media kind that renders a `.mediaTypeBadge` at
+    // all — a plain video gets none (QUALITY-2: the badge/thumbnail
+    // containment check below needs one on screen).
+    const onePixelPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64'
+    )
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'badge-fixture.png',
+      mimeType: 'image/png',
+      buffer: onePixelPng,
+    })
+
+    await expect(page.getByRole('button', { name: 'Add to timeline' })).toBeVisible({
+      timeout: 60_000,
+    })
+
+    // Every bit of rendered text in the sidebar that holds the uploader and
+    // the library — the one panel ESCSUITE-4 found six ad-hoc sizes in.
+    const sidebar = page.locator('aside', { has: page.locator('#media-library-title') })
+    const fontSizes = await sidebar.locator('*').evaluateAll((nodes) =>
+      nodes
+        .filter((node) => node.childElementCount === 0 && !!node.textContent?.trim())
+        .map((node) => parseFloat(window.getComputedStyle(node).fontSize))
+    )
+    expect(fontSizes.length).toBeGreaterThan(0)
+    for (const size of fontSizes) {
+      expect(size).toBeGreaterThanOrEqual(11)
+    }
+
+    // QUALITY-2: the badge's font-size grew 8px -> 11px; prove its box still
+    // sits inside the 64x36px thumbnail's corner rather than spilling past
+    // its left or top edge — which the thumbnail's own `overflow: hidden`
+    // would hide visually rather than prevent. `.mediaTypeBadge` is
+    // `position: absolute` with only `bottom`/`right` set, so nothing but
+    // its own (now smaller) padding keeps it off those two edges.
+    const badge = page.locator('[class*="mediaTypeBadge"]').first()
+    await expect(badge).toBeVisible()
+    const thumbnail = badge.locator('xpath=..')
+    const badgeBox = await badge.boundingBox()
+    const thumbnailBox = await thumbnail.boundingBox()
+    expect(badgeBox).not.toBeNull()
+    expect(thumbnailBox).not.toBeNull()
+    if (badgeBox && thumbnailBox) {
+      expect(badgeBox.x).toBeGreaterThanOrEqual(thumbnailBox.x)
+      expect(badgeBox.y).toBeGreaterThanOrEqual(thumbnailBox.y)
+      expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(thumbnailBox.x + thumbnailBox.width)
+      expect(badgeBox.y + badgeBox.height).toBeLessThanOrEqual(thumbnailBox.y + thumbnailBox.height)
+    }
+  })
+})
+
 test.describe('Color Contrast', () => {
   test('ESCAPEPLAN has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5173')

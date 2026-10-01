@@ -8,11 +8,25 @@ import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
 import styles from './VideoUploader.module.css';
 
+/**
+ * How long a finished upload's row fades before it leaves the list
+ * (ESCSUITE-4) — matches `--transition-normal` in `styles/index.css`, which
+ * `.uploadItem`'s own `transition: opacity` in `VideoUploader.module.css` is
+ * declared in terms of, so the two stay in step without a shared constant.
+ */
+const UPLOAD_ROW_FADE_MS = 200;
+
 interface UploadProgress {
   fileName: string;
   progress: number;
   status: 'uploading' | 'processing' | 'complete' | 'error';
   error?: string;
+  /**
+   * Set for the last stretch of a finished upload's "remove from the list"
+   * timer (ESCSUITE-4), so its row fades via `.uploadItemRemoving` instead of
+   * popping out of the list the instant the timer fires.
+   */
+  removing?: boolean;
 }
 
 interface StorageInfo {
@@ -286,11 +300,20 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         refreshStorageInfo();
 
         // Remove from upload list after a delay. The id is kept so the unmount
-        // cleanup above can call it off (ESCSUITE-120).
+        // cleanup above can call it off (ESCSUITE-120). The removal is a fade
+        // (ESCSUITE-4) rather than a pop: the row is marked `removing` for one
+        // transition's length, and only then does it actually leave the array.
         const timers = (removalTimersRef.current ??= new Set());
         const id = window.setTimeout(() => {
           timers.delete(id);
-          setUploads((prev) => prev.filter((u) => u.fileName !== file.name));
+          setUploads((prev) =>
+            prev.map((u) => (u.fileName === file.name ? { ...u, removing: true } : u))
+          );
+          const fadeId = window.setTimeout(() => {
+            timers.delete(fadeId);
+            setUploads((prev) => prev.filter((u) => u.fileName !== file.name));
+          }, UPLOAD_ROW_FADE_MS);
+          timers.add(fadeId);
         }, 2000);
         timers.add(id);
       } catch (error) {
@@ -439,10 +462,18 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
       {uploads.length > 0 && (
         <div className={styles.uploadList}>
           {uploads.map((upload, index) => (
-            <div key={index} className={`${styles.uploadItem} ${upload.status === 'error' ? styles.uploadError : ''}`}>
+            <div
+              key={index}
+              className={`${styles.uploadItem} ${upload.status === 'error' ? styles.uploadError : ''} ${upload.removing ? styles.uploadItemRemoving : ''}`}
+            >
               <div className={styles.uploadInfo}>
                 <span className={styles.uploadName}>{upload.fileName}</span>
-                <span className={styles.uploadStatus}>
+                {/*
+                  role="status" (ESCSUITE-4): this had no accessible announcement
+                  at all — a screen reader heard nothing as an upload moved from
+                  processing to complete or to an error.
+                */}
+                <span className={styles.uploadStatus} role="status">
                   {upload.status === 'processing' && 'Processing...'}
                   {upload.status === 'complete' && 'Complete'}
                   {upload.status === 'error' && upload.error}

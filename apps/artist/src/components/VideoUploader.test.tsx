@@ -271,7 +271,7 @@ describe('VideoUploader', () => {
       expect(valueWrites).toEqual([''])
     })
 
-    it('drops the finished upload from the list after a moment', async () => {
+    it('drops the finished upload from the list after a moment, fading first (ESCSUITE-4)', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
       render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
@@ -287,7 +287,86 @@ describe('VideoUploader', () => {
         vi.advanceTimersByTime(2000)
       })
 
+      // The removal is a fade, not a pop: the row is still there, marked for
+      // the transition, until the fade itself has had time to run.
+      const row = screen.getByText('Complete').closest(`.${styles.uploadItem}`)
+      expect(row).toHaveClass(styles.uploadItemRemoving)
+
+      act(() => {
+        vi.advanceTimersByTime(200)
+      })
+
       expect(screen.queryByText('Complete')).not.toBeInTheDocument()
+    })
+
+    // Coverage round: the fade-start map's `: u` arm — the sibling row left
+    // alone — was unreached, because every other case fades a lone upload.
+    // Stagger two uploads' own 2000ms timers (drop the second only after
+    // advancing partway through the first's) so the first's timer fires
+    // while the second's is still pending, and prove the second is both
+    // untouched (no `.uploadItemRemoving`) and still listed — then that both
+    // still leave on their own schedules.
+    it('fades only the upload whose own timer has fired, leaving a sibling untouched (ESCSUITE-4)', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file('first.mp4', 'video/mp4')] } })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(screen.getAllByText('Complete')).toHaveLength(1)
+
+      // 500ms into first.mp4's 2000ms removal timer before second.mp4 even
+      // arrives, so the two timers land 500ms apart rather than the same tick.
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file('second.mp4', 'video/mp4')] } })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(screen.getAllByText('Complete')).toHaveLength(2)
+
+      // first.mp4's timer reaches its 2000ms mark; second.mp4's (armed 500ms
+      // later) still has 500ms left.
+      act(() => {
+        vi.advanceTimersByTime(1500)
+      })
+
+      expect(screen.getByText('first.mp4').closest(`.${styles.uploadItem}`)).toHaveClass(
+        styles.uploadItemRemoving
+      )
+      const secondRow = screen.getByText('second.mp4').closest(`.${styles.uploadItem}`)
+      expect(secondRow).not.toHaveClass(styles.uploadItemRemoving)
+      expect(screen.getByText('second.mp4')).toBeInTheDocument()
+
+      // first.mp4's fade completes and it leaves; second.mp4 is still
+      // untouched — its own timer has not reached 2000ms yet.
+      act(() => {
+        vi.advanceTimersByTime(200)
+      })
+      expect(screen.queryByText('first.mp4')).not.toBeInTheDocument()
+      expect(screen.getByText('second.mp4').closest(`.${styles.uploadItem}`)).not.toHaveClass(
+        styles.uploadItemRemoving
+      )
+
+      // second.mp4 now reaches its own 2000ms mark and fades, independently.
+      act(() => {
+        vi.advanceTimersByTime(300)
+      })
+      expect(screen.getByText('second.mp4').closest(`.${styles.uploadItem}`)).toHaveClass(
+        styles.uploadItemRemoving
+      )
+
+      act(() => {
+        vi.advanceTimersByTime(200)
+      })
+      expect(screen.queryByText('second.mp4')).not.toBeInTheDocument()
     })
 
     // ESCSUITE-120: the 2 s "remove from the list" timer used to outlive the
@@ -315,6 +394,18 @@ describe('VideoUploader', () => {
       act(() => {
         vi.advanceTimersByTime(2000)
       })
+    })
+
+    // ESCSUITE-4: the status text had no accessible announcement at all — a
+    // screen reader heard nothing as an upload moved from processing to
+    // complete. role="status" carries an implicit aria-live="polite", so no
+    // separate aria-live attribute is needed alongside it.
+    it('announces the upload status to assistive tech (ESCSUITE-4)', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
+
+      expect(await screen.findByText('Complete')).toHaveAttribute('role', 'status')
     })
 
     it('rejects files that are not media at all', async () => {
