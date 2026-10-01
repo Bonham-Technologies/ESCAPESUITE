@@ -22,13 +22,16 @@ const decoder = vi.hoisted(() => ({
   disposedSources: [] as string[],
   terminated: 0,
   frames: [] as Array<{ sourceId: string; timestamp: number }>,
+  lastInitializeSignal: undefined as AbortSignal | undefined,
 }))
 
 vi.mock('./videoDecodeManager', () => ({
   VideoDecodeManager: class {
     static isSupported = () => decoder.supported
 
-    async initialize() {}
+    async initialize(signal?: AbortSignal) {
+      decoder.lastInitializeSignal = signal
+    }
 
     async loadSource(sourceId: string, _data: ArrayBuffer, _mimeType: string) {
       if (decoder.loadSourceError) throw decoder.loadSourceError
@@ -77,6 +80,7 @@ describe('frameManager', () => {
     decoder.disposedSources = []
     decoder.terminated = 0
     decoder.frames = []
+    decoder.lastInitializeSignal = undefined
     resetFrameRegistry()
 
     previousVideoFrame = (globalThis as unknown as Record<string, unknown>).VideoFrame
@@ -102,6 +106,14 @@ describe('frameManager', () => {
     it('reports WebCodecs disabled when the caller opts out', async () => {
       const manager = await createFrameManager(false)
       expect(manager.useWebCodecs).toBe(false)
+    })
+
+    // ESCSUITE-29 Mechanism 2: a cancelled export should not have to wait out
+    // the decode manager's full startup timeout, so the signal is forwarded.
+    it('forwards the abort signal to the decode manager', async () => {
+      const controller = new AbortController()
+      await createFrameManager(true, controller.signal)
+      expect(decoder.lastInitializeSignal).toBe(controller.signal)
     })
 
     it('reports WebCodecs disabled when the platform does not support it', async () => {

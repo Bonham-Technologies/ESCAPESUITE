@@ -7,6 +7,13 @@ import {
   type IFrameSource,
 } from './frameSource';
 
+// A mutable slot a test can fill in before calling factory.initialize(), so
+// the *next* MockVideoDecodeManager's initialize() rejects once (ESCSUITE-29
+// Mechanism 2: the decode worker failing to start). vi.hoisted so the mock
+// factory below — itself hoisted above this file's imports — can close over
+// it, and the test body can reach it through the mocked class's own field.
+const nextInitializeRejection = vi.hoisted(() => ({ error: null as Error | null }));
+
 // Mock VideoDecodeManager - the factory must be self-contained
 vi.mock('./videoDecodeManager', () => {
   // Define mock class inside factory to avoid hoisting issues
@@ -14,8 +21,16 @@ vi.mock('./videoDecodeManager', () => {
 
   class MockVideoDecodeManager {
     static isSupported = mockFn().mockReturnValue(true);
+    static __nextInitializeRejection = nextInitializeRejection;
 
-    initialize = mockFn().mockResolvedValue(undefined);
+    initialize = mockFn().mockImplementation(() => {
+      if (nextInitializeRejection.error) {
+        const error = nextInitializeRejection.error;
+        nextInitializeRejection.error = null;
+        return Promise.reject(error);
+      }
+      return Promise.resolve(undefined);
+    });
     loadSource = mockFn().mockResolvedValue({
       sourceId: 'test-source',
       duration: 10,
@@ -179,6 +194,7 @@ describe('frameSource', () => {
   afterEach(() => {
     vi.clearAllMocks();
     videoFactory = () => new MockHTMLVideoElement();
+    nextInitializeRejection.error = null;
   });
 
   describe('WebCodecsFrameSource', () => {
@@ -426,6 +442,49 @@ describe('frameSource', () => {
       await factory.initialize();
       // Factory should still be enabled after init
       expect(factory.isWebCodecsEnabled()).toBe(true);
+    });
+
+    // ESCSUITE-153 / ESCSUITE-29 Mechanism 2: a decode worker that fails to
+    // start (missing from a standalone download, blocked by CSP, timed out)
+    // must not fail or hang the whole export — it should degrade to the
+    // <video>-element path, the same fallback createSource() already takes
+    // per-source for an unsupported codec.
+    it('falls back to the element path when the decode worker will not start', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      nextInitializeRejection.error = new Error('Decode worker did not become ready within 10000ms');
+
+      const factory = new FrameSourceFactory(true);
+      await factory.initialize();
+
+      expect(factory.isWebCodecsEnabled()).toBe(false);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('falling back to HTMLVideoElement'),
+        expect.any(Error)
+      );
+
+      // mp4 would normally take the WebCodecs branch; with the worker down it
+      // must still produce a usable (HTMLVideoElement) source instead of
+      // throwing or hanging.
+      const source = await factory.createSource('mp4-source', new Blob(['x'], { type: 'video/mp4' }), 'video/mp4');
+      expect(source.requiresCleanup()).toBe(false);
+
+      warn.mockRestore();
+    });
+
+    it('initializing twice after the worker failed to start does not retry it', async () => {
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      nextInitializeRejection.error = new Error('Decode worker did not become ready within 10000ms');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const factory = new FrameSourceFactory(true);
+      await factory.initialize();
+      expect(factory.isWebCodecsEnabled()).toBe(false);
+
+      // A second initialize() call must not try to stand the worker back up
+      // mid-export; useWebCodecs is now false, same as "disabled explicitly".
+      await factory.initialize();
+      expect(factory.isWebCodecsEnabled()).toBe(false);
     });
 
     it('falls back when WebCodecs not supported', () => {
