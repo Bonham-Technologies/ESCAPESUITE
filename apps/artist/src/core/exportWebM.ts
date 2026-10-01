@@ -26,6 +26,10 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   getActiveTransition,
+  // Shared with exportMP4.ts, which re-exports it for existing callers — both
+  // exporters import it from its actual home so neither depends on the other
+  // (review round, ESCSUITE-152).
+  ExportError,
 } from './exportTypes';
 import {
   drawClipToCanvas,
@@ -68,6 +72,17 @@ export async function exportToWebM(
   // Use the bottom-most track's source dimensions as the base
   const { width: baseWidth, height: baseHeight } = getBaseDimensions(clips, exportTracks, sourceVideos);
   const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
+
+  // Defensive guard at the door (ESCSUITE-152): see exportMP4.ts's twin
+  // check for why — a hand-built `projectResolution` can still bypass
+  // `parseProject`, and this is clearer than whatever WebCodecs would say.
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) {
+    throw new ExportError(
+      `Cannot export at ${width}x${height}: resolved output resolution must be at least 2x2`,
+      []
+    );
+  }
+
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;

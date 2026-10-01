@@ -1425,6 +1425,28 @@ evaluate without the suppression, which `apps/artist/CLAUDE.md` names beside the
 preset longer than its transition takes. **No floor crossed**; artist's floors stay
 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-152 (`parseProject` validates
+`resolution`, and both exporters refuse an output size below two pixels before any encoder is
+built): 99.56 / 98.91 / **94.85** / 99.46 against the 99.56 / 98.91 / 94.82 / 99.46 the commit this
+branch was rebased onto measures — branches up three hundredths, the other three unmoved.
+Measured in one sitting, the base gives 4,237 / 4,468 branches and this branch 4,263 / 4,494:
+twenty-six new branches, twenty-six covered, the same 231 uncovered as before (lines
+6,799 / 6,829 → 6,813 / 6,843, statements 7,667 / 7,751 → 7,681 / 7,765, functions
+1,680 / 1,689 → 1,682 / 1,691, every denominator growing by exactly what the numerator did; the
+same 30 / 84 / 9 uncovered). The twenty-six are `store/projectMigration.ts`'s
+`isValidResolutionDimension` (a number, an integer, within the 2-to-8K bound — each operand of
+the `&&` chain a branch of its own) and `isValidResolution`'s object and width / height checks,
+the `candidate.resolution !== undefined && !isValidResolution(…)` gate that leaves an old file
+with no `resolution` on the migration's existing default, and the identical
+`!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2` guard at each
+exporter's door in `core/exportMP4.ts` and `core/exportWebM.ts` — each reached from both sides
+by the six rejections (0×0, a string, a negative, `NaN`, a missing width, 7681 wide), the
+happy and odd-dimension parses, and the exporter cases that assert `VideoEncoder` was never
+constructed against the exports that already run. The two new functions are the two validators.
+`ExportError` moved to `core/exportTypes.ts` with a re-export from `exportMP4.ts`, which adds
+no decision; `exportTypes.ts`'s three uncovered branches and the exporters' own predate the
+ticket. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1432,7 +1454,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.56 | 98.91 | 94.82 | 99.46 |
+| `@escapesuite/artist` | 99.56 | 98.91 | 94.85 | 99.46 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

@@ -5,6 +5,7 @@
 // the media elements, the 2D context, mediabunny and the audio mixer.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToWebM } from './exportWebM'
+import { ExportError } from './exportMP4'
 import { ExportAbortedError } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
@@ -138,6 +139,14 @@ describe('exportToWebM preconditions', () => {
 
     await expect(run({ signal: controller.signal })).rejects.toBeInstanceOf(ExportAbortedError)
     expect(getMediabunnyState().outputs).toHaveLength(0)
+  })
+
+  it('rejects a 0x0 resolved resolution before any encoder is built (ESCSUITE-152)', async () => {
+    const error = await run({ projectResolution: { width: 0, height: 0 } }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toMatch(/resolution/i)
+    expect(webcodecs.videoEncoders).toHaveLength(0)
   })
 })
 

@@ -129,6 +129,36 @@ export class ExportAbortedError extends Error {
 }
 
 /**
+ * Structured log entry for export diagnostics
+ */
+export interface ExportLogEntry {
+  phase: string;
+  detail: string;
+  timestamp: number;
+}
+
+/**
+ * Error class that carries the export diagnostic log for debugging. Lives
+ * here (rather than in exportMP4.ts, where it was first written) so both
+ * exporters can throw and catch it without one importing from the other;
+ * exportMP4.ts re-exports it so every existing caller and test import is
+ * untouched.
+ */
+export class ExportError extends Error {
+  public readonly exportLog: ExportLogEntry[];
+  public readonly frameIndex: number | undefined;
+  public readonly totalFrames: number | undefined;
+
+  constructor(message: string, exportLog: ExportLogEntry[], frameIndex?: number, totalFrames?: number) {
+    super(message);
+    this.name = 'ExportError';
+    this.exportLog = exportLog;
+    this.frameIndex = frameIndex;
+    this.totalFrames = totalFrames;
+  }
+}
+
+/**
  * Check if abort was requested and throw if so
  */
 export function checkAborted(signal?: AbortSignal): void {

@@ -15,7 +15,7 @@ import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { isWebCodecsAvailable } from './frameSource';
-import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback } from './exportTypes';
+import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback, ExportLogEntry } from './exportTypes';
 import { openOutputFrame, projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
@@ -26,6 +26,7 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   getActiveTransition,
+  ExportError,
 } from './exportTypes';
 import {
   drawMediaWithFrame,
@@ -42,31 +43,12 @@ import {
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
 
-/**
- * Structured log entry for export diagnostics
- */
-export interface ExportLogEntry {
-  phase: string;
-  detail: string;
-  timestamp: number;
-}
-
-/**
- * Error class that carries the export diagnostic log for debugging
- */
-export class ExportError extends Error {
-  public readonly exportLog: ExportLogEntry[];
-  public readonly frameIndex: number | undefined;
-  public readonly totalFrames: number | undefined;
-
-  constructor(message: string, exportLog: ExportLogEntry[], frameIndex?: number, totalFrames?: number) {
-    super(message);
-    this.name = 'ExportError';
-    this.exportLog = exportLog;
-    this.frameIndex = frameIndex;
-    this.totalFrames = totalFrames;
-  }
-}
+// `ExportLogEntry` and `ExportError` now live in exportTypes.ts, so exportWebM.ts
+// can import them without reaching into this module; re-exported here so every
+// existing `import { ExportError } from './exportMP4'` (and the `exporter.ts`
+// barrel, which re-exports from here) keeps resolving unchanged.
+export type { ExportLogEntry } from './exportTypes';
+export { ExportError } from './exportTypes';
 
 /**
  * Export timeline to MP4 using WebCodecs + Mediabunny
@@ -108,6 +90,20 @@ export async function exportToMP4(
   // Use the bottom-most track's source dimensions as the base
   const { width: baseWidth, height: baseHeight } = getBaseDimensions(clips, exportTracks, sourceVideos);
   const { width, height } = getResolution(options.resolution, baseWidth, baseHeight, projectResolution);
+
+  // Defensive guard at the door (ESCSUITE-152): `parseProject` rejects a
+  // malformed project `resolution` before it ever reaches the store, but a
+  // caller that builds `ExportOptions`/`projectResolution` by hand — a
+  // headless job spec, today's only other caller — has no such gate, and
+  // `VideoEncoder.configure` rejects a 0x0 (or non-finite) raster far less
+  // clearly than this does.
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) {
+    throw new ExportError(
+      `Cannot export at ${width}x${height}: resolved output resolution must be at least 2x2`,
+      exportLog
+    );
+  }
+
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = 48000;
