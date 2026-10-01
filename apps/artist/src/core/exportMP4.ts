@@ -26,6 +26,7 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   getActiveTransition,
+  findSupportedVideoConfig,
   ExportError,
 } from './exportTypes';
 import {
@@ -43,10 +44,12 @@ import {
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
 
-// `ExportLogEntry` and `ExportError` now live in exportTypes.ts, so exportWebM.ts
-// can import them without reaching into this module; re-exported here so every
-// existing `import { ExportError } from './exportMP4'` (and the `exporter.ts`
-// barrel, which re-exports from here) keeps resolving unchanged.
+// `ExportLogEntry` and `ExportError` live in exportTypes.ts (moved there by
+// ESCSUITE-152, independently of ESCSUITE-29 Mechanism 1 doing the same
+// thing on this branch), so exportWebM.ts can import them without reaching
+// into this module; re-exported here so every existing
+// `import { ExportError } from './exportMP4'` (and the `exporter.ts` barrel,
+// which re-exports from here) keeps resolving unchanged.
 export type { ExportLogEntry } from './exportTypes';
 export { ExportError } from './exportTypes';
 
@@ -270,12 +273,17 @@ export async function exportToMP4(
     'avc1.4d0033', // Main Profile Level 5.1
   ];
 
-  // Find a supported H.264 codec configuration
-  let videoConfig: VideoEncoderConfig | null = null;
+  // Find a supported H.264 codec configuration. Two passes flattened into one
+  // candidate list, in order: prefer-hardware first (GPU acceleration), then
+  // no-preference (allows software encoding) — the second pass ensures the
+  // headless / CI path works even without a GPU (e.g. Playwright Chromium,
+  // Docker). `findSupportedVideoConfig` (exportTypes.ts) is the shared ladder
+  // walker the WebM exporter's VP9/VP8 probe also uses (ESCSUITE-29).
   const hwModes: VideoEncoderConfig['hardwareAcceleration'][] = ['prefer-hardware', 'no-preference'];
-  outer: for (const hwMode of hwModes) {
+  const h264Configs: VideoEncoderConfig[] = [];
+  for (const hwMode of hwModes) {
     for (const codec of h264Codecs) {
-      const config: VideoEncoderConfig = {
+      h264Configs.push({
         codec,
         width,
         height,
@@ -283,24 +291,21 @@ export async function exportToMP4(
         framerate: frameRate,
         latencyMode: 'quality',
         hardwareAcceleration: hwMode,
-      };
-      try {
-        const support = await VideoEncoder.isConfigSupported(config);
-        if (support.supported) {
-          videoConfig = support.config || config;
-          log('codec', `Selected H.264 codec: ${codec} hw=${hwMode} (${width}x${height} @ ${videoBitrate}bps)`);
-          console.log(`[MP4 Export] Using H.264 codec: ${codec} (${hwMode})`);
-          break outer;
-        }
-      } catch {
-        // This codec not supported, try next
-      }
+      });
     }
   }
+
+  const videoConfig = await findSupportedVideoConfig(h264Configs);
 
   if (!videoConfig) {
     throw new Error('No supported H.264 codec found. MP4 export requires H.264 support.');
   }
+
+  log(
+    'codec',
+    `Selected H.264 codec: ${videoConfig.codec} hw=${videoConfig.hardwareAcceleration} (${width}x${height} @ ${videoBitrate}bps)`
+  );
+  console.log(`[MP4 Export] Using H.264 codec: ${videoConfig.codec} (${videoConfig.hardwareAcceleration})`);
 
   // Create video encoder with error tracking
   let videoEncoderError: Error | null = null;

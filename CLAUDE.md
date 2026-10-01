@@ -1649,7 +1649,13 @@ never above what the suite actually achieves:
 
 ## Key Constraints
 
-- WebCodecs API (ESCAPEARTIST exports) only works in Chrome/Edge
+- WebCodecs API (ESCAPEARTIST exports) only works in Chrome/Edge today, and even there MP4 and
+  WebM can diverge: `isMP4ExportSupported()` only checks that the three WebCodecs globals exist,
+  while `isWebMExportSupported()` (ESCSUITE-22/29) is a real, asynchronous probe of whether this
+  browser's `VideoEncoder` can actually configure VP9 or VP8 — so a browser can offer one format
+  and not the other, and the export dialog says so (and, when neither is possible, says that too,
+  up front) rather than offering a button that fails the instant it is clicked. See
+  `apps/artist/CLAUDE.md`'s "Export Dialog Browser Support"
 - MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
   end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; composited PiP takes,
   audio-only takes and any browser without WebCodecs all reach that path, but a composited PiP

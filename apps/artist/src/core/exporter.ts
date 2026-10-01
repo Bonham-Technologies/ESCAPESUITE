@@ -9,10 +9,16 @@
 
 // Public API - export functions
 export { exportToWebM } from './exportWebM';
-export { exportToMP4, ExportError } from './exportMP4';
+export { exportToMP4 } from './exportMP4';
 
 // Public API - capability checks
-export { isMP4ExportSupported, isWebMExportSupported } from './exportTypes';
+export {
+  isMP4ExportSupported,
+  isWebMExportSupported,
+  EXPORT_NO_WEBCODECS_REASON,
+  WEBM_NO_CODEC_REASON,
+} from './exportTypes';
 
-// Public API - error class
-export { ExportAbortedError } from './exportTypes';
+// Public API - error classes
+export { ExportAbortedError, ExportError } from './exportTypes';
+export type { ExportLogEntry } from './exportTypes';
