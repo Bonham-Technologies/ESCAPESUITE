@@ -341,14 +341,24 @@ export function AudioWaveform({
     cache.entries.set(cacheKey, resampled);
     cache.totalSamples += resampled.length;
 
-    // Evict oldest-touched-first until back under *both* budgets —
-    // MAX_CACHE_ENTRIES is what makes this routine during ordinary
-    // scrolling; MAX_CACHE_SAMPLES is the backstop against one window
-    // costing far more than the rest. `cache.entries` is in LRU order
-    // (oldest first) by construction, so a plain forward iteration visits
-    // exactly the entries eviction should consider, in the order it should
-    // consider them, and both counters reaching 0 when the map empties
-    // means this can never read past the end of it.
+    // Evict oldest-touched-first until back under *both* budgets (ESCSUITE-13
+    // round 4, MINOR-1 — corrected from a round-3 comment here that claimed
+    // the opposite). For a real clip, MAX_CACHE_SAMPLES is what actually
+    // bounds memory and is almost always the one that trips first: at
+    // MAX_BACKING_DIMENSION-sized entries it binds at ~31 of them, long
+    // before MAX_CACHE_ENTRIES's 1024 — see that constant's own doc comment
+    // for the full reasoning. MAX_CACHE_ENTRIES exists for the case the
+    // sample budget cannot catch at all: a sparse source (near-silent audio,
+    // or a handful of peaks per window from a short, heavily zoomed-in clip)
+    // whose entries are too small, individually, to ever add up to the
+    // sample budget, however many distinct windows a session visits. Either
+    // way the evicted entry's buffer is recycled into MAX_FREE_BUFFERS'
+    // pool, so buffer reuse happens on eviction regardless of which budget
+    // triggered it. `cache.entries` is in LRU order (oldest first) by
+    // construction, so a plain forward iteration visits exactly the entries
+    // eviction should consider, in the order it should consider them, and
+    // both counters reaching 0 when the map empties means this can never
+    // read past the end of it.
     for (const [key, value] of cache.entries) {
       if (cache.totalSamples <= MAX_CACHE_SAMPLES && cache.entries.size <= MAX_CACHE_ENTRIES) break;
       cache.entries.delete(key);
