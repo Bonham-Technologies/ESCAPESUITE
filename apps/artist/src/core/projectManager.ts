@@ -226,12 +226,11 @@ export async function loadProject(
     // Convert base64 back to blob
     const blob = base64ToBlob(videoData.data, videoData.mimeType);
 
-    // A source already in the shared DB — most likely a take ESCAPECRAFT
-    // still owns, or one an earlier import/load already restored — keeps
-    // exactly the metadata it already has. A `.veditor` load restores the
+    // Is this id already in the shared DB? A `.veditor` load restores the
     // bytes ARTIST needs; it is not authority over metadata it does not own
-    // (ESCSUITE-151), so even an identical-looking `meta` in the file must
-    // not overwrite what is already stored.
+    // (ESCSUITE-151). Checked up front because it decides two things below:
+    // which five fields describe CRAFT's take identity, and whether this
+    // video's bytes/thumbnail get written to the DB at all.
     const existing = await getVideo(videoData.id);
 
     // A file saved since ESCSUITE-97 carries the live SourceVideo's own
@@ -242,21 +241,19 @@ export async function loadProject(
     // number (review round 1), so each is validated and, only when it fails,
     // recovered from the blob rather than stored unquestioned. The common
     // case — a `meta` written by this same `saveProject` — never touches the
-    // blob at all.
+    // blob at all. This runs the same way whether or not `existing` is set:
+    // a present source's own duration/dimensions/waveform are still worth
+    // restoring from the file being reopened (review round 1 tried reusing
+    // `existing.metadata` wholesale instead, which silently dropped a
+    // reopened CRAFT take's waveform — CRAFT never computes one — and let a
+    // stored non-finite duration bypass this same recovery).
     //
     // An older file has no `meta` at all, and falls back to reconstructing
     // everything from the blob (through `extractMetadataFromBlob`, which
     // itself now goes through the same duration probe every other importer
     // uses).
     let metadata: SourceVideo;
-    if (existing) {
-      metadata = {
-        ...existing.metadata,
-        // thumbnailUrl is a live `blob:` handle that never survives a reload
-        // on its own (ESCSUITE-96) — refreshed here; nothing else is touched.
-        thumbnailUrl: await resolveThumbnailUrl(videoData.id),
-      };
-    } else if (videoData.meta) {
+    if (videoData.meta) {
       const duration = await resolveStoredDuration(blob, {
         ...videoData.meta,
         name: videoData.name,
@@ -272,37 +269,54 @@ export async function loadProject(
         width,
         height,
       };
+    } else {
+      metadata = await extractMetadataFromBlob(blob, videoData);
+    }
 
-      // A stored thumbnail (below) is the only legitimate source of a live
-      // `thumbnailUrl` — never a value that arrived in the file itself.
-      // `meta` is typed to exclude `thumbnailUrl`, but nothing stops a
-      // hand-edited file from smuggling one in through the `...videoData.meta`
-      // spread above, and it must not reach IndexedDB via `storeVideo` below
-      // (ESCSUITE-96 is exactly the failure mode a stale `blob:` handle in
-      // storage causes) or survive into the returned `SourceVideo` when the
-      // file has no real thumbnail to resolve over it (review round 1).
-      delete metadata.thumbnailUrl;
+    // A stored thumbnail (below) is the only legitimate source of a live
+    // `thumbnailUrl` — never a value that arrived in the file itself. `meta`
+    // is typed to exclude `thumbnailUrl`, but nothing stops a hand-edited
+    // file from smuggling one in through the `...videoData.meta` spread
+    // above, and it must not reach IndexedDB via `storeVideo` below
+    // (ESCSUITE-96 is exactly the failure mode a stale `blob:` handle in
+    // storage causes) or survive into the returned `SourceVideo` when the
+    // file has no real thumbnail to resolve over it (review round 1).
+    delete metadata.thumbnailUrl;
 
+    if (existing) {
+      // CRAFT's take identity belongs to whatever is already stored under
+      // this id, never to the file: these five fields are the only ones
+      // `source: 'recording'` means anything for
+      // (`getAllVideoMetadata().filter(v => v.source === 'recording')`,
+      // apps/craft/src/core/storage.ts), and a `.veditor` that happens to
+      // carry an identical-looking `meta` must not be able to assert them
+      // over what CRAFT (or an earlier load) actually wrote (ESCSUITE-151).
+      metadata.source = existing.metadata.source;
+      metadata.takeId = existing.metadata.takeId;
+      metadata.role = existing.metadata.role;
+      metadata.startOffset = existing.metadata.startOffset;
+      metadata.overlayPlacement = existing.metadata.overlayPlacement;
+      // thumbnailUrl is a live `blob:` handle that never survives a reload on
+      // its own (ESCSUITE-96) — refreshed here from what's actually stored;
+      // the file's own embedded thumbnail (if any) is not written, matching
+      // `storeThumbnail` being skipped below for an id already present.
+      metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
+    } else {
       // This id is not already in the shared DB, so restoring it resurrects a
       // copy under an identity CRAFT no longer recognises as live. A
       // `source: 'recording'` here would put a take the user deleted in
-      // CRAFT straight back into CRAFT's own library
-      // (`getAllVideoMetadata().filter(v => v.source === 'recording')`,
-      // apps/craft/src/core/storage.ts), and `takeId`/`role`/`startOffset`/
-      // `overlayPlacement` describe a take-group this restored copy is not
-      // part of (ESCSUITE-151). Cleared outright, not set to `'import'`:
-      // ARTIST's own importers (`core/videoProcessor.ts`) never write a
-      // `source` on a dragged-in file either — it's simply absent.
+      // CRAFT straight back into CRAFT's own library, and
+      // `takeId`/`role`/`startOffset`/`overlayPlacement` describe a
+      // take-group this restored copy is not part of (ESCSUITE-151). Cleared
+      // outright, not set to `'import'`: ARTIST's own importers
+      // (`core/videoProcessor.ts`) never write a `source` on a dragged-in
+      // file either — it's simply absent.
       delete metadata.source;
       delete metadata.takeId;
       delete metadata.role;
       delete metadata.startOffset;
       delete metadata.overlayPlacement;
-    } else {
-      metadata = await extractMetadataFromBlob(blob, videoData);
-    }
 
-    if (!existing) {
       // Store video
       await storeVideo(videoData.id, blob, metadata);
 
