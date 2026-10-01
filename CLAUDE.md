@@ -1540,6 +1540,28 @@ cheaper, not dearer. What is deliberately left: a clip animated to opacity 0 sti
 click (ESCSUITE-155), and the hit box ignores a transition's modifiers (ESCSUITE-147). **No
 floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 for ESCSUITE-4 (the media library's upload pulse
+is guarded under `prefers-reduced-motion`, a finished upload's row fades out instead of popping,
+the upload status is a live region, and the panel's six ad-hoc type sizes become a scale with
+nothing below 11px): **99.58** / 98.94 / 94.93 / 99.47 against the 99.57 / 98.94 / 94.93 / 99.47
+the commit this branch was rebased onto measures — lines up a hundredth, the other three
+unmoved. Measured in one sitting, the base gives 4,311 / 4,541 branches and this branch
+4,315 / 4,545: four new branches, four covered, the same 230 uncovered as before (lines
+6,870 / 6,899 → 6,876 / 6,905, statements 7,748 / 7,831 → 7,755 / 7,838, functions
+1,698 / 1,707 → 1,701 / 1,710, every denominator growing by exactly what the numerator did; the
+same 29 / 83 / 9 uncovered). The four are in `components/VideoUploader.tsx`: the fade-start map
+that marks one row `removing` and leaves every other row alone, and the row's `removing` class
+ternary — each reached from both sides by the two-files-at-once case (one row fading while its
+sibling is untouched, both leaving on their own timers, with ESCSUITE-120's unmount-clears-timers
+pin intact) against the single-upload cases that were already there; the three new functions
+are the fade and removal timer callbacks. The reduced-motion and type-size halves are CSS and
+are pinned outside vitest's measurement by two cases in
+`apps/e2e/tests/accessibility/core.spec.ts`, run here in Chromium: a probe element wearing the
+compiled pulse class computes `animation-name: none` under `reducedMotion: 'reduce'` and a
+hashed `pulse` keyframe name without it, and no text in the panel computes below 11px with the
+media-type badge inside its thumbnail. The render pins and every `*.perf.test.ts` file are
+byte-unchanged. **No floor crossed**; artist's floors stay 99 / 98 / 94 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1547,7 +1569,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.57 | 98.94 | 94.93 | 99.47 |
+| `@escapesuite/artist` | 99.58 | 98.94 | 94.93 | 99.47 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 
