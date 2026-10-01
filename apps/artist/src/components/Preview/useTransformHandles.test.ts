@@ -266,6 +266,19 @@ describe('useTransformHandles cursor', () => {
     expect(await cursorAt(960, 540 - SHAPE.halfH - GRIP)).toBe('crosshair')
   })
 
+  // ESCSUITE-3 review round 1, NIT-2: `isKeyframeMode`'s `hit.clipId ===
+  // selectedClipId` operand exercised false with the panel open — nothing is
+  // selected, so the clip the pointer is over is never "the one the panel has
+  // open", and it reads not-allowed exactly as it does with the panel closed.
+  it('offers not-allowed over a keyframed clip with the panel open but nothing selected', async () => {
+    const shape = addShape()
+    store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+    store().setKeyframePanelOpen(true)
+    store().setSelectedClipId(null)
+
+    expect(await cursorAt(960, 540)).toBe('not-allowed')
+  })
+
   it('offers the default cursor over empty canvas', async () => {
     addShape()
     expect(await cursorAt(100, 100)).toBe('default')

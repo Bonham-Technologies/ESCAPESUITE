@@ -222,6 +222,55 @@ describe('hitTestHandles z-order', () => {
         ?.clipId
     ).toBe('keyframed')
   })
+
+  // The converse of the case above: the same loop, the same ordering, so a
+  // plain clip on top of a keyframed one still wins. Not a regression this
+  // ticket could cause, but worth pinning beside its mirror.
+  it('still picks a plain clip on top of a keyframed one beneath it', () => {
+    const upper = makeTrack({ id: 'track2', index: 5 })
+    const plain = mediaClip({ id: 'plain', trackId: upper.id })
+    const keyframed = mediaClip({
+      id: 'keyframed',
+      trackId: track.id,
+      animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }),
+    })
+
+    expect(
+      hitAt(CENTER_X, CENTER_Y, scene({ clips: [plain, keyframed], tracks: [track, upper] }))
+        ?.clipId
+    ).toBe('plain')
+  })
+
+  // ESCSUITE-3 review round 1, MAJOR-1: every case above keyframes a property
+  // to its own default value, so the animated position and the base position
+  // are the same number and never distinguish "evaluated at the animated
+  // position" from "evaluated at the base transform". These two do: each is
+  // red if hitTest.ts's `getOverlayBounds(clip, canvas, currentTime, …)` has
+  // its `currentTime` argument swapped for `undefined` (which is how
+  // getOverlayBounds is told to ignore the animation entirely).
+  it('picks a keyframed clip where it is drawn, not where its base transform puts it', () => {
+    // x ramps 0.25 -> 0.75 over the 4s clip; at currentTime 1 (a quarter of
+    // the way through) it is a quarter of the way there: 0.375. The box is
+    // 400px wide (HALF_W 200), so the base position (0.25 * 1920 = 480) is
+    // well clear of the animated one (0.375 * 1920 = 720).
+    const clip = mediaClip({
+      transform: { x: 0.25, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+      animation: makeAnimation({ keyframes: { x: [kf(0, 0.25), kf(4, 0.75)] } }),
+    })
+
+    expect(hitAt(0.375 * CANVAS_W, CENTER_Y, scene({ clips: [clip] }))?.clipId).toBe('clip1')
+    expect(hitAt(0.25 * CANVAS_W, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
+  })
+
+  it('rotates the pointer into a keyframed clip’s animated frame, not its base one', () => {
+    // The same 90-degree case as "rotates the pointer into the clip's own
+    // frame" above, with the rotation coming from a keyframe (the clip's own
+    // transform is unrotated) instead of from the static transform.
+    const clip = mediaClip({ animation: makeAnimation({ keyframes: { rotation: [kf(0, 90)] } }) })
+
+    expect(hitAt(CENTER_X, CENTER_Y + 150, scene({ clips: [clip] }))?.mode).toBe('move')
+    expect(hitAt(CENTER_X + 150, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
+  })
 })
 
 describe('hitTestHandles handles on the selected clip', () => {
