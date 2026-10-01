@@ -102,7 +102,14 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 - **pnpm workspaces**: Efficient dependency management with shared packages
 - **Turborepo**: Cached builds, parallel execution, smart rebuilds
 - **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer
-- **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file
+- **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
+  but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism
+  (`isSingleFileBuild`, `apps/artist/singleFileBuild.js`, read by `apps/artist/vite.config.ts`)
+  that inlines it as a blob URL for the headless and standalone targets specifically (both run
+  from `file://`, where Chromium blocks a separate worker script) and fails the build if any
+  `.js` file survives inlining; the hosted build keeps the worker as an ordinary fetchable
+  chunk. ESCSUITE-153: before this predicate existed, the standalone build checked only
+  `VITE_HEADLESS` here and shipped an un-inlined `decodeWorker-*.js` the release never attached.
 - **Shared dialog behaviour**: `useDialogBehaviour` (`packages/shared/src/hooks`, imported
   as `@escapesuite/shared/hooks`) is the single modal keyboard implementation — initial
   focus, the Tab/Shift+Tab trap, Escape-to-close and focus restored to the opener — used by
