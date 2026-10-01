@@ -32,6 +32,14 @@ interface TimelineProps {
  */
 const NO_CLIPS: Clip[] = [];
 
+/**
+ * Assumed viewport width before the track area's own has been measured, or
+ * when the measuring environment cannot report one at all (ESCSUITE-13
+ * round 3, MINOR-6 — see the `viewportRight` comment below for why this
+ * exists).
+ */
+const DEFAULT_VIEWPORT_WIDTH = 1280;
+
 export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -97,12 +105,19 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
 
   // The on-screen span of the track area, in absolute timeline pixels —
   // ESCSUITE-13 feeds this to `AudioWaveform` (via `TimelineTrack`) so a
-  // clip's waveform resamples only the slice actually scrolled into view. The
-  // container's width is 0 until its `ResizeObserver` has fired once (see
-  // `useScrollSync`), and `viewportRight` is left unbounded until then rather
-  // than briefly collapsing every waveform to nothing on first paint.
+  // clip's waveform resamples only the slice actually scrolled into view.
+  // `containerWidth` is measured in `useScrollSync`'s layout effect, which in
+  // a real browser runs before the first paint — but `viewportRight` must
+  // still never read `Infinity`, in jsdom as much as for that one frame
+  // before a real browser's first measurement: jsdom never reports a
+  // non-zero `clientWidth` at all, so a *test* render would see
+  // `containerWidth` stay 0 forever and every clip would take the
+  // "whole clip visible" path for its entire life (ESCSUITE-13 round 3,
+  // MINOR-6). `DEFAULT_VIEWPORT_WIDTH` is an ordinary desktop width, used
+  // only so the very first resample is windowed to something sane rather
+  // than a clip's entire, possibly enormous, box.
   const viewportLeft = scrollLeft;
-  const viewportRight = containerWidth > 0 ? scrollLeft + containerWidth : Infinity;
+  const viewportRight = scrollLeft + (containerWidth > 0 ? containerWidth : DEFAULT_VIEWPORT_WIDTH);
 
   // Group visible clips by track for efficient rendering
   const visibleClipsByTrack = useMemo(

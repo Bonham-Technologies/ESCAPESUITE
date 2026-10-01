@@ -1133,6 +1133,7 @@ component.
 | `TimelinePlayhead.tsx` | The playhead line — `React.memo`'d and subscribing to `currentTime` itself, so a playback tick moves this element instead of re-rendering the timeline |
 | `TimelineTimeReadout.tsx` | The `current / total` readout in the info bar, split out for the same reason |
 | `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, **masked thumbnail**, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
+| `visibleRangeCache.ts` | `pruneVisibleRangeCache` (ESCSUITE-13 round 3): deletes `TimelineTrack`'s per-clip `visibleRangePx` cache entries for clips no longer on the row. Its own file rather than living in `TimelineTrack.tsx` purely so it can be `export`ed and unit-tested directly without breaking that file's Fast Refresh (`react-refresh/only-export-components` disallows a component file exporting anything else) |
 | `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — its props are stable through a clip drag, a marquee and playback, so the whole column sits those out. **Not through a trim**: `useTrackHeaderActions`' `handleDeleteTrack` depends on `clips`, and a trim writes the store every move, so `onDeleteTrack` changes identity per frame and the column re-renders anyway |
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
 | `AudioWaveform.tsx` | The canvas waveform inside a clip. Resamples the clip's *visible window* — not its whole box — so detail follows zoom instead of being frozen at a whole-clip cap (ESCSUITE-13); the CSS size and the backing store are always the same clamped number, so a canvas never stretches past what it actually holds |
@@ -2595,6 +2596,55 @@ extraction rate too. Below that point, a 60s clip's finest window improves from 
 magnitude a dense synthetic test source can show. The ticket's own worst case is where it
 matters most: a 10-minute clip's whole-clip fallback was 300ms/sample, so the same 10ms floor
 there is about **30x**.
+
+**Round 3 (same ticket, re-review of round 2): the free-buffer pool wasn't actually tested, the
+sample budget was still too large in absolute terms, two defects, and a loose end on the
+seam.**
+
+- **Buffer reuse, made real.** Round 2's `MAX_FREE_BUFFERS` pool was fed only by eviction, and
+  with entries near `MAX_BACKING_DIMENSION` in size, one eviction always covered the next
+  insert's overshoot — so the pool only ever held 0 or 1 buffer, never tested past its own cap.
+  `MAX_CACHE_ENTRIES` (1024) is a second, independent eviction trigger alongside
+  `MAX_CACHE_SAMPLES`: a *count* of windows kept, which bounds a session of many small/sparse
+  entries (a near-silent recording, a heavily zoomed-in short clip) that the sample budget alone
+  would never catch, since nothing else bounds how many tiny entries accumulate. 1024 is
+  deliberately *larger* than what the sample budget needs for realistically-sized entries
+  (which it already bounds at 32–660 distinct windows, depending on entry size) specifically so
+  the two caps don't collide — a small count cap would itself become the binding constraint and
+  prevent the sample budget, and the free-buffer pool's own overflow behaviour, from ever being
+  exercised by a realistic-entry-size test.
+- **The sample budget is 500,000, not 2,000,000, now with the arithmetic that number implies.**
+  Round 2 reasoned the 2,000,000-sample figure as "nowhere near what a realistic session
+  reaches" without converting it to bytes; it is 64–96 MB of retained peaks **per mounted audio
+  clip**. 500,000 (~16–24 MB) is still generous against what a realistic window costs. The
+  actual fix — storing peaks as two parallel `Float32Array`s instead of an array of `{min,max}`
+  objects, which the draw loop could read with zero allocation — touches `resamplePeaks`'s
+  public return type and every existing caller/test of it, a larger refactor than this round
+  had room for; lowering the budget is the stopgap, and the `Float32Array` conversion is the
+  documented next step.
+- **Defect: bucketing could manufacture a window out of nothing.** `bucketWindow` rounds its end
+  up, which — applied to a *genuinely* zero-width request (a clip just past the strict viewport
+  edge but still inside the virtualiser's wider overscan, so it is mounted and drawing at all) —
+  could produce a window of up to `WINDOW_BUCKET_PX - 1` pixels where none should exist. The
+  zero-width check now runs on the raw, pre-bucket width, before `bucketWindow` ever sees it.
+- **Defect: `TimelineTrack`'s per-clip `visibleRangePx` cache (NIT-2, round 2) never shrank.**
+  A clip scrolled away and never revisited — or, the common case, trimmed away or deleted
+  outright — left its cached object in the `Map` forever. `pruneVisibleRangeCache`
+  (`visibleRangeCache.ts` — its own file, not `TimelineTrack.tsx`, so it can be `export`ed
+  without breaking that file's Fast Refresh) deletes entries for clips no longer in `clips`,
+  run whenever `TimelineTrack`'s own `clips` prop changes identity (no more often than that).
+- **The fallback/windowed seam (MINOR-3, round 2) gained a direct test**: a window explicitly
+  covering the whole clip (`{ offset: 0, width: fullWidthPx }`) now has a test asserting it
+  draws the same detail as the implicit whole-clip case (no `visibleRangePx` at all) — the
+  clearest possible proof there is no separate code path left for the two to disagree across.
+- **`Timeline.tsx`'s `viewportRight` no longer reads `Infinity`.** Round 2's `useLayoutEffect`
+  fix measured `containerWidth` before a *real* browser's first paint, but jsdom never reports a
+  non-zero `clientWidth` at all — so a test render saw `containerWidth` stay 0 forever and
+  `viewportRight` read `Infinity` for its entire life, not just one frame, meaning every clip
+  always took the whole-clip path in every test that didn't explicitly stub a width.
+  `DEFAULT_VIEWPORT_WIDTH` (1280, an ordinary desktop width) replaces `Infinity` outright when
+  `containerWidth` is 0, so the first (and every) resample windows to something sane instead of
+  a clip's entire, possibly enormous, box.
 
 Waveform visualization adapts to clip selection state:
 - **Default colors**: Purple (`rgba(138, 43, 226, 0.6)`) for audio, blue tint for video with audio

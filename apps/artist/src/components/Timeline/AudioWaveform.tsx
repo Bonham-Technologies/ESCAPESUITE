@@ -59,28 +59,70 @@ export const WINDOW_BUCKET_PX = 64;
 
 /**
  * Sample budget for a single `AudioWaveform` instance's resample cache
- * (ESCSUITE-13 round 2, MINOR-2): the combined length of every entry
- * currently held, evicted least-recently-*touched* first — a cache hit moves
- * its entry to the most-recently-used end, so a window the user keeps
- * scrolling back to is never the one that gets evicted. 2,000,000 peaks is a
- * generous circuit breaker rather than a tight budget: now that a window's
- * own sample count is capped at the source's actual peak count for that
- * window ({@link targetSamplesFor}) rather than an arbitrary per-pixel
- * request, a realistic session's worth of distinct windows for one clip
- * comes nowhere near this, and the bound exists only against a pathological
- * case (a corrupted `sourceDuration` inflating a window's apparent peak
- * count, say).
+ * (ESCSUITE-13 round 2, MINOR-2; lowered round 3): the combined length of
+ * every entry currently held, evicted least-recently-*touched* first — a
+ * cache hit moves its entry to the most-recently-used end, so a window the
+ * user keeps scrolling back to is never the one that gets evicted.
+ *
+ * Round 2 set this to 2,000,000, reasoning it as "nowhere near what a
+ * realistic session reaches". Round 3's review did the arithmetic the round-2
+ * comment skipped: 2,000,000 `{min,max}` objects is **64–96 MB of retained
+ * peaks per mounted audio clip** (two 8-byte floats plus V8's per-object
+ * overhead, typically 24–40 bytes, times two million) — far too much for the
+ * low-spec machines this project targets, "nowhere near reached" or not.
+ * 500,000 is still generous (now ~16–24 MB) against what
+ * {@link targetSamplesFor}'s own per-window cap makes a *realistic* window
+ * cost, while no longer being a number nobody would notice blow past.
+ *
+ * The real fix is storing peaks as two parallel `Float32Array`s (8 bytes per
+ * sample, no per-object header) rather than an array of `{min,max}` objects,
+ * which the draw loop could read with no allocation at all. That touches
+ * `resamplePeaks`'s public return type (and every existing caller/test of
+ * it), the cache's storage shape, and the draw loop's indexing — a larger
+ * refactor than this round has room for. Lowering the budget is the
+ * stopgap; the `Float32Array` conversion is the correct next step.
  */
-export const MAX_CACHE_SAMPLES = 2_000_000;
+export const MAX_CACHE_SAMPLES = 500_000;
+
+/**
+ * How many distinct windows one `AudioWaveform` instance keeps cached, in
+ * addition to {@link MAX_CACHE_SAMPLES} (ESCSUITE-13 round 3, defect 1 of the
+ * round-2 re-review: "buffer reuse effectively never fires in production").
+ * A *sample*-budget alone only evicts (and therefore only recycles a buffer
+ * into {@link MAX_FREE_BUFFERS}'s pool) once a session has accumulated
+ * hundreds of thousands of cached samples — for a *sparse* source (a
+ * near-silent recording, or a handful of peaks per window from a short,
+ * heavily zoomed-in clip) that can be an unbounded number of windows, since
+ * nothing else ever bounds how many tiny entries accumulate. Capping the
+ * *count* of windows kept, independent of how small each one is, closes that
+ * gap outright: the 1025th distinct bucket a session visits always evicts
+ * the least-recently-touched of the first 1024, recycling its buffer,
+ * regardless of how small every entry involved is.
+ *
+ * 1024 is a real constraint, not a decorative one — deliberately larger than
+ * {@link MAX_CACHE_SAMPLES} would need for realistically-sized entries
+ * (which the sample budget already bounds well before 1024 windows,
+ * `AudioWaveform.test.tsx`'s own eviction tests reach it at ~32-660
+ * depending on entry size) — chosen so the pathological-*small*-entry case
+ * this constant exists for does not collide with the pathological-*large*-
+ * entry case {@link MAX_CACHE_SAMPLES} exists for: a smaller count cap (32,
+ * say) would itself become the binding constraint for merely-ordinary
+ * entries, preventing the sample budget from ever being exercised, including
+ * in the free-buffer-pool test below that proves eviction can recycle more
+ * than {@link MAX_FREE_BUFFERS} buffers in a single pass.
+ */
+export const MAX_CACHE_ENTRIES = 1024;
 
 /**
  * How many evicted resample arrays one instance keeps on hand to hand back to
  * {@link resamplePeaks} instead of letting the next miss allocate fresh
  * (MAJOR-1(d)). Small and arbitrary — it only needs to be big enough that a
- * burst of evictions (a long continuous scroll through all-new windows)
- * doesn't immediately run the pool dry.
+ * burst of evictions (a long continuous scroll through all-new windows, or a
+ * single oversized entry evicting many small ones in one pass) doesn't
+ * immediately run the pool dry; entries beyond this are simply dropped
+ * rather than queued, so the pool itself can never grow without bound.
  */
-const MAX_FREE_BUFFERS = 16;
+export const MAX_FREE_BUFFERS = 16;
 
 interface WaveformCache {
   /** The `peaks` array this cache's entries were resampled from. */
@@ -92,7 +134,11 @@ interface WaveformCache {
    * repeatedly revisited.
    */
   entries: Map<string, WaveformPeak[]>;
-  /** Sum of every entry's length — what {@link MAX_CACHE_SAMPLES} bounds. */
+  /**
+   * Sum of every entry's length — one of the two things eviction watches,
+   * alongside `entries.size` against {@link MAX_CACHE_ENTRIES} (see
+   * {@link MAX_CACHE_SAMPLES}'s doc for why both exist).
+   */
   totalSamples: number;
   /** Evicted entries' arrays, ready for `resamplePeaks` to reuse (MAJOR-1(d)). */
   freeBuffers: WaveformPeak[][];
@@ -232,11 +278,18 @@ export function AudioWaveform({
     0,
     fullWidthPx - rawOffsetPx
   );
-  const { offset: offsetPx, width: visibleWidthPx } = bucketWindow(
-    rawOffsetPx,
-    rawVisibleWidthPx,
-    fullWidthPx
-  );
+  // A clip with nothing visible stays nothing visible (ESCSUITE-13 round 3,
+  // defect 1): `bucketWindow` rounds its end *up*, which — applied to a
+  // genuinely zero-width request — would manufacture a window of up to
+  // `WINDOW_BUCKET_PX - 1` pixels for a clip that is really off-screen (one
+  // just past the strict viewport edge but still inside the virtualiser's
+  // wider overscan, so it is mounted and rendering at all). Checked on the
+  // *raw*, pre-bucket width, so a clip the caller says is fully off-screen
+  // never gets bucketed into a visible tail.
+  const { offset: offsetPx, width: visibleWidthPx } =
+    rawVisibleWidthPx > 0
+      ? bucketWindow(rawOffsetPx, rawVisibleWidthPx, fullWidthPx)
+      : { offset: rawOffsetPx, width: 0 };
 
   const dpr = readDevicePixelRatio();
 
@@ -288,13 +341,16 @@ export function AudioWaveform({
     cache.entries.set(cacheKey, resampled);
     cache.totalSamples += resampled.length;
 
-    // Evict oldest-touched-first until back under budget. `cache.entries` is
-    // in LRU order (oldest first) by construction, so a plain forward
-    // iteration visits exactly the entries eviction should consider, in the
-    // order it should consider them, and `totalSamples` reaching 0 when the
-    // map empties means this can never read past the end of it.
+    // Evict oldest-touched-first until back under *both* budgets —
+    // MAX_CACHE_ENTRIES is what makes this routine during ordinary
+    // scrolling; MAX_CACHE_SAMPLES is the backstop against one window
+    // costing far more than the rest. `cache.entries` is in LRU order
+    // (oldest first) by construction, so a plain forward iteration visits
+    // exactly the entries eviction should consider, in the order it should
+    // consider them, and both counters reaching 0 when the map empties
+    // means this can never read past the end of it.
     for (const [key, value] of cache.entries) {
-      if (cache.totalSamples <= MAX_CACHE_SAMPLES) break;
+      if (cache.totalSamples <= MAX_CACHE_SAMPLES && cache.entries.size <= MAX_CACHE_ENTRIES) break;
       cache.entries.delete(key);
       cache.totalSamples -= value.length;
       if (cache.freeBuffers.length < MAX_FREE_BUFFERS) cache.freeBuffers.push(value);

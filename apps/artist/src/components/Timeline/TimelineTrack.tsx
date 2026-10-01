@@ -4,6 +4,7 @@ import { clamp, formatTime, timeToPixels } from '../../utils/timeUtils';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
 import { CLIP_THUMB_ASPECT, maskClipPathFor } from '../../utils/maskClipPath';
+import { pruneVisibleRangeCache } from './visibleRangeCache';
 import type { DragState, TrimState } from './types';
 import styles from './Timeline.module.css';
 
@@ -197,6 +198,18 @@ export const TimelineTrack = React.memo(function TimelineTrack({
   const clipBoxHeight = clipBoxHeightFor(track.height);
   /** Per-clip `visibleRangePx` objects, reused across renders — see `stableVisibleRange`. */
   const visibleRangeCacheRef = React.useRef(new Map<string, { offset: number; width: number }>());
+  /** The `clips` array `visibleRangeCacheRef` was last pruned against — see below. */
+  const prunedForClipsRef = React.useRef<Clip[] | null>(null);
+
+  // Prune (see `pruneVisibleRangeCache`), keyed on `clips`' own identity
+  // rather than running every render: `Timeline`'s `clipsByTrack` memo (see
+  // `TimelineTrack`'s own doc comment) only gives this row a new `clips`
+  // array when the virtualiser's answer actually changes, so this is no
+  // more frequent than that.
+  if (prunedForClipsRef.current !== clips) {
+    prunedForClipsRef.current = clips;
+    pruneVisibleRangeCache(visibleRangeCacheRef.current, clips);
+  }
 
   return (
     <div
