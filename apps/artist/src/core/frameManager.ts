@@ -26,10 +26,14 @@ export interface FrameManager {
 
 /**
  * Create a frame manager for WebCodecs-based export
+ *
+ * `signal`, when given, lets a cancelled export interrupt the decode worker's
+ * startup wait instead of sitting through its full timeout (ESCSUITE-29
+ * Mechanism 2) — forwarded to FrameSourceFactory.initialize().
  */
-export async function createFrameManager(useWebCodecs: boolean): Promise<FrameManager> {
+export async function createFrameManager(useWebCodecs: boolean, signal?: AbortSignal): Promise<FrameManager> {
   const factory = new FrameSourceFactory(useWebCodecs);
-  await factory.initialize();
+  await factory.initialize(signal);
 
   return {
     factory,

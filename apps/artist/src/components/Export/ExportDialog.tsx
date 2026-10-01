@@ -368,12 +368,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                 )}
               </div>
 
-              {/* Only MP4 decodes through WebCodecs (in a worker); WebM drives an
-                  HTMLVideoElement from rAF, which the browser throttles once the
-                  tab is hidden. */}
+              {/* MP4 decodes through WebCodecs (in a worker) when the decode worker
+                  starts successfully; WebM always drives an HTMLVideoElement from
+                  rAF, which the browser throttles once the tab is hidden — and so
+                  does MP4 when it has fallen back to the same element path
+                  (ESCSUITE-153 / ESCSUITE-29 Mechanism 2: a worker that fails to
+                  start, missing from a standalone download or blocked by a CSP, is
+                  the case this hedge is for). The progress line below says so for
+                  that run specifically, once the exporter knows. */}
               {mp4Supported && (
                 <div className={styles.summary}>
-                  MP4 exports keep encoding in a background tab. WebM needs this tab visible.
+                  MP4 exports keep encoding in a background tab when the decoder is available. WebM needs this tab visible.
                 </div>
               )}
 

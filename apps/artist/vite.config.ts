@@ -5,6 +5,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { isSingleFileBuild } from './singleFileBuild.js'
 
 /**
  * Headless-build Vite plugin: rewrite module-worker instantiation to classic workers.
@@ -37,12 +38,17 @@ function escapeRegExp(literal: string) {
 }
 
 /**
- * Headless-build Vite plugin: inline worker .js files into the HTML as blob URLs.
+ * Single-file-build Vite plugin: inline worker .js files into the HTML as blob URLs.
  *
  * Chrome blocks file:// pages from loading file:// workers (null origin). The only
  * way to create workers from a file:// page is via URL.createObjectURL(blob). This
- * plugin post-processes the built headless.html to replace each worker URL
+ * plugin post-processes the built HTML to replace each worker URL
  * expression with a blob URL created from the inlined worker script text.
+ *
+ * Used by both builds that must run from file:// — the headless render bundle
+ * (dist-headless/headless.html) and the standalone offline download
+ * (dist/index.html, ESCSUITE-153) — so it takes the output directory and entry
+ * HTML filename rather than assuming the headless build's own.
  *
  * Two call-site shapes are handled, because Vite has emitted both:
  *   - vite <= 8.2:  new Worker(``+new URL(`w.js`,import.meta.url).href, ...)
@@ -63,13 +69,12 @@ function escapeRegExp(literal: string) {
  * it throws and fails the build — so a future change to Vite's emitted shape turns
  * the `build` job red instead of only the e2e/kit-docker jobs (which Dependabot skips).
  */
-function headlessInlineWorkersPlugin() {
+function headlessInlineWorkersPlugin(outDir: string, htmlFile: string) {
   return {
     name: 'headless-inline-workers',
     apply: 'build' as const,
     closeBundle() {
-      const outDir = 'dist-headless'
-      const htmlPath = join(outDir, 'headless.html')
+      const htmlPath = join(outDir, htmlFile)
       if (!existsSync(htmlPath)) return
 
       let html = readFileSync(htmlPath, 'utf8')
@@ -104,11 +109,15 @@ function headlessInlineWorkersPlugin() {
       // Anything still emitted as a separate .js chunk would be loaded over file://
       // and blocked. If discovery above missed a worker (e.g. Vite changed the URL
       // expression again), this is where we find out.
-      const leftovers = readdirSync(outDir).filter((f) => f.endsWith('.js'))
+      // recursive: true — a top-level-only scan would miss a stray .js vite
+      // emits into a subdirectory (e.g. dist/assets/), which is exactly the
+      // kind of future emission-shape change this guard exists to catch
+      // (ESCSUITE-153 review round 1, NIT).
+      const leftovers = (readdirSync(outDir, { recursive: true }) as string[]).filter((f) => f.endsWith('.js'))
       if (leftovers.length > 0) {
         throw new Error(
           `[headless-inline-workers] ${outDir} still contains separate script file(s) ` +
-          `after inlining: ${leftovers.join(', ')}. The headless bundle must be a single ` +
+          `after inlining: ${leftovers.join(', ')}. This bundle must be a single ` +
           `HTML file; these would be blocked when loaded from file:// (null origin).`
         )
       }
@@ -162,15 +171,31 @@ function headlessInlineWorkersPlugin() {
   }
 }
 
+// True for the two builds that must run from file:// — headless (Playwright,
+// the headless-artist CLI) and standalone (a downloaded GitHub Release asset)
+// — which both need every worker inlined; false for the hosted (saas) build,
+// served over http(s), which keeps its worker as a separate, fetchable chunk.
+// See singleFileBuild.js, beside this file. ESCSUITE-153: the standalone build used to
+// read only VITE_HEADLESS here, so it shipped index.html plus a second,
+// never-attached decodeWorker-*.js — a downloaded build's MP4 export hung
+// forever trying to start a worker that was never there.
+const SINGLE_FILE_BUILD = isSingleFileBuild(process.env)
+// A separate question from SINGLE_FILE_BUILD above: standalone and saas both
+// build dist/index.html and differ only in whether the worker gets inlined;
+// only the headless build's output location and entry file are different.
+const OUT_DIR = process.env.VITE_HEADLESS === 'true' ? 'dist-headless' : 'dist'
+const ENTRY_HTML = process.env.VITE_HEADLESS === 'true' ? 'headless.html' : 'index.html'
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     viteSingleFile(),
-    // Headless build: strip { type: 'module' } from Worker constructors and inline
-    // all worker .js files as blob URLs so the bundle works from file:// (null origin).
-    process.env.VITE_HEADLESS === 'true' && headlessClassicWorkersPlugin(),
-    process.env.VITE_HEADLESS === 'true' && headlessInlineWorkersPlugin(),
+    // Single-file builds (headless and standalone): strip { type: 'module' }
+    // from Worker constructors and inline all worker .js files as blob URLs
+    // so the bundle works from file:// (null origin).
+    SINGLE_FILE_BUILD && headlessClassicWorkersPlugin(),
+    SINGLE_FILE_BUILD && headlessInlineWorkersPlugin(OUT_DIR, ENTRY_HTML),
     // Run with ANALYZE=true to generate bundle-stats.html
     process.env.ANALYZE === 'true' && visualizer({
       filename: 'bundle-stats.html',
@@ -178,9 +203,9 @@ export default defineConfig({
       gzipSize: true,
     }),
   ].filter(Boolean),
-  // Headless build: emit workers as IIFE (classic scripts) not ES modules.
+  // Single-file builds: emit workers as IIFE (classic scripts) not ES modules.
   // Module workers are blocked from file:// (null origin) in Chromium.
-  ...(process.env.VITE_HEADLESS === 'true' ? {
+  ...(SINGLE_FILE_BUILD ? {
     worker: {
       format: 'iife' as const,
     },
@@ -191,9 +216,11 @@ export default defineConfig({
     chunkSizeWarningLimit: 5000,
     cssCodeSplit: false,
     // Headless render bundle: single-file headless.html in dist-headless/.
-    outDir: process.env.VITE_HEADLESS === 'true' ? 'dist-headless' : 'dist',
+    // The hosted and standalone builds both emit dist/index.html; only the
+    // worker-inlining above (gated on SINGLE_FILE_BUILD) differs between them.
+    outDir: OUT_DIR,
     rollupOptions: {
-      input: process.env.VITE_HEADLESS === 'true' ? 'headless.html' : 'index.html',
+      input: ENTRY_HTML,
       output: { inlineDynamicImports: true },
     },
   },

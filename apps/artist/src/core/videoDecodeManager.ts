@@ -58,10 +58,22 @@ interface PendingRequest {
  * Manages video decoding using a Web Worker with WebCodecs
  */
 export class VideoDecodeManager {
+  /**
+   * How long initialize() waits for WORKER_READY before giving up
+   * (ESCSUITE-153 / ESCSUITE-29 Mechanism 2). A worker that never starts —
+   * missing from the bundle, blocked by CSP — used to leave initialize()'s
+   * promise unsettled forever, hanging the MP4 export at "Loading media
+   * files…" with no error and a Cancel button that could not free it.
+   */
+  private static readonly READY_TIMEOUT_MS = 10000;
+
   private worker: Worker | null = null;
   private isReady = false;
   private readyPromise: Promise<void> | null = null;
   private readyResolve: (() => void) | null = null;
+  private readyReject: ((error: Error) => void) | null = null;
+  private readyTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private readyAbortCleanup: (() => void) | null = null;
 
   // Request tracking
   private nextRequestId = 1;
@@ -95,9 +107,31 @@ export class VideoDecodeManager {
   }
 
   /**
-   * Initialize the decode worker
+   * Clear whatever is waiting on the worker becoming ready — the timeout and
+   * the abort listener, if either was set up — without settling the promise.
+   * Called from every settle path so none of them can fire again afterward.
    */
-  async initialize(): Promise<void> {
+  private clearReadyWait(): void {
+    if (this.readyTimeoutId !== null) {
+      clearTimeout(this.readyTimeoutId);
+      this.readyTimeoutId = null;
+    }
+    if (this.readyAbortCleanup) {
+      this.readyAbortCleanup();
+      this.readyAbortCleanup = null;
+    }
+  }
+
+  /**
+   * Initialize the decode worker.
+   *
+   * Settles once: on WORKER_READY (resolve), on the worker's own `error` or
+   * `messageerror` event (reject), after READY_TIMEOUT_MS of silence (reject),
+   * or when `signal` aborts while the wait is still pending (reject) — so a
+   * worker that fails to start, for any reason, never leaves a caller hanging
+   * (ESCSUITE-153 / ESCSUITE-29 Mechanism 2).
+   */
+  async initialize(signal?: AbortSignal): Promise<void> {
     if (this.worker) {
       return this.readyPromise || Promise.resolve();
     }
@@ -106,16 +140,69 @@ export class VideoDecodeManager {
       throw new Error('WebCodecs VideoDecoder is not supported in this browser');
     }
 
-    this.readyPromise = new Promise((resolve) => {
-      this.readyResolve = resolve;
+    if (signal?.aborted) {
+      throw new Error('Decode worker initialization was aborted');
+    }
+
+    this.readyPromise = new Promise<void>((resolve, reject) => {
+      // The timeout and the abort listener below call these two directly —
+      // never through `this.readyReject?.()` — because clearReadyWait()
+      // cancels both of them on every settle path, so neither can ever fire
+      // a second time: there is no "already settled" case for them to guard
+      // against. `this.readyResolve`/`this.readyReject` exist only for the
+      // worker's `onerror`/`onmessageerror` handlers below, which are not
+      // scoped to one wait and genuinely can fire after this promise has
+      // already settled (an error after WORKER_READY, say) — that is where
+      // the null-safe `?.` belongs.
+      const settleResolve = () => {
+        this.clearReadyWait();
+        this.readyResolve = null;
+        this.readyReject = null;
+        resolve();
+      };
+      const settleReject = (error: Error) => {
+        this.clearReadyWait();
+        this.readyResolve = null;
+        this.readyReject = null;
+        reject(error);
+      };
+
+      this.readyResolve = settleResolve;
+      this.readyReject = settleReject;
+
+      this.readyTimeoutId = setTimeout(() => {
+        settleReject(
+          new Error(`Decode worker did not become ready within ${VideoDecodeManager.READY_TIMEOUT_MS}ms`)
+        );
+      }, VideoDecodeManager.READY_TIMEOUT_MS);
+
+      if (signal) {
+        const onAbort = () => {
+          settleReject(new Error('Decode worker initialization was aborted'));
+        };
+        signal.addEventListener('abort', onAbort);
+        this.readyAbortCleanup = () => signal.removeEventListener('abort', onAbort);
+      }
     });
 
     // Create worker from module
     // Note: The worker URL will be resolved by Vite's worker import
-    this.worker = new Worker(
-      new URL('../workers/decodeWorker.ts', import.meta.url),
-      { type: 'module' }
-    );
+    try {
+      this.worker = new Worker(
+        new URL('../workers/decodeWorker.ts', import.meta.url),
+        { type: 'module' }
+      );
+    } catch (error) {
+      // A synchronous construction failure (e.g. the file:// "SecurityError:
+      // Failed to construct 'Worker'" case) leaves nothing listening for the
+      // timeout or the abort signal, so clean both up directly here rather
+      // than depending on a caller's terminate() to do it later.
+      this.clearReadyWait();
+      this.readyPromise = null;
+      this.readyResolve = null;
+      this.readyReject = null;
+      throw error;
+    }
 
     this.worker.onmessage = (event: MessageEvent<DecodeWorkerResponse | { type: 'WORKER_READY' }>) => {
       this.handleWorkerMessage(event.data);
@@ -126,6 +213,12 @@ export class VideoDecodeManager {
       if (this.errorCallback) {
         this.errorCallback(`Worker error: ${error.message}`, true);
       }
+      this.readyReject?.(new Error(`Decode worker failed to start: ${error.message || 'unknown error'}`));
+    };
+
+    this.worker.onmessageerror = () => {
+      console.error('Decode worker message error: received an unparseable message');
+      this.readyReject?.(new Error('Decode worker failed to start: received an unparseable message'));
     };
 
     return this.readyPromise;
@@ -139,10 +232,13 @@ export class VideoDecodeManager {
   ): void {
     switch (message.type) {
       case 'WORKER_READY':
-        this.isReady = true;
+        // A WORKER_READY that arrives after the wait already settled (timed
+        // out, errored, or was aborted) must not report ready — `readyResolve`
+        // is only non-null while a wait is still live, so this is also the
+        // guard against resolving (or marking ready) twice.
         if (this.readyResolve) {
+          this.isReady = true;
           this.readyResolve();
-          this.readyResolve = null;
         }
         break;
 
@@ -384,6 +480,8 @@ export class VideoDecodeManager {
    * Terminate the worker and free all resources
    */
   terminate(): void {
+    this.clearReadyWait();
+
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
@@ -392,6 +490,7 @@ export class VideoDecodeManager {
     this.isReady = false;
     this.readyPromise = null;
     this.readyResolve = null;
+    this.readyReject = null;
 
     // Reject all pending requests
     for (const pending of this.pendingRequests.values()) {

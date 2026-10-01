@@ -9,17 +9,25 @@ import type {
   VideoSourceInfo,
 } from '../workers/decodeWorker.types';
 
+// Whether a newly constructed MockWorker auto-fires WORKER_READY on the next
+// tick. Tests for ESCSUITE-153 / ESCSUITE-29 Mechanism 2 (a worker that never
+// starts) turn this off so initialize() is left genuinely pending.
+let autoReadyEnabled = true;
+
 // Mock Worker class
 class MockWorker {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
+  onmessageerror: ((event: MessageEvent) => void) | null = null;
   private messageHandler: ((data: unknown) => void) | null = null;
 
   constructor(_url: URL | string, _options?: WorkerOptions) {
-    // Simulate worker ready after a tick
-    setTimeout(() => {
-      this.simulateMessage({ type: 'WORKER_READY' });
-    }, 0);
+    if (autoReadyEnabled) {
+      // Simulate worker ready after a tick
+      setTimeout(() => {
+        this.simulateMessage({ type: 'WORKER_READY' });
+      }, 0);
+    }
   }
 
   postMessage(data: unknown, _transfer?: Transferable[]) {
@@ -31,6 +39,7 @@ class MockWorker {
   terminate() {
     this.onmessage = null;
     this.onerror = null;
+    this.onmessageerror = null;
   }
 
   // Test helpers
@@ -43,6 +52,12 @@ class MockWorker {
   simulateError(message: string) {
     if (this.onerror) {
       this.onerror(new ErrorEvent('error', { message }));
+    }
+  }
+
+  simulateMessageError() {
+    if (this.onmessageerror) {
+      this.onmessageerror(new MessageEvent('messageerror'));
     }
   }
 
@@ -80,8 +95,13 @@ describe('VideoDecodeManager', () => {
   afterEach(() => {
     resetVideoDecodeManager();
     mockWorkerInstance = null;
+    autoReadyEnabled = true;
     vi.stubGlobal('Worker', originalWorker);
     vi.stubGlobal('VideoDecoder', originalVideoDecoder);
+    // Always real timers after this file's fake-timer cases — a test whose
+    // body times out abandons its async function before a local try/finally
+    // would run, which used to leak fake timers into every later test.
+    vi.useRealTimers();
   });
 
   describe('isSupported', () => {
@@ -135,6 +155,170 @@ describe('VideoDecodeManager', () => {
 
       const manager = new VideoDecodeManager();
       await expect(manager.initialize()).rejects.toThrow('WebCodecs VideoDecoder is not supported');
+    });
+  });
+
+  // ESCSUITE-153 / ESCSUITE-29 Mechanism 2: a worker that fails to start used
+  // to leave initialize()'s promise unsettled forever. These pin that it now
+  // always settles — reject on the worker's own error/messageerror, reject on
+  // a bounded timeout, reject when an abort signal fires during the wait —
+  // and that a happy worker is unaffected.
+  describe('initialize() settling when the worker fails to start', () => {
+    it('rejects when the worker never reports ready (timed out)', async () => {
+      vi.useFakeTimers();
+      autoReadyEnabled = false;
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize();
+      const assertion = expect(initPromise).rejects.toThrow(/did not become ready within 10000ms/);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await assertion;
+
+      expect(manager.ready).toBe(false);
+    });
+
+    it('rejects immediately when the worker reports an error before becoming ready', async () => {
+      autoReadyEnabled = false;
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize();
+
+      mockWorkerInstance!.simulateError('decodeWorker-abc123.js failed to load');
+
+      await expect(initPromise).rejects.toThrow('Decode worker failed to start: decodeWorker-abc123.js failed to load');
+    });
+
+    it('falls back to "unknown error" when the worker error carries no message', async () => {
+      // The empty-message ErrorEvent is exactly what a cross-origin or opaque
+      // worker load reports — the standalone/CSP case this ticket exists for
+      // — so the fallback string is the one a real user would actually see.
+      autoReadyEnabled = false;
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize();
+
+      mockWorkerInstance!.simulateError('');
+
+      await expect(initPromise).rejects.toThrow('Decode worker failed to start: unknown error');
+    });
+
+    it('rejects immediately when the worker reports a messageerror before becoming ready', async () => {
+      autoReadyEnabled = false;
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize();
+
+      mockWorkerInstance!.simulateMessageError();
+
+      await expect(initPromise).rejects.toThrow('Decode worker failed to start: received an unparseable message');
+    });
+
+    it('rejects immediately when the given signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      const manager = new VideoDecodeManager();
+      await expect(manager.initialize(controller.signal)).rejects.toThrow(
+        'Decode worker initialization was aborted'
+      );
+    });
+
+    it('rejects when the signal aborts while still waiting for the worker', async () => {
+      autoReadyEnabled = false;
+      const controller = new AbortController();
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize(controller.signal);
+
+      controller.abort();
+
+      await expect(initPromise).rejects.toThrow('Decode worker initialization was aborted');
+    });
+
+    it('still resolves normally when a signal is provided and never aborts', async () => {
+      const controller = new AbortController();
+
+      const manager = new VideoDecodeManager();
+      await manager.initialize(controller.signal);
+
+      expect(manager.ready).toBe(true);
+    });
+
+    it('clears its timeout on a successful ready, leaving no stray timer behind', async () => {
+      // A regression that left the timer armed would be silent in every other
+      // test here — the surviving callback would find readyReject already
+      // null and no-op — so this has to check the timer queue directly.
+      vi.useFakeTimers();
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize();
+      // MockWorker's own auto-ready is a real setTimeout(…, 0); fake timers
+      // replace it too, so it needs advancing like the 10s timeout does.
+      await vi.advanceTimersByTimeAsync(0);
+      await initPromise;
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('ignores a WORKER_READY that arrives after the wait already timed out', async () => {
+      vi.useFakeTimers();
+      autoReadyEnabled = false;
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize();
+      const assertion = expect(initPromise).rejects.toThrow(/did not become ready/);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await assertion;
+
+      // A late READY from the same worker must not throw, resurrect the
+      // already-rejected promise, or report the manager ready — a manager
+      // whose one readyPromise is permanently rejected must never claim to
+      // be ready, since `initialize()` hands that same rejection to every
+      // later caller for as long as `this.worker` is set.
+      expect(() => mockWorkerInstance!.simulateMessage({ type: 'WORKER_READY' })).not.toThrow();
+      expect(manager.ready).toBe(false);
+    });
+
+    it('does not reject a second time when the worker errors again after already rejecting', async () => {
+      autoReadyEnabled = false;
+
+      const manager = new VideoDecodeManager();
+      const initPromise = manager.initialize();
+
+      mockWorkerInstance!.simulateError('first failure');
+      await expect(initPromise).rejects.toThrow('Decode worker failed to start: first failure');
+
+      // A second error event (or the timeout, had it still been pending)
+      // must not throw an unhandled rejection or otherwise blow up.
+      expect(() => mockWorkerInstance!.simulateError('second failure')).not.toThrow();
+    });
+
+    it('ignores a messageerror that arrives after the wait already resolved', async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+
+      // readyReject is null once WORKER_READY has resolved; a late
+      // messageerror must not throw and must not disturb the ready state.
+      expect(() => mockWorkerInstance!.simulateMessageError()).not.toThrow();
+      expect(manager.ready).toBe(true);
+    });
+
+    it('clears the timeout when the Worker constructor throws synchronously', async () => {
+      // The literal file:// "SecurityError: Failed to construct 'Worker'"
+      // case: nothing is listening for the timeout or the abort signal once
+      // construction itself fails, so initialize() must clean both up on its
+      // own rather than depending on a caller's terminate().
+      vi.useFakeTimers();
+      vi.stubGlobal('Worker', function () {
+        throw new Error("Failed to construct 'Worker'");
+      });
+
+      const manager = new VideoDecodeManager();
+      await expect(manager.initialize()).rejects.toThrow("Failed to construct 'Worker'");
+
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 

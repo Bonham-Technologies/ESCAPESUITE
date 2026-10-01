@@ -192,7 +192,12 @@ describe('ExportDialog', () => {
 
     it('mentions background-tab encoding only where MP4 is available', () => {
       const { unmount } = render(<ExportDialog isOpen={true} onClose={onClose} />)
-      expect(screen.getByText(/MP4 exports keep encoding in a background tab/)).toBeInTheDocument()
+      // Softened (ESCSUITE-153/29 review, MINOR-4): this is a hedge, not a
+      // guarantee — a decode worker that fails to start falls back to the
+      // same throttled-in-background element path WebM always uses.
+      expect(
+        screen.getByText(/MP4 exports keep encoding in a background tab when the decoder is available/)
+      ).toBeInTheDocument()
       unmount()
 
       mockIsMP4ExportSupported.mockReturnValue(false)
@@ -600,6 +605,39 @@ describe('ExportDialog', () => {
       expect(screen.queryByRole('button', { name: /download webm/i })).not.toBeInTheDocument()
 
       scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    // ESCSUITE-153 / ESCSUITE-29 Mechanism 2 review (MINOR-4): the exporter's
+    // own fallback notice (exportMP4.test.ts pins that it is sent) has to
+    // actually reach the user through this same generic progress-message
+    // rendering — this pins the dialog side of that contract.
+    it("shows the exporter's own notice when MP4 has fallen back to in-page decoding", async () => {
+      let report: (p: ExportProgress) => void = () => {}
+      let rejectExport: (e: unknown) => void = () => {}
+      mockExportToMP4.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise((_resolve, reject) => {
+            report = args[3] as (p: ExportProgress) => void
+            rejectExport = reject
+          })
+      )
+
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(mockExportToMP4).toHaveBeenCalledTimes(1))
+      await act(async () => report({
+        phase: 'preparing',
+        progress: 12,
+        message: 'Decoding in the page; keep this tab in the foreground',
+      }))
+
+      expect(screen.getByText('Decoding in the page; keep this tab in the foreground')).toBeInTheDocument()
+
+      rejectExport(new ExportAbortedError())
       await settle()
     })
 

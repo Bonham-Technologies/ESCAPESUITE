@@ -793,6 +793,23 @@ describe('exportToMP4 progress', () => {
     expect(Math.max(...encoding.map((p) => p.progress))).toBeLessThanOrEqual(88)
     expect(progress.filter((p) => p.phase === 'muxing')[0]).toMatchObject({ progress: 92 })
   })
+
+  // ESCSUITE-153 / ESCSUITE-29 Mechanism 2 review (MINOR-4): the dialog's own
+  // copy promises background-tab MP4 encoding, which is only true when
+  // WebCodecs actually decoded the export. jsdom has neither Worker nor
+  // VideoDecoder, so isWebCodecsAvailable() is false throughout this file —
+  // exactly the "fell back to <video> decoding" case the message is for.
+  it('tells the user it fell back to in-page decoding when WebCodecs is unavailable', async () => {
+    const progress: ExportProgress[] = []
+
+    await run({ onProgress: (p) => progress.push(p) })
+
+    expect(progress).toContainEqual({
+      phase: 'preparing',
+      progress: 12,
+      message: 'Decoding in the page; keep this tab in the foreground',
+    })
+  })
 })
 
 describe('exportToMP4 failure handling', () => {
