@@ -145,28 +145,40 @@ export class VideoDecodeManager {
     }
 
     this.readyPromise = new Promise<void>((resolve, reject) => {
-      this.readyResolve = () => {
+      // The timeout and the abort listener below call these two directly —
+      // never through `this.readyReject?.()` — because clearReadyWait()
+      // cancels both of them on every settle path, so neither can ever fire
+      // a second time: there is no "already settled" case for them to guard
+      // against. `this.readyResolve`/`this.readyReject` exist only for the
+      // worker's `onerror`/`onmessageerror` handlers below, which are not
+      // scoped to one wait and genuinely can fire after this promise has
+      // already settled (an error after WORKER_READY, say) — that is where
+      // the null-safe `?.` belongs.
+      const settleResolve = () => {
         this.clearReadyWait();
         this.readyResolve = null;
         this.readyReject = null;
         resolve();
       };
-      this.readyReject = (error: Error) => {
+      const settleReject = (error: Error) => {
         this.clearReadyWait();
         this.readyResolve = null;
         this.readyReject = null;
         reject(error);
       };
 
+      this.readyResolve = settleResolve;
+      this.readyReject = settleReject;
+
       this.readyTimeoutId = setTimeout(() => {
-        this.readyReject?.(
+        settleReject(
           new Error(`Decode worker did not become ready within ${VideoDecodeManager.READY_TIMEOUT_MS}ms`)
         );
       }, VideoDecodeManager.READY_TIMEOUT_MS);
 
       if (signal) {
         const onAbort = () => {
-          this.readyReject?.(new Error('Decode worker initialization was aborted'));
+          settleReject(new Error('Decode worker initialization was aborted'));
         };
         signal.addEventListener('abort', onAbort);
         this.readyAbortCleanup = () => signal.removeEventListener('abort', onAbort);
@@ -175,10 +187,22 @@ export class VideoDecodeManager {
 
     // Create worker from module
     // Note: The worker URL will be resolved by Vite's worker import
-    this.worker = new Worker(
-      new URL('../workers/decodeWorker.ts', import.meta.url),
-      { type: 'module' }
-    );
+    try {
+      this.worker = new Worker(
+        new URL('../workers/decodeWorker.ts', import.meta.url),
+        { type: 'module' }
+      );
+    } catch (error) {
+      // A synchronous construction failure (e.g. the file:// "SecurityError:
+      // Failed to construct 'Worker'" case) leaves nothing listening for the
+      // timeout or the abort signal, so clean both up directly here rather
+      // than depending on a caller's terminate() to do it later.
+      this.clearReadyWait();
+      this.readyPromise = null;
+      this.readyResolve = null;
+      this.readyReject = null;
+      throw error;
+    }
 
     this.worker.onmessage = (event: MessageEvent<DecodeWorkerResponse | { type: 'WORKER_READY' }>) => {
       this.handleWorkerMessage(event.data);
@@ -208,8 +232,14 @@ export class VideoDecodeManager {
   ): void {
     switch (message.type) {
       case 'WORKER_READY':
-        this.isReady = true;
-        this.readyResolve?.();
+        // A WORKER_READY that arrives after the wait already settled (timed
+        // out, errored, or was aborted) must not report ready — `readyResolve`
+        // is only non-null while a wait is still live, so this is also the
+        // guard against resolving (or marking ready) twice.
+        if (this.readyResolve) {
+          this.isReady = true;
+          this.readyResolve();
+        }
         break;
 
       case 'SOURCE_READY': {
