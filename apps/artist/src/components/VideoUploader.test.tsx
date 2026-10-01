@@ -663,6 +663,49 @@ describe('VideoUploader', () => {
       expect(remainingIds).not.toContain('video3')
     })
 
+    // ESCSUITE-149 coverage round: `if (removedIds.length > 0)
+    // removeSourceVideosPermanently(removedIds)`'s false arm was unreached —
+    // every committed case up to now had at least one delete succeed. When
+    // every `deleteVideo` in the batch rejects, `removedIds` stays empty and
+    // the permanent-removal write must never run: every source stays in both
+    // the store and the database, the notice still names the full count, the
+    // meter still refreshes, and — since no store action ran at all — the
+    // history is untouched, the exact same object as before the click.
+    //
+    // Spies directly on the store action rather than only on its
+    // consequences: `removeSourceVideosPermanently([])` is itself a no-op
+    // (its own `ids.length === 0` guard), so "the library is unchanged"
+    // alone cannot tell "never called" apart from "called with nothing to
+    // do" — only `not.toHaveBeenCalled()` can.
+    it('does not call removeSourceVideosPermanently when every delete in the batch rejects', async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'two.mp4' })
+      store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'two.mp4' })
+
+      vi.spyOn(storageModule, 'deleteVideo').mockRejectedValue(new Error('disk full'))
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+      const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const callsBeforeClick = estimate.mock.calls.length
+      const historyBefore = useEditorStore.getState().history
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith('Could not remove 2 files from storage', 'error')
+      )
+      expect(removeSourceVideosPermanently).not.toHaveBeenCalled()
+      expect(store().sourceVideos.map((v) => v.id).sort()).toEqual(['video1', 'video2'])
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('video1')
+      expect(remainingIds).toContain('video2')
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+      expect(useEditorStore.getState().history).toBe(historyBefore)
+    })
+
     // MINOR 3 (ESCSUITE-142 review): the render-time `lockedMedia` snapshot
     // the button uses to decide what to *offer* is not safe to trust once the
     // loop is `await`ing between ids — a track locked while an earlier id's
@@ -805,6 +848,51 @@ describe('VideoUploader', () => {
       await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).not.toContain('unused1'))
       expect(store().sourceVideos.map((v) => v.id)).toContain('unused2')
       await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+    })
+
+    // ESCSUITE-149 coverage round: `if (removedIds.length > 0)
+    // removeSourceVideosPermanently(removedIds)`'s false arm was unreached
+    // here too. Clear Unused's loop has no per-id try/catch, so the very
+    // first rejection aborts it — only one `deleteVideo` is ever actually
+    // attempted — but every id handed to it rejects, so `removedIds` stays
+    // empty throughout and the permanent-removal write must never run: both
+    // sources stay in the store and the database, the meter still refreshes,
+    // and — since no store action ran at all — the history is untouched, the
+    // exact same object as before the click. (Clear Unused has no notice
+    // channel of its own on failure — only `console.error` — unlike Clear
+    // All's counted notice.)
+    //
+    // Spies directly on the store action rather than only on its
+    // consequences: `removeSourceVideosPermanently([])` is itself a no-op
+    // (its own `ids.length === 0` guard), so "the library is unchanged"
+    // alone cannot tell "never called" apart from "called with nothing to
+    // do" — only `not.toHaveBeenCalled()` can.
+    it('does not call removeSourceVideosPermanently when every delete in the batch rejects', async () => {
+      await storeVideo('unused1', new Blob(['bytes']), { ...videoMeta, id: 'unused1' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused1', name: 'one.mp4', size: 1024 })
+      await storeVideo('unused2', new Blob(['bytes']), { ...videoMeta, id: 'unused2' })
+      store().addSourceVideo({ ...videoMeta, id: 'unused2', name: 'two.mp4', size: 1024 })
+
+      vi.spyOn(storageModule, 'deleteVideo').mockRejectedValue(new Error('disk full'))
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
+
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const callsBeforeClick = estimate.mock.calls.length
+      const historyBefore = useEditorStore.getState().history
+
+      fireEvent.click(await screen.findByRole('button', { name: /Clear Unused/ }))
+
+      await waitFor(() => expect(consoleError).toHaveBeenCalled())
+      expect(removeSourceVideosPermanently).not.toHaveBeenCalled()
+      expect(store().sourceVideos.map((v) => v.id).sort()).toEqual(['unused1', 'unused2'])
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('unused1')
+      expect(remainingIds).toContain('unused2')
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+      expect(useEditorStore.getState().history).toBe(historyBefore)
     })
 
     // ESCSUITE-149: Clear Unused is as non-undoable as Clear All, and —
