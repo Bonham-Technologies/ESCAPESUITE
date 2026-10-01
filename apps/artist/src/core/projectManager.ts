@@ -248,7 +248,14 @@ export async function loadProject(
     // reopened CRAFT take's waveform — CRAFT never computes one — and let a
     // stored non-finite duration bypass this same recovery).
     //
-    // An older file has no `meta` at all, and falls back to reconstructing
+    // An older file has no `meta` at all. If this id is already in the shared
+    // DB, the stored record is still strictly more than a blob probe can ever
+    // recover — waveform peaks, `hasAudio`, `recordedAt` — so it is trusted
+    // over re-probing (review round 2: re-probing here silently dropped all
+    // three and replaced a known-good stored duration with a re-derived one,
+    // for a file that happens to predate ESCSUITE-97 referencing a source
+    // that happens to still be live). Only a source this DB has never heard
+    // of — a genuinely old file, old source — falls back to reconstructing
     // everything from the blob (through `extractMetadataFromBlob`, which
     // itself now goes through the same duration probe every other importer
     // uses).
@@ -269,6 +276,8 @@ export async function loadProject(
         width,
         height,
       };
+    } else if (existing) {
+      metadata = { ...existing.metadata };
     } else {
       metadata = await extractMetadataFromBlob(blob, videoData);
     }
