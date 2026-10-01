@@ -28,6 +28,7 @@ import {
   findSupportedVideoConfig,
   webMVideoCodecConfigs,
   waitForEncoderBackpressure,
+  hasWebMEncodeGlobals,
   // Shared with exportMP4.ts, which re-exports it for existing callers — both
   // exporters import it from its actual home so neither depends on the other
   // (ESCSUITE-152 moved it here; ESCSUITE-29 Mechanism 1 is why this file
@@ -61,8 +62,10 @@ export async function exportToWebM(
   // HTMLVideoElements directly), so only VideoEncoder/VideoFrame need to
   // exist — unlike `isMP4ExportSupported()`, which also needs VideoDecoder.
   // Whether a WebCodecs-capable browser can actually *configure* VP9 or VP8
-  // is answered below, by the real ladder, not here.
-  if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') {
+  // is answered below, by the real ladder, not here. `hasWebMEncodeGlobals()`
+  // is the one predicate this and `isWebMExportSupported` both read (review
+  // round 1, MAJOR 2(d)): it used to be written out here a second time.
+  if (!hasWebMEncodeGlobals()) {
     throw new Error('WebM export requires WebCodecs API (Chrome/Edge)');
   }
 
@@ -111,19 +114,24 @@ export async function exportToWebM(
   // all). `findSupportedVideoConfig`/`webMVideoCodecConfigs` are the same
   // helpers the MP4 H.264 ladder uses, so the probe and the real
   // `configure()` below ask about the exact same configuration.
-  const videoConfig = await findSupportedVideoConfig(
+  const foundVideoConfig = await findSupportedVideoConfig(
     webMVideoCodecConfigs(width, height, videoBitrate, frameRate)
   );
-  if (!videoConfig) {
+  if (!foundVideoConfig) {
     log('codec', 'No supported WebM video codec found (tried VP9, VP8)');
     throw new ExportError(
       'No supported video codec found. WebM export requires VP9 or VP8 support.',
       exportLog
     );
   }
-  const videoCodecFamily = videoConfig.codec === 'vp8' ? 'vp8' : 'vp9';
-  log('codec', `Selected WebM codec: ${videoConfig.codec} (${width}x${height} @ ${videoBitrate}bps)`);
-  console.log(`[WebM Export] Using video codec: ${videoConfig.codec}`);
+  // The muxer track family follows the candidate we asked about, never the
+  // browser's own (possibly differently-spelled) normalised answer (review
+  // round 1, MINOR 3/NIT 3) — `webMVideoCodecConfigs` only ever offers
+  // `'vp09.00.10.08'` or `'vp8'`, so this is an exact match, not a guess.
+  const { config: videoConfig, candidate: videoCandidate } = foundVideoConfig;
+  const videoCodecFamily = videoCandidate.codec === 'vp8' ? 'vp8' : 'vp9';
+  log('codec', `Selected WebM codec: ${videoCandidate.codec} (${width}x${height} @ ${videoBitrate}bps)`);
+  console.log(`[WebM Export] Using video codec: ${videoCandidate.codec}`);
 
   // The space every draw call below is in, as against the raster they land on.
   // A caller with no project resolution (only the tests, today — both the editor

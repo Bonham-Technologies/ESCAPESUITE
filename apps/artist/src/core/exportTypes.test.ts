@@ -304,7 +304,8 @@ describe('findSupportedVideoConfig', () => {
         { codec: 'b' } as VideoEncoderConfig,
         { codec: 'c' } as VideoEncoderConfig,
       ])
-      expect(found).toMatchObject({ codec: 'b' })
+      expect(found?.config).toMatchObject({ codec: 'b' })
+      expect(found?.candidate).toMatchObject({ codec: 'b' })
       expect(codecs.encoder.configs.map((c) => (c as { codec: string }).codec)).toEqual(['a', 'b'])
     } finally {
       codecs.uninstall()
@@ -320,7 +321,7 @@ describe('findSupportedVideoConfig', () => {
         { codec: 'a' } as VideoEncoderConfig,
         { codec: 'b' } as VideoEncoderConfig,
       ])
-      expect(found).toMatchObject({ codec: 'b' })
+      expect(found?.config).toMatchObject({ codec: 'b' })
     } finally {
       codecs.uninstall()
     }
@@ -334,6 +335,27 @@ describe('findSupportedVideoConfig', () => {
       expect(found).toBeNull()
     } finally {
       codecs.uninstall()
+    }
+  })
+
+  // Review round 1, MINOR 3: a caller that needs to know *which candidate it
+  // asked about* (exportWebM.ts labelling its muxer track) must read
+  // `candidate`, not `config` — the browser owes nothing about what
+  // `config.codec` looks like once it has normalised it.
+  it('keeps the original candidate even when the browser returns a differently-normalised config', async () => {
+    const previous = (globalThis as { VideoEncoder?: unknown }).VideoEncoder
+    ;(globalThis as { VideoEncoder?: unknown }).VideoEncoder = {
+      isConfigSupported: async (config: VideoEncoderConfig) => ({
+        supported: true,
+        config: { ...config, codec: 'vp08.00.10.08' },
+      }),
+    }
+    try {
+      const found = await findSupportedVideoConfig([{ codec: 'vp8' } as VideoEncoderConfig])
+      expect(found?.candidate.codec).toBe('vp8')
+      expect(found?.config.codec).toBe('vp08.00.10.08')
+    } finally {
+      ;(globalThis as { VideoEncoder?: unknown }).VideoEncoder = previous
     }
   })
 })

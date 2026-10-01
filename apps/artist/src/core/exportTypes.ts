@@ -192,13 +192,31 @@ export function isMP4ExportSupported(): boolean {
 }
 
 /**
+ * What `findSupportedVideoConfig` found: the config to actually `configure()`
+ * the encoder with, and the exact candidate (from the caller's own input
+ * list) that was found supported.
+ *
+ * These can differ: `support.config` is the browser's own normalised answer
+ * when it offers one, and nothing requires it to echo the candidate's `codec`
+ * string unchanged (a browser is free to rewrite `'vp8'` into a fuller
+ * `'vp08.00.10.08'`, say). A caller that needs to know *which configuration
+ * it asked for* — `exportWebM.ts` labelling its muxer track VP9 or VP8 — reads
+ * `candidate`, never `config`, because `candidate` is the object the caller
+ * itself constructed and never touched by the browser (review round 1,
+ * MINOR 3: the original code pattern-matched `config.codec`, which is latent
+ * rather than live only because Chromium happens to echo the string today).
+ */
+export interface SupportedVideoConfig {
+  config: VideoEncoderConfig;
+  candidate: VideoEncoderConfig;
+}
+
+/**
  * Try each video encoder config in order and return the first one
- * `VideoEncoder.isConfigSupported` accepts — its own normalised `config` when
- * it offers one, the candidate otherwise, the same `support.config || config`
- * fallback both ladders below use — or `null` once every candidate has been
- * asked and none were. A config whose probe throws is skipped rather than
- * treated as a refusal, the same way a real `isConfigSupported()` call that
- * rejects is not a "no".
+ * `VideoEncoder.isConfigSupported` accepts — or `null` once every candidate
+ * has been asked and none were. A config whose probe throws is skipped
+ * rather than treated as a refusal, the same way a real `isConfigSupported()`
+ * call that rejects is not a "no".
  *
  * Shared by the MP4 H.264 ladder (`exportMP4.ts`) and the WebM VP9/VP8 probe
  * below (ESCSUITE-29 Mechanism 1: before this, `exportWebM.ts` asked nothing
@@ -207,12 +225,12 @@ export function isMP4ExportSupported(): boolean {
  */
 export async function findSupportedVideoConfig(
   configs: VideoEncoderConfig[]
-): Promise<VideoEncoderConfig | null> {
+): Promise<SupportedVideoConfig | null> {
   for (const config of configs) {
     try {
       const support = await VideoEncoder.isConfigSupported(config);
       if (support.supported) {
-        return support.config || config;
+        return { config: support.config || config, candidate: config };
       }
     } catch {
       // This codec isn't supported, try the next one.
@@ -271,26 +289,45 @@ export const WEBM_NO_CODEC_REASON =
   'This browser cannot encode WebM video — Chrome or Edge can.';
 
 /**
+ * Whether the two WebCodecs globals WebM encoding needs — `VideoEncoder` and
+ * `VideoFrame`, not `VideoDecoder`, since WebM never decodes through
+ * WebCodecs (`exportWebM.ts` seeks `HTMLVideoElement`s directly) — both
+ * exist. The one predicate `isWebMExportSupported` and `exportToWebM`'s own
+ * early guard both call (review round 1, MAJOR 2(d)): written twice, the two
+ * copies can drift independently and a mutation to either one's `||` can go
+ * unnoticed by a suite that only ever removes both globals together.
+ */
+export function hasWebMEncodeGlobals(): boolean {
+  return typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined';
+}
+
+/**
  * Check if WebM export via WebCodecs is supported.
  *
  * Unlike `isMP4ExportSupported()` this is a real probe, not a boolean read of
  * which globals exist (ESCSUITE-22/29: it used to be
  * `return isMP4ExportSupported();`, which answered "yes" for any browser with
  * WebCodecs even when that browser's `VideoEncoder` cannot configure VP9 *or*
- * VP8 — the export would then fail opaquely partway through). WebM never
- * decodes through WebCodecs either — `exportWebM.ts` seeks `HTMLVideoElement`s
- * directly — so only `VideoEncoder`/`VideoFrame` need to exist, not
- * `VideoDecoder`. `width`/`height` are the project's own output size, the
- * shape the real export will configure the encoder at.
+ * VP8 — the export would then fail opaquely partway through).
+ *
+ * `width`/`height` should be the size the export will actually configure the
+ * encoder at — which, once a resolution preset is chosen, is
+ * `getResolution(preset, …)`'s answer, not necessarily the raw project
+ * resolution (review round 1, MINOR 2: `ExportDialog` passes
+ * `getResolution(advancedOptions.resolution, …)` and re-probes when the
+ * preset changes, precisely so a project whose native size this browser
+ * cannot configure doesn't read as unsupported when a smaller preset would
+ * have worked). This function itself takes whatever size it is given; it has
+ * no opinion on which one that should be.
  */
 export async function isWebMExportSupported(width: number, height: number): Promise<boolean> {
-  if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') {
+  if (!hasWebMEncodeGlobals()) {
     return false;
   }
-  const config = await findSupportedVideoConfig(
+  const found = await findSupportedVideoConfig(
     webMVideoCodecConfigs(width, height, WEBM_PROBE_BITRATE, WEBM_PROBE_FRAMERATE)
   );
-  return config !== null;
+  return found !== null;
 }
 
 /**
