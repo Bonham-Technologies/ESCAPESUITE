@@ -563,11 +563,17 @@ export function VideoLibrary() {
    * removed, the editor unmounted (`mountedRef`, which is the component's
    * lifetime and deliberately not this effect's), or a real load having won the
    * race.
+   *
+   * An audio source — the ESCSUITE-14 companions, and since ESCSUITE-143 a
+   * microphone-only take's own primary — never had a picture in the first
+   * place, so its missing `thumbnailUrl` is not damage this rebuild undoes
+   * (ESCSUITE-148): skip it rather than spend a storage read on a lookup that
+   * can only come back empty.
    */
   useEffect(() => {
     const alreadyRead = (thumbnailReadsRef.current ??= new Set<string>());
     for (const source of sourceVideos) {
-      if (source.thumbnailUrl || alreadyRead.has(source.id)) continue;
+      if (source.thumbnailUrl || source.mediaType === 'audio' || alreadyRead.has(source.id)) continue;
       const id = source.id;
       alreadyRead.add(id);
       void (async () => {

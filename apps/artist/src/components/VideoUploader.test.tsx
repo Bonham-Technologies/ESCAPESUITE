@@ -1236,6 +1236,20 @@ describe('VideoLibrary', () => {
       expect(vi.mocked(URL.revokeObjectURL).mock.calls).toHaveLength(revokesBefore)
     })
 
+    // ESCSUITE-148: an audio source (the ESCSUITE-14 companions, and since
+    // ESCSUITE-143 a microphone-only take's own primary) never had a picture to
+    // begin with — its missing `thumbnailUrl` is not damage ESCSUITE-113 undid,
+    // so there is nothing to rebuild and no reason to cost it a storage read.
+    it('never asks storage to rebuild a thumbnail for an audio source', async () => {
+      store().addSourceVideo(videoMeta)
+      store().addSourceVideo(audioMeta)
+
+      render(<VideoLibrary />)
+
+      await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
+      expect(mockResolveThumbnailUrl).not.toHaveBeenCalledWith('audio1')
+    })
+
     it('frees the handle it minted when the source left the library before the read landed', async () => {
       const land = parkedReads()
       store().addSourceVideo(videoMeta)

@@ -86,6 +86,37 @@ describe('placeTakeOnTimeline', () => {
     expect({ ...placed, id: dropped.id, trackId: dropped.trackId }).toEqual(dropped)
   })
 
+  // ESCSUITE-148: a microphone-only take (ESCSUITE-143) hands this action a
+  // single part with no companions at all — `takeImport.ts`'s audio primary,
+  // not an audio part riding alongside a screen recording the way `micPart`
+  // above does. ARTIST has no `Track.type` to flip: what makes a track read as
+  // "audio" is the clip on it resolving to a `mediaType: 'audio'` source
+  // (`TimelineTrack.tsx`'s `isAudioClip`), and the frame-finding and the
+  // transform are what this pins — the same two questions `micPart` alongside
+  // a screen recording already answers, asked of a take that is audio alone.
+  it('places a single audio-only part exactly as dropping it from the library would, with no frame to measure', () => {
+    const resolutionBefore = store().project.resolution
+
+    store().placeTakeOnTimeline([micPart])
+
+    expect(placedClips()).toHaveLength(1)
+    const clip = placedClips()[0]
+    // No picture, so the default transform — not derived from a frame that
+    // does not exist — and no mask or stroke of any kind.
+    expect(clip.transform).toEqual({ ...DEFAULT_TRANSFORM })
+    expect(clip.mask).toBeUndefined()
+    expect(clip.stroke).toBeUndefined()
+    expect('mask' in clip).toBe(false)
+    expect('stroke' in clip).toBe(false)
+    // Takes the lowest-index empty track, the same rule a drop from the
+    // library follows — audio is not routed anywhere special.
+    expect(trackOf(clip).index).toBe(store().project.timeline.tracks[0].index)
+    // A take with nothing to draw must not resize the canvas around it.
+    expect(store().project.resolution).toEqual(resolutionBefore)
+    // One undo step for the one part, same as any other take.
+    expect(store().history.past).toHaveLength(1)
+  })
+
   it('puts the webcam part on a track above the primary, at its start offset', () => {
     store().placeTakeOnTimeline([screenPart, webcamPart])
 

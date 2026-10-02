@@ -365,6 +365,19 @@ arrived before the primary, would have measured the camera against a rectangle t
 means "the whole canvas". The clip carries the whole default rather than no transform at all
 because `Clip.transform` is a required field.
 
+A take's audio need not be a *companion*: since ESCSUITE-143 ESCAPECRAFT stores a
+microphone-only recording as its own `mediaType: 'audio'` **primary**, with no screen or webcam
+part at all and no `takeId` to resolve — a single-file take, the same shape every
+pre-ESCSUITE-14 recording has, except its one file is sound. `importTake` and
+`placeTakeOnTimeline` ask nothing about whether a part is the primary or a companion before
+giving it the audio treatment above, so the mic-only case needs no code of its own — and
+ESCSUITE-148 is the test file pinning that: `takeImport.test.ts`'s single-file audio-only case,
+`store/__tests__/projectStore.takePlacement.test.ts`'s single-audio-part placement (default
+transform, no mask or stroke, the project resolution untouched, one undo step), and
+`VideoUploader.test.tsx`'s pin that the ESCSUITE-117 lazy thumbnail rebuild skips an audio
+source outright — it never had a picture to rebuild, so asking storage for one on every mount
+was a wasted read the fix removes.
+
 **Every part arrives with its waveform**, computed by the same `extractWaveformData`
 (`utils/waveform.ts`) the media library's own import path calls for every file, at the same
 point in the sequence — with the library entry, before the take is placed (ESCSUITE-71). It
