@@ -18,11 +18,13 @@ export interface S3SinkConfig {
 const FORMAT_TO_EXTENSION: Record<VerificationManifest['format'], string> = {
   mp4: 'mp4',
   webm: 'webm',
+  gif: 'gif',
 }
 
 const FORMAT_TO_MIME: Record<VerificationManifest['format'], string> = {
   mp4: 'video/mp4',
   webm: 'video/webm',
+  gif: 'image/gif',
 }
 
 /**

@@ -2,3 +2,4 @@ dist
 *.tgz
 coverage
 test-output
+tsconfig.tsbuildinfo

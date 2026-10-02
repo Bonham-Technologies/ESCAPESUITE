@@ -177,6 +177,72 @@ describe('parseJobSpec', () => {
       /output\.config/,
     )
   })
+
+  it('accepts gif as a format', () => {
+    const spec = parseJobSpec(validSpec({ options: { format: 'gif' } }))
+    expect(spec.options).toEqual({ format: 'gif', quality: 'high' })
+  })
+
+  it('keeps a 360p resolution', () => {
+    // '360p' is accepted for any format, not just gif: `getResolution` answers
+    // it for all three and an MP4 at 640x360 is a legitimate thing to ask a
+    // render farm for. The export *dialog* is where 360p is gif-only, because
+    // that is a choice about what to offer rather than about what works.
+    const spec = parseJobSpec(validSpec({ options: { format: 'gif', resolution: '360p' } }))
+    expect(spec.options.resolution).toBe('360p')
+  })
+
+  it('keeps a 360p resolution for a video format too', () => {
+    const spec = parseJobSpec(validSpec({ options: { format: 'mp4', resolution: '360p' } }))
+    expect(spec.options.resolution).toBe('360p')
+  })
+
+  it.each([10, 15, 20])('keeps an fps of %s for a gif', (fps) => {
+    const spec = parseJobSpec(validSpec({ options: { format: 'gif', fps } }))
+    expect(spec.options.fps).toBe(fps)
+  })
+
+  it('leaves fps unset when a gif job does not ask for one', () => {
+    // The exporter's own default (15) applies; the spec does not invent one.
+    const spec = parseJobSpec(validSpec({ options: { format: 'gif' } }))
+    expect(spec.options.fps).toBeUndefined()
+  })
+
+  it.each([7, 0, 30, '15', 15.5, null])('rejects an fps of %s', (fps) => {
+    expect(() => parseJobSpec(validSpec({ options: { format: 'gif', fps } }))).toThrow(
+      /options\.fps must be one of 10, 15, or 20/,
+    )
+  })
+
+  it.each(['mp4', 'webm'])('rejects fps for a %s job', (format) => {
+    // Silently ignoring it would render at 30 fps while the caller believed
+    // otherwise — the failure mode `collectUnknownKeys` exists to prevent, for a
+    // field that is known but inapplicable.
+    expect(() => parseJobSpec(validSpec({ options: { format, fps: 15 } }))).toThrow(
+      /options\.fps applies to "gif" only/,
+    )
+  })
+
+  it('names gif in the format error', () => {
+    expect(() => parseJobSpec(validSpec({ options: { format: 'avi' } }))).toThrow(
+      /options\.format must be one of "mp4", "webm", or "gif"/,
+    )
+  })
+
+  it('names 360p in the resolution error', () => {
+    expect(() => parseJobSpec(validSpec({ options: { format: 'gif', resolution: '240p' } }))).toThrow(
+      /"720p", "480p", or "360p"/,
+    )
+  })
+
+  it('refuses an empty range on a gif job here rather than leaving it to the exporter', () => {
+    // A GIF of an empty range is the one range the exporter itself refuses
+    // (zero frames would otherwise write a one-byte "image/gif"), and the kit
+    // says so before Chromium launches — the same check every format gets.
+    expect(() =>
+      parseJobSpec(validSpec({ options: { format: 'gif', timeRange: { start: 3, end: 3 } } })),
+    ).toThrow(/options\.timeRange\.start must be less than options\.timeRange\.end/)
+  })
 })
 
 describe('collectUnknownKeys', () => {
@@ -213,5 +279,9 @@ describe('collectUnknownKeys', () => {
 
   it('ignores a non-object options field rather than throwing', () => {
     expect(collectUnknownKeys(validSpec({ options: 'nope' }))).toEqual([])
+  })
+
+  it('does not flag fps, which the parser reads', () => {
+    expect(collectUnknownKeys(validSpec({ options: { format: 'gif', fps: 15 } }))).toEqual([])
   })
 })

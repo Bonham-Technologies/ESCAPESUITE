@@ -113,9 +113,10 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 | `input` | yes | Exactly one of `bundle` or `manifest`. Both take a single `path`. |
 | `input.bundle.path` | — | A `.veditor` file exported from the editor. |
 | `input.manifest.path` | — | A manifest JSON file (see [Inputs](#inputs)). |
-| `options.format` | yes | `mp4` (H.264 + AAC) or `webm` (VP9 + Opus). |
-| `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. |
-| `options.resolution` | no | `project` (default) uses the project's own resolution; `1080p`, `720p` and `480p` scale to that height, keeping the *project's* aspect ratio (falling back to the bottom-most media clip's native aspect only when the project has no resolution of its own). Odd dimensions are rounded up to even. |
+| `options.format` | yes | `mp4` (H.264 + AAC), `webm` (VP9 + Opus) or `gif` (animated GIF, 256 colours per frame, no audio). |
+| `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. **Video formats only — a `gif` render ignores it** (a GIF's size comes from its palette, its resolution and `fps`). It is accepted rather than rejected on a `gif` job, unlike `fps` on a video one, because `parseOptions` always fills a default in: rejecting it would refuse specs doing nothing wrong. |
+| `options.fps` | no | **`gif` only** — `10`, `15` (default) or `20`. Rejected for the other two formats, which always encode at 30. A GIF stores each frame's delay in centiseconds, so 10 and 20 fps are exact while 15 fps really plays at about 14.3. |
+| `options.resolution` | no | `project` (default) uses the project's own resolution; `1080p`, `720p`, `480p` and `360p` scale to that height, keeping the *project's* aspect ratio (falling back to the bottom-most media clip's native aspect only when the project has no resolution of its own). Odd dimensions are rounded up to even. All five are accepted for every format; ESCAPEARTIST's own export dialog offers `720p`, `480p` (its default) and `360p` for `gif`, because a GIF at 1080p is enormous and one at the project's own resolution is unpredictable. The kit applies no such narrowing and issues no size warning — ask for `{ "format": "gif", "resolution": "1080p" }` and you get exactly that, however large (see [Sizing and throughput](#sizing-and-throughput) on GIF memory, which grows with duration). |
 | `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both numbers, `start` strictly less than `end`. Omit to render the whole timeline. |
 | `output.sink` | yes | `volume`, `command`, `webhook` or `s3`. |
 | `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)). |
@@ -205,7 +206,7 @@ manifest](#output-and-verification).
 { "sink": "volume", "config": { "dir": "/out" } }
 ```
 
-Writes `<dir>/<jobId>.<mp4|webm>` and `<dir>/<jobId>.manifest.json`. The directory is created
+Writes `<dir>/<jobId>.<mp4|webm|gif>` and `<dir>/<jobId>.manifest.json`. The directory is created
 if missing. The video is moved into place with a rename (falling back to a copy across
 filesystems), and both files **overwrite** anything already at those names — which is what
 makes re-running a job id idempotent rather than duplicative. `outputLocation` and
@@ -259,8 +260,8 @@ transport, not storage. If you want the manifest, copy it somewhere durable whil
 ```
 
 A single `multipart/form-data` POST with two fields: `manifest` (the verification manifest as a
-JSON string) and `file` (the video, filename `<jobId>.<ext>`, content type `video/mp4` or
-`video/webm`). Any non-2xx response fails the job. `outputLocation` is the URL.
+JSON string) and `file` (the render, filename `<jobId>.<ext>`, content type `video/mp4`,
+`video/webm` or `image/gif`). Any non-2xx response fails the job. `outputLocation` is the URL.
 
 `timeoutMs` (a positive integer, default **10 minutes**) bounds the whole POST — connect,
 upload, and the server's response. `HEADLESS_TIMEOUT_MS` does not cover delivery, so without
@@ -294,7 +295,7 @@ Requires the optional dependency `@aws-sdk/client-s3`; without it the job fails 
 `prefix` accepts `s3://bucket/key-prefix` or a bare `bucket/key-prefix` (a trailing slash is
 harmless), and a bucket with no prefix at all. Objects are written as
 `<key-prefix>/<jobId>.<ext>` and `<key-prefix>/<jobId>.manifest.json`; the video is streamed
-from disk rather than buffered, and tagged `video/mp4` / `video/webm` (the manifest
+from disk rather than buffered, and tagged `video/mp4` / `video/webm` / `image/gif` (the manifest
 `application/json`) so a signed URL plays instead of downloading. `endpoint` and `region` are
 both optional — set `endpoint` for MinIO, Ceph, R2 and friends.
 
@@ -389,9 +390,9 @@ Every successful render is accompanied by `<jobId>.manifest.json`:
 | Field | Meaning |
 | --- | --- |
 | `jobId` | The job that produced it. |
-| `format` | `mp4` or `webm`, as requested. |
+| `format` | `mp4`, `webm` or `gif`, as requested. |
 | `byteLength` | Size of the delivered file, re-read from disk after encoding. |
-| `durationSec` | Encoded duration — the `timeRange` length when one was given, else the whole timeline. |
+| `durationSec` | Encoded duration — the `timeRange` length when one was given, else the whole timeline. For a `gif`, the frame delays it actually plays for: `ceil(seconds x fps)` frames of the delay the **file stores**, which is `round(1000 / fps)` ms quantised to whole centiseconds. At 15 fps that is 70 ms, not 67, so a 15 fps GIF of a 1 s range reports **1.05** — the figure `ffprobe` will agree with. 10 and 20 fps survive both roundings exactly, so `durationSec` is the range rounded up to a whole frame rather than up to a whole frame *and* a coarser delay — not the range itself unless `seconds x fps` is already a whole number (a 1.03 s range at 20 fps is `ceil(20.6) = 21` frames x 50 ms = 1.05). |
 | `width`, `height` | Encoded frame size after `options.resolution` is applied (not necessarily the project's own resolution). |
 | `gpu` | Whether Chromium was launched with GPU acceleration. |
 | `sha256` | SHA-256 of the delivered file, streamed while hashing. |
@@ -616,7 +617,7 @@ API moves job specs, never media.
 | Status | When | Body |
 | --- | --- | --- |
 | `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
-| `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\" or \"webm\""}` |
+| `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\", \"webm\", or \"gif\""}` |
 | `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
@@ -820,6 +821,13 @@ Rules of thumb:
 - **Memory scales with resolution**, not with duration — frames are streamed, not accumulated.
   4 GB is comfortable for 1080p; budget 8 GB or more for 4K. A `.veditor` input is the
   exception: it also needs headroom for the whole JSON document.
+- **`gif` is the other exception, and it does scale with duration.** The GIF format has no
+  streaming muxer, so the encoder accumulates the entire output in one growing buffer and then
+  copies it once, into the `Blob` handed back — peak page memory is roughly **twice the finished
+  GIF** and grows with duration x frame size. (It was three times until the encoder stopped
+  `slice`ing its buffer on the way out; `finish()` returns a view over it instead.) A 1080p GIF of a two-minute
+  timeline is a multi-gigabyte file and needs several times that in RAM; keep GIF jobs short and
+  small, which is what the resolution and `fps` limits are for.
 - **Disk**: the scratch directory holds one complete output for the duration of the job, plus
   decoded temp files for a `.veditor` input.
 - **Fixed overhead** per job is a Chromium launch — a second or two. It is not worth batching
@@ -829,7 +837,8 @@ Rules of thumb:
 
 **`No H.264 encoder available` / MP4 export fails, WebM works.** The Chromium you're launching
 was built without H.264 (some Linux distribution packages strip it). Use Playwright's own
-Chromium rather than a system one, or export `webm`. If you're on a GPU host, try toggling
+Chromium rather than a system one, or export `webm` — or `gif`, which needs no video codec at
+all. If you're on a GPU host, try toggling
 `HEADLESS_GPU` — a broken hardware encoder path can fail where software succeeds, and vice
 versa.
 

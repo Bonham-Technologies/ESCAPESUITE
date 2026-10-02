@@ -425,11 +425,13 @@ describe('the exit code a render returns', () => {
   })
 
   it('exits 2 for a spec the parser refuses, without dumping usage over the reason', async () => {
-    const jobFile = await writeJobSpec(validSpec({ options: { format: 'gif' } }))
+    // 'avi' rather than the 'gif' this case used before ESCSUITE-34, which is a
+    // format the kit now renders.
+    const jobFile = await writeJobSpec(validSpec({ options: { format: 'avi' } }))
 
     expect(await main(['render', '--job', jobFile], {})).toBe(2)
 
-    expect(stderrText()).toContain('error: options.format must be one of "mp4" or "webm"')
+    expect(stderrText()).toContain('error: options.format must be one of "mp4", "webm", or "gif"')
     // Usage is for "you are holding it wrong", not for a spec that was read and understood.
     expect(stderrText()).not.toContain('Usage: headless-artist render')
     expect(runJob).not.toHaveBeenCalled()

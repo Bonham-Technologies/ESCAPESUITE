@@ -1,11 +1,12 @@
 // apps/artist/src/headless/renderProject.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const { exportToMP4, exportToWebM } = vi.hoisted(() => ({
+const { exportToMP4, exportToWebM, exportToGIF } = vi.hoisted(() => ({
   exportToMP4: vi.fn(async () => new Blob([new Uint8Array([9, 9, 9])], { type: 'video/mp4' })),
   exportToWebM: vi.fn(async () => new Blob([new Uint8Array([8, 8])], { type: 'video/webm' })),
+  exportToGIF: vi.fn(async () => new Blob([new Uint8Array([7])], { type: 'image/gif' })),
 }))
-vi.mock('../core/exporter', () => ({ exportToMP4, exportToWebM }))
+vi.mock('../core/exporter', () => ({ exportToMP4, exportToWebM, exportToGIF }))
 // Stands in for the real seeding: fills the fields the probe would supply.
 vi.mock('./seedSources', () => ({
   seedSources: vi.fn(async (sourceVideos: SourceVideoInput[]) => sourceVideos.map((s) => ({
@@ -36,7 +37,7 @@ const baseInput = (): RenderInput => ({
   options: { format: 'mp4' } as RenderInput['options'],
 })
 
-beforeEach(() => { exportToMP4.mockClear(); exportToWebM.mockClear() })
+beforeEach(() => { exportToMP4.mockClear(); exportToWebM.mockClear(); exportToGIF.mockClear() })
 
 describe('renderProject', () => {
   it('routes mp4 to exportToMP4 with editor arg order and returns base64 + meta', async () => {
@@ -58,6 +59,62 @@ describe('renderProject', () => {
     const res = await renderProject(input)
     expect(exportToWebM).toHaveBeenCalledTimes(1)
     expect(res.meta.format).toBe('webm')
+  })
+
+  it('routes gif to exportToGIF, carrying the frame rate through', async () => {
+    const input = baseInput()
+    input.options = { format: 'gif', fps: 20 } as RenderInput['options']
+    const res = await renderProject(input)
+
+    expect(exportToGIF).toHaveBeenCalledTimes(1)
+    expect(exportToMP4).not.toHaveBeenCalled()
+    expect((exportToGIF.mock.calls[0] as unknown[])[2]).toMatchObject({ format: 'gif', fps: 20 })
+    expect(res.meta.format).toBe('gif')
+  })
+
+  it('reports a GIF durationSec in the frame delays the file stores, not the requested range', async () => {
+    // A GIF's on-screen time per frame is stored in **centiseconds**, so there are
+    // two roundings between a frame rate and a duration: the exporter asks for
+    // `round(1000 / 15) = 67` ms and `gifenc` writes `round(67 / 10) = 7` cs = 70 ms.
+    // A one-second range at 15 fps is therefore 15 frames of 70 ms = 1.05 s of GIF
+    // — a 5% stretch, not the 0.5% that stopping at the first rounding suggests.
+    // The verification manifest describes the bytes, and `ffprobe` will say 1.05.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
+    input.options = { format: 'gif', fps: 15 } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    expect(res.meta.durationSec).toBeCloseTo(1.05, 6)
+  })
+
+  it('reports a GIF durationSec of exactly the range at a rate the container can store', async () => {
+    // 20 fps is 50 ms, a whole number of centiseconds, so both roundings are
+    // identities and the GIF plays for exactly the second it was asked for. The
+    // inexact case above and this one together are what keep the duration honest:
+    // a single-rate assertion cannot tell 67 ms from 70 ms.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
+    input.options = { format: 'gif', fps: 20 } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    expect(res.meta.durationSec).toBe(1)
+  })
+
+  it('takes the GIF frame rate from the exporter\'s own default when the job asks for none', async () => {
+    // `gifFrameRate` owns that default (15); the headless path must not invent a
+    // second one, or the manifest would describe a render nobody made.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
+    input.options = { format: 'gif' } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    expect(res.meta.durationSec).toBeCloseTo(1.05, 6)
   })
 
   it('computes durationSec from timelinePosition + duration, not from source trim bounds', async () => {
@@ -233,6 +290,14 @@ describe('renderProjectToFile', () => {
     input.options = { format: 'webm' } as RenderFileInput['options']
     await renderProjectToFile(input)
     expect(clicks[0].download).toBe('job-1.webm')
+  })
+
+  it('uses the gif extension for a gif render', async () => {
+    fileInput(['source.mp4'])
+    const input = fileInputBase()
+    input.options = { format: 'gif' } as RenderFileInput['options']
+    await renderProjectToFile(input)
+    expect(clicks[0].download).toBe('job-1.gif')
   })
 
   it('never revokes the download object URL, on a timer or otherwise', async () => {

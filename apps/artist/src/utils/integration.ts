@@ -333,7 +333,9 @@ export function generateShareUrl(
  * Outgoing messages (to parent):
  * - READY: {} - Editor is initialized and ready
  * - VIDEO_LOADED: { id: string, name: string } - Video was loaded
- * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm', name: string } - Export finished
+ * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string } - Export
+ *   finished ('gif' since ESCSUITE-34; a host that only knows the two video formats sees it
+ *   only for an export the user explicitly chose GIF for)
  * - EXPORT_PROGRESS: { progress: number, message: string } - Export progress
  *   [documented but not currently implemented - nothing sends it]
  * - PROJECT_SAVED: {} - Project was saved

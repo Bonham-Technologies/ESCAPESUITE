@@ -143,7 +143,8 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 - Static per-clip picture properties in `src/core/`: `clipMask.ts` (a circle or rounded mask and its stroke) and `clipCrop.ts` (a crop — four insets as fractions of the source frame). Never keyframed, media clips only, and read by the preview, both exporters, both transition paths and the headless bundle from the same two draw functions; a crop also resizes the clip's rectangle, so the selection box, hit test, marquee and drag seed read it too
 - Audio waveform visualization in `src/utils/waveform.ts`
 - WebCodecs API for encoding/decoding (Chrome/Edge only)
-- Export formats: WebM (VP9+Opus) and MP4 (H.264+AAC)
+- Export formats: WebM (VP9+Opus), MP4 (H.264+AAC) and GIF (`gifenc`, 256 colours per frame, no
+  audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
 
 ### Data Flow
@@ -171,8 +172,11 @@ Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) �
 the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
-  init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm', name: string }` after a
-  successful export (`name` is the download filename; not sent on failure or cancellation).
+  init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string }`
+  after a successful export (`name` is the download filename; not sent on failure or
+  cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
+  a new value of a field it already reads, and needs no change unless it wants to treat a GIF
+  differently.
   Inbound `LOAD_VIDEO` (`{ url }`) fetches that URL the same way `?video=` does, so it is bound by
   the same `connect-src` — a URL the page's policy refuses gets an `ERROR` reply naming the origin
   and the policy (`code: 'LOAD_ERROR'`) instead of a generic failure. See "URL params (ARTIST)"
@@ -1686,6 +1690,52 @@ design's point — four readers of one pure function cannot disagree. The whole-
 fix round (Fit to Canvas fitting the cropped picture, the all-zero write on a sourceless clip) is in
 these numbers. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 at the end of ESCSUITE-34 (an animated GIF as a third
+export format, through `gifenc` and no WebCodecs at all; the WebM exporter's per-frame machinery
+lifted into `core/elementFrames.ts` so the two element-drawing exporters share it; the dialog's GIF
+radio, frame rate, per-format presets, two size estimates and 30-second note; the headless kit
+rendering `format: "gif"`): **99.78** / **99.18** / **95.37** / **99.66** against the
+99.72 / 99.12 / 95.26 / 99.65 the commit this branch lands on (`d8868d2`) measures — every figure up,
+and this time because the *uncovered* column shrank as well as the covered one growing: lines
+7,145 / 7,165 → 7,265 / 7,281 (uncovered 20 → 16), statements 8,044 / 8,115 → 8,166 / 8,233
+(71 → 67), branches 4,507 / 4,731 → 4,597 / 4,820 (224 → 223) and functions 1,746 / 1,752 →
+1,768 / 1,774 (6 → 6). The branch count is the one to read carefully, because the move inside it
+is larger than the net. `core/exportWebM.ts` went 127 / 141 → 69 / 72 — its fourteen uncovered
+arms were nearly all in the frame loop, and the loop moved — and `core/elementFrames.ts` arrives at
+60 / 69: nine of those fourteen, carried across in the lift (the `readyState` poll's never-ready
+arm, the paused-video and image fallbacks, the two `?? ` defaults in the composer) and *two* of them
+newly reached by `elementFrames.test.ts`'s sixteen module-level cases, which is where the net
+224 → 223 comes from. Everything the ticket wrote is covered from both sides: `core/gifEncoder.ts`
+4 / 4, `core/exportGIF.ts` 33 / 34 — its one uncovered arm is the `error instanceof Error ?
+error.message : String(error)` fallback in the catch, the exact parity of `exportWebM.ts`'s own
+uncovered `String(error)` arm, which the Task 3 review ruled stays rather than be tested for a
+throw no caller makes — `core/exportTypes.ts`'s ten new arms (`gifFrameRate`'s and
+`gifFrameDelayMs`'s option checks, `resolutionForFormat` in both directions, `estimateGifBytes`),
+`components/Export/ExportDialog.tsx`'s thirty-five (the GIF dispatch branch, the format gates on
+the Quality, audio and background-tab affordances, the two estimates, the 30-second note, the
+no-WebCodecs alert's second sentence) at 169 / 170 with the same one pre-existing arm uncovered,
+and `headless/renderProject.ts`'s six (the three-way dispatch, the GIF duration) with the same
+three pre-existing uncovered. The branch deletes one fully covered function (`isGIFExportSupported`,
+which had no production caller), so the functions denominator grows by one fewer than the new
+module's fifteen, four and four. The three pre-existing export and preview ceiling files and every
+rerender pin are byte-identical to the base; `core/exportGIF.perf.test.ts` is the new ceiling file,
+and its laws are exact — one `getImageData`, one `addFrame`, one `setTransform` and zero
+`VideoFrame`s per frame. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
+`@escapesuite/headless-artist` was re-measured 2026-10-02 for the same ticket: **99.46** / **99.37** /
+**98.19** / 98.52 against the 99.45 / 99.36 / 98.16 / 98.52 the same base measures — lines, statements
+and branches each up a hundredth or three, functions unmoved. Measured in one sitting, the base gives
+481 / 490 branches and this branch 489 / 498: eight new branches, eight covered, the same 9 uncovered
+as before (lines 735 / 739 → 742 / 746, statements 785 / 790 → 792 / 797, functions 134 / 136 on
+both; the same 4 / 5 / 9 / 2 uncovered). All eight are in `src/jobSpec.ts`'s `parseOptions`: `gif`
+joining `FORMATS`, `360p` joining `RESOLUTIONS`, and the `fps` rule — present only with
+`format: "gif"`, an integer in {10, 15, 20}, refused on the two video formats — each reached from
+both sides by the accept and reject cases the validator suite gained. The widened `RenderMeta['format']`
+forced `gif` keys into the two sink maps, which `tsc` found; neither is a branch. The GIF Chromium
+parity case (`run.chromium.test.ts`, `GIF89a` in, manifest `format: 'gif'` out) is outside this
+measurement and was run twice here: 28 / 28 both times. **No floor crossed**; the kit's floors stay
+99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1693,9 +1743,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.72 | 99.12 | 95.26 | 99.65 |
+| `@escapesuite/artist` | 99.78 | 99.18 | 95.37 | 99.66 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
-| `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
+| `@escapesuite/headless-artist` | 99.46 | 99.37 | 98.19 | 98.52 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being

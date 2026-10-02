@@ -84,6 +84,51 @@ describe('runJob (real Chromium)', () => {
     expect(await fs.readdir(workDir)).toEqual([])
   }, RENDER_TIMEOUT_MS)
 
+  it('renders the same job as a GIF', async () => {
+    const spec: JobSpec = {
+      ...makeSpec('e2e-gif'),
+      options: { format: 'gif', quality: 'medium', fps: 10, resolution: '360p' },
+    }
+
+    const outcome = await runJob(spec, {
+      bundlePath: BUNDLE,
+      workDir,
+      versions: VERSIONS,
+      log: quiet,
+    })
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.error).toBeUndefined()
+    // 360p of the fixture's 64x48 (4:3) project is 480x360, through the same
+    // `getResolution` the two video formats use. The duration is the GIF's own:
+    // 10 frames of 100 ms, which at this rate is exactly the one-second timeline.
+    expect(outcome.meta).toMatchObject({
+      format: 'gif',
+      width: 480,
+      height: 360,
+      durationSec: 1,
+      gpu: false,
+    })
+
+    const outputPath = path.join(outDir, 'e2e-gif.gif')
+    expect(outcome.outputLocation).toBe(outputPath)
+    const bytes = await fs.readFile(outputPath)
+    // Every GIF starts with the signature and version; this one must be 89a,
+    // because an animated GIF needs the Graphic Control Extension that 87a
+    // does not have.
+    expect(bytes.subarray(0, 6).toString('latin1')).toBe('GIF89a')
+    // And it ends with the trailer, which is how we know it was finished rather
+    // than truncated.
+    expect(bytes[bytes.byteLength - 1]).toBe(0x3b)
+
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(outDir, 'e2e-gif.manifest.json'), 'utf8'),
+    )
+    expect(manifest.format).toBe('gif')
+    expect(manifest.byteLength).toBe(bytes.byteLength)
+    expect(manifest.sha256).toMatch(/^[0-9a-f]{64}$/)
+  }, RENDER_TIMEOUT_MS)
+
   it('returns ok:false and cleans up when the headless bundle is missing', async () => {
     const missing = path.join(tmpRoot, 'no-such-bundle.html')
 

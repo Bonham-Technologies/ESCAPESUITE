@@ -1,6 +1,12 @@
 // apps/artist/src/headless/renderProject.ts
-import { exportToMP4, exportToWebM } from '../core/exporter'
-import { calculateTimelineDuration, getBaseDimensions, getResolution } from '../core/exportTypes'
+import { exportToGIF, exportToMP4, exportToWebM } from '../core/exporter'
+import {
+  calculateTimelineDuration,
+  getBaseDimensions,
+  getResolution,
+  gifFrameDelayMs,
+  gifFrameRate,
+} from '../core/exportTypes'
 import { convertLegacyOverlays } from '../store/legacyOverlays'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, RenderMeta, RenderResult, SourceVideoInput } from './types'
@@ -47,6 +53,19 @@ function validateInput(request: RenderRequest): void {
 }
 
 /**
+ * How long a GIF of `seconds` of timeline actually plays, which is not `seconds`:
+ * the encoder writes `ceil(seconds x rate)` frames and gives each the same delay,
+ * so the total is a whole number of those delays. Both rules come from the
+ * exporter's own helpers rather than being derived a second time here — the frame
+ * count mirrors `exportGIF.ts`, and `gifFrameDelayMs` owns the two roundings a
+ * frame's on-screen time goes through on the way into the file (67 ms asked for at
+ * 15 fps, 70 ms stored).
+ */
+function gifDurationSec(seconds: number, fps: number | undefined): number {
+  return (Math.ceil(seconds * gifFrameRate(fps)) * gifFrameDelayMs(fps)) / 1000
+}
+
+/**
  * The one render path: validate, seed, run the SAME engine the editor uses
  * (identical arg order to ExportDialog), and describe the encoded output.
  * Both entry points differ only in how bytes arrive and how they leave.
@@ -75,10 +94,15 @@ async function render(
     ? (ep: { progress: number }) => onProgress(ep.progress)
     : () => {}
 
-  const format = options.format === 'webm' ? 'webm' : 'mp4'
+  // One branch per format, in the same shape the export dialog uses. 'mp4' is
+  // the fallback for an unrecognised value, which is what it has always been.
+  const format: RenderMeta['format'] =
+    options.format === 'webm' ? 'webm' : options.format === 'gif' ? 'gif' : 'mp4'
   const blob = format === 'webm'
     ? await exportToWebM(clips, sourceVideos, options, progress, tracks, undefined, resolution)
-    : await exportToMP4(clips, sourceVideos, options, progress, tracks, undefined, resolution)
+    : format === 'gif'
+      ? await exportToGIF(clips, sourceVideos, options, progress, tracks, undefined, resolution)
+      : await exportToMP4(clips, sourceVideos, options, progress, tracks, undefined, resolution)
 
   // Describe the OUTPUT, not the project: honour the resolution option and timeRange
   // the same way the engine does, so the manifest (Plan 2) matches the bytes.
@@ -87,7 +111,18 @@ async function render(
   const fullDuration = calculateTimelineDuration(clips)
   const rangeStart = options.timeRange?.start ?? 0
   const rangeEnd = options.timeRange?.end ?? fullDuration
-  const durationSec = rangeEnd - rangeStart
+  // A GIF plays for as long as its frame delays say, and the format stores those
+  // in centiseconds: `exportToGIF` encodes `ceil(seconds x rate)` frames, each
+  // asked for at `round(1000 / rate)` ms and written as `round(that / 10)` cs, so
+  // a 15 fps GIF of a one-second range is 15 frames of 70 ms — 1.05 s of GIF, not
+  // 1. The manifest describes the bytes, so it reports those stored delays rather
+  // than the requested range; the two video formats encode the range itself and
+  // are unchanged. `gifFrameRate` and `gifFrameDelayMs` own the rate, its default
+  // and the rounding, the same way the exporter and `gifenc` do.
+  const rangeSeconds = rangeEnd - rangeStart
+  const durationSec = format === 'gif'
+    ? gifDurationSec(rangeSeconds, options.fps)
+    : rangeSeconds
 
   return {
     blob,

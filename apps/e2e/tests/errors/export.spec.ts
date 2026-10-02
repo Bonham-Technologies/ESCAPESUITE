@@ -96,8 +96,11 @@ test.describe('WebCodecs Unavailable', () => {
 
     const alert = page.getByRole('alert')
     await expect(alert).toBeVisible()
+    // ESCSUITE-34: the alert gained a second sentence, because GIF needs no
+    // WebCodecs and is the one export this browser still has.
     await expect(alert).toHaveText(
-      'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.'
+      'Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project. ' +
+        'GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway.'
     )
     // Said in the main body, not behind the collapsed Advanced disclosure.
     await expect(page.getByRole('button', { name: 'Advanced options' })).toHaveAttribute(
@@ -105,6 +108,11 @@ test.describe('WebCodecs Unavailable', () => {
       'false'
     )
     await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeDisabled()
+
+    // And the sentence is true: under Advanced, GIF is the one format left enabled.
+    await page.getByRole('button', { name: 'Advanced options' }).click()
+    await expect(page.getByRole('radio', { name: /GIF/ })).toBeEnabled()
+    await expect(page.getByRole('radio', { name: /MP4/ })).toBeDisabled()
   })
 })
 

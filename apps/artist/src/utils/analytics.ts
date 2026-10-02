@@ -13,9 +13,9 @@ export const analytics = {
   projectSaved: () => trackEvent('Project Saved'),
 
   // Export events
-  exportStarted: (format: 'webm' | 'mp4') =>
+  exportStarted: (format: 'webm' | 'mp4' | 'gif') =>
     trackEvent('Export Started', { format }),
-  exportCompleted: (format: 'webm' | 'mp4', durationSeconds: number) =>
+  exportCompleted: (format: 'webm' | 'mp4' | 'gif', durationSeconds: number) =>
     trackEvent('Export Completed', { format, duration: Math.round(durationSeconds) }),
   exportFailed: (format: string, errorType: string, progress: number) =>
     trackEvent('Export Failed', { format, errorType, progress: Math.round(progress * 100) }),
