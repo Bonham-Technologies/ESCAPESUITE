@@ -11,9 +11,10 @@ import { lastObjectUrl } from '../../test/objectUrls'
 // The exporter itself is driven by its own suite; here it is a scripted
 // collaborator. The real error classes come through importOriginal so the
 // dialog's instanceof checks are the ones production runs.
-const { mockExportToWebM, mockExportToMP4, mockIsMP4ExportSupported, mockIsWebMExportSupported } = vi.hoisted(() => ({
+const { mockExportToWebM, mockExportToMP4, mockExportToGIF, mockIsMP4ExportSupported, mockIsWebMExportSupported } = vi.hoisted(() => ({
   mockExportToWebM: vi.fn(),
   mockExportToMP4: vi.fn(),
+  mockExportToGIF: vi.fn(),
   mockIsMP4ExportSupported: vi.fn(() => true),
   mockIsWebMExportSupported: vi.fn(() => Promise.resolve(true)),
 }))
@@ -22,6 +23,7 @@ vi.mock('../../core/exporter', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../core/exporter')>()),
   exportToWebM: mockExportToWebM,
   exportToMP4: mockExportToMP4,
+  exportToGIF: mockExportToGIF,
   isMP4ExportSupported: mockIsMP4ExportSupported,
   isWebMExportSupported: mockIsWebMExportSupported,
 }))
@@ -55,7 +57,7 @@ vi.mock('../../utils/analytics', () => ({ analytics: mockAnalytics }))
 type ExportArgs = [
   unknown, // clips
   unknown, // sourceVideos
-  { format: string; quality: string; resolution: string; timeRange?: { start: number; end: number } },
+  { format: string; quality: string; resolution: string; fps?: number; timeRange?: { start: number; end: number } },
   (p: ExportProgress) => void,
   unknown, // tracks
   AbortSignal,
@@ -64,12 +66,20 @@ type ExportArgs = [
 
 const webmArgs = () => mockExportToWebM.mock.calls[0] as unknown as ExportArgs
 const mp4Args = () => mockExportToMP4.mock.calls[0] as unknown as ExportArgs
+const gifArgs = () => mockExportToGIF.mock.calls[0] as unknown as ExportArgs
 
 const advancedToggle = () => screen.getByRole('button', { name: /advanced options/i })
 const primaryExport = () => screen.getByRole('button', { name: /download webm/i })
 const advancedExport = () => {
-  const buttons = screen.getAllByRole('button', { name: /download (webm|mp4)/i })
+  const buttons = screen.getAllByRole('button', { name: /download (webm|mp4|gif)/i })
   return buttons[buttons.length - 1]
+}
+const gifRadio = () => screen.getByRole('radio', { name: /gif/i })
+const fpsSelect = () => screen.getByLabelText(/frames per second/i)
+/** Open Advanced options and choose GIF. */
+const chooseGif = () => {
+  fireEvent.click(advancedToggle())
+  fireEvent.click(gifRadio())
 }
 
 /** Let the export promise chain settle without waiting on a real timer. */
@@ -118,6 +128,8 @@ describe('ExportDialog', () => {
     mockExportToWebM.mockResolvedValue(new Blob())
     mockExportToMP4.mockReset()
     mockExportToMP4.mockResolvedValue(new Blob())
+    mockExportToGIF.mockReset()
+    mockExportToGIF.mockResolvedValue(new Blob([new Uint8Array(1234)], { type: 'image/gif' }))
     mockSendMessage.mockReset()
     mockIsMP4ExportSupported.mockReturnValue(true)
     mockIsWebMExportSupported.mockReset()
@@ -155,12 +167,14 @@ describe('ExportDialog', () => {
       expect(advancedToggle()).toHaveAttribute('aria-expanded', 'false')
       expect(screen.queryByText('WebM (VP9 + Opus)')).not.toBeInTheDocument()
       expect(screen.queryByText('MP4 (H.264 + AAC)')).not.toBeInTheDocument()
+      expect(screen.queryByText('GIF (256 colours, no audio)')).not.toBeInTheDocument()
 
       fireEvent.click(advancedToggle())
 
       expect(advancedToggle()).toHaveAttribute('aria-expanded', 'true')
       expect(screen.getByText('WebM (VP9 + Opus)')).toBeInTheDocument()
       expect(screen.getByText('MP4 (H.264 + AAC)')).toBeInTheDocument()
+      expect(screen.getByText('GIF (256 colours, no audio)')).toBeInTheDocument()
       expect(screen.getByText('Low (faster export)')).toBeInTheDocument()
       expect(screen.getByText('Medium')).toBeInTheDocument()
       expect(screen.getByText('High (slower export)')).toBeInTheDocument()
@@ -1320,6 +1334,308 @@ describe('ExportDialog', () => {
 
       expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Export Section/ })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('GIF export', () => {
+    it('offers GIF as a third format under Advanced options', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      expect(gifRadio()).toBeEnabled()
+      expect(screen.getByText('GIF (256 colours, no audio)')).toBeInTheDocument()
+      // The other two radios must still be findable by name — the GIF label and
+      // hint deliberately contain neither "WebM" nor "MP4".
+      expect(screen.getByRole('radio', { name: /webm/i })).toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: /mp4/i })).toBeInTheDocument()
+    })
+
+    it('keeps the frame-rate control hidden until GIF is chosen', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      expect(screen.queryByLabelText(/frames per second/i)).not.toBeInTheDocument()
+
+      fireEvent.click(gifRadio())
+
+      expect(fpsSelect()).toHaveValue('15')
+      expect(screen.getByText('10 fps (smallest file)')).toBeInTheDocument()
+      expect(screen.getByText('15 fps')).toBeInTheDocument()
+      expect(screen.getByText('20 fps (smoothest)')).toBeInTheDocument()
+    })
+
+    it('offers only 720p, 480p and 360p for GIF, defaulting to 480p', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+
+      // The project is 1920x1080 (the store's default), so the three widths
+      // follow its 16:9 aspect — the same `getResolution` rule every format uses.
+      expect(screen.getByText('720p — 1280×720')).toBeInTheDocument()
+      expect(screen.getByText('480p — 854×480')).toBeInTheDocument()
+      expect(screen.getByText('360p — 640×360')).toBeInTheDocument()
+      expect(screen.queryByText(/^Project —/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^1080p —/)).not.toBeInTheDocument()
+      // A GIF at the project's own resolution is unpredictable and one at 1080p
+      // is enormous, so neither is offered — and choosing GIF while 1080p was
+      // selected lands on the spec's default rather than leaving the select on a
+      // value it no longer lists.
+      expect(screen.getByDisplayValue('480p — 854×480')).toBeInTheDocument()
+    })
+
+    it('moves a 1080p selection to 480p on the way into GIF', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      fireEvent.change(screen.getByDisplayValue(/^Project —/), { target: { value: '1080p' } })
+      fireEvent.click(gifRadio())
+
+      expect(screen.getByDisplayValue('480p — 854×480')).toBeInTheDocument()
+    })
+
+    it('moves a 360p selection to 480p on the way back to WebM', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+      fireEvent.change(screen.getByDisplayValue('480p — 854×480'), { target: { value: '360p' } })
+      expect(screen.getByDisplayValue('360p — 640×360')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('radio', { name: /webm/i }))
+
+      // 360p is GIF-only; no video preset is 360p, so the selection has to move.
+      expect(screen.getByDisplayValue('480p — 854×480')).toBeInTheDocument()
+      expect(screen.queryByText('360p — 640×360')).not.toBeInTheDocument()
+    })
+
+    it('runs exportToGIF with the chosen fps, preset and range', async () => {
+      store().setInPoint(1)
+      store().setOutPoint(3)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+      fireEvent.change(fpsSelect(), { target: { value: '20' } })
+      fireEvent.click(advancedExport())
+      await settle()
+
+      expect(mockExportToGIF).toHaveBeenCalledTimes(1)
+      expect(mockExportToWebM).not.toHaveBeenCalled()
+      expect(mockExportToMP4).not.toHaveBeenCalled()
+      expect(gifArgs()[2]).toMatchObject({
+        format: 'gif',
+        resolution: '480p',
+        fps: 20,
+        timeRange: { start: 1, end: 3 },
+      })
+    })
+
+    it('downloads the GIF as <project name>.gif and tells the host so', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+      fireEvent.click(advancedExport())
+      await settle()
+
+      expect(clickedLinks[0].download).toBe('Test Project.gif')
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'EXPORT_COMPLETE',
+          payload: expect.objectContaining({ format: 'gif', name: 'Test Project.gif' }),
+        })
+      )
+      expect(mockAnalytics.exportStarted).toHaveBeenCalledWith('gif')
+      expect(mockAnalytics.exportCompleted).toHaveBeenCalledWith('gif', expect.any(Number))
+    })
+
+    it('labels the Advanced button for GIF', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+
+      expect(screen.getByRole('button', { name: /download gif/i })).toBeEnabled()
+    })
+
+    it('estimates the size before the export starts', () => {
+      // 5 seconds of clip (the suite's own fixture), 480p of a 16:9 project is
+      // 854x480, 15 fps -> 75 frames, at the pixels x frames x 0.3 heuristic.
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+
+      expect(screen.getByText(/Estimated size/)).toBeInTheDocument()
+      expect(screen.getByText(/75 frames/)).toBeInTheDocument()
+    })
+
+    it('re-estimates when the frame rate changes', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+      const before = screen.getByText(/Estimated size/).textContent
+
+      fireEvent.change(fpsSelect(), { target: { value: '10' } })
+
+      expect(screen.getByText(/50 frames/)).toBeInTheDocument()
+      expect(screen.getByText(/Estimated size/).textContent).not.toBe(before)
+    })
+
+    it('shows the live estimate the exporter reports while it runs', async () => {
+      let report: ((p: ExportProgress) => void) | undefined
+      mockExportToGIF.mockImplementation((...args: unknown[]) => {
+        report = args[3] as (p: ExportProgress) => void
+        return new Promise(() => {}) // never settles: the dialog stays on the progress view
+      })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+      fireEvent.click(advancedExport())
+      await settle()
+
+      act(() => {
+        report!({ phase: 'encoding', progress: 40, message: 'Encoding frame 30/75...', estimatedBytes: 2_621_440 })
+      })
+
+      // Rendered through the same formatFileSize the media library uses, so one
+      // formatter covers the whole app.
+      expect(screen.getByText(/2\.5 MB/)).toBeInTheDocument()
+    })
+
+    it('warns past 30 seconds without refusing the export', () => {
+      resetStoreForTest()
+      store().setProject({ ...store().project, name: 'Test Project' })
+      addClip('long', 0, 45)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+
+      expect(screen.getByText(/GIFs above 30 seconds get large/)).toBeInTheDocument()
+      // A warning, not a gate.
+      expect(screen.getByRole('button', { name: /download gif/i })).toBeEnabled()
+    })
+
+    it('does not warn for an export inside 30 seconds', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+
+      expect(screen.queryByText(/GIFs above 30 seconds get large/)).not.toBeInTheDocument()
+    })
+
+    it('warns on the range, not the timeline, when in/out points are set', () => {
+      resetStoreForTest()
+      store().setProject({ ...store().project, name: 'Test Project' })
+      addClip('long', 0, 45)
+      store().setInPoint(0)
+      store().setOutPoint(5)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+
+      // 45 seconds of timeline but a 5-second section: the warning is about what
+      // will actually be encoded.
+      expect(screen.queryByText(/GIFs above 30 seconds get large/)).not.toBeInTheDocument()
+    })
+
+    it('hides the background-tab note for GIF and says what GIF needs instead', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      expect(
+        screen.getByText(/MP4 exports keep encoding in a background tab/)
+      ).toBeInTheDocument()
+
+      fireEvent.click(gifRadio())
+
+      // That note is about the two video formats' decoders; GIF has none.
+      expect(
+        screen.queryByText(/MP4 exports keep encoding in a background tab/)
+      ).not.toBeInTheDocument()
+      expect(screen.getByText(/GIF export needs this tab visible and has no sound/)).toBeInTheDocument()
+    })
+
+    it('leaves GIF enabled, and says so, when the browser has no WebCodecs', async () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await waitFor(() => expect(primaryExport()).toBeDisabled())
+
+      // The ESCSUITE-22 alert is still there, and now carries the sentence that
+      // stops it being a dead end.
+      expect(
+        screen.getByText(/Exporting needs WebCodecs, which this browser does not provide/)
+      ).toBeInTheDocument()
+      expect(screen.getByText(/GIF export needs no WebCodecs/)).toBeInTheDocument()
+
+      fireEvent.click(advancedToggle())
+      expect(gifRadio()).toBeEnabled()
+      expect(screen.getByRole('radio', { name: /webm/i })).toBeDisabled()
+      expect(screen.getByRole('radio', { name: /mp4/i })).toBeDisabled()
+
+      fireEvent.click(gifRadio())
+      const button = screen.getByRole('button', { name: /download gif/i })
+      expect(button).toBeEnabled()
+      expect(button).not.toHaveAttribute('title')
+    })
+
+    it('exports GIF in a browser with no WebCodecs', async () => {
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsWebMExportSupported.mockResolvedValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await waitFor(() => expect(primaryExport()).toBeDisabled())
+      chooseGif()
+      fireEvent.click(screen.getByRole('button', { name: /download gif/i }))
+      await settle()
+
+      expect(mockExportToGIF).toHaveBeenCalledTimes(1)
+    })
+
+    it('remembers the frame rate with the rest of the advanced settings', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+      fireEvent.change(fpsSelect(), { target: { value: '10' } })
+      fireEvent.click(advancedExport())
+      await settle()
+
+      expect(mockSetSetting).toHaveBeenCalledWith('lastExportSettings', {
+        format: 'gif',
+        quality: 'medium',
+        resolution: '480p',
+        fps: 10,
+      })
+    })
+
+    it('restores a saved setting that predates the frame rate at the default', async () => {
+      mockGetSetting.mockResolvedValue({ format: 'gif', quality: 'high', resolution: '480p' })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await waitFor(() => expect(gifRadio()).toBeChecked())
+
+      // A setting saved before this ticket carries no fps at all.
+      expect(fpsSelect()).toHaveValue('15')
+    })
+
+    it('surfaces a failed GIF export inline, with no format fallback offered', async () => {
+      mockExportToGIF.mockRejectedValue(new ExportError('quantiser gave up', []))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        chooseGif()
+        fireEvent.click(advancedExport())
+        await settle()
+
+        expect(screen.getByRole('alert')).toHaveTextContent('Export failed: quantiser gave up')
+        // "Try MP4 Instead" is WebM's own recovery (ESCSUITE-29 Mechanism 1): a
+        // GIF failure is not a codec problem another codec would solve.
+        expect(screen.queryByRole('button', { name: /try mp4 instead/i })).not.toBeInTheDocument()
+        expect(mockAnalytics.exportFailed).toHaveBeenCalledWith('gif', 'ExportError', expect.any(Number))
+        // The diagnostic trail is labelled for the format that actually ran.
+        expect(debugLog).toHaveBeenCalledWith('[GIF Export] Diagnostic log:', [])
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
+    it('stops a GIF export when Cancel is clicked', async () => {
+      let signal: AbortSignal | undefined
+      mockExportToGIF.mockImplementation((...args: unknown[]) => {
+        signal = args[5] as AbortSignal
+        return new Promise(() => {})
+      })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      chooseGif()
+      fireEvent.click(advancedExport())
+      await settle()
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      expect(signal!.aborted).toBe(true)
+      expect(onClose).toHaveBeenCalled()
     })
   })
 })
