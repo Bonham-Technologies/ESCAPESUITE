@@ -19,11 +19,16 @@
 // collapsed the region to whatever one mousemove was wide — chasing the
 // pointer instead of spanning from the stationary point to it. The ordering
 // is done here instead: `draggedPointRef` names which point the pointer is
-// currently moving, and `stationaryPointRef` holds the other point's value,
-// read at the moment the handle was grabbed and never touched again except
-// at the instant of a crossing, when both are written explicitly in the same
-// move and the ref flips — so the store's own swap, correct for a direct
-// write from outside a gesture, never has occasion to fire mid-drag.
+// currently moving, and at each move the *other* point's value is read live
+// off `inPointRef`/`outPointRef` — mirrored from the caller's own `inPoint`/
+// `outPoint` every render — rather than snapshotted once at mousedown. A
+// snapshot would go stale the moment anything outside this gesture wrote the
+// stationary point directly (the keyboard's I/O shortcuts, the Toolbar's
+// in/out buttons both do), silently discarding that write the instant the
+// drag crossed. Reading live means a crossing always uses whatever the
+// store actually holds, the same as the store's own swap would have — and
+// the write at the crossing instant is still explicit on both points, so
+// that swap never has occasion to fire mid-drag.
 import type * as React from 'react';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { clampTime, pointerTime } from './timelineGeometry';
@@ -38,10 +43,10 @@ export interface InOutDragDeps {
   pixelsPerSecond: number;
   /** The project's duration — both points are clamped to it. */
   timelineDuration: number;
-  /** The store's current in point — read at the moment the out handle is grabbed. */
-  inPoint?: number | null;
-  /** The store's current out point — read at the moment the in handle is grabbed. */
-  outPoint?: number | null;
+  /** The store's current in point — read live at each move while the out handle drags. */
+  inPoint: number | null;
+  /** The store's current out point — read live at each move while the in handle drags. */
+  outPoint: number | null;
   setInPoint: (time: number) => void;
   setOutPoint: (time: number) => void;
 }
@@ -76,24 +81,20 @@ export function useInOutDrag({
   const outPointRef = useRef(outPoint);
   outPointRef.current = outPoint;
 
-  // Which point the gesture is currently writing, and the other point's
-  // value, fixed for the gesture's whole life except at a crossing. See the
-  // file comment for why a ref rather than state — flipping it must never
-  // itself trigger a re-render or re-bind the listeners below.
+  // Which point the gesture is currently writing. See the file comment for
+  // why a ref rather than state — flipping it must never itself trigger a
+  // re-render or re-bind the listeners below.
   const draggedPointRef = useRef<'in' | 'out'>('in');
-  const stationaryPointRef = useRef<number | null>(null);
 
   const handleInPointMouseDown = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     draggedPointRef.current = 'in';
-    stationaryPointRef.current = outPointRef.current ?? null;
     setIsDraggingInPoint(true);
   }, []);
 
   const handleOutPointMouseDown = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     draggedPointRef.current = 'out';
-    stationaryPointRef.current = inPointRef.current ?? null;
     setIsDraggingOutPoint(true);
   }, []);
 
@@ -108,9 +109,13 @@ export function useInOutDrag({
       const rect = ref.getBoundingClientRect();
       const time = pointerTime(e.clientX, rect.left, ref.scrollLeft, pixelsPerSecond);
       const clampedTime = clampTime(time, timelineDuration);
-      const stationary = stationaryPointRef.current;
 
       if (draggedPointRef.current === 'in') {
+        // The out point as the store holds it *right now* — not whatever it
+        // was when the in handle was grabbed — so a write from outside this
+        // gesture (keyboard I/O, the Toolbar's in/out buttons) is what a
+        // crossing sees.
+        const stationary = outPointRef.current;
         if (stationary !== null && clampedTime > stationary) {
           // Crossed the out point: the gesture now drags the out handle, and
           // the in point lands exactly where the out point was — the region
@@ -123,6 +128,7 @@ export function useInOutDrag({
           setInPoint(clampedTime);
         }
       } else {
+        const stationary = inPointRef.current;
         if (stationary !== null && clampedTime < stationary) {
           draggedPointRef.current = 'in';
           setOutPoint(stationary);
