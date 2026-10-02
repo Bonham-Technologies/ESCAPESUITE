@@ -9,6 +9,8 @@ import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo, Track } from '../../store/types';
 import { getClipsAtTime } from '../../store/projectStore';
+import { presetSuppressionFor } from '../../core/exportTypes';
+import type { TransitionInfo } from '../../core/exportTypes';
 import * as geometry from './previewGeometry';
 import type { ManipulableClipType, ProjectSize } from './types';
 
@@ -32,6 +34,13 @@ export interface DragStartMeasurements {
  * In keyframe mode the numbers come from the clip's *animated* state at the
  * playhead — the drag continues from what the eye can see, not from the
  * untouched base transform the keyframes are animating away from.
+ *
+ * "What the eye can see" is why `transition` is here (ESCSUITE-147): while a
+ * transition owns one of the clip's preset sides the renderer leaves that preset
+ * out, so a seed that applied it would start the gesture from a position nothing
+ * on screen is at — and, in keyframe mode, write every keyframe the drag makes
+ * offset by the preset's delta. Pass the transition active at `currentTime`, or
+ * nothing where there is none.
  */
 export function measureDragStart(
   clip: Clip,
@@ -40,7 +49,8 @@ export function measureDragStart(
   currentTime: number,
   isKeyframeMode: boolean,
   sourceVideos: SourceVideo[],
-  projectSize?: ProjectSize
+  projectSize?: ProjectSize,
+  transition?: TransitionInfo | null
 ): DragStartMeasurements {
   let startX = 0, startY = 0, startWidth = 0, startHeight = 0, startRotation = 0, startScaleX = 1, startScaleY = 1;
 
@@ -48,7 +58,9 @@ export function measureDragStart(
   const sizeOf = (c: HTMLCanvasElement): ProjectSize => projectSize ?? c;
 
   const boundsOf = (time: number) =>
-    canvas ? geometry.getOverlayBounds(clip, canvas, time, sourceVideos, sizeOf(canvas)) : null;
+    canvas
+      ? geometry.getOverlayBounds(clip, canvas, time, sourceVideos, sizeOf(canvas), { transition })
+      : null;
 
   if (isKeyframeMode && canvas) {
     // Use animated values from getOverlayBounds
@@ -90,7 +102,10 @@ export function measureDragStart(
           clip.duration,
           clip.animation,
           transform,
-          clip.effects || DEFAULT_EFFECTS
+          clip.effects || DEFAULT_EFFECTS,
+          // The same suppression `boundsOf` above measured the box under, so the
+          // seeded scale and the seeded position describe one picture.
+          presetSuppressionFor(clip.id, transition)
         );
         startScaleX = animatedValues.scaleX;
         startScaleY = animatedValues.scaleY;
@@ -146,6 +161,10 @@ export function measureDragStart(
  * measured in project pixels. Both are mapped into the 0-1 space of the
  * *rendered* content, which is what object-fit: contain letterboxes, so a
  * marquee drawn over a letterbox bar selects nothing rather than everything.
+ *
+ * `transition` is the one active at `currentTime`, so the rectangle sweeps the
+ * boxes the viewer can see rather than the ones a suppressed preset would put
+ * elsewhere (ESCSUITE-147).
  */
 export function clipsIntersectingMarquee(
   canvas: HTMLCanvasElement,
@@ -154,7 +173,8 @@ export function clipsIntersectingMarquee(
   clips: Clip[],
   currentTime: number,
   sourceVideos: SourceVideo[],
-  project: ProjectSize = canvas
+  project: ProjectSize = canvas,
+  transition?: TransitionInfo | null
 ): string[] {
   // The rendered canvas area within the element (object-fit: contain)
   const content = geometry.contentBox(canvas, canvas.getBoundingClientRect(), project);
@@ -177,7 +197,9 @@ export function clipsIntersectingMarquee(
     const clipEnd = clip.timelinePosition + clip.duration;
     if (currentTime < clip.timelinePosition || currentTime >= clipEnd) continue;
 
-    const bounds = geometry.getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
+    const bounds = geometry.getOverlayBounds(
+      clip, canvas, currentTime, sourceVideos, project, { transition }
+    );
     if (!bounds) continue;
 
     // Convert bounds to normalized coords
@@ -200,6 +222,8 @@ export function clipsIntersectingMarquee(
  *
  * Unlike the handle hit test this ignores selection and keyframe mode
  * entirely: a double-click opens the editor on whatever text is under it.
+ * `transition` is the one active at `currentTime`, for the reason
+ * {@link clipsIntersectingMarquee} gives.
  */
 export function textClipAtPoint(
   mouseX: number,
@@ -209,14 +233,17 @@ export function textClipAtPoint(
   tracks: Track[],
   currentTime: number,
   sourceVideos: SourceVideo[],
-  project: ProjectSize = canvas
+  project: ProjectSize = canvas,
+  transition?: TransitionInfo | null
 ): Clip | null {
   const activeClips = getClipsAtTime(clips, tracks, currentTime);
   // Check in reverse z-order (top-most first)
   for (const { clip } of [...activeClips].reverse()) {
     if (clip.overlayType !== 'text' || !clip.textData) continue;
 
-    const bounds = geometry.getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
+    const bounds = geometry.getOverlayBounds(
+      clip, canvas, currentTime, sourceVideos, project, { transition }
+    );
     if (!bounds) continue;
 
     const halfW = bounds.width / 2;

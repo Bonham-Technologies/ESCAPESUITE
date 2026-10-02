@@ -36,6 +36,7 @@ import type { ClipTransform, TextOverlayData, ShapeOverlayData } from '../../sto
 import * as geometry from './previewGeometry';
 import * as hitTest from './hitTest';
 import { clipsIntersectingMarquee, measureDragStart, textClipAtPoint } from './dragGeometry';
+import { getActiveTransition } from './transitions';
 import { clipOnLockedTrack, isTrackLocked } from '../../store/trackLock';
 import { getCursorForMode } from './cursor';
 import type { DragMode, ManipulableClipType } from './types';
@@ -115,6 +116,27 @@ export function useTransformHandles({
   const resolution = useEditorStore((state) => state.project.resolution);
   const projectSize = useMemo(() => geometry.projectSizeOf(resolution), [resolution]);
 
+  /**
+   * The transition active at the playhead, or null.
+   *
+   * Every measurement below reads a clip's animation, and the renderer leaves out
+   * whichever preset side an active transition owns (ESCSUITE-139) — so the box a
+   * pointer is tested against, the rectangle a marquee sweeps, the text a
+   * double-click lands on and the position a keyframe drag seeds from all have to
+   * be measured under the same suppression, or they describe a picture nobody can
+   * see (ESCSUITE-147). Derived once here rather than at each of the four call
+   * sites: it is a function of three things every one of them already depends on,
+   * and one answer cannot disagree with itself.
+   *
+   * `null` wherever there is no transition, which is almost always — so the memo,
+   * and every callback that takes it as a dependency, stays referentially stable
+   * through an ordinary scrub and only churns inside a window.
+   */
+  const activeTransition = useMemo(
+    () => getActiveTransition(clips, tracks, currentTime),
+    [clips, tracks, currentTime]
+  );
+
   // Drag state for overlay manipulation
   const [dragState, setDragState] = useState<DragState | null>(null);
 
@@ -186,8 +208,10 @@ export function useTransformHandles({
       currentTime,
       selectedClipId,
       keyframePanelOpen,
+      transition: activeTransition,
     }, projectSize, screenScale);
-  }, [canvasRef, clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen, projectSize]);
+  }, [canvasRef, clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen,
+      projectSize, activeTransition]);
 
   // Mouse event handlers for drag-and-drop
   const handleMouseDown = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
@@ -232,7 +256,8 @@ export function useTransformHandles({
       const {
         startX, startY, startWidth, startHeight, startRotation, startScaleX, startScaleY,
       } = measureDragStart(
-        clip, hit.clipType, canvas, currentTime, isKeyframeMode, sourceVideos, projectSize
+        clip, hit.clipType, canvas, currentTime, isKeyframeMode, sourceVideos, projectSize,
+        activeTransition
       );
 
       // A fresh gesture owes the undo stack one entry, which its first store
@@ -266,7 +291,7 @@ export function useTransformHandles({
         setMarqueeCurrent(null);
       }
     }
-  }, [isPlaying, getCanvasPosition, hitTestHandles, clips, tracks, setSelectedClipId, sourceVideos, keyframePanelOpen, selectedClipId, currentTime, canvasRef, projectSize, gestureHistory]);
+  }, [isPlaying, getCanvasPosition, hitTestHandles, clips, tracks, setSelectedClipId, sourceVideos, keyframePanelOpen, selectedClipId, currentTime, canvasRef, projectSize, gestureHistory, activeTransition]);
 
   const handleMouseMove = useCallback((e: MouseEvent<HTMLCanvasElement>) => {
     // Handle marquee drag
@@ -554,7 +579,7 @@ export function useTransformHandles({
 
         const intersecting = clipsIntersectingMarquee(
           canvas, marqueeStart, marqueeCurrent!, clips, currentTime, sourceVideos,
-          projectSize
+          projectSize, activeTransition
         );
 
         const nativeEvent = e as unknown as { ctrlKey?: boolean; metaKey?: boolean } | undefined;
@@ -597,7 +622,7 @@ export function useTransformHandles({
     // invariant local to it, for whatever writes this hook grows next.
     gestureHistory.end();
     setDragState(null);
-  }, [dragState, clips, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef, projectSize, gestureHistory]);
+  }, [dragState, clips, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef, projectSize, gestureHistory, activeTransition]);
 
   const handleMouseLeave = useCallback(() => {
     // Don't cancel drag when mouse leaves canvas — window listeners handle it
@@ -649,7 +674,8 @@ export function useTransformHandles({
     const mouseY = pos.y * projectSize.height;
 
     const clip = textClipAtPoint(
-      mouseX, mouseY, canvas, clips, tracks, currentTime, sourceVideos, projectSize
+      mouseX, mouseY, canvas, clips, tracks, currentTime, sourceVideos, projectSize,
+      activeTransition
     );
     // A locked row's clip would open the editor and then lose every keystroke
     // to the store's refusal, silently — so it does not open (ESCSUITE-84).
@@ -659,7 +685,7 @@ export function useTransformHandles({
       setEditingTextClipId(clip.id);
       setSelectedClipId(clip.id);
     }
-  }, [isPlaying, dragState, getCanvasPosition, clips, tracks, currentTime, sourceVideos, setSelectedClipId, canvasRef, setEditingTextClipId, projectSize]);
+  }, [isPlaying, dragState, getCanvasPosition, clips, tracks, currentTime, sourceVideos, setSelectedClipId, canvasRef, setEditingTextClipId, projectSize, activeTransition]);
 
   // Determine cursor based on hover state.
   //

@@ -18,7 +18,13 @@ import type { DragMode, HandleHit, PreviewSceneContext, ProjectSize } from './ty
 /** The slice of the scene a hit test reads. */
 export type HitTestContext = Pick<
   PreviewSceneContext,
-  'clips' | 'tracks' | 'sourceVideos' | 'currentTime' | 'selectedClipId' | 'keyframePanelOpen'
+  | 'clips'
+  | 'tracks'
+  | 'sourceVideos'
+  | 'currentTime'
+  | 'selectedClipId'
+  | 'keyframePanelOpen'
+  | 'transition'
 >;
 
 /** How a pass narrows the handle cascade below. */
@@ -55,12 +61,12 @@ export function hitHandlesOnClip(
   mouseX: number,
   mouseY: number,
   canvas: HTMLCanvasElement,
-  scene: Pick<HitTestContext, 'clips' | 'sourceVideos' | 'currentTime'>,
+  scene: Pick<HitTestContext, 'clips' | 'sourceVideos' | 'currentTime' | 'transition'>,
   options: HandleCascadeOptions,
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): HandleHit | null {
-  const { clips, sourceVideos, currentTime } = scene;
+  const { clips, sourceVideos, currentTime, transition } = scene;
 
   const clip = clips.find(c => c.id === clipId);
   const clipType = clip ? getClipType(clip, sourceVideos) : null;
@@ -70,7 +76,7 @@ export function hitHandlesOnClip(
   const clipEnd = clip.timelinePosition + clip.duration;
   if (currentTime < clip.timelinePosition || currentTime >= clipEnd) return null;
 
-  const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
+  const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project, { transition });
   if (!bounds) return null;
 
   const halfW = bounds.width / 2;
@@ -130,7 +136,9 @@ export function hitTestHandles(
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): HandleHit | null {
-  const { clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen } = scene;
+  const {
+    clips, tracks, sourceVideos, currentTime, selectedClipId, keyframePanelOpen, transition,
+  } = scene;
 
   const mouseX = normalizedX * project.width;
   const mouseY = normalizedY * project.height;
@@ -189,7 +197,8 @@ export function hitTestHandles(
   // keyframe panel (RESTRICTION 2 above skips it in the handle passes), but it
   // still occupies the pixels it is drawn at — at its *animated* position,
   // since getOverlayBounds below takes currentTime and evaluates the same
-  // getAnimatedValues the preview draws with. Reporting a hit here, rather
+  // getAnimatedValues the preview draws with, under the same preset suppression
+  // an active transition imposes on it (ESCSUITE-147). Reporting a hit here, rather
   // than skipping to whatever is underneath, is what stops a click from
   // falling through a keyframed clip to the one on the lower track. The
   // caller (handleMouseDown in useTransformHandles.ts) is the one that turns
@@ -207,7 +216,7 @@ export function hitTestHandles(
     if (!clipType) continue;
     if (getClipOpacity(clip, currentTime) <= 0) continue;
 
-    const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
+    const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project, { transition });
     if (!bounds) continue;
 
     const halfW = bounds.width / 2;

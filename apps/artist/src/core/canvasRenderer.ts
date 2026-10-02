@@ -3,8 +3,8 @@
 
 import type { Clip, TextOverlayData, ShapeOverlayData, TransitionType } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
-import { getAnimatedValues } from '../utils/animation';
-import type { AnimatedValuesOptions, PresetSide } from '../utils/animation';
+import { getAnimatedValues, PRESET_SUPPRESSION } from '../utils/animation';
+import type { PresetSide } from '../utils/animation';
 import type {
   DrawableMediaSource,
   MediaDrawOptions,
@@ -15,20 +15,6 @@ import type {
 import { blendModeToCanvas, getSourceDimensions, getIncomingClipTime } from './exportTypes';
 import { drawWithMaskAndStroke } from './clipMask';
 import { croppedSourceRect } from './clipCrop';
-
-/**
- * The one options object per suppressible side, built once for the module
- * (ESCSUITE-139).
- *
- * `getAnimatedValues` takes its adjustments as an object, and a transition
- * frame calls this twice per frame for as long as it lasts — a literal here
- * would be two allocations per frame for a value that has exactly two possible
- * contents.
- */
-const PRESET_SUPPRESSION: Readonly<Record<PresetSide, AnimatedValuesOptions>> = {
-  in: Object.freeze({ suppressPreset: 'in' }),
-  out: Object.freeze({ suppressPreset: 'out' }),
-};
 
 /**
  * The animated transform/effect values of a clip at one instant.

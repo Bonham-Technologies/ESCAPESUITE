@@ -462,6 +462,22 @@ export interface AnimatedValuesOptions {
 }
 
 /**
+ * The one options object per suppressible side, frozen and shared.
+ *
+ * Lived in `core/canvasRenderer.ts` until ESCSUITE-147, which gave it a second
+ * caller: the preview's geometry has to evaluate a clip under the very
+ * suppression the renderer draws it under, or the selection box lands where the
+ * picture is not. Shared rather than copied so there is one answer, and frozen
+ * and hoisted rather than built per call because both callers ask repeatedly for
+ * as long as a transition lasts — the renderer twice a frame, the pointer once a
+ * move — for a value with exactly two possible contents.
+ */
+export const PRESET_SUPPRESSION: Readonly<Record<PresetSide, AnimatedValuesOptions>> = {
+  in: Object.freeze({ suppressPreset: 'in' }),
+  out: Object.freeze({ suppressPreset: 'out' }),
+};
+
+/**
  * Get all animated property values at a specific time within a clip
  *
  * @param clipTime - Time relative to clip start (seconds)
