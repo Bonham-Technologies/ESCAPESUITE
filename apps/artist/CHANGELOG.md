@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.14.1
+
+### Patch Changes
+
+- 2cae295: Clicking the preview no longer selects a fully transparent clip that is covering the one you can see; a selected keyframed clip now shows its selection box where it actually is.
+
 ## 2.14.0
 
 ### Minor Changes
