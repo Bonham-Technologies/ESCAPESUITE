@@ -1,5 +1,11 @@
 # @escapesuite/headless-artist
 
+## 0.4.2
+
+### Patch Changes
+
+- 02f229b: A manifest source can carry `meta` (media type and dimensions) so an audio-only file renders as audio, the way a bundle source already does.
+
 ## 0.4.1
 
 ### Patch Changes
