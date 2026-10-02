@@ -184,14 +184,14 @@ export async function exportToWebM(
   // the diagnostic log, and every encoder built so far, so the catch can close
   // what exists without caring how far construction got.
   //
-  // The muxer is the third (ESCSUITE-159): an `Output` that has been started
-  // holds its target and its packet sources — and, in a real browser, the
-  // encoders those sources own — and `cancel()` is Mediabunny's own call for
-  // releasing them. The handle is dropped again the moment `finalize()`
-  // succeeds, because a finalized output has nothing left to release and says so
-  // on the console if asked.
+  // The muxer is the third (ESCSUITE-159): an `Output` that is still mid-file
+  // holds its writer and its unfinalised target, and `cancel()` is Mediabunny's
+  // own call for releasing them. The handle is recorded as soon as the `Output`
+  // exists — before `start()`, so a `start()` that throws is covered too — and
+  // *which* outputs still need the call is answered by Mediabunny's own
+  // `state`, not by a flag kept out here: see the catch.
   const openEncoders: Array<VideoEncoder | AudioEncoder> = [];
-  let unfinalizedOutput: Output | null = null;
+  let muxerOutput: Output | null = null;
   let frameCount = 0;
 
   const releaseSources = createElementSourceRelease(sources);
@@ -205,7 +205,7 @@ export async function exportToWebM(
       format: new WebMOutputFormat(),
       target,
     });
-    unfinalizedOutput = output;
+    muxerOutput = output;
 
     // Create video packet source — the family actually negotiated above, which
     // is VP8 whenever the VP9 probe failed.
@@ -440,7 +440,6 @@ export async function exportToWebM(
     }
 
     await output.finalize();
-    unfinalizedOutput = null;
 
     // A cancel that landed while we were muxing still counts: never hand back
     // an export the caller asked to stop. Thrown before the 'complete' report,
@@ -465,22 +464,39 @@ export async function exportToWebM(
     // reach here (ESCSUITE-159).
     releaseSources();
 
-    // Release the muxer if it is still holding anything: null before
-    // `output.start()` ever ran, and null again once `finalize()` has written
-    // the file. A `finalize()` that threw leaves it set, which is exactly the
-    // state Mediabunny means `cancel()` for (ESCSUITE-159).
-    if (unfinalizedOutput) {
-      await unfinalizedOutput.cancel().catch(() => { /* the export already failed */ });
-    }
-
     // Close every encoder that was built — none at all when the setup threw
-    // before the first one, one when it threw between them (ESCSUITE-156).
+    // before the first one, one when it threw between them (ESCSUITE-156) — and
+    // do it *before* the muxer is cancelled (ESCSUITE-159). `close()` abandons
+    // the packets an encoder had not delivered yet; cancelling the output first
+    // would leave them to arrive at a packet source that now refuses them
+    // (`Output has been canceled.`) from inside the `output:` callbacks above,
+    // which nobody awaits — an unhandled rejection on top of the failure being
+    // reported, on the ordinary path of a user clicking Cancel mid-export.
+    // ESCAPECRAFT's recorder `cleanup()` keeps the same order for the same
+    // reason.
     for (const encoder of openEncoders) {
       try {
         if (encoder.state !== 'closed') {
           encoder.close();
         }
       } catch { /* ignore */ }
+    }
+
+    // Then the muxer, if it is still mid-file. `'started'` is the only state
+    // that is: a `'pending'` output never wrote anything, a `'finalized'` one is
+    // a finished file whose target `finalize()` already closed (asking anyway
+    // only logs "Output has already been finalized."), and a `finalize()` that
+    // *rejected* leaves `'canceled'`, which has released what it had. Reading
+    // Mediabunny's own state rather than keeping a flag out here is what
+    // ESCAPECRAFT's `cleanup()` does, and it cannot drift from the library.
+    // A muxer that will not let go is reported to the console and no further:
+    // the error this export fails with is its own, not the muxer's.
+    if (muxerOutput?.state === 'started') {
+      try {
+        await muxerOutput.cancel();
+      } catch (e) {
+        console.warn('The export output could not be cancelled:', e);
+      }
     }
 
     // Re-throw ExportAbortedError and ExportError as-is

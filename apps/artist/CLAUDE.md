@@ -147,14 +147,25 @@ pnpm lint                # Run ESLint
   source, held for the life of the page. `exportWebM.ts` records each encoder in an
   `openEncoders` list as it is built and its catch closes whatever exists, so the cleanup
   does not have to name handles that may not be in scope yet — and, since ESCSUITE-159, the
-  **muxer** beside it: an `Output` that has been started holds its target and its packet
-  sources (and in a real browser the encoders those sources own), so the catch
-  `await`s Mediabunny's own `output.cancel()` — the handle recorded as
-  `unfinalizedOutput` and dropped again the moment `finalize()` succeeds, because a
-  finalized output has nothing left to release and warns on the console if asked. A
-  `finalize()` that **threw** leaves it set, which is the one state Mediabunny
-  deliberately does not warn about and exactly what it means `cancel()` for. The GIF
-  pipeline has no muxer to cancel: `gifenc` writes into plain JS buffers.
+  **muxer** beside it: an `Output` that is still mid-file holds its writer and its
+  unfinalised target (the encoders are the exporter's own, and the same catch closes them;
+  an `EncodedVideoPacketSource` owns none), so the catch `await`s Mediabunny's own
+  `output.cancel()`. **Which** outputs get that call is answered by Mediabunny's own
+  `state` rather than by a flag the exporter keeps: only `'started'` is mid-file —
+  `'pending'` wrote nothing, `'finalized'` is a finished file whose target `finalize()`
+  closed (asking anyway only logs "Output has already been finalized.", which the two
+  reachable post-finalize paths — the abort check and the empty-buffer refusal — would
+  otherwise print), and a `finalize()` that *rejected* leaves `'canceled'`, having already
+  released what it had. That is exactly the state test ESCAPECRAFT's recorder `cleanup()`
+  applies to its own outputs, and it cannot drift from the library the way a hand-kept
+  handle can. **Order matters inside the catch**: the encoders are closed *first*, because
+  `close()` abandons the packets an encoder had not delivered yet, and cancelling the output
+  first would leave them to arrive at a packet source that refuses them (`Output has been
+  canceled.`) from inside an `output:` callback nobody awaits — an unhandled rejection on
+  top of the failure being reported, on the ordinary path of a user clicking Cancel
+  mid-export. A `cancel()` that itself fails is warned about and goes no further, the way
+  ESCAPECRAFT's `cancelOutput` reports one. The GIF pipeline has no muxer to cancel:
+  `gifenc` writes into plain JS buffers.
   **Releasing exactly once** is the other half of the same ownership (ESCSUITE-159): the
   success path's release and the catch's are *not* exclusive, because the caller's own
   `onProgress({ phase: 'complete' })` callback — and, in `exportWebM.ts`, the "no data was
