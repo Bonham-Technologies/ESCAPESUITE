@@ -234,6 +234,27 @@ describe('useSliderGesture', () => {
     expect(write()).toBe(true)
   })
 
+  it('resets the pointer flag on blur, so a later keyboard nudge groups its own held key (ESCSUITE-169 review round 1)', () => {
+    // `onBlur` is the substitute for a pointerup that never arrives — but it
+    // has to give the gesture back to the keyboard too. Leaving
+    // `pointerDownRef` stuck `true` made every later `onKeyDown`/`onKeyUp`
+    // short-circuit on the pointer guard before ever reaching `RANGE_KEYS` or
+    // `begin`/`resume` — so a held arrow key pressed after the blur pushed one
+    // undo entry per repeated keystroke instead of one for the whole hold,
+    // the exact regression ESCSUITE-75 exists to prevent.
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    on().onBlur()
+
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+    expect(write()).toBe(false)
+    // The held key's repeat must continue the SAME gesture, not open one of
+    // its own.
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
+    expect(write()).toBe(true)
+  })
+
   it('keeps one identity for the listeners across renders', () => {
     const { result, rerender } = renderHook(() => useSliderGesture())
     const first = result.current

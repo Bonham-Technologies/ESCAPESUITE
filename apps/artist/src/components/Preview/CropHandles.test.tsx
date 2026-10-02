@@ -644,6 +644,26 @@ describe('nudging a crop handle from the keyboard', () => {
     expect(clipNow(clip.id).crop!.left).toBeCloseTo(3 / 1920, 6)
   })
 
+  it('a non-nudging keyup does not end an open keyboard hold, with no mouse drag involved (ESCSUITE-169 review round 1)', () => {
+    // `onKeyUp`'s two guards run in sequence — "is a mouse drag open" then "is
+    // this a nudging key" — and every other case that fires a non-arrow keyup
+    // does so WITH a mouse drag open, so guard A already returns before guard
+    // B is ever reached. This isolates guard B: no mouse event at all, so
+    // `endDragRef.current` is null throughout, and Shift's keyup has to be
+    // the thing that leaves the held arrow's gesture open.
+    const { clip, handle } = mount()
+    const button = handle('Crop left')
+    const before = past()
+
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+    fireEvent.keyUp(button, { key: 'Shift' })
+    fireEvent.keyDown(button, { key: 'ArrowRight', repeat: true })
+    fireEvent.keyUp(button, { key: 'ArrowRight' })
+
+    expect(past()).toBe(before + 1)
+    expect(clipNow(clip.id).crop!.left).toBeCloseTo(2 / 1920, 6)
+  })
+
   it('starts a fresh entry for the next press', () => {
     const { handle } = mount()
     const button = handle('Crop left')
