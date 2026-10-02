@@ -176,8 +176,8 @@ describe('ClipEditor', () => {
       lockTrack()
       render(<ClipEditor />)
 
-      // The four sections that default closed can still be opened and read.
-      for (const title of ['Blend Mode', 'Mask & Stroke', 'Effects', 'Transition Out']) {
+      // The five sections that default closed can still be opened and read.
+      for (const title of ['Blend Mode', 'Mask & Stroke', 'Crop', 'Effects', 'Transition Out']) {
         const header = screen.getByRole('button', { name: title })
         expect(header).toBeEnabled()
         await user.click(header)
@@ -186,6 +186,7 @@ describe('ClipEditor', () => {
       expect(within(section('Transform')).getAllByRole('slider')[0]).toBeDisabled()
       expect(within(section('Blend Mode')).getByRole('combobox')).toBeDisabled()
       expect(within(section('Mask & Stroke')).getByRole('combobox')).toBeDisabled()
+      expect(within(section('Crop')).getAllByRole('slider')[0]).toBeDisabled()
       expect(within(section('Effects')).getByRole('slider')).toBeDisabled()
       expect(within(section('Animation')).getAllByRole('combobox')[0]).toBeDisabled()
       expect(within(section('Transition Out')).getByRole('combobox')).toBeDisabled()
@@ -262,6 +263,7 @@ describe('ClipEditor', () => {
       expect(screen.queryByRole('button', { name: 'Transform' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Blend Mode' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Mask & Stroke' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Crop' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Animation/ })).not.toBeInTheDocument()
       // A transition and a split still make sense for audio
       expect(screen.getByRole('button', { name: 'Transition Out' })).toBeInTheDocument()
@@ -273,6 +275,7 @@ describe('ClipEditor', () => {
       render(<ClipEditor />)
 
       expect(screen.getByRole('button', { name: 'Mask & Stroke' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Crop' })).toBeInTheDocument()
     })
 
     it('offers the mask and stroke to an image clip as well', () => {
@@ -283,6 +286,29 @@ describe('ClipEditor', () => {
       render(<ClipEditor />)
 
       expect(screen.getByRole('button', { name: 'Mask & Stroke' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Crop' })).toBeInTheDocument()
+    })
+
+    it('offers the crop to a media clip whose source is missing from the library', async () => {
+      // ESCSUITE-6. The source's pixel dimensions are what the insets are
+      // fractions of, and a clip can name a source the library has lost — a
+      // session restored against a cleared store, say. The section still draws,
+      // reads and resets; only the aspect presets have nothing to compute
+      // against, and `handleCropChange` is what refuses them.
+      const user = userEvent.setup()
+      store().addClipToTimeline(
+        { id: 'clip1', sourceVideoId: 'gone', name: 'clip1', startTime: 0, endTime: 2, duration: 2 },
+        undefined,
+        0
+      )
+      store().setSelectedClipId('clip1')
+      render(<ClipEditor />)
+
+      await user.click(screen.getByRole('button', { name: 'Crop' }))
+      expect(screen.getByLabelText('Left')).toHaveValue('0')
+
+      await user.click(screen.getByRole('button', { name: '1:1' }))
+      expect(clipNow().crop).toBeUndefined()
     })
   })
 

@@ -8,6 +8,7 @@ import {
   TRANSITION_TYPES,
   BLEND_MODES,
   CLIP_MASK_KINDS,
+  CROP_ASPECT_PRESETS,
   ANIMATION_PRESETS,
   EASING_TYPES,
 } from './clipEditorOptions'
@@ -77,5 +78,15 @@ describe('clipEditorOptions', () => {
       { value: 'ease-in-out-cubic', label: 'Ease In-Out (Cubic)' },
     ])
     expect(EASING_TYPES.map((e) => e.value)).not.toContain('ease-in-quad')
+  })
+})
+
+describe('CROP_ASPECT_PRESETS', () => {
+  it('offers None first, then the four ratios, in the order the user sees', () => {
+    expect(CROP_ASPECT_PRESETS.map((p) => p.label)).toEqual(['None', '1:1', '16:9', '9:16', '4:3'])
+  })
+
+  it('carries the ratio each label names, and null for None', () => {
+    expect(CROP_ASPECT_PRESETS.map((p) => p.aspect)).toEqual([null, 1, 16 / 9, 9 / 16, 4 / 3])
   })
 })

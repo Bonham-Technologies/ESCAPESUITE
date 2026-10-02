@@ -165,6 +165,7 @@ describe('accessible names (ESCSUITE-89)', () => {
         transition: { type: 'fade', duration: 0.5 },
         mask: { kind: 'rounded', radius: 0.2 },
         stroke: { color: '#ffffff', width: 0.004 },
+        crop: { left: 0.25, top: 0.1, right: 0, bottom: 0.05 },
         effects: { blur: 3 },
       })
     })
