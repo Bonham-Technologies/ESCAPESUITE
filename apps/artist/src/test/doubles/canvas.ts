@@ -205,6 +205,27 @@ export function createRecordingContext(): RecordingCanvasRenderingContext2D {
   return createContext(document.createElement('canvas'))
 }
 
+/**
+ * The destination box `[x, y, width, height]` of a recorded `drawImage`,
+ * whichever of the overload's three arities the call used.
+ *
+ * Since ESCSUITE-6 every **media** clip is drawn with the nine-argument form
+ * (`drawImage(source, sx, sy, sw, sh, x, y, w, h)`) so the crop can name the
+ * source region, while the thumbnail generator and the offscreen blur
+ * compositing still use the five- and three-argument forms. The destination box
+ * is the last four arguments in every form that has one, so asking for it this
+ * way reads better than `args.slice(5)` and survives the next arity change.
+ * Meaningless for the three-argument form, which no caller of this uses.
+ */
+export function destBox(args: unknown[]): unknown[] {
+  return args.slice(-4)
+}
+
+/** The source region `[sx, sy, sw, sh]` of a nine-argument `drawImage`. */
+export function sourceBox(args: unknown[]): unknown[] {
+  return args.slice(1, 5)
+}
+
 let originalGetContext: typeof HTMLCanvasElement.prototype.getContext | null = null
 let originalToBlob: typeof HTMLCanvasElement.prototype.toBlob | null = null
 
