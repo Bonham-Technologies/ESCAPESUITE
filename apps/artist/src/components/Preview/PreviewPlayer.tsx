@@ -8,7 +8,7 @@
 // machine in the three hooks beside them.
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
-import { drawPreviewFrame } from './drawFrame';
+import { drawPreviewFrame, isDrawableImage, isDrawableVideo } from './drawFrame';
 import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
 import { getActiveTransition } from './transitions';
@@ -114,12 +114,28 @@ export function PreviewPlayer() {
   );
   const cropping = useMemo(() => cropOverlay.cropTarget(cropScene), [cropScene]);
 
-  /** The decoded element a source draws from, for the crop chrome's dim pass. */
+  /**
+   * The decoded element a source draws from, for the crop chrome's dim pass —
+   * or `undefined` when there is nothing in it to draw yet.
+   *
+   * It applies the frame path's own readiness test (`drawFrame.ts`'s
+   * `isDrawableImage` / `isDrawableVideo`) rather than asking whether the
+   * element exists: `usePreviewMedia` puts an element into its map when it
+   * CREATES it, before anything has loaded, and `drawImage` on a `<video>` at
+   * `readyState` 0 or an undecoded `<img>` is a silent no-op — which would leave
+   * the ring neither dimmed nor veiled. Handing back `undefined` is what makes
+   * `drawCropOverlay` take its veil fallback for exactly the window the spec
+   * names.
+   */
   const mediaElementFor = useCallback(
-    (source: SourceVideo): CanvasImageSource | undefined =>
-      source.mediaType === 'image'
-        ? imageElementsRef.current.get(source.id)
-        : videoElementsRef.current.get(source.id),
+    (source: SourceVideo): CanvasImageSource | undefined => {
+      if (source.mediaType === 'image') {
+        const img = imageElementsRef.current.get(source.id);
+        return isDrawableImage(img) ? img : undefined;
+      }
+      const video = videoElementsRef.current.get(source.id);
+      return isDrawableVideo(video) ? video : undefined;
+    },
     [imageElementsRef, videoElementsRef]
   );
 
