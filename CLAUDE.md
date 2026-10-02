@@ -1850,6 +1850,40 @@ to the box (a drag seeded from it would write keyframes displaced by the transit
 documented as a limit beside the circle-mask one. `drawFrame.perf.test.ts` and every rerender pin
 are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 at the end of ESCSUITE-157 (crop v2: a crop mode on
+the preview — the whole source dimmed, the kept region bright, eight DOM handles on its edges and
+corners with a pointer drag that writes one `updateClip(id, { crop, transform })` per move from the
+gesture's start transform, crop alone on a keyframed placement, Shift keeping the aspect preset,
+arrow-key nudges announced through the live region, Escape to leave; the `cropClipId` latch and a
+time-aware `cropTarget`; the inspector's "Crop on canvas" toggle): **99.80** / **99.23** / **95.53** /
+**99.67** against the 99.79 / 99.21 / 95.42 / 99.66 the commit this branch lands on (`cc56e38`)
+measures — every figure up, with the uncovered column unmoved: lines 7,277 / 7,292 → 7,498 / 7,513,
+statements 8,178 / 8,243 → 8,435 / 8,500, branches 4,607 / 4,828 → 4,729 / 4,950 and functions
+1,766 / 1,772 → 1,821 / 1,827, every denominator growing by exactly what the numerator did (the same
+15 / 65 / 221 / 6 uncovered, file by file). The 122 new branches are the three new modules at
+100 — `core/cropDrag.ts` 42 / 42 (`sourceDelta`'s rotation, `cropForHandleMove`'s eight handles with
+the opposite edge pinned and the aspect-locked dependent inset, `clampMoved`'s one-pixel floor and
+its negative-ceiling arm on a source narrower than ten pixels, `cropCompensatesCentre`,
+`cropWriteFor`'s keyframed-placement side), `components/Preview/cropOverlay.ts` 25 / 25 (the
+even-odd ring, the readiness veil, the before-start and after-end halves of the time window) and
+`useCropHandleGesture.ts` 20 / 20 (the owned and unowned arrows, Shift, the held-key repeat, the
+degenerate content box, the clip the store no longer holds) — plus `CropHandles.tsx` 6 / 6,
+`core/clipCrop.ts`'s ten for `cropUpdateFor` (the decision the inspector and the handles now
+share), `CropSection.tsx`'s two for the toggle disabled on a locked track or a vanished source,
+`useAppKeyboardShortcuts.ts`'s two for Escape leaving crop mode, and `PreviewPlayer.tsx`'s nineteen
+for the chrome, the mount and the readiness predicate it shares with `drawFrame.ts` (whose own
+denominator fell by two as that predicate moved out of its inline form). `useClipEditorActions.ts`
+lost two: the `!selectedClip` guard on the toggle's handler, unreachable behind `ClipEditor`'s own
+early return and deleted rather than tested. The first measurement of the rebased branch came back
+one function short — the `onLeave` arrow `PreviewPlayer` hands the mounted handles, pinned by the
+component suite through a spy and by nothing through the preview — and the case that drives Escape
+on a mounted handle to the store is the branch's last commit. No new `*.perf.test.ts`: the crop
+chrome is drawn where the selection chrome is drawn and returns during playback, so its
+conservation laws (zero context calls when crop mode is off; one `drawImage`, one `clip`, one
+`translate`, one `rotate`, `save` balanced with `restore` when on) live in `cropOverlay.test.ts` and
+are asserted exactly. The seven pins and `perfScene.ts` are byte-identical. **No floor crossed**;
+artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1857,7 +1891,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.79 | 99.21 | 95.42 | 99.66 |
+| `@escapesuite/artist` | 99.80 | 99.23 | 95.53 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.46 | 99.37 | 98.20 | 98.52 |
 
