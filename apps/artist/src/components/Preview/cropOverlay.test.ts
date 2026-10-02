@@ -25,6 +25,7 @@ import {
   makeAnimation,
   makeClip,
   makeSourceVideo,
+  makeTrack,
   makeTransitionInfo,
 } from '../../test/fixtures/clipFixtures'
 import {
@@ -35,7 +36,7 @@ import {
   type RecordingCanvasRenderingContext2D,
 } from '../../test/doubles/canvas'
 import { setRect } from '../../test/doubles/layout'
-import type { Clip, SourceVideo } from '../../store/types'
+import type { Clip, SourceVideo, Track } from '../../store/types'
 
 const CANVAS_W = 1920
 const CANVAS_H = 1080
@@ -62,16 +63,25 @@ afterEach(() => {
 const mediaClip = (overrides: Partial<Clip> = {}): Clip =>
   makeClip({ id: 'clip1', duration: 4, ...overrides })
 
-function scene(overrides: Partial<CropOverlayScene> = {}): CropOverlayScene {
+function scene(overrides: Partial<CropOverlayScene> = {}) {
   return {
     clips: [mediaClip()],
     sourceVideos: [source],
+    // ESCSUITE-171: crop mode shows a clip's own picture, so it has to ask the
+    // same question of the track that `getClipsAtTime` asks before drawing one.
+    tracks: [makeTrack()],
     cropClipId: 'clip1',
     selectedClipId: 'clip1',
     isPlaying: false,
     ...overrides,
   }
 }
+
+/** The same scene over a different set of tracks (ESCSUITE-171). */
+const withTracks = (tracks: Track[]) => ({ ...scene(), tracks })
+
+/** The same scene with the cropped clip's track hidden. */
+const hiddenTrack = () => withTracks([makeTrack({ visible: false })])
 
 /** An element the dim pass can draw: its identity is all the double records. */
 const element = document.createElement('video')
@@ -97,6 +107,19 @@ describe('cropTarget', () => {
 
   it('is null for a latch naming a clip that has left the timeline', () => {
     expect(cropTarget(scene({ clips: [] }))).toBeNull()
+  })
+
+  // ESCSUITE-171. `drawPreviewFrame` draws nothing for a clip on a hidden track
+  // (`store/clipQueries.ts`: `if (track && track.visible)`), so crop mode must
+  // not draw a dim ghost of it and must not leave eight live handles over it.
+  it('is null for a clip on a hidden track', () => {
+    expect(cropTarget(hiddenTrack())).toBeNull()
+  })
+
+  it('is null for a clip whose track is not in the scene at all', () => {
+    // The other operand, and the same rule `getClipsAtTime` applies: no track,
+    // no picture.
+    expect(cropTarget(withTracks([]))).toBeNull()
   })
 
   it('is null for a clip whose source is not in the library — an overlay included', () => {
@@ -136,6 +159,16 @@ describe('visibleCropTarget', () => {
     expect(visibleCropTarget(scene({ cropClipId: null }), 1)).toBeNull()
     expect(visibleCropTarget(scene({ isPlaying: true }), 1)).toBeNull()
     expect(visibleCropTarget(scene({ sourceVideos: [] }), 1)).toBeNull()
+    expect(visibleCropTarget(hiddenTrack(), 1)).toBeNull()
+  })
+
+  it('is still the target on a visible track', () => {
+    // The other side of ESCSUITE-171's guard: hiding a track takes crop mode
+    // away, and a visible one leaves it exactly as it was.
+    expect(visibleCropTarget(withTracks([makeTrack({ visible: true })]), 1)).toEqual({
+      clip: mediaClip(),
+      source,
+    })
   })
 })
 
@@ -280,6 +313,14 @@ describe('drawCropOverlay', () => {
 
   it('draws nothing at all with crop mode off', () => {
     drawCropOverlay(canvas, 1, scene({ cropClipId: null }), element)
+
+    expect(ctx.calls).toEqual([])
+  })
+
+  it('draws nothing for a clip on a hidden track', () => {
+    // ESCSUITE-171: the frame skips the clip entirely, so the chrome must not
+    // dim a ghost of it.
+    drawCropOverlay(canvas, 1, hiddenTrack(), element)
 
     expect(ctx.calls).toEqual([])
   })
