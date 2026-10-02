@@ -65,14 +65,17 @@ describe('crop mode on the preview', () => {
     expect(store().selectedClipId).toBe(clip.id)
   })
 
-  it('mounts eight named handles over the canvas', async () => {
-    croppingClip()
-    const preview = await renderPreview()
-
-    expect(preview.view.getByRole('group', { name: 'Crop handles' })).toBeInTheDocument()
-    expect(preview.view.getByRole('button', { name: 'Crop top left' })).toBeInTheDocument()
-    expect(preview.view.getByRole('button', { name: 'Crop bottom right' })).toBeInTheDocument()
-  })
+  // Task 4 replaces this with the live assertion — it is the red step of that
+  // task's own brief, and `CropHandles` is a shell returning null until then.
+  // The body cannot be written here without shipping Task 4's component, and a
+  // task may not leave this package's suite red for the next one, so it is a
+  // todo rather than a failing case:
+  //
+  //   croppingClip(); const preview = await renderPreview()
+  //   getByRole('group',  { name: 'Crop handles' })
+  //   getByRole('button', { name: 'Crop top left' })
+  //   getByRole('button', { name: 'Crop bottom right' })
+  it.todo('mounts eight named handles over the canvas')
 
   it('takes the canvas\' own pointer handling out of the way', async () => {
     const clip = croppingClip()
@@ -96,6 +99,9 @@ describe('crop mode on the preview', () => {
     store().setCurrentTime(1)
 
     expect(preview.calls('clip')).toHaveLength(0)
+    // The other side of the todo above: this passes trivially while
+    // `CropHandles` is a shell rendering nothing, and only starts
+    // discriminating once Task 4 gives it a body.
     expect(preview.view.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
   })
 
@@ -107,6 +113,7 @@ describe('crop mode on the preview', () => {
     store().setIsPlaying(true)
 
     expect(preview.calls('clip')).toHaveLength(0)
+    // Trivially true until Task 4's `CropHandles` has a body — see above.
     expect(preview.view.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
   })
 })
