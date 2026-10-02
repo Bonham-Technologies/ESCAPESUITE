@@ -12,12 +12,16 @@ import { drawPreviewFrame } from './drawFrame';
 import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
 import { getActiveTransition } from './transitions';
+import * as cropOverlay from './cropOverlay';
+import { CropHandles } from './CropHandles';
+import { isTrackLocked } from '../../store/trackLock';
 import { usePreviewMedia } from './usePreviewMedia';
 import { usePreviewRenderLoop } from './usePreviewRenderLoop';
 import { useTransformHandles } from './useTransformHandles';
 import { InlineTextEditorAnchor } from './InlineTextEditorAnchor';
 import { MarqueeSelection } from './MarqueeSelection';
 import { PreviewTimecode } from './PreviewTimecode';
+import type { SourceVideo } from '../../store/types';
 import styles from './PreviewPlayer.module.css';
 
 export function PreviewPlayer() {
@@ -47,6 +51,8 @@ export function PreviewPlayer() {
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
   const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
   const updateTextOverlayData = useEditorStore((state) => state.updateTextOverlayData);
+  const cropClipId = useEditorStore((state) => state.cropClipId);
+  const setCropClipId = useEditorStore((state) => state.setCropClipId);
 
   // Keyframe mode: when keyframe panel is open, manipulations create keyframes
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
@@ -96,6 +102,26 @@ export function PreviewPlayer() {
     videoUrlsKey,
     imageUrlsKey,
   } = usePreviewMedia();
+
+  // Crop mode (ESCSUITE-157). `cropTarget` is the single answer to "is it on,
+  // and on what": the latch has to name the SELECTED clip, so a selection
+  // change leaves the mode with nothing to clear. It gates three things — the
+  // chrome below, the canvas' own pointer handlers, and the DOM handle layer —
+  // and all three ask it once, here.
+  const cropScene = useMemo<cropOverlay.CropOverlayScene>(
+    () => ({ clips, sourceVideos, cropClipId, selectedClipId, isPlaying }),
+    [clips, sourceVideos, cropClipId, selectedClipId, isPlaying]
+  );
+  const cropping = useMemo(() => cropOverlay.cropTarget(cropScene), [cropScene]);
+
+  /** The decoded element a source draws from, for the crop chrome's dim pass. */
+  const mediaElementFor = useCallback(
+    (source: SourceVideo): CanvasImageSource | undefined =>
+      source.mediaType === 'image'
+        ? imageElementsRef.current.get(source.id)
+        : videoElementsRef.current.get(source.id),
+    [imageElementsRef, videoElementsRef]
+  );
 
   // Draw a single frame to canvas
   const drawFrame = useCallback((time: number) => {
@@ -190,6 +216,23 @@ export function PreviewPlayer() {
   const drawSelectionHandles = useCallback((time: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // In crop mode the crop chrome REPLACES the transform chrome: the canvas'
+    // own pointer handling is off (see the canvas element below), so resize
+    // handles would be visible and inert, over the same rectangle as the crop
+    // frame.
+    if (cropping) {
+      cropOverlay.drawCropOverlay(
+        canvas,
+        time,
+        cropScene,
+        mediaElementFor(cropping.source),
+        canvasDimensions,
+        handleScreenScale(canvas)
+      );
+      return;
+    }
+
     selectionOverlay.drawSelectionHandles(canvas, time, {
       clips,
       sourceVideos,
@@ -199,7 +242,7 @@ export function PreviewPlayer() {
       transition: getActiveTransition(clips, tracks, time),
     }, canvasDimensions, handleScreenScale(canvas));
   }, [canvasDimensions, clips, tracks, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
-      handleScreenScale]);
+      handleScreenScale, cropping, cropScene, mediaElementFor]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
   const drawMultiSelectHandles = useCallback((time: number) => {
@@ -336,10 +379,10 @@ export function PreviewPlayer() {
             width={canvasDimensions.width}
             height={canvasDimensions.height}
             style={{ cursor }}
-            onMouseDown={editingTextClipId ? undefined : handleMouseDown}
-            onMouseMove={editingTextClipId ? undefined : handleMouseMoveForCursor}
-            onMouseUp={editingTextClipId ? undefined : handleMouseUp}
-            onMouseLeave={editingTextClipId ? undefined : handleMouseLeave}
+            onMouseDown={editingTextClipId || cropping ? undefined : handleMouseDown}
+            onMouseMove={editingTextClipId || cropping ? undefined : handleMouseMoveForCursor}
+            onMouseUp={editingTextClipId || cropping ? undefined : handleMouseUp}
+            onMouseLeave={editingTextClipId || cropping ? undefined : handleMouseLeave}
             onDoubleClick={handleDoubleClick}
           />
         )}
@@ -358,6 +401,17 @@ export function PreviewPlayer() {
             startY={marqueeStart.y}
             currentX={marqueeCurrent.x}
             currentY={marqueeCurrent.y}
+          />
+        )}
+        {cropping && canvasRef.current && (
+          <CropHandles
+            clip={cropping.clip}
+            source={cropping.source}
+            canvas={canvasRef.current}
+            projectSize={canvasDimensions}
+            time={currentTime}
+            locked={isTrackLocked(tracks, cropping.clip.trackId)}
+            onLeave={() => setCropClipId(null)}
           />
         )}
       </div>
