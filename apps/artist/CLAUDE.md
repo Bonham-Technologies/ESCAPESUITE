@@ -37,7 +37,7 @@ pnpm lint                # Run ESLint
 - Timeline is a flat array of `Clip` objects; each clip references a `sourceVideoId` and defines `startTime`/`endTime` within that source
 - **Track properties**: `id`, `name`, `index`, `visible`, `locked`, `muted`, `volume` (0-1), `height` — `locked` freezes the track's contents everywhere (ESCSUITE-84, see Timeline)
 - **Auto-track creation**: When adding clips/overlays without specifying a track, a new track is created automatically
-- **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work. Two more live here and are **not** re-exported, because only the clip drag asks them: `trackIndexDelta` (how many rows a drop moved the clip the pointer held, in `moveSelectedClips`' ascending-`index` space, or `null` when either row has left the timeline) and `canMoveSelectedClips` (whether *every* clip of a multi-selection can take a given time and row delta) — ESCSUITE-80, below. A third, `trackRefusesDrop` (a locked row, or one not on the timeline, takes no clip), is what the single-clip drop asks about the row under the pointer; the group veto applies the same locked rule inline — ESCSUITE-82, below
+- **Snapping helpers** (`src/store/timelineSnapping.ts`): `getSnapPoints`, `findNearestSnapPoint` and `wouldOverlap` — pure functions over the clips they are handed, with no store access, so `components/Timeline/timelineGeometry.ts` and `useClipDrag.ts` can import them without pulling the store module into their graph. `projectStore.ts` re-exports all three, so the paths that always reached them through the store still work. Two more live here and are **not** re-exported, because only the clip drag asks them: `trackIndexDelta` (how many rows a drop moved the clip the pointer held, in `moveSelectedClips`' ascending-`index` space, or `null` when either row has left the timeline) and `canMoveSelectedClips` (whether *every* clip of a multi-selection can take a given time and row delta) — ESCSUITE-80, below. A third, `trackRefusesDrop` (a locked row, or one not on the timeline, takes no clip), is what the single-clip drop asks about the row under the pointer; the group veto applies the same locked rule inline — ESCSUITE-82, below. Two more are not re-exported either, because the trim gesture and the paste action ask them directly: `clampTrimToNeighbours` (how far the pointer may take a trim before the clip runs into the neighbour on its own row — ESCSUITE-161) and `firstFreeGroupStart` (the earliest start at or after a preferred one at which no member of a group lands on a clip already on its row — ESCSUITE-162), both below
 
 **Pure helpers** — no zustand, no React, no store access:
 
@@ -1864,6 +1864,52 @@ other three. A rule added to `trackRefusesDrop` has to be added to that loop too
 is asked for the trimmed clip's *own* row (so is `rippleDeleteClip`'s shift), and a trim cannot
 start on a locked one, so a ripple never reaches a locked row's clips — `useTrimDrag.test.ts`
 pins it beside the new refusals in `useClipDrag.test.ts` and `timelineSnapping.test.ts`.
+
+**One row never holds two overlapping clips, and four writers keep it that way**
+(ESCSUITE-161, ESCSUITE-162). The invariant is what `store/clipQueries.ts`'s `getClipsAtTime`
+is written against: it returns **every** clip at an instant, so a row holding two means the
+preview, both exporters and `core/audioMixer.ts` draw and mix two clips from one track,
+`core/exportTypes.ts`'s `getActiveTransition` (which looks for an incoming clip at
+`timelinePosition >= clipEnd - 0.01`) misreads the pair, and the clip drag then refuses to move
+*either* of them, because each now overlaps the other. Two writers had always enforced it and
+two had not:
+
+1. **The drop** — `useClipDrag`'s single-clip commit vetoes with `wouldOverlap`, and
+   `canMoveSelectedClips` is the group's all-or-nothing version of the same question
+   (ESCSUITE-80, above). Silent: the clips spring back.
+2. **`duplicateClip`** — walks its row from the original's end and relocates past any
+   collision, which is the precedent the paste now follows.
+3. **The edge trim** (ESCSUITE-161) — `useTrimDrag.handleMouseMove` now puts the pointer time
+   through `clampTrimToNeighbours` before `computeTrimUpdate` sees it, so an end trim stops at
+   the next clip's start and a start trim at the previous clip's end. The clamp lives in the
+   **hook and not in `trimClip`**, for three reasons: the **ripple** tool is excepted (it
+   lengthens the clip over its neighbours during the drag and shifts them out of the way on
+   release, so the overlap is real and transient) and which tool is out is something only the
+   gesture knows; the store is already not where a trim's geometry is enforced, since the
+   source's length and `MIN_CLIP_DURATION` are `computeTrimUpdate`'s rules too and `trimClip`
+   enforces only what it owns (the locked row, ESCSUITE-84); and `trimClip` has exactly one
+   caller, this hook, so a second copy of the rule there would buy no defence and would cost
+   the ripple tool a flag to switch it off again. The clamp is applied to the **pointer time**
+   rather than to the computed update, which is what keeps ESCSUITE-110's idempotence — a trim
+   that wanders out past the neighbour and back comes home exactly instead of accumulating the
+   clamped frames in between.
+4. **Paste** (ESCSUITE-162) — `pasteClips` checked that the clone's track exists (ESCSUITE-100)
+   and is unlocked (ESCSUITE-84) and nothing else, so copy a clip, move the playhead into it,
+   Ctrl+V and the clone landed on top of the original: the commonest keyboard path there is. It
+   now lands at the playhead **or at the first spot after it where the group fits**, via
+   `firstFreeGroupStart`. It **relocates rather than refusing** — `duplicateClip`'s rule, and a
+   Ctrl+V that silently did nothing is the surprising answer; the two refusals beside it are
+   for a paste with nowhere legal to go at all, not for one that just needs moving along the
+   row. The whole group shifts together, so its members keep their offsets from each other, and
+   past the last occupant every row is free, so there is always an answer (a playhead inside a
+   solid run pastes at the end of that run). The ESCSUITE-100 pin that a playhead at 0 means 0
+   is unchanged; its fixture clip is two seconds long now so the clone's own span is clear of
+   the original's and the relocation never comes into what that test is about.
+
+What this does **not** do is repair a project that already holds an overlap — a hand-edited or
+host-supplied `LOAD_PROJECT` timeline is taken as given, the way `parseProject` (ESCSUITE-102)
+checks shape and not geometry. The four writers above are the only ways the app itself can make
+one.
 
 **A locked track is locked for every component** (ESCSUITE-84). ESCSUITE-82 closed the pointer
 gestures; Delete, paste, split, duplicate, the inspector, the keyframe panel and a new clip
