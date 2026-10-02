@@ -27,10 +27,11 @@
   pointer-events: auto;
 }
 
+/* No `cursor` here: the component sets one inline on every handle, which beats
+   any class rule, so `not-allowed` for a locked row is computed there. */
 .handle:disabled {
   background: #9e9e9e;
   border-color: #607d8b;
-  cursor: not-allowed;
 }
 
 .handle:focus-visible {

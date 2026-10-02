@@ -941,7 +941,7 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 | `cursor.ts` | The CSS cursor a drag mode advertises |
 | `types.ts` | The shapes the above share (`DragMode`, `OverlayBounds`, `HandleHit`, `PreviewSceneContext`). **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
 | `InlineTextEditorAnchor.tsx` | Positioning `InlineTextEditor` over the text it edits, through the canvas' object-fit mapping |
-| `CropHandles.tsx` | The eight on-canvas crop handles (ESCSUITE-157), mounted over the canvas only while crop mode is open; the mouse drag and the arrow-key nudges both land through `useCropHandleGesture.ts`. The gesture and the keyboard nudges are documented beside `CropSection.tsx`, further down |
+| `CropHandles.tsx` | The eight on-canvas crop handles (ESCSUITE-157), mounted over the canvas only while crop mode is open **and the playhead is on the clip** — the one `visibleCropTarget` answer the chrome gates on, so handles and dim come and go together; the mouse drag and the arrow-key nudges both land through `useCropHandleGesture.ts`. The gesture and the keyboard nudges are documented beside `CropSection.tsx`, further down |
 | `PlaybackControls.tsx` | The transport buttons and their keyboard shortcuts (Space, the arrows, Home, End — bound on `window` here, not in the App cascade); no canvas at all. Takes `modalOpen`, the same gate the App cascade carries, so Space cannot start playback from behind a dialog |
 | `PreviewTimecode.tsx` | The playhead readout `<span>` — the only thing that re-renders on a playback tick (see below) |
 
@@ -1394,9 +1394,14 @@ ticket's (ESCSUITE-157) other limit — **no on-canvas crop handles** — is
 closed: `cropClipId` (`store/uiSlice.ts`) names the clip crop mode is open
 on, or `null`; `CropSection`'s header carries a second button, "Crop on
 canvas", beside Reset — `aria-pressed` on whether the latch names the
-*selected* clip, live on a locked track because looking at a crop is reading,
-not editing (the eight handles go inert there, via their own `disabled`, not
-the latch). It is a latch deliberately left unsynchronised: nothing clears it
+*selected* clip (and **looking** pressed, not just reading as pressed: a
+`.resetButton[aria-pressed='true']` rule fills it with the same accent every
+other `aria-pressed` control in the panel uses), live on a locked track because
+looking at a crop is reading, not editing (the eight handles go inert there, via
+their own `disabled`, not the latch). The **one** thing that disables it is a
+clip whose source has left the media library — `sourceWidth` 0, which
+`cropTarget` refuses — where latching would mean a pressed toggle with nothing on
+the canvas, so it is `disabled` with a `title` saying why instead. It is a latch deliberately left unsynchronised: nothing clears it
 on a selection change, a clip delete, a project load or an undo, because every
 reader is required to compare it to the current selection rather than trust it
 on its own — which is how all four of those leave crop mode for free. Escape
@@ -1410,15 +1415,37 @@ While crop mode is open, `PreviewPlayer` renders `components/Preview/CropHandles
 over the canvas instead of the ordinary resize handles — a DOM layer, not canvas
 chrome, because a handle has to be focusable and independently `disabled` for a
 locked track, and because ESCSUITE-90's CSS-pixel-sized chrome is exactly what a
-button already is. Eight `<button>`s at the kept region's corners and edges
+button already is. Each handle's cursor is computed **once**, inline — its resize
+keyword from `cursor.ts`' table, or `not-allowed` when the row is locked
+(ESCSUITE-88's answer); a stylesheet `:disabled { cursor }` rule cannot reach past
+an inline style, which is why there is no longer one. Eight `<button>`s at the kept region's corners and edges
 (`CROP_HANDLES`'s compass points, in reading order so a screen reader walks
 top, sides, bottom), inside one `role="group"` framed in the clip's own CSS box
 and rotated with it by a single `rotate()`; the dim over the cropped-away
 picture is separate canvas chrome in `cropOverlay.ts`. A handle owns the one or
 two insets its compass point names (a corner owns both axes) and writes
 through `useCropHandleGesture`, which also carries the compensating `transform`
-a crop write needs (`cropWriteFor`) and refuses it on a clip whose placement is
-keyframed, exactly as the inspector's sliders do.
+a crop write needs (`cropWriteFor`) — except on a clip whose placement is
+keyframed, where the crop goes alone.
+
+**The inspector's four sliders carry no compensating centre at all**: they write
+`{ crop }` and nothing else, as they have since ESCSUITE-6
+(`useClipEditorActions.ts`' `handleCropChange`). So the same inset reached from
+the two surfaces repositions the clip differently — a handle drag pins the edge
+it is *not* dragging, while a slider shrinks the picture about the clip's own
+centre, moving both edges of that axis. A carried v1 limit, named here rather
+than a drift: both surfaces share `cropUpdateFor`, which is the decision about
+what the store may *hold*, not about where the picture sits.
+
+**Crop mode's chrome and its handles appear and disappear together**, because
+both ask one question. `visibleCropTarget` (`cropOverlay.ts`) is `cropTarget`
+plus the clip's own time window — end exclusive, as `selectionOverlay.ts`' test
+has always been — and `PreviewPlayer` calls it once for all three of the chrome,
+the canvas' own pointer handlers and the handle layer's mount. Scrubbing the
+playhead off the cropped clip therefore unmounts the eight handles rather than
+leaving them live and draggable over an unrelated frame; the latch survives, so
+scrubbing back in returns the mode. Before the final review the chrome carried
+that comparison alone and the layer carried none.
 
 **Mouse and keyboard reach the same write.** Dragging a handle rebases every
 move from the crop and transform the gesture **started** with — never the
@@ -1465,11 +1492,29 @@ above); on the keyboard it is `CROP_NUDGE.coarse` — ten source pixels instead
 of one — and does nothing to the aspect, because a single-inset nudge has no
 shape to hold.
 
+**Playback takes the handles away and gives them back.** `cropTarget`'s
+`isPlaying` condition makes the chrome stop and the eight handles **unmount** the
+moment playback starts, while the latch itself survives — so the mode returns on
+pause, on the clip the user left it on. Related, and not fixed: a focused handle
+claims only Escape and the four arrows, so `PlaybackControls`' own window listener
+(which skips only input/textarea/select targets) still takes **Space**, **Home**
+and **End** from it. Space therefore starts playback and unmounts the very control
+the user's focus was on. Arrow-stealing was fixed deliberately (spec §8); this is
+its sibling, left alone here.
+
 **Known wrinkles, left as they are rather than fixed in this ticket.** The drag
 is **mouse events only** (`mousedown`/`mousemove`/`mouseup`), the same scope
 `useTransformHandles.ts` already has, so there is no crop drag from a touch
-pointer. An **unmount mid-drag commits** the pending move instead of abandoning
-it — the gesture's teardown runs the same `throttled.flush()` → `end()` its own
+pointer. On a clip whose **scale or rotation is keyframed** the drag does not
+track the pointer exactly: the handles sit on `getOverlayBounds`' *animated* box,
+while `sourceDelta` divides by `start.transform.scaleX/Y` and un-rotates by
+`start.transform.rotation` — the **static** values — so a clip animated to 2x
+moves its handle at half the pointer's rate, and one animated 45° off its static
+rotation grows the crop along the wrong axis. The same accepted family as the
+compensating centre above, named rather than discovered. Eight 12px handles also
+**overlap** on a clip drawn small on screen, which is inherent to a fixed CSS
+size rather than a defect. An **unmount mid-drag commits** the pending move
+instead of abandoning it — the gesture's teardown runs the same `throttled.flush()` → `end()` its own
 `mouseup` handler does, so a drag cut off by the layer going away (an Escape
 fired elsewhere, a selection change, a delete) still writes its last pending
 position. **Escape on a focused handle does not return focus to the
@@ -1499,8 +1544,8 @@ briefly reads `null` while the dim chrome keeps painting over nothing to lay
 handles on. It self-heals on the very next render for any reason (a playhead
 move, a selection change), so the visible cost is a dropped frame of handles
 rather than a stuck one. The real fix — a state-backed `ref={setCanvasEl}`
-shared by `CropHandles`, `InlineTextEditorAnchor` and the marquee — is a
-follow-up, not taken here.
+shared by `CropHandles`, `InlineTextEditorAnchor` and the marquee — is
+**ESCSUITE-160**, filed for exactly it and not taken here.
 
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
@@ -1530,7 +1575,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `TransformSection.tsx` | "Transform": position, then — media clips only — scale with its aspect-ratio lock, Fit to Canvas and Reset, and opacity last |
 | `BlendModeSection.tsx` | "Blend Mode": one dropdown over `BLEND_MODES`, collapsed by default |
 | `MaskSection.tsx` | "Mask & Stroke": the mask kind over `CLIP_MASK_KINDS`, a corner-radius slider shown for `rounded` only, and the stroke's width and colour — the width labelled in **pixels at the project's resolution**, because what is stored is a fraction of the frame width and a fraction is not a number anyone can act on. Collapsed by default. Media clips only, gated exactly as Blend Mode is. It normalises nothing: "`none` with a radius" and "a width of 0 with a colour" are things a user can express, and turning them into absent fields is `useClipEditorActions`' job |
-| `CropSection.tsx` | "Crop" (ESCSUITE-6): which rectangle of its source frame the clip shows — four rows of slider plus number field, each inset a whole percentage capped at `MAX_CROP_INSET` (90%), five aspect-preset buttons over `CROP_ASPECT_PRESETS` (None, 1:1, 16:9, 9:16, 4:3) and a header with two buttons, "Crop on canvas" then Reset. Collapsed by default. Media clips only, gated exactly as Mask & Stroke is and placed **immediately after it**, before Effects — an overlay has no source frame for an inset to be a fraction of, and the condition is byte-identical to its neighbours' so no existing section's positional open/closed slot changes meaning. Like `MaskSection` it normalises nothing: 90% off two opposite edges is something a user can express, and the **one** new handler `handleCropChange` is what decides what gets stored. The **presets are computed here**, from `cropForAspect` — this is the only place holding both the source's shape and the clip's current crop — which is why they are not a second handler, and why "None" and the header Reset make literally the same write: four zeroes, which `normaliseCrop` turns into `crop: undefined`. The four sliders carry the undo gesture; the number fields and the preset buttons keep an entry each — a number field has no gesture listeners, so it reports on every keystroke and typing `45` into an empty one lands two undo entries, same as `TextContentSection`'s font-size field. "Crop on canvas" (ESCSUITE-157) opens or closes crop mode — `aria-pressed` on whether `useClipEditorActions`' `cropOnCanvas` is true, i.e. whether the store's `cropClipId` latch names this clip — and is deliberately **not** `disabled`: it is reading, not editing, so it stays live on a locked track where Reset does not, which is why it is also in `headerRight` and so outside the section's `<fieldset disabled>` |
+| `CropSection.tsx` | "Crop" (ESCSUITE-6): which rectangle of its source frame the clip shows — four rows of slider plus number field, each inset a whole percentage capped at `MAX_CROP_INSET` (90%), five aspect-preset buttons over `CROP_ASPECT_PRESETS` (None, 1:1, 16:9, 9:16, 4:3) and a header with two buttons, "Crop on canvas" then Reset. Collapsed by default. Media clips only, gated exactly as Mask & Stroke is and placed **immediately after it**, before Effects — an overlay has no source frame for an inset to be a fraction of, and the condition is byte-identical to its neighbours' so no existing section's positional open/closed slot changes meaning. Like `MaskSection` it normalises nothing: 90% off two opposite edges is something a user can express, and the **one** new handler `handleCropChange` is what decides what gets stored. The **presets are computed here**, from `cropForAspect` — this is the only place holding both the source's shape and the clip's current crop — which is why they are not a second handler, and why "None" and the header Reset make literally the same write: four zeroes, which `normaliseCrop` turns into `crop: undefined`. The four sliders carry the undo gesture; the number fields and the preset buttons keep an entry each — a number field has no gesture listeners, so it reports on every keystroke and typing `45` into an empty one lands two undo entries, same as `TextContentSection`'s font-size field. "Crop on canvas" (ESCSUITE-157) opens or closes crop mode — `aria-pressed` on whether `useClipEditorActions`' `cropOnCanvas` is true, i.e. whether the store's `cropClipId` latch names this clip, with a matching accent fill from `.resetButton[aria-pressed='true']` so the state is visible and not screen-reader-only — and is deliberately **not** disabled by the track's lock: it is reading, not editing, so it stays live on a locked track where Reset does not, which is why it is also in `headerRight` and so outside the section's `<fieldset disabled>`. It **is** disabled, with a `title` giving the reason, when `sourceWidth` is 0 — the clip's source has left the media library, `cropTarget` would refuse it, and latching the mode would leave a pressed toggle over an empty canvas |
 | `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |

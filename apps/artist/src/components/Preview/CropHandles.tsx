@@ -118,7 +118,14 @@ export function CropHandles({
             key={handle}
             type="button"
             className={`${styles.handle} ${styles[handle]}`}
-            style={{ cursor: getCursorForMode(CROP_HANDLE_MODES[handle]) }}
+            style={{
+              // One computed cursor rather than a keyword here and a
+              // `:disabled` rule in the stylesheet: an inline style beats any
+              // class rule, so the rule would never apply and a locked row's
+              // handle would advertise a resize it refuses. `not-allowed` is
+              // ESCSUITE-88's answer for exactly that.
+              cursor: locked ? 'not-allowed' : getCursorForMode(CROP_HANDLE_MODES[handle]),
+            }}
             aria-label={CROP_HANDLE_LABELS[handle]}
             disabled={locked}
             onMouseDown={(e) => gesture.onMouseDown(handle, e)}

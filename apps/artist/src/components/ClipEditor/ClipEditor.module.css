@@ -369,6 +369,22 @@
   color: var(--text-primary);
 }
 
+/* A pressed header toggle — today only "Crop on canvas" (ESCSUITE-157) — reads as
+   on, the same accent fill `.styleButton.active`, `.noFillButton.active` and
+   `.lockButton.locked` use, so `aria-pressed` is not something only a screen
+   reader can tell. Keyed off the attribute rather than a second class: the
+   attribute is already the state. */
+.resetButton[aria-pressed='true'] {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.resetButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .fitToCanvasButton {
   padding: var(--spacing-xs) var(--spacing-sm);
   font-size: 11px;

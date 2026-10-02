@@ -70,16 +70,18 @@ export const CROP_HANDLE_MODES: Record<CropHandle, DragMode> = {
 };
 
 /**
- * Is crop mode on, and on what?
+ * Is crop mode on, and on what — leaving the playhead out of it?
  *
- * The **one** definition, read by the chrome below and by `PreviewPlayer` for
- * whether to mount the handles at all. `cropClipId` is a latch that nothing
- * clears, so the second condition is what makes a selection change — or a
- * delete, a project load, an undo — leave crop mode: a latch that no longer
- * names the selected clip is inert.
+ * `cropClipId` is a latch that nothing clears, so the second condition is what
+ * makes a selection change — or a delete, a project load, an undo — leave crop
+ * mode: a latch that no longer names the selected clip is inert.
  *
  * An overlay needs no condition of its own: it carries `sourceVideoId: ''` and
  * fails the source lookup.
+ *
+ * Callers want {@link visibleCropTarget} below, which adds the clip's own time
+ * window. This half is separate only because the window needs the clip this one
+ * resolves.
  */
 export function cropTarget(scene: CropOverlayScene): CropTarget | null {
   const { clips, sourceVideos, cropClipId, selectedClipId, isPlaying } = scene;
@@ -92,6 +94,29 @@ export function cropTarget(scene: CropOverlayScene): CropTarget | null {
   if (!source) return null;
 
   return { clip, source };
+}
+
+/**
+ * Is crop mode on, on what, and is the playhead actually on that clip?
+ *
+ * The **one** definition, read by the chrome below and by `PreviewPlayer` for
+ * whether to mount the eight DOM handles — so neither can show crop mode for a
+ * frame the other is not showing it for. Before this existed the chrome carried
+ * the time comparison on its own and the handle layer carried none, which left
+ * eight live, draggable buttons over an unrelated frame once the playhead
+ * scrubbed off the cropped clip.
+ *
+ * The end is exclusive, exactly as `selectionOverlay.ts`' own window test is: a
+ * clip ending where the next begins hands the frame over, it does not share it.
+ */
+export function visibleCropTarget(scene: CropOverlayScene, time: number): CropTarget | null {
+  const target = cropTarget(scene);
+  if (!target) return null;
+
+  const { clip } = target;
+  if (time < clip.timelinePosition || time >= clip.timelinePosition + clip.duration) return null;
+
+  return target;
 }
 
 /**
@@ -162,16 +187,13 @@ export function drawCropOverlay(
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): void {
-  const target = cropTarget(scene);
+  const target = visibleCropTarget(scene, time);
   if (!target) return;
 
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
   const { clip, source } = target;
-  const clipEnd = clip.timelinePosition + clip.duration;
-  if (time < clip.timelinePosition || time >= clipEnd) return;
-
   const bounds = getOverlayBounds(clip, canvas, time, scene.sourceVideos, project);
   if (!bounds) return;
 

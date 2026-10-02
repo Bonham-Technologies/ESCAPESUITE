@@ -46,6 +46,16 @@ const EDGES = [
 /** No crop at all, as the four insets that say so. */
 const NO_CROP: ClipCrop = { left: 0, top: 0, right: 0, bottom: 0 };
 
+/**
+ * Why "Crop on canvas" is refused on a clip with no source frame behind it.
+ *
+ * `sourceWidth` is `sourceVideo?.width ?? 0`: a zero means the clip's source has
+ * left the media library, and the preview's crop mode (`cropTarget`) refuses such
+ * a clip and draws nothing. Latching the mode would leave a pressed toggle with
+ * an empty canvas behind it, so the toggle refuses itself instead and says why.
+ */
+const NO_SOURCE_REASON = "This clip's source is no longer in the media library";
+
 /** The percentage the user sees for a stored fraction. */
 function percentOf(inset: number): number {
   return Math.round(inset * 100);
@@ -86,6 +96,7 @@ export function CropSection({
   // names, which `ClipEditor.a11y.test.tsx` enforces.
   const id = useId();
   const current = crop ?? NO_CROP;
+  const noSource = sourceWidth <= 0;
 
   const reportPercent = (key: keyof ClipCrop, percent: number) => {
     onCropChange({ ...current, [key]: percent / 100 });
@@ -98,14 +109,21 @@ export function CropSection({
       disabled={disabled}
       headerRight={
         <>
-          {/* Not `disabled`: crop mode shows the user what is being cropped
-              away, which is reading. The eight handles are what go inert on a
-              locked track (ESCSUITE-157), and the panel header already says
-              why. It sits in `headerRight` and so outside the section's
-              <fieldset disabled> for the same reason. */}
+          {/* Not disabled by the track's lock: crop mode shows the user what is
+              being cropped away, which is reading. The eight handles are what go
+              inert on a locked track (ESCSUITE-157), and the panel header already
+              says why. It sits in `headerRight` and so outside the section's
+              <fieldset disabled> for the same reason. The one thing that DOES
+              disable it is having no source frame to crop — see
+              {@link NO_SOURCE_REASON}. Its pressed state is a visual one too, via
+              `.resetButton[aria-pressed='true']`, the way every other
+              `aria-pressed` control in this panel pairs the attribute with a
+              look. */}
           <button
             className={styles.resetButton}
             aria-pressed={cropOnCanvas}
+            disabled={noSource}
+            title={noSource ? NO_SOURCE_REASON : undefined}
             onClick={(e) => {
               e.stopPropagation();
               onCropOnCanvasToggle();

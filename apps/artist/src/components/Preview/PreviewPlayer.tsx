@@ -103,16 +103,26 @@ export function PreviewPlayer() {
     imageUrlsKey,
   } = usePreviewMedia();
 
-  // Crop mode (ESCSUITE-157). `cropTarget` is the single answer to "is it on,
-  // and on what": the latch has to name the SELECTED clip, so a selection
-  // change leaves the mode with nothing to clear. It gates three things — the
-  // chrome below, the canvas' own pointer handlers, and the DOM handle layer —
-  // and all three ask it once, here.
+  // Crop mode (ESCSUITE-157). `visibleCropTarget` is the single answer to "is it
+  // on, and on what": the latch has to name the SELECTED clip, so a selection
+  // change leaves the mode with nothing to clear, and the playhead has to be on
+  // that clip, so the chrome and the handles appear and disappear together. It
+  // gates three things — the chrome below, the canvas' own pointer handlers, and
+  // the DOM handle layer — and all three ask it once, here.
+  //
+  // Taking `currentTime` means this value's identity changes on every scrub tick
+  // *while crop mode is open* (it stays a stable `null` the rest of the time, so
+  // nothing downstream of it churns when the mode is off). The cost is bounded by
+  // the mode being open, the same argument `CropHandles`' own ResizeObserver
+  // makes.
   const cropScene = useMemo<cropOverlay.CropOverlayScene>(
     () => ({ clips, sourceVideos, cropClipId, selectedClipId, isPlaying }),
     [clips, sourceVideos, cropClipId, selectedClipId, isPlaying]
   );
-  const cropping = useMemo(() => cropOverlay.cropTarget(cropScene), [cropScene]);
+  const cropping = useMemo(
+    () => cropOverlay.visibleCropTarget(cropScene, currentTime),
+    [cropScene, currentTime]
+  );
 
   /**
    * The decoded element a source draws from, for the crop chrome's dim pass —
