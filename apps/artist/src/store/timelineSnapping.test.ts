@@ -5,6 +5,8 @@ import {
   wouldOverlap,
   trackIndexDelta,
   canMoveSelectedClips,
+  clampTrimToNeighbours,
+  firstFreeGroupStart,
 } from './timelineSnapping'
 import type { Clip, Track } from './types'
 
@@ -257,6 +259,188 @@ describe('timelineSnapping helper functions', () => {
       // Both members are pulled back past the start of the timeline, where the
       // store's own `Math.max(0, …)` would pile them on top of each other.
       expect(move(clips, ['c1', 'c2'], -10, 0)).toBe(false)
+    })
+  })
+  // ESCSUITE-161: the end of the trim gesture's arithmetic. The invariant is
+  // that one track never holds two overlapping clips; the clamp is how a trim
+  // keeps it, in the same way `wouldOverlap` is how a drop keeps it.
+  describe('clampTrimToNeighbours', () => {
+    /** clip `c2`'s origin: it sits at 10s and plays 5s of its source. */
+    const origin = (position: number, duration: number) => ({
+      startTime: 0,
+      endTime: duration,
+      timelinePosition: position,
+      animation: undefined,
+    })
+
+    it('stops an end trim at the next clip on the row', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 8, 3)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'end', origin(0, 5), 12)
+      ).toBe(8)
+    })
+
+    it('leaves an end trim alone when it stays short of the next clip', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 8, 3)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'end', origin(0, 5), 7)
+      ).toBe(7)
+    })
+
+    it('leaves an end trim alone when there is nothing in front of it', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'end', origin(0, 5), 40)
+      ).toBe(40)
+    })
+
+    it('stops a start trim at the end of the clip behind it', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 8, 3)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[1], 'start', origin(8, 3), 2)
+      ).toBe(5)
+    })
+
+    it('leaves a start trim alone when it stays clear of the clip behind it', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 8, 3)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[1], 'start', origin(8, 3), 6)
+      ).toBe(6)
+    })
+
+    it('leaves a start trim alone when there is nothing behind it', () => {
+      const clips = [createMockClip('c2', 't1', 8, 3)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'start', origin(8, 3), -4)
+      ).toBe(-4)
+    })
+
+    it('ignores the clips on every other row', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('other', 't2', 6, 3)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'end', origin(0, 5), 12)
+      ).toBe(12)
+    })
+
+    it('is never in its own way', () => {
+      // The clip being trimmed is in `clips` — it always is, the hook hands
+      // the whole timeline — and the limit it reads must skip it, or an end
+      // trim would clamp to the clip's own start.
+      const clips = [createMockClip('c1', 't1', 4, 5)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'end', origin(4, 5), 12)
+      ).toBe(12)
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'start', origin(4, 5), 1)
+      ).toBe(1)
+    })
+
+    it('reads the nearest of several clips in front of the end edge', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 2),
+        createMockClip('far', 't1', 20, 2),
+        createMockClip('near', 't1', 9, 2),
+      ]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'end', origin(0, 2), 30)
+      ).toBe(9)
+    })
+
+    it('reads the nearest of several clips behind the start edge', () => {
+      const clips = [
+        createMockClip('c1', 't1', 20, 5),
+        createMockClip('far', 't1', 0, 2),
+        createMockClip('near', 't1', 9, 2),
+      ]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[0], 'start', origin(20, 5), 1)
+      ).toBe(11)
+    })
+  })
+
+  // ESCSUITE-162: where a pasted group lands. `duplicateClip` has walked its
+  // row past a collision since the beginning; this is the same rule for a
+  // whole group, and the group moves as one so its members keep their offsets.
+  describe('firstFreeGroupStart', () => {
+    /** One clone of a one-clip group on `t1`. */
+    const alone = (duration: number) => [{ trackId: 't1', offset: 0, duration }]
+
+    it('leaves a group that fits where it was asked for', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5)]
+
+      expect(firstFreeGroupStart(clips, alone(5), 10)).toBe(10)
+    })
+
+    it('leaves a group that fits in a gap between two clips', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 20, 5)]
+
+      expect(firstFreeGroupStart(clips, alone(5), 6)).toBe(6)
+    })
+
+    it('moves a group off a clip it would land on, to that clip’s end', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5)]
+
+      expect(firstFreeGroupStart(clips, alone(5), 2)).toBe(5)
+    })
+
+    it('walks on past a run of clips with no room in it', () => {
+      const clips = [
+        createMockClip('c1', 't1', 0, 5),
+        createMockClip('c2', 't1', 5, 5),
+        createMockClip('c3', 't1', 10, 5),
+      ]
+
+      expect(firstFreeGroupStart(clips, alone(5), 2)).toBe(15)
+    })
+
+    it('never moves a group earlier than it was asked for', () => {
+      // There is room at 0 and the group is asked for 12: the answer is where
+      // it fits at or after 12, not the earliest hole on the row.
+      const clips = [createMockClip('c1', 't1', 10, 5)]
+
+      expect(firstFreeGroupStart(clips, alone(2), 12)).toBe(15)
+    })
+
+    it('ignores the clips on rows the group is not landing on', () => {
+      const clips = [createMockClip('elsewhere', 't2', 0, 20)]
+
+      expect(firstFreeGroupStart(clips, alone(5), 2)).toBe(2)
+    })
+
+    it('moves a multi-member group as one, so its members keep their offsets', () => {
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 8, 5)]
+      const members = [
+        { trackId: 't1', offset: 0, duration: 5 },
+        { trackId: 't1', offset: 8, duration: 5 },
+      ]
+
+      // At 0 the first member lands on c1; at 5 the second lands on c2; 13 is
+      // the first start where neither does.
+      expect(firstFreeGroupStart(clips, members, 0)).toBe(13)
+    })
+
+    it('reads a member’s own row, not the row of the member before it', () => {
+      const clips = [createMockClip('busy', 't2', 0, 20)]
+      const members = [
+        { trackId: 't1', offset: 0, duration: 5 },
+        { trackId: 't2', offset: 0, duration: 5 },
+      ]
+
+      expect(firstFreeGroupStart(clips, members, 2)).toBe(20)
+    })
+
+    it('answers the preferred start for a group with no members at all', () => {
+      expect(firstFreeGroupStart([createMockClip('c1', 't1', 0, 5)], [], 2)).toBe(2)
     })
   })
 })

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from '../projectStore'
+import { getClipsAtTime } from '../clipQueries'
 import type { Clip, Track } from '../types'
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from '../types'
 
@@ -418,7 +419,11 @@ describe('Multi-Select Store', () => {
     // the playhead, 0 included.
     it('pastes at the playhead even when the playhead is at 0', () => {
       const tracks = [createTestTrack()]
-      const clips = [createTestClip({ id: 'clip-1', timelinePosition: 3 })]
+      // Two seconds long, so the clone's own [0, 2) span is clear of the
+      // original's [3, 5) and ESCSUITE-162's relocation never comes into it:
+      // what this pins is that a playhead at 0 means 0 and not
+      // `minPosition + 0.5` = 3.5.
+      const clips = [createTestClip({ id: 'clip-1', timelinePosition: 3, endTime: 2, duration: 2 })]
       setupStore(clips, tracks)
 
       useEditorStore.getState().toggleClipSelection('clip-1')
@@ -529,6 +534,120 @@ describe('Multi-Select Store', () => {
       // Relative offset should be preserved: clip-2 was 8s after clip-1
       const positions = pastedClips.map(c => c.timelinePosition).sort((a, b) => a - b)
       expect(positions[1] - positions[0]).toBe(8)
+    })
+
+    // ESCSUITE-162: `pasteClips` checked that the clone's track exists
+    // (ESCSUITE-100) and is unlocked (ESCSUITE-84) and nothing else, so
+    // Ctrl+C, move the playhead into the clip, Ctrl+V landed a clone on top of
+    // the original. `getClipsAtTime` returned both, so the preview, both
+    // exporters and `core/audioMixer.ts` drew and mixed two clips from one row.
+    // The clone now relocates — `duplicateClip`'s rule, applied to a whole
+    // group — rather than refusing: a refusal would be a Ctrl+V that silently
+    // did nothing, and the duplicate precedent already says "move it along".
+    describe('paste relocates past an occupied span (ESCSUITE-162)', () => {
+      /** The clips `getClipsAtTime` hands the renderer at one instant. */
+      const drawnAt = (time: number): string[] => {
+        const { clips, tracks } = useEditorStore.getState().project.timeline
+        return getClipsAtTime(clips, tracks, time).map((entry) => entry.clip.id)
+      }
+
+      /** Copy `id` to the clipboard, put the playhead at `at`, paste. */
+      const copyThenPasteAt = (id: string, at: number): boolean => {
+        useEditorStore.getState().toggleClipSelection(id)
+        useEditorStore.getState().copySelectedClips()
+        useEditorStore.getState().clearMultiSelection()
+        useEditorStore.setState({ currentTime: at })
+        return useEditorStore.getState().pasteClips()
+      }
+
+      /** Every clip on the timeline that is not one of the originals. */
+      const pastedPositions = (originals: string[]): number[] =>
+        useEditorStore
+          .getState()
+          .project.timeline.clips.filter((c) => !originals.includes(c.id))
+          .map((c) => c.timelinePosition)
+          .sort((a, b) => a - b)
+
+      it('moves a clone that would land on the clip it was copied from to that clip’s end', () => {
+        setupStore([createTestClip({ id: 'clip-1', timelinePosition: 0 })], [createTestTrack()])
+
+        expect(copyThenPasteAt('clip-1', 2)).toBe(true)
+
+        expect(pastedPositions(['clip-1'])).toEqual([5])
+        expect(drawnAt(3)).toEqual(['clip-1'])
+      })
+
+      it('leaves a clone the playhead put on a free span exactly there', () => {
+        setupStore(
+          [
+            createTestClip({ id: 'clip-1', timelinePosition: 0 }),
+            createTestClip({ id: 'clip-2', timelinePosition: 20 }),
+          ],
+          [createTestTrack()]
+        )
+
+        expect(copyThenPasteAt('clip-1', 6)).toBe(true)
+
+        expect(pastedPositions(['clip-1', 'clip-2'])).toEqual([6])
+      })
+
+      it('walks on to the end of a run of clips with no room in it', () => {
+        setupStore(
+          [
+            createTestClip({ id: 'clip-1', timelinePosition: 0 }),
+            createTestClip({ id: 'clip-2', timelinePosition: 5 }),
+          ],
+          [createTestTrack()]
+        )
+
+        expect(copyThenPasteAt('clip-1', 2)).toBe(true)
+
+        expect(pastedPositions(['clip-1', 'clip-2'])).toEqual([10])
+      })
+
+      it('moves a multi-clip paste as one group, so the clips keep their offsets', () => {
+        setupStore(
+          [
+            createTestClip({ id: 'clip-1', timelinePosition: 0 }),
+            createTestClip({ id: 'clip-2', timelinePosition: 8 }),
+          ],
+          [createTestTrack()]
+        )
+
+        useEditorStore.getState().toggleClipSelection('clip-1')
+        useEditorStore.getState().toggleClipSelection('clip-2')
+        useEditorStore.getState().copySelectedClips()
+        useEditorStore.getState().clearMultiSelection()
+        useEditorStore.setState({ currentTime: 0 })
+
+        expect(useEditorStore.getState().pasteClips()).toBe(true)
+
+        // 13 is the first start at which neither clone lands on an original;
+        // the 8s between them is untouched.
+        expect(pastedPositions(['clip-1', 'clip-2'])).toEqual([13, 21])
+        for (const time of [1, 4, 9, 12, 14, 17, 22, 25]) {
+          expect(drawnAt(time)).toHaveLength(1)
+        }
+      })
+
+      it('reads the clone’s own row, not every row', () => {
+        setupStore(
+          [
+            createTestClip({ id: 'clip-1', trackId: 'track-2', timelinePosition: 0 }),
+            createTestClip({ id: 'blocker', trackId: 'track-1', timelinePosition: 10 }),
+          ],
+          [
+            createTestTrack({ id: 'track-1', index: 0 }),
+            createTestTrack({ id: 'track-2', name: 'Track 2', index: 1 }),
+          ]
+        )
+
+        // `blocker` covers 10s–15s, but it is on track-1 and the clone lands
+        // on track-2, where 10s is free.
+        expect(copyThenPasteAt('clip-1', 10)).toBe(true)
+
+        expect(pastedPositions(['clip-1', 'blocker'])).toEqual([10])
+      })
     })
 
     it('paste does nothing when clipboard is empty', () => {
