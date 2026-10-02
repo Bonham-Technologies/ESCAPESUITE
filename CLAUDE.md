@@ -1805,6 +1805,26 @@ old `catch` arm now reached by the rejection case. The uncovered counts read 16 
 67 → 66 statements, 223 → 223 branches and 6 → 6 functions. Every perf and rerender pin is
 byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-156 (a WebM or GIF export whose setup
+throws between the media load and the frame loop releases what it loaded; a corrupt image is
+warned about and skipped instead of aborting the load; the readiness poll cancels itself when its
+300 ms fallback fires, and the fallback is cleared when readiness arrives first): 99.78 / **99.19** /
+**95.41** / 99.66 against the 99.78 / 99.18 / 95.37 / 99.66 the commit this branch lands on
+(`c89cf40`) measures — statements up a hundredth, branches up four, lines and functions unmoved, and
+for the second time this week with *fewer* uncovered units: lines 7,265 / 7,281 → 7,276 / 7,292
+(16 → 16 uncovered), statements 8,166 / 8,233 → 8,177 / 8,243 (67 → 66), branches 4,597 / 4,820 →
+4,595 / 4,816 (223 → 221) and functions 1,768 / 1,774 → 1,769 / 1,775 (6 → 6). The branch denominator
+*shrank* by four because `core/exportWebM.ts`'s two guarded encoder-close blocks became one loop over
+the encoders it had opened (69 / 72 → 66 / 68: four fewer arms and one fewer uncovered, the loop being
+reached with zero, one and two entries by the configure-throws, audio-abort and muxer-failure cases),
+and `core/elementFrames.ts` went 60 / 69 → 61 / 69 with no new arm at all: the image branch's
+warn-and-skip reuses the video branch's existing fallback shape, the readiness wait's cancellation is
+two unconditional handles, and the one arm newly reached is the poll's never-ready side, which the
+fake-timer case drives for the first time. `elementFrames.ts` also reaches 118 / 118 statements
+(from 108 / 109): the never-ready statement was the one it carried uncovered. The four export and
+preview ceiling files and every rerender pin are byte-identical — nothing per frame moved. **No
+floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1812,7 +1832,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.79 | 99.19 | 95.37 | 99.66 |
+| `@escapesuite/artist` | 99.78 | 99.19 | 95.41 | 99.66 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.46 | 99.37 | 98.20 | 98.52 |
 
