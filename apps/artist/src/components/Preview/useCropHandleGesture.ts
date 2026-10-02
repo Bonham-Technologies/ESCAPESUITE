@@ -33,15 +33,35 @@ import { useEditorStore } from '../../store/projectStore';
 import { useGestureHistory, useThrottledDragUpdate } from '../../hooks';
 import { cropUpdateFor } from '../../core/clipCrop';
 import {
+  CROP_NUDGE,
+  cropAnnouncement,
   cropCompensatesCentre,
   cropForHandleMove,
   cropRegionAspect,
+  cropsEqual,
   cropWriteFor,
   sourceDelta,
   type CropHandle,
 } from '../../core/cropDrag';
 import type { Clip, ClipCrop, ClipTransform, SourceVideo } from '../../store/types';
 import type { ProjectSize } from './types';
+
+// Appended to alternate announcements so two identical ones in a row are two
+// different strings — an aria-atomic region whose text does not change is not
+// re-read, which is exactly the case a user repeating one nudge is in.
+// Deliberately a copy of the keyframe graph's
+// (`KeyframePanel/hooks/useKeyframeGraphKeyboard.ts`) rather than an import of
+// it: the graph owns its own live region, and importing from it would tie the
+// preview to the keyframe panel for one character.
+const ANNOUNCE_MARK = '​';
+
+/** Which way each arrow moves a handle, in the clip's own frame. */
+const ARROW_STEPS: Record<string, { x: number; y: number } | undefined> = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+};
 
 /**
  * What a crop gesture needs that a hook cannot reach for itself.
@@ -96,10 +116,7 @@ export function useCropHandleGesture({
   const updateClip = useEditorStore((state) => state.updateClip);
   const gestureHistory = useGestureHistory();
   const throttled = useThrottledDragUpdate<{ crop: ClipCrop; start: CropGestureStart }>();
-  // Nothing writes this yet — the arrow nudges do, in Task 5. The live region it
-  // feeds is rendered from the start regardless: an aria-live region has to
-  // exist before its content changes for a screen reader to announce one.
-  const [message] = useState('');
+  const [message, setMessage] = useState('');
 
   /**
    * The open drag's teardown, so an unmount mid-drag takes its two document
@@ -107,6 +124,10 @@ export function useCropHandleGesture({
    */
   const endDragRef = useRef<(() => void) | null>(null);
   useEffect(() => () => endDragRef.current?.(), []);
+
+  const announce = useCallback((text: string) => {
+    setMessage((prev) => (prev.slice(-1) === ANNOUNCE_MARK ? text : text + ANNOUNCE_MARK));
+  }, []);
 
   /**
    * Normalise one crop and write it — with the centre that keeps the pinned
@@ -188,18 +209,64 @@ export function useCropHandleGesture({
     [clip.crop, clip.transform, source, contentScale, gestureHistory, throttled, write]
   );
 
-  // Escape only, for now: Task 5 adds the arrow branch below it, red first. The
-  // `handle` parameter is already taken because every button passes it and the
-  // arrows are what will read it.
   const onKeyDown = useCallback(
-    (_handle: CropHandle, e: ReactKeyboardEvent<HTMLButtonElement>) => {
+    (handle: CropHandle, e: ReactKeyboardEvent<HTMLButtonElement>) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
         onLeave();
+        return;
       }
+
+      const step = ARROW_STEPS[e.key];
+      if (!step) return;
+      // A focused control owns its arrows — the rule the keyframe graph states —
+      // so all four are claimed even where the handle owns no inset on that
+      // axis, rather than stepping the playhead out from under the user.
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Read the clip's crop and transform fresh from the store rather than the
+      // `clip` prop: unlike a drag, a key press has no `start` object to rebase
+      // from — each is its own gesture — so the SECOND of two presses has to see
+      // what the FIRST one actually stored. In the mounted app that is also what
+      // the prop holds, because `PreviewPlayer` re-renders this component from a
+      // store subscription before the next keydown can reach it; reading the
+      // store directly makes that true by construction rather than by timing.
+      // The non-null assertion carries the same precondition the rest of this
+      // hook already relies on without a guard (`write`'s `clip.id`/
+      // `clip.animation`, `onMouseDown`'s `clip.crop`/`clip.transform`): this
+      // component is only mounted while `cropping.clip` names a clip that is
+      // still on the timeline, and nothing it renders survives the clip
+      // leaving — a real race is a render away from an unmount, not a branch
+      // worth asking the gesture to carry.
+      const live = useEditorStore.getState().project.timeline.clips.find(
+        (c) => c.id === clip.id
+      )!;
+
+      const distance = e.shiftKey ? CROP_NUDGE.coarse : CROP_NUDGE.fine;
+      const next = cropForHandleMove(
+        live.crop,
+        handle,
+        { x: step.x * distance, y: step.y * distance },
+        source
+      );
+      // An arrow the handle does not own, or a handle already clamped at the
+      // frame's edge: writing this would spend an undo entry on a change of
+      // nothing and announce an edit that did not happen.
+      if (cropsEqual(next, live.crop)) return;
+
+      // A held key is one undo entry, not one per repetition —
+      // `useSliderGesture`'s rule for a held slider arrow.
+      if (e.repeat) gestureHistory.resume();
+      else gestureHistory.begin();
+
+      // Refused by the store (a locked row): nothing changed, so the live region
+      // must not say otherwise (ESCSUITE-87's shape).
+      if (!write(next, { crop: live.crop, transform: live.transform })) return;
+      announce(cropAnnouncement(handle, cropUpdateFor(next, source)?.crop, source));
     },
-    [onLeave]
+    [clip, source, onLeave, gestureHistory, write, announce]
   );
 
   const onKeyUp = useCallback(() => gestureHistory.end(), [gestureHistory]);

@@ -484,11 +484,12 @@ describe('the crop handle layer', () => {
   })
 
   it('leaves every other key alone', () => {
-    // Task 5 is what gives the arrows a meaning; until then a handle claims
-    // Escape and nothing else, and crop mode stays open.
+    // Escape leaves crop mode and the four arrows nudge (the next describe
+    // block), so Tab is what is left to prove falls through untouched — a
+    // focused handle does not swallow the key that moves focus off it.
     const { onLeave, handle } = mount()
 
-    expect(fireEvent.keyDown(handle('Crop left'), { key: 'ArrowLeft' })).toBe(true)
+    expect(fireEvent.keyDown(handle('Crop left'), { key: 'Tab' })).toBe(true)
     expect(onLeave).not.toHaveBeenCalled()
   })
 })
@@ -496,7 +497,7 @@ describe('the crop handle layer', () => {
 describe('nudging a crop handle from the keyboard', () => {
   /** What the live region is saying, with the re-read mark taken off. */
   const announced = (): string =>
-    (screen.getByRole('status').textContent ?? '').replace(/​$/, '')
+    (screen.getByRole('status').textContent ?? '').replace(/\u200B$/, '')
 
   it('crops one source pixel per arrow press, in the direction the arrow points', () => {
     const { clip, handle } = mount()
@@ -603,13 +604,25 @@ describe('nudging a crop handle from the keyboard', () => {
 
   it('says the same thing twice audibly', () => {
     // An aria-atomic region whose text does not change is not re-read, which is
-    // exactly the case a user repeating one nudge is in.
+    // exactly the case a user repeating one nudge is in — here, an external
+    // undo (not this hook's own announce) puts the crop back to what it was
+    // before the first press, so the second press announces the identical
+    // text with nothing of this hook's own in between.
+    //
+    // A same-handle ArrowLeft between the two ArrowRights, rather than an
+    // undo, would also restore the crop to zero — but it is itself a second
+    // genuine nudge, with its own (different) announcement in between, and
+    // the mark's single-call toggle only ever disambiguates two IMMEDIATELY
+    // adjacent identical announcements: three real announcements whose first
+    // and third texts coincide land back on the same mark parity and the
+    // live region's raw text collides. The arithmetic cases above cover that
+    // round trip's crop value; this one isolates the mark.
     const { handle } = mount()
     const button = handle('Crop left')
 
     fireEvent.keyDown(button, { key: 'ArrowRight' })
     const first = screen.getByRole('status').textContent
-    fireEvent.keyDown(button, { key: 'ArrowLeft' })
+    store().undo()
     fireEvent.keyDown(button, { key: 'ArrowRight' })
 
     expect(screen.getByRole('status').textContent).not.toBe(first)
