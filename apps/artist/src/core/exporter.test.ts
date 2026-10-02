@@ -13,6 +13,7 @@ import {
   exportToGIF,
   exportToMP4,
   exportToWebM,
+  gifFrameDelayMs,
   isGIFExportSupported,
   isMP4ExportSupported,
   isWebMExportSupported,
@@ -187,6 +188,13 @@ describe('exportToGIF through the barrel', () => {
 
   it('exposes the up-front size heuristic', () => {
     expect(estimateGifBytes(640, 360, 15)).toBe(Math.round(640 * 360 * 15 * 0.3))
+  })
+
+  it('exposes the stored frame delay, which the headless manifest reports a duration from', () => {
+    // 15 fps asks for 67 ms and is written as 70; the rule has one home
+    // (`exportTypes.ts`) and reaches `headless/renderProject.ts` through here.
+    expect(gifFrameDelayMs(15)).toBe(70)
+    expect(gifFrameDelayMs(20)).toBe(50)
   })
 
   it('exposes the note shown when no video format can be encoded', () => {

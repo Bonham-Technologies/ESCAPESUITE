@@ -21,6 +21,7 @@ import {
   getQualitySettings,
   getResolution,
   getSourceDimensions,
+  gifFrameDelayMs,
   gifFrameRate,
   isGIFExportSupported,
   isMP4ExportSupported,
@@ -726,6 +727,38 @@ describe('gifFrameRate', () => {
     // A hand-built headless job spec or a stale saved setting can carry
     // anything. Landing on the default beats encoding a 90-second GIF at 0 fps.
     expect(gifFrameRate(fps)).toBe(DEFAULT_GIF_FPS)
+  })
+})
+
+describe('gifFrameDelayMs', () => {
+  it.each([
+    [10, 100],
+    [15, 70],
+    [20, 50],
+  ])('stores %s fps as a %s ms delay', (fps, delayMs) => {
+    // Two roundings, not one. The exporter asks `addFrame` for
+    // `round(1000 / rate)` ms, and `gifenc` writes `round(delay / 10)`
+    // centiseconds into the Graphic Control Extension (`gifEncoder.ts`, pinned by
+    // `gifEncoder.test.ts`). 10 and 20 fps survive both exactly; 15 fps asks for
+    // 67 ms and is stored as 7 cs = 70 ms, so a "15 fps" GIF really plays at
+    // about 14.3 — which is the figure every doc site quotes.
+    expect(gifFrameDelayMs(fps)).toBe(delayMs)
+  })
+
+  it('answers the default rate when no rate was asked for', () => {
+    expect(gifFrameDelayMs(undefined)).toBe(70)
+    expect(gifFrameDelayMs(undefined)).toBe(gifFrameDelayMs(DEFAULT_GIF_FPS))
+  })
+
+  it.each([0, 7, 30, 15.5, Number.NaN])('falls back to the default rate for %s', (fps) => {
+    // Shares `gifFrameRate`'s fallback rather than carrying a second one.
+    expect(gifFrameDelayMs(fps)).toBe(70)
+  })
+
+  it('is a whole number of centiseconds for every rate offered', () => {
+    for (const fps of GIF_FPS_OPTIONS) {
+      expect(gifFrameDelayMs(fps) % 10).toBe(0)
+    }
   })
 })
 

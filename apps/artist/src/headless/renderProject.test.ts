@@ -72,12 +72,13 @@ describe('renderProject', () => {
     expect(res.meta.format).toBe('gif')
   })
 
-  it('reports a GIF durationSec in whole frame delays, not the requested range length', async () => {
-    // A GIF stores each frame's on-screen time in milliseconds (centiseconds, in
-    // the file itself), so what it plays for is frames x delay — never
-    // range / fps. At 15 fps the delay rounds to 67 ms, so a one-second range is
-    // 15 frames of 67 ms = 1.005 s of GIF, and the verification manifest has to
-    // describe the bytes rather than the request.
+  it('reports a GIF durationSec in the frame delays the file stores, not the requested range', async () => {
+    // A GIF's on-screen time per frame is stored in **centiseconds**, so there are
+    // two roundings between a frame rate and a duration: the exporter asks for
+    // `round(1000 / 15) = 67` ms and `gifenc` writes `round(67 / 10) = 7` cs = 70 ms.
+    // A one-second range at 15 fps is therefore 15 frames of 70 ms = 1.05 s of GIF
+    // — a 5% stretch, not the 0.5% that stopping at the first rounding suggests.
+    // The verification manifest describes the bytes, and `ffprobe` will say 1.05.
     const input = baseInput()
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
@@ -85,7 +86,22 @@ describe('renderProject', () => {
 
     const res = await renderProject(input)
 
-    expect(res.meta.durationSec).toBeCloseTo(1.005, 6)
+    expect(res.meta.durationSec).toBeCloseTo(1.05, 6)
+  })
+
+  it('reports a GIF durationSec of exactly the range at a rate the container can store', async () => {
+    // 20 fps is 50 ms, a whole number of centiseconds, so both roundings are
+    // identities and the GIF plays for exactly the second it was asked for. The
+    // inexact case above and this one together are what keep the duration honest:
+    // a single-rate assertion cannot tell 67 ms from 70 ms.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
+    input.options = { format: 'gif', fps: 20 } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    expect(res.meta.durationSec).toBe(1)
   })
 
   it('takes the GIF frame rate from the exporter\'s own default when the job asks for none', async () => {
@@ -98,7 +114,7 @@ describe('renderProject', () => {
 
     const res = await renderProject(input)
 
-    expect(res.meta.durationSec).toBeCloseTo(1.005, 6)
+    expect(res.meta.durationSec).toBeCloseTo(1.05, 6)
   })
 
   it('computes durationSec from timelinePosition + duration, not from source trim bounds', async () => {
