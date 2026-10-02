@@ -341,6 +341,12 @@ export interface Clip {
   // mean anything against. Absent means none for both.
   mask?: ClipMask;
   stroke?: ClipStroke;
+  /**
+   * Which rectangle of its source frame this clip shows (ESCSUITE-6). Static,
+   * like `mask` and `stroke` — never keyframed — and media clips only. Absent
+   * means the whole frame.
+   */
+  crop?: ClipCrop;
 }
 
 /**
@@ -408,6 +414,32 @@ export const DEFAULT_CLIP_MASK_RADIUS = 0.05;
  * stored colour it cannot represent — `ShapeOverlayData`'s own stroke default.
  */
 export const DEFAULT_CLIP_STROKE_COLOR = '#ffffff';
+
+/**
+ * A media clip's crop: one inset per edge, as a **fraction of the source
+ * frame** (ESCSUITE-6).
+ *
+ * Fractions rather than source pixels for the same reason `ClipMask.radius` and
+ * `ClipStroke.width` are fractions: a `.veditor` outlives the numbers it was
+ * written with. `core/projectManager.ts`'s `resolveMetaDimensions` re-probes a
+ * saved source's width and height whenever the file's own `meta` is not usable,
+ * so a crop stored in pixels would silently mean something different after that
+ * load, while a fraction means the same thing whatever the probe reports.
+ *
+ * `undefined` means no crop; `{ left: 0, top: 0, right: 0, bottom: 0 }` is
+ * normalised to `undefined` by the inspector, so a clip that was never cropped
+ * and one whose crop was reset are the same object.
+ *
+ * Valid when every inset is a finite number >= 0, `left + right < 1` and
+ * `top + bottom < 1`. `core/clipCrop.ts`'s `isValidCrop` is that check and
+ * `store/projectMigration.ts`'s `parseProject` is its one caller.
+ */
+export interface ClipCrop {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
 
 /**
  * One part of a handed-over take, ready to be placed on the timeline
