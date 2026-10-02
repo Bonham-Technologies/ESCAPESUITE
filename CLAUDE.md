@@ -1690,6 +1690,52 @@ design's point — four readers of one pure function cannot disagree. The whole-
 fix round (Fit to Canvas fitting the cropped picture, the all-zero write on a sourceless clip) is in
 these numbers. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 at the end of ESCSUITE-34 (an animated GIF as a third
+export format, through `gifenc` and no WebCodecs at all; the WebM exporter's per-frame machinery
+lifted into `core/elementFrames.ts` so the two element-drawing exporters share it; the dialog's GIF
+radio, frame rate, per-format presets, two size estimates and 30-second note; the headless kit
+rendering `format: "gif"`): **99.78** / **99.18** / **95.37** / **99.66** against the
+99.72 / 99.12 / 95.26 / 99.65 the commit this branch lands on (`d8868d2`) measures — every figure up,
+and this time because the *uncovered* column shrank as well as the covered one growing: lines
+7,145 / 7,165 → 7,265 / 7,281 (uncovered 20 → 16), statements 8,044 / 8,115 → 8,166 / 8,233
+(71 → 67), branches 4,507 / 4,731 → 4,597 / 4,820 (224 → 223) and functions 1,746 / 1,752 →
+1,768 / 1,774 (6 → 6). The branch count is the one to read carefully, because the move inside it
+is larger than the net. `core/exportWebM.ts` went 127 / 141 → 69 / 72 — its fourteen uncovered
+arms were nearly all in the frame loop, and the loop moved — and `core/elementFrames.ts` arrives at
+60 / 69: nine of those fourteen, carried across in the lift (the `readyState` poll's never-ready
+arm, the paused-video and image fallbacks, the two `?? ` defaults in the composer) and *two* of them
+newly reached by `elementFrames.test.ts`'s sixteen module-level cases, which is where the net
+224 → 223 comes from. Everything the ticket wrote is covered from both sides: `core/gifEncoder.ts`
+4 / 4, `core/exportGIF.ts` 33 / 34 — its one uncovered arm is the `error instanceof Error ?
+error.message : String(error)` fallback in the catch, the exact parity of `exportWebM.ts`'s own
+uncovered `String(error)` arm, which the Task 3 review ruled stays rather than be tested for a
+throw no caller makes — `core/exportTypes.ts`'s ten new arms (`gifFrameRate`'s and
+`gifFrameDelayMs`'s option checks, `resolutionForFormat` in both directions, `estimateGifBytes`),
+`components/Export/ExportDialog.tsx`'s thirty-five (the GIF dispatch branch, the format gates on
+the Quality, audio and background-tab affordances, the two estimates, the 30-second note, the
+no-WebCodecs alert's second sentence) at 169 / 170 with the same one pre-existing arm uncovered,
+and `headless/renderProject.ts`'s six (the three-way dispatch, the GIF duration) with the same
+three pre-existing uncovered. The branch deletes one fully covered function (`isGIFExportSupported`,
+which had no production caller), so the functions denominator grows by one fewer than the new
+module's fifteen, four and four. The three pre-existing export and preview ceiling files and every
+rerender pin are byte-identical to the base; `core/exportGIF.perf.test.ts` is the new ceiling file,
+and its laws are exact — one `getImageData`, one `addFrame`, one `setTransform` and zero
+`VideoFrame`s per frame. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
+`@escapesuite/headless-artist` was re-measured 2026-10-02 for the same ticket: **99.46** / **99.37** /
+**98.19** / 98.52 against the 99.45 / 99.36 / 98.16 / 98.52 the same base measures — lines, statements
+and branches each up a hundredth or three, functions unmoved. Measured in one sitting, the base gives
+481 / 490 branches and this branch 489 / 498: eight new branches, eight covered, the same 9 uncovered
+as before (lines 735 / 739 → 742 / 746, statements 785 / 790 → 792 / 797, functions 134 / 136 on
+both; the same 4 / 5 / 9 / 2 uncovered). All eight are in `src/jobSpec.ts`'s `parseOptions`: `gif`
+joining `FORMATS`, `360p` joining `RESOLUTIONS`, and the `fps` rule — present only with
+`format: "gif"`, an integer in {10, 15, 20}, refused on the two video formats — each reached from
+both sides by the accept and reject cases the validator suite gained. The widened `RenderMeta['format']`
+forced `gif` keys into the two sink maps, which `tsc` found; neither is a branch. The GIF Chromium
+parity case (`run.chromium.test.ts`, `GIF89a` in, manifest `format: 'gif'` out) is outside this
+measurement and was run twice here: 28 / 28 both times. **No floor crossed**; the kit's floors stay
+99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1697,9 +1743,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.72 | 99.12 | 95.26 | 99.65 |
+| `@escapesuite/artist` | 99.78 | 99.18 | 95.37 | 99.66 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
-| `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
+| `@escapesuite/headless-artist` | 99.46 | 99.37 | 98.19 | 98.52 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being
