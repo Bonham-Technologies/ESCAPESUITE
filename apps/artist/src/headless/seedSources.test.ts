@@ -99,6 +99,20 @@ describe('seedSources', () => {
     expect(extractMetadataFromBlob).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a caller-supplied mediaType "audio" even though the mime type says "video"', async () => {
+    // ESCSUITE-150: an ESCAPECRAFT audio-only take's blob is typed
+    // "video/webm;codecs=vp9,opus" even though there is no picture in it -- `meta.mediaType`
+    // is the only thing that says otherwise, and it must win over the implied 'video'.
+    const meta: SourceVideoInput = {
+      id: 'src-audio', name: 'take.webm', mimeType: 'video/webm;codecs=vp9,opus', mediaType: 'audio',
+    }
+    const result = await seedSources([meta], { 'src-audio': new Uint8Array([1, 2, 3, 4]).buffer })
+
+    expect(result[0].mediaType).toBe('audio')
+    const record = await getVideo('src-audio')
+    expect(record!.metadata.mediaType).toBe('audio')
+  })
+
   it('probes only the incomplete sources in a mixed batch', async () => {
     await seedSources(
       [complete({ id: 'ok' }), { id: 'partial', name: 'p.mp4', mimeType: 'video/mp4' }],
