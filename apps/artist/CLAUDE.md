@@ -1049,11 +1049,13 @@ round 1, NIT-4; `handleMouseDown` already had the clip in hand and needed no cha
 
 No `suppressPreset` outside a transition is not the same as "a hit test is never inside one" —
 the preview does draw transitions, and the pointer works during them. The renderer suppresses
-one preset side per side of an active transition (`core/canvasRenderer.ts`), and
-`getOverlayBounds` has no way to be told, so inside a transition the hit box, the selection
-chrome, the marquee and the drag seed can all disagree with the drawn frame. That is
-ESCSUITE-147's gap; it applied to every clip carrying a preset before this ticket and now
-applies to keyframed ones too — this ticket neither introduces nor fixes it.
+one preset side per side of an active transition (`core/canvasRenderer.ts`), and at the time of
+this ticket `getOverlayBounds` had no way to be told, so inside a transition the hit box, the
+selection chrome, the marquee and the drag seed could all disagree with the drawn frame. That
+was ESCSUITE-147's gap; it applied to every clip carrying a preset before this ticket and to
+keyframed ones too. ESCSUITE-147 has since closed it: the readers take the active transition as a
+trailing option and evaluate under the same suppression the renderer uses (see "The chrome and
+the picture agree through a transition" below).
 
 **A fully transparent clip does not catch the click, and a keyframed clip's selection chrome
 matches its picture** (ESCSUITE-155, closing two gaps the ESCSUITE-3 review left open). The body
@@ -1081,10 +1083,12 @@ its context and so never could distinguish a locked clip's chrome from an unlock
 asymmetry the review named — a keyframed selection showing in the inspector and on the timeline row
 but nowhere on the canvas — is closed.
 
-No `suppressPreset` outside a transition still means a hit test inside one can disagree with the
-drawn frame (ESCSUITE-147's gap, untouched by this ticket): `getOverlayBounds` has no way to be
-told which preset side an active transition has suppressed, so `getClipOpacity` reading the full,
-un-suppressed opacity for a clip mid-transition is the same kind of gap, not a new one.
+At the time of this ticket a hit test inside a transition could still disagree with the drawn
+frame (ESCSUITE-147's gap): `getOverlayBounds` had no way to be told which preset side an active
+transition had suppressed, and `getClipOpacity` read the full, un-suppressed opacity for a clip
+mid-transition. ESCSUITE-147 has since closed both — `getClipOpacity` takes the same trailing
+`{ transition }` and evaluates under `presetSuppressionFor`, so a clip a transition is fading in
+reads as opaque and stays clickable.
 
 **The playhead position does not re-render the preview, the timeline body, or `App`.**
 `usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every
