@@ -315,4 +315,32 @@ describe('useInOutDrag crossing the other point', () => {
     moveTo(4) // crosses back: now dragging in again
     expect(points()).toEqual({ inPoint: 4, outPoint: 5 })
   })
+
+  // Round 1 review, finding 3: the stationary point used to be snapshotted
+  // once at mousedown and never re-read, so a write to it from OUTSIDE this
+  // gesture — the keyboard's I/O shortcuts, the Toolbar's in/out buttons,
+  // both of which call setInPoint/setOutPoint directly — was silently
+  // discarded the instant the drag crossed. `inPoint`/`outPoint` are already
+  // mirrored into refs every render, so the fix reads those refs live at the
+  // crossing instead of keeping a separate snapshot. In production
+  // Timeline's own `inPoint`/`outPoint` selectors re-render this hook on any
+  // such write; this test's `deps()` is a static object, so the `rerender()`
+  // stands in for that subscription the way a prop change would.
+  it('reads the stationary point live at the crossing, not a value snapshotted at mousedown', () => {
+    seedPoints(2, 5)
+    const { result, rerender } = mountDrag()
+    grab(result, 'in')
+
+    moveTo(3) // under the out point as grabbed — no crossing yet
+
+    // Something outside this hook moves the out point directly while the
+    // mouse is still down.
+    act(() => { useEditorStore.getState().setOutPoint(9) })
+    currentOutPoint = 9
+    rerender()
+
+    moveTo(10) // crosses the NEW out point (9), not the 5 the gesture grabbed with
+
+    expect(points()).toEqual({ inPoint: 9, outPoint: 10 })
+  })
 })

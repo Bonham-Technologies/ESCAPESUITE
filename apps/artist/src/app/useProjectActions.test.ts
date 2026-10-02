@@ -245,6 +245,10 @@ describe('opening a project', () => {
     // ESCSUITE-113: nothing is ever going to render these now, and nothing
     // else would ever free them either.
     expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming])
+    // ESCSUITE-164: parseProject refused before resetProject/setProject ever
+    // ran — there is no freshly loaded project to make non-undoable, and
+    // whatever undo history the editor held must survive untouched.
+    expect(deps.clearHistory).not.toHaveBeenCalled()
   })
 
   // ESCSUITE-113: loadProject succeeded (it minted thumbnails) but something
@@ -268,6 +272,10 @@ describe('opening a project', () => {
 
     expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
     expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming])
+    // ESCSUITE-164: setProject threw before any source ever reached the
+    // store — clearHistory() sits after the addSourceVideo loop, so this
+    // throw never reaches it either.
+    expect(deps.clearHistory).not.toHaveBeenCalled()
   })
 
   // ESCSUITE-113 (round 2 re-review): the loop shrinks `mintedButNotYetOwned`
