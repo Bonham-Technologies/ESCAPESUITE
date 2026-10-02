@@ -325,6 +325,54 @@ describe('loadBundle', () => {
     const entries = await fs.readdir(tmpRoot)
     expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
   })
+
+  it('forwards a video\'s "meta" into sourceVideos, so an audio-only take keeps mediaType "audio"', async () => {
+    // ESCSUITE-150: CRAFT types an audio-only take's blob "video/webm;codecs=vp9,opus" even
+    // though there is no picture in it; `mediaType: 'audio'` in `meta` is the only thing that
+    // says so, and the editor's own `loadProject` trusts it. The kit must agree.
+    const dir = await makeTempDir()
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    veditor.videos[0].mimeType = 'video/webm;codecs=vp9,opus'
+    veditor.videos[0].meta = { mediaType: 'audio' }
+    const bundlePath = path.join(dir, 'audio-only.veditor')
+    await fs.writeFile(bundlePath, JSON.stringify(veditor))
+
+    const job = await loadBundle(bundlePath, dir)
+    try {
+      expect(job.sourceVideos[0]).toEqual({
+        id: 'src-0',
+        name: 'src-0.mp4',
+        mimeType: 'video/webm;codecs=vp9,opus',
+        mediaType: 'audio',
+      })
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  it('leaves sourceVideos exactly as before when a video carries no "meta"', async () => {
+    const job = await loadBundle(veditorFixture)
+    expect(job.sourceVideos[0].mediaType).toBeUndefined()
+    await job.cleanup()
+  })
+
+  it.each([
+    ['audio/webm', 'audio/webm'],
+    ['video/webm with a codecs parameter', 'video/webm;codecs=vp9,opus'],
+  ])('names a temp file ending .webm for %s', async (_label, mimeType) => {
+    const dir = await makeTempDir()
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    veditor.videos[0].mimeType = mimeType
+    const bundlePath = path.join(dir, 'bundle.veditor')
+    await fs.writeFile(bundlePath, JSON.stringify(veditor))
+
+    const job = await loadBundle(bundlePath, dir)
+    try {
+      expect(path.extname(job.sourceFiles['src-0'])).toBe('.webm')
+    } finally {
+      await job.cleanup()
+    }
+  })
 })
 
 describe('loadManifest source validation', () => {
@@ -430,6 +478,15 @@ describe('loadBundle video validation', () => {
     const bundlePath = await writeBundle(dir, [video, { ...video }])
 
     await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`duplicate source id "${video.id}"`)
+  })
+
+  it('rejects a non-object "meta" field', async () => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.meta = 'not-an-object'
+    const bundlePath = await writeBundle(dir, [video])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow('bundle video #0 field "meta" must be an object')
   })
 })
 

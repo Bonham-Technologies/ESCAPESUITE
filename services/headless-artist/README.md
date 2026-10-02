@@ -190,6 +190,15 @@ itself is parsed whole into memory** — a 4 GB bundle needs more than 4 GB of h
 for small projects and for round-tripping something straight out of the editor; for anything
 large, use a manifest.
 
+A `videos[]` entry may also carry `"meta"`, the same object ESCAPEARTIST's own `.veditor` export
+writes beside each video's bytes (`id`/`name`/`mimeType` excluded — those are already the
+entry's own top-level fields). When present it is forwarded into that source's metadata ahead
+of anything the engine would otherwise probe from the bytes, most importantly `mediaType`: an
+ESCAPECRAFT take recorded with no picture (microphone alone) is still typed
+`video/webm;codecs=vp9,opus`, and `meta.mediaType: "audio"` is the only thing that says
+otherwise. A bundle without `meta` on a source still works exactly as before — the engine probes
+it from the bytes, the same as a manifest source with no `width`/`height`/`duration`.
+
 `examples/job-veditor-volume.json` shows the job shape but points at
 `examples/project.veditor`, which the kit does **not** ship — a `.veditor` carries its own media
 and would bloat the tarball. Produce one from ESCAPEARTIST itself — **File → Save Project**
