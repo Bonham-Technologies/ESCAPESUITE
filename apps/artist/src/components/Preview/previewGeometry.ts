@@ -7,6 +7,7 @@ import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo } from '../../store/types';
 import type { ManipulableClipType, NormalizedPoint, OverlayBounds, ProjectSize } from './types';
+import { croppedSourceRect } from '../../core/clipCrop';
 
 /** The project size the preview assumes when a project records none. */
 export const DEFAULT_PROJECT_WIDTH = 1920;
@@ -166,12 +167,20 @@ export function getOverlayBounds(
     const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
     if (!sourceMedia) return null;
 
-    // Base dimensions = native source pixels (matches drawClip)
+    // Base dimensions = native source pixels of the clip's CROPPED region,
+    // which is what `drawClipToCanvas` draws (ESCSUITE-6). Unlike `mask` — which
+    // leaves the rectangle alone, and whose rectangular selection box is a
+    // documented v1 limit — a crop *is* the rectangle, so this is not optional:
+    // every box on the preview comes from here, so the selection chrome, the
+    // handle cascade, the marquee's AABB and a drag's seed measurements all
+    // follow the picture by reading the same function the renderer reads.
+    const region = croppedSourceRect(sourceMedia.width, sourceMedia.height, clip.crop);
+
     return {
       centerX: x * project.width,
       centerY: y * project.height,
-      width: sourceMedia.width * scaleX,
-      height: sourceMedia.height * scaleY,
+      width: region.sw * scaleX,
+      height: region.sh * scaleY,
       rotation,
     };
   }
