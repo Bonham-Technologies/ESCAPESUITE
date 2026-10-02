@@ -400,6 +400,21 @@ describe('getClipOpacity', () => {
 
     expect(getClipOpacity(clip, 1)).toBe(0.75)
   })
+
+  it('interpolates over the default transform and effects when a keyframed clip carries neither', () => {
+    // The same `|| DEFAULT_*` fallbacks getOverlayBounds makes, on the animated
+    // path this time: a clip restored without a transform or effects block
+    // still evaluates its keyframes over the defaults (opacity 1) rather than
+    // throwing on `undefined.opacity`.
+    const clip = makeClip({
+      duration: 4,
+      transform: undefined,
+      effects: undefined,
+      animation: makeAnimation({ keyframes: { opacity: [kf(0, 1), kf(4, 0)] } }),
+    })
+
+    expect(getClipOpacity(clip, 1)).toBe(0.75)
+  })
 })
 
 describe('isManipulableClip', () => {
