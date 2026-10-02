@@ -17,7 +17,22 @@
 // guard — whose index space they share. `trackRefusesDrop` (ESCSUITE-82) is the
 // one rule about a *row* the two drop paths share: a locked row, or one that is
 // not on the timeline, takes no clip.
-import type { Clip, Track } from './types';
+//
+// `clampTrimToNeighbours` and `firstFreeGroupStart` (ESCSUITE-161 / 162) are
+// the same invariant asked by the other two writers that can break it. The
+// timeline's rule is that **one row never holds two overlapping clips** —
+// `store/clipQueries.ts`'s `getClipsAtTime` returns every clip at an instant,
+// so a row holding two means the preview, both exporters and
+// `core/audioMixer.ts` draw and mix both, `core/exportTypes.ts`'s
+// `getActiveTransition` misreads the pair, and the clip drag then refuses to
+// move either of them. `wouldOverlap` is how a drop keeps the rule and
+// `duplicateClip` walks its row past a collision; these two are how a trim and
+// a paste keep it. Both are arithmetic over the clips they are handed, with no
+// store and no DOM. `clampTrimToNeighbours` allocates nothing at all, because a
+// trim calls it on every mousemove; `firstFreeGroupStart` builds and sorts one
+// span per (member, same-row clip) pair whether the two collide or not, and
+// runs once per Ctrl+V.
+import type { Clip, Track, TrimOrigin } from './types';
 
 // Get snap points from all clip edges
 export function getSnapPoints(clips: Clip[], excludeClipId?: string): number[] {
@@ -52,6 +67,29 @@ export function findNearestSnapPoint(
   return nearest;
 }
 
+/**
+ * How far inside a clip another one must reach before this counts as an
+ * overlap: one nanosecond (ESCSUITE-161 / 162 review).
+ *
+ * The two writers that butt a clip up against its neighbour aim at the
+ * neighbour's exact edge and cannot land on it in binary floating point. A
+ * clamped end trim writes `endTime = startTime + (mouseTime - timelinePosition)`
+ * and `trimClip` derives `duration = endTime - startTime`, so the clip's end is
+ * `p + ((s + (L - p)) - s)` — not `L`: fuzzed over 2e6 random triples, 8.0% of
+ * end trims land strictly past the limit, worst 3.55e-15 s. A relocated paste is
+ * the same shape from the other side (`offset + (occupantEnd - offset)`, short
+ * of the occupant's end in 3.2% of cases, worst 3.55e-15 s).
+ *
+ * A strict comparison read those misses as collisions, which is not harmless:
+ * `canMoveSelectedClips` is state-based rather than sampled, so a group holding
+ * both butted clips refused every drag, silently and for good. One nanosecond is
+ * far below a frame and below `MIN_CLIP_DURATION` and `MIN_SPLIT_DISTANCE`, so
+ * no overlap a user can make falls inside it; it lives in the shared predicate
+ * rather than as a tolerance sprinkled over the two writers, so every reader of
+ * the invariant answers the same question.
+ */
+const OVERLAP_EPSILON = 1e-9;
+
 // Check if clip placement would overlap with another on same track
 export function wouldOverlap(
   clips: Clip[],
@@ -67,8 +105,8 @@ export function wouldOverlap(
     if (clip.id === excludeClipId) continue;
 
     const clipEnd = clip.timelinePosition + clip.duration;
-    // Overlap if ranges intersect
-    if (position < clipEnd && end > clip.timelinePosition) {
+    // Overlap if ranges intersect by more than a float bit's worth.
+    if (position < clipEnd - OVERLAP_EPSILON && end > clip.timelinePosition + OVERLAP_EPSILON) {
       return true;
     }
   }
@@ -200,4 +238,111 @@ export function canMoveSelectedClips({
   }
 
   return true;
+}
+
+/**
+ * Where the pointer may take a trim before the clip would run into its
+ * neighbour on its own row (ESCSUITE-161): `mouseTime` itself when there is
+ * nothing in the way, the neighbour's facing edge when there is.
+ *
+ * The edge being dragged says which neighbour matters and which of the clip's
+ * own edges is the fixed one to measure from — an end trim never moves the
+ * clip's start, and a start trim never moves its end (`computeTrimUpdate`
+ * holds `origin`'s end for both clip kinds). A neighbour starting at or after
+ * that fixed start is in front of the clip; one ending at or before that fixed
+ * end is behind it; the nearest of them is as far as the trim may go. A
+ * neighbour touching the clamped edge exactly is not an overlap, which is the
+ * same open-interval rule `wouldOverlap` applies.
+ *
+ * Clamping the *pointer time* rather than the computed update is what keeps the
+ * gesture idempotent: `computeTrimUpdate` re-derives the edge from the origin
+ * and the pointer on every move, so a trim that wanders out past the neighbour
+ * and back comes home exactly (ESCSUITE-110's rule), with the clamp applied to
+ * the input rather than accumulated into the result.
+ */
+export function clampTrimToNeighbours(
+  clips: Clip[],
+  clip: Pick<Clip, 'id' | 'trackId' | 'timelinePosition'>,
+  edge: 'start' | 'end',
+  origin: TrimOrigin,
+  mouseTime: number
+): number {
+  const fixedEdge =
+    edge === 'end'
+      ? clip.timelinePosition
+      : origin.timelinePosition + (origin.endTime - origin.startTime);
+
+  let limit: number | null = null;
+
+  for (const other of clips) {
+    if (other.trackId !== clip.trackId) continue;
+    if (other.id === clip.id) continue;
+
+    if (edge === 'end') {
+      if (other.timelinePosition >= fixedEdge && (limit === null || other.timelinePosition < limit)) {
+        limit = other.timelinePosition;
+      }
+      continue;
+    }
+
+    const otherEnd = other.timelinePosition + other.duration;
+    if (otherEnd <= fixedEdge && (limit === null || otherEnd > limit)) {
+      limit = otherEnd;
+    }
+  }
+
+  if (limit === null) return mouseTime;
+  return edge === 'end' ? Math.min(mouseTime, limit) : Math.max(mouseTime, limit);
+}
+
+/** One clip of a group being placed together, relative to the group's start. */
+export interface GroupMember {
+  /** The row it lands on. */
+  trackId: string;
+  /** Seconds after the group's start at which it begins. */
+  offset: number;
+  /** How long it is, in seconds. */
+  duration: number;
+}
+
+/**
+ * The earliest start at or after `preferredStart` at which **no** member of the
+ * group lands on a clip already on its row (ESCSUITE-162). The group moves as
+ * one, so its members keep their offsets from each other.
+ *
+ * Every (member, occupant) collision is one open span of the group's own start
+ * coordinate: a member at `start + offset` for `duration` seconds overlaps an
+ * occupant `[from, to)` exactly while the group starts inside
+ * `(from - offset - duration, to - offset)`. Sorted by their left edge and
+ * swept once, those spans give the first start outside all of them — the group
+ * is bumped to a span's right edge whenever it falls inside, and a span whose
+ * left edge is already past the group can never be bumped back into, because
+ * the group only ever moves forward. There is always an answer: past the last
+ * occupant's end, every row is free.
+ */
+export function firstFreeGroupStart(
+  clips: Clip[],
+  members: readonly GroupMember[],
+  preferredStart: number
+): number {
+  const blocked: { from: number; to: number }[] = [];
+
+  for (const member of members) {
+    for (const clip of clips) {
+      if (clip.trackId !== member.trackId) continue;
+      blocked.push({
+        from: clip.timelinePosition - member.offset - member.duration,
+        to: clip.timelinePosition + clip.duration - member.offset,
+      });
+    }
+  }
+
+  blocked.sort((a, b) => a.from - b.from);
+
+  let start = preferredStart;
+  for (const span of blocked) {
+    if (span.from < start && start < span.to) start = span.to;
+  }
+
+  return start;
 }

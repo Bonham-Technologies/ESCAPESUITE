@@ -11,6 +11,7 @@ import { pushToHistory } from './storeHistory';
 import { calculateTimelineDuration } from './projectFactory';
 import { anyClipOnLockedTrack, lockedTrackIds } from './trackLock';
 import { pruneSelection } from './selectionPrune';
+import { firstFreeGroupStart } from './timelineSnapping';
 
 export type SelectionSlice = Pick<EditorState, 'selectedClipId' | 'selectedClipIds' | 'selectedTrackId' | 'clipboard' | 'setSelectedClipId' | 'setSelectedTrackId' | 'toggleClipSelection' | 'selectClipsInRange' | 'clearMultiSelection' | 'moveSelectedClips' | 'deleteSelectedClips' | 'copySelectedClips' | 'pasteClips' | 'muteSelectedClips' | 'unmuteSelectedClips'>;
 
@@ -176,15 +177,38 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     // Find the earliest position among clipboard clips to calculate offsets
     const minPosition = Math.min(...state.clipboard.map(c => c.timelinePosition));
 
-    // Paste always lands at the playhead: the earliest clone at `currentTime`,
-    // the rest keeping their relative offsets. `currentTime` is never
-    // undefined, so there is no "no playhead" case to default away from —
-    // the old `|| minPosition + 0.5` treated a playhead at 0 as missing and
-    // pasted a clip copied from 3s at 3.5s instead of 0.
+    // Paste lands at the playhead: the earliest clone at `currentTime`, the
+    // rest keeping their relative offsets. `currentTime` is never undefined, so
+    // there is no "no playhead" case to default away from — the old
+    // `|| minPosition + 0.5` treated a playhead at 0 as missing and pasted a
+    // clip copied from 3s at 3.5s instead of 0.
+    //
+    // ESCSUITE-162: at the playhead, or at the first spot after it where the
+    // group fits. One row never holds two overlapping clips, and this used to
+    // be the commonest way to break that rule — copy a clip, move the playhead
+    // into it, Ctrl+V, and `getClipsAtTime` returned the clone and the original
+    // together, so the preview, both exporters and `core/audioMixer.ts` drew
+    // and mixed both. It **relocates** rather than refusing, which is
+    // `duplicateClip`'s own rule (it has walked its row past a collision since
+    // the beginning): a Ctrl+V that silently did nothing is the surprising
+    // answer, and the two refusals below are there for a paste that has nowhere
+    // legal to go at all rather than for one that just needs moving along. The
+    // whole group shifts together, so its members keep their offsets from each
+    // other.
+    const start = firstFreeGroupStart(
+      state.project.timeline.clips,
+      state.clipboard.map((clip) => ({
+        trackId: clip.trackId,
+        offset: clip.timelinePosition - minPosition,
+        duration: clip.duration,
+      })),
+      state.currentTime
+    );
+
     const newClips = state.clipboard.map(clip => ({
       ...cloneClip(clip),
       id: uuidv4(),
-      timelinePosition: clip.timelinePosition - minPosition + state.currentTime,
+      timelinePosition: clip.timelinePosition - minPosition + start,
     }));
 
     // A clone keeps its clipboard trackId, and that track can be gone by the

@@ -21,6 +21,8 @@ import { act, renderHook } from '@testing-library/react'
 import type React from 'react'
 import { useTrimDrag, type TrimDragDeps } from './useTrimDrag'
 import { useEditorStore } from '../../store/projectStore'
+import { getClipsAtTime } from '../../store/clipQueries'
+import { canMoveSelectedClips, wouldOverlap } from '../../store/timelineSnapping'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { setRect } from '../../test/doubles/layout'
 
@@ -210,12 +212,23 @@ describe('useTrimDrag following the pointer', () => {
     const { result } = mountTrim()
     grabEdge(result, 'start')
 
+    // Out past the source's own beginning on the opening move. The clamp holds
+    // the clip exactly where it already sits, so there is nothing to write and
+    // the no-op gate refuses it rather than re-rendering for an unchanged clip.
+    moveTo(1)
+    expect(actions.trimClip).not.toHaveBeenCalled()
+
+    // Into the source and back out past its beginning: the clamped values now
+    // differ from the clip's, so the write lands — and it is still the limit,
+    // not the two seconds of source the pointer asked to reveal.
+    moveTo(2.5)
     moveTo(1)
 
-    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'start', {
+    expect(actions.trimClip).toHaveBeenLastCalledWith('clip1', 'start', {
       startTime: 0,
       timelinePosition: 2,
-    }, ORIGIN, false)
+    }, ORIGIN, true)
+    expect(theClip('clip1')).toMatchObject({ startTime: 0, timelinePosition: 2, duration: 2 })
   })
 
   it('takes the end edge out into the rest of the source', () => {
@@ -533,5 +546,180 @@ describe('useTrimDrag and the undo stack', () => {
     expect(actions.trimClip).toHaveBeenNthCalledWith(2, 'clip1', 'end', { endTime: 3 }, ORIGIN, false)
     expect(theClip('clip1').endTime).toBe(3)
     expect(past() - before).toBe(1)
+  })
+})
+
+// ESCSUITE-161: one row never holds two overlapping clips. A drop has been
+// vetoed by `wouldOverlap` since the beginning and `duplicateClip` walks past
+// a collision, but the trim wrote whatever the pointer asked for — drag a
+// clip's end handle out over the clip in front of it and both played at once.
+// `getClipsAtTime` returns the pair, so the preview, both exporters and
+// `core/audioMixer.ts` drew and mixed two clips from one row, `getActiveTransition`
+// misread them, and the clip drag then refused to move either of them.
+//
+// The clamp is the **gesture's**, not the store's: the ripple tool is
+// deliberately excepted, and only the gesture knows which tool is out. See the
+// note at the top of `useTrimDrag.ts`.
+describe('useTrimDrag and the clip next to it (ESCSUITE-161)', () => {
+  /** The clips `getClipsAtTime` hands the renderer at one instant. */
+  const drawnAt = (time: number): string[] => {
+    const { clips, tracks } = useEditorStore.getState().project.timeline
+    return getClipsAtTime(clips, tracks, time).map((entry) => entry.clip.id)
+  }
+
+  it('stops an end trim at the next clip’s start', () => {
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+
+    // clip2 starts at 6s; the pointer is asking for 7s.
+    moveTo(7)
+
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, duration: 4, endTime: 4 })
+    expect(drawnAt(6.5)).toEqual(['clip2'])
+  })
+
+  it('stops a start trim at the previous clip’s end', () => {
+    // clip2 needs source before its in point for its start edge to have
+    // anywhere to go: it now plays 4s–6s of the same 30s source.
+    act(() => {
+      store().updateClip('clip2', { startTime: 4, endTime: 6 })
+    })
+    const { result } = mountTrim()
+    grabEdge(result, 'start', 'clip2')
+
+    // clip1 ends at 4s; the pointer is asking for 3s.
+    moveTo(3)
+
+    // Stopped dead on clip1's end at 4s: two seconds of source revealed
+    // instead of the three the pointer asked for.
+    expect(theClip('clip2')).toMatchObject({ timelinePosition: 4, startTime: 2, duration: 4 })
+    expect(drawnAt(3)).toEqual(['clip1'])
+  })
+
+  it('takes a clip with nothing in front of it as far as the pointer asks', () => {
+    act(() => {
+      store().removeClipFromTimeline('clip2')
+    })
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+
+    moveTo(7)
+
+    expect(theClip('clip1')).toMatchObject({ duration: 5, endTime: 5 })
+  })
+
+  it('is not clamped by a clip on another row', () => {
+    const trackB = store().addTrack('Track 2').id
+    addClip('clip3', 5, 2, trackB)
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+
+    moveTo(7)
+
+    // Clamped at clip2's 6s on its own row, not at clip3's 5s on track B.
+    expect(theClip('clip1').duration).toBe(4)
+    expect(theClip('clip3')).toMatchObject({ trackId: trackB, timelinePosition: 5 })
+  })
+
+  it('does not clamp a ripple END trim, whose release shifts the neighbours out of the way', () => {
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+
+    moveTo(7)
+    expect(theClip('clip1').duration).toBe(5)
+
+    release()
+
+    // The overlap the drag made is transient: the release pushes clip2 by the
+    // three seconds clip1's end moved, and the row is sound again.
+    expect(theClip('clip2').timelinePosition).toBe(9)
+    expect(drawnAt(6.5)).toEqual(['clip1'])
+  })
+
+  it('clamps a ripple START trim, because the release shifts nothing for one', () => {
+    // The ripple exception is the END edge's alone. `handleMouseUp` measures
+    // its shift from the clip's **end** (`currentEnd - originalEnd`), and a
+    // start trim never moves the end — for a source clip
+    // `pos' + (endTime - startTime')` reduces to the origin's own end — so
+    // `delta` is 0, `shiftClipsAfter` is never called, and an unclamped start
+    // trim left the overlap on the row for good rather than transiently.
+    //
+    // clip2 needs source before its in point for its start edge to have
+    // anywhere to go, as in the start case above: it plays 4s-6s of the 30s
+    // source.
+    act(() => {
+      store().updateClip('clip2', { startTime: 4, endTime: 6 })
+    })
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'start', 'clip2')
+
+    // clip1 ends at 4s; the pointer is asking for 3s.
+    moveTo(3)
+
+    expect(theClip('clip2')).toMatchObject({ timelinePosition: 4, startTime: 2, duration: 4 })
+    expect(drawnAt(3)).toEqual(['clip1'])
+
+    release()
+
+    // And the proof that the exception could not have earned the start edge:
+    // the release has nothing to shift, so clip1 stays exactly where it was.
+    expect(actions.shiftClipsAfter).not.toHaveBeenCalled()
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, duration: 2 })
+  })
+
+  it('leaves the row a group drag can still move after an end trim butts up to it', () => {
+    // The clamp holds the pointer to the neighbour's exact start, but the
+    // value that reaches the store is not that number: an end trim writes
+    // `endTime = startTime + (mouseTime - timelinePosition)` and `trimClip`
+    // then derives `duration = endTime - startTime`, so the clip's end is
+    // `p + ((s + (L - p)) - s)` — and that is not `L`. Here it is 4.4e-16 past
+    // it, which `wouldOverlap`'s strict `<` read as an overlap: every drag of
+    // the two clips together was then refused, silently and permanently, which
+    // is the very symptom ESCSUITE-161 is about.
+    act(() => {
+      store().updateClip('clip1', { startTime: 0.1, endTime: 1.1, timelinePosition: 0.7 })
+      store().updateClip('clip2', { timelinePosition: 2.9 })
+    })
+    const { result } = mountTrim()
+    grabEdge(result, 'end', 'clip1')
+
+    moveTo(4)
+
+    const clip1 = theClip('clip1')
+    expect(clip1.endTime).toBeCloseTo(2.3, 10)
+    // Not an assertion of what we want, but of the float arithmetic that makes
+    // the epsilon necessary: without it this test would pass vacuously.
+    expect(clip1.timelinePosition + clip1.duration).toBeGreaterThan(2.9)
+
+    const { clips, tracks } = useEditorStore.getState().project.timeline
+    expect(wouldOverlap(clips, trackA, 2.9, theClip('clip2').duration, 'clip2')).toBe(false)
+    expect(
+      canMoveSelectedClips({
+        clips,
+        tracks,
+        selectedClipIds: new Set(['clip1', 'clip2']),
+        deltaTime: 1,
+        deltaTrack: 0,
+      })
+    ).toBe(true)
+  })
+
+  it('writes once while the pointer stays out past the neighbour', () => {
+    // Clamped, every move past clip2's start computes the same update, and a
+    // write of values the clip already holds is a new clips array, a new
+    // `modified` and a re-render for no change — ESCSUITE-101's "a no-op edit
+    // refuses", applied to the frame-by-frame writer that now meets its limit
+    // on the commonest gesture there is.
+    const { result } = mountTrim()
+    grabEdge(result, 'end')
+
+    moveTo(7)
+    moveTo(8)
+    moveTo(9)
+
+    expect(actions.trimClip).toHaveBeenCalledTimes(1)
+    expect(theClip('clip1')).toMatchObject({ duration: 4, endTime: 4 })
   })
 })
