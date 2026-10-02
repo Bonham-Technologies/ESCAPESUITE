@@ -1771,6 +1771,21 @@ transform, no mask or stroke, resolution untouched, one undo entry) — were gre
 ticket anticipated, and add no unit to any denominator. Every perf and rerender pin is byte-identical.
 **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/headless-artist` was re-measured 2026-10-02 for ESCSUITE-150 (`loadBundle` forwards a
+bundle source's validated `meta`, so an ESCAPECRAFT audio-only take typed `video/webm;codecs=…` stays
+`mediaType: 'audio'` in the kit the way it does in the editor, and a WebM source's temp file keeps a
+`.webm` extension whatever parameters its MIME type carries): 99.46 / 99.37 / **98.20** / 98.52 against
+the 99.46 / 99.37 / 98.19 / 98.52 the commit this branch lands on (`c89cf40`) measures — branches up a
+hundredth, the other three unmoved. Measured in one sitting, the base gives 489 / 498 branches and
+this branch 493 / 502: four new branches, four covered, the same 9 uncovered as before (lines
+742 / 746 → 745 / 749, statements 792 / 797 → 795 / 800, functions 134 / 136 on both; the same 4 / 5 / 2
+uncovered). All four are in `src/loaders.ts`: the `meta` spread's present-or-absent choice and the
+parameter-stripping extension lookup's two fallbacks, each reached from both sides by the audio-meta
+bundle, the meta-less bundle and the `audio/webm` / `video/webm;codecs=vp9,opus` extension cases.
+`apps/artist/src/headless/seedSources.ts` needed no change — a caller-supplied `meta.mediaType`
+already won over the implied one — so the artist package's figures do not move. **No floor
+crossed**; the kit's floors stay 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1780,7 +1795,7 @@ never above what the suite actually achieves:
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
 | `@escapesuite/artist` | 99.78 | 99.18 | 95.37 | 99.66 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
-| `@escapesuite/headless-artist` | 99.46 | 99.37 | 98.19 | 98.52 |
+| `@escapesuite/headless-artist` | 99.46 | 99.37 | 98.20 | 98.52 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being
