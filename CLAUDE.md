@@ -1938,6 +1938,20 @@ first render and their element side on every later one. `MarqueeSelection` carri
 and is untouched. Every perf and rerender pin is byte-identical: the state changes on mount and
 unmount only. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-166 (`setClipKeyframe`'s time-0 seed fires
+once per property — gated on the property having no keyframes before the write — instead of on every
+write, so a keyframe at 0 the user deleted or dragged away no longer comes back on the next edit):
+99.80 / 99.23 / 95.53 / 99.67, byte-identical on every percentage to the 99.80 / 99.23 / 95.53 / 99.67
+the commit this branch lands on (`177577e`) measures. Measured in one sitting, the base gives
+4,733 / 4,954 branches and this branch the same 4,733 / 4,954: the gate swapped one condition for
+another and adds no decision; lines 7,520 / 7,535 → 7,519 / 7,534, statements 8,457 / 8,522 →
+8,455 / 8,520 and functions 1,825 / 1,831 → 1,824 / 1,830 each one or two smaller — the deleted
+`hasKeyframeAtZero` scan and its arrow — with the same 15 / 65 / 221 / 6 uncovered. The two red cases
+(a deleted time-0 keyframe stays deleted across a later edit; a keyframe moved off 0 stays moved) and
+the review's extra case (a property emptied by deletion is a first-time property again and seeds) reach
+both operands of the new gate from both sides, beside the first-write seed that was already pinned.
+Every perf and rerender pin is byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
