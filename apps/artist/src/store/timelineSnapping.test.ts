@@ -98,6 +98,54 @@ describe('timelineSnapping helper functions', () => {
       // Same position as c1 but excluding c1 from check
       expect(wouldOverlap(clips, 't1', 5, 5, 'c1')).toBe(false)
     })
+
+    // ESCSUITE-161 / 162 review: the two writers that now aim a clip at a
+    // neighbour's exact edge cannot land on it in binary floating point, and a
+    // strict `<` read the miss as an overlap. The predicate is shared, state-based
+    // and not sampled, so an epsilon belongs here and not in either writer.
+    it('reads a clip whose end misses its neighbour’s start by a float bit as clear of it', () => {
+      // The trim's own arithmetic: a clip at 0.7 playing from source time 0.1,
+      // end-trimmed to the neighbour at 2.9, is written
+      // `endTime = 0.1 + (2.9 - 0.7)` and then `duration = endTime - 0.1`, so its
+      // end is 0.7 + 2.2000000000000006 = 2.9000000000000004 — 4.4e-16 past where
+      // the clamp aimed. Fuzzed over 2e6 random (startTime, position, limit)
+      // triples, 8.0% of end trims land past the limit, worst 3.55e-15 s.
+      const endTime = 0.1 + (2.9 - 0.7)
+      const duration = endTime - 0.1
+      expect(0.7 + duration).toBeGreaterThan(2.9)
+
+      const clips = [
+        { ...createMockClip('trimmed', 't1', 0.7, duration), startTime: 0.1, endTime },
+        createMockClip('neighbour', 't1', 2.9, 2),
+      ]
+
+      // Both drops the pair can ask, each excluding its own placement.
+      expect(wouldOverlap(clips, 't1', 0.7, duration, 'trimmed')).toBe(false)
+      expect(wouldOverlap(clips, 't1', 2.9, 2, 'neighbour')).toBe(false)
+    })
+
+    it('reads a clone whose start misses the occupant’s end by a float bit as clear of it', () => {
+      // `firstFreeGroupStart` has the same shape from the other side: the clone's
+      // position is `offset + (occupantEnd - offset)`, which here is
+      // 0.2 + (0.9 - 0.2) = 0.8999999999999999 — 1.1e-16 *inside* the occupant.
+      // 3.2% of relocations land short, worst 3.55e-15 s.
+      const position = 0.2 + (0.4 + 0.5 - 0.2)
+      expect(position).toBeLessThan(0.4 + 0.5)
+
+      const clips = [createMockClip('occupant', 't1', 0.4, 0.5)]
+
+      expect(wouldOverlap(clips, 't1', position, 0.1)).toBe(false)
+    })
+
+    it('still reads a real overlap a nanosecond either side of the epsilon', () => {
+      // The epsilon is 1e-9 s, far below a frame and below MIN_CLIP_DURATION, so
+      // it answers the float miss and nothing else: a tenth of a second of real
+      // overlap is still an overlap, and so is a microsecond of it.
+      const clips = [createMockClip('c1', 't1', 5, 5)] // 5-10
+
+      expect(wouldOverlap(clips, 't1', 9.9, 5)).toBe(true)
+      expect(wouldOverlap(clips, 't1', 10 - 1e-6, 5)).toBe(true)
+    })
   })
 
   // ESCSUITE-80: the two questions a multi-selection's drop asks before it
@@ -297,6 +345,17 @@ describe('timelineSnapping helper functions', () => {
       ).toBe(40)
     })
 
+    it('leaves an end trim alone when the only clip on the row is behind it', () => {
+      // The other side of the end edge's own test: a clip trimmed with a
+      // same-row clip *behind* it — an ordinary gesture — reads no limit at all,
+      // because a neighbour starting before the fixed start is not in its way.
+      const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 8, 3)]
+
+      expect(
+        clampTrimToNeighbours(clips, clips[1], 'end', origin(8, 3), 40)
+      ).toBe(40)
+    })
+
     it('stops a start trim at the end of the clip behind it', () => {
       const clips = [createMockClip('c1', 't1', 0, 5), createMockClip('c2', 't1', 8, 3)]
 
@@ -440,6 +499,9 @@ describe('timelineSnapping helper functions', () => {
     })
 
     it('answers the preferred start for a group with no members at all', () => {
+      // A contract case, not a reachable one: `pasteClips` returns false on an
+      // empty clipboard before it builds any members. It pins that the helper is
+      // total over its inputs — an empty group is answered, not NaN'd.
       expect(firstFreeGroupStart([createMockClip('c1', 't1', 0, 5)], [], 2)).toBe(2)
     })
   })

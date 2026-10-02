@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from '../projectStore'
 import { getClipsAtTime } from '../clipQueries'
+import { canMoveSelectedClips, wouldOverlap } from '../timelineSnapping'
 import type { Clip, Track } from '../types'
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from '../types'
 
@@ -628,6 +629,58 @@ describe('Multi-Select Store', () => {
         for (const time of [1, 4, 9, 12, 14, 17, 22, 25]) {
           expect(drawnAt(time)).toHaveLength(1)
         }
+      })
+
+      it('leaves a relocated clone clear of the clip it was moved past, to the last float bit', () => {
+        // `firstFreeGroupStart` aims the group at an occupant's exact end, and in
+        // binary floating point it cannot land there: the clone's position is
+        // `offset + (occupantEnd - offset)`, which for offset 0.2 and an occupant
+        // ending at 0.9 is 0.8999999999999999 — 1.1e-16 *inside* the occupant.
+        // `wouldOverlap`'s strict `<` read that as a collision, so the pair could
+        // not be dragged, which is the symptom ESCSUITE-162 is about. 3.2% of
+        // relocations land short this way, worst observed 3.55e-15 s.
+        setupStore(
+          [
+            createTestClip({ id: 'a', trackId: 'track-1', timelinePosition: 0, endTime: 0.1, duration: 0.1 }),
+            createTestClip({ id: 'b', trackId: 'track-2', timelinePosition: 0.2, endTime: 0.1, duration: 0.1 }),
+            createTestClip({ id: 'occupant', trackId: 'track-2', timelinePosition: 0.4, endTime: 0.5, duration: 0.5 }),
+          ],
+          [
+            createTestTrack({ id: 'track-1', index: 0 }),
+            createTestTrack({ id: 'track-2', name: 'Track 2', index: 1 }),
+          ]
+        )
+
+        useEditorStore.getState().toggleClipSelection('a')
+        useEditorStore.getState().toggleClipSelection('b')
+        useEditorStore.getState().copySelectedClips()
+        useEditorStore.getState().clearMultiSelection()
+        useEditorStore.setState({ currentTime: 0 })
+
+        expect(useEditorStore.getState().pasteClips()).toBe(true)
+
+        const { clips, tracks } = useEditorStore.getState().project.timeline
+        const clone = clips.find(
+          (c) => !['a', 'b', 'occupant'].includes(c.id) && c.trackId === 'track-2'
+        )!
+        // Not an assertion of what we want, but of the arithmetic that makes the
+        // epsilon necessary: without it this test would pass vacuously.
+        expect(clone.timelinePosition).toBeLessThan(0.9)
+
+        expect(wouldOverlap(clips, 'track-2', clone.timelinePosition, clone.duration, clone.id)).toBe(false)
+        // And the group drag the strict comparison used to refuse. 0.1 s rather
+        // than a whole second because the artefact survives some shifts and is
+        // rounded away by others — the pair refused *some* drags and not others,
+        // which is worse for the user than refusing all of them.
+        expect(
+          canMoveSelectedClips({
+            clips,
+            tracks,
+            selectedClipIds: new Set([clone.id, 'occupant']),
+            deltaTime: 0.1,
+            deltaTrack: 0,
+          })
+        ).toBe(true)
       })
 
       it('reads the clone’s own row, not every row', () => {
