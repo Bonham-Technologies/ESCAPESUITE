@@ -3,6 +3,7 @@ import { getAllKeyframesForProperty, interpolateKeyframes } from '../../utils/an
 import type { AnimatableProperty, Keyframe, ClipAnimation, ClipTransform, ClipEffects, EasingType } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import { EASING_TYPES } from '../../utils/easingOptions';
+import { useGestureHistory } from '../../hooks/useGestureHistory';
 import {
   formatValue,
   keyframeOptionId,
@@ -323,6 +324,13 @@ export function KeyframeGraph({
   const dragStateRef = useRef(dragState);
   dragStateRef.current = dragState;
 
+  // One gesture is one undo entry (ESCSUITE-163 / M1), the same mechanism
+  // useTrimDrag and useTransformHandles already use: the move's own write,
+  // when there is one, goes first and reports whether it landed, and the
+  // value write joins its entry via `skipHistory` rather than pushing one of
+  // its own.
+  const gestureHistory = useGestureHistory();
+
   // Global mouse move/up handlers for drag (using window events for reliable tracking)
   useEffect(() => {
     if (!dragState?.isDragging) return;
@@ -350,29 +358,44 @@ export function KeyframeGraph({
     const handleMouseUp = () => {
       const currentDrag = dragStateRef.current;
       if (currentDrag) {
-        // Commit the final position to the store
         const timeChanged = Math.abs(currentDrag.currentTime - currentDrag.originalTime) > 0.001;
         const valueChanged = Math.abs(currentDrag.currentValue - currentDrag.originalValue) > 0.001;
 
-        if (timeChanged && valueChanged) {
-          // When both change, move time first, then update value at NEW time
-          onKeyframeMoved(property, currentDrag.originalTime, currentDrag.currentTime);
-          // Use setTimeout to ensure store has updated before setting value
-          setTimeout(() => {
-            onKeyframeValueChanged(property, currentDrag.currentTime, currentDrag.currentValue);
-          }, 0);
-        } else if (timeChanged) {
-          onKeyframeMoved(property, currentDrag.originalTime, currentDrag.currentTime);
-        } else if (valueChanged) {
-          // Value only - update at original time
-          onKeyframeValueChanged(property, currentDrag.originalTime, currentDrag.currentValue);
+        // One gesture, one undo entry (ESCSUITE-163 / M1): the move commits
+        // first — synchronously, no setTimeout — and the value write, when
+        // there is one, joins the same entry via `gestureHistory`'s
+        // `skipHistory`. A refused move (a locked track) leaves `settledTime`
+        // at the keyframe's original time, so a value-only write — if any —
+        // lands there rather than on a time the drag never actually reached.
+        let settledTime = currentDrag.originalTime;
+        if (timeChanged || valueChanged) {
+          gestureHistory.begin();
+
+          let moveLanded = true;
+          if (timeChanged) {
+            moveLanded = gestureHistory.commit((skipHistory) =>
+              onKeyframeMoved(property, currentDrag.originalTime, currentDrag.currentTime, skipHistory)
+            );
+            if (moveLanded) settledTime = currentDrag.currentTime;
+          }
+
+          // A refused move leaves the value alone: committing it at the
+          // keyframe's old time would write a second keyframe the drag never
+          // intended, right where the move itself landed on being refused.
+          if (valueChanged && moveLanded) {
+            gestureHistory.commit((skipHistory) =>
+              onKeyframeValueChanged(property, settledTime, currentDrag.currentValue, skipHistory)
+            );
+          }
+
+          gestureHistory.end();
         }
 
         // Both, and for the same reason: after a time change the keyframe lives
-        // at currentTime, so an activeTime left on the original would resolve to
+        // at settledTime, so an activeTime left on the original would resolve to
         // "no active option" and send the next arrow key back to the first.
-        setActiveTime(currentDrag.currentTime);
-        setSelectedKeyframeTime(currentDrag.currentTime);
+        setActiveTime(settledTime);
+        setSelectedKeyframeTime(settledTime);
       }
       setDragState(null);
     };
@@ -384,7 +407,7 @@ export function KeyframeGraph({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime]);
+  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime, gestureHistory]);
 
   // Click on graph background to deselect
   const handleGraphClick = useCallback(() => {

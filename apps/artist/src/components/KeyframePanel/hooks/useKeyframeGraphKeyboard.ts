@@ -81,6 +81,18 @@ function nudgeAnnouncement(property: AnimatableProperty, value: number, time: nu
   return `${PROPERTY_LABELS[property]} ${formatValue(value, property)} at ${time.toFixed(2)} seconds`;
 }
 
+/**
+ * What the live region says when a move would land within
+ * `KEYFRAME_TIME_EPSILON` of a time another keyframe already occupies —
+ * `moveClipKeyframe` deletes whatever is there, so both refusals that can
+ * reach this situation say it the same way: this keyboard's own `nudgeTime`
+ * below, and the diamond-row pointer drag in `useKeyframeDrag.ts`
+ * (ESCSUITE-167 / M6).
+ */
+export function occupiedTimeMessage(property: AnimatableProperty, time: number): string {
+  return `${PROPERTY_LABELS[property]} keyframe not moved: another keyframe is at ${time.toFixed(2)} seconds`;
+}
+
 interface KeyframeGraphKeyboardOptions {
   property: AnimatableProperty;
   /** Every keyframe drawn on the graph, presets included, sorted by time. */
@@ -245,9 +257,7 @@ export function useKeyframeGraphKeyboard({
       Math.abs(kf.time - selectedKeyframe.time) >= 0.001 && Math.abs(kf.time - newTime) < 0.001
     );
     if (occupied) {
-      announce(
-        `${PROPERTY_LABELS[property]} keyframe not moved: another keyframe is at ${newTime.toFixed(2)} seconds`
-      );
+      announce(occupiedTimeMessage(property, newTime));
       return;
     }
     // Refused by the store (a locked track): nothing moved, so the active

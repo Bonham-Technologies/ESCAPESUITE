@@ -146,29 +146,16 @@ export function KeyframePanel() {
     return moveClipKeyframe(selectedClipId, property, originalTime, newTime, skipHistory);
   }, [selectedClipId, moveClipKeyframe]);
 
-  // Handle add keyframe (with optional value)
-  const handleAddKeyframe = useCallback((property: AnimatableProperty, time: number, value?: number) => {
+  // Handle add keyframe. Both the graph's two add paths and the track's
+  // double-click (ESCSUITE-167 / m3) always supply the curve's own value at
+  // `time` — nothing left falls back to the clip's static default, which used
+  // to make a track double-click jump the shape it was adding to.
+  const handleAddKeyframe = useCallback((property: AnimatableProperty, time: number, value: number) => {
     if (!selectedClip) return;
-
-    // Get current value at this time for interpolation if not provided
-    let keyframeValue = value;
-    if (keyframeValue === undefined) {
-      const transform = selectedClip.transform;
-      const effects = selectedClip.effects;
-
-      if (property === 'blur') {
-        keyframeValue = effects?.blur ?? 0;
-      } else if (property === 'volume') {
-        keyframeValue = 1; // Volume default is 1 (100%)
-      } else {
-        const val = transform?.[property as keyof typeof transform];
-        keyframeValue = typeof val === 'number' ? val : 0;
-      }
-    }
 
     setClipKeyframe(selectedClipId!, property, {
       time,
-      value: keyframeValue!,
+      value,
       easing: 'ease-in-out',
     });
   }, [selectedClip, selectedClipId, setClipKeyframe]);

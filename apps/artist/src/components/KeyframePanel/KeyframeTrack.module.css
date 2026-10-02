@@ -112,3 +112,21 @@
   text-align: right;
   font-family: monospace;
 }
+
+/* Visually hidden, still read: the live region that announces a refused drop
+   (ESCSUITE-167 / M6). The standard 1px clip-rect pattern, matching
+   KeyframeGraph.module.css's own .srOnly — `display: none` or
+   `visibility: hidden` would take it out of the accessibility tree along with
+   the pixels. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
