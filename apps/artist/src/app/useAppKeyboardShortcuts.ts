@@ -3,9 +3,9 @@
 //
 // **The order of the branches is the behaviour.** `c` sits below Ctrl+C, `v`
 // below Ctrl+V and `o` below Ctrl+O, so each bare letter only ever sees the
-// chords that fell through; the Escape cascade runs shortcuts sheet → in/out
-// points → multi-selection → single selection, and four tests assert exactly
-// that sequence. The block moves as one unit; nothing in it is reordered.
+// chords that fell through; the Escape cascade runs shortcuts sheet → crop mode
+// → in/out points → multi-selection → single selection, and tests assert
+// exactly that sequence. The block moves as one unit; nothing in it is reordered.
 //
 // Above the whole cascade sits `modalOpen`: while a dialog is up, the editor
 // behind it takes no key at all. The transport's own window listener
@@ -88,6 +88,9 @@ export interface AppKeyboardShortcutsDeps {
   clearInOutPoints: () => void;
   inPoint: number | null;
   outPoint: number | null;
+  /** The clip the preview's crop mode is open on, and how to close it (ESCSUITE-157). */
+  cropClipId: string | null;
+  setCropClipId: (clipId: string | null) => void;
 }
 
 export function useAppKeyboardShortcuts({
@@ -131,6 +134,8 @@ export function useAppKeyboardShortcuts({
   clearInOutPoints,
   inPoint,
   outPoint,
+  cropClipId,
+  setCropClipId,
 }: AppKeyboardShortcutsDeps): void {
   // Global keyboard shortcuts
   useEffect(() => {
@@ -408,6 +413,16 @@ export function useAppKeyboardShortcuts({
           setShowShortcuts(false);
           return;
         }
+        // Crop mode is a mode, so Escape leaves it before Escape touches a
+        // selection (ESCSUITE-157). Below the shortcuts sheet, which is a modal
+        // on top of everything; above the in/out points and the two selection
+        // branches, because deselecting would leave crop mode as a side effect
+        // and take the selection with it.
+        if (cropClipId) {
+          e.preventDefault();
+          setCropClipId(null);
+          return;
+        }
         if (inPoint !== null || outPoint !== null) {
           e.preventDefault();
           clearInOutPoints();
@@ -436,6 +451,6 @@ export function useAppKeyboardShortcuts({
     setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker,
     goToNextMarker, goToPreviousMarker, showShortcuts, splitClip,
     selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection,
-    setInPoint, setOutPoint, clearInOutPoints, inPoint, outPoint
+    setInPoint, setOutPoint, clearInOutPoints, inPoint, outPoint, cropClipId, setCropClipId
   ]);
 }

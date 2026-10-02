@@ -40,6 +40,8 @@ export function ClipEditor() {
     handleMaskChange,
     handleStrokeChange,
     handleCropChange,
+    cropOnCanvas,
+    handleCropOnCanvasToggle,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
@@ -160,6 +162,8 @@ export function ClipEditor() {
           sourceWidth={sourceVideo?.width ?? 0}
           sourceHeight={sourceVideo?.height ?? 0}
           onCropChange={handleCropChange}
+          cropOnCanvas={cropOnCanvas}
+          onCropOnCanvasToggle={handleCropOnCanvasToggle}
           sliderGesture={sliderGesture}
           disabled={trackLocked}
         />

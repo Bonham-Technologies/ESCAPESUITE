@@ -126,6 +126,9 @@ export interface ClipEditorActions {
   handleMaskChange: (mask: ClipMask) => void;
   handleStrokeChange: (stroke: ClipStroke) => void;
   handleCropChange: (crop: ClipCrop) => void;
+  /** Whether the preview's crop mode is open on the selected clip (ESCSUITE-157). */
+  cropOnCanvas: boolean;
+  handleCropOnCanvasToggle: () => void;
   handleBlurChange: (blur: number) => void;
   handleTransitionTypeChange: (type: TransitionType) => void;
   handleTransitionDurationChange: (duration: number) => void;
@@ -197,6 +200,11 @@ export function useClipEditorActions(): ClipEditorActions {
   const addShapeOverlayClip = useEditorStore((state) => state.addShapeOverlayClip);
   const setKeyframePanelOpen = useEditorStore((state) => state.setKeyframePanelOpen);
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
+  // `cropClipId` is a scalar that changes only when the toggle below is
+  // pressed, so it cannot move a playback-tick render count — see constraint 5
+  // and `ClipEditor.rerender.test.tsx`.
+  const cropClipId = useEditorStore((state) => state.cropClipId);
+  const setCropClipId = useEditorStore((state) => state.setCropClipId);
 
   const sourceVideo = useMemo(() => {
     if (!selectedClip) return null;
@@ -327,6 +335,16 @@ export function useClipEditorActions(): ClipEditorActions {
     },
     [selectedClip, sourceVideo, updateClip, commit]
   );
+
+  // Crop mode is a latch (`store/uiSlice.ts`): it is "on" only while it names
+  // the selected clip, which is what makes a selection change leave the mode
+  // without anything having to clear it.
+  const cropOnCanvas = selectedClip != null && cropClipId === selectedClip.id;
+
+  const handleCropOnCanvasToggle = useCallback(() => {
+    if (!selectedClip) return;
+    setCropClipId(cropOnCanvas ? null : selectedClip.id);
+  }, [selectedClip, cropOnCanvas, setCropClipId]);
 
   const handleBlurChange = useCallback(
     (blur: number) => {
@@ -560,6 +578,8 @@ export function useClipEditorActions(): ClipEditorActions {
     handleMaskChange,
     handleStrokeChange,
     handleCropChange,
+    cropOnCanvas,
+    handleCropOnCanvasToggle,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,

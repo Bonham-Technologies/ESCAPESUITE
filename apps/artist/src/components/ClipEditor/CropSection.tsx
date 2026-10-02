@@ -21,6 +21,10 @@ interface CropSectionProps {
   sourceHeight: number;
   /** The crop the user asked for. Deciding what gets stored is the caller's job. */
   onCropChange: (crop: ClipCrop) => void;
+  /** Whether the preview's crop mode is open on this clip (ESCSUITE-157). */
+  cropOnCanvas: boolean;
+  /** Open or close it. Live on a locked track: crop mode is a view, not an edit. */
+  onCropOnCanvasToggle: () => void;
   /**
    * Undo-coalescing listeners for the four sliders (ESCSUITE-87): one drag is
    * one undo entry rather than one per `input` event. Not on the number fields
@@ -72,6 +76,8 @@ export function CropSection({
   sourceWidth,
   sourceHeight,
   onCropChange,
+  cropOnCanvas,
+  onCropOnCanvasToggle,
   sliderGesture,
   disabled,
 }: CropSectionProps) {
@@ -91,16 +97,33 @@ export function CropSection({
       defaultOpen={false}
       disabled={disabled}
       headerRight={
-        <button
-          className={styles.resetButton}
-          disabled={disabled}
-          onClick={(e) => {
-            e.stopPropagation();
-            onCropChange(NO_CROP);
-          }}
-        >
-          Reset
-        </button>
+        <>
+          {/* Not `disabled`: crop mode shows the user what is being cropped
+              away, which is reading. The eight handles are what go inert on a
+              locked track (ESCSUITE-157), and the panel header already says
+              why. It sits in `headerRight` and so outside the section's
+              <fieldset disabled> for the same reason. */}
+          <button
+            className={styles.resetButton}
+            aria-pressed={cropOnCanvas}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCropOnCanvasToggle();
+            }}
+          >
+            Crop on canvas
+          </button>
+          <button
+            className={styles.resetButton}
+            disabled={disabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCropChange(NO_CROP);
+            }}
+          >
+            Reset
+          </button>
+        </>
       }
     >
       <div className={styles.transformControls}>

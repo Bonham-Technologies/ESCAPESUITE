@@ -1,8 +1,9 @@
 // What an edit burst costs the global keyboard cascade.
 //
-// `useAppKeyboardShortcuts` closes over 37 values and lists all 37 in its
-// dependency array, so every change to one of them tears the `keydown` listener
-// off `window` and binds a fresh closure. `apps/artist/CLAUDE.md` records that
+// `useAppKeyboardShortcuts` closes over 39 values (ESCSUITE-157 added
+// `cropClipId` and `setCropClipId`) and lists all of them in its dependency
+// array, so every change to one of them tears the `keydown` listener off
+// `window` and binds a fresh closure. `apps/artist/CLAUDE.md` records that
 // array as deliberate — the Ctrl+B branch depends on the staleness the array
 // deliberately carries (`clips.length` is a dep while `clips.find` is what the
 // branch reads), and holding the handler in a ref to stop the re-binding would
@@ -12,11 +13,13 @@
 // It is not a per-frame cost — nothing here runs on a pointer move or a
 // playback tick — so the number that matters is re-binds per *edit*, driven
 // through the same store the app drives. The harness mirrors `App.tsx`'s own
-// selectors for the nine store-backed deps that can change during editing
+// selectors for the ten store-backed deps that can change during editing
 // (`selectedClipId`, `activeTool`, `clips`, `keyframePanelOpen`, `snapEnabled`,
-// `selectedClipIds`, `clipboard`, `inPoint`, `outPoint`); the store's actions
-// are stable identities and the rest are `App`'s own callbacks, held fixed here
-// so the count is the store's contribution and nothing else.
+// `selectedClipIds`, `clipboard`, `inPoint`, `outPoint`, `cropClipId`); the
+// store's actions are stable identities and the rest are `App`'s own
+// callbacks, held fixed here so the count is the store's contribution and
+// nothing else. The burst below never opens crop mode, so `cropClipId` costs
+// this measurement nothing — it is here only so the type checks.
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { useAppKeyboardShortcuts } from './useAppKeyboardShortcuts'
@@ -70,6 +73,8 @@ function ShortcutHost() {
     clearInOutPoints: useEditorStore((s) => s.clearInOutPoints),
     inPoint: useEditorStore((s) => s.inPoint),
     outPoint: useEditorStore((s) => s.outPoint),
+    cropClipId: useEditorStore((s) => s.cropClipId),
+    setCropClipId: useEditorStore((s) => s.setCropClipId),
     ...appCallbacks,
   })
   return null

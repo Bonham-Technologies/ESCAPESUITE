@@ -595,6 +595,17 @@ export interface EditorState {
   snapThreshold: number; // in pixels
   activeTool: ToolType;
   loopPlayback: boolean;
+  /**
+   * The clip the preview's **crop mode** is open on (ESCSUITE-157), or null.
+   *
+   * A latch, deliberately not kept in step with anything: every reader requires
+   * it to name the *selected* clip (`components/Preview/cropOverlay.ts`'s
+   * `cropTarget`), so selecting another clip, deselecting, deleting the clip,
+   * loading another project and undoing the clip away all leave crop mode
+   * without a single line of synchronisation. View state — not in the project,
+   * not in the undo history, not in a saved file.
+   */
+  cropClipId: string | null;
   markers: Marker[];
 
   // Keyframe panel state
@@ -805,6 +816,7 @@ export interface EditorState {
   setSnapEnabled: (enabled: boolean) => void;
   setActiveTool: (tool: ToolType) => void;
   setLoopPlayback: (enabled: boolean) => void;
+  setCropClipId: (clipId: string | null) => void;
   recalculateTimelineDuration: () => void;
 
   // Actions - Markers

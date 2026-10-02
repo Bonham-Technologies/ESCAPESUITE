@@ -78,7 +78,7 @@ export function addClip(
  * resetProject() covers the project, playhead, selection, clipboard, in/out
  * points and markers, and nothing else: every other top-level field of the
  * store survives it and would otherwise leak from one test into the next.
- * Those are `zoom`, `snapEnabled`, `activeTool`, `loopPlayback`,
+ * Those are `zoom`, `snapEnabled`, `activeTool`, `loopPlayback`, `cropClipId`,
  * `keyframePanelState` (the panel's own position and size included) and the
  * history resetProject itself pushes to — all reset here. `snapThreshold` is
  * the one remaining field, and it has no setter, so it cannot drift.
@@ -91,6 +91,7 @@ export function resetStoreForTest(): void {
     snapEnabled: true,
     activeTool: 'select',
     loopPlayback: false,
+    cropClipId: null,
     keyframePanelState: structuredClone(DEFAULT_KEYFRAME_PANEL_STATE),
   })
   store().addSourceVideo(video)
