@@ -1736,6 +1736,25 @@ parity case (`run.chromium.test.ts`, `GIF89a` in, manifest `format: 'gif'` out) 
 measurement and was run twice here: 28 / 28 both times. **No floor crossed**; the kit's floors stay
 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-155 (a clip whose evaluated opacity is 0
+no longer takes the click in the preview, and a selected keyframed clip draws its selection box at
+its animated position): 99.78 / 99.18 / 95.37 / 99.66, byte-identical on every percentage to the
+99.78 / 99.18 / 95.37 / 99.66 the commit this branch lands on (`c89cf40`) measures. Measured in one
+sitting, the base gives 4,597 / 4,820 branches and this branch 4,603 / 4,826: six new branches, six
+covered, the same 223 uncovered as before (lines 7,265 / 7,281 → 7,268 / 7,284, statements
+8,166 / 8,233 → 8,170 / 8,237, functions 1,768 / 1,774 → 1,769 / 1,775, every denominator growing by
+exactly what the numerator did; the same 16 / 67 / 6 uncovered). The six are the net of three files:
+`components/Preview/hitTest.ts` gains the two arms of the z-order loop's `getClipOpacity(...) <= 0`
+skip, `previewGeometry.ts` gains `getClipOpacity`'s eight — the no-animation choice and the
+`|| DEFAULT_TRANSFORM` / `|| DEFAULT_EFFECTS` fallbacks on both paths, each reached from both
+sides by that function's own four cases (the animated-path fallbacks were the two arms the first
+rebased measurement found unreached, and the case that covers them is the branch's last commit) —
+and `selectionOverlay.ts` loses four, the `hasCustomKeyframes && !keyframePanelOpen` early return
+that drew no chrome for a keyframed clip, deleted along with its import. `getClipOpacity`'s
+outside-the-clip fallback was deleted rather than tested: its one caller is fed clips
+`getClipsAtTime` has already filtered. `drawFrame.perf.test.ts` and every rerender pin are
+byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

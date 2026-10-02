@@ -209,14 +209,24 @@ describe('drawSelectionHandles', () => {
     expect(ctx.calls).toHaveLength(0)
   })
 
-  it('hides the handles of a keyframed clip until the keyframe panel is open', () => {
-    const clip = mediaClip({ animation: makeAnimation({ keyframes: { x: [kf(0, 0.5)] } }) })
+  // ESCSUITE-155 (the ESCSUITE-3 review's MINOR-4): this used to draw nothing
+  // at all for a keyframed clip outside keyframe mode, the one asymmetry with
+  // a locked track's chrome — which is drawn in full, simply inert, whether or
+  // not the track is actually locked, since this function has no way to know.
+  // A keyframed clip's chrome now matches: the full box and handles, at the
+  // clip's **animated** position (the same `getOverlayBounds` call the hit
+  // test uses), whether or not the keyframe panel is open.
+  it('draws the box for a keyframed clip at its animated position with the keyframe panel closed', () => {
+    const clip = mediaClip({
+      animation: makeAnimation({ keyframes: { x: [kf(0, 0)], scaleX: [kf(0, 2)] } }),
+    })
 
-    drawSelectionHandles(canvas, 1, selection({ clips: [clip] }))
-    expect(ctx.calls).toHaveLength(0)
+    drawSelectionHandles(canvas, 1, selection({ clips: [clip], keyframePanelOpen: false }))
 
-    drawSelectionHandles(canvas, 1, selection({ clips: [clip], keyframePanelOpen: true }))
-    expect(ctx.argsFor('strokeRect')[0]).toEqual([-HALF_W, -HALF_H, HALF_W * 2, HALF_H * 2])
+    // Same animated box the panel-open case above asserts — the chrome no
+    // longer depends on the panel being open to appear at all.
+    expect(ctx.argsFor('translate')).toEqual([[0, CANVAS_H / 2]])
+    expect(ctx.argsFor('strokeRect')[0]).toEqual([-HALF_W * 2, -HALF_H, HALF_W * 4, HALF_H * 2])
   })
 
   it('gives up on a canvas with no 2D context', () => {

@@ -1012,13 +1012,36 @@ chrome, the marquee and the drag seed can all disagree with the drawn frame. Tha
 ESCSUITE-147's gap; it applied to every clip carrying a preset before this ticket and now
 applies to keyframed ones too — this ticket neither introduces nor fixes it.
 
-The body test is geometry only — `getOverlayBounds` never reads opacity — so a clip animated to
-`opacity: 0` is still picked rather than clicked through, the same way a clip with a static
-`transform.opacity: 0` (or mid an out-preset fade) always was; a follow-up ticket covers making
-the hit test opacity-aware. And because `selectionOverlay.ts` declines to draw any chrome for a
-keyframed clip until its own panel is open, selecting one this way shows in the inspector and on
-the timeline row, not on the canvas — unlike the locked-track case it otherwise mirrors, where
-the full box and handles are drawn and simply inert.
+**A fully transparent clip does not catch the click, and a keyframed clip's selection chrome
+matches its picture** (ESCSUITE-155, closing two gaps the ESCSUITE-3 review left open). The body
+test used to be geometry only — `getOverlayBounds` never reads opacity — so a clip animated to
+`opacity: 0` was still picked rather than clicked through, the same way a clip with a static
+`transform.opacity: 0` always was, hiding whatever was drawn underneath from the pointer entirely.
+`hitTestHandles`' z-order loop now calls `previewGeometry.ts`'s `getClipOpacity(clip, currentTime)`
+and `continue`s past a clip whose evaluated opacity is exactly `0` before it ever reaches
+`getOverlayBounds` — `0.01` is still clickable, so this is "invisible", not "faint". A clip with
+no `animation` reads its static `transform.opacity`; one with an `animation` reads
+`getAnimatedValues`' interpolated value at the clip-relative time, falling back to the static value
+outside the clip's duration — the same condition `getOverlayBounds` already branches on for
+position, so the two cannot disagree about what is actually on screen. Opacity lives on
+`ClipTransform` for every clip kind — a text or shape overlay's own `textData.opacity` /
+`shapeData.opacity` fields are never read for drawing — so `getClipOpacity` needs none of
+`getOverlayBounds`' per-kind base-transform substitution.
+
+And `selectionOverlay.ts`'s `drawSelectionHandles` no longer declines to draw anything at all for a
+keyframed clip outside keyframe mode. The `hasCustomKeyframes(selectedClip) && !keyframePanelOpen`
+early return the ESCSUITE-3 review's MINOR-4 flagged is gone: a keyframed clip selected by its body
+hit now shows the same full box and handles any other selected clip does, at its **animated**
+position — the same `getOverlayBounds` call the hit test uses, so the chrome and the hit box agree
+too — simply inert, the way a locked track's chrome already was (that function has no `tracks` in
+its context and so never could distinguish a locked clip's chrome from an unlocked one). The
+asymmetry the review named — a keyframed selection showing in the inspector and on the timeline row
+but nowhere on the canvas — is closed.
+
+No `suppressPreset` outside a transition still means a hit test inside one can disagree with the
+drawn frame (ESCSUITE-147's gap, untouched by this ticket): `getOverlayBounds` has no way to be
+told which preset side an active transition has suppressed, so `getClipOpacity` reading the full,
+un-suppressed opacity for a clip mid-transition is the same kind of gap, not a new one.
 
 **The playhead position does not re-render the preview, the timeline body, or `App`.**
 `usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every

@@ -187,6 +187,36 @@ export function getOverlayBounds(
   return null;
 }
 
+/**
+ * A clip's opacity at a point in time, evaluated the same way the renderer
+ * does (`core/canvasRenderer.ts`'s `animatedValuesFor`): the static
+ * `transform.opacity` for a clip with no `animation`, or `getAnimatedValues`'
+ * interpolated value for one that has keyframes or a preset. Opacity lives on
+ * `ClipTransform` for every clip kind, including a text or shape overlay
+ * (their own `textData.opacity` / `shapeData.opacity` fields are unused for
+ * this), so unlike {@link getOverlayBounds} this needs no per-kind
+ * base-transform substitution (ESCSUITE-155).
+ *
+ * `time` is assumed to fall within the clip's active window — every current
+ * caller (`hitTest.ts`'s z-order loop) only ever sees a clip `getClipsAtTime`
+ * has already filtered to `time`, so there is no reachable "outside the
+ * clip's duration" case to fall back from, and none is coded here. A future
+ * caller that cannot make the same guarantee should bounds-check before
+ * calling in, the way every current caller of {@link getOverlayBounds} does.
+ */
+export function getClipOpacity(clip: Clip, time: number): number {
+  if (!clip.animation) return (clip.transform || DEFAULT_TRANSFORM).opacity;
+
+  const clipTime = time - clip.timelinePosition;
+  return getAnimatedValues(
+    clipTime,
+    clip.duration,
+    clip.animation,
+    clip.transform || DEFAULT_TRANSFORM,
+    clip.effects || DEFAULT_EFFECTS
+  ).opacity;
+}
+
 /** Helper to determine if a clip is manipulable (overlays, images, videos - not audio) */
 export function isManipulableClip(clip: Clip, sourceVideos: SourceVideo[]): boolean {
   // Overlays are always manipulable

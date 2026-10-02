@@ -4,6 +4,7 @@
 // interaction to the selected clip alone. Pure: the scene is a parameter.
 import { getClipsAtTime } from '../../store/projectStore';
 import {
+  getClipOpacity,
   getClipType,
   getOverlayBounds,
   hasCustomKeyframes,
@@ -194,9 +195,17 @@ export function hitTestHandles(
   // caller (handleMouseDown in useTransformHandles.ts) is the one that turns
   // this `move` into a refusal — selecting the clip without starting a drag —
   // the same way it already does for a clip on a locked track.
+  //
+  // A clip evaluated fully transparent at this instant — statically, or by a
+  // keyframe or an Animate Out preset — is skipped instead: it is invisible,
+  // so it does not stand between the pointer and whatever is drawn beneath it
+  // (ESCSUITE-155). `getClipOpacity` reads the same base `transform.opacity`
+  // and the same `getAnimatedValues` call `getOverlayBounds` below already
+  // makes for position, so the two agree about what is actually on screen.
   for (const { clip } of manipulableClips) {
     const clipType = getClipType(clip, sourceVideos);
     if (!clipType) continue;
+    if (getClipOpacity(clip, currentTime) <= 0) continue;
 
     const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project);
     if (!bounds) continue;

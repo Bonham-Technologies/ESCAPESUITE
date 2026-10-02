@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
   contentBox,
   getCanvasPosition,
+  getClipOpacity,
   getClipType,
   getOverlayBounds,
   hasCustomKeyframes,
@@ -373,6 +374,46 @@ describe('getOverlayBounds for media clips', () => {
     const clip = makeClip({ sourceVideoId: '', overlayType: 'text', textData: undefined })
 
     expect(getOverlayBounds(clip, makeCanvas(), undefined, [])).toBeNull()
+  })
+})
+
+describe('getClipOpacity', () => {
+  it('reads the static transform.opacity when the clip has no animation', () => {
+    const clip = makeClip({
+      transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 0.4 },
+    })
+
+    expect(getClipOpacity(clip, 1)).toBe(0.4)
+  })
+
+  it('treats a missing transform as fully opaque, the same default getOverlayBounds falls back to', () => {
+    expect(getClipOpacity(makeClip({ transform: undefined }), 1)).toBe(1)
+  })
+
+  it('interpolates opacity from keyframes at the given time', () => {
+    // Opacity ramps 1 -> 0 over the 4s clip; at time 1 (a quarter through) it
+    // is a quarter of the way there: 0.75.
+    const clip = makeClip({
+      duration: 4,
+      animation: makeAnimation({ keyframes: { opacity: [kf(0, 1), kf(4, 0)] } }),
+    })
+
+    expect(getClipOpacity(clip, 1)).toBe(0.75)
+  })
+
+  it('interpolates over the default transform and effects when a keyframed clip carries neither', () => {
+    // The same `|| DEFAULT_*` fallbacks getOverlayBounds makes, on the animated
+    // path this time: a clip restored without a transform or effects block
+    // still evaluates its keyframes over the defaults (opacity 1) rather than
+    // throwing on `undefined.opacity`.
+    const clip = makeClip({
+      duration: 4,
+      transform: undefined,
+      effects: undefined,
+      animation: makeAnimation({ keyframes: { opacity: [kf(0, 1), kf(4, 0)] } }),
+    })
+
+    expect(getClipOpacity(clip, 1)).toBe(0.75)
   })
 })
 
