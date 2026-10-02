@@ -26,8 +26,15 @@ export interface GifWriter {
   addFrame(rgba: Uint8ClampedArray, width: number, height: number, delayMs: number): void;
   /** Bytes written to the GIF stream so far — the live size estimate's numerator. */
   bytesWritten(): number;
-  /** Write the end-of-stream byte (once) and return the finished file. */
-  finish(): Uint8Array;
+  /**
+   * Write the end-of-stream byte (once) and return the finished file.
+   *
+   * `Uint8Array<ArrayBuffer>` rather than the default `Uint8Array<ArrayBufferLike>`,
+   * because its one caller puts it straight into a `Blob` and `BlobPart` refuses a
+   * view that might be backed by a `SharedArrayBuffer`. `gifenc`'s stream never is
+   * — see `src/types/gifenc.d.ts`.
+   */
+  finish(): Uint8Array<ArrayBuffer>;
 }
 
 /**

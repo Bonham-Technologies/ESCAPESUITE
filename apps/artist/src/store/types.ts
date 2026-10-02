@@ -830,16 +830,31 @@ export interface EditorState {
 
 // Export options
 export interface ExportOptions {
-  format: 'webm' | 'mp4';
+  format: 'webm' | 'mp4' | 'gif';
   quality: 'low' | 'medium' | 'high';
-  resolution: 'project' | '1080p' | '720p' | '480p';
+  resolution: 'project' | '1080p' | '720p' | '480p' | '360p';
   timeRange?: { start: number; end: number };
+  /**
+   * GIF only: 10, 15 (default) or 20 frames per second (ESCSUITE-34). The two
+   * video formats always encode at 30 and ignore this. Read through
+   * `gifFrameRate()` rather than directly, so a stale saved setting or a
+   * hand-built headless job spec lands on the default instead of encoding at
+   * whatever number it carried.
+   */
+  fps?: 10 | 15 | 20;
 }
 
 export interface ExportProgress {
   phase: 'preparing' | 'encoding' | 'muxing' | 'complete' | 'error';
   progress: number;       // 0-100
   message: string;
+  /**
+   * GIF only: the projected size of the finished file in bytes, from the bytes
+   * actually written so far (ESCSUITE-34). Absent on every WebM and MP4 report,
+   * and absent on a GIF report made before the first frame was written — the
+   * dialog shows its own up-front heuristic until then.
+   */
+  estimatedBytes?: number;
 }
 
 // Integration API types

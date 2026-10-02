@@ -64,10 +64,19 @@ declare module 'gifenc' {
     writeHeader(): void;
     /** Writes the end-of-stream trailer byte. */
     finish(): void;
-    /** A copy of everything written so far. */
-    bytes(): Uint8Array;
+    /**
+     * A copy of everything written so far.
+     *
+     * `Uint8Array<ArrayBuffer>`, not the default `Uint8Array<ArrayBufferLike>`:
+     * the stream's backing store is a plain `new Uint8Array(capacity)` and both
+     * accessors derive from it (`slice` here, `subarray` below), so neither can
+     * be backed by a `SharedArrayBuffer` — and `new Blob([...])` will not take a
+     * view that might be. Same narrowing, same reason, as `LevelMeter.data` in
+     * ESCAPECRAFT's `core/webcodecs-recorder.ts`.
+     */
+    bytes(): Uint8Array<ArrayBuffer>;
     /** A zero-copy view of everything written so far — its length is the stream cursor. */
-    bytesView(): Uint8Array;
+    bytesView(): Uint8Array<ArrayBuffer>;
     reset(): void;
     readonly buffer: ArrayBuffer;
   }

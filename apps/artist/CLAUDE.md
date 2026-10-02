@@ -105,9 +105,20 @@ pnpm lint                # Run ESLint
   class of hang is caught by the unit suite rather than only in a browser. The `<audio>` double
   shares that one `currentTime` setter (`SeekScript`, which both `VideoScript` and `AudioScript`
   extend), so the two importers cannot drift apart in the tests either.
-- `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
-  - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
-  - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
+- `exporter.ts`: the barrel over **three** export paths — two through WebCodecs +
+  `mediabunny` for muxing, and one through neither:
+  - **WebM** (`exportWebM.ts`): VP9 video + Opus audio, frame-by-frame encoding with audio mixing
+  - **MP4** (`exportMP4.ts`): H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
+  - **GIF** (`exportGIF.ts`): animated GIF, **no WebCodecs at all** (ESCSUITE-34) — see "GIF
+    Export" below
+- `exportGIF.ts`: GIF export. Shares `elementFrames.ts` with `exportWebM.ts` and swaps the
+  encoder: per frame one `ctx.getImageData` over the whole output raster and one
+  `writer.addFrame`. No audio mixing, no muxer, no encoder queue. Also exports
+  `estimateGifBytes(width, height, frames)`, the up-front size heuristic the dialog shows
+  before the first frame exists
+- `gifEncoder.ts`: the one importer of `gifenc`. `createGifWriter()` returns
+  `{ addFrame, bytesWritten, finish }`, where `addFrame` is `quantize` -> `applyPalette` ->
+  `writeFrame` behind one method
 - `elementFrames.ts`: the per-frame machinery an exporter that draws media **elements**
   (`<video>` / `<img>`) needs, lifted out of `exportWebM.ts` by ESCSUITE-34 so a second
   element-drawing pipeline reuses it rather than copying it. Four functions:
@@ -118,14 +129,21 @@ pnpm lint                # Run ESLint
   times, then the single track-ordered interleaved draw pass and the transition) and
   `releaseElementSources` (pause everything and revoke the object URLs). The composer takes
   the output `frameRate` because the seek tolerance is a little under half a frame of it —
-  the one value that had to become a parameter, 30 for WebM. `exportMP4.ts` is deliberately
+  the one value that had to become a parameter, 30 for WebM and 10/15/20 for GIF.
+  `exportMP4.ts` is deliberately
   **not** a caller: it decodes through `videoDecodeManager.ts` / `frameSource.ts` and draws
   `VideoFrame`s, so it shares `canvasRenderer.ts` but not this. The extraction is a pure
   move — the same warning strings, the same 500 ms seek and 300 ms readiness fallbacks, the
-  same `readyState >= 2` gate — and both export `*.perf.test.ts` ceiling files are
-  byte-identical across it, which is what pins the call order
+  same `readyState >= 2` gate — and both of the existing export `*.perf.test.ts` ceiling
+  files are byte-identical across it, which is what pins the call order. The third,
+  `exportGIF.perf.test.ts`, is what proves the sharing is real rather than claimed: it measures
+  **26** canvas calls per frame over the same scene where `exportWebM.perf.test.ts` measures 25,
+  the one extra being the GIF pipeline's own `getImageData`
 - `audioMixer.ts`: `extractAndMixAudio` is the export pipeline's one audio mixer — both
-  `exportWebM.ts` and `exportMP4.ts` call it directly, on the main thread. It decodes each
+  `exportWebM.ts` and `exportMP4.ts` call it directly, on the main thread. `exportGIF.ts`
+  does **not** call it at all, not even with the result discarded: a GIF has no audio track,
+  and mixing the whole timeline to throw it away is the most expensive no-op in the pipeline
+  (`exportGIF.test.ts` asserts the mixer is never called). It decodes each
   clip's source with `OfflineAudioContext`, applies `getAnimatedVolume` per sample (so a
   clip's volume keyframes always reach the export, the same as the preview), sums the result
   into one stereo interleaved timeline buffer and normalises the peak back under 1. A clip
@@ -2440,10 +2458,58 @@ file and no fallback. WebM's shape now matches MP4's:
   WebM failure that is not already an `ExportError` or an `ExportAbortedError` is wrapped in one
   on the way out, the same catch-all `exportMP4.ts`'s own catch block has always done.
 
+### GIF Export (`src/core/exportGIF.ts`, `src/core/gifEncoder.ts`, `src/core/exportTypes.ts`)
+
+The third export format (ESCSUITE-34), and the only one that needs nothing from WebCodecs.
+
+- **It is `exportWebM.ts` with a different encoder.** `exportToGIF` takes the same seven
+  arguments in the same order as the other two exporters — so the dialog's dispatch and the
+  headless renderer's are one-line additions, not a third calling convention — and drives
+  `elementFrames.ts`'s composer exactly as the WebM exporter does. Per frame: `composeFrame(t)`
+  (the `openOutputFrame`, the per-clip seek, the one track-ordered draw pass, the transition),
+  then one `ctx.getImageData(0, 0, width, height)` and one `writer.addFrame`.
+- **Everything a GIF cannot carry is absent, not computed and discarded.** No audio mixing (see
+  `audioMixer.ts` above), no muxer, no encoder queue, no backpressure wait. What is left is the
+  frame loop, which is also the whole of the export's cancellation surface: the abort is checked
+  at the top of every frame, so Cancel stops within one frame, and a `checkAborted` after
+  `writer.finish()` means a cancel that landed during the finalise never hands a blob back. A
+  failing frame wraps in `ExportError` with the diagnostic log and the frame it reached, the same
+  shape both other exporters produce, and every exit — success, throw, abort — calls
+  `releaseElementSources`.
+- **Frame rate and resolution are their own presets.** `GIF_FPS_OPTIONS` is 10/15/20 and
+  `gifFrameRate(options.fps)` is the only reader of `ExportOptions.fps`, so `undefined` (every
+  caller that predates the format), a stale saved setting and a hand-built headless job spec all
+  land on `DEFAULT_GIF_FPS` (15) rather than encoding at whatever they carried. A GIF stores each
+  frame's delay in **centiseconds**, so 10 fps (100 ms) and 20 fps (50 ms) are exact while 15 fps
+  (67 ms -> 7 cs) really plays at about 14.3 fps — written down beside the constant rather than
+  left to be found. `GIF_RESOLUTIONS` is 720p/480p/360p with `DEFAULT_GIF_RESOLUTION` 480p;
+  `'360p'` is one entry on the **shared** `ExportOptions['resolution']` union (one union, one
+  `getResolution`, one headless `RESOLUTIONS` list) and `resolutionForFormat(format, resolution)`
+  is the pure function that keeps it GIF-only, in both directions — to GIF from `'project'` or
+  `'1080p'` lands on 480p, and away from GIF while 360p is selected lands on 480p too.
+- **Two size estimates, deliberately.** Before the loop there is nothing written to divide, so
+  `estimateGifBytes(width, height, frames)` — pixels x frames x 0.3 — is what the dialog shows,
+  exported from `exportGIF.ts` so the two estimates live together. From inside the loop every
+  progress report carries `estimatedBytes` = bytes written so far / frames done x frames total,
+  which is **only** ever set there: dividing by zero frames would put `Infinity` on screen. The
+  field is optional on `ExportProgress` and the two video exporters never set it, so nothing
+  about their progress reports changed.
+- **The context is `{ alpha: false, willReadFrequently: true }`**, because every frame reads the
+  entire raster back and without the hint a browser keeps the backing store on the GPU and each
+  read is a stall. And `getImageData` is called **under** the output transform on purpose: it
+  reads device pixels and ignores the matrix, so the frame the encoder sees is the whole output
+  raster including any letterbox bar. Nothing is saved, restored or re-transformed around it,
+  which is why `exportGIF.perf.test.ts` can still assert one `setTransform` per frame.
+- **`exportGIF.perf.test.ts`** is the third per-frame ceiling file, over the same scene and the
+  same `openOutputFrame` splitter as its two twins, at 15 fps. Its own laws, all exact: one
+  full-raster read-back per frame, one encoded frame per read-back, one writer for the whole
+  export, and **no `VideoFrame` created anywhere** — that last one is what would quietly break
+  the no-WebCodecs browser if it ever moved.
+
 ### Export Dialog Browser Support (`src/components/Export/ExportDialog.tsx`, `src/core/exportTypes.ts`)
 
-`isMP4ExportSupported()` and `isWebMExportSupported()` answer two different questions, on
-purpose, and the dialog reads each one differently:
+`isMP4ExportSupported()`, `isWebMExportSupported()` and `isGIFExportSupported()` answer three
+different questions, on purpose, and the dialog reads each one differently:
 
 - **`isMP4ExportSupported()`** is a synchronous read of which globals exist —
   `VideoEncoder`/`VideoDecoder`/`VideoFrame` — unchanged by ESCSUITE-22/29. It says nothing about
@@ -2468,6 +2534,15 @@ purpose, and the dialog reads each one differently:
   reason, only once the probe actually says no. The effect's `cancelled` flag is the ESCSUITE-98
   run-identity shape: closing the dialog before a probe resolves, then reopening it before the
   stale one settles, must not let the stale answer overwrite the fresh one.
+- **`isGIFExportSupported()`** (ESCSUITE-34) is a **constant**: it returns `true`. `gifenc` is
+  pure JavaScript and a 2D canvas is the only browser capability `exportGIF.ts` uses, so there
+  is nothing to probe and nothing to check at the exporter's door either — `exportGIF.ts` has no
+  capability guard at all, which is the point (`exportGIF.test.ts` deletes the WebCodecs globals
+  and exports fifteen frames anyway). It is a function rather than a `true` so the dialog can
+  read all three formats' support the same way, and so a future reason to refuse has one place
+  to live. Its companion sentence `GIF_ALWAYS_AVAILABLE_NOTE` exists because "this browser
+  cannot export" stopped being true when GIF landed: the no-WebCodecs state below is now "no
+  **video** format is possible", with one that still is.
 
 The dialog's **three support states**:
 

@@ -444,13 +444,14 @@ export function getBaseDimensions(
  * hand-built headless job spec could reach it). ESCSUITE-111 dropped it rather
  * than fix it: every reachable resolution now follows the project's aspect.
  *
- * `resolution` is exactly `'project' | '1080p' | '720p' | '480p'` now, so a
- * preset name outside that list can only reach this function by bypassing the
- * type system — there is no longer a typed caller (the export dialog, both
- * exporters, or a validated headless job spec) that can construct one. That
- * used to fall back silently to `originalHeight`, which produced a
- * plausible-looking but meaningless size; it now throws instead (review round
- * 1, ESCSUITE-111).
+ * `resolution` is exactly `'project' | '1080p' | '720p' | '480p' | '360p'` now
+ * (ESCSUITE-34 added the last of those, which only the GIF format offers — see
+ * {@link resolutionForFormat}), so a preset name outside that list can only
+ * reach this function by bypassing the type system — there is no longer a typed
+ * caller (the export dialog, the three exporters, or a validated headless job
+ * spec) that can construct one. That used to fall back silently to
+ * `originalHeight`, which produced a plausible-looking but meaningless size; it
+ * now throws instead (review round 1, ESCSUITE-111).
  */
 export function getResolution(
   resolution: ExportOptions['resolution'],
@@ -473,10 +474,11 @@ export function getResolution(
     };
   }
 
-  const targetHeights: Partial<Record<'1080p' | '720p' | '480p', number>> = {
+  const targetHeights: Partial<Record<'1080p' | '720p' | '480p' | '360p', number>> = {
     '1080p': 1080,
     '720p': 720,
     '480p': 480,
+    '360p': 360,
   };
 
   const targetHeight = targetHeights[resolution];
@@ -494,6 +496,103 @@ export function getResolution(
     width: width % 2 === 0 ? width : width + 1,
     height: targetHeight % 2 === 0 ? targetHeight : targetHeight + 1,
   };
+}
+
+// ---------------------------------------------------------------------------
+// GIF (ESCSUITE-34)
+// ---------------------------------------------------------------------------
+
+/**
+ * The frame rates the GIF export offers. Low by design: a GIF carries one
+ * 256-colour palette and one LZW-compressed bitmap per frame, so its size is
+ * roughly linear in the frame count, and the format stores each frame's delay
+ * in **centiseconds** — 20 fps (50 ms) and 10 fps (100 ms) are exact, while
+ * 15 fps (67 ms) rounds to 7 cs and really plays at about 14.3 fps.
+ */
+export const GIF_FPS_OPTIONS = [10, 15, 20] as const;
+
+export type GifFps = (typeof GIF_FPS_OPTIONS)[number];
+
+export const DEFAULT_GIF_FPS: GifFps = 15;
+
+/**
+ * The frame rate an export will actually use, from whatever `options.fps`
+ * carried. Anything that is not one of the three offered rates — `undefined`
+ * from every caller that predates GIF export, a stale saved setting, a
+ * hand-built headless job spec — lands on the default rather than being
+ * encoded at.
+ */
+export function gifFrameRate(fps: number | undefined): GifFps {
+  return fps !== undefined && (GIF_FPS_OPTIONS as readonly number[]).includes(fps)
+    ? (fps as GifFps)
+    : DEFAULT_GIF_FPS;
+}
+
+/**
+ * The resolution presets GIF offers, and only GIF. A GIF at 1080p is enormous
+ * and a GIF at the project's own resolution is unpredictable, so the list is
+ * three fixed heights with the project's aspect — `getResolution` does the
+ * actual arithmetic, the same way it does for the video formats.
+ */
+export const GIF_RESOLUTIONS = ['720p', '480p', '360p'] as const;
+
+export const DEFAULT_GIF_RESOLUTION: ExportOptions['resolution'] = '480p';
+
+/**
+ * The resolution preset a format can actually be exported at, given the one
+ * currently selected.
+ *
+ * `'360p'` is on the shared `ExportOptions['resolution']` union — one union, one
+ * `getResolution`, one headless `RESOLUTIONS` list — and this is the function
+ * that keeps it GIF-only. Both directions matter: switching **to** GIF from
+ * `'project'` or `'1080p'` lands on 480p (GIF offers neither), and switching
+ * **away** from GIF while 360p is selected lands on 480p too (no video preset is
+ * 360p). Pure, so the dialog's radios and a headless validator read the same
+ * rule.
+ */
+export function resolutionForFormat(
+  format: ExportOptions['format'],
+  resolution: ExportOptions['resolution']
+): ExportOptions['resolution'] {
+  if (format === 'gif') {
+    return (GIF_RESOLUTIONS as readonly string[]).includes(resolution)
+      ? resolution
+      : DEFAULT_GIF_RESOLUTION;
+  }
+  return resolution === '360p' ? '480p' : resolution;
+}
+
+/** Past this many seconds of output, the dialog warns (but never refuses). */
+export const GIF_LONG_RANGE_SECONDS = 30;
+
+/**
+ * Shown beside the GIF controls when the export would be longer than
+ * {@link GIF_LONG_RANGE_SECONDS}. A warning, not a gate: a long GIF is a
+ * legitimate thing to want, it is just usually not what someone meant.
+ */
+export const GIF_LONG_RANGE_WARNING =
+  'GIFs above 30 seconds get large; consider WebM.';
+
+/**
+ * Shown alongside {@link EXPORT_NO_WEBCODECS_REASON}, because "this browser
+ * cannot export" stopped being true when GIF landed: `gifenc` is pure
+ * JavaScript, so the one format that needs no WebCodecs at all is still there.
+ */
+export const GIF_ALWAYS_AVAILABLE_NOTE =
+  'GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway.';
+
+/**
+ * Whether GIF export is possible. It always is.
+ *
+ * A function rather than a `true` constant so the export dialog reads all three
+ * formats' support the same way, and so a future reason to refuse (a missing
+ * `getImageData`, say) has one place to live. This is the asymmetry
+ * `apps/artist/CLAUDE.md`'s "Export Dialog Browser Support" section describes:
+ * MP4's support is a synchronous globals check, WebM's is a real asynchronous
+ * codec probe, and GIF's is a constant.
+ */
+export function isGIFExportSupported(): boolean {
+  return true;
 }
 
 /**
