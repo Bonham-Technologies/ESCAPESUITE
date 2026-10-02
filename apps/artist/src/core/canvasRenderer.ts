@@ -14,6 +14,7 @@ import type {
 } from './exportTypes';
 import { blendModeToCanvas, getSourceDimensions, getIncomingClipTime } from './exportTypes';
 import { drawWithMaskAndStroke } from './clipMask';
+import { croppedSourceRect } from './clipCrop';
 
 /**
  * The one options object per suppressible side, built once for the module
@@ -383,10 +384,18 @@ export function drawClipToCanvas(
   const videoWidth = sourceWidth || canvasWidth;
   const videoHeight = sourceHeight || canvasHeight;
 
-  // Base dimensions = native source pixels.
-  // Scale 1.0 = actual source size on the canvas.
-  const scaledWidth = videoWidth * animated.scaleX;
-  const scaledHeight = videoHeight * animated.scaleY;
+  // The crop (ESCSUITE-6): the clip draws this rectangle of its source rather
+  // than the whole frame. Absent means the whole frame, so an uncropped clip is
+  // byte-identical to what it was.
+  const sourceRect = croppedSourceRect(videoWidth, videoHeight, clip.crop);
+
+  // Base dimensions = native source pixels, of the CROPPED region.
+  // Scale 1.0 = actual size of that region on the canvas, so cropping shrinks
+  // the picture in place and never stretches the remainder back over the old
+  // box. Anchoring is unchanged: the box is still centred on the animated
+  // position below.
+  const scaledWidth = sourceRect.sw * animated.scaleX;
+  const scaledHeight = sourceRect.sh * animated.scaleY;
 
   // Apply animated position with transition offset
   const offsetX = transitionModifiers?.offsetX || 0;
@@ -422,10 +431,12 @@ export function drawClipToCanvas(
   // spec's named risk is exactly that they drift apart.
   //
   // It draws the media frame (VideoFrame, HTMLVideoElement or HTMLImageElement)
-  // itself, on the same five arguments the bare ctx.drawImage() here used to.
+  // itself, in the nine-argument form, so the source region the crop names is
+  // part of the same one call.
   drawWithMaskAndStroke(
     ctx,
     source,
+    sourceRect,
     clip.mask,
     clip.stroke,
     x,
@@ -538,10 +549,14 @@ export function drawImageToCanvasWithModifiers(
   const imageWidth = image.naturalWidth || canvasWidth;
   const imageHeight = image.naturalHeight || canvasHeight;
 
-  // Base dimensions = native source pixels.
-  // Scale 1.0 = actual source size on the canvas.
-  const scaledWidth = imageWidth * animated.scaleX;
-  const scaledHeight = imageHeight * animated.scaleY;
+  // The crop (ESCSUITE-6) — the same call as `drawClipToCanvas`, in the same
+  // place, for the reasons argued in full there. These two near-duplicates are
+  // the only two media draws in the app, and a crop added to one and not the
+  // other would give videos a crop and images none.
+  const sourceRect = croppedSourceRect(imageWidth, imageHeight, clip.crop);
+
+  const scaledWidth = sourceRect.sw * animated.scaleX;
+  const scaledHeight = sourceRect.sh * animated.scaleY;
 
   // Apply animated position with transition offset
   const offsetX = transitionModifiers?.offsetX || 0;
@@ -565,11 +580,12 @@ export function drawImageToCanvasWithModifiers(
   // mask added to one and not the other would give videos a mask and images
   // none.
   //
-  // It draws the image itself, on the same five arguments the bare
-  // ctx.drawImage() here used to.
+  // It draws the image itself, in the nine-argument form, so the source region
+  // the crop names is part of the same one call.
   drawWithMaskAndStroke(
     ctx,
     image,
+    sourceRect,
     clip.mask,
     clip.stroke,
     x,

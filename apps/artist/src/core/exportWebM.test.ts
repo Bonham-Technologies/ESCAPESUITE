@@ -17,6 +17,7 @@ import {
   resetMediabunnyDouble,
 } from '../test/doubles/mediabunny'
 import {
+  destBox,
   getLastCanvasContext,
   installCanvasDouble,
   installOffscreenCanvasDouble,
@@ -569,7 +570,7 @@ describe('exportToWebM output raster', () => {
     // at scale 1, is its own 1280x720 — 1.5x each under the transform, which is
     // exactly the 1920x1080 frame.
     expect(ctx().argsFor('fillRect')[0]).toEqual([0, 0, 1280, 720])
-    expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 1280, 720])
+    expect(destBox(ctx().argsFor('drawImage')[0])).toEqual([0, 0, 1280, 720])
   })
 
   it('scales a 4K project down to 1080p instead of cropping it', async () => {
@@ -584,7 +585,7 @@ describe('exportToWebM output raster', () => {
     expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ width: 1920, height: 1080 })
     expect(ctx().argsFor('setTransform')[0]).toEqual([0.5, 0, 0, 0.5, 0, 0])
     // The whole picture, halved — not the middle 1920x1080 of it.
-    expect(ctx().argsFor('drawImage')[0].slice(1)).toEqual([0, 0, 3840, 2160])
+    expect(destBox(ctx().argsFor('drawImage')[0])).toEqual([0, 0, 3840, 2160])
   })
 
   // The old "letterboxes deliberately when the output aspect really differs"

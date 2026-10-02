@@ -15,6 +15,7 @@
 // `drawWithMaskAndStroke` takes the media source itself rather than a callback,
 // so it allocates no closure per clip per frame either.
 import type { ClipMask, ClipMaskKind, ClipStroke } from '../store/types';
+import type { SourceRect } from './clipCrop';
 
 /**
  * A mask outline for a drawn box, in canvas pixels.
@@ -242,11 +243,19 @@ export function applyClipStroke(
  * image, or a stroke applied inside the clip region, is wrong in a way no
  * geometry test would catch.
  *
- * It issues the `drawImage` itself, on the same five arguments both callers
- * passed (`source` and the box) — the source rather than a `() => void` because
- * a callback would allocate one closure per media clip per frame, in the one
- * place this module promises not to allocate. Neither caller uses the nine-
- * argument crop form, so there is nothing the five arguments cannot say.
+ * It issues the `drawImage` itself — the source rather than a `() => void`
+ * because a callback would allocate one closure per media clip per frame, in the
+ * one place this module promises not to allocate. Always the **nine-argument**
+ * form (ESCSUITE-6): `sourceRect` says which rectangle of the source to take,
+ * and an uncropped clip hands over its whole frame, which is the same picture
+ * the five-argument form drew. Nine unconditionally rather than five-or-nine,
+ * because a branch here would be a second rule about crops inside the one
+ * function that is meant to have no opinion about them — and because the
+ * `drawImage` *count* is what the per-frame ceilings measure, not its arity.
+ *
+ * `sourceRect` is the source's own pixels; `x`/`y`/`width`/`height` are the
+ * canvas'. The mask and the stroke are computed from the latter, so a cropped
+ * clip is masked and stroked on the box its picture actually lands in.
  *
  * The three shapes it takes, by what the clip carries:
  * - **neither** — the `drawImage` and nothing else. Not one extra context call:
@@ -267,6 +276,7 @@ export function applyClipStroke(
 export function drawWithMaskAndStroke(
   ctx: CanvasRenderingContext2D,
   source: CanvasImageSource,
+  sourceRect: SourceRect,
   mask: ClipMask | undefined,
   stroke: ClipStroke | undefined,
   x: number,
@@ -284,7 +294,17 @@ export function drawWithMaskAndStroke(
 
   applyClipMask(ctx, mask, x, y, width, height);
 
-  ctx.drawImage(source, x, y, width, height);
+  ctx.drawImage(
+    source,
+    sourceRect.sx,
+    sourceRect.sy,
+    sourceRect.sw,
+    sourceRect.sh,
+    x,
+    y,
+    width,
+    height
+  );
 
   if (visible) {
     ctx.restore();
