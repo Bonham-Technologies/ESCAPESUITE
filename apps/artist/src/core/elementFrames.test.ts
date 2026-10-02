@@ -2,10 +2,11 @@
 //
 // `exportWebM.ts` had all of this inline and `exportGIF.ts` needed the same
 // thing, so it was lifted here rather than copied. The exporters' own suites
-// (`exportWebM.test.ts`, `exportGIF.test.ts`) still cover it end to end; these
-// cases cover the four exported functions directly, where a specific question —
-// "does a source with no bytes get skipped", "is a seek inside half a frame of
-// the target skipped" — is cheaper to ask than through a whole export.
+// (`exportWebM.test.ts`, and `exportGIF.test.ts` once it lands) still cover it
+// end to end; these cases cover the four exported functions directly, where a
+// specific question — "does a source with no bytes get skipped", "is a seek
+// inside half a frame of the target skipped" — is cheaper to ask than through a
+// whole export.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   createFrameComposer,
@@ -209,6 +210,18 @@ describe('createFrameComposer', () => {
     expect(ctx.argsFor('fillRect')).toEqual([[0, 0, PROJECT.width, PROJECT.height]])
     expect(ctx.stateFor('fillRect')[0].fillStyle).toBe('#000000')
     expect(ctx.argsFor('drawImage')).toHaveLength(1)
+
+    // "Opens" is the load-bearing word, and it is an ordering claim: the frame
+    // transform, then the full-raster fill, then anything drawn into it.
+    // Nothing else pins it — `exportWebM.perf.test.ts`'s `splitFrames` buckets
+    // on the transform-and-fill pair *wherever* it falls, so moving
+    // `openOutputFrame` to the end of the frame leaves all of its medians (and
+    // its frame count) unmoved. A GIF frame read back with `ctx.getImageData`
+    // after a late clear would be black, so this is the assertion that keeps
+    // the composer honest for every element-drawing pipeline.
+    const order = ctx.calls.map((c) => c.method)
+    expect(order.indexOf('setTransform')).toBeLessThan(order.indexOf('fillRect'))
+    expect(order.indexOf('fillRect')).toBeLessThan(order.indexOf('drawImage'))
   })
 
   it('skips a seek that is already within half an output frame of the target', async () => {

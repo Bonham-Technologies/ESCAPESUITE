@@ -165,6 +165,7 @@ export interface FrameComposerParams {
   clips: Clip[];
   tracks: Track[];
   sources: ElementSources;
+  /** Must be the map `rewindElementSources(sources)` returned for the same `sources`. */
   playbackState: VideoPlaybackState;
   projectSize: PixelSize;
   outputSize: PixelSize;
@@ -180,9 +181,15 @@ export type FrameComposer = (currentTime: number) => Promise<void>;
  * One frame of the timeline, drawn with media *elements*.
  *
  * The first call every frame makes is `openOutputFrame` — the project-to-output
- * transform followed immediately by the full-raster black fill — which is also
- * how both export perf files split their recorded canvas calls into frames. It
- * stays first here so that splitter holds for every element-drawing pipeline.
+ * transform followed immediately by the full-raster black fill — and that pair
+ * is also how both export perf files split their recorded canvas calls into
+ * frames. Those files pin **one open per frame**, not its position: their
+ * splitter buckets on the pair wherever it falls, so moving this call to the end
+ * of the frame leaves every one of their medians green. What pins it *first* is
+ * `elementFrames.test.ts`'s "opens the frame by clearing the whole raster to
+ * black", which asserts the order over `ctx.calls` — and first is load-bearing
+ * for a pipeline that reads the frame back (a GIF frame captured with
+ * `ctx.getImageData` after a late clear would be black).
  */
 export function createFrameComposer({
   ctx,

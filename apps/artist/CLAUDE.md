@@ -2213,9 +2213,9 @@ premise this ticket falsified.
 canvas at all. The compositing is in
 `exportWebM.ts` and `exportMP4.ts` and nowhere else, which is why two call sites were the whole
 fix (since ESCSUITE-34, WebM's half of it lives in `elementFrames.ts`, which `exportWebM.ts` is
-the first caller of — still one composite per pipeline). The headless kit drives these same exporters through `window.__renderProject`, so it gets
-the fix for free — including the manifest, which `headless/renderProject.ts` sizes with the same
-`getResolution`.
+the first caller of — still one composite per pipeline). The headless kit drives these same
+exporters through `window.__renderProject`, so it gets the fix for free — including the
+manifest, which `headless/renderProject.ts` sizes with the same `getResolution`.
 
 **The exporters draw media and overlays in one interleaved track-order pass, the same pass
 `drawFrame.ts` draws for the preview** (ESCSUITE-124). Both exporters used to draw every media
