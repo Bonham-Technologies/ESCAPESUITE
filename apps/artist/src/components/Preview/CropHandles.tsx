@@ -1,24 +1,130 @@
-// The eight crop handles, as DOM buttons over the preview canvas
+// Crop mode's handles: eight buttons on the kept region's corners and edges
 // (ESCSUITE-157).
 //
-// A SHELL for now: Task 3 mounts this layer and pins that it is mounted exactly
-// when `cropTarget` says crop mode is on, and Task 4 fills the body in — the
-// positioned group, the eight named buttons and the drag. The props are Task
-// 4's own and do not change.
+// A DOM layer over the canvas, beside `MarqueeSelection` and
+// `InlineTextEditorAnchor` and positioned the same way — the clip's box in
+// project pixels, through the object-fit: contain mapping, into the element's
+// own CSS pixels. DOM rather than canvas chrome for three reasons: a handle has
+// to be focusable and named for a keyboard user, it has to be disable-able on
+// its own for a locked track, and a CSS-pixel size is exactly what ESCSUITE-90
+// asks of chrome. The clip's rotation is one CSS `rotate()` on the frame, so
+// the eight positions inside it are percentages.
+//
+// The dim behind it — the cropped-away picture — is canvas chrome and lives in
+// `cropOverlay.ts`.
+import { useEffect, useState } from 'react';
+import { CROP_HANDLES, CROP_HANDLE_LABELS } from '../../core/cropDrag';
+import { contentBox, getOverlayBounds } from './previewGeometry';
+import { CROP_HANDLE_MODES, cropFrameBox } from './cropOverlay';
+import { getCursorForMode } from './cursor';
+import { useCropHandleGesture } from './useCropHandleGesture';
 import type { Clip, SourceVideo } from '../../store/types';
 import type { ProjectSize } from './types';
+import styles from './CropHandles.module.css';
 
 export interface CropHandlesProps {
   clip: Clip;
   source: SourceVideo;
+  /** The preview canvas the handles are positioned over. */
   canvas: HTMLCanvasElement;
   projectSize: ProjectSize;
   /** The playhead, so the handles sit on the clip's animated box. */
   time: number;
+  /** The clip's track is locked (ESCSUITE-84): the handles are inert. */
   locked: boolean;
+  /** Leave crop mode. */
   onLeave: () => void;
 }
 
-export function CropHandles(_props: CropHandlesProps) {
-  return null;
+export function CropHandles({
+  clip,
+  source,
+  canvas,
+  projectSize,
+  time,
+  locked,
+  onLeave,
+}: CropHandlesProps) {
+  // The canvas element's CSS box, followed for as long as crop mode is open.
+  // An observer of its own rather than a prop from `PreviewPlayer`, which keeps
+  // its box in a ref precisely so a resize does not re-render the preview
+  // subtree: this layer only exists in crop mode, so the render a resize costs
+  // here is bounded by the mode being open.
+  const [box, setBox] = useState(() => {
+    const rect = canvas.getBoundingClientRect();
+    return { width: rect.width, height: rect.height };
+  });
+  useEffect(() => {
+    const observer = new ResizeObserver((entries) => {
+      // Every entry, rather than the last one behind a "was there an entry at
+      // all" guard: one observed element's entries arrive in order, so the last
+      // write wins either way, and the loop needs no conditional that no
+      // observer can take the other side of.
+      for (const { contentRect } of entries) {
+        setBox({ width: contentRect.width, height: contentRect.height });
+      }
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [canvas]);
+
+  const content = contentBox(canvas, box, projectSize);
+  // `locked` is not handed to the gesture: the buttons below are `disabled`, so
+  // React delivers them no mouse event and they take no focus. A keydown aimed
+  // straight at one is the only way in, and `updateClip` refuses that write
+  // (ESCSUITE-84) — which is also the backstop for a row locked mid-drag.
+  const gesture = useCropHandleGesture({
+    clip,
+    source,
+    projectSize,
+    contentScale: content.scaleX,
+    onLeave,
+  });
+
+  // The same `getOverlayBounds` the selection chrome, the hit test, the marquee
+  // and the drag seed read, so the crop frame cannot disagree with the box the
+  // rest of the preview draws — and so it inherits that function's documented
+  // ESCSUITE-147 gap rather than inventing a second geometry.
+  const bounds = getOverlayBounds(clip, canvas, time, [source], projectSize);
+  if (!bounds) return null;
+
+  const frame = cropFrameBox(bounds, content);
+
+  return (
+    <>
+      <div
+        className={styles.frame}
+        role="group"
+        aria-label="Crop handles"
+        style={{
+          left: frame.left,
+          top: frame.top,
+          width: frame.width,
+          height: frame.height,
+          transform: `rotate(${frame.rotation}deg)`,
+        }}
+      >
+        {CROP_HANDLES.map((handle) => (
+          <button
+            key={handle}
+            type="button"
+            className={`${styles.handle} ${styles[handle]}`}
+            style={{ cursor: getCursorForMode(CROP_HANDLE_MODES[handle]) }}
+            aria-label={CROP_HANDLE_LABELS[handle]}
+            disabled={locked}
+            onMouseDown={(e) => gesture.onMouseDown(handle, e)}
+            onKeyDown={(e) => gesture.onKeyDown(handle, e)}
+            onKeyUp={gesture.onKeyUp}
+            onBlur={gesture.onKeyUp}
+          />
+        ))}
+      </div>
+
+      {/* Always rendered, never conditional: a live region has to exist before
+          its content changes for a screen reader to announce the change. */}
+      <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+        {gesture.message}
+      </span>
+    </>
+  );
 }

@@ -10,7 +10,7 @@
 // letterboxed — and a clip at the default centre and scale, whose kept region
 // is therefore the whole frame and whose frame box is the whole 960x540 box.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { CropHandles } from './CropHandles'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
@@ -167,7 +167,10 @@ describe('the crop handle layer', () => {
     )
 
     setRect(canvas, { left: 0, top: 0, width: 480, height: 270 })
-    observer.emit(canvas, { width: 480, height: 270 })
+    // Inside act(): a ResizeObserver entry is not a React event, so the state it
+    // sets is flushed asynchronously otherwise — `renderPreview`'s own `resize`
+    // wraps its emit for the same reason.
+    act(() => observer.emit(canvas, { width: 480, height: 270 }))
 
     expect(screen.getByRole('group', { name: 'Crop handles' }).style.width).toBe('480px')
   })
@@ -318,6 +321,41 @@ describe('the crop handle layer', () => {
     expect(clipNow(clip.id).crop).toEqual({ left: 0.9, top: 0, right: 0, bottom: 0 })
   })
 
+  it('writes nothing for an aspect-locked drag that would leave no pixel', () => {
+    // The other side of `cropUpdateFor`'s refusal: an aspect-locked drag
+    // DERIVES the dependent axis rather than clamping it, so Shift-dragging the
+    // left handle to the far edge asks for a 1px-wide, 0.6px-high region —
+    // `normaliseCrop` refuses it, and the gesture simply writes nothing rather
+    // than storing a region the renderer could not read.
+    const { clip, handle } = mount()
+    const before = past()
+
+    drag(handle('Crop left'), 9999, 0, true)
+
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(past()).toBe(before)
+  })
+
+  it('renders nothing for a clip whose source it was not handed', () => {
+    // `getOverlayBounds` has no box for a clip whose source is missing from the
+    // list it is given. Crop mode cannot reach it — `cropTarget` looks the
+    // source up off the clip — but the type says it can, and the layer answers
+    // with no frame rather than a frame at NaN.
+    render(
+      <CropHandles
+        clip={addClip('clip1', 0, 4)}
+        source={{ ...video, id: 'someone-else' }}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
+  })
+
   it('takes its listeners with it when it unmounts mid-drag', () => {
     const { clip, handle } = mount()
     fireEvent.mouseDown(handle('Crop left'), { clientX: 0, clientY: 0 })
@@ -333,5 +371,14 @@ describe('the crop handle layer', () => {
 
     expect(fireEvent.keyDown(handle('Crop left'), { key: 'Escape' })).toBe(false)
     expect(onLeave).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves every other key alone', () => {
+    // Task 5 is what gives the arrows a meaning; until then a handle claims
+    // Escape and nothing else, and crop mode stays open.
+    const { onLeave, handle } = mount()
+
+    expect(fireEvent.keyDown(handle('Crop left'), { key: 'ArrowLeft' })).toBe(true)
+    expect(onLeave).not.toHaveBeenCalled()
   })
 })

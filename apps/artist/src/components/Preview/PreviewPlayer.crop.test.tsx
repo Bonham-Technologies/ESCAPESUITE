@@ -95,12 +95,15 @@ describe('crop mode on the preview', () => {
   })
 
   it('mounts eight named handles over the canvas', async () => {
-    // The props the mount computes — `time={currentTime}` and
-    // `locked={isTrackLocked(...)}` — are only exercised here;
-    // `CropHandles.test.tsx` renders the component directly and so would not
-    // catch a wrong value handed over by the preview.
-    croppingClip()
+    // Crop mode is entered with the preview already on screen — the inspector's
+    // toggle is the only way in — so the latch is set after the render here
+    // rather than before it, which is also the order that gives the mount's
+    // `canvasRef.current` a canvas to hand over.
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
     const preview = await renderPreview()
+
+    store().setCropClipId(clip.id)
 
     const group = preview.view.getByRole('group', { name: 'Crop handles' })
     expect(group.querySelectorAll('button')).toHaveLength(8)
@@ -109,26 +112,36 @@ describe('crop mode on the preview', () => {
   })
 
   it('moves the handles with the playhead, onto the box the clip is animated to', async () => {
-    // The `time={currentTime}` half of the same pair: the frame follows the
-    // clip's ANIMATED centre, not its stored one.
-    const clip = croppingClip()
+    // The `time={currentTime}` half of the props the mount computes: the frame
+    // follows the clip's ANIMATED centre, not its stored one. Nothing else pins
+    // it — `CropHandles.test.tsx` renders the component directly and so cannot
+    // catch a wrong value handed over by the preview.
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
     store().setClipKeyframe(clip.id, 'x', { time: 0, value: 0.25, easing: 'linear' })
     store().setClipKeyframe(clip.id, 'x', { time: 2, value: 0.75, easing: 'linear' })
     const preview = await renderPreview()
-    preview.resize({ width: 960, height: 540 })
-    const frame = () => preview.view.getByRole('group', { name: 'Crop handles' }).style.left
+    store().setCropClipId(clip.id)
+    const frameLeft = () =>
+      preview.view.getByRole('group', { name: 'Crop handles' }).style.left
+
+    // The canvas is laid out at 960x540 for a 1920x1080 project, so a centre at
+    // x 0.75 puts the 1920-wide picture's left edge 240 CSS pixels in.
+    store().setCurrentTime(2)
+    expect(frameLeft()).toBe('240px')
 
     store().setCurrentTime(0)
-    expect(frame()).toBe('-240px')
-
-    store().setCurrentTime(2)
-    expect(frame()).toBe('240px')
+    expect(frameLeft()).toBe('-240px')
   })
 
   it('disables the handles it mounts over a locked track', async () => {
-    const clip = croppingClip()
-    store().updateTrack(clip.trackId, { locked: true })
+    // The `locked={isTrackLocked(...)}` half.
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
     const preview = await renderPreview()
+
+    store().updateTrack(clip.trackId, { locked: true })
+    store().setCropClipId(clip.id)
 
     expect(preview.view.getByRole('button', { name: 'Crop top left' })).toBeDisabled()
   })
